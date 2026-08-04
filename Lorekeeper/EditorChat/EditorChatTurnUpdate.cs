@@ -15,6 +15,7 @@ namespace Lorekeeper.EditorChat;
 [JsonDerivedType(typeof(EditorChatImageGenerationJobUpdated), typeDiscriminator: "image-job")]
 [JsonDerivedType(typeof(EditorChatAssistantMessageCompleted), typeDiscriminator: "assistant-end")]
 [JsonDerivedType(typeof(EditorChatMutated), typeDiscriminator: "editor-mutated")]
+[JsonDerivedType(typeof(EditorWorkspaceMutated), typeDiscriminator: "workspace-mutated")]
 [JsonDerivedType(typeof(EditorChatTurnError), typeDiscriminator: "error")]
 public abstract record EditorChatTurnUpdate;
 
@@ -90,5 +91,23 @@ public sealed record EditorChatImageGenerationJobUpdated(
 public sealed record EditorChatAssistantMessageCompleted(Guid MessageId) : EditorChatTurnUpdate;
 
 public sealed record EditorChatMutated : EditorChatTurnUpdate;
+
+public enum EditorWorkspaceMutationKind
+{
+    Manuscript,
+    PageComposition,
+    ProjectPageSetup,
+    ImageLibrary,
+    Other,
+}
+
+public sealed record EditorWorkspaceMutated(
+    EditorWorkspaceMutationKind Kind,
+    Guid? ChapterId = null,
+    Guid? CompositionId = null,
+    Guid? VariantId = null,
+    long? Revision = null,
+    IReadOnlyList<string>? ChangedIds = null,
+    Guid? SelectedObjectId = null) : EditorChatTurnUpdate;
 
 public sealed record EditorChatTurnError(string Message, bool Cancelled) : EditorChatTurnUpdate;

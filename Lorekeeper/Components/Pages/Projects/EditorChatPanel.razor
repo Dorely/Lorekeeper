@@ -111,6 +111,7 @@
     [Parameter] public EventCallback OnAiTurnCompleted { get; set; }
     [Parameter] public EventCallback OnAiTurnIdle { get; set; }
     [Parameter] public EventCallback OnAiChangesApplied { get; set; }
+    [Parameter] public EventCallback<EditorWorkspaceMutated> OnWorkspaceMutated { get; set; }
     [Parameter] public EventCallback OnActiveChapterManuscriptChangesReady { get; set; }
     [Parameter] public EventCallback OnContestResultsReady { get; set; }
 
@@ -593,6 +594,19 @@
                 });
                 break;
 
+            case EditorWorkspaceMutated mutation:
+                await TryRunPostToolUiRefreshAsync("targeted workspace refresh", async () =>
+                {
+                    if (OnWorkspaceMutated.HasDelegate)
+                        await OnWorkspaceMutated.InvokeAsync(mutation);
+                    else if (OnAiChangesApplied.HasDelegate)
+                        await OnAiChangesApplied.InvokeAsync();
+                    await RefreshSystemPromptAsync();
+                    UpdateConversationTokenCount();
+                    StateHasChanged();
+                });
+                break;
+
             case EditorChatPendingAiChangeCreated:
                 await TryRunPostToolUiRefreshAsync("pending change refresh", async () =>
                 {
@@ -637,7 +651,7 @@
                 break;
 
             case EditorChatImageGenerationJobUpdated imageGeneration:
-                LiveTurn().UpdateToolProgress(imageGeneration.ToolCallId, "generate_project_image", ToChatToolProgress(imageGeneration));
+                LiveTurn().UpdateToolProgress(imageGeneration.ToolCallId, LiveTurn().ToolNameFor(imageGeneration.ToolCallId) ?? "project image", ToChatToolProgress(imageGeneration));
                 RequestScroll();
                 StateHasChanged();
                 break;

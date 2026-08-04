@@ -378,7 +378,11 @@ Deliverables:
   plus sparse overlays and retains isolated older import adapters.
 
 Assistant parity: the Publish assistant operates Core by default, can create and
-customize releases through compact revision-safe tools, and cannot select raw
+customize releases through compact revision-safe tools, receives the complete
+outline every turn, and can search bounded chapter/research/project sources.
+All assistant image generation/editing waits for a terminal unattached project
+image and uses a separate focused placement call; cover editing is embedded
+beside the assistant with a live structured canvas. It cannot select raw
 profiles, invent ISBNs, or approve proofs. Destructive recovery remains
 user-confirmed.
 

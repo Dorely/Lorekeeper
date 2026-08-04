@@ -60,7 +60,7 @@ public sealed class ContextBuilder(
             currentChapter));
         var items = composition.Sections.Select(ToContextItem).ToList();
 
-        if (request.Purpose is ContextBuildPurpose.Images or ContextBuildPurpose.Research)
+        if (request.Purpose is ContextBuildPurpose.Images or ContextBuildPurpose.Research or ContextBuildPurpose.Publish)
         {
             items.Add(new ContextItem(
                 Key: EditorContextKeys.ProjectOutline,

@@ -486,7 +486,7 @@ public sealed class EditorChatService(
                         await CompleteRevisionUpdateReadAsync(updateCancellation, updateTask);
                     }
                 }
-                else if (IsImageGenerationTool(pendingCall.Name))
+                else
                 {
                     string? lastProgressKey = null;
                     var invokeTask = turnEngine.InvokeToolAsync(aiFunction, pendingCall, cancellationToken);
@@ -507,25 +507,7 @@ public sealed class EditorChatService(
                             }
                         }
 
-                        using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                        var updateTask = WaitForImageRuntimeChangeAsync(waitCts.Token);
-                        var completed = await Task.WhenAny(invokeTask, updateTask);
-                        if (completed == invokeTask)
-                        {
-                            await waitCts.CancelAsync();
-                            try { await updateTask; }
-                            catch (OperationCanceledException) { }
-                            break;
-                        }
-
-                        try
-                        {
-                            await updateTask;
-                        }
-                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                        {
-                            break;
-                        }
+                        await Task.WhenAny(invokeTask, Task.Delay(250, cancellationToken));
                     }
 
                     toolOutcome = await invokeTask;
@@ -539,10 +521,6 @@ public sealed class EditorChatService(
                         if (!string.Equals(progressKey, lastProgressKey, StringComparison.Ordinal))
                             yield return finalImageUpdate;
                     }
-                }
-                else
-                {
-                    toolOutcome = await turnEngine.InvokeToolAsync(aiFunction, pendingCall, cancellationToken);
                 }
                 stopwatch.Stop();
 
@@ -602,6 +580,12 @@ public sealed class EditorChatService(
                     stopwatch.Elapsed.TotalMilliseconds,
                     visuals);
 
+                var workspaceMutation = toolError is null
+                    ? TryWorkspaceMutation(pendingCall.Name, pendingCall.ArgumentsJson, toolResult)
+                    : null;
+                if (workspaceMutation is not null)
+                    yield return workspaceMutation;
+
                 if (toolError is null
                     && string.Equals(pendingCall.Name, "start_contest", StringComparison.Ordinal)
                     && editorContext.TryTakeContestRequest(out var contestRequest))
@@ -646,7 +630,7 @@ public sealed class EditorChatService(
                     yield break;
                 }
 
-                if (DrainMutated())
+                if (DrainMutated() && workspaceMutation is null)
                     yield return new EditorChatMutated();
             }
 
@@ -944,31 +928,6 @@ public sealed class EditorChatService(
             outputs.LastOrDefault(output => !string.IsNullOrWhiteSpace(output.PartialImageDataUrl))?.PartialImageDataUrl);
     }
 
-    private Task WaitForImageRuntimeChangeAsync(CancellationToken cancellationToken)
-    {
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        CancellationTokenRegistration registration = default;
-        EventHandler? handler = null;
-        handler = (_, _) =>
-        {
-            imageRuntime.StateChanged -= handler;
-            registration.Dispose();
-            completion.TrySetResult();
-        };
-
-        imageRuntime.StateChanged += handler;
-        if (cancellationToken.CanBeCanceled)
-        {
-            registration = cancellationToken.Register(() =>
-            {
-                imageRuntime.StateChanged -= handler;
-                completion.TrySetCanceled(cancellationToken);
-            });
-        }
-
-        return completion.Task;
-    }
-
     private static string ImageProgressKey(EditorChatImageGenerationJobUpdated progress)
     {
         var sb = new StringBuilder()
@@ -1040,6 +999,98 @@ public sealed class EditorChatService(
         }
     }
 
+    internal static EditorWorkspaceMutated? TryWorkspaceMutation(
+        string toolName,
+        string argumentsJson,
+        string? resultJson)
+    {
+        if (string.IsNullOrWhiteSpace(resultJson))
+            return null;
+        try
+        {
+            using var resultDocument = JsonDocument.Parse(resultJson);
+            var root = resultDocument.RootElement;
+            if (root.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.False)
+                return null;
+            if (toolName is "generate_project_image" or "edit_project_image" or "wait_project_image_job")
+            {
+                return root.TryGetProperty("outputImageIds", out var outputs)
+                    && outputs.ValueKind == JsonValueKind.Array
+                    && outputs.GetArrayLength() > 0
+                        ? new EditorWorkspaceMutated(EditorWorkspaceMutationKind.ImageLibrary)
+                        : null;
+            }
+            if (!root.TryGetProperty("mutation", out var mutation) || mutation.ValueKind != JsonValueKind.Object)
+                return null;
+
+            var kind = ReadString(mutation, "kind");
+            var id = ReadGuid(mutation, "id");
+            var revision = ReadLong(mutation, "revision") ?? ReadLong(root, "revision");
+            var changedIds = ReadStrings(root, "changedIds");
+            using var argumentsDocument = ParseJson(argumentsJson);
+            var arguments = argumentsDocument.RootElement;
+
+            if (string.Equals(kind, "manuscript", StringComparison.OrdinalIgnoreCase))
+                return new EditorWorkspaceMutated(EditorWorkspaceMutationKind.Manuscript, ChapterId: id, Revision: revision, ChangedIds: changedIds);
+            if (string.Equals(kind, "projectPageSetup", StringComparison.OrdinalIgnoreCase))
+                return new EditorWorkspaceMutated(EditorWorkspaceMutationKind.ProjectPageSetup, Revision: revision, ChangedIds: changedIds);
+            if (string.Equals(kind, "pageComposition", StringComparison.OrdinalIgnoreCase))
+            {
+                var variantId = ReadGuid(root, "variantId") ?? ReadGuid(arguments, "variantId");
+                var selectedObjectId = toolName.Contains("patch", StringComparison.Ordinal)
+                    ? ReadGuid(arguments, "targetId")
+                    : null;
+                return new EditorWorkspaceMutated(
+                    EditorWorkspaceMutationKind.PageComposition,
+                    CompositionId: id,
+                    VariantId: variantId,
+                    Revision: revision,
+                    ChangedIds: changedIds,
+                    SelectedObjectId: selectedObjectId);
+            }
+            if (string.Equals(kind, "pageCompositionVariant", StringComparison.OrdinalIgnoreCase))
+                return new EditorWorkspaceMutated(
+                    EditorWorkspaceMutationKind.PageComposition,
+                    VariantId: id,
+                    Revision: revision,
+                    ChangedIds: changedIds,
+                    SelectedObjectId: ReadGuid(mutation, "selectId") ?? ReadGuid(root, "selectId") ?? ReadGuid(arguments, "targetId"));
+            return new EditorWorkspaceMutated(EditorWorkspaceMutationKind.Other, Revision: revision, ChangedIds: changedIds);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static JsonDocument ParseJson(string json)
+    {
+        try { return JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json); }
+        catch (JsonException) { return JsonDocument.Parse("{}"); }
+    }
+
+    private static Guid? ReadGuid(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var property)
+        && property.ValueKind == JsonValueKind.String
+        && Guid.TryParse(property.GetString(), out var value)
+            ? value
+            : null;
+
+    private static string? ReadString(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+
+    private static long? ReadLong(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var property) && property.TryGetInt64(out var value)
+            ? value
+            : null;
+
+    private static IReadOnlyList<string> ReadStrings(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.Array
+            ? property.EnumerateArray().Select(item => item.ToString()).ToList()
+            : [];
+
     private static bool ShouldRefreshForCompletedRevisionSession(
         EditorChatContext editorContext,
         EditorChatRevisionJobUpdated update) =>
@@ -1049,9 +1100,6 @@ public sealed class EditorChatService(
         && update.Progress.Sessions.Any(session =>
             session.SessionId == sessionId
             && session.Status == EditorRevisionSessionStatus.Completed);
-
-    private static bool IsImageGenerationTool(string toolName) =>
-        string.Equals(toolName, "generate_project_image", StringComparison.Ordinal);
 
     private static EditorRevisionJobUpdateKind RevisionUpdateKindForStatus(EditorRevisionJobStatus status) => status switch
     {

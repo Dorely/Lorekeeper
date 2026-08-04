@@ -48,6 +48,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   dedicated cover composition, exact target-bound generation, accessibility
   state, and layout diagnostics. Placement always chooses non-destructive
   Contain or Cover fit; crop positioning is adjusted directly in the canvas.
+  Every assistant generation/edit waits for a terminal result and produces an
+  unattached reusable project image; Figure, page, cover, and canonical-reference
+  placement is a separate revision-safe step using that image ID.
 - An always-present Core Book for shared title/author/language metadata, content
   order, presentation, semantic matter, image placements, project typography,
   and reusable front-cover design. Optional paperback, EPUB ebook, and PDF ebook
@@ -60,7 +63,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   release target. Paperback presets cover KDP, IngramSpark, and other printers;
   EPUB and PDF ebook workspaces expose only relevant controls. The full-height
   conversational Publish assistant has compact Core/release tools, persistent
-  streaming history, image attachments, Stop/Reset, and reconnectable jobs.
+  streaming history, image attachments, complete outline context, bounded
+  project search, geometry-aware image creation, Stop/Reset, and reconnectable
+  jobs. Cover design is embedded beside the assistant with a live scene canvas
+  and one controls column instead of opening a modal.
 - Lorekeeper-owned paperback and Digital PDF press jobs with cancellation/restart recovery,
   immutable SHA-256-verified interior and full-wrap cover PDFs, actual in-app
   PDF viewing, semantic block-to-page maps, render comparisons, and matching

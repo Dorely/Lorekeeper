@@ -50,6 +50,18 @@ the live test project; terminate the browser host after the run.
   briefs receive concise relevant guidance subordinate to explicit direction.
 - Ask Outline, Editor, Images, and Publish to read and mutate a Figure and a
   composition; verify compact IDs/revisions/diagnostics and conflict recovery.
+- On each assistant surface, generate or edit an image and confirm the tool
+  remains active until it returns a readable terminal result and an unattached
+  project-image ID. Confirm no numeric job status or queued-success result is
+  returned. Resume one existing job by ID without repeating its prompt.
+- Ask Editor to illustrate a chapter in one turn. Confirm it generates the
+  unattached image, receives it visually, then separately inserts a Figure or
+  creates/opens a Designed Page and places the same image ID before replying.
+  Confirm the Pages canvas follows each affected object as the tools progress.
+- Ask Publish a project-specific cover question that depends on a synopsis or
+  chapter body. Confirm the full outline is already available and that bounded
+  source search/read finds the body detail. Generate cover art, inspect it, and
+  separately place its image ID without replaying the generation request.
 - Stage a large scene once, apply by stage ID, and verify the payload is neither
   repeated nor replayable.
 - Confirm every assistant defaults reusable art and ordinary flowing Figures to
@@ -141,6 +153,11 @@ the live test project; terminate the browser host after the run.
 
 ## Covers
 
+- Open Core and release cover editing. Confirm it replaces the normal right
+  Publish workspace instead of opening a modal, leaves the Publish assistant
+  visible, gives the canvas the main area, and places all cover controls in one
+  independently scrolling right column. Confirm assistant cover mutations
+  update and select the affected live canvas object.
 - Confirm paperback shows back, spine, front, bleed/safe/fold guides, and barcode
   reserve, while Digital PDF/EPUB shows only a front surface.
 - Verify canonical title/subtitle/author/spine/back-copy bindings, project font

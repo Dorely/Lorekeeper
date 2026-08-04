@@ -1,18 +1,37 @@
 using System.Text.Json;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Images;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Composition;
+using Lorekeeper.Search;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 
 namespace Lorekeeper.Publish;
 
-public sealed record PublishAssistantContext(
-    Guid ProjectId,
-    Guid ConversationId = default,
-    CancellationToken TurnCancellationToken = default);
+public sealed class PublishAssistantContext(
+    Guid projectId,
+    Guid conversationId = default,
+    CancellationToken turnCancellationToken = default)
+{
+    private readonly List<EntityVisualContextReference> _visuals = [];
+    private readonly HashSet<Guid> _imageJobIds = [];
+
+    public Guid ProjectId { get; } = projectId;
+    public Guid ConversationId { get; } = conversationId;
+    public CancellationToken TurnCancellationToken { get; } = turnCancellationToken;
+    public IReadOnlyList<Guid> ImageJobIds => _imageJobIds.ToList();
+    public void TrackImageJob(Guid jobId) => _imageJobIds.Add(jobId);
+    public void AddVisual(EntityVisualContextReference visual) => _visuals.Add(visual);
+    public IReadOnlyList<EntityVisualContextReference> DrainVisuals()
+    {
+        var result = _visuals.ToList();
+        _visuals.Clear();
+        return result;
+    }
+}
 
 public interface IPublishAssistantTools
 {
@@ -32,9 +51,8 @@ public sealed class PublishAssistantTools(
     IProjectImageService projectImages,
     ICompositionService? compositions = null,
     AppDbContext? db = null,
-    IImagePromptComposer? imagePrompts = null,
-    IProjectImageJobService? imageJobs = null,
-    IProjectImageGenerationRuntime? imageRuntime = null) : IPublishAssistantTools
+    IAgentProjectImageWorkflow? imageWorkflow = null,
+    IProjectSearchService? projectSearch = null) : IPublishAssistantTools
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -48,6 +66,21 @@ public sealed class PublishAssistantTools(
         cancellationToken.ThrowIfCancellationRequested();
         IList<AITool> tools =
         [
+            AIFunctionFactory.Create(
+                method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
+                    ListSearchSourcesAsync(context, query, sourceTypes, topK),
+                name: "list_search_sources",
+                description: "Discover bounded project sources with stable IDs and exact read arguments."),
+            AIFunctionFactory.Create(
+                method: (string sourceType, Guid sourceId, int? pageNumber = null) =>
+                    ReadProjectSourceAsync(context, sourceType, sourceId, pageNumber),
+                name: "read_project_source",
+                description: "Read one paginated project source, including chapter bodies, research sources, acts, entities, and ingest material."),
+            AIFunctionFactory.Create(
+                method: (string query, int topK = 8, string[]? sourceTypes = null, string[]? sourceIds = null, Guid? containerSourceId = null, bool lexicalOnly = false) =>
+                    SearchProjectAsync(context, query, topK, sourceTypes, sourceIds, containerSourceId, lexicalOnly),
+                name: "search_project",
+                description: "Run bounded hybrid project search and return stable source IDs, compact excerpts, and exact detail-read arguments."),
             AIFunctionFactory.Create(
                 method: () => ReadPublicationBookAsync(context),
                 name: "read_publication_book",
@@ -130,8 +163,12 @@ public sealed class PublishAssistantTools(
                 description: "List a compact page of project Book Text Styles with stable IDs, definitions, revisions, and continuation metadata."),
             AIFunctionFactory.Create(
                 method: (int offset = 0, int limit = 30) => ListProjectImagesAsync(context, offset, limit),
-                name: "list_publication_project_images",
-                description: "List a compact page of project images with stable asset IDs, file metadata, alt text, source, preview URL, and continuation metadata."),
+                name: "list_project_images",
+                description: "List a bounded page of reusable project images with stable asset IDs, file metadata, alt text, source, preview URL, and continuation metadata. Image bytes are omitted."),
+            AIFunctionFactory.Create(
+                method: (Guid imageId) => ReadProjectImageAsync(context, imageId),
+                name: "read_project_image",
+                description: "Read one project image and supply its bytes as visual context on the next model round when vision is available."),
             AIFunctionFactory.Create(
                 method: (int offset = 0, int limit = 40) => ListManuscriptVisualsAsync(context, offset, limit),
                 name: "list_publication_manuscript_visuals",
@@ -149,15 +186,27 @@ public sealed class PublishAssistantTools(
                 name: "validate_publication_page_composition",
                 description: "Validate one Designed Page variant for geometry, semantic coverage, reading order, accessibility, overflow, image DPI, font readiness, and release compatibility. Returns compact prioritized diagnostics."),
             AIFunctionFactory.Create(
-                method: (string targetKind, Guid targetId, ImageGenerationBrief brief, Guid? variantId = null, ImageReferenceUse[]? references = null, string? altText = null, Guid? releaseId = null) =>
-                    QueueLayoutBoundImageAsync(context, targetKind, targetId, variantId, brief, references, altText, releaseId),
-                name: "generate_publication_layout_image",
-                description: "Queue image generation for a concrete project page, Figure, page frame/surface, or publication cover frame/surface. Authoring targets derive geometry from project state and omit release ownership; use the project ID for project-page. Publication covers use the selected release. The returned raster accepts any aspect ratio and is later placed with Contain or Cover. Returns compact job metadata and never claims to place or download output."),
+                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
+                    GenerateProjectImageAsync(context, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression),
+                name: "generate_project_image",
+                description: "Generate one unattached project image and wait for a terminal result. Optional page, Figure, frame, or cover geometry guides composition only and never places output. Inspect the returned image, then apply its project-image ID with a separate cover or publication placement tool during this turn."),
             AIFunctionFactory.Create(
-                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
-                    QueueFreeStandingImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression),
-                name: "generate_publication_image",
-                description: "Queue one reusable, free-standing image in the project library without a release or layout target. Use this for ordinary flowing Figures and art that may be placed in more than one format. The generated raster keeps its source shape and is fitted or crop-positioned only when placed. Returns compact job metadata and never places the output automatically."),
+                method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
+                    EditProjectImageAsync(context, sourceImageId, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression),
+                name: "edit_project_image",
+                description: "Edit one project image and wait for a terminal result. The output remains an unattached project image; inspect it and place its ID with a separate publication tool."),
+            AIFunctionFactory.Create(
+                method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: false),
+                name: "read_project_image_job",
+                description: "Read compact status for an existing project-image job without replaying its prompt."),
+            AIFunctionFactory.Create(
+                method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: true),
+                name: "wait_project_image_job",
+                description: "Reconnect to an existing project-image job and wait for terminal output without replaying its prompt."),
+            AIFunctionFactory.Create(
+                method: (Guid jobId) => CancelProjectImageJobAsync(context, jobId),
+                name: "cancel_project_image_job",
+                description: "Cancel one queued or running project-image job. No image is placed."),
             AIFunctionFactory.Create(
                 method: (Guid compositionId, Guid releaseId) => GetOrCreateCompositionVariantAsync(context, compositionId, releaseId),
                 name: "get_or_create_publication_composition_variant",
@@ -166,6 +215,14 @@ public sealed class PublishAssistantTools(
                 method: (Guid releaseId, Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchCompositionElementAsync(context, releaseId, variantId, expectedRevision, targetKind, targetId, patch),
                 name: "patch_publication_composition_element",
                 description: "Revision-check patch one stable composition object, layer, or style using only changed fields. Page overlays are computed and cannot be authored. Preserve unrelated state and reserve full-scene staging for structural edits."),
+            AIFunctionFactory.Create(
+                method: (Guid releaseId, Guid variantId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlacePublicationPageImageAsync(context, releaseId, variantId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
+                name: "place_project_image_in_publication_page_frame",
+                description: "Place an existing project-image ID into an existing release-specific Designed Page frame with explicit Contain/Cover fit and an accessibility decision."),
+            AIFunctionFactory.Create(
+                method: (Guid releaseId, Guid variantId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddPublicationPageImageAsync(context, releaseId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
+                name: "add_project_image_to_publication_page",
+                description: "Add a new image object to a release-specific Designed Page from an existing project-image ID with explicit Contain/Cover fit and an accessibility decision."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, CompositionScene scene) => StageCompositionAsync(context, variantId, expectedRevision, scene),
                 name: "stage_publication_composition",
@@ -257,6 +314,14 @@ public sealed class PublishAssistantTools(
                 name: "patch_publication_core_cover_element",
                 description: "Revision-check and patch one stable Core cover object, layer, or style with changed fields only. Core cover geometry comes from project page setup."),
             AIFunctionFactory.Create(
+                method: (long expectedBookRevision, long expectedCoverRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlaceCoreCoverImageAsync(context, expectedBookRevision, expectedCoverRevision, targetId, imageId, fit, altText, decorative, readingOrder),
+                name: "place_project_image_on_core_cover",
+                description: "Place an existing project-image ID into one existing Core cover image object. Requires explicit Contain/Cover fit and an alt-text or decorative decision. This is separate from image generation."),
+            AIFunctionFactory.Create(
+                method: (long expectedBookRevision, long expectedCoverRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddCoreCoverImageAsync(context, expectedBookRevision, expectedCoverRevision, imageId, fit, altText, decorative, bounds, readingOrder),
+                name: "add_project_image_to_core_cover",
+                description: "Add an existing project-image ID as a new Core cover image object. Requires explicit Contain/Cover fit and an alt-text or decorative decision. This is separate from image generation."),
+            AIFunctionFactory.Create(
                 method: (long expectedBookRevision, long expectedCoverRevision, CompositionScene scene) => StageCoreCoverCompositionAsync(context, expectedBookRevision, expectedCoverRevision, scene),
                 name: "stage_publication_core_cover_composition",
                 description: "Submit a complete Core front-cover scene exactly once. Returns an opaque one-use stage ID and compact diagnostics without echoing the scene."),
@@ -282,6 +347,14 @@ public sealed class PublishAssistantTools(
                 name: "patch_publication_cover_element",
                 description: "Revision-check patch one stable cover object, guide, layer, or style using only changed fields. Preserve unrelated cover state; use full-scene staging for structural changes."),
             AIFunctionFactory.Create(
+                method: (Guid releaseId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlaceCoverImageAsync(context, releaseId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
+                name: "place_project_image_on_release_cover",
+                description: "Place an existing project-image ID into one existing release-cover image object. Requires explicit Contain/Cover fit and an alt-text or decorative decision. This is separate from image generation."),
+            AIFunctionFactory.Create(
+                method: (Guid releaseId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddCoverImageAsync(context, releaseId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
+                name: "add_project_image_to_release_cover",
+                description: "Add an existing project-image ID as a new release-cover image object. Requires explicit Contain/Cover fit and an alt-text or decorative decision. This is separate from image generation."),
+            AIFunctionFactory.Create(
                 method: (Guid releaseId, long expectedRevision, CompositionScene scene) =>
                     StageCoverCompositionAsync(context, releaseId, expectedRevision, scene),
                 name: "stage_publication_cover_composition",
@@ -299,30 +372,129 @@ public sealed class PublishAssistantTools(
         ];
         var currentTools = new HashSet<string>(StringComparer.Ordinal)
         {
+            "list_search_sources", "read_project_source", "search_project", "list_project_images", "read_project_image",
             "read_publication_book", "patch_publication_book", "list_publication_releases",
             "create_publication_release", "read_publication_release", "patch_publication_release_overrides",
             "prepare_publication_files", "cancel_publication_preparation", "read_publication_readiness",
             "read_publication_book_content", "patch_publication_book_content", "read_publication_book_matter",
             "upsert_publication_book_matter", "delete_publication_book_matter", "read_publication_book_placements",
             "add_publication_book_placement", "update_publication_book_placement", "reorder_publication_book_placements", "delete_publication_book_placement",
-            "list_publication_book_text_styles", "list_publication_project_images", "list_publication_manuscript_visuals",
+            "list_publication_book_text_styles", "list_publication_manuscript_visuals",
             "read_publication_page_composition", "read_publication_generation_target", "validate_publication_page_composition",
-            "generate_publication_layout_image", "generate_publication_image", "get_or_create_publication_composition_variant",
-            "patch_publication_composition_element", "stage_publication_composition", "apply_publication_composition_stage",
+            "generate_project_image", "edit_project_image", "read_project_image_job", "wait_project_image_job", "cancel_project_image_job", "get_or_create_publication_composition_variant",
+            "patch_publication_composition_element", "place_project_image_in_publication_page_frame", "add_project_image_to_publication_page", "stage_publication_composition", "apply_publication_composition_stage",
             "stage_publication_composition_semantic", "apply_publication_composition_semantic_stage",
             "stage_publication_composition_workspace", "apply_publication_composition_workspace_stage",
             "patch_publication_release_content", "reorder_publication_release_content", "read_publication_release_matter", "upsert_publication_release_matter", "delete_publication_release_matter",
             "upsert_publication_release_style_override", "delete_publication_release_style_override", "add_publication_release_placement",
             "update_publication_release_placement", "reorder_publication_release_placements", "delete_publication_release_placement",
             "read_publication_cover_design", "validate_publication_cover_composition", "update_publication_cover_design",
-            "patch_publication_core_cover_element", "customize_publication_release_cover", "use_core_publication_cover",
+            "patch_publication_core_cover_element", "place_project_image_on_core_cover", "add_project_image_to_core_cover", "customize_publication_release_cover", "use_core_publication_cover",
             "stage_publication_core_cover_composition", "apply_publication_core_cover_composition_stage",
-            "patch_publication_cover_element", "stage_publication_cover_composition", "apply_publication_cover_composition_stage",
+            "patch_publication_cover_element", "place_project_image_on_release_cover", "add_project_image_to_release_cover", "stage_publication_cover_composition", "apply_publication_cover_composition_stage",
             "export_publication_release",
         };
         return Task.FromResult<IList<AITool>>(tools
             .Where(tool => tool is AIFunction function && currentTools.Contains(function.Name))
             .ToList());
+    }
+
+    private async Task<string> ListSearchSourcesAsync(
+        PublishAssistantContext context,
+        string? query,
+        string[]? sourceTypes,
+        int topK)
+    {
+        if (projectSearch is null)
+            return Serialize(new { ok = false, code = "SEARCH_UNAVAILABLE", summary = "Project search is unavailable." });
+        var sources = await projectSearch.ListSourcesAsync(
+            context.ProjectId,
+            query,
+            sourceTypes,
+            Math.Clamp(topK, 1, 30));
+        return ProjectSearchAgentPayload.SerializeSources(sources);
+    }
+
+    private async Task<string> ReadProjectSourceAsync(
+        PublishAssistantContext context,
+        string sourceType,
+        Guid sourceId,
+        int? pageNumber)
+    {
+        if (projectSearch is null)
+            return Serialize(new { ok = false, code = "SEARCH_UNAVAILABLE", summary = "Project search is unavailable." });
+        var result = await projectSearch.ReadSourceAsync(context.ProjectId, sourceType, sourceId, pageNumber);
+        return result is null
+            ? Serialize(new { ok = false, code = "NOT_FOUND", sourceType, sourceId, summary = "Project source was not found." })
+            : JsonSerializer.Serialize(result, JsonOptions);
+    }
+
+    private async Task<string> SearchProjectAsync(
+        PublishAssistantContext context,
+        string query,
+        int topK,
+        string[]? sourceTypes,
+        string[]? sourceIds,
+        Guid? containerSourceId,
+        bool lexicalOnly)
+    {
+        if (projectSearch is null)
+            return Serialize(new { ok = false, code = "SEARCH_UNAVAILABLE", summary = "Project search is unavailable." });
+        IReadOnlyList<Guid>? parsedIds = null;
+        if (sourceIds is { Length: > 0 })
+        {
+            var ids = new List<Guid>();
+            foreach (var sourceId in sourceIds)
+            {
+                if (!Guid.TryParse(sourceId, out var id))
+                    return Serialize(new { ok = false, code = "INVALID_SOURCE_ID", summary = $"'{sourceId}' is not a valid source ID." });
+                ids.Add(id);
+            }
+            parsedIds = ids;
+        }
+        var result = await projectSearch.SearchAsync(new ProjectSearchRequest(
+            context.ProjectId,
+            query.Trim(),
+            Math.Clamp(topK, 1, 30),
+            sourceTypes,
+            parsedIds,
+            containerSourceId,
+            lexicalOnly), context.TurnCancellationToken);
+        return ProjectSearchAgentPayload.SerializeResults(query.Trim(), result);
+    }
+
+    private async Task<string> ReadProjectImageAsync(PublishAssistantContext context, Guid imageId)
+    {
+        var image = await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken);
+        if (image is null)
+            return Serialize(new { ok = false, code = "NOT_FOUND", targetId = imageId, summary = "Project image was not found." });
+        context.AddVisual(new EntityVisualContextReference(
+            image.Id,
+            null,
+            "ProjectImage",
+            image.FileName,
+            "explicit project image",
+            0,
+            image.FileName,
+            image.AltText,
+            image.Prompt,
+            IsExplicitImage: true,
+            ImageSource: image.Source));
+        return Serialize(new
+        {
+            ok = true,
+            targetId = image.Id,
+            image.Id,
+            image.FileName,
+            image.ContentType,
+            image.PreviewUrl,
+            image.AltText,
+            image.Source,
+            image.Prompt,
+            image.GenerationModel,
+            image.SizeBytes,
+            summary = "Project image loaded for visual inspection.",
+        });
     }
 
     private async Task<string> ReadPublicationBookAsync(PublishAssistantContext context)
@@ -606,113 +778,130 @@ public sealed class PublishAssistantTools(
         });
     }
 
-    private async Task<string> QueueLayoutBoundImageAsync(
-        PublishAssistantContext context,
-        string targetKind,
-        Guid targetId,
-        Guid? variantId,
-        ImageGenerationBrief brief,
-        ImageReferenceUse[]? references,
-        string? altText,
-        Guid? editionId)
-    {
-        if (imagePrompts is null || imageJobs is null || imageRuntime is null)
-            return Serialize(new { ok = false, code = "IMAGE_RUNTIME_UNAVAILABLE", targetId, summary = "Image generation is unavailable." });
-        try
-        {
-            var compiled = await imagePrompts.CompileGenerationAsync(
-                context.ProjectId,
-                brief,
-                references,
-                new ImageGenerationTarget { EditionId = targetKind.StartsWith("cover", StringComparison.OrdinalIgnoreCase)
-                    ? editionId ?? throw new ArgumentException("Publication cover generation targets require releaseId.")
-                    : null, TargetKind = targetKind, TargetId = targetId, VariantId = variantId },
-                context.TurnCancellationToken);
-            var job = await imageJobs.CreateGenerateJobAsync(
-                context.ProjectId,
-                new ProjectImageGenerateJobRequest(
-                    compiled.Prompt,
-                    compiled.Size,
-                    "auto",
-                    "png",
-                    null,
-                    altText?.Trim() ?? string.Empty,
-                    1,
-                    compiled.ReferenceImageIds,
-                    Label: "Publish layout image",
-                    BriefJson: compiled.BriefJson,
-                    ReferenceManifestJson: compiled.ReferenceManifestJson,
-                    TargetGeometryJson: compiled.TargetGeometryJson),
-                context.TurnCancellationToken);
-            await imageRuntime.EnqueueProjectAsync(context.ProjectId, context.TurnCancellationToken);
-            return Serialize(new
-            {
-                ok = true,
-                targetId,
-                jobId = job.Id,
-                status = job.Status,
-                requestedCanvas = compiled.Size,
-                referenceCount = compiled.ReferenceImageIds.Count,
-                summary = "Generation queued in the project image library; inspect the result before placing it.",
-            });
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
-        {
-            return Serialize(new { ok = false, code = "GENERATION_REJECTED", targetId, summary = ex.Message });
-        }
-    }
-
-    private async Task<string> QueueFreeStandingImageAsync(
+    private async Task<string> GenerateProjectImageAsync(
         PublishAssistantContext context,
         ImageGenerationBrief brief,
         ImageReferenceUse[]? references,
+        ImageGenerationTarget? geometryGuidance,
         string? altText,
         string? quality,
         string? outputFormat,
         int? outputCompression)
     {
-        if (imagePrompts is null || imageJobs is null || imageRuntime is null)
+        if (imageWorkflow is null)
             return Serialize(new { ok = false, code = "IMAGE_RUNTIME_UNAVAILABLE", summary = "Image generation is unavailable." });
         try
         {
-            var compiled = await imagePrompts.CompileGenerationAsync(
+            var result = await imageWorkflow.GenerateAsync(
                 context.ProjectId,
                 brief,
                 references,
-                target: null,
+                geometryGuidance,
+                altText,
+                quality,
+                outputFormat,
+                outputCompression,
+                "Publish image",
+                context.TrackImageJob,
                 context.TurnCancellationToken);
-            var job = await imageJobs.CreateGenerateJobAsync(
-                context.ProjectId,
-                new ProjectImageGenerateJobRequest(
-                    compiled.Prompt,
-                    compiled.Size,
-                    string.IsNullOrWhiteSpace(quality) ? "auto" : quality.Trim(),
-                    string.IsNullOrWhiteSpace(outputFormat) ? "png" : outputFormat.Trim(),
-                    outputCompression,
-                    altText?.Trim() ?? string.Empty,
-                    1,
-                    compiled.ReferenceImageIds,
-                    Label: "Publish image",
-                    BriefJson: compiled.BriefJson,
-                    ReferenceManifestJson: compiled.ReferenceManifestJson,
-                    TargetGeometryJson: compiled.TargetGeometryJson),
-                context.TurnCancellationToken);
-            await imageRuntime.EnqueueProjectAsync(context.ProjectId, context.TurnCancellationToken);
-            return Serialize(new
-            {
-                ok = true,
-                targetId = job.Id,
-                jobId = job.Id,
-                status = job.Status,
-                requestedCanvas = compiled.Size,
-                referenceCount = compiled.ReferenceImageIds.Count,
-                summary = "Free-standing generation queued in the project image library; inspect the result before placing it.",
-            });
+            return ImageResult(context, result);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
             return Serialize(new { ok = false, code = "GENERATION_REJECTED", summary = ex.Message });
         }
+    }
+
+    private async Task<string> EditProjectImageAsync(
+        PublishAssistantContext context,
+        Guid sourceImageId,
+        ImageEditBrief brief,
+        ImageReferenceUse[]? references,
+        ImageGenerationTarget? geometryGuidance,
+        string? altText,
+        string? quality,
+        string? outputFormat,
+        int? outputCompression)
+    {
+        if (imageWorkflow is null)
+            return Serialize(new { ok = false, code = "IMAGE_RUNTIME_UNAVAILABLE", summary = "Image editing is unavailable." });
+        try
+        {
+            var result = await imageWorkflow.EditAsync(
+                context.ProjectId,
+                sourceImageId,
+                brief,
+                null,
+                references,
+                geometryGuidance,
+                altText,
+                quality,
+                outputFormat,
+                outputCompression,
+                "Publish image edit",
+                context.TrackImageJob,
+                context.TurnCancellationToken);
+            return ImageResult(context, result);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            return Serialize(new { ok = false, code = "EDIT_REJECTED", summary = ex.Message });
+        }
+    }
+
+    private async Task<string> ReadProjectImageJobAsync(PublishAssistantContext context, Guid jobId, bool wait)
+    {
+        if (imageWorkflow is null)
+            return Serialize(new { ok = false, code = "IMAGE_RUNTIME_UNAVAILABLE", summary = "Image generation is unavailable." });
+        var result = wait
+            ? await imageWorkflow.WaitAsync(context.ProjectId, jobId, context.TrackImageJob, context.TurnCancellationToken)
+            : await imageWorkflow.ReadAsync(context.ProjectId, jobId, context.TurnCancellationToken);
+        return result is null
+            ? Serialize(new { ok = false, code = "NOT_FOUND", jobId, summary = "Image job was not found in this project." })
+            : ImageResult(context, result);
+    }
+
+    private async Task<string> CancelProjectImageJobAsync(PublishAssistantContext context, Guid jobId)
+    {
+        if (imageWorkflow is null)
+            return Serialize(new { ok = false, code = "IMAGE_RUNTIME_UNAVAILABLE", summary = "Image generation is unavailable." });
+        await imageWorkflow.CancelAsync(context.ProjectId, jobId, context.TurnCancellationToken);
+        return Serialize(new { ok = true, jobId, status = "cancelled", summary = "Image job cancelled; no image was placed." });
+    }
+
+    private static string ImageResult(PublishAssistantContext context, AgentProjectImageResult result)
+    {
+        foreach (var image in result.Images)
+        {
+            context.AddVisual(new EntityVisualContextReference(
+                image.Id,
+                null,
+                "ProjectImage",
+                image.FileName,
+                "generated project image",
+                0,
+                image.FileName,
+                image.AltText,
+                image.Prompt,
+                IsExplicitImage: true,
+                ImageSource: image.Source));
+        }
+        return Serialize(new
+        {
+            ok = result.Succeeded,
+            jobId = result.JobId,
+            status = result.Status,
+            requestedCanvas = result.RequestedCanvas,
+            outputImageIds = result.Images.Select(image => image.Id),
+            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.Image.PreviewUrl }),
+            attached = false,
+            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = 0 },
+            diagnostics = result.Diagnostics.Take(3),
+            summary = result.Summary,
+            nextAction = result.Succeeded
+                ? "Inspect the returned project image, then place its ID with a separate cover or publication tool before completing the request."
+                : null,
+        });
     }
 
     private string ReadPressRuntimeReadiness(PublicationEditionFormat format, PublicationVendor vendor)
@@ -790,6 +979,39 @@ public sealed class PublishAssistantTools(
             targetId,
             patch,
             context.TurnCancellationToken);
+
+    private async Task<string> PlacePublicationPageImageAsync(PublishAssistantContext context, Guid editionId, Guid variantId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder)
+    {
+        if (!decorative && string.IsNullOrWhiteSpace(altText))
+            return Serialize(new { ok = false, code = "ALT_DECISION_REQUIRED", targetId, summary = "Provide alternative text or explicitly mark the artwork decorative." });
+        if (await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken) is null)
+            return Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId, imageId, summary = "Project image was not found." });
+        return await PatchCompositionElementAsync(context, editionId, variantId, expectedRevision, "object", targetId, new CompositionElementPatch(
+            ImageId: imageId,
+            ImageFit: fit,
+            AltText: decorative ? string.Empty : altText?.Trim(),
+            Decorative: decorative,
+            AccessibilityDecisionPending: false,
+            SemanticRole: decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure,
+            ReadingOrder: decorative ? null : readingOrder,
+            ClearReadingOrder: decorative));
+    }
+
+    private async Task<string> AddPublicationPageImageAsync(PublishAssistantContext context, Guid editionId, Guid variantId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds, int? readingOrder)
+    {
+        try
+        {
+            if (await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken) is null)
+                return Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId = variantId, imageId, summary = "Project image was not found." });
+            var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable.");
+            var placed = await service.AddImageObjectAsync(context.ProjectId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder, context.TurnCancellationToken);
+            return Serialize(new { ok = true, targetId = variantId, releaseId = editionId, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the release layout.", mutation = new { kind = "pageCompositionVariant", id = variantId, selectId = placed.ObjectId } });
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException or CompositionRevisionConflictException)
+        {
+            return Serialize(new { ok = false, code = ex is CompositionRevisionConflictException ? "REVISION_CONFLICT" : "PLACEMENT_REJECTED", targetId = variantId, summary = ex.Message, recovery = "Reread the compact release layout and retry with the same project-image ID." });
+        }
+    }
 
     private async Task<string> ReadLayoutGenerationTargetAsync(PublishAssistantContext context, string targetKind, Guid targetId, Guid? variantId, Guid? editionId)
     {
@@ -1065,6 +1287,79 @@ public sealed class PublishAssistantTools(
         }
     }
 
+    private async Task<string> PlaceCoreCoverImageAsync(
+        PublishAssistantContext context,
+        long expectedBookRevision,
+        long expectedCoverRevision,
+        Guid targetId,
+        Guid imageId,
+        FigureImageFit fit,
+        string? altText,
+        bool decorative,
+        int? readingOrder)
+    {
+        if (!decorative && string.IsNullOrWhiteSpace(altText))
+            return Serialize(new { ok = false, code = "ALT_DECISION_REQUIRED", targetId, summary = "Provide alternative text or explicitly mark the artwork decorative." });
+        if (await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken) is null)
+            return Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId, imageId, summary = "Project image was not found." });
+        return await PatchCoreCoverElementAsync(
+            context,
+            expectedBookRevision,
+            expectedCoverRevision,
+            "object",
+            targetId,
+            new CompositionElementPatch(
+                ImageId: imageId,
+                ImageFit: fit,
+                AltText: decorative ? string.Empty : altText?.Trim(),
+                Decorative: decorative,
+                AccessibilityDecisionPending: false,
+                SemanticRole: decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure,
+                ReadingOrder: decorative ? null : readingOrder,
+                ClearReadingOrder: decorative));
+    }
+
+    private async Task<string> AddCoreCoverImageAsync(
+        PublishAssistantContext context,
+        long expectedBookRevision,
+        long expectedCoverRevision,
+        Guid imageId,
+        FigureImageFit fit,
+        string? altText,
+        bool decorative,
+        CompositionBounds? bounds,
+        int? readingOrder)
+    {
+        try
+        {
+            if (await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken) is null)
+                return Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", imageId, summary = "Project image was not found." });
+            var cover = await books.GetCoverAsync(context.ProjectId, context.TurnCancellationToken);
+            if (cover.Revision != expectedCoverRevision || cover.CoreBookRevision != expectedBookRevision)
+                throw new DbUpdateConcurrencyException("Core Book or its cover changed; reread the cover before retrying.");
+            var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
+                ?? throw new InvalidDataException("The Core cover composition is empty.");
+            var mutation = CompositionService.AddImageObjectToScene(scene, imageId, fit, altText, decorative, bounds, readingOrder);
+            var saved = await books.SaveCoverAsync(
+                context.ProjectId,
+                expectedBookRevision,
+                new PublicationCoverDesignUpdate(
+                    cover.Title, cover.Subtitle, cover.Author, string.Empty, string.Empty,
+                    cover.BackgroundColor, PublicationBarcodeMode.None, 50, 50, expectedCoverRevision, true),
+                mutation.Scene,
+                context.TurnCancellationToken);
+            return Serialize(new { ok = true, target = "core", targetId = context.ProjectId, revision = saved.Revision,
+                bookRevision = saved.CoreBookRevision, changedIds = new[] { mutation.ObjectId }, selectId = mutation.ObjectId,
+                summary = "Project image added to the Core cover.",
+                mutation = new { kind = "core-cover", selectId = mutation.ObjectId, refresh = new[] { "core", "covers", "readiness", "artifacts" } } });
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException or InvalidOperationException or DbUpdateConcurrencyException)
+        {
+            return Serialize(new { ok = false, code = exception is DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "PLACEMENT_REJECTED",
+                imageId, summary = exception.Message, recovery = "Reread the Core cover and retry with the same project-image ID." });
+        }
+    }
+
     private async Task<string> CustomizeReleaseCoverAsync(
         PublishAssistantContext context,
         Guid releaseId,
@@ -1120,6 +1415,81 @@ public sealed class PublishAssistantTools(
     {
         try { var cover = await covers.PatchElementAsync(context.ProjectId, editionId, expectedRevision, targetKind, targetId, patch, context.TurnCancellationToken); return Serialize(new { ok = true, targetId, revision = cover.Revision, changedIds = new[] { targetId }, summary = $"Patched cover {targetKind} {targetId:N}.", mutation = new { kind = "coverComposition", id = editionId } }); }
         catch (Exception ex) { return Serialize(new { ok = false, code = ex is DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "PATCH_REJECTED", targetId, summary = ex.Message, recovery = "Reread the cover and retry only the intended fields against its current revision." }); }
+    }
+
+    private async Task<string> PlaceCoverImageAsync(
+        PublishAssistantContext context,
+        Guid editionId,
+        long expectedRevision,
+        Guid targetId,
+        Guid imageId,
+        FigureImageFit fit,
+        string? altText,
+        bool decorative,
+        int? readingOrder)
+    {
+        if (!decorative && string.IsNullOrWhiteSpace(altText))
+            return Serialize(new { ok = false, code = "ALT_DECISION_REQUIRED", targetId, summary = "Provide alternative text or explicitly mark the artwork decorative." });
+        if (await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken) is null)
+            return Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId, imageId, summary = "Project image was not found." });
+        return await PatchCoverElementAsync(
+            context,
+            editionId,
+            expectedRevision,
+            "object",
+            targetId,
+            new CompositionElementPatch(
+                ImageId: imageId,
+                ImageFit: fit,
+                AltText: decorative ? string.Empty : altText?.Trim(),
+                Decorative: decorative,
+                AccessibilityDecisionPending: false,
+                SemanticRole: decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure,
+                ReadingOrder: decorative ? null : readingOrder,
+                ClearReadingOrder: decorative));
+    }
+
+    private async Task<string> AddCoverImageAsync(
+        PublishAssistantContext context,
+        Guid editionId,
+        long expectedRevision,
+        Guid imageId,
+        FigureImageFit fit,
+        string? altText,
+        bool decorative,
+        CompositionBounds? bounds,
+        int? readingOrder)
+    {
+        try
+        {
+            if (await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken) is null)
+                return Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId = editionId, imageId, summary = "Project image was not found." });
+            var cover = await covers.GetAsync(context.ProjectId, editionId, context.TurnCancellationToken);
+            if (cover.Revision != expectedRevision)
+                throw new DbUpdateConcurrencyException("The cover changed; reread it before retrying.");
+            var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
+                ?? throw new InvalidDataException("The release cover composition is empty.");
+            var mutation = CompositionService.AddImageObjectToScene(scene, imageId, fit, altText, decorative, bounds, readingOrder);
+            var saved = await covers.SaveWorkspaceAsync(
+                context.ProjectId,
+                editionId,
+                new PublicationCoverDesignUpdate(
+                    cover.Title, cover.Subtitle, cover.Author, cover.SpineText, cover.BackCopy,
+                    cover.BackgroundColor, cover.BarcodeMode, cover.ImageCropXPercent, cover.ImageCropYPercent,
+                    expectedRevision, true),
+                mutation.Scene,
+                context.TurnCancellationToken);
+            return Serialize(new { ok = true, targetId = editionId, revision = saved.Revision,
+                changedIds = new[] { mutation.ObjectId }, selectId = mutation.ObjectId,
+                summary = "Project image added to the release cover.",
+                mutation = new { kind = "coverComposition", id = editionId, selectId = mutation.ObjectId } });
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException or InvalidOperationException or DbUpdateConcurrencyException)
+        {
+            return Serialize(new { ok = false, code = exception is DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "PLACEMENT_REJECTED",
+                targetId = editionId, imageId, summary = exception.Message,
+                recovery = "Reread the release cover and retry with the same project-image ID." });
+        }
     }
 
     private async Task<string> UpdateCoverAsync(

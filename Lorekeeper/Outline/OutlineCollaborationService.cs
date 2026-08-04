@@ -91,6 +91,10 @@ When to use tools:
 
 {{AssistantWorkflowInstructions.OutlineChat}}
 
+{{AssistantWorkflowInstructions.ImageGeneration}}
+
+{{AssistantWorkflowInstructions.CompositionDesign}}
+
 {{AssistantWorkflowInstructions.NonReplayedToolHistory}}
 
 {{AssistantWorkflowInstructions.EntityVisualExamples}}

@@ -36,8 +36,7 @@ public sealed class EditorChatTools(
     IProjectImageService projectImages,
     IEntityVisualExampleService entityVisualExamples,
     IProjectImageJobService imageJobs,
-    IProjectImageGenerationRuntime imageRuntime,
-    IImagePromptComposer imagePrompts,
+    IAgentProjectImageWorkflow imageWorkflow,
     ICompositionService compositions,
     IProjectPageSetupService pageSetups,
     IChapterSemanticProjectionService semanticProjection,
@@ -45,6 +44,15 @@ public sealed class EditorChatTools(
     IOptions<EditorChatOptions> editorOptions,
     IOptions<ProjectImageGenerationOptions> imageOptions)
 {
+    private static readonly HashSet<string> ImportedOutlineToolNames =
+    [
+        "list_outline", "create_act", "update_act", "delete_act",
+        "create_chapter", "update_chapter", "delete_chapter",
+        "reorder_acts", "reorder_chapters", "insert_outline_designed_page",
+        "list_entity_types", "create_entity", "update_entity", "delete_entity",
+        "reorder_entities", "link_entities", "read_book_format_guidance", "update_book_brief",
+    ];
+
     private static readonly EntityRelationContextOptions _listEntityRelationOptions = new()
     {
         Depth = 2,
@@ -322,7 +330,7 @@ public sealed class EditorChatTools(
                 GenerateProjectImageAsync(context, brief, references, target, altText, quality, outputFormat, outputCompression),
             name: "generate_project_image",
             description:
-                $"Generate one unattached library image from a structured brief without placing it. intendedUse and scene are required. State grounded scene requirements and leave unspecified visual details to the image model. Default to free-standing generation for reusable art and ordinary flowing Figures. Use a server-owned project-page, Figure, page-frame, or page-surface target only when composition must honor that concrete authoring layout; omit editionId and manual size/aspect for a bound target. Bound targets guide composition but never reject the returned raster shape. Rendered text is disabled unless explicitly requested. Place with Contain or Cover afterward and reposition a Cover crop directly when needed. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
+                $"Generate one unattached project image and wait for a terminal result. intendedUse and scene are required. A target supplies geometry guidance only and never places the output. Inspect the returned image, then use its project-image ID in a separate Figure or Designed Page placement tool during this turn. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid imageId, string label, ProjectImageMaskShape[] shapes) =>
@@ -333,9 +341,22 @@ public sealed class EditorChatTools(
         tools.Add(AIFunctionFactory.Create(
             method: (Guid sourceImageId, ImageEditBrief brief, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
                 EditProjectImageAsync(context, sourceImageId, brief, maskId, maskShapes, maskLabel, references, target, altText, quality, outputFormat, outputCompression),
-            name: "edit_image",
+            name: "edit_project_image",
             description:
-                $"Edit one project image when the requested result can be revised coherently. Prefer generation for spatial or compositional changes such as moving a character; do not frame edits as 'move this but change nothing else'. brief.change describes the desired result and brief.preserve lists only material continuity priorities, allowing nearby details to adapt naturally. Use a mask for genuinely localized work when available. The source is provider input image 1; additional references begin at input image 2. Cover every depicted character with one available canonical reference each in focal order before optional references. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed. Outputs are unattached and never inherit source entity associations; attach only an intentionally isolated canonical result with the explicit canonical-reference tool."));
+                $"Edit one project image and wait for a terminal result. The result is always a new unattached project image. Geometry guidance never places it. Inspect the returned image, then apply its ID with a separate placement tool when requested. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: false),
+            name: "read_project_image_job",
+            description: "Read compact status for an existing project-image job without replaying its prompt."));
+        tools.Add(AIFunctionFactory.Create(
+            method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: true),
+            name: "wait_project_image_job",
+            description: "Reconnect to an existing project-image job and wait for terminal output without replaying its prompt."));
+        tools.Add(AIFunctionFactory.Create(
+            method: (Guid jobId) => CancelProjectImageJobAsync(context, jobId),
+            name: "cancel_project_image_job",
+            description: "Cancel one queued or running project-image job. No image is placed."));
 
         tools.AddRange([
             AIFunctionFactory.Create(
@@ -353,6 +374,16 @@ public sealed class EditorChatTools(
                     PatchCompositionElementAsync(context, variantId, expectedRevision, targetKind, targetId, patch),
                 name: "patch_page_composition_element",
                 description: "Revision-check patch one stable object, layer, or style without resending or replacing the scene. Page guides are computed overlays. Send only changed fields; use one-use staging only for large structural edits."),
+            AIFunctionFactory.Create(
+                method: (Guid variantId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) =>
+                    PlacePageImageAsync(context, variantId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
+                name: "place_project_image_in_page_frame",
+                description: "Place an existing project-image ID into an existing Designed Page image frame. Requires explicit Contain/Cover fit and an alt-text or decorative decision. This never generates an image."),
+            AIFunctionFactory.Create(
+                method: (Guid variantId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) =>
+                    AddPageImageAsync(context, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
+                name: "add_project_image_to_page",
+                description: "Add a new image object to a Designed Page using an existing project-image ID. Requires explicit Contain/Cover fit and an alt-text or decorative decision. Bounds default to the safe full surface."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, CompositionScene scene) =>
                     StageCompositionVariantAsync(context, variantId, expectedRevision, scene),
@@ -409,7 +440,9 @@ public sealed class EditorChatTools(
             bookBriefUpdatePolicy: BookBriefUpdatePolicy.ExplicitUserRequestOnly,
             manuscriptStaging: context.EditorStaging), cancellationToken))
         {
-            if (outlineTool is AIFunction function && existingNames.Add(function.Name))
+            if (outlineTool is AIFunction function
+                && ImportedOutlineToolNames.Contains(function.Name)
+                && existingNames.Add(function.Name))
                 tools.Add(outlineTool);
         }
 
@@ -1690,6 +1723,64 @@ public sealed class EditorChatTools(
         return result;
     }
 
+    private async Task<string> PlacePageImageAsync(
+        EditorChatContext ctx,
+        Guid variantId,
+        long expectedRevision,
+        Guid targetId,
+        Guid imageId,
+        FigureImageFit fit,
+        string? altText,
+        bool decorative,
+        int? readingOrder)
+    {
+        if (!decorative && string.IsNullOrWhiteSpace(altText))
+            return JsonSerializer.Serialize(new { ok = false, code = "ALT_DECISION_REQUIRED", targetId, summary = "Provide alternative text or explicitly mark the artwork decorative." });
+        if (await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken) is null)
+            return JsonSerializer.Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId, imageId, summary = "Project image was not found." });
+        return await PatchCompositionElementAsync(
+            ctx,
+            variantId,
+            expectedRevision,
+            "object",
+            targetId,
+            new CompositionElementPatch(
+                ImageId: imageId,
+                ImageFit: fit,
+                AltText: decorative ? string.Empty : altText?.Trim(),
+                Decorative: decorative,
+                AccessibilityDecisionPending: false,
+                SemanticRole: decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure,
+                ReadingOrder: decorative ? null : readingOrder,
+                ClearReadingOrder: decorative));
+    }
+
+    private async Task<string> AddPageImageAsync(
+        EditorChatContext ctx,
+        Guid variantId,
+        long expectedRevision,
+        Guid imageId,
+        FigureImageFit fit,
+        string? altText,
+        bool decorative,
+        CompositionBounds? bounds,
+        int? readingOrder)
+    {
+        try
+        {
+            if (await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken) is null)
+                return JsonSerializer.Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId = variantId, imageId, summary = "Project image was not found." });
+            var placed = await compositions.AddImageObjectAsync(
+                ctx.ProjectId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder, ctx.TurnCancellationToken);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(new { ok = true, targetId = variantId, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the Designed Page.", mutation = new { kind = "pageCompositionVariant", id = variantId, selectId = placed.ObjectId } });
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException or CompositionRevisionConflictException)
+        {
+            return JsonSerializer.Serialize(new { ok = false, code = ex is CompositionRevisionConflictException ? "REVISION_CONFLICT" : "PLACEMENT_REJECTED", targetId = variantId, summary = ex.Message, recovery = "Reread the compact page composition and retry with the same project-image ID." });
+        }
+    }
+
     private async Task<string> ReadLayoutGenerationTargetAsync(EditorChatContext ctx, string targetKind, Guid targetId, Guid? variantId)
     {
         try
@@ -1790,102 +1881,25 @@ public sealed class EditorChatTools(
         string? outputFormat,
         int? outputCompression)
     {
-        CompiledImagePrompt compiled;
         try
         {
-            compiled = await imagePrompts.CompileGenerationAsync(
+            var result = await imageWorkflow.GenerateAsync(
                 ctx.ProjectId,
                 brief,
                 references,
                 target,
-                ctx.TurnCancellationToken);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
-        {
-            return $"Error: {ex.Message}";
-        }
-
-        ProjectImageJobView job;
-        try
-        {
-            job = await imageJobs.CreateGenerateJobAsync(ctx.ProjectId, new ProjectImageGenerateJobRequest(
-                compiled.Prompt,
-                compiled.Size,
-                string.IsNullOrWhiteSpace(quality) ? "auto" : quality.Trim(),
-                string.IsNullOrWhiteSpace(outputFormat) ? "png" : outputFormat.Trim(),
+                altText,
+                quality,
+                outputFormat,
                 outputCompression,
-                altText?.Trim() ?? string.Empty,
-                1,
-                compiled.ReferenceImageIds,
-                Label: "Editor chat image",
-                EntityTargets: null,
-                BriefJson: compiled.BriefJson,
-                ReferenceManifestJson: compiled.ReferenceManifestJson,
-                TargetGeometryJson: compiled.TargetGeometryJson), ctx.TurnCancellationToken);
+                "Editor chat image",
+                ctx.TrackImageGenerationJob,
+                ctx.TurnCancellationToken);
+            return await BuildImageResultAsync(ctx, result, "Generated output saved to the image library.");
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
             return $"Error: {ex.Message}";
-        }
-        ctx.TrackImageGenerationJob(job.Id);
-        try
-        {
-            await imageRuntime.EnqueueProjectAsync(ctx.ProjectId, ctx.TurnCancellationToken);
-            var timeout = TimeSpan.FromSeconds(Math.Clamp(imageOptions.Value.AgentJobWaitTimeoutSeconds, 1, 3600));
-            var completed = await imageRuntime.WaitForJobCompletionAsync(job.Id, timeout, ctx.TurnCancellationToken);
-            job = await imageJobs.GetJobAsync(ctx.ProjectId, job.Id, ctx.TurnCancellationToken)
-                ?? throw new InvalidOperationException($"Image generation job {job.Id:N} was not found after queueing.");
-
-            var outputImages = new List<object>();
-            object? placementMutation = null;
-            var attached = false;
-            foreach (var imageId in job.OutputImageIds)
-            {
-                if (await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken) is { } image)
-                {
-                    var visual = await BuildVisualAsync(
-                        ctx,
-                        image,
-                        title: image.FileName,
-                        caption: "Generated output saved to the image library.");
-                    ctx.AddVisual(visual);
-                    ctx.AddModelOnlyImage(image);
-                    outputImages.Add(new
-                    {
-                        image.Id,
-                        image.PreviewUrl,
-                        requestedSize = compiled.Size,
-                        actualRaster = RasterMetadata(visual.Width, visual.Height),
-                    });
-                    if (placementMutation is null)
-                        (placementMutation, attached) = await TryAttachGeneratedImageAsync(ctx, target, image.Id, altText);
-                }
-            }
-
-            ctx.OnMutated();
-            return JsonSerializer.Serialize(new
-            {
-                ok = completed && job.Status is ProjectImageGenerationJobStatus.Succeeded
-                    or ProjectImageGenerationJobStatus.CompletedWithErrors,
-                targetId = target?.TargetId,
-                jobId = job.Id,
-                status = job.Status,
-                outputImageIds = job.OutputImageIds,
-                images = outputImages,
-                mutation = placementMutation,
-                diagnosticCounts = new { errors = job.OutputErrors.Count, warnings = 0 },
-                diagnostics = job.OutputErrors.Take(3),
-                note = completed
-                    ? !attached
-                        ? "Generated image saved to the library. Inspect the visible output before placing it."
-                        : "Generated image saved and attached to its stable target with the target's existing fit."
-                    : "Timed out waiting for the image job. The Images tab will continue showing progress.",
-            });
-        }
-        catch (OperationCanceledException) when (ctx.TurnCancellationToken.IsCancellationRequested)
-        {
-            await imageRuntime.CancelJobAsync(ctx.ProjectId, job.Id, CancellationToken.None);
-            return "Cancelled.";
         }
     }
 
@@ -1925,22 +1939,6 @@ public sealed class EditorChatTools(
         string? outputFormat,
         int? outputCompression)
     {
-        CompiledImagePrompt compiled;
-        try
-        {
-            compiled = await imagePrompts.CompileEditAsync(
-                ctx.ProjectId,
-                sourceImageId,
-                brief,
-                references,
-                target,
-                ctx.TurnCancellationToken);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
-        {
-            return $"Error: {ex.Message}";
-        }
-
         Guid? effectiveMaskId = maskId;
         if (effectiveMaskId is null && maskShapes is { Length: > 0 })
         {
@@ -1959,178 +1957,82 @@ public sealed class EditorChatTools(
             }
         }
 
-        ProjectImageJobView job;
         try
         {
-            job = await imageJobs.CreateEditJobAsync(ctx.ProjectId, new ProjectImageEditJobRequest(
+            var result = await imageWorkflow.EditAsync(
+                ctx.ProjectId,
                 sourceImageId,
-                compiled.Prompt,
-                compiled.Size,
-                string.IsNullOrWhiteSpace(quality) ? "auto" : quality.Trim(),
-                string.IsNullOrWhiteSpace(outputFormat) ? "png" : outputFormat.Trim(),
+                brief,
+                effectiveMaskId,
+                references,
+                target,
+                altText,
+                quality,
+                outputFormat,
                 outputCompression,
-                altText?.Trim() ?? string.Empty,
-                1,
-                MaskPngDataUrl: null,
-                ReferenceImageIds: compiled.ReferenceImageIds,
-                Label: "Editor chat image edit",
-                ExistingMaskId: effectiveMaskId,
-                EntityTargets: null,
-                InheritSourceEntityTargets: false,
-                BriefJson: compiled.BriefJson,
-                ReferenceManifestJson: compiled.ReferenceManifestJson,
-                TargetGeometryJson: compiled.TargetGeometryJson), ctx.TurnCancellationToken);
+                "Editor chat image edit",
+                ctx.TrackImageGenerationJob,
+                ctx.TurnCancellationToken);
+            return await BuildImageResultAsync(ctx, result, "Edited output saved to the image library.");
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
             return $"Error: {ex.Message}";
         }
+    }
 
-        ctx.TrackImageGenerationJob(job.Id);
-        try
+    private async Task<string> BuildImageResultAsync(
+        EditorChatContext ctx,
+        AgentProjectImageResult result,
+        string caption)
+    {
+        var payloads = new List<object>();
+        foreach (var image in result.Images)
         {
-            await imageRuntime.EnqueueProjectAsync(ctx.ProjectId, ctx.TurnCancellationToken);
-            var timeout = TimeSpan.FromSeconds(Math.Clamp(imageOptions.Value.AgentJobWaitTimeoutSeconds, 1, 3600));
-            var completed = await imageRuntime.WaitForJobCompletionAsync(job.Id, timeout, ctx.TurnCancellationToken);
-            job = await imageJobs.GetJobAsync(ctx.ProjectId, job.Id, ctx.TurnCancellationToken)
-                ?? throw new InvalidOperationException($"Image edit job {job.Id:N} was not found after queueing.");
-
-            var outputImages = new List<object>();
-            object? placementMutation = null;
-            var attached = false;
-            foreach (var imageId in job.OutputImageIds)
+            var visual = await BuildVisualAsync(ctx, image, image.FileName, caption);
+            ctx.AddVisual(visual);
+            ctx.AddModelOnlyImage(image);
+            payloads.Add(new
             {
-                if (await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken) is not { } image)
-                    continue;
-                var visual = await BuildVisualAsync(
-                    ctx,
-                    image,
-                    title: image.FileName,
-                    caption: "Edited output saved to the image library.");
-                ctx.AddVisual(visual);
-                ctx.AddModelOnlyImage(image);
-                outputImages.Add(new
-                {
-                    image.Id,
-                    image.PreviewUrl,
-                    requestedSize = compiled.Size,
-                    actualRaster = RasterMetadata(visual.Width, visual.Height),
-                });
-                if (placementMutation is null)
-                    (placementMutation, attached) = await TryAttachGeneratedImageAsync(ctx, target, image.Id, altText);
-            }
-
-            ctx.OnMutated();
-            return JsonSerializer.Serialize(new
-            {
-                ok = completed && job.Status is ProjectImageGenerationJobStatus.Succeeded
-                    or ProjectImageGenerationJobStatus.CompletedWithErrors,
-                targetId = target?.TargetId,
-                jobId = job.Id,
-                status = job.Status,
-                outputImageIds = job.OutputImageIds,
-                images = outputImages,
-                mutation = placementMutation,
-                diagnosticCounts = new { errors = job.OutputErrors.Count, warnings = 0 },
-                diagnostics = job.OutputErrors.Take(3),
-                note = completed
-                    ? !attached
-                        ? "Edited output saved to the library. Inspect the visible output before placing it."
-                        : "Edited output saved and attached to its stable target with the target's existing fit."
-                    : "Timed out waiting for the edit; the Images tab will continue showing progress.",
+                image.Id,
+                image.PreviewUrl,
+                requestedCanvas = result.RequestedCanvas,
+                actualRaster = RasterMetadata(visual.Width, visual.Height),
             });
         }
-        catch (OperationCanceledException) when (ctx.TurnCancellationToken.IsCancellationRequested)
+        if (result.Images.Count > 0)
+            ctx.OnMutated();
+        return JsonSerializer.Serialize(new
         {
-            await imageRuntime.CancelJobAsync(ctx.ProjectId, job.Id, CancellationToken.None);
-            return "Cancelled.";
-        }
+            ok = result.Succeeded,
+            jobId = result.JobId,
+            status = result.Status,
+            outputImageIds = result.Images.Select(image => image.Id),
+            images = payloads,
+            attached = false,
+            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = 0 },
+            diagnostics = result.Diagnostics.Take(3),
+            summary = result.Summary,
+            nextAction = result.Succeeded
+                ? "Inspect a returned image, then place its project-image ID with a separate Figure or Designed Page tool before completing an authoring request."
+                : null,
+        });
     }
 
-    private async Task<object?> AttachGeneratedImageAsync(
-        EditorChatContext ctx,
-        ImageGenerationTarget? target,
-        Guid imageId,
-        string? generatedAltText)
+    private async Task<string> ReadProjectImageJobAsync(EditorChatContext ctx, Guid jobId, bool wait)
     {
-        if (target?.TargetId is not Guid targetId || string.IsNullOrWhiteSpace(target.TargetKind))
-            return null;
-        var kind = new string(target.TargetKind.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
-        if (kind == "figure")
-        {
-            var blockId = targetId.ToString("N");
-            foreach (var chapter in await chapters.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken))
-            {
-                var snapshot = await manuscripts.GetManuscriptAsync(chapter.Id, ctx.TurnCancellationToken);
-                var figure = snapshot?.Document.Content.FirstOrDefault(block => block.Type == ManuscriptBlockType.Figure
-                    && string.Equals(block.Id, blockId, StringComparison.OrdinalIgnoreCase));
-                if (snapshot is null || figure is null) continue;
-                var alt = string.IsNullOrWhiteSpace(generatedAltText) ? figure.AltText : generatedAltText.Trim();
-                var decorative = string.IsNullOrWhiteSpace(generatedAltText) && figure.Decorative;
-                var result = await manuscripts.ApplyAsync(chapter.Id, snapshot.Revision,
-                    [new SetFigurePresentation(
-                        figure.Id, imageId, decorative ? null : alt, decorative, figure.Language,
-                        figure.FigurePresentation ?? new FigurePresentation(),
-                        figure.AccessibilityRole ?? FigureAccessibilityRole.Figure)],
-                    ctx.TurnCancellationToken);
-                return new { kind = "manuscript", id = chapter.Id, revision = result.Snapshot.Revision, selectId = figure.Id };
-            }
-            throw new KeyNotFoundException("The generated Figure target no longer exists.");
-        }
-        if (kind == "pageframe" && target.VariantId is Guid variantId)
-        {
-            var variant = await compositions.ReadVariantAsync(ctx.ProjectId, variantId, ctx.TurnCancellationToken);
-            var result = await compositions.PatchElementAsync(ctx.ProjectId, variantId, variant.Revision,
-                "object", targetId, new CompositionElementPatch(ImageId: imageId), ctx.TurnCancellationToken);
-            return new { kind = "pageComposition", id = result.CompositionId, revision = result.Revision, selectId = targetId };
-        }
-        return null;
+        var result = wait
+            ? await imageWorkflow.WaitAsync(ctx.ProjectId, jobId, ctx.TrackImageGenerationJob, ctx.TurnCancellationToken)
+            : await imageWorkflow.ReadAsync(ctx.ProjectId, jobId, ctx.TurnCancellationToken);
+        return result is null
+            ? JsonSerializer.Serialize(new { ok = false, code = "NOT_FOUND", jobId, summary = "Image job was not found in this project." })
+            : await BuildImageResultAsync(ctx, result, "Project image job output loaded from the image library.");
     }
 
-    private async Task<(object? Notice, bool Attached)> TryAttachGeneratedImageAsync(
-        EditorChatContext ctx,
-        ImageGenerationTarget? target,
-        Guid imageId,
-        string? altText)
+    private async Task<string> CancelProjectImageJobAsync(EditorChatContext ctx, Guid jobId)
     {
-        try
-        {
-            var notice = await AttachGeneratedImageAsync(ctx, target, imageId, altText);
-            return (notice, notice is not null);
-        }
-        catch (CompositionRevisionConflictException ex)
-        {
-            return (new
-            {
-                ok = false,
-                code = "REVISION_CONFLICT",
-                targetId = target?.TargetId,
-                currentRevision = ex.ActualRevision,
-                recovery = "Reread the page target and attach the generated project image by its returned ID.",
-            }, false);
-        }
-        catch (ManuscriptRevisionConflictException ex)
-        {
-            return (new
-            {
-                ok = false,
-                code = "REVISION_CONFLICT",
-                targetId = target?.TargetId,
-                currentRevision = ex.ActualRevision,
-                recovery = "Reread the Figure target and attach the generated project image by its returned ID.",
-            }, false);
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return (new
-            {
-                ok = false,
-                code = "TARGET_NOT_FOUND",
-                targetId = target?.TargetId,
-                summary = ex.Message,
-                recovery = "Use the returned project image ID after selecting a current stable target.",
-            }, false);
-        }
+        await imageWorkflow.CancelAsync(ctx.ProjectId, jobId, ctx.TurnCancellationToken);
+        return JsonSerializer.Serialize(new { ok = true, jobId, status = "cancelled", summary = "Image job cancelled; no image was placed." });
     }
 
     private async Task<string> AddProjectImageToContextAsync(EditorChatContext ctx, Guid chapterId, Guid imageId)

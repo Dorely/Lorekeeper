@@ -199,6 +199,7 @@ builder.Services.AddOptions<ProjectImageGenerationOptions>()
 builder.Services.AddScoped<IProjectImageProvider, CodexProjectImageProvider>();
 builder.Services.AddScoped<IProjectImageJobService, ProjectImageJobService>();
 builder.Services.AddScoped<IImagePromptComposer, ImagePromptComposer>();
+builder.Services.AddScoped<IAgentProjectImageWorkflow, AgentProjectImageWorkflow>();
 builder.Services.AddSingleton<IProjectImageGenerationRuntime, ProjectImageGenerationRuntime>();
 builder.Services.AddHostedService<ProjectImageGenerationStartupWorker>();
 

@@ -49,7 +49,18 @@ else
                 }
 
                 <div class="publish-scroll">
-                    @if (_selectedReleaseId is null && _core is not null)
+                    @if (_coverEditorOpen && Project is not null)
+                    {
+                        <CoverCompositionWorkspace @ref="_coverWorkspace"
+                                                   ProjectId="Project.Id"
+                                                   EditionId="_selectedReleaseId ?? Guid.Empty"
+                                                   CoreBook="@(_selectedReleaseId is null)"
+                                                   RefreshSignal="_coverRefreshSignal"
+                                                   RequestedSelectionId="_coverSelectionId"
+                                                   Saved="HandleCoverSavedAsync"
+                                                   Closed="CloseCoverEditorAsync" />
+                    }
+                    else if (_selectedReleaseId is null && _core is not null)
                     {
                         @CoreBookView()
                     }
@@ -99,16 +110,6 @@ else
     </div>
 }
 
-@if (_coverEditorOpen && Project is not null)
-{
-    <CoverCompositionWorkspace ProjectId="Project.Id"
-                               ProjectSlug="Project.Slug"
-                               EditionId="_selectedReleaseId ?? Guid.Empty"
-                               CoreBook="@(_selectedReleaseId is null)"
-                               Saved="HandleCoverSavedAsync"
-                               Closed="CloseCoverEditorAsync" />
-}
-
 @code {
     [CascadingParameter] public Project? Project { get; set; }
 
@@ -133,6 +134,9 @@ else
     private bool _busy;
     private bool _addReleaseOpen;
     private bool _coverEditorOpen;
+    private CoverCompositionWorkspace? _coverWorkspace;
+    private long _coverRefreshSignal;
+    private Guid? _coverSelectionId;
     private PublicationArtifactView? _previewArtifact;
     private bool _coreDirty;
     private bool _coreOutlineDirty;
@@ -195,6 +199,7 @@ else
     private async Task SelectCoreAsync()
     {
         await SavePendingAsync();
+        _coverEditorOpen = false;
         await LoadCoreAsync();
     }
 
@@ -202,6 +207,7 @@ else
     {
         if (Project is null) return;
         await SavePendingAsync();
+        _coverEditorOpen = false;
         _previewArtifact = null;
         _loading = true; _error = null;
         try
@@ -592,6 +598,8 @@ else
 
     private async Task SavePendingAsync()
     {
+        if (_coverEditorOpen && _coverWorkspace is not null)
+            await _coverWorkspace.FlushAsync();
         if (_coreDirty || _coreOutlineDirty) await SaveCoreAsync();
         if (_releaseDirty || _releaseContentDirty) await SaveReleaseAsync();
     }
@@ -740,6 +748,7 @@ else
         else
             await LoadCoreAsync();
         _coverEditorOpen = true;
+        _coverRefreshSignal++;
     }
 
     private Task CloseCoverEditorAsync()
@@ -767,9 +776,16 @@ else
             _notice = "The assistant changed publishing settings. Your unsaved form edits were kept; save or reload to reconcile them.";
             return;
         }
+        var coverWasOpen = _coverEditorOpen;
         if (mutation.SelectEdition && mutation.EditionId is Guid id) await SelectReleaseAsync(id);
         else if (_selectedReleaseId is Guid releaseId) await SelectReleaseAsync(releaseId);
         else await LoadCoreAsync();
+        if (mutation.Kind == PublishWorkspaceMutationKind.Edition && coverWasOpen)
+        {
+            _coverEditorOpen = true;
+            _coverSelectionId = mutation.SelectedObjectId;
+            _coverRefreshSignal++;
+        }
     }
 
     private void CoreChanged(string field, string? value) { typeof(CoreDraft).GetProperty(field)!.SetValue(_coreDraft, value ?? string.Empty); _coreDirty = true; }

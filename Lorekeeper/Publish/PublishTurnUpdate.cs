@@ -43,7 +43,8 @@ public enum PublishWorkspaceMutationKind
 public sealed record PublishWorkspaceMutated(
     Guid? EditionId,
     bool SelectEdition,
-    PublishWorkspaceMutationKind Kind = PublishWorkspaceMutationKind.Edition) : PublishTurnUpdate;
+    PublishWorkspaceMutationKind Kind = PublishWorkspaceMutationKind.Edition,
+    Guid? SelectedObjectId = null) : PublishTurnUpdate;
 
 public sealed record PublishAssistantMessageCompleted(Guid MessageId) : PublishTurnUpdate;
 

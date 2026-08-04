@@ -65,6 +65,7 @@ else
                              OnAiTurnCompleted="OnAiTurnCompletedAsync"
                              OnAiTurnIdle="OnAiTurnIdleAsync"
                              OnAiChangesApplied="OnAiChangesAppliedAsync"
+                             OnWorkspaceMutated="OnAiWorkspaceMutatedAsync"
                              OnActiveChapterManuscriptChangesReady="OpenReviewForActiveChapterChangesAsync"
                              OnContestResultsReady="OpenReviewForContestResultsAsync" />
         </aside>
@@ -230,6 +231,8 @@ else
                                                    @ref="_designedPageWorkspace"
                                                    ProjectId="Project.Id"
                                                    CompositionId="selectedCompositionId"
+                                                   RefreshSignal="_pageWorkspaceRefreshSignal"
+                                                   RequestedSelectionId="_pageWorkspaceSelectionId"
                                                    Closed="CloseDesignedPage" />
                         }
                     </div>
@@ -873,6 +876,8 @@ else
         }
     }
     private DesignedPageWorkspace? _designedPageWorkspace;
+    private int _pageWorkspaceRefreshSignal;
+    private Guid? _pageWorkspaceSelectionId;
     private async Task OpenDesignedPage(Guid compositionId)
     {
         if (!DesignedPageIds.Contains(compositionId)
@@ -3110,6 +3115,33 @@ else
             chapter.ManuscriptJson,
             chapter.ManuscriptRevision,
             renderVersion);
+    }
+
+    private async Task OnAiWorkspaceMutatedAsync(EditorWorkspaceMutated mutation)
+    {
+        await OnAiChangesAppliedAsync();
+        if (mutation.Kind != EditorWorkspaceMutationKind.PageComposition)
+            return;
+
+        var compositionId = mutation.CompositionId;
+        if (compositionId is null && mutation.VariantId is Guid variantId)
+        {
+            compositionId = DesignedPageIds.FirstOrDefault(id => id == _openCompositionId);
+            if (compositionId == Guid.Empty)
+                compositionId = null;
+        }
+        if (compositionId is null || !DesignedPageIds.Contains(compositionId.Value))
+        {
+            await ReconcileCurrentChapterAsync(refreshContextSurfaces: true);
+            if (compositionId is null || !DesignedPageIds.Contains(compositionId.Value))
+                return;
+        }
+
+        _openCompositionId = compositionId;
+        _mode = EditorMode.Pages;
+        _pageWorkspaceSelectionId = mutation.SelectedObjectId;
+        _pageWorkspaceRefreshSignal++;
+        StateHasChanged();
     }
 
     private void SynchronizeExternalEditorDocument(Chapter chapter)

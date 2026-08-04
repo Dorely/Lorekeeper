@@ -148,14 +148,13 @@ in the pending-edits modal, which shows body text plus separate structure and
 visual-block diffs. Focused Figure tools and Designed Page insertion obey the
 same Review-edits staging boundary as the general manuscript preview/apply
 protocol. A staged Designed Page preallocates its composition and manuscript
-block IDs and retains its project authoring geometry, page/spread mode, initial
-project artwork, explicit contain/cover fit, crop position, and accessibility
-decision in the reviewed tool payload. Keeping the change creates the manuscript
-block, composition, exact authoring variant, and initial image object in one
-transaction; approval never
-depends on a later assistant turn to finish the page. Staged visual reads resolve
-against the projected manuscript revision until the user keeps or rejects the
-grouped change.
+block IDs and retains its project authoring geometry and page/spread mode.
+Keeping the change creates the manuscript block, composition, and exact
+authoring variant in one transaction. Artwork is always an already-completed
+project image placed by a separate revision-checked Figure or scene-object
+mutation; generation never embeds a destination or creates a partial image
+object. Staged visual reads resolve against the projected manuscript revision
+until the user keeps or rejects the grouped change.
 
 ### Ingest, Research, and Background Work
 
@@ -185,6 +184,18 @@ crops. `IProjectImageJobService` owns queued generation/edit records and audit
 metadata. `IProjectImageGenerationRuntime` owns FIFO execution, retries,
 cancellation, previews, and completion notifications, while provider transport
 details remain behind `IProjectImageProvider`.
+
+`IAgentProjectImageWorkflow` is the single assistant-facing generation/edit
+boundary for Outline, Editor, Images, and Publish. It creates one unattached
+project-image job, registers its durable job ID, waits to a readable terminal
+state, cancels timed-out or interrupted work, and returns compact status,
+project-image IDs, diagnostics, and temporary visual context. Geometry
+descriptors guide prompt composition and provider-canvas choice only. Focused
+Figure, Designed Page, cover, and canonical-reference tools consume a completed
+image ID in a subsequent tool round; revision conflicts never discard or
+regenerate that library asset. Job read/wait/cancel tools reconnect without
+replaying the original prompt, and persisted chat never stores image bytes or
+repeated generation payloads.
 
 Entity visual examples are ordered associations between graph entities and
 project images. Image prompting, editor context, research/ingest promotion, and
@@ -274,6 +285,12 @@ capabilities. Page saves are serialized per mounted workspace. Each save uses
 an immutable scene/semantic snapshot, adopts the returned revisions before the
 next queued save, and clears the dirty state only when no newer local mutation
 occurred while persistence was in flight.
+
+Assistant composition mutation notices carry the chapter,
+composition/variant, revision, changed IDs, and selected object. A newly
+created Designed Page opens Pages mode automatically, and each later placement
+or layout mutation reloads the mounted canvas and follows the affected object
+without replacing dirty manual state.
 
 `LayoutGenerationTargetDescriptor` is the server-owned geometry boundary for a
 project page, Figure, page surface/frame, or publication cover surface/frame.
@@ -481,6 +498,15 @@ ink-limit path. Black-and-white editions convert interior raster and colored
 text to DeviceGray; cover color remains independent and uses RGB for
 KDP/generic or CMYK for Ingram.
 
+Cover editing is an embedded Publish workspace mode rather than a modal. The
+Publish assistant remains mounted in the left column; the scene canvas fills
+the main area and bound copy, artwork, layers, accessibility, and object
+properties share one scrolling controls column. Pages and covers use the same
+structured `CompositionScene`, object/layer/style primitives, pointer/crop
+interaction module, undo/redo semantics, explicit Contain/Cover placement, and
+revision-safe persistence; cover bindings and print regions remain
+cover-specific host configuration.
+
 `PublicationPackageService` owns versioned Lorekeeper validation and the final
 artifact-assembly boundary. It verifies current source fingerprints, correlated
 interior/cover render evidence, page geometry, page-box consistency, embedded
@@ -542,7 +568,11 @@ native target runners; neither the app nor release package compiles Rust at
 runtime.
 `PublishChatService` owns one persisted, ordered, project-scoped Publish
 conversation and uses the shared turn runtime for streaming, cancellation,
-reconnection, image attachments, and text-only cross-turn replay. The two-column
+reconnection, image attachments, and text-only cross-turn replay. Every turn
+includes the complete ordered act/chapter outline, stable IDs, synopses, beats,
+Book Brief, Project Guidance, and project facts. Bounded project search and
+source/image reads provide chapter bodies, research, ingest sources, entities,
+facts, and reusable artwork on demand. The two-column
 Publish workspace flushes pending manual autosaves before each turn and refreshes
 its selected Core/release target and artifact state from structured mutation notices. Manual
 publishing mutations are locked for the duration of a Publish turn, render state

@@ -592,7 +592,13 @@ public sealed class PublicationPackageTests
             "cancel_publication_preparation",
             "read_publication_readiness",
             "list_publication_book_text_styles",
-            "list_publication_project_images",
+            "list_project_images",
+            "read_project_image",
+            "generate_project_image",
+            "edit_project_image",
+            "read_project_image_job",
+            "wait_project_image_job",
+            "cancel_project_image_job",
             "read_publication_book_content",
             "patch_publication_book_content",
             "read_publication_book_matter",
@@ -612,12 +618,19 @@ public sealed class PublicationPackageTests
             "reorder_publication_release_placements",
             "delete_publication_release_placement",
             "read_publication_cover_design",
+            "place_project_image_on_core_cover",
+            "add_project_image_to_core_cover",
+            "place_project_image_on_release_cover",
+            "add_project_image_to_release_cover",
             "update_publication_cover_design",
             "stage_publication_cover_composition",
             "apply_publication_cover_composition_stage",
             "export_publication_release",
         ];
         Assert.All(requiredTools, name => Assert.Contains(name, names));
+        Assert.DoesNotContain("generate_outline_layout_image", names);
+        Assert.DoesNotContain("generate_publication_layout_image", names);
+        Assert.DoesNotContain("list_publication_project_images", names);
         Assert.DoesNotContain(catalog, tool =>
             tool.Name.Contains("proof", StringComparison.OrdinalIgnoreCase)
             && (tool.Name.Contains("approve", StringComparison.OrdinalIgnoreCase)

@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Lorekeeper.ChatTurns;
 using Lorekeeper.Context;
+using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence.Repositories;
@@ -37,7 +38,8 @@ public sealed class PublishChatService(
     ChatTurnRuntime turnRuntime,
     ChatTurnEngine turnEngine,
     IOptions<AgentOptions> options,
-    ILogger<PublishChatService> logger) : IPublishChatService
+    ILogger<PublishChatService> logger,
+    IEntityVisualContextService? entityVisualContext = null) : IPublishChatService
 {
     internal const string WorkflowInstructions = """
         You are Lorekeeper's conversational Publish assistant. You maintain Core Book and prepare optional publication releases through the supplied tools.
@@ -59,13 +61,15 @@ public sealed class PublishChatService(
 
         Tool and state integrity:
         - Use tools for every publication read or mutation and honor Core or release revisions.
+        - The complete ordered outline, synopses, beats, Project Guidance, Book Brief, and project facts are supplied every turn. Use list_search_sources, search_project, and paginated read_project_source for chapter bodies, research, sources, entities, facts, or other project details that are not already present. Use list_project_images and read_project_image for reusable visual assets.
         - Immediately before mutation, reread its target. After a conflict, perform one compact reread and retry only when intent remains unambiguous.
         - Use prepare_publication_files for compile, render or export, validation, and packaging. Do not attempt separate low-level orchestration.
         - Never claim a mutation, preparation, validation, package, or export succeeded unless the tool result says so.
         - Tool results are not replayed into later model turns. Summarize durable decisions, exact changes, revisions, diagnostics, and unresolved questions without repeating large payloads.
         - Returned URLs require a user action. Never claim that you downloaded a file.
         - Chapters contain semantic text, flowing Figures, and Designed Pages. Distinguish those from release-only placements, print full-wrap covers, and digital front covers.
-        - Use project page setup for authoring decisions and release geometry only for compatibility and covers. Target-bound generation derives dimensions; ordinary source-image shapes remain valid and are fitted non-destructively.
+        - Use project page setup for authoring decisions and release geometry only for compatibility and covers. Optional generation geometry derives dimensions but never places the result; ordinary source-image shapes remain valid and are fitted non-destructively.
+        - generate_project_image and edit_project_image wait for completion and always return unattached project images. Inspect the visible output, then use its ID with the focused place/add Core cover, release cover, or publication-page tools in this same turn when placement is requested. Never stop after asset generation or imply geometry guidance attached it.
         - Require alt text or an explicit decorative decision and preserve logical reading order.
         - Submit large composition payloads once to staging, then apply only the stage ID and expected revision.
         - Release format is fixed. Create another release for another product type.
@@ -92,6 +96,8 @@ public sealed class PublishChatService(
         "create_publication_release",
         "patch_publication_release_overrides",
         "patch_publication_core_cover_element",
+        "place_project_image_on_core_cover",
+        "add_project_image_to_core_cover",
         "apply_publication_core_cover_composition_stage",
         "customize_publication_release_cover",
         "use_core_publication_cover",
@@ -110,13 +116,17 @@ public sealed class PublishChatService(
         "update_publication_cover_design",
         "get_or_create_publication_composition_variant",
         "patch_publication_composition_element",
+        "place_project_image_in_publication_page_frame",
+        "add_project_image_to_publication_page",
         "apply_publication_cover_composition_stage",
         "patch_publication_cover_element",
+        "place_project_image_on_release_cover",
+        "add_project_image_to_release_cover",
         "apply_publication_composition_stage",
         "apply_publication_composition_semantic_stage",
         "apply_publication_composition_workspace_stage",
-        "generate_publication_layout_image",
-        "generate_publication_image",
+        "generate_project_image",
+        "edit_project_image",
     ];
 
     public async Task<PublishConversation> GetOrCreateAsync(
@@ -229,13 +239,15 @@ public sealed class PublishChatService(
 
         IChatClient? chat = null;
         IList<AITool>? aiTools = null;
+        PublishAssistantContext? assistantContext = null;
         string? systemPrompt = null;
         Exception? setupException = null;
         var setupCancelled = false;
         try
         {
             chat = await clients.CreateChatClientAsync(availability.Provider.Id, cancellationToken);
-            aiTools = await tools.BuildAsync(new PublishAssistantContext(projectId, conversation.Id, cancellationToken), cancellationToken);
+            assistantContext = new PublishAssistantContext(projectId, conversation.Id, cancellationToken);
+            aiTools = await tools.BuildAsync(assistantContext, cancellationToken);
             systemPrompt = await GetSystemPromptAsync(projectId, selectedEditionId, cancellationToken);
         }
         catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested)
@@ -418,6 +430,21 @@ public sealed class PublishChatService(
                     }
                 }
                 messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
+                if (assistantContext is not null)
+                {
+                    var visuals = assistantContext.DrainVisuals();
+                    if (entityVisualContext is not null)
+                    {
+                        var visualMessage = await entityVisualContext.BuildVisionMessageAsync(
+                            projectId,
+                            visuals,
+                            visionReady,
+                            "Project-image outputs from the preceding tools. Inspect the visible result before choosing an image ID for a separate cover or publication placement tool.",
+                            cancellationToken);
+                        if (visualMessage is not null)
+                            messages.Add(visualMessage);
+                    }
+                }
 
                 if (iteration == maxIterations - 1)
                 {
@@ -447,14 +474,23 @@ public sealed class PublishChatService(
         if (!ResultSucceeded(resultJson))
             return null;
 
-        if (toolName == "generate_publication_image")
+        if (toolName is "generate_project_image" or "edit_project_image")
             return new PublishWorkspaceMutated(null, false, PublishWorkspaceMutationKind.ImageLibrary);
         if (toolName is "patch_publication_book" or "patch_publication_book_content"
             or "upsert_publication_book_matter" or "delete_publication_book_matter"
             or "add_publication_book_placement" or "update_publication_book_placement"
             or "reorder_publication_book_placements" or "delete_publication_book_placement"
-            or "patch_publication_core_cover_element" or "apply_publication_core_cover_composition_stage")
-            return new PublishWorkspaceMutated(null, false, PublishWorkspaceMutationKind.Edition);
+            or "patch_publication_core_cover_element" or "place_project_image_on_core_cover" or "add_project_image_to_core_cover"
+            or "apply_publication_core_cover_composition_stage")
+            return new PublishWorkspaceMutated(
+                null,
+                false,
+                PublishWorkspaceMutationKind.Edition,
+                toolName is "patch_publication_core_cover_element" or "place_project_image_on_core_cover"
+                    ? ReadGuid(argumentsJson, "targetId")
+                    : toolName == "add_project_image_to_core_cover"
+                        ? ReadGuid(resultJson, "selectId")
+                    : null);
 
         var selectEdition = toolName is "create_publication_release" or "customize_publication_release_cover" or "use_core_publication_cover";
         var kind = toolName switch
@@ -468,7 +504,12 @@ public sealed class PublishChatService(
                 ?? (toolName == "apply_publication_cover_composition_stage"
                     ? ReadGuid(resultJson, "targetId")
                     : null);
-        return editionId is { } id ? new PublishWorkspaceMutated(id, selectEdition, kind) : null;
+        var selectedObjectId = toolName is "patch_publication_cover_element" or "place_project_image_on_release_cover"
+            ? ReadGuid(argumentsJson, "targetId")
+            : toolName == "add_project_image_to_release_cover"
+                ? ReadGuid(resultJson, "selectId")
+                : null;
+        return editionId is { } id ? new PublishWorkspaceMutated(id, selectEdition, kind, selectedObjectId) : null;
     }
 
     private static Guid? ReadGuid(string json, string name)

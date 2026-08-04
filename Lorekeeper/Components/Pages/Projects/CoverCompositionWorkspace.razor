@@ -13,13 +13,12 @@
 @inject IProjectFontService ProjectFonts
 @inject IJSRuntime JS
 
-<div class="cover-composer" role="dialog" aria-modal="true" aria-label="Cover composition editor" tabindex="0" @onkeydown="HandleKeyDown">
+<div class="cover-composer" aria-label="Cover composition editor" tabindex="0" @onkeydown="HandleKeyDown">
     <style>@((MarkupString)FontFaceCss())</style>
     <header>
         <div><strong>@(CoreBook ? "Core cover" : "Release cover")</strong><small>@ModeSummary</small></div>
-        <a class="btn btn-sm btn-outline-primary" href="@GenerationUrl("cover-surface", EditionId)">Generate cover artwork</a>
         <button type="button" class="btn btn-sm btn-primary" disabled="@(!_dirty || _saving)" @onclick="SaveAsync">@(_saving ? "Saving..." : "Save cover")</button>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseAsync">Close</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseAsync">Back to publishing</button>
     </header>
     @if (!string.IsNullOrWhiteSpace(_error)) { <div class="alert alert-danger m-2">@_error</div> }
     @if (_cover is null || _scene is null || (!CoreBook && _edition is null))
@@ -119,7 +118,6 @@
                     <label>Reading order<input type="number" value="@selected.ReadingOrder" @onchange="e => Patch(selected with { ReadingOrder = NullableInt(e) })" /></label>
                     @if (selected.Kind == CompositionObjectKind.Image)
                     {
-                        <a class="btn btn-sm btn-outline-primary" href="@GenerationUrl("cover-frame", selected.Id)">Generate for this frame</a>
                         <label>Project artwork<select value="@selected.ImageId" @onchange="e => SelectImage(selected, e)"><option value="">Choose artwork</option>@foreach (var image in _images) { <option value="@image.Id">@image.FileName</option> }</select></label>
                         <label>Fit<select value="@selected.ImageFit" @onchange="e => Patch(selected with { ImageFit = Enum.Parse<FigureImageFit>(e.Value!.ToString()!) })">@foreach (var fit in Enum.GetValues<FigureImageFit>()) { <option value="@fit">@fit</option> }</select></label>
                         @if (selected.ImageFit == FigureImageFit.Cover)
@@ -165,15 +163,16 @@
 
 @code {
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
-    [Parameter, EditorRequired] public string ProjectSlug { get; set; } = string.Empty;
     [Parameter] public Guid EditionId { get; set; }
     [Parameter] public bool CoreBook { get; set; }
+    [Parameter] public long RefreshSignal { get; set; }
+    [Parameter] public Guid? RequestedSelectionId { get; set; }
     [Parameter] public EventCallback Saved { get; set; }
     [Parameter] public EventCallback Closed { get; set; }
     private PublicationCoverDesignView? _cover; private PublicationEditionSummary? _edition; private CompositionScene? _scene;
     private List<CompositionObject> _objects = []; private List<CompositionLayer> _layers = []; private List<CompositionObjectStyle> _styles = []; private IReadOnlyList<ProjectImageView> _images = []; private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = []; private Guid? _selectedId; private Guid? _selectedLayerId; private readonly HashSet<Guid> _groupSelection = [];
     private readonly Stack<WorkspaceSnapshot> _undo = new(); private readonly Stack<WorkspaceSnapshot> _redo = new();
-    private Guid _loadedProjectId; private Guid _loadedEditionId; private bool _loadedCoreBook;
+    private Guid _loadedProjectId; private Guid _loadedEditionId; private bool _loadedCoreBook; private long _loadedRefreshSignal = -1;
     private string _title = "", _subtitle = "", _author = "", _spineText = "", _backCopy = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private string? _error; private bool _dirty, _saving, _snap = true, _guides = true, _cropReposition; private double _zoom = .8;
     private Guid? _newImageId;
     private FigureImageFit _newImageFit = FigureImageFit.Contain;
@@ -181,15 +180,11 @@
     private CompositionObject? Selected => _objects.FirstOrDefault(item => item.Id == _selectedId);
     private bool IsPrint => _edition?.Format == PublicationEditionFormat.Paperback;
     private string ModeSummary => CoreBook ? "Reusable front cover" : IsPrint ? "Print full wrap: back, spine, and front" : "Digital front cover";
-    private string GenerationUrl(string targetKind, Guid targetId) =>
-        CoreBook
-            ? $"/projects/{Uri.EscapeDataString(ProjectSlug)}/images?targetKind=core-{targetKind}&targetId={(targetKind == "cover-surface" ? ProjectId : targetId):N}"
-            : $"/projects/{Uri.EscapeDataString(ProjectSlug)}/images?editionId={EditionId:N}&targetKind={targetKind}&targetId={targetId:N}";
     private IReadOnlyList<CompositionRegionConstraint> AvailableRegions => IsPrint ? Enum.GetValues<CompositionRegionConstraint>() : [CompositionRegionConstraint.Page, CompositionRegionConstraint.SafeArea, CompositionRegionConstraint.Front];
     private static readonly string[] Bindings = ["title", "subtitle", "author", "spineText", "backCopy"];
     private IEnumerable<string> AvailableBindings => IsPrint ? Bindings : Bindings.Take(3);
 
-    protected override async Task OnParametersSetAsync() { if (_loadedProjectId == ProjectId && _loadedEditionId == EditionId && _loadedCoreBook == CoreBook) return; if (_dirty) { await SaveAsync(); if (_dirty) return; } try { _edition = CoreBook ? null : (await Editions.ListAsync(ProjectId)).Single(item => item.Id == EditionId); _cover = CoreBook ? await Books.GetCoverAsync(ProjectId) : await Covers.GetAsync(ProjectId, EditionId); _images = (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg").ToList(); _fontFamilies = await ProjectFonts.ListAsync(ProjectId); _scene = JsonSerializer.Deserialize<CompositionScene>(_cover.CompositionSceneJson, ManuscriptCodec.JsonOptions) ?? throw new InvalidDataException("Cover scene is empty."); _objects = _scene.Objects.ToList(); _layers = _scene.Layers.ToList(); _styles = _scene.Styles.ToList(); _selectedLayerId = _layers.OrderByDescending(item => item.Order).FirstOrDefault()?.Id; _title = _cover.Title; _subtitle = _cover.Subtitle; _author = _cover.Author; _spineText = _cover.SpineText; _backCopy = _cover.BackCopy; _background = _cover.BackgroundColor; _barcodeMode = _cover.BarcodeMode; _undo.Clear(); _redo.Clear(); _dirty = false; _loadedProjectId = ProjectId; _loadedEditionId = EditionId; _loadedCoreBook = CoreBook; } catch (Exception ex) { _error = ex.Message; } }
+    protected override async Task OnParametersSetAsync() { if (_loadedProjectId == ProjectId && _loadedEditionId == EditionId && _loadedCoreBook == CoreBook && _loadedRefreshSignal == RefreshSignal) return; if (_dirty) { await SaveAsync(); if (_dirty) return; } try { _edition = CoreBook ? null : (await Editions.ListAsync(ProjectId)).Single(item => item.Id == EditionId); _cover = CoreBook ? await Books.GetCoverAsync(ProjectId) : await Covers.GetAsync(ProjectId, EditionId); _images = (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg").ToList(); _fontFamilies = await ProjectFonts.ListAsync(ProjectId); _scene = JsonSerializer.Deserialize<CompositionScene>(_cover.CompositionSceneJson, ManuscriptCodec.JsonOptions) ?? throw new InvalidDataException("Cover scene is empty."); _objects = _scene.Objects.ToList(); _layers = _scene.Layers.ToList(); _styles = _scene.Styles.ToList(); _selectedId = RequestedSelectionId is Guid requestedId && _objects.Any(item => item.Id == requestedId) ? requestedId : _selectedId is Guid selectedId && _objects.Any(item => item.Id == selectedId) ? selectedId : null; _selectedLayerId = _layers.OrderByDescending(item => item.Order).FirstOrDefault()?.Id; _title = _cover.Title; _subtitle = _cover.Subtitle; _author = _cover.Author; _spineText = _cover.SpineText; _backCopy = _cover.BackCopy; _background = _cover.BackgroundColor; _barcodeMode = _cover.BarcodeMode; _undo.Clear(); _redo.Clear(); _dirty = false; _loadedProjectId = ProjectId; _loadedEditionId = EditionId; _loadedCoreBook = CoreBook; _loadedRefreshSignal = RefreshSignal; } catch (Exception ex) { _error = ex.Message; } }
     private void MarkDirty() => _dirty = true;
     private WorkspaceSnapshot Capture() => new(_objects.ToList(), _layers.ToList(), _styles.ToList());
     private void Restore(WorkspaceSnapshot snapshot) { _objects = snapshot.Objects; _layers = snapshot.Layers; _styles = snapshot.Styles; _selectedId = _objects.FirstOrDefault(item => item.Id == _selectedId)?.Id; _selectedLayerId = _layers.FirstOrDefault(item => item.Id == _selectedLayerId)?.Id ?? _layers.FirstOrDefault()?.Id; }
@@ -243,6 +238,7 @@
     private ProjectImageView? Image(Guid id) => _images.FirstOrDefault(item => item.Id == id);
     private string BoundText(CompositionObject item) => item.TextBinding switch { "title" => _title, "subtitle" => _subtitle, "author" => _author, "spineText" => _spineText, "backCopy" => _backCopy, _ => item.TextBinding };
     private async Task SaveAsync() { if (_cover is null || _scene is null) return; _saving = true; _error = null; try { var scene = _scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Objects = _objects.ToList() }; var update = new PublicationCoverDesignUpdate(_title, _subtitle, _author, IsPrint ? _spineText : "", IsPrint ? _backCopy : "", _background, IsPrint ? _barcodeMode : PublicationBarcodeMode.None, 50, 50, _cover.Revision, true); _cover = CoreBook ? await Books.SaveCoverAsync(ProjectId, _cover.CoreBookRevision ?? throw new InvalidOperationException("Core Book revision is unavailable."), update, scene) : await Covers.SaveWorkspaceAsync(ProjectId, _cover.EditionId, update, scene); _scene = scene; _dirty = false; await Saved.InvokeAsync(); } catch (Exception ex) { _error = ex.Message; } finally { _saving = false; } }
+    public async Task FlushAsync() { if (_dirty) await SaveAsync(); }
     private void HandleKeyDown(KeyboardEventArgs e) { if (Selected is not { Locked: false } selected || LayerLocked(selected.LayerId)) return; var delta = e.ShiftKey ? 1d : .25; switch (e.Key) { case "ArrowLeft": PatchBounds(selected, x: selected.Bounds.XPercent - delta); break; case "ArrowRight": PatchBounds(selected, x: selected.Bounds.XPercent + delta); break; case "ArrowUp": PatchBounds(selected, y: selected.Bounds.YPercent - delta); break; case "ArrowDown": PatchBounds(selected, y: selected.Bounds.YPercent + delta); break; } }
     private async Task CloseAsync() { if (_dirty) { await SaveAsync(); if (_dirty) return; } await Closed.InvokeAsync(); }
     private string StageStyle() => $"--cover-ratio:{_scene!.Surface.WidthPoints / _scene.Surface.HeightPoints:R};--cover-zoom:{_zoom:R};--cover-bg:{_background}";

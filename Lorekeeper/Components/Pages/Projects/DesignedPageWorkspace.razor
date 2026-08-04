@@ -309,6 +309,8 @@
 </section>
 
 @code {
+    [Parameter] public int RefreshSignal { get; set; }
+    [Parameter] public Guid? RequestedSelectionId { get; set; }
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter, EditorRequired] public Guid CompositionId { get; set; }
     [Parameter] public EventCallback Closed { get; set; }
@@ -334,6 +336,7 @@
     private string? _selectedSemanticId;
     private Guid _loadedProjectId;
     private Guid _loadedCompositionId;
+    private int _loadedRefreshSignal = -1;
     private int _markStart;
     private int _markEnd;
     private ManuscriptMarkType _markType = ManuscriptMarkType.Emphasis;
@@ -371,7 +374,9 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        if (_loadedProjectId == ProjectId && _loadedCompositionId == CompositionId)
+        if (_loadedProjectId == ProjectId
+            && _loadedCompositionId == CompositionId
+            && _loadedRefreshSignal == RefreshSignal)
             return;
         if (_dirty)
         {
@@ -391,8 +396,14 @@
             _images = (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg").ToList();
             _fontFamilies = await ProjectFonts.ListAsync(ProjectId);
             await LoadVariantAsync();
+            if (RequestedSelectionId is Guid requestedSelectionId
+                && _objects.Any(item => item.Id == requestedSelectionId))
+            {
+                _selectedId = requestedSelectionId;
+            }
             _loadedProjectId = ProjectId;
             _loadedCompositionId = CompositionId;
+            _loadedRefreshSignal = RefreshSignal;
         }
         catch (Exception exception) { _error = exception.Message; }
     }

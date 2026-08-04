@@ -271,6 +271,8 @@ public sealed class ChatLiveTurn
         chip.Progress = progress;
     }
 
+    public string? ToolNameFor(string callId) => FindToolChip(callId)?.Name;
+
     private ChatToolChip? FindToolChip(string callId) => Messages
         .SelectMany(message => message.Parts)
         .OfType<ChatToolPart>()

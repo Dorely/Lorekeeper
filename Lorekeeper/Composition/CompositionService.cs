@@ -25,6 +25,7 @@ public interface ICompositionService
     Task<PageCompositionVariant> SelectVariantAsync(Guid projectId, Guid compositionId, Guid editionId, Guid variantId, CancellationToken cancellationToken = default);
     Task<PageCompositionVariant> SaveVariantAsync(Guid projectId, Guid variantId, long expectedRevision, CompositionScene scene, CancellationToken cancellationToken = default);
     Task<PageCompositionVariant> PatchElementAsync(Guid projectId, Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch, CancellationToken cancellationToken = default);
+    Task<CompositionImagePlacementResult> AddImageObjectAsync(Guid projectId, Guid variantId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null, CancellationToken cancellationToken = default);
     Task<CompositionWorkspaceSaveResult> SaveWorkspaceAsync(Guid projectId, Guid compositionId, long expectedCompositionRevision, IReadOnlyList<ManuscriptBlock> semanticBlocks, Guid variantId, long expectedVariantRevision, CompositionScene scene, CancellationToken cancellationToken = default);
     Task<CompositionMutationStage> StageVariantAsync(Guid projectId, Guid conversationId, Guid variantId, long expectedRevision, CompositionScene scene, CancellationToken cancellationToken = default);
     Task<PageCompositionVariant> ApplyStageAsync(Guid projectId, Guid conversationId, Guid stageId, long expectedRevision, CancellationToken cancellationToken = default);
@@ -527,6 +528,82 @@ public sealed class CompositionService(
             ?? throw new InvalidDataException("The composition scene is empty.");
         scene = ApplyElementPatch(scene, targetKind, targetId, patch);
         return await SaveVariantAsync(projectId, variantId, expectedRevision, scene, cancellationToken);
+    }
+
+    public async Task<CompositionImagePlacementResult> AddImageObjectAsync(
+        Guid projectId,
+        Guid variantId,
+        long expectedRevision,
+        Guid imageId,
+        FigureImageFit fit,
+        string? altText,
+        bool decorative,
+        CompositionBounds? bounds = null,
+        int? readingOrder = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (imageId == Guid.Empty)
+            throw new ArgumentException("A project image is required.", nameof(imageId));
+        if (!decorative && string.IsNullOrWhiteSpace(altText))
+            throw new ArgumentException("Provide alternative text or explicitly mark the artwork decorative.", nameof(altText));
+        if (!await db.PublishAssets.AsNoTracking().AnyAsync(asset => asset.ProjectId == projectId && asset.Id == imageId, cancellationToken))
+            throw new KeyNotFoundException("Project image was not found.");
+
+        var variant = await ReadVariantAsync(projectId, variantId, cancellationToken);
+        if (variant.Revision != expectedRevision)
+            throw new CompositionRevisionConflictException(expectedRevision, variant.Revision);
+        var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, JsonOptions)
+            ?? throw new InvalidDataException("Composition scene is empty.");
+        var mutation = AddImageObjectToScene(scene, imageId, fit, altText, decorative, bounds, readingOrder);
+        var saved = await SaveVariantAsync(
+            projectId,
+            variantId,
+            expectedRevision,
+            mutation.Scene,
+            cancellationToken);
+        return new CompositionImagePlacementResult(saved, mutation.ObjectId);
+    }
+
+    public static CompositionSceneImageMutation AddImageObjectToScene(
+        CompositionScene scene,
+        Guid imageId,
+        FigureImageFit fit,
+        string? altText,
+        bool decorative,
+        CompositionBounds? bounds = null,
+        int? readingOrder = null)
+    {
+        if (imageId == Guid.Empty)
+            throw new ArgumentException("A project image is required.", nameof(imageId));
+        if (!decorative && string.IsNullOrWhiteSpace(altText))
+            throw new ArgumentException("Provide alternative text or explicitly mark the artwork decorative.", nameof(altText));
+
+        var layers = scene.Layers.ToList();
+        if (layers.Count == 0)
+            layers.Add(new CompositionLayer(Guid.NewGuid(), "Artwork", 0));
+        var objectId = Guid.NewGuid();
+        int? effectiveReadingOrder = decorative
+            ? null
+            : readingOrder ?? scene.Objects.Where(item => item.ReadingOrder is not null).Select(item => item.ReadingOrder!.Value).DefaultIfEmpty().Max() + 1;
+        var imageObject = new CompositionObject
+        {
+            Id = objectId,
+            LayerId = layers.OrderByDescending(item => item.Order).First().Id,
+            Kind = CompositionObjectKind.Image,
+            Name = "Artwork",
+            ImageId = imageId,
+            ImageFit = fit,
+            Bounds = bounds ?? new CompositionBounds { XPercent = 5, YPercent = 5, WidthPercent = 90, HeightPercent = 90 },
+            AltText = decorative ? string.Empty : altText!.Trim(),
+            Decorative = decorative,
+            AccessibilityDecisionPending = false,
+            SemanticRole = decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure,
+            ReadingOrder = effectiveReadingOrder,
+            ZIndex = scene.Objects.Select(item => item.ZIndex).DefaultIfEmpty(-1).Max() + 1,
+        };
+        return new CompositionSceneImageMutation(
+            scene with { Layers = layers, Objects = [.. scene.Objects, imageObject] },
+            objectId);
     }
 
     internal static CompositionScene ApplyElementPatch(
@@ -1987,6 +2064,14 @@ public sealed record CompositionWorkspaceMutationResult(
     PageComposition Composition,
     PageCompositionVariant Variant,
     IReadOnlyList<string> ChangedBlockIds);
+
+public sealed record CompositionImagePlacementResult(
+    PageCompositionVariant Variant,
+    Guid ObjectId);
+
+public sealed record CompositionSceneImageMutation(
+    CompositionScene Scene,
+    Guid ObjectId);
 
 internal sealed record CompositionWorkspaceStagePayload(
     Guid VariantId,
