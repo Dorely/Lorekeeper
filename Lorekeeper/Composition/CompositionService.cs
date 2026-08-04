@@ -1121,18 +1121,22 @@ public sealed class CompositionService(
         var normalizedKind = NormalizeGenerationTargetKind(targetKind);
         if (normalizedKind is "page-surface" or "page-frame" && variantId is null)
             throw new ArgumentException("Page layout generation targets require the exact composition variant ID.", nameof(variantId));
-        if (normalizedKind is not ("project-page" or "page-surface" or "page-frame" or "figure"))
-            throw new ArgumentException("Authoring targets must be project-page, figure, page-surface, or page-frame.", nameof(targetKind));
-        if (normalizedKind is "figure" or "project-page" && variantId is not null)
-            throw new ArgumentException("Project-page and Figure targets do not use a page variant.", nameof(variantId));
+        if (normalizedKind is not ("project-page" or "page-surface" or "page-frame" or "figure" or "core-cover-surface" or "core-cover-frame"))
+            throw new ArgumentException("Authoring targets must be a project page, Figure, Designed Page surface/frame, or Core cover surface/frame.", nameof(targetKind));
+        if (normalizedKind is "figure" or "project-page" or "core-cover-surface" or "core-cover-frame" && variantId is not null)
+            throw new ArgumentException("Project-page, Figure, and Core cover targets do not use a page variant.", nameof(variantId));
         if (normalizedKind == "project-page" && targetId != projectId)
             throw new ArgumentException("A project-page target ID must be the current project ID.", nameof(targetId));
+        if (normalizedKind == "core-cover-surface" && targetId != projectId)
+            throw new ArgumentException("A Core cover surface target ID must be the current project ID.", nameof(targetId));
 
         var (width, height, regions, diagnostics) = normalizedKind switch
         {
             "project-page" => (setup.PageWidthInches, setup.PageHeightInches, PageRegions(CreatePageScene(setup), true), []),
             "figure" => await ResolveAuthoringFigureTargetAsync(projectId, setup, targetId, cancellationToken),
             "page-surface" => await ResolveAuthoringPageSurfaceTargetAsync(projectId, targetId, variantId!.Value, cancellationToken),
+            "core-cover-surface" => await ResolveCoreCoverSurfaceTargetAsync(projectId, setup, cancellationToken),
+            "core-cover-frame" => await ResolveCoreCoverFrameTargetAsync(projectId, setup, targetId, cancellationToken),
             _ => await ResolveAuthoringPageFrameTargetAsync(projectId, targetId, variantId!.Value, cancellationToken),
         };
         var gcd = GreatestCommonDivisor((int)Math.Round(width * 1000), (int)Math.Round(height * 1000));
@@ -1203,6 +1207,8 @@ public sealed class CompositionService(
             "pagesurface" => "page-surface",
             "coverframe" => "cover-frame",
             "coversurface" => "cover-surface",
+            "corecoverframe" => "core-cover-frame",
+            "corecoversurface" => "core-cover-surface",
             _ => value.Trim().ToLowerInvariant(),
         };
     }
@@ -1236,7 +1242,7 @@ public sealed class CompositionService(
             ?? throw new KeyNotFoundException("Composition variant was not found in this project.");
         var diagnostics = new List<LayoutValidationDiagnostic>();
         if (edition is not null && !VariantMatchesEdition(variant, edition))
-            diagnostics.Add(new("error", "GEOMETRY_VARIANT_MISMATCH", "The variant does not belong to the selected edition geometry."));
+            diagnostics.Add(new("error", "GEOMETRY_VARIANT_MISMATCH", "The variant does not belong to the selected release geometry."));
         var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, JsonOptions)
             ?? throw new InvalidDataException("The composition scene is empty.");
         var semantic = ManuscriptCodec.Deserialize(variant.Composition.SemanticManuscriptJson);
@@ -1424,6 +1430,56 @@ public sealed class CompositionService(
             ?? throw new InvalidDataException("The composition scene is empty.");
         return (variant, scene);
     }
+
+    private async Task<(double Width, double Height, IReadOnlyList<LayoutGenerationRegionDescriptor> Regions, IReadOnlyList<string> Diagnostics)> ResolveCoreCoverSurfaceTargetAsync(
+        Guid projectId,
+        ProjectPageSetup setup,
+        CancellationToken cancellationToken)
+    {
+        var scene = await ReadCoreCoverSceneAsync(projectId, cancellationToken);
+        var edition = CoreCoverEdition(projectId, setup);
+        return (scene.Surface.WidthPoints / 72, scene.Surface.HeightPoints / 72, CoverRegions(scene, edition), []);
+    }
+
+    private async Task<(double Width, double Height, IReadOnlyList<LayoutGenerationRegionDescriptor> Regions, IReadOnlyList<string> Diagnostics)> ResolveCoreCoverFrameTargetAsync(
+        Guid projectId,
+        ProjectPageSetup setup,
+        Guid frameId,
+        CancellationToken cancellationToken)
+    {
+        var scene = await ReadCoreCoverSceneAsync(projectId, cancellationToken);
+        var frame = CompositionSceneResolver.Flatten(scene).FirstOrDefault(
+            item => item.Id == frameId && item.Kind == CompositionObjectKind.Image)
+            ?? throw new KeyNotFoundException("Core cover image frame was not found.");
+        return FrameDimensions(scene, frame, CoverRegions(scene, CoreCoverEdition(projectId, setup)));
+    }
+
+    private async Task<CompositionScene> ReadCoreCoverSceneAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        var sceneJson = await db.PublicationBookCoverDesigns.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .Select(item => item.CompositionSceneJson)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(sceneJson))
+            throw new KeyNotFoundException("Core cover was not found. Open Publish once to initialize Core Book.");
+        return JsonSerializer.Deserialize<CompositionScene>(sceneJson, JsonOptions)
+            ?? throw new InvalidDataException("The Core cover composition is empty.");
+    }
+
+    private static PublicationEdition CoreCoverEdition(Guid projectId, ProjectPageSetup setup) => new()
+    {
+        ProjectId = projectId,
+        Name = "Core Book",
+        Format = PublicationEditionFormat.DigitalPdf,
+        Binding = PublicationBinding.Digital,
+        Paper = PublicationPaper.Digital,
+        Ink = PublicationInk.Digital,
+        PageWidthInches = setup.PageWidthInches,
+        PageHeightInches = setup.PageHeightInches,
+        PageMarginInches = setup.PageMarginInches,
+        BodyFontSizePoints = setup.BodyFontSizePoints,
+        BodyLineHeight = setup.BodyLineHeight,
+    };
 
     private async Task<(double Width, double Height, IReadOnlyList<LayoutGenerationRegionDescriptor> Regions, IReadOnlyList<string> Diagnostics)> ResolveCoverSurfaceTargetAsync(
         Guid projectId,

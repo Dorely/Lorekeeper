@@ -94,6 +94,7 @@ public sealed class PublicationPackageService(
     IPublicationEditionService editions,
     IPublicationCoverService covers,
     IProjectMutationCoordinator projectMutations,
+    IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IPublicationPressRuntime? pressRuntime = null) : IPublicationPackageService
 {
     private const string AssemblerVersion = "lorekeeper-package-v1";
@@ -229,9 +230,7 @@ public sealed class PublicationPackageService(
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
-        var edition = await db.PublicationEditions.AsNoTracking().FirstOrDefaultAsync(
-            candidate => candidate.Id == editionId && candidate.ProjectId == projectId,
-            cancellationToken) ?? throw new KeyNotFoundException("Publication edition not found.");
+        var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
         var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
         var artifacts = await db.PublicationArtifacts.AsNoTracking()
             .Where(artifact => artifact.EditionId == editionId
@@ -298,7 +297,13 @@ public sealed class PublicationPackageService(
                     message,
                     PublicationArtifactKind.CoverPdf)));
             if (!coverDesign.Template.IsAcknowledged)
-                items.Add(Error("COVER_TEMPLATE_ACK_REQUIRED", "Acknowledge the current cover template.", PublicationArtifactKind.CoverPdf));
+            {
+                items.Add(new PublicationPreflightItem(
+                    "warning",
+                    "COVER_TEMPLATE_REVIEW_RECOMMENDED",
+                    "Review the calculated full-wrap cover template before recording a physical proof.",
+                    PublicationArtifactKind.CoverPdf));
+            }
             if (edition.Vendor == PublicationVendor.IngramSpark
                 && !PublicationIsbn.IsValidIsbn13(edition.Isbn))
             {
@@ -352,7 +357,7 @@ public sealed class PublicationPackageService(
         {
             items.Add(Error(
                 "MATTER_GENERATED_PAGE_CONFLICT",
-                $"{item.Kind} is generated from edition settings and cannot also be included as publication matter."));
+                $"{item.Kind} is generated from the effective release settings and cannot also be included as publication matter."));
         }
         ValidateLanguageScope(document, coverDesign, matter, items);
         if (!string.Equals(edition.Language, "en", StringComparison.OrdinalIgnoreCase)
@@ -629,7 +634,7 @@ public sealed class PublicationPackageService(
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await db.PublicationEditions.AsNoTracking().FirstOrDefaultAsync(
             candidate => candidate.Id == editionId && candidate.ProjectId == projectId,
-            cancellationToken) ?? throw new KeyNotFoundException("Publication edition not found.");
+            cancellationToken) ?? throw new KeyNotFoundException("Publication release not found.");
         PublicationEditionService.EnsureDraft(edition);
         if (kind == PublicationProofKind.Physical
             && edition.Format != PublicationEditionFormat.Paperback)
@@ -645,7 +650,7 @@ public sealed class PublicationPackageService(
         var package = await db.PublicationArtifacts.FirstOrDefaultAsync(
             artifact => artifact.Id == packageArtifactId
                 && artifact.EditionId == editionId
-                && artifact.Edition.ProjectId == projectId
+                && artifact.ProjectId == projectId
                 && artifact.Kind == PublicationArtifactKind.PublicationPackage
                 && !artifact.IsLegacy,
             cancellationToken) ?? throw new KeyNotFoundException("Publication package not found.");

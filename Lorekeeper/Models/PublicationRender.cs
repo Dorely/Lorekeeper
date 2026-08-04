@@ -15,6 +15,7 @@ public enum PublicationRenderStatus
 [JsonConverter(typeof(JsonStringEnumConverter<PublicationArtifactKind>))]
 public enum PublicationArtifactKind
 {
+    ReadingPdf,
     InteriorPdf,
     CoverPdf,
     BookPdf,
@@ -29,8 +30,11 @@ public enum PublicationArtifactKind
 public class PublicationRenderJob
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid EditionId { get; set; }
-    public PublicationEdition Edition { get; set; } = null!;
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+    public PublicationTargetKind TargetKind { get; set; } = PublicationTargetKind.Release;
+    public Guid? EditionId { get; set; }
+    public PublicationEdition? Edition { get; set; }
     public PublicationRenderStatus Status { get; set; } = PublicationRenderStatus.Queued;
     public string SourceFingerprint { get; set; } = string.Empty;
     public string PaginationFingerprint { get; set; } = string.Empty;
@@ -53,8 +57,11 @@ public class PublicationRenderJob
 public class PublicationArtifact
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid EditionId { get; set; }
-    public PublicationEdition Edition { get; set; } = null!;
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+    public PublicationTargetKind TargetKind { get; set; } = PublicationTargetKind.Release;
+    public Guid? EditionId { get; set; }
+    public PublicationEdition? Edition { get; set; }
     public Guid? RenderJobId { get; set; }
     public PublicationRenderJob? RenderJob { get; set; }
     public PublicationArtifactKind Kind { get; set; }

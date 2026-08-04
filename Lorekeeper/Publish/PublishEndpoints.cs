@@ -7,7 +7,7 @@ public static class PublishEndpoints
     public static IEndpointRouteBuilder MapPublishEndpoints(this IEndpointRouteBuilder endpoints)
     {
         endpoints.MapGet(
-            "/projects/{projectId:guid}/publish/editions/{editionId:guid}/exports/{format}",
+            "/projects/{projectId:guid}/publish/releases/{editionId:guid}/exports/{format}",
             async (
                 Guid projectId,
                 Guid editionId,

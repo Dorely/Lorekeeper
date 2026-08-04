@@ -37,13 +37,15 @@ public sealed class LorekeeperPressMigrationTests
             var chapterId = Guid.NewGuid();
             var styleId = Guid.NewGuid();
             var assetId = Guid.NewGuid();
+            var matterId = Guid.NewGuid();
             var coverDesignId = Guid.NewGuid();
             var assetBytes = "preserved publish image bytes"u8.ToArray();
             var bytes = "%PDF-1.7\nimmutable legacy bytes"u8.ToArray();
             var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
             var now = DateTime.UtcNow;
             var emptyJson = "{}";
-            var legacyManuscriptJson = "{\"schemaVersion\":1,\"blocks\":[]}";
+            var legacyManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(chapterId, revision: 7))
+                .Replace($"\"schemaVersion\":{ManuscriptDocument.CurrentSchemaVersion}", "\"schemaVersion\":2", StringComparison.Ordinal);
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
@@ -71,7 +73,7 @@ public sealed class LorekeeperPressMigrationTests
                         VectorIndexedAt, CreatedAt, UpdatedAt)
                     VALUES ({chapterId}, {projectId}, {actId}, 'Existing chapter', '', 0, 'Prose',
                         '', '', 'SinglePortrait', {legacyManuscriptJson}, 7,
-                        'Pending', NULL, NULL, {now}, {now});
+                        'Stale', NULL, NULL, {now}, {now});
                     """);
                 await db.Database.ExecuteSqlInterpolatedAsync(
                     $"""
@@ -148,16 +150,6 @@ public sealed class LorekeeperPressMigrationTests
                     ChapterId = chapterId,
                     SortOrder = 2,
                 });
-                db.PublicationMatter.Add(new PublicationMatter
-                {
-                    EditionId = editionId,
-                    Location = PublicationMatterLocation.Front,
-                    Kind = PublicationMatterKind.Dedication,
-                    Title = "Existing dedication",
-                    ManuscriptJson = "{\"schemaVersion\":1,\"blocks\":[]}",
-                    Revision = 4,
-                    SortOrder = 1,
-                });
                 db.PublicationEditionStyleMappings.Add(new PublicationEditionStyleMapping
                 {
                     EditionId = editionId,
@@ -191,6 +183,14 @@ public sealed class LorekeeperPressMigrationTests
                     Content = "Preserve this publishing decision.",
                 });
                 await db.SaveChangesAsync();
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    INSERT INTO PublicationMatter (
+                        Id, EditionId, Location, Kind, Title, ManuscriptJson, Revision,
+                        IsIncluded, SortOrder, CreatedAt, UpdatedAt)
+                    VALUES ({matterId}, {editionId}, 'Front', 'Dedication', 'Existing dedication',
+                        '{legacyManuscriptJson}', 4, 1, 1, {now}, {now});
+                    """);
                 await db.Database.ExecuteSqlInterpolatedAsync(
                     $"""
                     INSERT INTO PublicationImagePlacements (
@@ -231,9 +231,27 @@ public sealed class LorekeeperPressMigrationTests
                 Assert.False(recoveryState.RecoveryRequired, recoveryState.Error);
                 await db.GetService<IMigrator>().MigrateAsync(
                     VisualCompositionMigrationService.AdditiveMigrationId);
-                await db.GetService<IMigrator>().MigrateAsync(
-                    VisualCompositionMigrationService.CleanupMigrationId);
-                await db.GetService<IMigrator>().MigrateAsync();
+                var visualMigration = new VisualCompositionMigrationService(
+                    recovery,
+                    NullLogger<VisualCompositionMigrationService>.Instance);
+                await visualMigration.ApplyPendingAsync(db);
+                var visualRecoveryState = await recovery.GetStateAsync();
+                Assert.False(visualRecoveryState.RecoveryRequired, visualRecoveryState.Error);
+                await visualMigration.ApplyFinalSchemaAsync(db);
+                await db.GetService<IMigrator>().MigrateAsync(PublicationCoreMigrationService.SchemaMigrationId);
+                var authoringMigration = new AuthoringPageMigrationService(
+                    recovery,
+                    NullLogger<AuthoringPageMigrationService>.Instance);
+                await authoringMigration.ApplyPendingAsync(db);
+                var authoringRecoveryState = await recovery.GetStateAsync();
+                Assert.False(authoringRecoveryState.RecoveryRequired, authoringRecoveryState.Error);
+                var coreMigration = new PublicationCoreMigrationService(
+                    recovery,
+                    NullLogger<PublicationCoreMigrationService>.Instance);
+                await coreMigration.ApplyPendingAsync(db);
+                var coreRecoveryState = await recovery.GetStateAsync();
+                Assert.False(coreRecoveryState.RecoveryRequired, coreRecoveryState.Error);
+                await db.GetService<IMigrator>().MigrateAsync(PublicationCoreMigrationService.CleanupMigrationId);
             }
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
@@ -252,7 +270,7 @@ public sealed class LorekeeperPressMigrationTests
                 Assert.Equal(3, unknownEdition.Revision);
                 Assert.True(completed.IsLegacy);
                 Assert.Equal("0.2.0", completed.RendererVersion);
-                Assert.False(queued.IsLegacy);
+                Assert.True(queued.IsLegacy);
                 Assert.Equal(PublicationRenderStatus.Queued, queued.Status);
                 Assert.Equal("kdp-paperback-v1", queued.ProfileId);
                 Assert.Null(queued.StartedAt);
@@ -261,10 +279,22 @@ public sealed class LorekeeperPressMigrationTests
                 Assert.Equal(hash, artifact.Sha256);
                 Assert.Equal(bytes, artifact.Data);
                 Assert.Equal(assetBytes, (await db.PublishAssets.AsNoTracking().SingleAsync()).Data);
-                Assert.Single(await db.PublicationEditionOutlineItems.AsNoTracking().ToListAsync());
-                Assert.Single(await db.PublicationMatter.AsNoTracking().ToListAsync());
+                var coreBook = await db.PublicationBooks.AsNoTracking().SingleAsync();
+                Assert.Equal("Existing title", coreBook.Title);
+                Assert.Equal("Author", coreBook.Author);
+                Assert.Single(await db.PublicationBookOutlineItems.AsNoTracking().ToListAsync());
+                Assert.Single(await db.PublicationBookMatter.AsNoTracking().ToListAsync());
+                Assert.Single(await db.PublicationBookImagePlacements.AsNoTracking().ToListAsync());
+                var releaseOutline = Assert.Single(await db.PublicationEditionOutlineItems.AsNoTracking().ToListAsync());
+                Assert.Equal(unknownEditionId, releaseOutline.EditionId);
+                Assert.False(releaseOutline.IsIncluded);
+                var releaseMatter = Assert.Single(await db.PublicationMatter.AsNoTracking().ToListAsync());
+                Assert.Equal(unknownEditionId, releaseMatter.EditionId);
+                Assert.True(releaseMatter.IsExcluded);
                 Assert.Single(await db.PublicationEditionStyleMappings.AsNoTracking().ToListAsync());
-                Assert.Single(await db.PublicationImagePlacements.AsNoTracking().ToListAsync());
+                var releasePlacement = Assert.Single(await db.PublicationImagePlacements.AsNoTracking().ToListAsync());
+                Assert.Equal(unknownEditionId, releasePlacement.EditionId);
+                Assert.True(releasePlacement.IsExcluded);
                 Assert.Single(await db.PublicationCoverDesigns.AsNoTracking().ToListAsync());
                 Assert.Single(await db.PublicationEditionAuditEntries.AsNoTracking().ToListAsync());
                 Assert.Single(await db.PublicationPageMapEntries.AsNoTracking().ToListAsync());
@@ -274,6 +304,13 @@ public sealed class LorekeeperPressMigrationTests
                 Assert.Equal("Completed", journal.Status);
                 Assert.True(File.Exists(journal.BackupPath));
                 Assert.Contains("guarded-cutover", journal.ValidationReportJson, StringComparison.Ordinal);
+                var coreJournal = await db.ManuscriptMigrationJournals.AsNoTracking()
+                    .SingleAsync(item => item.MigrationName == PublicationCoreMigrationService.MigrationName);
+                Assert.Equal(ManuscriptMigrationStatus.Completed, coreJournal.Status);
+                Assert.True(File.Exists(coreJournal.BackupPath));
+                var resolver = new PublicationEffectiveConfigurationResolver(db);
+                Assert.Single((await resolver.ResolveReleaseAsync(projectId, editionId)).Matter);
+                Assert.Empty((await resolver.ResolveReleaseAsync(projectId, unknownEditionId)).Matter);
             }
         }
         finally

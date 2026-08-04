@@ -40,57 +40,73 @@ public sealed class PublishChatService(
     ILogger<PublishChatService> logger) : IPublishChatService
 {
     internal const string WorkflowInstructions = """
-        You are Lorekeeper's conversational Publish assistant. You help the author make and carry out edition-production decisions through the supplied tools.
+        You are Lorekeeper's conversational Publish assistant. You maintain Core Book and prepare optional publication releases through the supplied tools.
 
-        Collaboration:
-        - Begin by reading the currently selected edition when one is supplied. If no edition exists, help the user choose the first edition's format, vendor, and name, then create it only after those material choices are clear.
-        - Ask focused questions only when format, vendor, audience, distribution, metadata, trim, typography, content, matter, imagery, or cover choices are materially undecided. Ask one small related group at a time instead of presenting a giant configuration checklist.
-        - Explain meaningful tradeoffs in plain language and recommend a sensible default grounded in the Book Brief, Project Guidance, selected vendor, and intended readers.
-        - Execute explicit instructions directly. For exploratory, underspecified, or consequential choices, discuss the options and obtain agreement before mutating.
-        - Preserve unrelated settings. Never silently replace the user's established production choices.
+        Current model:
+        - Core Book is always present. It owns shared metadata, content order and inclusion, matter, design defaults, opening and ending images, and the reusable front cover.
+        - Paperback, EPUB ebook, and PDF ebook releases are optional products. They inherit Core Book live until a field or section is explicitly customized. ISBN is always release-specific.
+        - Core Book can produce a tagged private reading PDF. It is not a publication product and has no ISBN, destination, package, vendor-conformance, or proof claim.
+        - Paperback owns destination, paper and ink, ISBN/barcode, full-wrap additions, print PDFs, and physical proof. Lorekeeper manages vendor profiles and required cover bleed. EPUB uses reflow/navigation settings. PDF ebook uses page-geometry settings. Never apply controls from one product type to another.
+        - Profile versions, standards identifiers, bleed rules, and package internals are application-managed. Do not ask the user to choose them.
+
+        Behavior:
+        - Execute explicit instructions directly.
+        - When no release is selected, read and work against Core Book. When a release is selected, read its effective values and override markers.
+        - Execute direct requests proactively with safe, reversible defaults. Ask only for a genuinely material unknown such as author identity, paperback destination, an ISBN the user must supply, or ambiguous black-and-white versus color cost.
+        - Recommend defaults from the Book Brief, Project Guidance, manuscript visuals, readers, and destination. Do not dump a production checklist.
+        - Preserve unrelated values. Customize a release only where it differs; use ResetFields to restore live Core inheritance.
+        - Create no release or ISBN unless requested. Never invent an ISBN.
 
         Tool and state integrity:
-        - Use tools for every publication read or mutation. Copy stable IDs exactly and honor expected revisions.
-        - Immediately before a mutation, make sure the relevant edition read is current. If a revision conflict occurs, reread, preserve the user's intent, and retry only when the intended change is still unambiguous.
-        - Never claim a mutation, render, preflight, package, or export succeeded unless the tool result says it did.
-        - Tool results are not replayed into later model turns. Summarize durable decisions, exact changes, important diagnostics, resulting revisions, and unresolved questions in the assistant response.
-        - Generated files are saved only when the user opens a returned download URL. Never claim that you downloaded a file for them.
-        - Archived editions are read-only. Recommend cloning when the user wants to change one.
-        - Chapters are format-neutral sequences of semantic text, flowing Figures, and Designed Pages. Distinguish those from edition-only opening/ending illustrations, print full-wrap covers, and digital front covers.
-        - Use project page setup and the active authoring variant for Figure or Designed Page decisions. Read active edition geometry only for publication compatibility and covers. Use a target descriptor when artwork must honor a concrete Figure placement, page, or cover region; free-standing reusable art needs no layout target. A target guides composition and protected regions but does not crop the stored source raster or make other source-image shapes invalid.
-        - Require alt text or an explicit decorative decision for imagery and preserve logical reading order independently of visual z-order.
-        - Patch one stable page object, layer, or style directly; page overlays are computed. Cover tools may expose format-owned guides. For a large page-composition edit or coupled semantic-and-layout change, submit the complete payload exactly once to the matching staging tool, then apply only its stage ID and expected revision. Do not repeat staged payloads in an apply call or response.
-        - Edition format is fixed at creation. Create another edition when the user needs a different output format; do not attempt to convert an existing edition in place.
-        - Validate accessibility, overflow, font embedding, image DPI, geometry, and profile compatibility before requesting a render.
+        - Use tools for every publication read or mutation and honor Core or release revisions.
+        - Immediately before mutation, reread its target. After a conflict, perform one compact reread and retry only when intent remains unambiguous.
+        - Use prepare_publication_files for compile, render or export, validation, and packaging. Do not attempt separate low-level orchestration.
+        - Never claim a mutation, preparation, validation, package, or export succeeded unless the tool result says so.
+        - Tool results are not replayed into later model turns. Summarize durable decisions, exact changes, revisions, diagnostics, and unresolved questions without repeating large payloads.
+        - Returned URLs require a user action. Never claim that you downloaded a file.
+        - Chapters contain semantic text, flowing Figures, and Designed Pages. Distinguish those from release-only placements, print full-wrap covers, and digital front covers.
+        - Use project page setup for authoring decisions and release geometry only for compatibility and covers. Target-bound generation derives dimensions; ordinary source-image shapes remain valid and are fitted non-destructively.
+        - Require alt text or an explicit decorative decision and preserve logical reading order.
+        - Submit large composition payloads once to staging, then apply only the stage ID and expected revision.
+        - Release format is fixed. Create another release for another product type.
 
         Publishing trust:
-        - Report owned-renderer validation exactly as returned by preflight. Lorekeeper can internally validate KDP PDF 1.7 and Ingram PDF/X-1a:2001 output; do not turn optional human proof or recorded vendor upload results into gates, and never imply vendor acceptance that the user did not record.
-        - You may run and explain preflight, request or cancel renders, build packages, and guide proof inspection. You cannot approve a digital or physical proof; only the user-facing proof controls may record that human attestation.
-        - End each turn with a concise account of the exact settings or artifacts changed, remaining diagnostics, current render/package state, what remains blocked, and every user action still required.
+        - Distinguish Core reading-copy validation from publication-release validation. Never describe a Core reading PDF as vendor-ready or published.
+        - You may prepare files, explain validation, and guide proof inspection. You cannot approve a digital or physical proof or claim vendor acceptance.
+        - End with exact mutations, inheritance or override state, current preparation state, blockers, download actions, and remaining user actions.
         """;
 
     private const string InitialGreeting =
-        "What are you publishing? I can help choose an edition, work through the production options with you, configure it, generate Lorekeeper-validated files, and explain anything that still blocks export.";
+        "I can help finish the shared Core Book, add a Paperback or ebook release when you need one, and prepare the right files without making you manage production internals.";
 
     private static readonly HashSet<string> MutationTools =
     [
-        "create_publication_edition",
-        "clone_publication_edition",
-        "update_publication_edition",
-        "set_default_publication_edition",
-        "archive_publication_edition",
-        "set_publication_content",
-        "reorder_publication_content",
-        "upsert_publication_matter",
-        "delete_publication_matter",
-        "upsert_publication_style_mapping",
-        "delete_publication_style_mapping",
-        "add_publication_image_placement",
-        "update_publication_image_placement",
-        "reorder_publication_image_placements",
-        "delete_publication_image_placement",
-        "request_publication_render",
-        "cancel_publication_render",
+        "patch_publication_book",
+        "patch_publication_book_content",
+        "upsert_publication_book_matter",
+        "delete_publication_book_matter",
+        "add_publication_book_placement",
+        "update_publication_book_placement",
+        "reorder_publication_book_placements",
+        "delete_publication_book_placement",
+        "create_publication_release",
+        "patch_publication_release_overrides",
+        "patch_publication_core_cover_element",
+        "apply_publication_core_cover_composition_stage",
+        "customize_publication_release_cover",
+        "use_core_publication_cover",
+        "prepare_publication_files",
+        "cancel_publication_preparation",
+        "patch_publication_release_content",
+        "reorder_publication_release_content",
+        "upsert_publication_release_matter",
+        "delete_publication_release_matter",
+        "upsert_publication_release_style_override",
+        "delete_publication_release_style_override",
+        "add_publication_release_placement",
+        "update_publication_release_placement",
+        "reorder_publication_release_placements",
+        "delete_publication_release_placement",
         "update_publication_cover_design",
         "get_or_create_publication_composition_variant",
         "patch_publication_composition_element",
@@ -101,8 +117,6 @@ public sealed class PublishChatService(
         "apply_publication_composition_workspace_stage",
         "generate_publication_layout_image",
         "generate_publication_image",
-        "preflight_publication_edition",
-        "build_publication_package",
     ];
 
     public async Task<PublishConversation> GetOrCreateAsync(
@@ -141,8 +155,8 @@ public sealed class PublishChatService(
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         var selection = selectedEditionId is { } editionId
-            ? $"The Publish workspace currently has edition {editionId:D} selected. Treat it as the default target, but verify it with tools before relying on its state."
-            : "The Publish workspace has no selected edition. List editions before assuming whether one exists.";
+            ? $"The Publish workspace currently has publication release {editionId:D} selected. Read that release before acting."
+            : "The Publish workspace currently targets Core Book. Read Core Book before acting; do not assume a publication release is required.";
         var assembly = await contextBuilder.BuildAsync(
             new ContextBuildRequest(
                 project,
@@ -435,18 +449,22 @@ public sealed class PublishChatService(
 
         if (toolName == "generate_publication_image")
             return new PublishWorkspaceMutated(null, false, PublishWorkspaceMutationKind.ImageLibrary);
+        if (toolName is "patch_publication_book" or "patch_publication_book_content"
+            or "upsert_publication_book_matter" or "delete_publication_book_matter"
+            or "add_publication_book_placement" or "update_publication_book_placement"
+            or "reorder_publication_book_placements" or "delete_publication_book_placement"
+            or "patch_publication_core_cover_element" or "apply_publication_core_cover_composition_stage")
+            return new PublishWorkspaceMutated(null, false, PublishWorkspaceMutationKind.Edition);
 
-        var selectEdition = toolName is "create_publication_edition" or "clone_publication_edition";
+        var selectEdition = toolName is "create_publication_release" or "customize_publication_release_cover" or "use_core_publication_cover";
         var kind = toolName switch
         {
-            "request_publication_render" or "cancel_publication_render" => PublishWorkspaceMutationKind.Render,
-            "preflight_publication_edition" => PublishWorkspaceMutationKind.Preflight,
-            "build_publication_package" => PublishWorkspaceMutationKind.Package,
+            "prepare_publication_files" or "cancel_publication_preparation" => PublishWorkspaceMutationKind.Package,
             _ => PublishWorkspaceMutationKind.Edition,
         };
         var editionId = selectEdition
-            ? ReadGuid(resultJson, "id")
-            : ReadGuid(argumentsJson, "editionId")
+            ? ReadGuid(resultJson, "id") ?? ReadGuid(resultJson, "targetId")
+            : ReadGuid(argumentsJson, "releaseId") ?? ReadGuid(argumentsJson, "editionId")
                 ?? (toolName == "apply_publication_cover_composition_stage"
                     ? ReadGuid(resultJson, "targetId")
                     : null);

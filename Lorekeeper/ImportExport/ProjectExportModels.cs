@@ -19,7 +19,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 15;
+    public const int CurrentFormatVersion = 16;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -31,6 +31,7 @@ public sealed record ProjectExportDocument
     public List<ProjectExportEntityType> EntityTypes { get; init; } = [];
     public List<ProjectExportImage> Images { get; init; } = [];
     public List<ProjectExportEntityVisualExample> EntityVisualExamples { get; init; } = [];
+    public ProjectExportPublicationBook? PublicationBook { get; init; }
     public List<ProjectExportPublicationEdition> PublicationEditions { get; init; } = [];
     public List<ProjectExportPageComposition> PageCompositions { get; init; } = [];
     [JsonPropertyName("publishProfiles")]
@@ -162,7 +163,7 @@ public sealed record ProjectExportPublicationEdition(
     PublicationVendor Vendor,
     string VendorProfileVersion,
     PublicationEditionStatus Status,
-    bool IsDefault,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsDefault,
     long Revision,
     string TitleOverride,
     string Subtitle,
@@ -198,6 +199,8 @@ public sealed record ProjectExportPublicationEdition(
     List<ProjectExportPublicationImagePlacement> ImagePlacements,
     ProjectExportCoverDesign? CoverDesign)
 {
+    public List<PublicationEditionOverrideField> OverrideFields { get; init; } = [];
+    public bool InheritsCoreCover { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public PrintPicturePageSpreadMode PrintPicturePageSpreadMode { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
@@ -205,6 +208,29 @@ public sealed record ProjectExportPublicationEdition(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? SelectedCoverChapterId { get; init; }
 }
+
+public sealed record ProjectExportPublicationBook(
+    long Revision,
+    string Title,
+    string Subtitle,
+    string Author,
+    string Language,
+    string Publisher,
+    string Copyright,
+    string Description,
+    bool IncludeTableOfContents,
+    bool IncludeVisibleTableOfContents,
+    bool IncludeActSynopses,
+    bool IncludeChapterSynopses,
+    bool IncludeActHeadings,
+    bool IncludeChapterHeadings,
+    bool NumberActs,
+    bool NumberChapters,
+    PublishTitlePageMode TitlePageMode,
+    List<ProjectExportEditionOutlineItem> OutlineItems,
+    List<ProjectExportPublicationMatter> Matter,
+    List<ProjectExportPublicationImagePlacement> ImagePlacements,
+    ProjectExportCoverDesign? CoverDesign);
 
 public sealed record ProjectExportCoverDesign(
     string Title,
@@ -234,7 +260,13 @@ public sealed record ProjectExportPublicationMatter(
     string ManuscriptJson,
     long Revision,
     bool IsIncluded,
-    int SortOrder);
+    int SortOrder)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? CoreMatterId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsExcluded { get; init; }
+}
 
 public sealed record ProjectExportEditionStyleMapping(
     Guid Id,
@@ -255,7 +287,13 @@ public sealed record ProjectExportPublicationImagePlacement(
     string AltText = "",
     bool Decorative = false,
     string Language = "en",
-    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure);
+    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? CorePlacementId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsExcluded { get; init; }
+}
 
 public sealed record ProjectExportLegacyPublishProfile(
     Guid Id,

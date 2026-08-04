@@ -109,20 +109,19 @@ public sealed class ProjectImportJobIntegrationTests
         Assert.All(images, image => Assert.Equal(imageBytes, image.Data));
         var importedValidChapter = await db.Chapters.AsNoTracking().SingleAsync(chapter => chapter.Title == "Legacy cover");
         var importedAmbiguousChapter = await db.Chapters.AsNoTracking().SingleAsync(chapter => chapter.Title == "Ambiguous cover");
-        var outlines = await db.PublicationEditionOutlineItems.AsNoTracking().ToListAsync();
-        Assert.False(outlines.Single(item =>
-            item.EditionId == converted.Id && item.ChapterId == importedValidChapter.Id).IsIncluded);
-        Assert.True(outlines.Single(item =>
-            item.EditionId == converted.Id && item.ChapterId == importedAmbiguousChapter.Id).IsIncluded);
-        Assert.False(outlines.Single(item =>
-            item.EditionId == ambiguous.Id && item.ChapterId == importedAmbiguousChapter.Id).IsIncluded);
-        Assert.True(outlines.Single(item =>
-            item.EditionId == ambiguous.Id && item.ChapterId == importedValidChapter.Id).IsIncluded);
+        var resolver = new PublicationEffectiveConfigurationResolver(db);
+        var convertedOutline = (await resolver.ResolveReleaseAsync(project.Id, converted.Id)).OutlineItems;
+        var ambiguousOutline = (await resolver.ResolveReleaseAsync(project.Id, ambiguous.Id)).OutlineItems;
+        Assert.False(convertedOutline.Single(item => item.ChapterId == importedValidChapter.Id).IsIncluded);
+        Assert.True(convertedOutline.Single(item => item.ChapterId == importedAmbiguousChapter.Id).IsIncluded);
+        Assert.False(ambiguousOutline.Single(item => item.ChapterId == importedAmbiguousChapter.Id).IsIncluded);
+        Assert.True(ambiguousOutline.Single(item => item.ChapterId == importedValidChapter.Id).IsIncluded);
         var webRoot = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
             "..", "..", "..", "..", "Lorekeeper", "wwwroot"));
         var fonts = new ProjectFontService(db, new TestWebHostEnvironment(webRoot));
-        var rendered = await new PublishService(db, null!, fonts, []).GetDocumentAsync(project.Id, converted.Id);
+        var rendered = await new PublishService(db, null!, null!, new PublicationEffectiveConfigurationResolver(db), fonts, [])
+            .GetDocumentAsync(project.Id, converted.Id);
         Assert.DoesNotContain(
             rendered.Sections.SelectMany(section => section.Chapters),
             chapter => chapter.Id == importedValidChapter.Id);
@@ -143,6 +142,7 @@ public sealed class ProjectImportJobIntegrationTests
         var imageBytes = TinyPng();
         var document = new ProjectExportDocument
         {
+            FormatVersion = 13,
             ExportKind = ProjectExportKind.Full,
             Project = new ProjectExportProject(Guid.NewGuid(), "Current", "current", string.Empty, true, true),
             Images = [ExportImage(imageId, "cover.png", imageBytes)],
@@ -214,7 +214,8 @@ public sealed class ProjectImportJobIntegrationTests
         var completed = await db.ProjectImportJobs.AsNoTracking().SingleAsync();
         Assert.True(completed.Status == ProjectImportJobStatus.Completed, completed.ErrorMessage);
         var edition = await db.PublicationEditions.AsNoTracking().SingleAsync();
-        var outline = await db.PublicationEditionOutlineItems.AsNoTracking().SingleAsync();
+        var outline = Assert.Single((await new PublicationEffectiveConfigurationResolver(db)
+            .ResolveReleaseAsync(project.Id, edition.Id)).OutlineItems);
         Assert.NotNull(edition.SelectedCoverImageId);
         Assert.False(outline.IsIncluded);
     }
@@ -276,6 +277,7 @@ public sealed class ProjectImportJobIntegrationTests
         var imageId = Guid.NewGuid();
         var export = new ProjectExportDocument
         {
+            FormatVersion = 15,
             ExportKind = ProjectExportKind.Full,
             Project = new ProjectExportProject(
                 Guid.NewGuid(),
@@ -485,6 +487,7 @@ public sealed class ProjectImportJobIntegrationTests
         };
         var export = new ProjectExportDocument
         {
+            FormatVersion = 9,
             ExportKind = ProjectExportKind.Full,
             Project = new ProjectExportProject(
                 Guid.NewGuid(),

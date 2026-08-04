@@ -229,7 +229,23 @@ public sealed class PublicationPackageTests
                 Paper = PublicationPaper.Digital,
                 Ink = PublicationInk.Digital,
             };
-            db.AddRange(project, chapter, edition);
+            var core = new PublicationBook
+            {
+                ProjectId = project.Id,
+                Title = edition.TitleOverride,
+                Author = edition.Author,
+                Language = edition.Language,
+            };
+            var setup = new ProjectPageSetup { ProjectId = project.Id };
+            db.AddRange(project, chapter, core, setup, edition);
+            db.PublicationBookOutlineItems.Add(new PublicationBookOutlineItem
+            {
+                ProjectId = project.Id,
+                TargetKind = PublishOutlineTargetKind.Chapter,
+                TargetId = chapter.Id,
+                ChapterId = chapter.Id,
+                IsIncluded = true,
+            });
             db.PublicationEditionOutlineItems.Add(new PublicationEditionOutlineItem
             {
                 EditionId = edition.Id,
@@ -256,7 +272,8 @@ public sealed class PublicationPackageTests
                 publishing,
                 editionService,
                 coverService,
-                coordinator);
+                coordinator,
+                new PublicationEffectiveConfigurationResolver(db));
 
             var preflight = await packages.PreflightAsync(project.Id, edition.Id);
             Assert.True(preflight.CanPackage);
@@ -455,7 +472,7 @@ public sealed class PublicationPackageTests
 
             publishing.OnNextExportAsync = async () =>
             {
-                edition.TitleOverride = "Changed during package build";
+                core.Title = "Changed during package build";
                 await db.SaveChangesAsync();
             };
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -558,7 +575,6 @@ public sealed class PublicationPackageTests
             null!,
             null!,
             null!,
-            null!,
             null!);
 
         var catalog = await tools.BuildAsync(new PublishAssistantContext(Guid.NewGuid()));
@@ -566,42 +582,40 @@ public sealed class PublicationPackageTests
         var names = catalog.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
         string[] requiredTools =
         [
-            "list_publication_editions",
-            "read_publication_edition",
+            "read_publication_book",
+            "patch_publication_book",
+            "list_publication_releases",
+            "read_publication_release",
+            "create_publication_release",
+            "patch_publication_release_overrides",
+            "prepare_publication_files",
+            "cancel_publication_preparation",
+            "read_publication_readiness",
             "list_publication_book_text_styles",
             "list_publication_project_images",
-            "create_publication_edition",
-            "clone_publication_edition",
-            "update_publication_edition",
-            "set_default_publication_edition",
-            "archive_publication_edition",
-            "set_publication_content",
-            "reorder_publication_content",
-            "upsert_publication_matter",
-            "delete_publication_matter",
-            "upsert_publication_style_mapping",
-            "delete_publication_style_mapping",
-            "add_publication_image_placement",
-            "update_publication_image_placement",
-            "reorder_publication_image_placements",
-            "delete_publication_image_placement",
-            "compare_publication_editions",
-            "read_publication_audit",
-            "read_publication_migration_state",
-            "read_publication_pdf_runtime",
-            "request_publication_render",
-            "list_publication_renders",
-            "list_publication_downloads",
-            "cancel_publication_render",
-            "read_publication_page_map",
-            "compare_publication_renders",
+            "read_publication_book_content",
+            "patch_publication_book_content",
+            "read_publication_book_matter",
+            "upsert_publication_book_matter",
+            "delete_publication_book_matter",
+            "read_publication_book_placements",
+            "add_publication_book_placement",
+            "delete_publication_book_placement",
+            "patch_publication_release_content",
+            "reorder_publication_release_content",
+            "upsert_publication_release_matter",
+            "delete_publication_release_matter",
+            "upsert_publication_release_style_override",
+            "delete_publication_release_style_override",
+            "add_publication_release_placement",
+            "update_publication_release_placement",
+            "reorder_publication_release_placements",
+            "delete_publication_release_placement",
             "read_publication_cover_design",
             "update_publication_cover_design",
             "stage_publication_cover_composition",
             "apply_publication_cover_composition_stage",
-            "preflight_publication_edition",
-            "export_publication_edition",
-            "build_publication_package",
+            "export_publication_release",
         ];
         Assert.All(requiredTools, name => Assert.Contains(name, names));
         Assert.DoesNotContain(catalog, tool =>
@@ -660,7 +674,31 @@ public sealed class PublicationPackageTests
                 SpineText = edition.TitleOverride,
                 BarcodeMode = PublicationBarcodeMode.VendorOverlay,
             };
-            db.AddRange(project, chapter, edition, coverDesign);
+            var core = new PublicationBook
+            {
+                ProjectId = project.Id,
+                Title = edition.TitleOverride,
+                Author = edition.Author,
+                Language = edition.Language,
+            };
+            var setup = new ProjectPageSetup
+            {
+                ProjectId = project.Id,
+                PageWidthInches = edition.PageWidthInches,
+                PageHeightInches = edition.PageHeightInches,
+                PageMarginInches = edition.PageMarginInches,
+                BodyFontSizePoints = edition.BodyFontSizePoints,
+                BodyLineHeight = edition.BodyLineHeight,
+            };
+            db.AddRange(project, chapter, core, setup, edition, coverDesign);
+            db.PublicationBookOutlineItems.Add(new PublicationBookOutlineItem
+            {
+                ProjectId = project.Id,
+                TargetKind = PublishOutlineTargetKind.Chapter,
+                TargetId = chapter.Id,
+                ChapterId = chapter.Id,
+                IsIncluded = true,
+            });
             db.PublicationEditionOutlineItems.Add(new PublicationEditionOutlineItem
             {
                 EditionId = edition.Id,
@@ -711,7 +749,8 @@ public sealed class PublicationPackageTests
                 publishing,
                 editionService,
                 coverService,
-                coordinator);
+                coordinator,
+                new PublicationEffectiveConfigurationResolver(db));
             var preflight = await packages.PreflightAsync(project.Id, edition.Id);
             Assert.True(preflight.CanPackage);
             Assert.Equal(2, preflight.ValidatedArtifacts.Count);
@@ -991,6 +1030,22 @@ public sealed class PublicationPackageTests
             Guid editionId,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<PublicationBookView> GetCoreWorkspaceAsync(
+            Guid projectId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<PublishDocument> GetCoreDocumentAsync(
+            Guid projectId,
+            CancellationToken cancellationToken = default) =>
+            GetDocumentAsync(projectId, Guid.Empty, cancellationToken);
+
+        public Task<ProjectExportFile> ExportCoreAsync(
+            Guid projectId,
+            PublishExportFormat format,
+            CancellationToken cancellationToken = default) =>
+            ExportAsync(projectId, Guid.Empty, format, cancellationToken);
 
         public async Task<PublishDocument> GetDocumentAsync(
             Guid projectId,

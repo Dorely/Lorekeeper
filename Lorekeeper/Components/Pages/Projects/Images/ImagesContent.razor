@@ -307,7 +307,7 @@ else
                 _layoutTarget = LayoutTargetKind.StartsWith("cover", StringComparison.OrdinalIgnoreCase)
                     ? await Compositions.DescribeGenerationTargetAsync(
                         Project.Id,
-                        LayoutEditionId ?? throw new ArgumentException("Cover artwork requires a publication edition."),
+                        LayoutEditionId ?? throw new ArgumentException("Publication cover artwork requires a release."),
                         LayoutTargetKind,
                         targetId,
                         LayoutVariantId)

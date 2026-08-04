@@ -139,7 +139,7 @@ public sealed class SemanticPublishFormattingTests
         var exception = Assert.Throws<InvalidOperationException>(
             () => new EpubPublishFormatter().Render(document));
 
-        Assert.Contains("generated from edition settings", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("generated from the effective release settings", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

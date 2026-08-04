@@ -237,7 +237,7 @@ public sealed class OutlineCollaborationTools(
             AIFunctionFactory.Create(
                 method: () => ReadProjectPageSetupAsync(context),
                 name: "read_project_page_setup",
-                description: "Read the project-owned authoring page geometry and revision used by Figures, Designed Pages, chapter preview, and geometry-bound image generation. This is not a publication edition."),
+                description: "Read the project-owned authoring page geometry and revision used by Figures, Designed Pages, chapter preview, and geometry-bound image generation. Publication releases do not govern authoring geometry."),
 
             AIFunctionFactory.Create(
                 method: (long expectedRevision, double pageWidthInches, double pageHeightInches, double pageMarginInches, double bodyFontSizePoints, double bodyLineHeight) =>

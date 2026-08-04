@@ -82,7 +82,7 @@ public sealed class ImagesChatTools(
             AIFunctionFactory.Create(
                 method: () => ReadProjectPageSetupAsync(context),
                 name: "read_project_page_setup",
-                description: "Read project-owned authoring geometry and its revision for Figures, Designed Pages, preview, and target-bound generation. This is not a publication edition."),
+                description: "Read project-owned authoring geometry and its revision for Figures, Designed Pages, preview, and target-bound generation. Publication releases do not govern authoring geometry."),
 
             AIFunctionFactory.Create(
                 method: (long expectedRevision, double pageWidthInches, double pageHeightInches, double pageMarginInches, double bodyFontSizePoints, double bodyLineHeight) =>

@@ -198,7 +198,7 @@ public sealed class EditorChatTools(
             AIFunctionFactory.Create(
                 method: () => ReadProjectPageSetupAsync(context),
                 name: "read_project_page_setup",
-                description: "Read the project-owned authoring page geometry and revision used by chapter preview, Figures, Designed Pages, and target-bound image generation. This is not a publication edition."),
+                description: "Read the project-owned authoring page geometry and revision used by chapter preview, Figures, Designed Pages, and target-bound image generation. Publication releases do not govern authoring geometry."),
 
             AIFunctionFactory.Create(
                 method: (Guid imageId) => ReadProjectImageAsync(context, imageId),

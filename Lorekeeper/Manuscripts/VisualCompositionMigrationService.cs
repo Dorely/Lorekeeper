@@ -91,14 +91,17 @@ public sealed class VisualCompositionMigrationService(
             var chapters = await db.Chapters.OrderBy(item => item.ProjectId).ThenBy(item => item.Order)
                 .ToDictionaryAsync(item => item.Id, cancellationToken);
             var assets = await db.PublishAssets.AsNoTracking().ToDictionaryAsync(item => item.Id, cancellationToken);
-            var editionsByProject = (await db.PublicationEditions.AsNoTracking().ToListAsync(cancellationToken))
+            var legacyEditions = await ReadEditionsBeforeCoreAsync(db, cancellationToken);
+            var editionsByProject = legacyEditions
                 .GroupBy(item => item.ProjectId)
                 .ToDictionary(group => group.Key, group => group.ToList());
+            var editionsById = legacyEditions.ToDictionary(item => item.Id);
             var warnings = new List<string>();
             var sourceHashes = new List<string>();
             var targetHashes = new List<string>();
             var sourceVisualHashes = new List<string>();
             var targetVisualHashes = new List<string>();
+            var compositionCount = 0;
             foreach (var legacy in legacyRows)
             {
                 var chapter = chapters[legacy.Id];
@@ -125,7 +128,6 @@ public sealed class VisualCompositionMigrationService(
                             projectEditions,
                             assets,
                             warnings);
-                        db.PageCompositions.Add(composition);
                         sourceVisualHashes.Add(sourceVisualHash);
                         targetVisualHashes.Add(HashCompositionVisual(composition));
                         if (projectEditions.Count == 0)
@@ -134,6 +136,8 @@ public sealed class VisualCompositionMigrationService(
                             composition.Variants.Clear();
                             db.CompositionMutationStages.Add(CreateCompositionSeed(composition, seed.SceneJson));
                         }
+                        await InsertPreAuthoringCompositionAsync(db, composition, cancellationToken);
+                        compositionCount++;
                         targetDocument = ManuscriptCodec.Deserialize(
                             composition.SemanticManuscriptJson,
                             composition.Id,
@@ -166,8 +170,9 @@ public sealed class VisualCompositionMigrationService(
                 chapter.UpdatedAt = DateTime.UtcNow;
             }
 
-            foreach (var cover in await db.PublicationCoverDesigns.Include(item => item.Edition).ToListAsync(cancellationToken))
+            foreach (var cover in await ReadCoversBeforeCoreAsync(db, cancellationToken))
             {
+                cover.Edition = editionsById[cover.EditionId];
                 if (cover.Edition.Format != PublicationEditionFormat.Paperback)
                     cover.BarcodeMode = PublicationBarcodeMode.None;
                 if (string.IsNullOrWhiteSpace(cover.CompositionSceneJson))
@@ -181,6 +186,11 @@ public sealed class VisualCompositionMigrationService(
                         CoverCompositionFactory.Create(cover.Edition, cover, pageCount),
                         ManuscriptCodec.JsonOptions);
                 }
+                await db.PublicationCoverDesigns.Where(item => item.Id == cover.Id).ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(item => item.BarcodeMode, cover.BarcodeMode)
+                        .SetProperty(item => item.CompositionSceneJson, cover.CompositionSceneJson),
+                    cancellationToken);
             }
             foreach (var change in await db.AiChanges
                 .Where(item => item.Status == AiChangeStatus.Pending
@@ -223,7 +233,7 @@ public sealed class VisualCompositionMigrationService(
             journal.ValidationReportJson = JsonSerializer.Serialize(new
             {
                 chapters = chapters.Count,
-                compositions = db.ChangeTracker.Entries<PageComposition>().Count(),
+                compositions = compositionCount,
                 sourceVisualHash = sourceVisualAggregate,
                 targetVisualHash = targetVisualAggregate,
                 warnings,
@@ -365,7 +375,17 @@ public sealed class VisualCompositionMigrationService(
         var version = json.RootElement.GetProperty("schemaVersion").GetInt32();
         return version switch
         {
-            3 => ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision),
+            ManuscriptDocument.CurrentSchemaVersion => ManuscriptCodec.Deserialize(
+                chapter.ManuscriptJson,
+                chapter.Id,
+                chapter.ManuscriptRevision),
+            3 => ManuscriptCodec.Deserialize(
+                ManuscriptSchemaUpgrade.UpgradeV3DocumentJson(
+                    chapter.ManuscriptJson,
+                    chapter.Id,
+                    chapter.ManuscriptRevision),
+                chapter.Id,
+                chapter.ManuscriptRevision),
             2 => ManuscriptCodec.Deserialize(
                 ManuscriptSchemaUpgrade.UpgradeV2DocumentJson(
                     chapter.ManuscriptJson,
@@ -591,6 +611,34 @@ public sealed class VisualCompositionMigrationService(
         ExpiresAt = DateTime.MaxValue,
     };
 
+    private static async Task InsertPreAuthoringCompositionAsync(
+        AppDbContext db,
+        PageComposition composition,
+        CancellationToken cancellationToken)
+    {
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+            INSERT INTO PageCompositions
+                (Id, ProjectId, ChapterId, Name, SemanticManuscriptJson, Revision, CreatedAt, UpdatedAt)
+            VALUES
+                ({composition.Id}, {composition.ProjectId}, {composition.ChapterId}, {composition.Name},
+                 {composition.SemanticManuscriptJson}, {composition.Revision}, {composition.CreatedAt}, {composition.UpdatedAt});
+            """,
+            cancellationToken);
+        foreach (var variant in composition.Variants)
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                INSERT INTO PageCompositionVariants
+                    (Id, CompositionId, GeometryKey, SceneJson, Revision, CreatedAt, UpdatedAt)
+                VALUES
+                    ({variant.Id}, {composition.Id}, {variant.GeometryKey}, {variant.SceneJson},
+                     {variant.Revision}, {variant.CreatedAt}, {variant.UpdatedAt});
+                """,
+                cancellationToken);
+        }
+    }
+
     private async Task ApplyGeometryPolicyMigrationAsync(
         AppDbContext db,
         CancellationToken cancellationToken)
@@ -603,10 +651,11 @@ public sealed class VisualCompositionMigrationService(
             return;
         }
 
-        var editions = await db.PublicationEditions.AsNoTracking().ToListAsync(cancellationToken);
-        var variants = await db.PageCompositionVariants
-            .Include(item => item.Composition)
-            .ToListAsync(cancellationToken);
+        var editions = await ReadEditionsBeforeCoreAsync(db, cancellationToken);
+        var compositionProjects = await db.PageCompositions.AsNoTracking()
+            .Select(item => new { item.Id, item.ProjectId })
+            .ToDictionaryAsync(item => item.Id, item => item.ProjectId, cancellationToken);
+        var variants = await db.PageCompositionVariants.ToListAsync(cancellationToken);
         if (variants.Count == 0)
         {
             db.ManuscriptMigrationJournals.Add(new ManuscriptMigrationJournal
@@ -644,7 +693,7 @@ public sealed class VisualCompositionMigrationService(
             {
                 var sourceScene = JsonSerializer.Deserialize<CompositionScene>(source.SceneJson, ManuscriptCodec.JsonOptions)
                     ?? throw new InvalidDataException($"Composition variant {source.Id:N} has no scene.");
-                var projectEditions = editions.Where(item => item.ProjectId == source.Composition.ProjectId).ToList();
+                var projectEditions = editions.Where(item => item.ProjectId == compositionProjects[source.CompositionId]).ToList();
                 var matched = projectEditions.Where(edition =>
                     string.Equals(source.GeometryKey, CompositionService.GeometryKey(edition, sourceScene), StringComparison.Ordinal)
                     || string.Equals(source.GeometryKey, CompositionService.LegacyEditionOnlyGeometryKey(edition), StringComparison.Ordinal)
@@ -992,9 +1041,22 @@ public sealed class VisualCompositionMigrationService(
         CancellationToken cancellationToken)
     {
         var compositions = await db.PageCompositions.AsNoTracking()
-            .Include(item => item.Variants)
+            .Select(item => new PageComposition
+            {
+                Id = item.Id,
+                ProjectId = item.ProjectId,
+                ChapterId = item.ChapterId,
+                Name = item.Name,
+                SemanticManuscriptJson = item.SemanticManuscriptJson,
+                Revision = item.Revision,
+                CreatedAt = item.CreatedAt,
+                UpdatedAt = item.UpdatedAt,
+            })
             .ToListAsync(cancellationToken);
-        var editions = await db.PublicationEditions.AsNoTracking().ToListAsync(cancellationToken);
+        var variants = await db.PageCompositionVariants.AsNoTracking().ToListAsync(cancellationToken);
+        foreach (var composition in compositions)
+            composition.Variants = variants.Where(item => item.CompositionId == composition.Id).ToList();
+        var editions = await ReadEditionsBeforeCoreAsync(db, cancellationToken);
         foreach (var composition in compositions)
         {
             var semantic = ManuscriptCodec.Deserialize(
@@ -1012,7 +1074,7 @@ public sealed class VisualCompositionMigrationService(
                     CompositionService.ValidateVariantGeometry(matchingEdition, scene);
             }
         }
-        foreach (var cover in await db.PublicationCoverDesigns.AsNoTracking().ToListAsync(cancellationToken))
+        foreach (var cover in await ReadCoversBeforeCoreAsync(db, cancellationToken))
         {
             var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
                 ?? throw new InvalidDataException($"Cover {cover.Id:N} has no composition scene.");
@@ -1029,6 +1091,101 @@ public sealed class VisualCompositionMigrationService(
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (await reader.ReadAsync(cancellationToken))
             throw new InvalidDataException($"Foreign-key validation failed for table {reader.GetString(0)}.");
+    }
+
+    // These projections intentionally omit Core Book columns. The guarded visual
+    // migration runs before the later additive Core schema on older databases,
+    // while the current EF model already knows about those columns.
+    private static Task<List<PublicationEdition>> ReadEditionsBeforeCoreAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken) =>
+        db.PublicationEditions.AsNoTracking().Select(item => new PublicationEdition
+        {
+            Id = item.Id,
+            ProjectId = item.ProjectId,
+            Name = item.Name,
+            Format = item.Format,
+            Vendor = item.Vendor,
+            VendorProfileVersion = item.VendorProfileVersion,
+            Status = item.Status,
+            Revision = item.Revision,
+            TitleOverride = item.TitleOverride,
+            Subtitle = item.Subtitle,
+            Author = item.Author,
+            Language = item.Language,
+            Publisher = item.Publisher,
+            Copyright = item.Copyright,
+            Isbn = item.Isbn,
+            Description = item.Description,
+            IncludeTableOfContents = item.IncludeTableOfContents,
+            IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents,
+            IncludeActSynopses = item.IncludeActSynopses,
+            IncludeChapterSynopses = item.IncludeChapterSynopses,
+            IncludeActHeadings = item.IncludeActHeadings,
+            IncludeChapterHeadings = item.IncludeChapterHeadings,
+            NumberActs = item.NumberActs,
+            NumberChapters = item.NumberChapters,
+            TitlePageMode = item.TitlePageMode,
+            Binding = item.Binding,
+            Paper = item.Paper,
+            Ink = item.Ink,
+            Bleed = item.Bleed,
+            AllowDesignedPageOverrides = item.AllowDesignedPageOverrides,
+            PageWidthInches = item.PageWidthInches,
+            PageHeightInches = item.PageHeightInches,
+            PageMarginInches = item.PageMarginInches,
+            BodyFontSizePoints = item.BodyFontSizePoints,
+            BodyLineHeight = item.BodyLineHeight,
+            SelectedCoverImageId = item.SelectedCoverImageId,
+            CreatedAt = item.CreatedAt,
+            UpdatedAt = item.UpdatedAt,
+        }).ToListAsync(cancellationToken);
+
+    private static async Task<List<PublicationCoverDesign>> ReadCoversBeforeCoreAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var cropX = await HasColumnAsync(db, "PublicationCoverDesigns", "ImageCropXPercent", cancellationToken)
+            ? "ImageCropXPercent"
+            : "ImageFocalXPercent";
+        var cropY = await HasColumnAsync(db, "PublicationCoverDesigns", "ImageCropYPercent", cancellationToken)
+            ? "ImageCropYPercent"
+            : "ImageFocalYPercent";
+        var connection = db.Database.GetDbConnection();
+        if (connection.State != ConnectionState.Open)
+            await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+        command.CommandText = $"""
+            SELECT Id, EditionId, Title, Subtitle, Author, SpineText, BackCopy,
+                   BackgroundColor, BarcodeMode, {QuoteIdentifier(cropX)}, {QuoteIdentifier(cropY)},
+                   AcknowledgedTemplateFingerprint, CompositionSceneJson, Revision
+            FROM PublicationCoverDesigns
+            ORDER BY Id;
+            """;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var covers = new List<PublicationCoverDesign>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            covers.Add(new PublicationCoverDesign
+            {
+                Id = reader.GetGuid(0),
+                EditionId = reader.GetGuid(1),
+                Title = reader.GetString(2),
+                Subtitle = reader.GetString(3),
+                Author = reader.GetString(4),
+                SpineText = reader.GetString(5),
+                BackCopy = reader.GetString(6),
+                BackgroundColor = reader.GetString(7),
+                BarcodeMode = Enum.Parse<PublicationBarcodeMode>(reader.GetString(8)),
+                ImageCropXPercent = reader.GetDouble(9),
+                ImageCropYPercent = reader.GetDouble(10),
+                AcknowledgedTemplateFingerprint = reader.GetString(11),
+                CompositionSceneJson = reader.GetString(12),
+                Revision = reader.GetInt64(13),
+            });
+        }
+        return covers;
     }
 
     private static string QuoteIdentifier(string value) => $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";

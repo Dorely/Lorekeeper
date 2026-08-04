@@ -29,6 +29,9 @@ public class PublicationMatter
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid EditionId { get; set; }
     public PublicationEdition Edition { get; set; } = null!;
+    public Guid? CoreMatterId { get; set; }
+    public PublicationBookMatter? CoreMatter { get; set; }
+    public bool IsExcluded { get; set; }
     public PublicationMatterLocation Location { get; set; }
     public PublicationMatterKind Kind { get; set; }
     public required string Title { get; set; }

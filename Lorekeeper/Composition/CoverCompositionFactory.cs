@@ -4,6 +4,109 @@ namespace Lorekeeper.Composition;
 
 public static class CoverCompositionFactory
 {
+    public static CompositionScene CreateCoreFrontFromRelease(
+        PublicationEdition sourceEdition,
+        CompositionScene sourceScene,
+        PublicationEdition coreEdition)
+    {
+        if (sourceEdition.Format != PublicationEditionFormat.Paperback)
+            return Reflow(coreEdition, new PublicationCoverDesign { EditionId = Guid.Empty }, sourceScene, 0, 0);
+        var sourceGeometry = new CoverGeometry(
+            sourceScene.Surface.WidthPoints,
+            sourceScene.Surface.HeightPoints,
+            sourceScene.Surface.TrimWidthPoints > 0 ? sourceScene.Surface.TrimWidthPoints : sourceEdition.PageWidthInches * 72,
+            sourceScene.Surface.TrimHeightPoints > 0 ? sourceScene.Surface.TrimHeightPoints : sourceEdition.PageHeightInches * 72,
+            sourceScene.Surface.BleedPoints,
+            sourceScene.Surface.SpineWidthPoints);
+        var front = Region(CompositionRegionConstraint.Front, sourceGeometry);
+        var frontPercent = RegionBoundsPercent(CompositionRegionConstraint.Front, sourceGeometry);
+        var selectedTopLevel = sourceScene.Objects.Where(item => item.GroupId is null
+            && item.TextBinding is not ("spineText" or "backCopy")
+            && item.RegionConstraint is not (CompositionRegionConstraint.Back or CompositionRegionConstraint.Spine or CompositionRegionConstraint.BarcodeReserve)
+            && Intersects(item.Bounds, frontPercent)).ToList();
+        var selectedIds = selectedTopLevel.Select(item => item.Id).ToHashSet();
+        var objects = sourceScene.Objects.Where(item => selectedIds.Contains(item.Id)
+                || item.GroupId is Guid groupId && selectedIds.Contains(groupId))
+            .Select(item => item.GroupId is not null
+                ? item
+                : item with
+                {
+                    Bounds = Clamp(FromSurfaceBounds(item.Bounds, front, sourceGeometry)),
+                    RegionConstraint = CompositionRegionConstraint.Front,
+                }).ToList();
+        var coreGeometry = Geometry(coreEdition, 0);
+        return sourceScene with
+        {
+            Surface = sourceScene.Surface with
+            {
+                Kind = CompositionSurfaceKind.SinglePage,
+                WidthPoints = coreGeometry.WidthPoints,
+                HeightPoints = coreGeometry.HeightPoints,
+                BleedPoints = 0,
+                TrimWidthPoints = coreGeometry.TrimWidthPoints,
+                TrimHeightPoints = coreGeometry.TrimHeightPoints,
+                SpineWidthPoints = 0,
+            },
+            Objects = objects,
+        };
+    }
+
+    public static CompositionScene CreateReleaseFromCore(
+        PublicationEdition edition,
+        PublicationCoverDesign cover,
+        CompositionScene coreScene,
+        int pageCount = 0,
+        bool lockCoreLayers = false)
+    {
+        var geometry = Geometry(edition, pageCount);
+        var targetRegion = Region(CompositionRegionConstraint.Front, geometry);
+        var coreLayerIds = coreScene.Layers.Select(layer => layer.Id).ToHashSet();
+        var coreLayers = coreScene.Layers.Select(layer => layer with
+        {
+            Name = $"Core · {layer.Name}",
+            Locked = lockCoreLayers || layer.Locked,
+        }).ToList();
+        var coreObjects = coreScene.Objects.Select(item => item.GroupId is not null
+            ? item
+            : item with
+            {
+                Bounds = ToSurfaceBounds(item.Bounds, targetRegion, geometry),
+                RegionConstraint = CompositionRegionConstraint.Front,
+                Locked = lockCoreLayers || item.Locked,
+            }).ToList();
+
+        if (edition.Format != PublicationEditionFormat.Paperback)
+        {
+            return coreScene with
+            {
+                Surface = coreScene.Surface with
+                {
+                    Kind = CompositionSurfaceKind.SinglePage,
+                    WidthPoints = geometry.WidthPoints,
+                    HeightPoints = geometry.HeightPoints,
+                    BleedPoints = 0,
+                    TrimWidthPoints = geometry.TrimWidthPoints,
+                    TrimHeightPoints = geometry.TrimHeightPoints,
+                    SpineWidthPoints = 0,
+                },
+                Layers = coreLayers,
+                Objects = coreObjects,
+            };
+        }
+
+        var additions = Create(edition, cover, pageCount);
+        var additionObjects = additions.Objects
+            .Where(item => item.TextBinding is "spineText" or "backCopy")
+            .Select(item => item with { ReadingOrder = (item.ReadingOrder ?? 0) + coreObjects.Count })
+            .ToList();
+        return additions with
+        {
+            Layers = coreLayers.Concat(additions.Layers.Where(layer => !coreLayerIds.Contains(layer.Id))).ToList(),
+            Styles = coreScene.Styles.Concat(additions.Styles).GroupBy(style => style.Id).Select(group => group.First()).ToList(),
+            Objects = coreObjects.Concat(additionObjects).ToList(),
+        };
+    }
+
     public static CompositionScene Create(PublicationEdition edition, PublicationCoverDesign cover, int pageCount = 0)
     {
         var print = edition.Format == PublicationEditionFormat.Paperback;
@@ -177,6 +280,27 @@ public static class CoverCompositionFactory
         WidthPercent = bounds.WidthPercent / 100 * surface.WidthPoints / region.Width * 100,
         HeightPercent = bounds.HeightPercent / 100 * surface.HeightPoints / region.Height * 100,
     };
+
+    private static bool Intersects(CompositionBounds left, CompositionBounds right) =>
+        left.XPercent < right.XPercent + right.WidthPercent
+        && right.XPercent < left.XPercent + left.WidthPercent
+        && left.YPercent < right.YPercent + right.HeightPercent
+        && right.YPercent < left.YPercent + left.HeightPercent;
+
+    private static CompositionBounds Clamp(CompositionBounds value)
+    {
+        var left = Math.Clamp(value.XPercent, 0, 100);
+        var top = Math.Clamp(value.YPercent, 0, 100);
+        var right = Math.Clamp(value.XPercent + value.WidthPercent, 0, 100);
+        var bottom = Math.Clamp(value.YPercent + value.HeightPercent, 0, 100);
+        return new CompositionBounds
+        {
+            XPercent = left,
+            YPercent = top,
+            WidthPercent = Math.Max(.01, right - left),
+            HeightPercent = Math.Max(.01, bottom - top),
+        };
+    }
 
     private sealed record CoverRegion(double X, double Y, double Width, double Height);
 }

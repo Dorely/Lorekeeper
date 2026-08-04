@@ -15,6 +15,7 @@ public class PublicationCoverDesign
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid EditionId { get; set; }
     public PublicationEdition Edition { get; set; } = null!;
+    public bool InheritsCoreFront { get; set; } = true;
     public string Title { get; set; } = string.Empty;
     public string Subtitle { get; set; } = string.Empty;
     public string Author { get; set; } = string.Empty;

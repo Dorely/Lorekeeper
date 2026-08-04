@@ -3,6 +3,7 @@ using System;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Lorekeeper.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260803222946_AddPublicationCoreBookV20")]
+    partial class AddPublicationCoreBookV20
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.5");
@@ -47,7 +50,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "Order");
 
-                    b.ToTable("Acts", (string)null);
+                    b.ToTable("Acts");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.AiChange", b =>
@@ -141,7 +144,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("BatchId", "Order");
 
-                    b.ToTable("AiChanges", (string)null);
+                    b.ToTable("AiChanges");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.AiChangeBatch", b =>
@@ -180,7 +183,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
-                    b.ToTable("AiChangeBatches", (string)null);
+                    b.ToTable("AiChangeBatches");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.BookBrief", b =>
@@ -275,7 +278,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId")
                         .IsUnique();
 
-                    b.ToTable("BookBriefs", (string)null);
+                    b.ToTable("BookBriefs");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.Chapter", b =>
@@ -331,7 +334,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "Order");
 
-                    b.ToTable("Chapters", (string)null);
+                    b.ToTable("Chapters");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ChatMessageImageAttachment", b =>
@@ -368,7 +371,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "Surface", "MessageId", "SortOrder");
 
-                    b.ToTable("ChatMessageImageAttachments", (string)null);
+                    b.ToTable("ChatMessageImageAttachments");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.CompositionMutationStage", b =>
@@ -416,7 +419,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "ConversationId", "ExpiresAt");
 
-                    b.ToTable("CompositionMutationStages", (string)null);
+                    b.ToTable("CompositionMutationStages");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ContestBatch", b =>
@@ -478,7 +481,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
-                    b.ToTable("ContestBatches", (string)null);
+                    b.ToTable("ContestBatches");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ContestCandidate", b =>
@@ -550,7 +553,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("BatchId", "Order");
 
-                    b.ToTable("ContestCandidates", (string)null);
+                    b.ToTable("ContestCandidates");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.EditorContextPreference", b =>
@@ -594,7 +597,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId", "ChapterId", "Kind", "Key")
                         .IsUnique();
 
-                    b.ToTable("EditorContextPreferences", (string)null);
+                    b.ToTable("EditorContextPreferences");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.EditorConversation", b =>
@@ -617,7 +620,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId")
                         .IsUnique();
 
-                    b.ToTable("EditorConversations", (string)null);
+                    b.ToTable("EditorConversations");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.EditorMessage", b =>
@@ -667,7 +670,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ConversationId", "Order");
 
-                    b.ToTable("EditorMessages", (string)null);
+                    b.ToTable("EditorMessages");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.EditorMessageVisual", b =>
@@ -726,7 +729,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ToolCallId", "CreatedAt");
 
-                    b.ToTable("EditorMessageVisuals", (string)null);
+                    b.ToTable("EditorMessageVisuals");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.EditorRevisionJob", b =>
@@ -774,7 +777,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
-                    b.ToTable("EditorRevisionJobs", (string)null);
+                    b.ToTable("EditorRevisionJobs");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.EditorRevisionMessage", b =>
@@ -821,7 +824,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("SessionId", "Order");
 
-                    b.ToTable("EditorRevisionMessages", (string)null);
+                    b.ToTable("EditorRevisionMessages");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.EditorRevisionSession", b =>
@@ -919,7 +922,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("JobId", "Order");
 
-                    b.ToTable("EditorRevisionSessions", (string)null);
+                    b.ToTable("EditorRevisionSessions");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.EmbeddingConfiguration", b =>
@@ -968,7 +971,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProviderId");
 
-                    b.ToTable("EmbeddingConfigurations", (string)null);
+                    b.ToTable("EmbeddingConfigurations");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.EntityVisualExample", b =>
@@ -1017,7 +1020,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "GraphNodeId", "SortOrder");
 
-                    b.ToTable("EntityVisualExamples", (string)null);
+                    b.ToTable("EntityVisualExamples");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.GraphEdge", b =>
@@ -1055,7 +1058,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ToNodeId", "EdgeType");
 
-                    b.ToTable("GraphEdges", (string)null);
+                    b.ToTable("GraphEdges");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.GraphEntityType", b =>
@@ -1111,7 +1114,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId", "Type")
                         .IsUnique();
 
-                    b.ToTable("GraphEntityTypes", (string)null);
+                    b.ToTable("GraphEntityTypes");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.GraphNode", b =>
@@ -1151,7 +1154,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId", "NodeType", "Key")
                         .IsUnique();
 
-                    b.ToTable("GraphNodes", (string)null);
+                    b.ToTable("GraphNodes");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestJob", b =>
@@ -1221,7 +1224,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
-                    b.ToTable("IngestJobs", (string)null);
+                    b.ToTable("IngestJobs");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestJobChunk", b =>
@@ -1289,7 +1292,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("JobId", "SourceChunkIndex");
 
-                    b.ToTable("IngestJobChunks", (string)null);
+                    b.ToTable("IngestJobChunks");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestJobEvent", b =>
@@ -1324,7 +1327,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("JobId", "CreatedAt");
 
-                    b.ToTable("IngestJobEvents", (string)null);
+                    b.ToTable("IngestJobEvents");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestReportItem", b =>
@@ -1399,7 +1402,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("JobId", "Kind", "Status", "CreatedAt");
 
-                    b.ToTable("IngestReportItems", (string)null);
+                    b.ToTable("IngestReportItems");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestSource", b =>
@@ -1482,7 +1485,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "CreatedAt");
 
-                    b.ToTable("IngestSources", (string)null);
+                    b.ToTable("IngestSources");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestSourceBlock", b =>
@@ -1537,7 +1540,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("SourceId", "StartChar");
 
-                    b.ToTable("IngestSourceBlocks", (string)null);
+                    b.ToTable("IngestSourceBlocks");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestSourceChunk", b =>
@@ -1602,7 +1605,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("SourceId", "Index")
                         .IsUnique();
 
-                    b.ToTable("IngestSourceChunks", (string)null);
+                    b.ToTable("IngestSourceChunks");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestSourcePage", b =>
@@ -1666,7 +1669,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("SourceId", "StartChar");
 
-                    b.ToTable("IngestSourcePages", (string)null);
+                    b.ToTable("IngestSourcePages");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestStagingRecord", b =>
@@ -1774,7 +1777,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("JobId", "SourceChunkId", "Kind", "Status");
 
-                    b.ToTable("IngestStagingRecords", (string)null);
+                    b.ToTable("IngestStagingRecords");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestVectorFragment", b =>
@@ -1812,7 +1815,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("SourceId", "Index")
                         .IsUnique();
 
-                    b.ToTable("IngestVectorFragments", (string)null);
+                    b.ToTable("IngestVectorFragments");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.LlmProvider", b =>
@@ -1913,7 +1916,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("LlmProviders", (string)null);
+                    b.ToTable("LlmProviders");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ManuscriptMigrationJournal", b =>
@@ -1981,7 +1984,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("MigrationName", "StartedAt");
 
-                    b.ToTable("ManuscriptMigrationJournals", (string)null);
+                    b.ToTable("ManuscriptMigrationJournals");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ManuscriptStyleDefinition", b =>
@@ -2039,7 +2042,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId", "Kind", "SemanticRoleKey")
                         .IsUnique();
 
-                    b.ToTable("ManuscriptStyleDefinitions", (string)null);
+                    b.ToTable("ManuscriptStyleDefinitions");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.OAuthToken", b =>
@@ -2071,7 +2074,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProviderId");
 
-                    b.ToTable("OAuthTokens", (string)null);
+                    b.ToTable("OAuthTokens");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.OutlineConversation", b =>
@@ -2094,7 +2097,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId")
                         .IsUnique();
 
-                    b.ToTable("OutlineConversations", (string)null);
+                    b.ToTable("OutlineConversations");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.OutlineMessage", b =>
@@ -2141,7 +2144,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ConversationId", "Order");
 
-                    b.ToTable("OutlineMessages", (string)null);
+                    b.ToTable("OutlineMessages");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PageComposition", b =>
@@ -2185,7 +2188,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "ChapterId", "UpdatedAt");
 
-                    b.ToTable("PageCompositions", (string)null);
+                    b.ToTable("PageCompositions");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PageCompositionVariant", b =>
@@ -2220,7 +2223,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("CompositionId", "GeometryKey")
                         .IsUnique();
 
-                    b.ToTable("PageCompositionVariants", (string)null);
+                    b.ToTable("PageCompositionVariants");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.Project", b =>
@@ -2270,7 +2273,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("Slug")
                         .IsUnique();
 
-                    b.ToTable("Projects", (string)null);
+                    b.ToTable("Projects");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectFontFace", b =>
@@ -2312,7 +2315,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("FamilyId", "Weight", "Italic")
                         .IsUnique();
 
-                    b.ToTable("ProjectFontFaces", (string)null);
+                    b.ToTable("ProjectFontFaces");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectFontFamily", b =>
@@ -2343,7 +2346,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId", "Name")
                         .IsUnique();
 
-                    b.ToTable("ProjectFontFamilies", (string)null);
+                    b.ToTable("ProjectFontFamilies");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectImageChatAttachment", b =>
@@ -2380,7 +2383,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "SortOrder");
 
-                    b.ToTable("ProjectImageChatAttachments", (string)null);
+                    b.ToTable("ProjectImageChatAttachments");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectImageConversation", b =>
@@ -2403,7 +2406,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId")
                         .IsUnique();
 
-                    b.ToTable("ProjectImageConversations", (string)null);
+                    b.ToTable("ProjectImageConversations");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectImageGenerationJob", b =>
@@ -2540,7 +2543,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
-                    b.ToTable("ProjectImageGenerationJobs", (string)null);
+                    b.ToTable("ProjectImageGenerationJobs");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectImageMask", b =>
@@ -2594,7 +2597,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "OwnerKind", "OwnerId");
 
-                    b.ToTable("ProjectImageMasks", (string)null);
+                    b.ToTable("ProjectImageMasks");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectImageMessage", b =>
@@ -2641,7 +2644,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ConversationId", "Order");
 
-                    b.ToTable("ProjectImageMessages", (string)null);
+                    b.ToTable("ProjectImageMessages");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectImageMessageVisual", b =>
@@ -2700,7 +2703,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ToolCallId", "CreatedAt");
 
-                    b.ToTable("ProjectImageMessageVisuals", (string)null);
+                    b.ToTable("ProjectImageMessageVisuals");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectImportJob", b =>
@@ -2787,7 +2790,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
-                    b.ToTable("ProjectImportJobs", (string)null);
+                    b.ToTable("ProjectImportJobs");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectImportReportItem", b =>
@@ -2858,7 +2861,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("JobId", "Kind", "Status", "CreatedAt");
 
-                    b.ToTable("ProjectImportReportItems", (string)null);
+                    b.ToTable("ProjectImportReportItems");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectPageSetup", b =>
@@ -2893,7 +2896,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasKey("ProjectId");
 
-                    b.ToTable("ProjectPageSetups", (string)null);
+                    b.ToTable("ProjectPageSetups");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationArtifact", b =>
@@ -2972,7 +2975,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "TargetKind", "EditionId", "Kind", "CreatedAt");
 
-                    b.ToTable("PublicationArtifacts", (string)null);
+                    b.ToTable("PublicationArtifacts");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationBook", b =>
@@ -3048,7 +3051,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasKey("ProjectId");
 
-                    b.ToTable("PublicationBooks", (string)null);
+                    b.ToTable("PublicationBooks");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationBookCoverDesign", b =>
@@ -3083,7 +3086,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId")
                         .IsUnique();
 
-                    b.ToTable("PublicationBookCoverDesigns", (string)null);
+                    b.ToTable("PublicationBookCoverDesigns");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationBookImagePlacement", b =>
@@ -3157,7 +3160,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "TargetKind", "TargetId", "PlacementKind", "SortOrder");
 
-                    b.ToTable("PublicationBookImagePlacements", (string)null);
+                    b.ToTable("PublicationBookImagePlacements");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationBookMatter", b =>
@@ -3205,7 +3208,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "Location", "SortOrder");
 
-                    b.ToTable("PublicationBookMatter", (string)null);
+                    b.ToTable("PublicationBookMatter");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationBookOutlineItem", b =>
@@ -3253,7 +3256,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId", "TargetKind", "TargetId")
                         .IsUnique();
 
-                    b.ToTable("PublicationBookOutlineItems", (string)null);
+                    b.ToTable("PublicationBookOutlineItems");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationCoverDesign", b =>
@@ -3325,7 +3328,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("EditionId")
                         .IsUnique();
 
-                    b.ToTable("PublicationCoverDesigns", (string)null);
+                    b.ToTable("PublicationCoverDesigns");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationEdition", b =>
@@ -3393,6 +3396,9 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<string>("Ink")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Isbn")
                         .IsRequired()
@@ -3474,10 +3480,14 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("SelectedCoverImageId");
 
+                    b.HasIndex("ProjectId", "IsDefault")
+                        .IsUnique()
+                        .HasFilter("\"IsDefault\" = 1");
+
                     b.HasIndex("ProjectId", "Name")
                         .IsUnique();
 
-                    b.ToTable("PublicationEditions", (string)null);
+                    b.ToTable("PublicationEditions");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationEditionAuditEntry", b =>
@@ -3516,7 +3526,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("EditionId", "CreatedAt");
 
-                    b.ToTable("PublicationEditionAuditEntries", (string)null);
+                    b.ToTable("PublicationEditionAuditEntries");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationEditionMigrationJournal", b =>
@@ -3580,7 +3590,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("MigrationName", "StartedAt");
 
-                    b.ToTable("PublicationEditionMigrationJournals", (string)null);
+                    b.ToTable("PublicationEditionMigrationJournals");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationEditionOutlineItem", b =>
@@ -3628,7 +3638,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("EditionId", "TargetKind", "TargetId")
                         .IsUnique();
 
-                    b.ToTable("PublicationEditionOutlineItems", (string)null);
+                    b.ToTable("PublicationEditionOutlineItems");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationEditionStyleMapping", b =>
@@ -3671,7 +3681,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("EditionId", "SemanticRole")
                         .IsUnique();
 
-                    b.ToTable("PublicationEditionStyleMappings", (string)null);
+                    b.ToTable("PublicationEditionStyleMappings");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationImagePlacement", b =>
@@ -3756,7 +3766,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("EditionId", "TargetKind", "TargetId", "PlacementKind", "SortOrder");
 
-                    b.ToTable("PublicationImagePlacements", (string)null);
+                    b.ToTable("PublicationImagePlacements");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationMatter", b =>
@@ -3815,7 +3825,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("EditionId", "Location", "SortOrder");
 
-                    b.ToTable("PublicationMatter", (string)null);
+                    b.ToTable("PublicationMatter");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationPageMapEntry", b =>
@@ -3843,7 +3853,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("RenderJobId", "ChapterId", "BlockId")
                         .IsUnique();
 
-                    b.ToTable("PublicationPageMapEntries", (string)null);
+                    b.ToTable("PublicationPageMapEntries");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationPreparationJob", b =>
@@ -3910,7 +3920,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "TargetKind", "EditionId", "CreatedAt");
 
-                    b.ToTable("PublicationPreparationJobs", (string)null);
+                    b.ToTable("PublicationPreparationJobs");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationRenderJob", b =>
@@ -3987,7 +3997,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "TargetKind", "EditionId", "CreatedAt");
 
-                    b.ToTable("PublicationRenderJobs", (string)null);
+                    b.ToTable("PublicationRenderJobs");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublishAsset", b =>
@@ -4061,7 +4071,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("DerivedFromImageId", "CropXPercent", "CropYPercent", "CropWidthPercent", "CropHeightPercent")
                         .IsUnique();
 
-                    b.ToTable("PublishAssets", (string)null);
+                    b.ToTable("PublishAssets");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublishConversation", b =>
@@ -4084,7 +4094,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId")
                         .IsUnique();
 
-                    b.ToTable("PublishConversations", (string)null);
+                    b.ToTable("PublishConversations");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublishMessage", b =>
@@ -4131,7 +4141,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ConversationId", "Order");
 
-                    b.ToTable("PublishMessages", (string)null);
+                    b.ToTable("PublishMessages");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ResearchConversation", b =>
@@ -4154,7 +4164,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId")
                         .IsUnique();
 
-                    b.ToTable("ResearchConversations", (string)null);
+                    b.ToTable("ResearchConversations");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.ResearchMessage", b =>
@@ -4201,7 +4211,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ConversationId", "Order");
 
-                    b.ToTable("ResearchMessages", (string)null);
+                    b.ToTable("ResearchMessages");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.SearchProvider", b =>
@@ -4244,7 +4254,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("SearchProviders", (string)null);
+                    b.ToTable("SearchProviders");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.SourceVisualCandidate", b =>
@@ -4337,7 +4347,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "Kind", "Status", "CreatedAt");
 
-                    b.ToTable("SourceVisualCandidates", (string)null);
+                    b.ToTable("SourceVisualCandidates");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.WebIngestCandidate", b =>
@@ -4467,7 +4477,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
-                    b.ToTable("WebIngestCandidates", (string)null);
+                    b.ToTable("WebIngestCandidates");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.WritingCoachConversation", b =>
@@ -4490,7 +4500,7 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasIndex("ProjectId")
                         .IsUnique();
 
-                    b.ToTable("WritingCoachConversations", (string)null);
+                    b.ToTable("WritingCoachConversations");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.WritingCoachMessage", b =>
@@ -4537,7 +4547,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ConversationId", "Order");
 
-                    b.ToTable("WritingCoachMessages", (string)null);
+                    b.ToTable("WritingCoachMessages");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.WritingSample", b =>
@@ -4569,7 +4579,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasIndex("ProjectId", "UpdatedAt");
 
-                    b.ToTable("WritingSamples", (string)null);
+                    b.ToTable("WritingSamples");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.Act", b =>

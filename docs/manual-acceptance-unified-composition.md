@@ -1,8 +1,40 @@
 # Unified composition manual acceptance checklist
 
 Use this checklist after automated migration, editor, Press, build, and startup
-verification. Browser/Electron visual automation is intentionally not part of
-this feature's authorized checks.
+verification. The Core Book Publish-workspace checks below are authorized for
+the live test project; terminate the browser host after the run.
+
+## Core Book and publication releases
+
+- Open Publish in a project with zero releases. Confirm Core Book is selected,
+  shared details/content/matter/design/cover remain usable, and no release or
+  ISBN is created implicitly.
+- Supply title, author, and language, choose **Prepare reading PDF**, reconnect
+  after navigation, and download the current immutable private reading copy.
+  Confirm it is never labeled publishable, packaged, vendor-validated, or ISBN
+  bearing.
+- Create Paperback (KDP, IngramSpark, and Other printer where applicable), EPUB
+  ebook, and PDF ebook releases. Confirm print controls appear only for
+  paperback, EPUB controls only for EPUB, and mixed-page/front-cover controls
+  only for PDF ebook. Raw profiles, hashes, and page-box terms stay under
+  Technical details.
+- Change a Core value and confirm an inherited release updates. Customize a
+  field to an explicit value and to an explicit empty value, change Core again,
+  and confirm both overrides remain stable. Use **Use Core Book value** and
+  confirm live inheritance resumes. Repeat for one content row and one matter or
+  placement overlay.
+- Confirm the Core front cover is inherited by digital releases and projected
+  into the paperback front panel. Customize the release front and confirm later
+  Core changes do not overwrite it.
+- Run **Prepare files** for all three release formats. Confirm preparation is
+  persisted/reconnectable, cancellation works, blockers are plain-language and
+  prioritized, current artifacts are reused, and successful downloads match the
+  selected release.
+- Ask the Publish assistant to patch Core, create a release, customize and reset
+  an override, inspect readiness, and prepare files. Confirm compact results
+  refresh the correct target without overwriting a dirty manual field. Confirm
+  it cannot select a raw profile, invent an ISBN, approve proof, or describe the
+  Core reading copy as publication files.
 
 ## Outline and assistants
 
@@ -33,7 +65,7 @@ this feature's authorized checks.
   search/index text, and plain-text/Markdown/EPUB projections.
 - Generate art for a Figure target and confirm the displayed aspect, raster,
   intended fit, and geometry descriptor match the project/page target without
-  requiring a publication edition.
+  requiring a publication release.
 
 ## Edit and Read modes
 
@@ -108,9 +140,9 @@ this feature's authorized checks.
   objects are not stretched, and overflow is surfaced.
 - Confirm full-wrap generation requires current interior page count while
   front-panel work remains available independently.
-- In Publish, choose an edition whose geometry lacks an exact page layout and
+- In Publish, choose a release whose geometry lacks an exact page layout and
   confirm compatibility is reported there. Use **Create layout for this
-  edition** and verify it copies the authoring scene into a reviewable edition
+  release** and verify it copies the authoring scene into a reviewable release
   variant without altering the active authoring layout.
 
 ## Outputs and accessibility

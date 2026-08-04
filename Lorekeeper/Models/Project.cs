@@ -24,6 +24,8 @@ public class Project
 
     public ProjectPageSetup? PageSetup { get; set; }
 
+    public PublicationBook? PublicationBook { get; set; }
+
     /// <summary>
     /// When true, the currently-open chapter is included in the assembled system prompt
     /// as a line-numbered block. Toggleable from the Context Feed.
@@ -97,6 +99,10 @@ public class Project
     public ICollection<ProjectImportJob> ProjectImportJobs { get; set; } = [];
 
     public ICollection<PublicationEdition> PublicationEditions { get; set; } = [];
+
+    public ICollection<PublicationPreparationJob> PublicationPreparationJobs { get; set; } = [];
+    public ICollection<PublicationRenderJob> PublicationRenderJobs { get; set; } = [];
+    public ICollection<PublicationArtifact> PublicationArtifacts { get; set; } = [];
 
     public ICollection<PublishAsset> PublishAssets { get; set; } = [];
 

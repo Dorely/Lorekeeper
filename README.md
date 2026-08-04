@@ -40,20 +40,25 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Project-owned authoring page setup, Press-backed current-chapter Read preview,
   and contextual Edit/Read/Pages/Review modes. Read shows actual pagination,
   line breaks, images, captions, and Designed Pages with single/facing and zoom
-  controls; it does not depend on a publication edition.
+  controls; it does not depend on a publication release.
 - Project image generation and editing, canonical entity visual references,
   permissive source-image geometry, semantic flowing Figures, contextual
   Designed Page/spread composition, project font management, format-aware
   dedicated cover composition, exact target-bound generation, accessibility
   state, and layout diagnostics. Placement always chooses non-destructive
   Contain or Cover fit; crop positioning is adjusted directly in the canvas.
-- Independent paperback, EPUB, and Digital PDF publication editions with product/vendor settings,
-  identifiers, included content, semantic matter, Book Text Style mappings, image
-  placements, dedicated project-image cover artwork, clone/archive/compare/audit workflows,
-  deterministic staleness fingerprints, read-only archived editions, and
-  a full-height conversational Publish assistant with streaming, persistent
-  history, image attachments, Stop/Reset, and matching tools. New paperback editions start on the
-  owned 6 × 9 in KDP, Ingram, or generic profile selected for the edition.
+- An always-present Core Book for shared title/author/language metadata, content
+  order, presentation, semantic matter, image placements, project typography,
+  and reusable front-cover design. Optional paperback, EPUB ebook, and PDF ebook
+  releases inherit Core values live and store only explicit field or collection
+  overrides; ISBN, destination, proof, package, and product settings remain
+  release-specific. No release or ISBN is created automatically.
+- A Core reading PDF for private review and sharing, plus one-action preparation
+  jobs that compile, render, validate, and store or package the selected Core or
+  release target. Paperback presets cover KDP, IngramSpark, and other printers;
+  EPUB and PDF ebook workspaces expose only relevant controls. The full-height
+  conversational Publish assistant has compact Core/release tools, persistent
+  streaming history, image attachments, Stop/Reset, and reconnectable jobs.
 - Lorekeeper-owned paperback and Digital PDF press jobs with cancellation/restart recovery,
   immutable SHA-256-verified interior and full-wrap cover PDFs, actual in-app
   PDF viewing, semantic block-to-page maps, render comparisons, and matching
@@ -65,10 +70,11 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   Book PDF with its front cover as page one, searchable/selectable text,
   bookmarks, internal links, semantic structure, and logical reading order.
   Renderer/profile upgrades make older owned PDFs stale until regenerated.
-- Edition-aware structured cover design with shared image/text/shape/layer/style
-  tools: page-count/paper-caliper back/spine/front geometry for print and a
-  front-only canvas for Digital PDF/EPUB, canonical copy bindings, safe zones,
-  ISBN-13/EAN-13 barcode or KDP reserve behavior, and assistant parity.
+- Core/release-aware structured cover design with shared image/text/shape/layer/style
+  tools: the Core front scene flows into digital releases and the front panel of
+  paperback wraps until explicitly customized. Print releases add
+  page-count/paper-caliper back/spine/front geometry, safe zones, and
+  ISBN-13/EAN-13 barcode or KDP reserve behavior.
 - Versioned Lorekeeper validation with independent post-write inspection,
   deterministic EPUB 3/package assembly, downloadable manifests and reports,
   exact-package digital proof records plus paperback-only physical-proof
@@ -78,8 +84,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   content, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded subset fonts, ToUnicode maps, and a
   240% total-ink ceiling. Recorded vendor acceptance and human proof remain
   separate evidence, never assistant-controlled conformance gates.
-- Versioned project import/export (current v15 manuscript-v4/page-setup/
-  composition model, Book Text Styles, editions, covers, custom-font binaries,
+- Versioned project import/export (current v16 manuscript-v4/page-setup/
+  composition model, Core Book, sparse release overlays, covers, custom-font binaries,
   and isolated older structured/text adapters) plus TXT, Markdown,
   accessible mixed-layout EPUB, artifact-backed Generate/Regenerate, separate
   paperback interior/cover saves, and one Digital PDF Book save. EPUB export is

@@ -131,7 +131,7 @@ public sealed class DatabaseMigrationRecoveryService(
             sourceVersion,
             targetVersion,
             resolved,
-            $"{exception.GetType().Name}: {exception.Message}",
+            DescribeException(exception),
             DateTime.UtcNow);
         var temporaryPath = RecoveryStatePath() + ".tmp";
         await File.WriteAllTextAsync(
@@ -170,6 +170,18 @@ public sealed class DatabaseMigrationRecoveryService(
         {
             throw new InvalidDataException("The migration recovery-state marker is malformed.", exception);
         }
+    }
+
+    private static string DescribeException(Exception exception)
+    {
+        var parts = new List<string>();
+        for (var current = exception; current is not null && parts.Count < 4; current = current.InnerException)
+        {
+            var part = $"{current.GetType().Name}: {current.Message}";
+            if (!parts.Contains(part, StringComparer.Ordinal))
+                parts.Add(part);
+        }
+        return string.Join(" -> ", parts);
     }
 
     public async Task<bool> IsRecoveryRequiredAsync(CancellationToken cancellationToken = default) =>

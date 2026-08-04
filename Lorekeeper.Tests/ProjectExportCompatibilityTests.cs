@@ -8,18 +8,24 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
-    public void V15WritesAuthoringCompositionDataWithoutObsoletePublicationFields()
+    public void V16WritesCoreBookAndReleasesWithoutObsoleteDefaultReleaseState()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
         {
-            PublicationEditions = [Edition(coverImageId, null, [])],
+            PublicationBook = new ProjectExportPublicationBook(
+                1, "Book", "", "Author", "en", "", "", "", true, false,
+                false, false, true, true, false, false, PublishTitlePageMode.Automatic,
+                [], [], [], null),
+            PublicationEditions = [Edition(coverImageId, null, []) with { IsDefault = false }],
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(15, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(16, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"publicationBook\"", json, StringComparison.Ordinal);
         Assert.Contains($"\"selectedCoverImageId\":\"{coverImageId}\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"isDefault\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("selectedCoverChapterId", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"publishProfiles\"", json, StringComparison.Ordinal);
     }

@@ -8,6 +8,9 @@ public class PublicationImagePlacement
 
     public Guid EditionId { get; set; }
     public PublicationEdition Edition { get; set; } = null!;
+    public Guid? CorePlacementId { get; set; }
+    public PublicationBookImagePlacement? CorePlacement { get; set; }
+    public bool IsExcluded { get; set; }
 
     public Guid AssetId { get; set; }
     public PublishAsset Asset { get; set; } = null!;

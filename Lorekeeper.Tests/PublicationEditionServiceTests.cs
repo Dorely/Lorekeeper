@@ -13,6 +13,68 @@ namespace Lorekeeper.Tests;
 public sealed class PublicationEditionServiceTests
 {
     [Fact]
+    public async Task CoreValuesInheritLiveWhileExplicitEmptyOverrideRemainsStableAndCanReset()
+    {
+        await WithServiceAsync(async (db, service, project) =>
+        {
+            var coordinator = new ProjectMutationCoordinator(db.Database.GetConnectionString()!);
+            var books = new PublicationBookService(db, coordinator);
+            var resolver = new PublicationEffectiveConfigurationResolver(db);
+            var core = await books.GetOrCreateAsync(project.Id);
+            core = await books.UpdateAsync(project.Id, new PublicationBookPatch(core.Revision, Author: "Core Author"));
+            var release = await service.CreateAsync(project.Id, new("Paperback", PublicationEditionFormat.Paperback));
+            Assert.Equal("Core Author", (await resolver.ResolveReleaseAsync(project.Id, release.Id)).Edition.Author);
+
+            release = await service.PatchOverridesAsync(project.Id, release.Id,
+                new PublicationReleaseOverridePatch(release.Revision, Author: string.Empty));
+            var fingerprint = await service.GetSourceFingerprintAsync(project.Id, release.Id);
+            core = await books.UpdateAsync(project.Id, new PublicationBookPatch(core.Revision, Author: "Changed Core Author"));
+            var overridden = await resolver.ResolveReleaseAsync(project.Id, release.Id);
+            Assert.Equal(string.Empty, overridden.Edition.Author);
+            Assert.Equal(fingerprint, await service.GetSourceFingerprintAsync(project.Id, release.Id));
+
+            release = await service.PatchOverridesAsync(project.Id, release.Id,
+                new PublicationReleaseOverridePatch(release.Revision, ResetFields: [PublicationEditionOverrideField.Author]));
+            Assert.Equal("Changed Core Author", (await resolver.ResolveReleaseAsync(project.Id, release.Id)).Edition.Author);
+            await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => service.PatchOverridesAsync(
+                project.Id, release.Id, new PublicationReleaseOverridePatch(release.Revision - 1, Author: "stale")));
+        });
+    }
+
+    [Fact]
+    public async Task NewCoreContentFlowsIntoReleaseWithoutRemovingSparseExclusion()
+    {
+        await WithServiceAsync(async (db, service, project) =>
+        {
+            static Chapter Chapter(Guid projectId, string title, int order)
+            {
+                var chapter = new Chapter { ProjectId = projectId, Title = title, Order = order };
+                chapter.ManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(chapter.Id));
+                return chapter;
+            }
+            var first = Chapter(project.Id, "First", 0);
+            db.Chapters.Add(first);
+            await db.SaveChangesAsync();
+            var coordinator = new ProjectMutationCoordinator(db.Database.GetConnectionString()!);
+            var books = new PublicationBookService(db, coordinator);
+            _ = await books.GetOrCreateAsync(project.Id);
+            var release = await service.CreateAsync(project.Id, new("EPUB", PublicationEditionFormat.Epub));
+            release = await service.SetOutlineSelectionsAsync(project.Id, release.Id,
+                [new(PublishOutlineTargetKind.Chapter, first.Id, false)], release.Revision);
+
+            var second = Chapter(project.Id, "Second", 1);
+            db.Chapters.Add(second);
+            await db.SaveChangesAsync();
+            _ = await books.GetOrCreateAsync(project.Id);
+            var effective = await new PublicationEffectiveConfigurationResolver(db).ResolveReleaseAsync(project.Id, release.Id);
+
+            Assert.False(effective.OutlineItems.Single(item => item.TargetId == first.Id).IsIncluded);
+            Assert.True(effective.OutlineItems.Single(item => item.TargetId == second.Id).IsIncluded);
+            Assert.Single(await db.PublicationEditionOutlineItems.Where(item => item.EditionId == release.Id).ToListAsync());
+        });
+    }
+
+    [Fact]
     public async Task NewPaperbackUsesTheOwnedKdpProfileDefaults()
     {
         await WithServiceAsync(async (_, service, project) =>
@@ -27,10 +89,48 @@ public sealed class PublicationEditionServiceTests
             Assert.Equal(6, edition.PageWidthInches);
             Assert.Equal(9, edition.PageHeightInches);
             Assert.Equal(0.75, edition.PageMarginInches);
-            Assert.Equal(11, edition.BodyFontSizePoints);
-            Assert.Equal(1.4, edition.BodyLineHeight);
-            Assert.False(edition.Bleed);
+            Assert.Equal(12, edition.BodyFontSizePoints);
+            Assert.Equal(1.55, edition.BodyLineHeight);
+            Assert.True(edition.Bleed);
             Assert.Equal("kdp-paperback-v1", edition.VendorProfileVersion);
+        });
+    }
+
+    [Fact]
+    public async Task OneActionPreparationPersistsCoreAndReleaseTargetsAndCanCancel()
+    {
+        await WithServiceAsync(async (db, releases, project) =>
+        {
+            var connectionString = db.Database.GetConnectionString()!;
+            var coordinator = new ProjectMutationCoordinator(connectionString);
+            var queue = new RecordingPreparationQueue();
+            var books = new PublicationBookService(db, coordinator);
+            var service = new PublicationPreparationService(
+                db,
+                queue,
+                books,
+                releases,
+                null!,
+                coordinator);
+
+            var coreJob = await service.PrepareCoreAsync(project.Id);
+            Assert.Equal(PublicationTargetKind.CoreBook, coreJob.TargetKind);
+            Assert.Equal(PublicationPreparationStatus.Queued, coreJob.Status);
+            Assert.Null(coreJob.EditionId);
+            Assert.Contains(coreJob.Id, queue.JobIds);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.PrepareCoreAsync(project.Id));
+
+            var cancelled = await service.CancelAsync(project.Id, coreJob.Id);
+            Assert.Equal(PublicationPreparationStatus.Cancelled, cancelled.Status);
+
+            var release = await releases.CreateAsync(
+                project.Id,
+                new PublicationEditionCreate("EPUB", PublicationEditionFormat.Epub));
+            var releaseJob = await service.PrepareReleaseAsync(project.Id, release.Id);
+            Assert.Equal(PublicationTargetKind.Release, releaseJob.TargetKind);
+            Assert.Equal(release.Id, releaseJob.EditionId);
+            Assert.Contains(releaseJob.Id, queue.JobIds);
+            Assert.Equal(2, await db.PublicationPreparationJobs.CountAsync());
         });
     }
 
@@ -121,21 +221,20 @@ public sealed class PublicationEditionServiceTests
                 null!,
                 null!,
                 null!,
+                null!,
                 coverService,
-                null!,
-                null!,
                 null!,
                 null!);
             var tools = await assistantTools.BuildAsync(new PublishAssistantContext(project.Id));
             var updateTool = Assert.Single(
                 tools.OfType<AIFunction>(),
-                tool => tool.Name == "update_publication_edition");
+                tool => tool.Name == "patch_publication_release_overrides");
             var toolException = await Assert.ThrowsAsync<InvalidOperationException>(
                 async () => await updateTool.InvokeAsync(
                     ToolCallArguments.Create(new Dictionary<string, object?>
                     {
-                        ["editionId"] = edition.Id,
-                        ["update"] = update,
+                        ["releaseId"] = edition.Id,
+                        ["patch"] = new PublicationReleaseOverridePatch(archivedRevision, Author: "Changed"),
                     })));
             Assert.Contains("read-only", toolException.Message, StringComparison.OrdinalIgnoreCase);
 
@@ -217,7 +316,7 @@ public sealed class PublicationEditionServiceTests
                             true,
                             0),
                         edition.Revision));
-                Assert.Contains("generated from edition settings", generatedException.Message, StringComparison.Ordinal);
+                Assert.Contains("generated from the effective release settings", generatedException.Message, StringComparison.Ordinal);
             }
             var styled = ManuscriptCodec.FromPlainText(Guid.Empty, "Styled", revision: 0);
             styled.Content[0] = styled.Content[0] with { StyleRole = "missing-style" };
@@ -396,6 +495,26 @@ public sealed class PublicationEditionServiceTests
             SqliteConnection.ClearAllPools();
             if (Directory.Exists(directory))
                 Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private sealed class RecordingPreparationQueue : IPublicationPreparationQueue
+    {
+        public List<Guid> JobIds { get; } = [];
+
+        public ValueTask EnqueueAsync(Guid jobId, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            JobIds.Add(jobId);
+            return ValueTask.CompletedTask;
+        }
+
+        public async IAsyncEnumerable<Guid> ReadAllAsync(
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await Task.CompletedTask;
+            cancellationToken.ThrowIfCancellationRequested();
+            yield break;
         }
     }
 }

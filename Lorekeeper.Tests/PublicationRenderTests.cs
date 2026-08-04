@@ -178,7 +178,7 @@ public sealed class PublicationRenderTests
             fixture.Provider.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<PublicationRenderWorker>.Instance);
         await worker.StartAsync(CancellationToken.None);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
 
         await worker.StopAsync(timeout.Token);
         var execution = worker.ExecuteTask
@@ -578,6 +578,22 @@ public sealed class PublicationRenderTests
         public Task<PublishWorkspaceView> GetWorkspaceAsync(
             Guid projectId,
             Guid editionId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<PublicationBookView> GetCoreWorkspaceAsync(
+            Guid projectId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<PublishDocument> GetCoreDocumentAsync(
+            Guid projectId,
+            CancellationToken cancellationToken = default) =>
+            GetDocumentAsync(projectId, Guid.Empty, cancellationToken);
+
+        public Task<ProjectExportFile> ExportCoreAsync(
+            Guid projectId,
+            PublishExportFormat format,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 

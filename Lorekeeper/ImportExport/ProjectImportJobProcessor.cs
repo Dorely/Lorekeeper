@@ -72,6 +72,8 @@ public sealed class ProjectImportJobProcessor(
         public Dictionary<Guid, Guid> CompositionMap { get; } = [];
         public Dictionary<Guid, Guid> FontFamilyMap { get; } = [];
         public Dictionary<Guid, Guid> EditionMap { get; } = [];
+        public Dictionary<Guid, Guid> CoreMatterMap { get; } = [];
+        public Dictionary<Guid, Guid> CorePlacementMap { get; } = [];
         public List<Guid> CreatedActIds { get; } = [];
         public List<Guid> CreatedChapterIds { get; } = [];
         public List<Guid> ContextEntityIdsToReindex { get; } = [];
@@ -123,6 +125,8 @@ public sealed class ProjectImportJobProcessor(
                         state.EditionMap[edition.Id] = Guid.NewGuid();
                     await AppendStructuralItemsAsync(job, document, state, cancellationToken);
                     await ImportPageCompositionsAsync(job, document, state, cancellationToken);
+                    if (document.FormatVersion >= 16 && document.PublicationBook is not null)
+                        await ImportPublicationBookAsync(job.ProjectId, document.PublicationBook, state, cancellationToken);
                     foreach (var importedEdition in document.PublicationEditions
                         .OrderByDescending(edition => edition.IsDefault)
                         .ThenBy(edition => edition.Name))
@@ -135,10 +139,14 @@ public sealed class ProjectImportJobProcessor(
                             state.ImageMap,
                             state.FontFamilyMap,
                             state.EditionMap,
+                            state.CoreMatterMap,
+                            state.CorePlacementMap,
                             document.FormatVersion,
                             document.Chapters,
                             cancellationToken);
                     }
+                    if (document.FormatVersion < 16)
+                        await SeedImportedCoreBookAsync(job.ProjectId, document, state, cancellationToken);
                     await MaterializeImportedLegacyCompositionVariantsAsync(job.ProjectId, cancellationToken);
                     await StepAsync(job, "Appended exported outline structure and imported publish page settings.", cancellationToken);
                 }
@@ -239,13 +247,16 @@ public sealed class ProjectImportJobProcessor(
         ProjectExportDocument document,
         CancellationToken cancellationToken)
     {
-        if (document.FormatVersion < 15 || document.PageSetup is not { } imported)
-            return;
         var setup = await db.ProjectPageSetups.SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
         if (setup is null)
         {
             setup = new ProjectPageSetup { ProjectId = projectId };
             db.ProjectPageSetups.Add(setup);
+        }
+        if (document.FormatVersion < 15 || document.PageSetup is not { } imported)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return;
         }
         setup.PageWidthInches = imported.PageWidthInches;
         setup.PageHeightInches = imported.PageHeightInches;
@@ -506,9 +517,16 @@ public sealed class ProjectImportJobProcessor(
             || document.PublicationEditions.GroupBy(
                 edition => edition.Name.Trim(),
                 StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
-            throw new InvalidOperationException("Import file contains duplicate publication editions.");
+            throw new InvalidOperationException("Import file contains duplicate publication releases.");
+        if (document.FormatVersion >= 16 && document.PublicationBook is null)
+            throw new InvalidOperationException("Import file does not contain its Core Book.");
+        if (document.FormatVersion >= 16 && document.PublicationEditions.Any(edition => edition.IsDefault))
+            throw new InvalidOperationException("Import file contains obsolete default-release state.");
+        if (document.FormatVersion < 16 && document.PublicationBook is not null)
+            throw new InvalidOperationException(
+                $"Import file contains Core Book data introduced after export format v{document.FormatVersion}.");
         if (document.PublicationEditions.Count(edition => edition.IsDefault) > 1)
-            throw new InvalidOperationException("Import file contains more than one default publication edition.");
+            throw new InvalidOperationException("Legacy import file contains more than one default publication release.");
         var sharedIsbnGroups = document.PublicationEditions
             .Select(edition => new
             {
@@ -541,6 +559,21 @@ public sealed class ProjectImportJobProcessor(
                 style.Definition,
                 style.Revision))
             .ToList();
+        var coreMatterIds = new HashSet<Guid>();
+        var corePlacementIds = new HashSet<Guid>();
+        if (document.PublicationBook is { } book)
+        {
+            ValidatePublicationBookPayload(
+                book,
+                actIds,
+                chapterIds,
+                chapterParents,
+                imageIds,
+                importedStyleViews,
+                document.FontFamilies.Select(family => family.Id).ToHashSet());
+            coreMatterIds = book.Matter.Select(item => item.Id).ToHashSet();
+            corePlacementIds = book.ImagePlacements.Select(item => item.Id).ToHashSet();
+        }
         foreach (var edition in document.PublicationEditions)
         {
             if (string.IsNullOrWhiteSpace(edition.Name)
@@ -638,18 +671,24 @@ public sealed class ProjectImportJobProcessor(
                 || edition.StyleMappings.GroupBy(item => item.ManuscriptStyleDefinitionId).Any(group => group.Count() > 1)
                 || edition.ImagePlacements.GroupBy(item => item.Id).Any(group => group.Count() > 1))
                 throw new InvalidOperationException($"Publication edition {edition.Id:N} contains duplicate child records.");
+            if (edition.OverrideFields.Distinct().Count() != edition.OverrideFields.Count
+                || edition.OverrideFields.Any(field => !Enum.IsDefined(field)))
+                throw new InvalidOperationException($"Publication release {edition.Id:N} contains invalid override markers.");
             if (edition.OutlineItems.Any(item => item.SortOrder < 0)
                 || edition.OutlineItems.GroupBy(item => item.SortOrder).Any(group => group.Count() > 1))
             {
                 throw new InvalidOperationException($"Publication edition {edition.Id:N} contains invalid content order values.");
             }
-            PublicationEditionService.ValidateOutlineOrder(
-                edition.OutlineItems
-                    .OrderBy(item => item.SortOrder)
-                    .Select(item => new PublicationEditionOutlineItemOrder(item.TargetKind, item.TargetId))
-                    .ToList(),
-                actIds,
-                chapterParents);
+            if (document.FormatVersion < 16)
+            {
+                PublicationEditionService.ValidateOutlineOrder(
+                    edition.OutlineItems
+                        .OrderBy(item => item.SortOrder)
+                        .Select(item => new PublicationEditionOutlineItemOrder(item.TargetKind, item.TargetId))
+                        .ToList(),
+                    actIds,
+                    chapterParents);
+            }
             foreach (var item in edition.OutlineItems)
             {
                 var exists = item.TargetKind == PublishOutlineTargetKind.Act
@@ -660,6 +699,10 @@ public sealed class ProjectImportJobProcessor(
             }
             foreach (var matter in edition.Matter)
             {
+                if (matter.CoreMatterId is Guid coreMatterId && !coreMatterIds.Contains(coreMatterId))
+                    throw new InvalidOperationException($"Publication release {edition.Id:N} references missing Core matter.");
+                if (matter.IsExcluded && matter.CoreMatterId is null)
+                    throw new InvalidOperationException($"Publication release {edition.Id:N} excludes matter that is not from Core Book.");
                 if (!Enum.IsDefined(matter.Kind)
                     || !Enum.IsDefined(matter.Location)
                     || PublicationMatterFormatting.IsGeneratedPageKind(matter.Kind)
@@ -690,6 +733,10 @@ public sealed class ProjectImportJobProcessor(
                 throw new InvalidOperationException($"Publication edition {edition.Id:N} references a missing image.");
             foreach (var placement in edition.ImagePlacements)
             {
+                if (placement.CorePlacementId is Guid corePlacementId && !corePlacementIds.Contains(corePlacementId))
+                    throw new InvalidOperationException($"Publication release {edition.Id:N} references a missing Core image placement.");
+                if (placement.IsExcluded && placement.CorePlacementId is null)
+                    throw new InvalidOperationException($"Publication release {edition.Id:N} excludes an image placement that is not from Core Book.");
                 var targetExists = placement.TargetKind == PublishOutlineTargetKind.Act
                     ? actIds.Contains(placement.TargetId)
                     : placement.TargetKind == PublishOutlineTargetKind.Chapter
@@ -1481,6 +1528,96 @@ public sealed class ProjectImportJobProcessor(
         }
     }
 
+    private static void ValidatePublicationBookPayload(
+        ProjectExportPublicationBook book,
+        IReadOnlySet<Guid> actIds,
+        IReadOnlySet<Guid> chapterIds,
+        IReadOnlyDictionary<Guid, Guid?> chapterParents,
+        IReadOnlySet<Guid> imageIds,
+        IReadOnlyList<ManuscriptStyleView> styles,
+        IReadOnlySet<Guid> fontFamilyIds)
+    {
+        if (book.Revision < 0
+            || book.Title.Trim().Length > 500
+            || book.Subtitle.Trim().Length > 500
+            || book.Author.Trim().Length > 500
+            || book.Language.Trim().Length > 40
+            || book.Publisher.Trim().Length > 500
+            || book.Copyright.Trim().Length > 100_000
+            || book.Description.Trim().Length > 100_000
+            || !Enum.IsDefined(book.TitlePageMode))
+            throw new InvalidOperationException("Core Book contains invalid book details.");
+        if (book.OutlineItems.GroupBy(item => (item.TargetKind, item.TargetId)).Any(group => group.Count() > 1)
+            || book.OutlineItems.GroupBy(item => item.SortOrder).Any(group => group.Count() > 1)
+            || book.OutlineItems.Any(item => item.SortOrder < 0)
+            || book.Matter.GroupBy(item => item.Id).Any(group => group.Count() > 1)
+            || book.ImagePlacements.GroupBy(item => item.Id).Any(group => group.Count() > 1))
+            throw new InvalidOperationException("Core Book contains duplicate or invalid child records.");
+        PublicationEditionService.ValidateOutlineOrder(
+            book.OutlineItems.OrderBy(item => item.SortOrder)
+                .Select(item => new PublicationEditionOutlineItemOrder(item.TargetKind, item.TargetId))
+                .ToList(),
+            actIds,
+            chapterParents);
+        foreach (var item in book.OutlineItems)
+        {
+            var exists = item.TargetKind == PublishOutlineTargetKind.Act
+                ? actIds.Contains(item.TargetId)
+                : item.TargetKind == PublishOutlineTargetKind.Chapter && chapterIds.Contains(item.TargetId);
+            if (!exists)
+                throw new InvalidOperationException("Core Book references missing outline content.");
+        }
+        foreach (var matter in book.Matter)
+        {
+            if (!Enum.IsDefined(matter.Kind)
+                || !Enum.IsDefined(matter.Location)
+                || PublicationMatterFormatting.IsGeneratedPageKind(matter.Kind)
+                || matter.Revision < 0
+                || matter.SortOrder < 0
+                || matter.Title.Trim().Length is < 1 or > 500
+                || matter.Title.Contains('\r')
+                || matter.Title.Contains('\n'))
+                throw new InvalidOperationException("Core Book contains invalid matter metadata.");
+            var manuscript = ManuscriptCodec.Deserialize(matter.ManuscriptJson, matter.Id, matter.Revision);
+            if (manuscript.Content.Any(block => block.Type == ManuscriptBlockType.Figure
+                && block.ImageId is Guid imageId && !imageIds.Contains(imageId)))
+                throw new InvalidOperationException($"Core matter {matter.Id:N} references a missing image.");
+            ManuscriptStyleService.ValidateDocumentReferences(manuscript, styles);
+        }
+        foreach (var placement in book.ImagePlacements)
+        {
+            if (!imageIds.Contains(placement.AssetId))
+                throw new InvalidOperationException("Core Book references a missing image.");
+            var targetExists = placement.TargetKind == PublishOutlineTargetKind.Act
+                ? actIds.Contains(placement.TargetId)
+                : placement.TargetKind == PublishOutlineTargetKind.Chapter && chapterIds.Contains(placement.TargetId);
+            var kindValid = placement.TargetKind == PublishOutlineTargetKind.Act
+                ? placement.PlacementKind is PublicationImagePlacementKind.BeforeAct or PublicationImagePlacementKind.AfterAct
+                : placement.PlacementKind is PublicationImagePlacementKind.BeforeChapter
+                    or PublicationImagePlacementKind.ChapterOpening
+                    or PublicationImagePlacementKind.ChapterEnding
+                    or PublicationImagePlacementKind.AfterChapter;
+            if (!targetExists || !kindValid || placement.SortOrder < 0)
+                throw new InvalidOperationException("Core Book contains an invalid image placement.");
+        }
+        if (book.CoverDesign is not { } cover)
+            return;
+        if (!System.Text.RegularExpressions.Regex.IsMatch(cover.BackgroundColor, "^#[0-9a-fA-F]{6}$")
+            || cover.Revision < 0)
+            throw new InvalidOperationException("Core Book contains invalid cover settings.");
+        if (cover.CompositionSceneJson.Length == 0)
+            return;
+        var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
+            ?? throw new InvalidOperationException("Core Book contains an empty cover scene.");
+        CompositionService.Validate(scene, ManuscriptCodec.CreateEmpty(Guid.Empty), allowCanonicalTextBindings: true);
+        ValidateExportSceneReferences(scene, imageIds, fontFamilyIds, allowCoverBindings: true, "Core Book cover");
+        if (scene.Surface.Kind != CompositionSurfaceKind.SinglePage
+            || scene.Objects.Any(item => item.RegionConstraint is CompositionRegionConstraint.Back
+                or CompositionRegionConstraint.Spine
+                or CompositionRegionConstraint.BarcodeReserve))
+            throw new InvalidOperationException("Core Book cover contains print-only regions.");
+    }
+
     private static string RemapFontKey(string value, IReadOnlyDictionary<Guid, Guid> fontFamilyMap)
     {
         if (!TryReadProjectFontKey(value, out var exportedFamilyId)) return value;
@@ -1567,6 +1704,8 @@ public sealed class ProjectImportJobProcessor(
         IReadOnlyDictionary<Guid, Guid> imageMap,
         IReadOnlyDictionary<Guid, Guid> fontFamilyMap,
         IReadOnlyDictionary<Guid, Guid> editionMap,
+        IReadOnlyDictionary<Guid, Guid> coreMatterMap,
+        IReadOnlyDictionary<Guid, Guid> corePlacementMap,
         int formatVersion,
         IReadOnlyList<ProjectExportChapter> importedChapters,
         CancellationToken cancellationToken)
@@ -1575,7 +1714,7 @@ public sealed class ProjectImportJobProcessor(
             || !Enum.IsDefined(importedEdition.PrintPicturePageSpreadMode)
             || !Enum.IsDefined(importedEdition.EpubPicturePageSpreadMode))
         {
-            throw new InvalidOperationException("The imported publication edition contains an unsupported page presentation mode.");
+            throw new InvalidOperationException("The imported publication release contains an unsupported page presentation mode.");
         }
 
         var normalizedIsbn = PublicationIsbn.NormalizeValidOrEmpty(importedEdition.Isbn);
@@ -1627,7 +1766,6 @@ public sealed class ProjectImportJobProcessor(
             Vendor = importedEdition.Vendor,
             VendorProfileVersion = importedEdition.VendorProfileVersion,
             Status = importedEdition.Status,
-            IsDefault = existingNames.Count == 0 && importedEdition.IsDefault,
             Revision = importedEdition.Revision,
             TitleOverride = importedEdition.TitleOverride,
             Subtitle = importedEdition.Subtitle,
@@ -1656,6 +1794,10 @@ public sealed class ProjectImportJobProcessor(
             Ink = importedEdition.Ink,
             Bleed = importedEdition.Bleed,
             AllowDesignedPageOverrides = importedEdition.AllowDesignedPageOverrides,
+            OverrideFieldsJson = formatVersion >= 16
+                ? JsonSerializer.Serialize(importedEdition.OverrideFields)
+                : "[]",
+            InheritsCoreCover = formatVersion >= 16 && importedEdition.InheritsCoreCover,
         };
         var exportedCoverImageId = importedEdition.SelectedCoverImageId;
         Guid? exportedLegacyCoverChapterId = null;
@@ -1736,11 +1878,15 @@ public sealed class ProjectImportJobProcessor(
         {
             var matter = new PublicationMatter
             {
+                CoreMatterId = formatVersion >= 16 && imported.CoreMatterId is Guid importedCoreMatterId
+                    ? coreMatterMap.GetValueOrDefault(importedCoreMatterId) is var coreMatterId && coreMatterId != Guid.Empty ? coreMatterId : null
+                    : null,
                 Location = imported.Location,
                 Kind = imported.Kind,
                 Title = imported.Title,
                 Revision = imported.Revision,
                 IsIncluded = imported.IsIncluded,
+                IsExcluded = formatVersion >= 16 && imported.IsExcluded,
                 SortOrder = imported.SortOrder,
             };
             var document = ManuscriptCodec.Deserialize(imported.ManuscriptJson, imported.Id, imported.Revision);
@@ -1784,6 +1930,9 @@ public sealed class ProjectImportJobProcessor(
             if (targetId == Guid.Empty || assetId == Guid.Empty) continue;
             edition.ImagePlacements.Add(new PublicationImagePlacement
             {
+                CorePlacementId = formatVersion >= 16 && imported.CorePlacementId is Guid importedCorePlacementId
+                    ? corePlacementMap.GetValueOrDefault(importedCorePlacementId) is var corePlacementId && corePlacementId != Guid.Empty ? corePlacementId : null
+                    : null,
                 AssetId = assetId,
                 TargetKind = imported.TargetKind,
                 TargetId = targetId,
@@ -1803,6 +1952,7 @@ public sealed class ProjectImportJobProcessor(
                 Decorative = imported.Decorative,
                 Language = string.IsNullOrWhiteSpace(imported.Language) ? "en" : imported.Language.Trim(),
                 AccessibilityRole = imported.AccessibilityRole,
+                IsExcluded = formatVersion >= 16 && imported.IsExcluded,
                 SortOrder = imported.SortOrder,
             });
         }
@@ -1817,6 +1967,211 @@ public sealed class ProjectImportJobProcessor(
                 $"{entry.Metadata.ClrType.Name}:{entry.State}"));
             throw new InvalidOperationException($"Publication edition import encountered an unexpected state transition ({entries}).", exception);
         }
+    }
+
+    private async Task ImportPublicationBookAsync(
+        Guid projectId,
+        ProjectExportPublicationBook imported,
+        ImportState state,
+        CancellationToken cancellationToken)
+    {
+        if (await db.PublicationBooks.AnyAsync(item => item.ProjectId == projectId, cancellationToken)) return;
+        var book = new PublicationBook
+        {
+            ProjectId = projectId,
+            Revision = imported.Revision,
+            Title = imported.Title,
+            Subtitle = imported.Subtitle,
+            Author = imported.Author,
+            Language = string.IsNullOrWhiteSpace(imported.Language) ? "en" : imported.Language,
+            Publisher = imported.Publisher,
+            Copyright = imported.Copyright,
+            Description = imported.Description,
+            IncludeTableOfContents = imported.IncludeTableOfContents,
+            IncludeVisibleTableOfContents = imported.IncludeVisibleTableOfContents,
+            IncludeActSynopses = imported.IncludeActSynopses,
+            IncludeChapterSynopses = imported.IncludeChapterSynopses,
+            IncludeActHeadings = imported.IncludeActHeadings,
+            IncludeChapterHeadings = imported.IncludeChapterHeadings,
+            NumberActs = imported.NumberActs,
+            NumberChapters = imported.NumberChapters,
+            TitlePageMode = imported.TitlePageMode,
+        };
+        foreach (var row in imported.OutlineItems)
+        {
+            var targetId = row.TargetKind == PublishOutlineTargetKind.Act
+                ? state.ActMap.GetValueOrDefault(row.TargetId)
+                : state.ChapterMap.GetValueOrDefault(row.TargetId);
+            if (targetId == Guid.Empty) continue;
+            book.OutlineItems.Add(new PublicationBookOutlineItem
+            {
+                ProjectId = projectId, TargetKind = row.TargetKind, TargetId = targetId,
+                ActId = row.TargetKind == PublishOutlineTargetKind.Act ? targetId : null,
+                ChapterId = row.TargetKind == PublishOutlineTargetKind.Chapter ? targetId : null,
+                IsIncluded = row.IsIncluded, SortOrder = row.SortOrder,
+            });
+        }
+        foreach (var row in imported.Matter)
+        {
+            var document = ManuscriptCodec.Deserialize(row.ManuscriptJson, row.Id, row.Revision);
+            var matter = new PublicationBookMatter
+            {
+                ProjectId = projectId, Location = row.Location, Kind = row.Kind, Title = row.Title,
+                Revision = row.Revision, IsIncluded = row.IsIncluded, SortOrder = row.SortOrder,
+            };
+            matter.ManuscriptJson = ManuscriptCodec.Serialize(RemapManuscriptFigures(document, matter.Id, state.ImageMap, state.EditionMap));
+            book.Matter.Add(matter);
+            state.CoreMatterMap[row.Id] = matter.Id;
+        }
+        foreach (var row in imported.ImagePlacements)
+        {
+            var targetId = row.TargetKind == PublishOutlineTargetKind.Act
+                ? state.ActMap.GetValueOrDefault(row.TargetId)
+                : state.ChapterMap.GetValueOrDefault(row.TargetId);
+            var assetId = state.ImageMap.GetValueOrDefault(row.AssetId);
+            if (targetId == Guid.Empty || assetId == Guid.Empty) continue;
+            var placement = new PublicationBookImagePlacement
+            {
+                ProjectId = projectId, AssetId = assetId, TargetKind = row.TargetKind, TargetId = targetId,
+                ActId = row.TargetKind == PublishOutlineTargetKind.Act ? targetId : null,
+                ChapterId = row.TargetKind == PublishOutlineTargetKind.Chapter ? targetId : null,
+                PlacementKind = row.PlacementKind, Caption = row.Caption, SortOrder = row.SortOrder,
+                PresentationJson = JsonSerializer.Serialize(row.Presentation ?? new FigurePresentation(), ManuscriptCodec.JsonOptions),
+                AltText = row.AltText, Decorative = row.Decorative,
+                Language = string.IsNullOrWhiteSpace(row.Language) ? "en" : row.Language,
+                AccessibilityRole = row.AccessibilityRole,
+            };
+            book.ImagePlacements.Add(placement);
+            state.CorePlacementMap[row.Id] = placement.Id;
+        }
+        book.CoverDesign = new PublicationBookCoverDesign
+        {
+            ProjectId = projectId,
+            BackgroundColor = imported.CoverDesign?.BackgroundColor ?? "#5c7ca5",
+            CompositionSceneJson = await ImportedCoreCoverSceneAsync(
+                projectId,
+                sourceEdition: null,
+                imported.CoverDesign is null ? string.Empty : RemapSceneJson(
+                    imported.CoverDesign.CompositionSceneJson, state.ImageMap, state.FontFamilyMap),
+                cancellationToken),
+            Revision = imported.CoverDesign?.Revision ?? 0,
+        };
+        db.PublicationBooks.Add(book);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task SeedImportedCoreBookAsync(
+        Guid projectId,
+        ProjectExportDocument document,
+        ImportState state,
+        CancellationToken cancellationToken)
+    {
+        if (await db.PublicationBooks.AnyAsync(item => item.ProjectId == projectId, cancellationToken)) return;
+        var sourceExport = document.PublicationEditions.OrderByDescending(item => item.IsDefault).ThenBy(item => item.Name).FirstOrDefault();
+        var sourceId = sourceExport is null ? Guid.Empty : state.EditionMap.GetValueOrDefault(sourceExport.Id);
+        var source = sourceId == Guid.Empty ? null : await db.PublicationEditions
+            .Include(item => item.OutlineItems).Include(item => item.Matter).Include(item => item.ImagePlacements).Include(item => item.CoverDesign)
+            .SingleAsync(item => item.Id == sourceId, cancellationToken);
+        var project = await db.Projects.AsNoTracking().SingleAsync(item => item.Id == projectId, cancellationToken);
+        var book = new PublicationBook
+        {
+            ProjectId = projectId, Revision = 1, Title = string.IsNullOrWhiteSpace(source?.TitleOverride) ? project.Name : source.TitleOverride,
+            Subtitle = source?.Subtitle ?? string.Empty, Author = source?.Author ?? string.Empty,
+            Language = string.IsNullOrWhiteSpace(source?.Language) ? "en" : source.Language,
+            Publisher = source?.Publisher ?? string.Empty, Copyright = source?.Copyright ?? string.Empty,
+            Description = source?.Description ?? string.Empty, IncludeTableOfContents = source?.IncludeTableOfContents ?? true,
+            IncludeVisibleTableOfContents = source?.IncludeVisibleTableOfContents ?? false,
+            IncludeActSynopses = source?.IncludeActSynopses ?? false, IncludeChapterSynopses = source?.IncludeChapterSynopses ?? false,
+            IncludeActHeadings = source?.IncludeActHeadings ?? true, IncludeChapterHeadings = source?.IncludeChapterHeadings ?? true,
+            NumberActs = source?.NumberActs ?? false, NumberChapters = source?.NumberChapters ?? false,
+            TitlePageMode = source?.TitlePageMode ?? PublishTitlePageMode.Automatic,
+            OutlineItems = source?.OutlineItems.Select(row => new PublicationBookOutlineItem
+            { ProjectId = projectId, TargetKind = row.TargetKind, TargetId = row.TargetId, ActId = row.ActId, ChapterId = row.ChapterId, IsIncluded = row.IsIncluded, SortOrder = row.SortOrder }).ToList() ?? [],
+            Matter = source?.Matter.Select(row => new PublicationBookMatter
+            { ProjectId = projectId, Location = row.Location, Kind = row.Kind, Title = row.Title, ManuscriptJson = row.ManuscriptJson, Revision = row.Revision, IsIncluded = row.IsIncluded, SortOrder = row.SortOrder }).ToList() ?? [],
+            ImagePlacements = source?.ImagePlacements.Select(row => new PublicationBookImagePlacement
+            { ProjectId = projectId, AssetId = row.AssetId, TargetKind = row.TargetKind, TargetId = row.TargetId, ActId = row.ActId, ChapterId = row.ChapterId, PlacementKind = row.PlacementKind, SortOrder = row.SortOrder, Caption = row.Caption, PresentationJson = row.PresentationJson, AltText = row.AltText, Decorative = row.Decorative, Language = row.Language, AccessibilityRole = row.AccessibilityRole }).ToList() ?? [],
+            CoverDesign = new PublicationBookCoverDesign { ProjectId = projectId, BackgroundColor = source?.CoverDesign?.BackgroundColor ?? "#5c7ca5", CompositionSceneJson = await ImportedCoreCoverSceneAsync(projectId, source, source?.CoverDesign?.CompositionSceneJson ?? string.Empty, cancellationToken), Revision = source?.CoverDesign?.Revision ?? 0 },
+        };
+        db.PublicationBooks.Add(book);
+        await db.SaveChangesAsync(cancellationToken);
+        var setup = await db.ProjectPageSetups.AsNoTracking().SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
+        var releases = await db.PublicationEditions
+            .Where(item => item.ProjectId == projectId)
+            .Include(item => item.OutlineItems)
+            .Include(item => item.Matter)
+            .Include(item => item.ImagePlacements)
+            .ToListAsync(cancellationToken);
+        foreach (var release in releases)
+        {
+            release.OverrideFieldsJson = JsonSerializer.Serialize(
+                PublicationCoreMigrationService.ChangedFields(book, setup, release));
+            release.InheritsCoreCover = release.CoverDesign is null;
+            foreach (var row in release.OutlineItems.ToList())
+            {
+                var inherited = book.OutlineItems.SingleOrDefault(item => item.TargetKind == row.TargetKind && item.TargetId == row.TargetId);
+                if (inherited is not null && inherited.IsIncluded == row.IsIncluded && inherited.SortOrder == row.SortOrder)
+                    db.PublicationEditionOutlineItems.Remove(row);
+            }
+            foreach (var row in release.Matter.ToList())
+            {
+                var inherited = book.Matter.FirstOrDefault(item => item.Location == row.Location && item.Kind == row.Kind && item.SortOrder == row.SortOrder);
+                if (inherited is null) continue;
+                if (row.Title == inherited.Title && row.ManuscriptJson == inherited.ManuscriptJson
+                    && row.Revision == inherited.Revision && row.IsIncluded == inherited.IsIncluded)
+                    db.PublicationMatter.Remove(row);
+                else
+                    row.CoreMatterId = inherited.Id;
+            }
+            foreach (var row in release.ImagePlacements.ToList())
+            {
+                var inherited = book.ImagePlacements.FirstOrDefault(item => item.TargetKind == row.TargetKind
+                    && item.TargetId == row.TargetId && item.PlacementKind == row.PlacementKind && item.SortOrder == row.SortOrder);
+                if (inherited is null) continue;
+                if (row.AssetId == inherited.AssetId && row.Caption == inherited.Caption
+                    && row.PresentationJson == inherited.PresentationJson && row.AltText == inherited.AltText
+                    && row.Decorative == inherited.Decorative && row.Language == inherited.Language
+                    && row.AccessibilityRole == inherited.AccessibilityRole)
+                    db.PublicationImagePlacements.Remove(row);
+                else
+                    row.CorePlacementId = inherited.Id;
+            }
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<string> ImportedCoreCoverSceneAsync(
+        Guid projectId,
+        PublicationEdition? sourceEdition,
+        string sceneJson,
+        CancellationToken cancellationToken)
+    {
+        var setup = await db.ProjectPageSetups.AsNoTracking().SingleAsync(
+            item => item.ProjectId == projectId,
+            cancellationToken);
+        var coreEdition = new PublicationEdition
+        {
+            ProjectId = projectId,
+            Name = "Core Book",
+            Format = PublicationEditionFormat.DigitalPdf,
+            Binding = PublicationBinding.Digital,
+            Paper = PublicationPaper.Digital,
+            Ink = PublicationInk.Digital,
+            PageWidthInches = setup.PageWidthInches,
+            PageHeightInches = setup.PageHeightInches,
+            PageMarginInches = setup.PageMarginInches,
+            BodyFontSizePoints = setup.BodyFontSizePoints,
+            BodyLineHeight = setup.BodyLineHeight,
+        };
+        if (string.IsNullOrWhiteSpace(sceneJson))
+            return JsonSerializer.Serialize(
+                CoverCompositionFactory.Create(coreEdition, new PublicationCoverDesign { EditionId = Guid.Empty }),
+                ManuscriptCodec.JsonOptions);
+        var scene = JsonSerializer.Deserialize<CompositionScene>(sceneJson, ManuscriptCodec.JsonOptions)
+            ?? throw new InvalidDataException("Imported Core cover scene is empty.");
+        if (sourceEdition?.Format == PublicationEditionFormat.Paperback)
+            scene = CoverCompositionFactory.CreateCoreFrontFromRelease(sourceEdition, scene, coreEdition);
+        return JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
     }
 
     private async Task ImportGraphNodesAsync(

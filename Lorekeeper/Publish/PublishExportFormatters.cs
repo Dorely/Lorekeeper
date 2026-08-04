@@ -1676,7 +1676,7 @@ internal static class PublicationMatterFormatting
         if (IsGeneratedPageKind(kind))
         {
             throw new InvalidOperationException(
-                $"{kind} is generated from edition settings and cannot be added as publication matter.");
+                $"{kind} is generated from the effective release settings and cannot be added as publication matter.");
         }
     }
 

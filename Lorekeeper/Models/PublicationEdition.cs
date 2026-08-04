@@ -68,8 +68,8 @@ public class PublicationEdition
     public PublicationVendor Vendor { get; set; } = PublicationVendor.Generic;
     public string VendorProfileVersion { get; set; } = "generic-paperback-v1";
     public PublicationEditionStatus Status { get; set; } = PublicationEditionStatus.Draft;
-    public bool IsDefault { get; set; }
     public long Revision { get; set; }
+    public string OverrideFieldsJson { get; set; } = "[]";
 
     public string TitleOverride { get; set; } = string.Empty;
     public string Subtitle { get; set; } = string.Empty;
@@ -93,6 +93,7 @@ public class PublicationEdition
     public PublicationInk Ink { get; set; } = PublicationInk.BlackAndWhite;
     public bool Bleed { get; set; }
     public bool AllowDesignedPageOverrides { get; set; }
+    public bool InheritsCoreCover { get; set; } = true;
 
     public double PageWidthInches { get; set; } = 8.5;
 

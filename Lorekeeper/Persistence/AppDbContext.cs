@@ -62,6 +62,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<ProjectImportJob> ProjectImportJobs => Set<ProjectImportJob>();
     public DbSet<ProjectImportReportItem> ProjectImportReportItems => Set<ProjectImportReportItem>();
     public DbSet<PublicationEdition> PublicationEditions => Set<PublicationEdition>();
+    public DbSet<PublicationBook> PublicationBooks => Set<PublicationBook>();
+    public DbSet<PublicationBookOutlineItem> PublicationBookOutlineItems => Set<PublicationBookOutlineItem>();
+    public DbSet<PublicationBookMatter> PublicationBookMatter => Set<PublicationBookMatter>();
+    public DbSet<PublicationBookImagePlacement> PublicationBookImagePlacements => Set<PublicationBookImagePlacement>();
+    public DbSet<PublicationBookCoverDesign> PublicationBookCoverDesigns => Set<PublicationBookCoverDesign>();
     public DbSet<PublicationEditionOutlineItem> PublicationEditionOutlineItems => Set<PublicationEditionOutlineItem>();
     public DbSet<PublicationMatter> PublicationMatter => Set<PublicationMatter>();
     public DbSet<PublicationEditionStyleMapping> PublicationEditionStyleMappings => Set<PublicationEditionStyleMapping>();
@@ -72,6 +77,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<PublicationArtifact> PublicationArtifacts => Set<PublicationArtifact>();
     public DbSet<PublicationPageMapEntry> PublicationPageMapEntries => Set<PublicationPageMapEntry>();
     public DbSet<PublicationCoverDesign> PublicationCoverDesigns => Set<PublicationCoverDesign>();
+    public DbSet<PublicationPreparationJob> PublicationPreparationJobs => Set<PublicationPreparationJob>();
     public DbSet<PublishAsset> PublishAssets => Set<PublishAsset>();
     public DbSet<ProjectImageGenerationJob> ProjectImageGenerationJobs => Set<ProjectImageGenerationJob>();
     public DbSet<ProjectImageMask> ProjectImageMasks => Set<ProjectImageMask>();
@@ -93,6 +99,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
 
     private async Task<int> SaveChangesWithLockRetryAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken)
     {
+        NormalizePublicationTargetOwnership();
         var delay = TimeSpan.FromMilliseconds(100);
         for (var attempt = 1; ; attempt++)
         {
@@ -820,9 +827,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
         modelBuilder.Entity<PublicationEdition>(entity =>
         {
             entity.HasIndex(e => new { e.ProjectId, e.Name }).IsUnique();
-            entity.HasIndex(e => new { e.ProjectId, e.IsDefault })
-                .IsUnique()
-                .HasFilter("\"IsDefault\" = 1");
             entity.HasIndex(e => e.SelectedCoverImageId);
             entity.Property(e => e.Format).HasConversion<string>();
             entity.Property(e => e.Vendor).HasConversion<string>();
@@ -842,6 +846,60 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
                 .WithMany(image => image.CoverEditions)
                 .HasForeignKey(e => e.SelectedCoverImageId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<PublicationBook>(entity =>
+        {
+            entity.HasKey(e => e.ProjectId);
+            entity.Property(e => e.TitlePageMode).HasConversion<string>();
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.Project)
+                .WithOne(e => e.PublicationBook)
+                .HasForeignKey<PublicationBook>(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationBookOutlineItem>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.TargetKind, e.TargetId }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.SortOrder });
+            entity.Property(e => e.TargetKind).HasConversion<string>();
+            entity.HasOne(e => e.Book).WithMany(e => e.OutlineItems)
+                .HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Act).WithMany().HasForeignKey(e => e.ActId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Chapter).WithMany().HasForeignKey(e => e.ChapterId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationBookMatter>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.Location, e.SortOrder });
+            entity.Property(e => e.Location).HasConversion<string>();
+            entity.Property(e => e.Kind).HasConversion<string>();
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.Book).WithMany(e => e.Matter)
+                .HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationBookImagePlacement>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.TargetKind, e.TargetId, e.PlacementKind, e.SortOrder });
+            entity.HasIndex(e => e.AssetId);
+            entity.Property(e => e.TargetKind).HasConversion<string>();
+            entity.Property(e => e.PlacementKind).HasConversion<string>();
+            entity.Property(e => e.AccessibilityRole).HasConversion<string>();
+            entity.HasOne(e => e.Book).WithMany(e => e.ImagePlacements)
+                .HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Asset).WithMany().HasForeignKey(e => e.AssetId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Act).WithMany().HasForeignKey(e => e.ActId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Chapter).WithMany().HasForeignKey(e => e.ChapterId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationBookCoverDesign>(entity =>
+        {
+            entity.HasIndex(e => e.ProjectId).IsUnique();
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.Book).WithOne(e => e.CoverDesign)
+                .HasForeignKey<PublicationBookCoverDesign>(e => e.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<PublishAsset>(entity =>
@@ -1014,6 +1072,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
         {
             entity.HasIndex(e => new { e.EditionId, e.TargetKind, e.TargetId, e.PlacementKind, e.SortOrder });
             entity.HasIndex(e => e.AssetId);
+            entity.HasIndex(e => new { e.EditionId, e.CorePlacementId }).IsUnique();
             entity.Property(e => e.TargetKind).HasConversion<string>();
             entity.Property(e => e.PlacementKind).HasConversion<string>();
             entity.Property(e => e.AccessibilityRole).HasConversion<string>();
@@ -1021,6 +1080,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Edition)
                 .WithMany(e => e.ImagePlacements)
                 .HasForeignKey(e => e.EditionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.CorePlacement)
+                .WithMany()
+                .HasForeignKey(e => e.CorePlacementId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasOne(e => e.Asset)
@@ -1043,9 +1106,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.Property(e => e.Location).HasConversion<string>();
             entity.Property(e => e.Kind).HasConversion<string>();
             entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasIndex(e => new { e.EditionId, e.CoreMatterId }).IsUnique();
             entity.HasOne(e => e.Edition)
                 .WithMany(e => e.Matter)
                 .HasForeignKey(e => e.EditionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.CoreMatter)
+                .WithMany()
+                .HasForeignKey(e => e.CoreMatterId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -1075,13 +1143,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
 
         modelBuilder.Entity<PublicationRenderJob>(entity =>
         {
-            entity.HasIndex(e => new { e.EditionId, e.CreatedAt });
+            entity.HasIndex(e => new { e.ProjectId, e.TargetKind, e.EditionId, e.CreatedAt });
             entity.HasIndex(e => new { e.Status, e.CreatedAt });
             entity.Property(e => e.Status).HasConversion<string>();
+            entity.Property(e => e.TargetKind).HasConversion<string>();
+            entity.HasOne(e => e.Project)
+                .WithMany(e => e.PublicationRenderJobs)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.Edition)
                 .WithMany(e => e.RenderJobs)
                 .HasForeignKey(e => e.EditionId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<PublicationCoverDesign>(entity =>
@@ -1097,17 +1170,36 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
 
         modelBuilder.Entity<PublicationArtifact>(entity =>
         {
-            entity.HasIndex(e => new { e.EditionId, e.Kind, e.CreatedAt });
+            entity.HasIndex(e => new { e.ProjectId, e.TargetKind, e.EditionId, e.Kind, e.CreatedAt });
             entity.HasIndex(e => new { e.RenderJobId, e.Kind }).IsUnique();
             entity.Property(e => e.Kind).HasConversion<string>();
+            entity.Property(e => e.TargetKind).HasConversion<string>();
+            entity.HasOne(e => e.Project)
+                .WithMany(e => e.PublicationArtifacts)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.Edition)
                 .WithMany(e => e.Artifacts)
                 .HasForeignKey(e => e.EditionId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.SetNull);
             entity.HasOne(e => e.RenderJob)
                 .WithMany(e => e.Artifacts)
                 .HasForeignKey(e => e.RenderJobId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationPreparationJob>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.TargetKind, e.EditionId, e.CreatedAt });
+            entity.HasIndex(e => new { e.Status, e.CreatedAt });
+            entity.Property(e => e.TargetKind).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+            entity.HasOne(e => e.Project).WithMany(e => e.PublicationPreparationJobs)
+                .HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Edition).WithMany()
+                .HasForeignKey(e => e.EditionId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.RenderJob).WithMany()
+                .HasForeignKey(e => e.RenderJobId).OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<PublicationPageMapEntry>(entity =>
@@ -1124,5 +1216,26 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
         {
             entity.HasIndex(e => new { e.MigrationName, e.StartedAt });
         });
+    }
+
+    private void NormalizePublicationTargetOwnership()
+    {
+        var releases = PublicationEditions.Local.ToDictionary(item => item.Id, item => item.ProjectId);
+        var renderJobs = PublicationRenderJobs.Local.ToDictionary(item => item.Id);
+        foreach (var entry in ChangeTracker.Entries<PublicationRenderJob>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            if (entry.Entity.ProjectId != Guid.Empty || entry.Entity.EditionId is not Guid releaseId) continue;
+            if (entry.Entity.Edition?.ProjectId is Guid projectId && projectId != Guid.Empty) entry.Entity.ProjectId = projectId;
+            else if (releases.TryGetValue(releaseId, out projectId)) entry.Entity.ProjectId = projectId;
+            entry.Entity.TargetKind = PublicationTargetKind.Release;
+        }
+        foreach (var entry in ChangeTracker.Entries<PublicationArtifact>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            if (entry.Entity.ProjectId != Guid.Empty) continue;
+            if (entry.Entity.Edition?.ProjectId is Guid projectId && projectId != Guid.Empty) entry.Entity.ProjectId = projectId;
+            else if (entry.Entity.EditionId is Guid releaseId && releases.TryGetValue(releaseId, out projectId)) entry.Entity.ProjectId = projectId;
+            else if (entry.Entity.RenderJobId is Guid renderId && renderJobs.TryGetValue(renderId, out var render)) entry.Entity.ProjectId = render.ProjectId;
+            if (entry.Entity.EditionId is not null) entry.Entity.TargetKind = PublicationTargetKind.Release;
+        }
     }
 }

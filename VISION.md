@@ -51,6 +51,11 @@ external tools.
 
 - Provide approachable defaults for prose books and progressively deeper tools
   for editorial review, page design, illustrated books, and nonfiction.
+- Keep shared bibliographic, structural, matter, design, and front-cover choices
+  in one Core Book. Let optional publication releases inherit that intent live
+  and override only product-specific decisions.
+- Make a private Core reading copy available without implying an ISBN, vendor,
+  package, proof, or publication claim; reserve those concepts for releases.
 - Generate deterministic pagination, real previews, full-wrap covers, EPUB, and
   vendor-specific print artifacts from the semantic manuscript.
 - Preflight fonts, images, color, geometry, metadata, accessibility, and format

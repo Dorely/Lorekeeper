@@ -24,7 +24,10 @@ public sealed record PublicationCoverDesignView(
     string CompositionSceneJson,
     long Revision,
     PublicationCoverTemplate Template,
-    IReadOnlyList<string> Diagnostics);
+    IReadOnlyList<string> Diagnostics)
+{
+    public long? CoreBookRevision { get; init; }
+}
 
 public sealed record PublicationCoverTemplate(
     int PageCount,
@@ -62,24 +65,86 @@ public interface IPublicationCoverService
     Task<PublicationCoverDesignView> PatchElementAsync(Guid projectId, Guid editionId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch, CancellationToken cancellationToken = default);
     Task<CompositionMutationStage> StageSceneAsync(Guid projectId, Guid conversationId, Guid editionId, long expectedRevision, CompositionScene scene, CancellationToken cancellationToken = default);
     Task<PublicationCoverDesignView> ApplySceneStageAsync(Guid projectId, Guid conversationId, Guid stageId, long expectedRevision, CancellationToken cancellationToken = default);
+    Task<PublicationCoverDesignView> CustomizeFromCoreAsync(Guid projectId, Guid editionId, long expectedEditionRevision, CancellationToken cancellationToken = default);
+    Task UseCoreAsync(Guid projectId, Guid editionId, long expectedEditionRevision, CancellationToken cancellationToken = default);
 }
 
 public sealed class PublicationCoverService(
     AppDbContext db,
     IProjectMutationCoordinator projectMutations,
     IPublicationEditionService editions,
+    IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IPublicationPressRuntime pressRuntime) : IPublicationCoverService
 {
+    public PublicationCoverService(
+        AppDbContext db,
+        IProjectMutationCoordinator projectMutations,
+        IPublicationEditionService editions,
+        IPublicationPressRuntime pressRuntime)
+        : this(db, projectMutations, editions, new PublicationEffectiveConfigurationResolver(db), pressRuntime)
+    {
+    }
+
     public async Task<PublicationCoverDesignView> GetAsync(
         Guid projectId,
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
-        var edition = await GetEditionAsync(projectId, editionId, cancellationToken);
+        var edition = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
         var design = await db.PublicationCoverDesigns.AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.EditionId == editionId, cancellationToken)
-            ?? Default(edition);
+            ?? await DefaultAsync(projectId, edition, lockCoreLayers: true, cancellationToken);
         return await ViewAsync(edition, design, cancellationToken);
+    }
+
+    public async Task<PublicationCoverDesignView> CustomizeFromCoreAsync(
+        Guid projectId,
+        Guid editionId,
+        long expectedEditionRevision,
+        CancellationToken cancellationToken = default)
+    {
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        var stored = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
+        PublicationEditionService.EnsureDraft(stored);
+        if (stored.Revision != expectedEditionRevision)
+            throw new DbUpdateConcurrencyException("The publication release changed; reread it before customizing the cover.");
+        var effective = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
+        var design = await db.PublicationCoverDesigns.SingleOrDefaultAsync(
+            item => item.EditionId == editionId,
+            cancellationToken);
+        if (design is null)
+        {
+            design = await DefaultAsync(projectId, effective, lockCoreLayers: false, cancellationToken);
+            db.PublicationCoverDesigns.Add(design);
+        }
+        stored.InheritsCoreCover = false;
+        stored.Revision = checked(stored.Revision + 1);
+        stored.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return await ViewAsync(await GetEffectiveEditionAsync(projectId, editionId, cancellationToken), design, cancellationToken);
+    }
+
+    public async Task UseCoreAsync(
+        Guid projectId,
+        Guid editionId,
+        long expectedEditionRevision,
+        CancellationToken cancellationToken = default)
+    {
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        var stored = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
+        PublicationEditionService.EnsureDraft(stored);
+        if (stored.Revision != expectedEditionRevision)
+            throw new DbUpdateConcurrencyException("The publication release changed; reread it before restoring the Core cover.");
+        var design = await db.PublicationCoverDesigns.SingleOrDefaultAsync(
+            item => item.EditionId == editionId,
+            cancellationToken);
+        if (design is not null)
+            db.PublicationCoverDesigns.Remove(design);
+        stored.InheritsCoreCover = true;
+        stored.SelectedCoverImageId = null;
+        stored.Revision = checked(stored.Revision + 1);
+        stored.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<PublicationCoverDesignView> UpdateAsync(
@@ -90,17 +155,19 @@ public sealed class PublicationCoverService(
     {
         Validate(update);
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var edition = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
+        var storedEdition = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
+        var edition = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
         ValidateProduct(update, edition);
-        PublicationEditionService.EnsureDraft(edition);
+        PublicationEditionService.EnsureDraft(storedEdition);
         var design = await db.PublicationCoverDesigns
             .FirstOrDefaultAsync(candidate => candidate.EditionId == editionId, cancellationToken);
         if (design is null)
         {
             if (update.ExpectedRevision != 0)
                 throw new DbUpdateConcurrencyException("The cover design changed.");
-            design = Default(edition);
+            design = await DefaultAsync(projectId, edition, lockCoreLayers: false, cancellationToken);
             db.PublicationCoverDesigns.Add(design);
+            storedEdition.InheritsCoreCover = false;
         }
         else if (design.Revision != update.ExpectedRevision)
         {
@@ -158,9 +225,10 @@ public sealed class PublicationCoverService(
         Validate(update);
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var edition = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
+        var storedEdition = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
+        var edition = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
         ValidateProduct(update, edition);
-        PublicationEditionService.EnsureDraft(edition);
+        PublicationEditionService.EnsureDraft(storedEdition);
         var design = await db.PublicationCoverDesigns.FirstOrDefaultAsync(
             candidate => candidate.EditionId == editionId,
             cancellationToken);
@@ -168,8 +236,9 @@ public sealed class PublicationCoverService(
         {
             if (update.ExpectedRevision != 0)
                 throw new DbUpdateConcurrencyException("The cover design changed.");
-            design = Default(edition);
+            design = await DefaultAsync(projectId, edition, lockCoreLayers: false, cancellationToken);
             db.PublicationCoverDesigns.Add(design);
+            storedEdition.InheritsCoreCover = false;
         }
         else if (design.Revision != update.ExpectedRevision)
         {
@@ -193,16 +262,16 @@ public sealed class PublicationCoverService(
         design.CompositionSceneJson = System.Text.Json.JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
         design.Revision = checked(design.Revision + 1);
         design.UpdatedAt = DateTime.UtcNow;
-        edition.SelectedCoverImageId = CompositionSceneResolver.Flatten(scene)
+        storedEdition.SelectedCoverImageId = CompositionSceneResolver.Flatten(scene)
             .Where(item => item.Visible && item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
             .OrderBy(item => item.ZIndex)
             .Select(item => item.ImageId)
             .FirstOrDefault();
-        edition.Revision = checked(edition.Revision + 1);
-        edition.UpdatedAt = DateTime.UtcNow;
+        storedEdition.Revision = checked(storedEdition.Revision + 1);
+        storedEdition.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return await ViewAsync(edition, design, cancellationToken);
+        return await ViewAsync(await GetEffectiveEditionAsync(projectId, editionId, cancellationToken), design, cancellationToken);
     }
 
     public async Task<PublicationCoverDesignView> UpdateSceneAsync(
@@ -215,29 +284,33 @@ public sealed class PublicationCoverService(
         var scene = System.Text.Json.JsonSerializer.Deserialize<CompositionScene>(sceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("Cover composition is empty.");
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var edition = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
-        PublicationEditionService.EnsureDraft(edition);
+        var storedEdition = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
+        var edition = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
+        PublicationEditionService.EnsureDraft(storedEdition);
         var design = await db.PublicationCoverDesigns.FirstOrDefaultAsync(item => item.EditionId == editionId, cancellationToken)
-            ?? Default(edition);
+            ?? await DefaultAsync(projectId, edition, lockCoreLayers: false, cancellationToken);
         if (design.Revision != expectedRevision)
             throw new DbUpdateConcurrencyException("The cover composition changed.");
         var template = await TemplateAsync(edition, design, cancellationToken);
         ValidateScene(scene, edition, template);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         if (db.Entry(design).State == EntityState.Detached)
+        {
             db.PublicationCoverDesigns.Add(design);
+            storedEdition.InheritsCoreCover = false;
+        }
         design.CompositionSceneJson = System.Text.Json.JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
         design.Revision = checked(design.Revision + 1);
         design.UpdatedAt = DateTime.UtcNow;
-        edition.SelectedCoverImageId = CompositionSceneResolver.Flatten(scene)
+        storedEdition.SelectedCoverImageId = CompositionSceneResolver.Flatten(scene)
             .Where(item => item.Visible && item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
             .OrderBy(item => item.ZIndex)
             .Select(item => item.ImageId)
             .FirstOrDefault();
-        edition.Revision = checked(edition.Revision + 1);
-        edition.UpdatedAt = DateTime.UtcNow;
+        storedEdition.Revision = checked(storedEdition.Revision + 1);
+        storedEdition.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
-        return await ViewAsync(edition, design, cancellationToken);
+        return await ViewAsync(await GetEffectiveEditionAsync(projectId, editionId, cancellationToken), design, cancellationToken);
     }
 
     public async Task<CompositionMutationStage> StageSceneAsync(
@@ -255,9 +328,10 @@ public sealed class PublicationCoverService(
             .Where(item => item.ProjectId == projectId
                 && (item.ExpiresAt <= DateTime.UtcNow || item.AppliedAt != null))
             .ExecuteDeleteAsync(cancellationToken);
-        var edition = await GetEditionAsync(projectId, editionId, cancellationToken);
+        var edition = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
         var design = await db.PublicationCoverDesigns.AsNoTracking()
-            .FirstOrDefaultAsync(item => item.EditionId == editionId, cancellationToken) ?? Default(edition);
+            .FirstOrDefaultAsync(item => item.EditionId == editionId, cancellationToken)
+            ?? await DefaultAsync(projectId, edition, lockCoreLayers: false, cancellationToken);
         if (design.Revision != expectedRevision)
             throw new DbUpdateConcurrencyException("The cover composition changed.");
         var template = await TemplateAsync(edition, design, cancellationToken);
@@ -306,31 +380,35 @@ public sealed class PublicationCoverService(
             throw new InvalidDataException("The staged cover composition failed its integrity check.");
         var scene = System.Text.Json.JsonSerializer.Deserialize<CompositionScene>(stage.OperationsJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The staged cover composition is empty.");
-        var edition = await GetEditionAsync(projectId, stage.TargetId, cancellationToken, tracked: true);
-        PublicationEditionService.EnsureDraft(edition);
+        var storedEdition = await GetEditionAsync(projectId, stage.TargetId, cancellationToken, tracked: true);
+        var edition = await GetEffectiveEditionAsync(projectId, stage.TargetId, cancellationToken);
+        PublicationEditionService.EnsureDraft(storedEdition);
         var design = await db.PublicationCoverDesigns.FirstOrDefaultAsync(item => item.EditionId == edition.Id, cancellationToken)
-            ?? Default(edition);
+            ?? await DefaultAsync(projectId, edition, lockCoreLayers: false, cancellationToken);
         if (design.Revision != expectedRevision)
             throw new DbUpdateConcurrencyException("The cover composition changed after it was staged.");
         var template = await TemplateAsync(edition, design, cancellationToken);
         ValidateScene(scene, edition, template);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         if (db.Entry(design).State == EntityState.Detached)
+        {
             db.PublicationCoverDesigns.Add(design);
+            storedEdition.InheritsCoreCover = false;
+        }
         design.CompositionSceneJson = System.Text.Json.JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
         design.Revision = checked(design.Revision + 1);
         design.UpdatedAt = DateTime.UtcNow;
-        edition.SelectedCoverImageId = CompositionSceneResolver.Flatten(scene)
+        storedEdition.SelectedCoverImageId = CompositionSceneResolver.Flatten(scene)
             .Where(item => item.Visible && item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
             .OrderBy(item => item.ZIndex)
             .Select(item => item.ImageId)
             .FirstOrDefault();
-        edition.Revision = checked(edition.Revision + 1);
-        edition.UpdatedAt = DateTime.UtcNow;
+        storedEdition.Revision = checked(storedEdition.Revision + 1);
+        storedEdition.UpdatedAt = DateTime.UtcNow;
         db.CompositionMutationStages.Remove(stage);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return await ViewAsync(edition, design, cancellationToken);
+        return await ViewAsync(await GetEffectiveEditionAsync(projectId, edition.Id, cancellationToken), design, cancellationToken);
     }
 
     private async Task ValidateSceneAssetsAsync(
@@ -356,7 +434,7 @@ public sealed class PublicationCoverService(
         var template = await TemplateAsync(edition, design, cancellationToken);
         var diagnostics = new List<string>();
         if (edition.Format == PublicationEditionFormat.Paperback && template.PageCount <= 0)
-            diagnostics.Add("Generate a current interior PDF before producing the full-wrap cover so its spine width is exact.");
+            diagnostics.Add("The full-wrap spine geometry will be finalized from the interior page count during preparation.");
         if (design.BarcodeMode == PublicationBarcodeMode.LorekeeperBarcode
             && !PublicationIsbn.IsValidIsbn13(edition.Isbn))
             diagnostics.Add("Lorekeeper barcode output requires a valid ISBN-13.");
@@ -499,8 +577,14 @@ public sealed class PublicationCoverService(
         var editions = tracked ? db.PublicationEditions : db.PublicationEditions.AsNoTracking();
         return await editions.FirstOrDefaultAsync(
             edition => edition.Id == editionId && edition.ProjectId == projectId,
-            cancellationToken) ?? throw new KeyNotFoundException("Publication edition not found.");
+            cancellationToken) ?? throw new KeyNotFoundException("Publication release not found.");
     }
+
+    private async Task<PublicationEdition> GetEffectiveEditionAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken) =>
+        (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
 
     private static PublicationCoverDesign Default(PublicationEdition edition)
     {
@@ -510,14 +594,48 @@ public sealed class PublicationCoverService(
             Title = edition.TitleOverride,
             Subtitle = edition.Subtitle,
             Author = edition.Author,
-            SpineText = edition.TitleOverride,
+            // A new paperback must remain renderable even when its first interior is
+            // too short for safe spine copy. Users can add spine text after the
+            // calculated template proves that it fits.
+            SpineText = string.Empty,
             BackCopy = edition.Description,
-            BarcodeMode = edition.Format == PublicationEditionFormat.Paperback
-                ? PublicationBarcodeMode.LorekeeperBarcode
-                : PublicationBarcodeMode.None,
+            BarcodeMode = edition.Format != PublicationEditionFormat.Paperback
+                ? PublicationBarcodeMode.None
+                : edition.Vendor == PublicationVendor.IngramSpark
+                    ? PublicationBarcodeMode.LorekeeperBarcode
+                    : PublicationBarcodeMode.VendorOverlay,
         };
         design.CompositionSceneJson = System.Text.Json.JsonSerializer.Serialize(
             CoverCompositionFactory.Create(edition, design),
+            ManuscriptCodec.JsonOptions);
+        return design;
+    }
+
+    private async Task<PublicationCoverDesign> DefaultAsync(
+        Guid projectId,
+        PublicationEdition edition,
+        bool lockCoreLayers,
+        CancellationToken cancellationToken)
+    {
+        var design = Default(edition);
+        if (!edition.InheritsCoreCover)
+            return design;
+        var coreSceneJson = await db.PublicationBookCoverDesigns.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .Select(item => item.CompositionSceneJson)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(coreSceneJson))
+            return design;
+        var coreScene = JsonSerializer.Deserialize<CompositionScene>(coreSceneJson, ManuscriptCodec.JsonOptions)
+            ?? throw new InvalidDataException("The Core cover composition is empty.");
+        var template = await TemplateAsync(edition, design, cancellationToken);
+        design.CompositionSceneJson = JsonSerializer.Serialize(
+            CoverCompositionFactory.CreateReleaseFromCore(
+                edition,
+                design,
+                coreScene,
+                template.PageCount,
+                lockCoreLayers),
             ManuscriptCodec.JsonOptions);
         return design;
     }
@@ -532,7 +650,7 @@ public sealed class PublicationCoverService(
         return Math.Max(0, (int)Math.Round((widthPoints - trim * 2 - bleed * 2) / caliperPoints));
     }
 
-    private static void ValidateScene(
+    internal static void ValidateScene(
         CompositionScene scene,
         PublicationEdition edition,
         PublicationCoverTemplate template)

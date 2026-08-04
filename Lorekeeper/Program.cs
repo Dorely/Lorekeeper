@@ -182,6 +182,7 @@ builder.Services.AddSingleton<IDatabaseMigrationRecoveryService, DatabaseMigrati
 builder.Services.AddSingleton<IManuscriptMigrationService, ManuscriptMigrationService>();
 builder.Services.AddScoped<IVisualCompositionMigrationService, VisualCompositionMigrationService>();
 builder.Services.AddScoped<IAuthoringPageMigrationService, AuthoringPageMigrationService>();
+builder.Services.AddScoped<IPublicationCoreMigrationService, PublicationCoreMigrationService>();
 builder.Services.AddScoped<IProjectImageService, ProjectImageService>();
 builder.Services.AddScoped<IProjectFontService, ProjectFontService>();
 builder.Services.AddScoped<IManuscriptStyleService, ManuscriptStyleService>();
@@ -259,6 +260,9 @@ builder.Services.AddScoped<IPublishExportFormatter, PlainTextPublishFormatter>()
 builder.Services.AddScoped<IPublishExportFormatter, MarkdownPublishFormatter>();
 builder.Services.AddScoped<IPublishExportFormatter, EpubPublishFormatter>();
 builder.Services.AddScoped<IPublishService, PublishService>();
+builder.Services.AddScoped<IPublicationBookService, PublicationBookService>();
+builder.Services.AddScoped<IPublicationReleasePresetService, PublicationReleasePresetService>();
+builder.Services.AddScoped<IPublicationEffectiveConfigurationResolver, PublicationEffectiveConfigurationResolver>();
 builder.Services.AddScoped<IPublicationEditionService, PublicationEditionService>();
 builder.Services.AddScoped<IPublicationActorContext, PublicationActorContext>();
 builder.Services.Configure<PublicationPressOptions>(
@@ -269,6 +273,9 @@ builder.Services.AddSingleton<IPublicationRenderQueue, PublicationRenderQueue>()
 builder.Services.AddScoped<IPublicationRenderService, PublicationRenderService>();
 builder.Services.AddScoped<IPublicationCoverService, PublicationCoverService>();
 builder.Services.AddScoped<IPublicationPackageService, PublicationPackageService>();
+builder.Services.AddSingleton<IPublicationPreparationQueue, PublicationPreparationQueue>();
+builder.Services.AddScoped<IPublicationPreparationService, PublicationPreparationService>();
+builder.Services.AddHostedService<PublicationPreparationWorker>();
 builder.Services.AddScoped<PublicationRenderProcessor>();
 builder.Services.AddHostedService<PublicationRenderWorker>();
 builder.Services.AddScoped<IPublishAssistantTools, PublishAssistantTools>();
@@ -334,12 +341,23 @@ using (var scope = app.Services.CreateScope())
         await visualCompositionMigration.ApplyPendingAsync(db);
     }
 
+    // The Core Book schema change is additive and supplies columns now mapped by the
+    // current model. Apply it before the later authoring/Core transforms inspect
+    // pre-Core rows; the protected Core transformation and cleanup run afterward.
+    var migrationsBeforeAuthoring = (await db.Database.GetAppliedMigrationsAsync()).ToHashSet(StringComparer.Ordinal);
+    if (!migrationsBeforeAuthoring.Contains(PublicationCoreMigrationService.SchemaMigrationId))
+        await db.GetService<IMigrator>().MigrateAsync(PublicationCoreMigrationService.SchemaMigrationId);
+
     var authoringPageMigration = scope.ServiceProvider.GetRequiredService<IAuthoringPageMigrationService>();
     await authoringPageMigration.ApplyPendingAsync(db);
+
+    var publicationCoreMigration = scope.ServiceProvider.GetRequiredService<IPublicationCoreMigrationService>();
+    await publicationCoreMigration.ApplyPendingAsync(db);
 
     var migrationRecovery = scope.ServiceProvider.GetRequiredService<IDatabaseMigrationRecoveryService>();
     if (!await migrationRecovery.IsRecoveryRequiredAsync())
     {
+        await db.GetService<IMigrator>().MigrateAsync(PublicationCoreMigrationService.CleanupMigrationId);
         var embeddingConfiguration = await db.EmbeddingConfigurations.AsNoTracking().FirstOrDefaultAsync();
         var vectorMaintenance = scope.ServiceProvider.GetRequiredService<IVectorStoreMaintenance>();
         vectorMaintenance.Initialize(embeddingConfiguration?.Dimensions);

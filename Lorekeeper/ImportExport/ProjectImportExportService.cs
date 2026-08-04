@@ -149,6 +149,12 @@ public sealed class ProjectImportExportService(
                     .Select(asset => ProjectImage(asset))
                     .ToListAsync(cancellationToken),
             EntityVisualExamples = exportedVisualExamples,
+            PublicationBook = kind == ProjectExportKind.Full
+                ? ProjectPublicationBook(await db.PublicationBooks.AsNoTracking()
+                    .Include(item => item.OutlineItems).Include(item => item.Matter)
+                    .Include(item => item.ImagePlacements).Include(item => item.CoverDesign)
+                    .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken))
+                : null,
             PublicationEditions = kind == ProjectExportKind.Full
                 ? (await db.PublicationEditions
                     .AsNoTracking()
@@ -159,8 +165,7 @@ public sealed class ProjectImportExportService(
                     .Include(edition => edition.ImagePlacements)
                     .Include(edition => edition.CoverDesign)
                     .Where(profile => profile.ProjectId == projectId)
-                    .OrderByDescending(profile => profile.IsDefault)
-                    .ThenBy(profile => profile.CreatedAt)
+                    .OrderBy(profile => profile.CreatedAt)
                     .ToListAsync(cancellationToken))
                     .Select(ProjectPublicationEdition)
                     .ToList()
@@ -386,14 +391,14 @@ public sealed class ProjectImportExportService(
             asset.UpdatedAt);
 
     private static ProjectExportPublicationEdition ProjectPublicationEdition(PublicationEdition profile) =>
-        new(
+        new ProjectExportPublicationEdition(
             profile.Id,
             profile.Name,
             profile.Format,
             profile.Vendor,
             profile.VendorProfileVersion,
             profile.Status,
-            profile.IsDefault,
+            false,
             profile.Revision,
             profile.TitleOverride,
             profile.Subtitle,
@@ -443,7 +448,11 @@ public sealed class ProjectImportExportService(
                     item.ManuscriptJson,
                     item.Revision,
                     item.IsIncluded,
-                    item.SortOrder))
+                    item.SortOrder)
+                {
+                    CoreMatterId = item.CoreMatterId,
+                    IsExcluded = item.IsExcluded,
+                })
                 .ToList(),
             profile.StyleMappings
                 .OrderBy(item => item.SemanticRole)
@@ -472,7 +481,11 @@ public sealed class ProjectImportExportService(
                     item.AltText,
                     item.Decorative,
                     item.Language,
-                    item.AccessibilityRole))
+                    item.AccessibilityRole)
+                {
+                    CorePlacementId = item.CorePlacementId,
+                    IsExcluded = item.IsExcluded,
+                })
                 .ToList(),
             profile.CoverDesign is null ? null : new ProjectExportCoverDesign(
                 profile.CoverDesign.Title,
@@ -485,7 +498,34 @@ public sealed class ProjectImportExportService(
                 profile.CoverDesign.ImageCropXPercent,
                 profile.CoverDesign.ImageCropYPercent,
                 profile.CoverDesign.CompositionSceneJson,
-                profile.CoverDesign.Revision));
+                profile.CoverDesign.Revision))
+        {
+            OverrideFields = ParseOverrideFields(profile.OverrideFieldsJson),
+            InheritsCoreCover = profile.InheritsCoreCover,
+        };
+
+    private static ProjectExportPublicationBook? ProjectPublicationBook(PublicationBook? book) => book is null ? null : new(
+        book.Revision, book.Title, book.Subtitle, book.Author, book.Language, book.Publisher, book.Copyright,
+        book.Description, book.IncludeTableOfContents, book.IncludeVisibleTableOfContents, book.IncludeActSynopses,
+        book.IncludeChapterSynopses, book.IncludeActHeadings, book.IncludeChapterHeadings, book.NumberActs,
+        book.NumberChapters, book.TitlePageMode,
+        book.OutlineItems.OrderBy(item => item.SortOrder).Select(item => new ProjectExportEditionOutlineItem(
+            item.Id, item.TargetKind, item.TargetId, item.IsIncluded, item.SortOrder)).ToList(),
+        book.Matter.OrderBy(item => item.Location).ThenBy(item => item.SortOrder).Select(item => new ProjectExportPublicationMatter(
+            item.Id, item.Location, item.Kind, item.Title, item.ManuscriptJson, item.Revision, item.IsIncluded, item.SortOrder)).ToList(),
+        book.ImagePlacements.OrderBy(item => item.SortOrder).Select(item => new ProjectExportPublicationImagePlacement(
+            item.Id, item.AssetId, item.TargetKind, item.TargetId, item.PlacementKind, item.Caption, item.SortOrder,
+            JsonSerializer.Deserialize<FigurePresentation>(item.PresentationJson, ManuscriptCodec.JsonOptions) ?? new FigurePresentation(),
+            item.AltText, item.Decorative, item.Language, item.AccessibilityRole)).ToList(),
+        book.CoverDesign is null ? null : new ProjectExportCoverDesign(
+            book.Title, book.Subtitle, book.Author, string.Empty, string.Empty, book.CoverDesign.BackgroundColor,
+            PublicationBarcodeMode.None, 50, 50, book.CoverDesign.CompositionSceneJson, book.CoverDesign.Revision));
+
+    private static List<PublicationEditionOverrideField> ParseOverrideFields(string json)
+    {
+        try { return JsonSerializer.Deserialize<List<PublicationEditionOverrideField>>(json) ?? []; }
+        catch (JsonException) { return []; }
+    }
 
     private static ProjectExportChapter ProjectChapter(
         Chapter chapter,

@@ -1,6 +1,6 @@
 # End-to-end book publishing roadmap
 
-Last updated: 2026-07-31
+Last updated: 2026-08-03
 
 ## Destination
 
@@ -66,11 +66,13 @@ consequential actions always require explicit user approval.
 - Remove superseded runtime paths after cutover; do not leave indefinite
   dual-write or compatibility branches.
 
-### One source, multiple editions
+### One source, Core intent, multiple releases
 
 The semantic manuscript is authoritative. PDF, EPUB, HTML previews, search
-fragments, page maps, and cover dimensions are versioned projections. Each
-publication edition owns its product-specific choices and artifacts.
+fragments, page maps, and cover dimensions are versioned projections. Core Book
+owns shared publication intent and a private reading copy. Optional releases
+inherit Core live and own only their product-specific choices, identifiers,
+proofs, packages, and publication artifacts.
 
 ### In-app production
 
@@ -89,7 +91,7 @@ conversion/preflight tool.
 
 | Phase | Outcome | Current status |
 |---|---|---|
-| 1. Publisher-ready novel foundation | Structured editing and independently validated paperback/EPUB artifacts for a narrow certified scope | Implemented; native release-matrix verification pending |
+| 1. Publisher-ready novel foundation | Structured editing, Core Book/reading copy, and independently validated paperback/EPUB/PDF release artifacts for a narrow certified scope | Implemented; native release-matrix verification pending |
 | 2. Professional editing and proofing | Track changes, comments, comparisons, house style, and page-proof workflows | Researched |
 | 3. Illustrated and picture-book design | Semantic Figures, Designed Pages, cover composition, color/bleed, fixed-layout EPUB, and tagged Digital PDF | Implemented core; advanced DTP additions deferred |
 | 4. Nonfiction and reference books | Notes, citations, tables, figures, cross-references, generated references, equations, and code | Researched |
@@ -251,7 +253,7 @@ Implemented in the application on 2026-07-30 and subsequently advanced to
 manuscript schema v4 by Phase 3. Stable IDs, revisions, migration/recovery,
 assistant operations, contest/revision, import, and projection paths use the
 shared manuscript service. The authorized fixture suite covers codec and mark
-behavior, WAL migration/restore, versioned visual/authoring cutover, and current v15
+behavior, WAL migration/restore, versioned visual/authoring/Core cutover, and current v16
 serialization. This status does not close the release gate below:
 production-like copied-database rehearsal and the remaining historical/export,
 permission, retention, failure-injection, and projection evidence are required
@@ -317,8 +319,8 @@ Deliverables:
 - semantic Markdown/EPUB projection so authored block/mark/figure intent is not
   flattened at the existing publishing boundary;
 - project export introduced semantic style round-tripping in v9; the current
-  v15 format also carries manuscript-v4 project page setup, compositions,
-  editions, cover scenes, and complete custom-font binaries, with isolated older
+  v16 format also carries manuscript-v4 project page setup, compositions,
+  Core Book, sparse release overlays, cover scenes, and complete custom-font binaries, with isolated older
   adapters;
 - removal of the temporary textarea adapter after every editor workflow uses
   schema-driven transactions (implemented);
@@ -339,43 +341,50 @@ same services.
 Gate: no raw HTML authority, no direct database mutation, and no divergence
 between manual and assistant edits.
 
-#### 4. Publication editions and book structure
+#### 4. Core Book, publication releases, and book structure
 
 Status: `Implementation complete; release validation pending`
 
-Evolve the one-profile Publish workspace into edition-scoped configuration.
+Provide one shared Core Book and layer optional product releases over it.
 
 Deliverables:
 
-- one-to-many `PublicationEdition` model with a safely migrated default;
-- an edition-specific migration journal and recovery boundary independent of
+- one revisioned `PublicationBook` per project for shared metadata, content,
+  matter, placements, presentation, and the reusable front cover;
+- optional paperback, EPUB ebook, and PDF ebook releases with live field-level
+  inheritance, explicit-empty/reset semantics, and sparse collection overlays;
+- release and Core-specific migration journals and recovery boundaries independent of
   the completed manuscript migration;
-- conversion of the optional zero-or-one `PublishProfile` and all current
-  project-scoped selections, placements, and cover references, creating one
-  default edition when a project has publishing rows but no profile;
-- format, vendor/profile version, trim, binding, paper, ink, bleed, margins,
-  metadata, identifier, and status;
+- conversion of the historical optional `PublishProfile` into a release,
+  followed by a protected Core migration that chooses that historical default
+  only as seed data and then removes default-release runtime state;
+- release-owned format, destination, internally managed profile, trim, binding,
+  paper, ink, bleed, identifier, status, artifacts, packages, and proofs;
 - installed-profile defaults for new paperbacks (6 × 9 in, 0.75 in margins,
   11 pt body text, and 1.4 line height);
-- edition-specific included content and order;
+- Core content and order with release rows only for changed inclusion/order;
 - generated title, copyright, and contents pages plus a front/back-matter
   builder for dedication, epigraph, acknowledgments, about-author, also-by,
   references, and custom matter; generated page kinds are reserved so they
   cannot be duplicated by user-authored matter;
-- Book Text Style mappings and overrides per edition;
+- project-owned Book Text Styles with sparse release overrides;
 - artifact/proof staleness derived from content, settings, assets, renderer, and
   profile versions;
 - edition clone, immutable archive, compare, and audit history; archived
   artifacts remain readable/exportable and changes continue through a clone.
-- project export introduced editions and edition-style mappings in v10; the
-  current v15 format retains isolated older import adapters.
+- a private tagged Core reading PDF with no publication or ISBN claim;
+- centralized safe release presets and one reconnectable **Prepare files** job;
+- project export introduced release rows in v10; current v16 exports Core Book
+  plus sparse overlays and retains isolated older import adapters.
 
-Assistant parity: a dedicated Publish assistant can read and operate the entire
-edition/matter/style surface through the owning services, including edition-
-migration status and diagnostics. Destructive recovery remains user-confirmed.
+Assistant parity: the Publish assistant operates Core by default, can create and
+customize releases through compact revision-safe tools, and cannot select raw
+profiles, invent ISBNs, or approve proofs. Destructive recovery remains
+user-confirmed.
 
-Gate: EPUB and two paperback editions can share source content while retaining
-independent settings and identifiers.
+Gate: Core works without releases; inherited values update live; explicit
+overrides remain stable; all release products can prepare files while retaining
+independent identifiers and proof state.
 
 #### 5. Deterministic novel typesetting and real PDF output
 
@@ -587,7 +596,7 @@ Implemented:
   captions, alternatives, and composition content in reading order;
 - compact, revision-safe Outline, Editor, Images, and Publish assistant tools,
   one-use persisted staging for large scenes, and genre-aware Outline guidance;
-- guarded protected-backup migration and v15 import/export cutover.
+- guarded protected-backup migration and v16 Core/release import/export cutover.
 
 Deferred without changing the semantic/scene ownership model:
 

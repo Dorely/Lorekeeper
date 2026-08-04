@@ -65,13 +65,15 @@ public sealed class PublicationEditionMigrationService(
             db.ChangeTracker.Clear();
             await db.Database.OpenConnectionAsync(cancellationToken);
             await EnsureHealthyAsync((SqliteConnection)db.Database.GetDbConnection(), cancellationToken);
-            var targetCounts = await ReadTargetCountsAsync(db, cancellationToken);
+            var targetCounts = await ReadTargetCountsAsync(
+                (SqliteConnection)db.Database.GetDbConnection(),
+                cancellationToken);
             var targetHash = await ReadShapeHashAsync(
                 (SqliteConnection)db.Database.GetDbConnection(),
                 legacy: false,
                 cancellationToken);
             Validate(sourceCounts, targetCounts, sourceHash, targetHash);
-            await ValidateMatterAsync(db, cancellationToken);
+            await ValidateMatterAsync((SqliteConnection)db.Database.GetDbConnection(), cancellationToken);
 
             db.PublicationEditionMigrationJournals.Add(new PublicationEditionMigrationJournal
             {
@@ -240,10 +242,10 @@ public sealed class PublicationEditionMigrationService(
         await db.Database.OpenConnectionAsync(cancellationToken);
         var connection = (SqliteConnection)db.Database.GetDbConnection();
         await EnsureHealthyAsync(connection, cancellationToken);
-        var target = await ReadTargetCountsAsync(db, cancellationToken);
+        var target = await ReadTargetCountsAsync(connection, cancellationToken);
         var targetHash = await ReadShapeHashAsync(connection, legacy: false, cancellationToken);
         Validate(marker.SourceCounts, target, marker.SourceHash, targetHash);
-        await ValidateMatterAsync(db, cancellationToken);
+        await ValidateMatterAsync(connection, cancellationToken);
         if (!await db.PublicationEditionMigrationJournals.AnyAsync(
             journal => journal.MigrationName == MigrationName && journal.Status == "Completed",
             cancellationToken))
@@ -370,13 +372,20 @@ public sealed class PublicationEditionMigrationService(
                 : UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 
-    private static async Task ValidateMatterAsync(AppDbContext db, CancellationToken cancellationToken)
+    private static async Task ValidateMatterAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
-        var matter = await db.PublicationMatter.AsNoTracking().ToListAsync(cancellationToken);
-        foreach (var item in matter)
-            _ = Manuscripts.ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id, ManuscriptJson, Revision FROM PublicationMatter;";
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = Guid.Parse(reader.GetString(0));
+                _ = Manuscripts.ManuscriptCodec.Deserialize(reader.GetString(1), id, reader.GetInt64(2));
+            }
+        }
         var foreignKeyFailures = await ScalarAsync(
-            (SqliteConnection)db.Database.GetDbConnection(),
+            connection,
             "SELECT COUNT(*) FROM pragma_foreign_key_check;",
             cancellationToken);
         if (foreignKeyFailures != 0)
@@ -421,13 +430,16 @@ public sealed class PublicationEditionMigrationService(
     }
 
     private static async Task<MigrationCounts> ReadTargetCountsAsync(
-        AppDbContext db,
-        CancellationToken cancellationToken) =>
-        new(
-            await db.PublicationEditions.CountAsync(cancellationToken),
-            await db.PublicationEditionOutlineItems.CountAsync(cancellationToken),
-            await db.PublicationImagePlacements.CountAsync(cancellationToken),
-            await db.PublicationEditions.CountAsync(cancellationToken));
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var releases = await ScalarAsync(connection, "SELECT COUNT(*) FROM PublicationEditions;", cancellationToken);
+        return new(
+            releases,
+            await ScalarAsync(connection, "SELECT COUNT(*) FROM PublicationEditionOutlineItems;", cancellationToken),
+            await ScalarAsync(connection, "SELECT COUNT(*) FROM PublicationImagePlacements;", cancellationToken),
+            releases);
+    }
 
     private static async Task<string> ReadShapeHashAsync(
         SqliteConnection connection,

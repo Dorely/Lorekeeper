@@ -119,10 +119,10 @@ public sealed class PublishChatServiceTests
         var targetEditionId = Guid.NewGuid();
         var tool = AIFunctionFactory.Create(
             method: (Guid editionId) => """{"revision":8}""",
-            name: "update_publication_edition");
+            name: "patch_publication_release_overrides");
         var client = new ScriptedChatClient(
-            ToolCall("call-1", "update_publication_edition", targetEditionId),
-            Complete("The edition was updated."));
+            ToolCall("call-1", "patch_publication_release_overrides", targetEditionId),
+            Complete("The release was updated."));
         var fixture = Fixture.With(client, new ToolCatalogStub([tool]));
 
         var updates = await CollectAsync(fixture.Service.SendAsync(
@@ -134,7 +134,7 @@ public sealed class PublishChatServiceTests
         Assert.Contains(updates, update => update is PublishToolCallStarted
         {
             CallId: "call-1",
-            ToolName: "update_publication_edition",
+            ToolName: "patch_publication_release_overrides",
         });
         var completed = Assert.Single(updates.OfType<PublishToolCallCompleted>());
         Assert.Null(completed.Error);
@@ -176,44 +176,33 @@ public sealed class PublishChatServiceTests
     public void PromptAndMutationNoticesEnforceCollaborativeRevisionAwareBehavior()
     {
         Assert.Contains("Execute explicit instructions directly", PublishChatService.WorkflowInstructions);
-        Assert.Contains("obtain agreement before mutating", PublishChatService.WorkflowInstructions);
-        Assert.Contains("revision conflict", PublishChatService.WorkflowInstructions);
+        Assert.Contains("Ask only for a genuinely material unknown", PublishChatService.WorkflowInstructions);
+        Assert.Contains("After a conflict", PublishChatService.WorkflowInstructions);
         Assert.Contains("reread", PublishChatService.WorkflowInstructions);
         Assert.Contains("cannot approve", PublishChatService.WorkflowInstructions);
-        Assert.Contains("internally validate KDP PDF 1.7", PublishChatService.WorkflowInstructions);
+        Assert.Contains("application-managed", PublishChatService.WorkflowInstructions);
         Assert.Contains("vendor acceptance", PublishChatService.WorkflowInstructions);
 
         var editionId = Guid.NewGuid();
         var created = PublishChatService.TryMutationNotice(
-            "create_publication_edition",
+            "create_publication_release",
             "{}",
             $$"""{"id":"{{editionId}}"}""");
         Assert.Equal(new PublishWorkspaceMutated(editionId, SelectEdition: true), created);
 
         var updated = PublishChatService.TryMutationNotice(
-            "update_publication_edition",
-            $$"""{"editionId":"{{editionId}}"}""",
+            "patch_publication_release_overrides",
+            $$"""{"releaseId":"{{editionId}}"}""",
             "{}");
         Assert.Equal(new PublishWorkspaceMutated(editionId, SelectEdition: false), updated);
         Assert.Equal(
-            PublishWorkspaceMutationKind.Render,
-            PublishChatService.TryMutationNotice(
-                "request_publication_render",
-                $$"""{"editionId":"{{editionId}}"}""",
-                "{}")?.Kind);
-        Assert.Equal(
-            PublishWorkspaceMutationKind.Preflight,
-            PublishChatService.TryMutationNotice(
-                "preflight_publication_edition",
-                $$"""{"editionId":"{{editionId}}"}""",
-                "{}")?.Kind);
-        Assert.Equal(
             PublishWorkspaceMutationKind.Package,
             PublishChatService.TryMutationNotice(
-                "build_publication_package",
-                $$"""{"editionId":"{{editionId}}"}""",
+                "prepare_publication_files",
+                $$"""{"releaseId":"{{editionId}}"}""",
                 "{}")?.Kind);
-        Assert.Null(PublishChatService.TryMutationNotice("read_publication_edition", "{}", "{}"));
+        Assert.NotNull(PublishChatService.TryMutationNotice("patch_publication_book", "{}", "{}"));
+        Assert.Null(PublishChatService.TryMutationNotice("read_publication_release", "{}", "{}"));
     }
 
     [Fact]

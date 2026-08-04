@@ -222,7 +222,7 @@ supersedes the older one.
 `IProjectPageSetupService` owns each project's authoring width, height, margins,
 body typography, preset selection, and revision. New projects start at 6 x 9 in.
 This setup drives chapter preview, Figures, new Designed Pages, and authoring-time
-generation without creating or selecting a publication edition.
+generation without creating or selecting a publication release.
 `ICompositionService` owns Designed Page semantic fragments exactly once and
 stores revisioned `PageCompositionVariant` scenes by exact geometry
 fingerprint. Text objects bind stable block/range IDs in that fragment, so
@@ -291,22 +291,38 @@ metadata is never classified as a physical layout target.
 Provider output validation has a separate configurable 64 MiB default byte
 boundary rather than inheriting the smaller user-upload limit, so a valid
 high-detail generated raster is not rejected after provider completion.
-`IPublicationEditionService` owns the one-to-many paperback, EPUB, and Digital
-PDF edition aggregate: product settings and identifiers, independently ordered
-content, semantic front/back matter, Book Text Style mappings, edition-only image
-placements, revision tokens, cloning, archival, comparison, audit history, and
-deterministic source fingerprints. `IPublishService` is projection/export-only;
-UI and assistant mutations use owning services rather than parallel publish
-logic. Digital PDF defaults to uniform edition geometry and can explicitly
-permit independent Designed Page boxes; paperback leaves are always uniform.
-Archived editions are immutable at every owning mutation boundary, including
-cover, package-build, and proof writes; their existing artifacts remain readable
-and exportable, and cloning creates the editable continuation. New paperback
-editions use their vendor-owned profile defaults of 6 × 9 in, 0.75 in
-margins, 11 pt body text, and 1.4 line height.
-Project export v15 writes manuscript-v4 documents, project page setup, page
-compositions and exact geometry variants with active authoring variants, cover
-scenes, the complete edition aggregate, Book Text Styles,
+`IPublicationBookService` owns the one-to-one revisioned Core Book: shared
+metadata, content and reading order, title/contents and heading presentation,
+semantic front/back matter, opening/ending placements, and a reusable front
+cover. Project page setup and Book Text Styles remain the Core geometry and
+typography owners. Core Book exists even when the project has no publication
+release and can produce only a private `ReadingPdf`, never a publication package
+or ISBN claim.
+`IPublicationEditionService` owns optional paperback, EPUB ebook, and PDF ebook
+release aggregates. Releases retain destination, internal immutable profile,
+ISBN, product settings, status, artifacts, packages, proofs, sparse field and
+collection overrides, cloning, archival, comparison, and audit history.
+`IPublicationEffectiveConfigurationResolver` combines Core with explicit
+overrides at read/render time. Absence means inherit, optional text can be
+explicitly empty, and reset removes the override. Core collection additions
+flow into releases unless excluded. Core mutations stale only releases whose
+effective source fingerprint changes. Digital PDF defaults to uniform release
+geometry and can explicitly permit independent Designed Page boxes; paperback
+leaves are always uniform.
+`IPublicationReleasePresetService` creates releases from only product type and,
+for paperback, destination. Application-owned profile versions and bleed policy
+are not normal UI or assistant inputs. `IPublicationPreparationService` owns
+persisted reconnectable one-action jobs: Core compiles/renders/validates its
+reading copy; paperback renders and packages interior/full-wrap files; EPUB
+exports, structurally validates, and packages; PDF ebook renders and packages
+one cover-plus-book PDF. It reuses current artifacts and returns plain-language
+blocking actions. `IPublishService` remains projection/export-only.
+Archived releases are immutable at every owning mutation boundary; their
+existing artifacts remain readable and exportable, and cloning creates the
+editable continuation.
+Project export v16 writes manuscript-v4 documents, project page setup, page
+compositions and exact geometry variants with active authoring variants, Core
+Book, sparse release overlays and cover scenes, Book Text Styles,
 visual references, and project-owned font families/faces with binary hashes.
 An isolated versioned transformer maps earlier visual structures into the
 current model; earlier structured and text adapters remain import-only
@@ -433,9 +449,14 @@ Malformed markers are quarantined: a pending v15 restarts from a fresh protected
 snapshot, while an already-applied cutover restores its newest protected source
 backup into the existing projectless recovery shell.
 
-`PublicationCoverService` owns the one-to-one revisioned cover aggregate and its
-shared structured scene. Canonical title, subtitle, author, spine, and back copy
-remain bindings, not duplicated frame text. Paperback geometry derives the
+`PublicationBookService` owns the Core front-cover scene. EPUB and PDF ebook
+releases inherit it until customized; paperback releases project it into the
+front panel while retaining release-owned spine, back, and barcode regions.
+Existing release covers and **Customize front** create explicit local
+overrides; inherited Core layers are read-only in the release workspace.
+`PublicationCoverService` owns each release cover override and its shared
+structured scene. Canonical title, subtitle, author, spine, and back copy remain
+bindings, not duplicated frame text. Paperback geometry derives the
 back/spine/front surface, bleed, safe zones, folds, and barcode reserve from the
 current interior page count, trim, paper, vendor, and profile; Digital PDF and
 EPUB use a front-only surface. Constraint-bound objects reflow when geometry
@@ -510,14 +531,17 @@ runtime.
 conversation and uses the shared turn runtime for streaming, cancellation,
 reconnection, image attachments, and text-only cross-turn replay. The two-column
 Publish workspace flushes pending manual autosaves before each turn and refreshes
-its selected edition and artifact state from structured mutation notices. Manual
+its selected Core/release target and artifact state from structured mutation notices. Manual
 publishing mutations are locked for the duration of a Publish turn, render state
-is re-read after autosave, and assistant render/package changes reconnect polling,
-preflight, and current artifact downloads.
-`PublishAssistantTools` exposes edition, matter, style, placement, Figure,
-composition, exact geometry, cover scene, target-bound generation, render,
-validation, package, audit, comparison, and export services with the same IDs,
-revisions, fingerprints, and diagnostics as the UI. Outline, Editor, Images, and
+is re-read after autosave, and assistant preparation changes reconnect polling
+and current artifact downloads.
+`PublishAssistantTools` exposes compact Core/release reads and revision-safe
+patches, sparse content/matter/placement/cover operations, readiness,
+preparation, cancellation, and artifact metadata. Tool results contain changed
+IDs/fields, revisions, prioritized diagnostic counts, and refresh notices rather
+than complete unchanged records. Raw profile selection and low-level
+render/preflight/package orchestration are not assistant capabilities. Proof
+approval and ISBN invention remain unavailable. Outline, Editor, Images, and
 Publish share compact paginated reads and revision-aware mutations. Large scene
 payloads are persisted once as project/conversation-scoped, hashed, expiring,
 non-replayable stages; preview returns a stage ID and compact diagnostics, and
@@ -628,9 +652,25 @@ appearance from an existing composition surface, then a default publication
 geometry, then 6 x 9 in. Its protected migration validates semantic text and
 hashes, scene/image ownership, references, protected row counts, artifacts,
 packages, proofs, and foreign keys before journaling success. Existing artifact
-bytes and hashes stay unchanged and become Legacy. Project export v15 contains
-only the current v4/page-setup/composition model; older formats remain
-importable only through isolated versioned transformers.
+bytes and hashes stay unchanged and become Legacy.
+
+The Core Book cutover uses an additive schema followed by the guarded
+`PublicationCoreMigrationService` and a cleanup migration. For each project it
+selects the former default release, then oldest release, then project/Book Brief
+defaults as its source. It creates exactly one Core Book, moves equal shared
+metadata/content/matter/placements into Core, converts every release to sparse
+overrides while comparing its complete effective projection, and retains every
+existing release cover as an explicit override. It generalizes jobs, artifacts,
+page maps, and covers to Core or release target references and marks existing
+artifacts Legacy without changing their bytes or hashes. The protected journal
+also validates packages, audits, proofs, chat rows, row ownership, and foreign
+keys. Only after successful validation does the cleanup remove the obsolete
+default-release flag and duplicated-field runtime dependency. A mismatch opens
+the projectless recovery shell with the original backup protected.
+
+Project export v16 contains only the current v4/page-setup/composition model,
+Core Book, sparse release overlays, and target-aware publication records; older
+formats remain importable only through isolated versioned transformers.
 The manuscript migration owner targets its historical EF schema only when that
 schema migration itself is pending; a later unrelated EF migration never causes
 the startup orchestrator to downgrade current application tables. This preserves
@@ -656,7 +696,7 @@ chapter heading into a subheading. Figure blocks own a project image ID,
 alternative/decorative decisions, language/role, presentation, and caption
 content. Designed Page blocks reference project-owned compositions. Manuscript
 saves and assistant previews validate image and composition ownership; image
-deletion refuses live Figure, scene, cover, and edition-placement references; v15
+deletion refuses live Figure, scene, cover, and release-placement references; v16
 imports preflight and remap figure asset IDs. Current Markdown and EPUB
 publication projections consume the structured manuscript rather than flattening
 these blocks and marks through the plain-text projection.

@@ -19,7 +19,14 @@ public sealed record PublishWorkspaceView(
     IReadOnlyList<PublicationImagePlacementView> Placements,
     IReadOnlyList<PublicationMatterView> Matter,
     IReadOnlyList<PublicationEditionStyleMappingView> StyleMappings,
-    string SourceFingerprint);
+    string SourceFingerprint)
+{
+    public IReadOnlySet<PublicationEditionOverrideField> OverrideFields { get; init; } = new HashSet<PublicationEditionOverrideField>();
+    public bool HasContentOverrides { get; init; }
+    public bool HasMatterOverrides { get; init; }
+    public bool HasPlacementOverrides { get; init; }
+    public bool HasStyleOverrides { get; init; }
+}
 
 public sealed record PublicationEditionSummary(
     Guid Id,
@@ -27,7 +34,6 @@ public sealed record PublicationEditionSummary(
     PublicationEditionFormat Format,
     PublicationVendor Vendor,
     PublicationEditionStatus Status,
-    bool IsDefault,
     long Revision,
     double PageWidthInches,
     double PageHeightInches,
@@ -42,7 +48,6 @@ public sealed record PublicationEditionView(
     PublicationVendor Vendor,
     string VendorProfileVersion,
     PublicationEditionStatus Status,
-    bool IsDefault,
     long Revision,
     string ProjectName,
     string ProjectSlug,
@@ -73,7 +78,10 @@ public sealed record PublicationEditionView(
     PublicationPaper Paper,
     PublicationInk Ink,
     bool Bleed,
-    bool AllowDesignedPageOverrides);
+    bool AllowDesignedPageOverrides)
+{
+    public bool InheritsCoreCover { get; init; }
+}
 
 public sealed record PublicationEditionUpdate(
     string TitleOverride,
@@ -113,6 +121,37 @@ public sealed record PublicationEditionCreate(
     string Name,
     PublicationEditionFormat Format,
     PublicationVendor Vendor = PublicationVendor.Generic);
+
+public sealed record PublicationReleaseOverridePatch(
+    long ExpectedRevision,
+    string? Name = null,
+    PublicationVendor? Destination = null,
+    string? Isbn = null,
+    PublicationPaper? Paper = null,
+    PublicationInk? Ink = null,
+    bool? AllowDesignedPageOverrides = null,
+    string? Title = null,
+    string? Subtitle = null,
+    string? Author = null,
+    string? Language = null,
+    string? Publisher = null,
+    string? Copyright = null,
+    string? Description = null,
+    bool? IncludeTableOfContents = null,
+    bool? IncludeVisibleTableOfContents = null,
+    bool? IncludeActSynopses = null,
+    bool? IncludeChapterSynopses = null,
+    bool? IncludeActHeadings = null,
+    bool? IncludeChapterHeadings = null,
+    bool? NumberActs = null,
+    bool? NumberChapters = null,
+    PublishTitlePageMode? TitlePageMode = null,
+    double? PageWidthInches = null,
+    double? PageHeightInches = null,
+    double? PageMarginInches = null,
+    double? BodyFontSizePoints = null,
+    double? BodyLineHeight = null,
+    IReadOnlyList<PublicationEditionOverrideField>? ResetFields = null);
 
 public sealed record PublicationEditionCompareView(
     PublicationEditionSummary Left,

@@ -15,7 +15,7 @@ namespace Lorekeeper.Publish;
 
 public sealed record PublicationRenderJobView(
     Guid Id,
-    Guid EditionId,
+    Guid? EditionId,
     PublicationRenderStatus Status,
     string SourceFingerprint,
     string RendererVersion,
@@ -72,8 +72,11 @@ public interface IPublicationRenderService
         PublicationVendor? vendor = null);
     PublicationPressDescription GetRuntimeDescription();
     Task<PublicationRenderJobView> RequestAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
+    Task<PublicationRenderJobView> RequestCoreAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<PublicationRenderJobView> CancelAsync(Guid projectId, Guid editionId, Guid jobId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PublicationRenderJobView>> ListAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PublicationRenderJobView>> ListCoreAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<PublicationRenderJobView> CancelCoreAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default);
     Task<PublicationRenderJobView> GetAsync(Guid projectId, Guid editionId, Guid jobId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PublicationPageMapView>> GetPageMapAsync(Guid projectId, Guid editionId, Guid jobId, CancellationToken cancellationToken = default);
     Task<PublicationRenderComparison> CompareAsync(Guid projectId, Guid editionId, Guid leftJobId, Guid rightJobId, CancellationToken cancellationToken = default);
@@ -138,10 +141,21 @@ public sealed class PublicationRenderQueue : IPublicationRenderQueue
 public sealed class PublicationRenderService(
     AppDbContext db,
     IPublicationEditionService editions,
+    IPublicationBookService books,
     IPublicationRenderQueue queue,
     IPublicationPressRuntime pressRuntime,
     IProjectMutationCoordinator projectMutations) : IPublicationRenderService
 {
+    public PublicationRenderService(
+        AppDbContext db,
+        IPublicationEditionService editions,
+        IPublicationRenderQueue queue,
+        IPublicationPressRuntime pressRuntime,
+        IProjectMutationCoordinator projectMutations)
+        : this(db, editions, new PublicationBookService(db, projectMutations), queue, pressRuntime, projectMutations)
+    {
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public PublicationPressRuntimeReadiness GetRuntimeReadiness(
@@ -159,6 +173,62 @@ public sealed class PublicationRenderService(
 
     public PublicationPressDescription GetRuntimeDescription() => pressRuntime.GetDescription();
 
+    public async Task<PublicationRenderJobView> RequestCoreAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        _ = await books.GetOrCreateAsync(projectId, cancellationToken);
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        var runtimeReadiness = GetRuntimeReadiness(PublicationEditionFormat.DigitalPdf, PublicationVendor.Generic);
+        if (!runtimeReadiness.IsReady)
+            throw new InvalidOperationException(runtimeReadiness.Message);
+        if (await db.PublicationRenderJobs.AnyAsync(job => job.ProjectId == projectId
+            && job.TargetKind == PublicationTargetKind.CoreBook
+            && (job.Status == PublicationRenderStatus.Queued || job.Status == PublicationRenderStatus.Rendering), cancellationToken))
+            throw new InvalidOperationException("Core Book already has an active reading-PDF preparation.");
+        var job = new PublicationRenderJob
+        {
+            ProjectId = projectId,
+            TargetKind = PublicationTargetKind.CoreBook,
+            EditionId = null,
+            SourceFingerprint = await books.GetSourceFingerprintAsync(projectId, cancellationToken),
+            PaginationFingerprint = await books.GetSourceFingerprintAsync(projectId, cancellationToken),
+            RendererVersion = pressRuntime.GetDescription().RendererVersion,
+            ProfileId = PublicationRenderProcessor.ProfileFor(PublicationEditionFormat.DigitalPdf, PublicationVendor.Generic),
+            Status = PublicationRenderStatus.Queued,
+            ProgressMessage = "Reading PDF queued",
+        };
+        db.PublicationRenderJobs.Add(job);
+        await db.SaveChangesAsync(cancellationToken);
+        await queue.EnqueueAsync(job.Id, cancellationToken);
+        return View(job, [], job.SourceFingerprint, CurrentRendererVersion());
+    }
+
+    public async Task<IReadOnlyList<PublicationRenderJobView>> ListCoreAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var fingerprint = await books.GetSourceFingerprintAsync(projectId, cancellationToken);
+        var jobs = await db.PublicationRenderJobs.AsNoTracking().Include(job => job.Artifacts)
+            .Where(job => job.ProjectId == projectId && job.TargetKind == PublicationTargetKind.CoreBook)
+            .OrderByDescending(job => job.CreatedAt).ToListAsync(cancellationToken);
+        return jobs.Select(job => View(job, job.Artifacts, fingerprint, CurrentRendererVersion())).ToList();
+    }
+
+    public async Task<PublicationRenderJobView> CancelCoreAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default)
+    {
+        var job = await db.PublicationRenderJobs.Include(item => item.Artifacts).SingleAsync(
+            item => item.ProjectId == projectId && item.TargetKind == PublicationTargetKind.CoreBook && item.Id == jobId,
+            cancellationToken);
+        if (job.Status is PublicationRenderStatus.Queued or PublicationRenderStatus.Rendering)
+        {
+            job.CancellationRequested = true;
+            job.ProgressMessage = "Cancellation requested";
+            queue.Cancel(job.Id);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        var fingerprint = await books.GetSourceFingerprintAsync(projectId, cancellationToken);
+        return View(job, job.Artifacts, fingerprint, CurrentRendererVersion());
+    }
+
     public async Task<PublicationRenderJobView> RequestAsync(
         Guid projectId,
         Guid editionId,
@@ -167,7 +237,7 @@ public sealed class PublicationRenderService(
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await db.PublicationEditions.AsNoTracking().FirstOrDefaultAsync(
             candidate => candidate.ProjectId == projectId && candidate.Id == editionId,
-            cancellationToken) ?? throw new KeyNotFoundException("Publication edition not found.");
+            cancellationToken) ?? throw new KeyNotFoundException("Publication release not found.");
         if (edition.Status != PublicationEditionStatus.Draft)
             throw new InvalidOperationException("Archived editions cannot be rendered.");
         if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.DigitalPdf))
@@ -184,6 +254,8 @@ public sealed class PublicationRenderService(
 
         var job = new PublicationRenderJob
         {
+            ProjectId = projectId,
+            TargetKind = PublicationTargetKind.Release,
             EditionId = editionId,
             SourceFingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken),
             PaginationFingerprint = await editions.GetPaginationFingerprintAsync(projectId, editionId, cancellationToken),
@@ -225,7 +297,7 @@ public sealed class PublicationRenderService(
         var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
         var jobs = await db.PublicationRenderJobs
             .AsNoTracking()
-            .Where(job => job.EditionId == editionId && job.Edition.ProjectId == projectId)
+            .Where(job => job.EditionId == editionId && job.ProjectId == projectId)
             .Include(job => job.Artifacts)
             .OrderByDescending(job => job.CreatedAt)
             .ToListAsync(cancellationToken);
@@ -245,7 +317,7 @@ public sealed class PublicationRenderService(
             .Include(candidate => candidate.Artifacts)
             .FirstOrDefaultAsync(candidate => candidate.Id == jobId
                 && candidate.EditionId == editionId
-                && candidate.Edition.ProjectId == projectId, cancellationToken)
+                && candidate.ProjectId == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Publication render job not found.");
         return View(job, job.Artifacts, fingerprint, CurrentRendererVersion());
     }
@@ -292,7 +364,7 @@ public sealed class PublicationRenderService(
         var delta = (rightPages ?? 0) - (leftPages ?? 0);
         var explanation = left.SourceFingerprint == right.SourceFingerprint
             ? $"The same source produced a {delta:+#;-#;0}-page difference; inspect renderer/profile versions."
-            : $"Content or edition settings changed, moving {movements.Count} mapped blocks and changing the publication by {delta:+#;-#;0} pages.";
+            : $"Content or release settings changed, moving {movements.Count} mapped blocks and changing the publication by {delta:+#;-#;0} pages.";
         return new(leftJobId, rightJobId, leftPages, rightPages, delta, movements.Count, movements, explanation);
     }
 
@@ -306,7 +378,7 @@ public sealed class PublicationRenderService(
         CancellationToken cancellationToken = default)
     {
         var artifact = await db.PublicationArtifacts.AsNoTracking().FirstOrDefaultAsync(
-            artifact => artifact.Id == artifactId && artifact.Edition.ProjectId == projectId,
+            artifact => artifact.Id == artifactId && artifact.ProjectId == projectId,
             cancellationToken);
         if (artifact is null
             || artifact.ByteLength != artifact.Data.LongLength
@@ -328,7 +400,7 @@ public sealed class PublicationRenderService(
         var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
         var rendererVersion = CurrentRendererVersion();
         return (await db.PublicationArtifacts.AsNoTracking()
-                .Where(artifact => artifact.EditionId == editionId && artifact.Edition.ProjectId == projectId)
+                .Where(artifact => artifact.EditionId == editionId && artifact.ProjectId == projectId)
                 .OrderByDescending(artifact => artifact.CreatedAt)
                 .ToListAsync(cancellationToken))
             .Select(artifact => ArtifactView(artifact, fingerprint, rendererVersion))
@@ -345,13 +417,13 @@ public sealed class PublicationRenderService(
         Guid jobId,
         CancellationToken cancellationToken) =>
         await db.PublicationRenderJobs.FirstOrDefaultAsync(
-            job => job.Id == jobId && job.EditionId == editionId && job.Edition.ProjectId == projectId,
+            job => job.Id == jobId && job.EditionId == editionId && job.ProjectId == projectId,
             cancellationToken) ?? throw new KeyNotFoundException("Publication render job not found.");
 
     private async Task EnsureJobAsync(Guid projectId, Guid editionId, Guid jobId, CancellationToken cancellationToken)
     {
         if (!await db.PublicationRenderJobs.AnyAsync(
-            job => job.Id == jobId && job.EditionId == editionId && job.Edition.ProjectId == projectId,
+            job => job.Id == jobId && job.EditionId == editionId && job.ProjectId == projectId,
             cancellationToken))
             throw new KeyNotFoundException("Publication render job not found.");
     }
@@ -553,11 +625,24 @@ public sealed class PublicationRenderProcessor(
     AppDbContext db,
     IPublishService publishing,
     IPublicationEditionService editions,
+    IPublicationBookService books,
     IPublicationCoverService covers,
     IProjectFontService projectFonts,
     IPublicationPressRuntime pressRuntime,
     IOptions<PublicationPressOptions> options)
 {
+    public PublicationRenderProcessor(
+        AppDbContext db,
+        IPublishService publishing,
+        IPublicationEditionService editions,
+        IPublicationCoverService covers,
+        IProjectFontService projectFonts,
+        IPublicationPressRuntime pressRuntime,
+        IOptions<PublicationPressOptions> options)
+        : this(db, publishing, editions, null!, covers, projectFonts, pressRuntime, options)
+    {
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static string ProfileFor(PublicationEditionFormat format, PublicationVendor vendor) =>
@@ -577,11 +662,12 @@ public sealed class PublicationRenderProcessor(
             ?? throw new KeyNotFoundException("Publication render job not found.");
         if (job.Status == PublicationRenderStatus.Cancelled || job.CancellationRequested)
             throw new OperationCanceledException(cancellationToken);
-        if (!IsSupportedProfile(job.Edition.VendorProfileVersion)
-            || !string.Equals(
-                job.ProfileId,
-                job.Edition.VendorProfileVersion,
-                StringComparison.Ordinal))
+        var coreTarget = job.TargetKind == PublicationTargetKind.CoreBook;
+        var edition = job.Edition;
+        if (!coreTarget && edition is null)
+            throw new InvalidOperationException("The queued release render no longer has a publication release.");
+        if (!IsSupportedProfile(job.ProfileId)
+            || (!coreTarget && !string.Equals(job.ProfileId, edition!.VendorProfileVersion, StringComparison.Ordinal)))
         {
             throw new InvalidOperationException(
                 "The edition's publication profile is unsupported by Lorekeeper Press.");
@@ -599,11 +685,12 @@ public sealed class PublicationRenderProcessor(
         job.StartedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
 
-        var document = await publishing.GetDocumentAsync(job.Edition.ProjectId, job.EditionId, cancellationToken);
-        var fingerprintBeforeRender = await editions.GetSourceFingerprintAsync(
-            job.Edition.ProjectId,
-            job.EditionId,
-            cancellationToken);
+        var document = coreTarget
+            ? await publishing.GetCoreDocumentAsync(job.ProjectId, cancellationToken)
+            : await publishing.GetDocumentAsync(job.ProjectId, edition!.Id, cancellationToken);
+        var fingerprintBeforeRender = coreTarget
+            ? await books.GetSourceFingerprintAsync(job.ProjectId, cancellationToken)
+            : await editions.GetSourceFingerprintAsync(job.ProjectId, edition!.Id, cancellationToken);
         if (!string.Equals(fingerprintBeforeRender, job.SourceFingerprint, StringComparison.Ordinal))
             throw new InvalidOperationException("The edition changed while this render was queued. Request a new render.");
         var expectedPageMap = document.Sections
@@ -612,7 +699,9 @@ public sealed class PublicationRenderProcessor(
                 ChapterId: chapter.Id,
                 BlockId: Guid.Parse(block.Id))))
             .ToHashSet();
-        var coverDesign = await covers.GetAsync(job.Edition.ProjectId, job.EditionId, cancellationToken);
+        var coverDesign = coreTarget
+            ? CoreCoverView(document)
+            : await covers.GetAsync(job.ProjectId, edition!.Id, cancellationToken);
         if (coverDesign.Diagnostics.Any(diagnostic => diagnostic.Contains("requires", StringComparison.OrdinalIgnoreCase)
             || diagnostic.Contains("must contain", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException(string.Join(" ", coverDesign.Diagnostics));
@@ -642,17 +731,18 @@ public sealed class PublicationRenderProcessor(
         var resultArtifacts = result.Artifacts
             ?? throw new InvalidOperationException("The press renderer omitted its artifact list.");
         var resultKinds = resultArtifacts.Select(artifact => artifact.Kind).Order().ToArray();
-        var expectedKinds = job.Edition.Format == PublicationEditionFormat.DigitalPdf
+        var digitalOutput = coreTarget || edition!.Format == PublicationEditionFormat.DigitalPdf;
+        var expectedKinds = digitalOutput
             ? new[] { "book-pdf" }
             : new[] { "cover-pdf", "interior-pdf" };
         if (!resultKinds.SequenceEqual(expectedKinds, StringComparer.Ordinal))
-            throw new InvalidOperationException(job.Edition.Format == PublicationEditionFormat.DigitalPdf
+            throw new InvalidOperationException(digitalOutput
                 ? "The press renderer must return exactly one Digital PDF book artifact."
                 : "The press renderer must return exactly one interior and one cover PDF.");
         var interiorResult = resultArtifacts.Single(artifact => artifact.Kind is "interior-pdf" or "book-pdf");
         if (interiorResult.PageCount is not > 0 or > 100_000)
             throw new InvalidOperationException("The renderer returned an invalid interior page count.");
-        if (job.Edition.Format != PublicationEditionFormat.DigitalPdf
+        if (!digitalOutput
             && resultArtifacts.Single(artifact => artifact.Kind == "cover-pdf").PageCount != 1)
             throw new InvalidOperationException("The renderer must return a one-page full-wrap cover.");
         job.ProgressPercent = 80;
@@ -685,10 +775,16 @@ public sealed class PublicationRenderProcessor(
                 throw new InvalidOperationException($"Artifact integrity failed for {resultArtifact.RelativePath}.");
             db.PublicationArtifacts.Add(new PublicationArtifact
             {
+                ProjectId = job.ProjectId,
+                TargetKind = job.TargetKind,
                 EditionId = job.EditionId,
                 RenderJobId = job.Id,
-                Kind = ParseKind(resultArtifact.Kind),
-                FileName = Path.GetFileName(fullPath),
+                Kind = coreTarget && resultArtifact.Kind == "book-pdf"
+                    ? PublicationArtifactKind.ReadingPdf
+                    : ParseKind(resultArtifact.Kind),
+                FileName = coreTarget && resultArtifact.Kind == "book-pdf"
+                    ? "core-reading-copy.pdf"
+                    : Path.GetFileName(fullPath),
                 MediaType = resultArtifact.MediaType,
                 Data = data,
                 Sha256 = sha,
@@ -714,10 +810,9 @@ public sealed class PublicationRenderProcessor(
         if (parsedPageMap.Select(entry => (entry.ChapterId, entry.BlockId)).Distinct().Count() != parsedPageMap.Count
             || !parsedPageMap.Select(entry => (entry.ChapterId, entry.BlockId)).ToHashSet().SetEquals(expectedPageMap))
             throw new InvalidOperationException("The renderer returned an incomplete or duplicate semantic page map.");
-        var fingerprintAfterRender = await editions.GetSourceFingerprintAsync(
-            job.Edition.ProjectId,
-            job.EditionId,
-            cancellationToken);
+        var fingerprintAfterRender = coreTarget
+            ? await books.GetSourceFingerprintAsync(job.ProjectId, cancellationToken)
+            : await editions.GetSourceFingerprintAsync(job.ProjectId, edition!.Id, cancellationToken);
         if (!string.Equals(fingerprintAfterRender, job.SourceFingerprint, StringComparison.Ordinal))
             throw new InvalidOperationException("The edition changed during rendering. The generated artifacts were discarded.");
         foreach (var entry in parsedPageMap)
@@ -734,6 +829,28 @@ public sealed class PublicationRenderProcessor(
         job.CompletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         Cleanup(job.Id);
+    }
+
+    private static PublicationCoverDesignView CoreCoverView(PublishDocument document)
+    {
+        var cover = document.Cover ?? throw new InvalidOperationException("Core Book requires a front cover before a reading PDF can be prepared.");
+        return new PublicationCoverDesignView(
+            Guid.Empty,
+            Guid.Empty,
+            cover.Title,
+            cover.Subtitle,
+            cover.Author,
+            string.Empty,
+            string.Empty,
+            cover.BackgroundColor,
+            PublicationBarcodeMode.None,
+            50,
+            50,
+            JsonSerializer.Serialize(cover.Scene, ManuscriptCodec.JsonOptions),
+            0,
+            new PublicationCoverTemplate(0, document.Profile.PageWidthInches, document.Profile.PageHeightInches, 0, 0,
+                document.Profile.PageWidthInches, document.Profile.PageHeightInches, 0.25, 0, 0, string.Empty, true),
+            []);
     }
 
     private static bool IsSupportedProfile(string profile) => profile is
@@ -777,6 +894,9 @@ public sealed class PublicationRenderProcessor(
         PublicationCoverDesignView coverDesign,
         CancellationToken cancellationToken)
     {
+        var release = job.Edition;
+        var digitalOutput = job.TargetKind == PublicationTargetKind.CoreBook
+            || release?.Format == PublicationEditionFormat.DigitalPdf;
         var assets = document.Assets
             .GroupBy(asset => asset.Id)
             .Select(group => StageAsset(group.First()))
@@ -903,9 +1023,9 @@ public sealed class PublicationRenderProcessor(
             protocolVersion = 5,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
-            ink = job.Edition.Ink == PublicationInk.Digital
+            ink = release?.Ink is null or PublicationInk.Digital
                 ? PublicationInk.Color.ToString()
-                : job.Edition.Ink.ToString(),
+                : release.Ink.ToString(),
             document = new
             {
                 title = string.IsNullOrWhiteSpace(document.DisplayTitle) ? document.ProjectName : document.DisplayTitle,
@@ -946,8 +1066,8 @@ public sealed class PublicationRenderProcessor(
                         accessibilityRole = placement.AccessibilityRole.ToString(),
                         placement.SortOrder,
                     }).ToArray(),
-                outputMode = job.Edition.Format == PublicationEditionFormat.DigitalPdf ? "DigitalPdf" : "Print",
-                allowDesignedPageOverrides = job.Edition.AllowDesignedPageOverrides,
+                outputMode = digitalOutput ? "DigitalPdf" : "Print",
+                allowDesignedPageOverrides = release?.AllowDesignedPageOverrides ?? false,
             },
             trim = new
             {
@@ -956,7 +1076,7 @@ public sealed class PublicationRenderProcessor(
                 marginInches = document.Profile.PageMarginInches,
                 bodyFontSizePoints = document.Profile.BodyFontSizePoints,
                 bodyLineHeight = document.Profile.BodyLineHeight,
-                bleedInches = job.Edition.Bleed && job.Edition.Format == PublicationEditionFormat.Paperback ? 0.125 : 0,
+                bleedInches = release?.Bleed == true && release.Format == PublicationEditionFormat.Paperback ? 0.125 : 0,
                 mirrorMargins = true,
                 rectoChapterStarts = true,
                 minimumWidowLines = 2,
@@ -964,15 +1084,15 @@ public sealed class PublicationRenderProcessor(
             },
             cover = new
             {
-                bleedInches = job.Edition.Bleed ? 0.125 : 0,
-                paperCaliperInchesPerPage = job.Edition.Paper == PublicationPaper.Cream ? 0.0025 : 0.002252,
+                bleedInches = release?.Bleed == true ? 0.125 : 0,
+                paperCaliperInchesPerPage = release?.Paper == PublicationPaper.Cream ? 0.0025 : 0.002252,
                 backCopy = coverDesign.BackCopy,
                 title = coverDesign.Title,
                 subtitle = coverDesign.Subtitle,
                 author = coverDesign.Author,
                 spineText = coverDesign.SpineText,
                 backgroundColor = coverDesign.BackgroundColor,
-                isbn = job.Edition.Isbn,
+                isbn = release?.Isbn ?? string.Empty,
                 barcodeMode = coverDesign.BarcodeMode.ToString(),
                 assetId = document.CoverAsset?.Id,
                 imageCropXPercent = coverDesign.ImageCropXPercent,

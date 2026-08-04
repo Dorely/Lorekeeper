@@ -15,6 +15,8 @@ namespace Lorekeeper.Publish;
 public sealed class PublishService(
     AppDbContext db,
     IPublicationEditionService editions,
+    IPublicationBookService books,
+    IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IProjectFontService projectFonts,
     IEnumerable<IPublishExportFormatter> formatters) : IPublishService
 {
@@ -23,13 +25,20 @@ public sealed class PublishService(
         WriteIndented = true,
     };
 
+    public Task<PublicationBookView> GetCoreWorkspaceAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default) =>
+        books.GetOrCreateAsync(projectId, cancellationToken);
+
     public async Task<PublishWorkspaceView> GetWorkspaceAsync(
         Guid projectId,
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
         var project = await GetProjectAsync(projectId, cancellationToken);
-        var profile = await GetEditionAsync(projectId, editionId, cancellationToken);
+        _ = await books.GetOrCreateAsync(projectId, cancellationToken);
+        var effective = await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken);
+        var profile = effective.Edition;
 
         var acts = await db.Acts
             .AsNoTracking()
@@ -41,17 +50,16 @@ public sealed class PublishService(
             .Where(chapter => chapter.ProjectId == projectId)
             .OrderBy(chapter => chapter.Order)
             .ToListAsync(cancellationToken);
-        var selections = await db.PublicationEditionOutlineItems
-            .AsNoTracking()
-            .Where(selection => selection.EditionId == editionId)
-            .ToListAsync(cancellationToken);
-        var placementRows = await db.PublicationImagePlacements
-            .AsNoTracking()
-            .Where(placement => placement.EditionId == editionId)
+        var selections = effective.OutlineItems;
+        var placementAssetIds = effective.ImagePlacements.Select(item => item.AssetId).Distinct().ToList();
+        var placementAssetNames = await db.PublishAssets.AsNoTracking()
+            .Where(item => item.ProjectId == projectId && placementAssetIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, item => item.FileName, cancellationToken);
+        var placementRows = effective.ImagePlacements
             .Select(placement => new PlacementRow(
                 placement.Id,
                 placement.AssetId,
-                placement.Asset.FileName,
+                placementAssetNames.GetValueOrDefault(placement.AssetId, "Missing image"),
                 placement.TargetKind,
                 placement.TargetId,
                 placement.PlacementKind,
@@ -62,7 +70,7 @@ public sealed class PublishService(
                 placement.Language,
                 placement.AccessibilityRole,
                 placement.SortOrder))
-            .ToListAsync(cancellationToken);
+            .ToList();
 
         var placementViews = placementRows
             .Select(placement => PlacementView(projectId, placement, acts, chapters))
@@ -71,13 +79,11 @@ public sealed class PublishService(
             .ThenBy(placement => placement.SortOrder)
             .ToList();
 
-        var matter = await db.PublicationMatter
-            .AsNoTracking()
-            .Where(item => item.EditionId == editionId)
+        var matter = effective.Matter
             .OrderBy(item => item.Location)
             .ThenBy(item => item.SortOrder)
-            .Select(item => PublicationEditionService.MatterView(item))
-            .ToListAsync(cancellationToken);
+            .Select(PublicationEditionService.MatterView)
+            .ToList();
         var mappings = await db.PublicationEditionStyleMappings
             .AsNoTracking()
             .Where(mapping => mapping.EditionId == editionId)
@@ -94,7 +100,14 @@ public sealed class PublishService(
             mappings.Select(mapping => PublicationEditionService.StyleMappingView(
                 mapping,
                 mapping.ManuscriptStyleDefinition.Name)).ToList(),
-            fingerprint);
+            fingerprint)
+        {
+            OverrideFields = effective.OverrideFields,
+            HasContentOverrides = await db.PublicationEditionOutlineItems.AnyAsync(item => item.EditionId == editionId, cancellationToken),
+            HasMatterOverrides = await db.PublicationMatter.AnyAsync(item => item.EditionId == editionId, cancellationToken),
+            HasPlacementOverrides = await db.PublicationImagePlacements.AnyAsync(item => item.EditionId == editionId, cancellationToken),
+            HasStyleOverrides = mappings.Count > 0,
+        };
     }
 
     public async Task<ProjectExportFile> ExportAsync(
@@ -112,7 +125,7 @@ public sealed class PublishService(
                 .SingleOrDefaultAsync(cancellationToken) != PublicationEditionFormat.Epub)
         {
             throw new InvalidOperationException(
-                "EPUB export is available only from an EPUB publication edition so print ISBN and product metadata cannot leak into a digital product.");
+                "EPUB export is available only from an EPUB release so print ISBN and product metadata cannot leak into a digital product.");
         }
         var document = await GetDocumentAsync(projectId, editionId, cancellationToken);
 
@@ -122,13 +135,72 @@ public sealed class PublishService(
             Content: formatter.Render(document));
     }
 
+    public async Task<ProjectExportFile> ExportCoreAsync(
+        Guid projectId,
+        PublishExportFormat format,
+        CancellationToken cancellationToken = default)
+    {
+        if (format == PublishExportFormat.Epub)
+            throw new InvalidOperationException("Create an EPUB ebook release to prepare an EPUB file.");
+        var formatter = formatters.FirstOrDefault(candidate => candidate.Format == format)
+            ?? throw new InvalidOperationException($"No publish formatter is registered for {format}.");
+        var document = await GetCoreDocumentAsync(projectId, cancellationToken);
+        return new ProjectExportFile(
+            ExportFileName(document, formatter.FileExtension),
+            formatter.ContentType,
+            formatter.Render(document));
+    }
+
     public async Task<PublishDocument> GetDocumentAsync(
         Guid projectId,
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
+        var effective = await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken);
+        return await BuildDocumentAsync(
+            projectId,
+            editionId,
+            effective.Edition,
+            effective.OutlineItems,
+            effective.ImagePlacements,
+            effective.Matter.Where(item => item.IsIncluded).ToList(),
+            coreTarget: false,
+            cancellationToken);
+    }
+
+    public async Task<PublishDocument> GetCoreDocumentAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        var core = await books.GetOrCreateAsync(projectId, cancellationToken);
+        var book = await db.PublicationBooks.AsNoTracking()
+            .Include(item => item.OutlineItems)
+            .Include(item => item.Matter)
+            .Include(item => item.ImagePlacements)
+            .SingleAsync(item => item.ProjectId == projectId, cancellationToken);
+        var profile = CoreProfile(projectId, core);
+        return await BuildDocumentAsync(
+            projectId,
+            Guid.Empty,
+            profile,
+            book.OutlineItems.Select(CoreOutline).ToList(),
+            book.ImagePlacements.Select(CorePlacement).ToList(),
+            book.Matter.Where(item => item.IsIncluded).Select(CoreMatter).ToList(),
+            coreTarget: true,
+            cancellationToken);
+    }
+
+    private async Task<PublishDocument> BuildDocumentAsync(
+        Guid projectId,
+        Guid editionId,
+        PublicationEdition profile,
+        IReadOnlyList<PublicationEditionOutlineItem> selections,
+        IReadOnlyList<PublicationImagePlacement> placements,
+        IReadOnlyList<PublicationMatter> matter,
+        bool coreTarget,
+        CancellationToken cancellationToken)
+    {
         var project = await GetProjectAsync(projectId, cancellationToken);
-        var profile = await GetEditionAsync(projectId, editionId, cancellationToken);
         var acts = await db.Acts
             .AsNoTracking()
             .Where(act => act.ProjectId == projectId)
@@ -139,26 +211,11 @@ public sealed class PublishService(
             .Where(chapter => chapter.ProjectId == projectId)
             .OrderBy(chapter => chapter.Order)
             .ToListAsync(cancellationToken);
-        var selections = await db.PublicationEditionOutlineItems
-            .AsNoTracking()
-            .Where(selection => selection.EditionId == editionId)
-            .ToListAsync(cancellationToken);
-        var placements = await db.PublicationImagePlacements
-            .AsNoTracking()
-            .Where(placement => placement.EditionId == editionId)
-            .ToListAsync(cancellationToken);
         var compositions = await db.PageCompositions
             .AsNoTracking()
             .Where(composition => composition.ProjectId == projectId)
             .Include(composition => composition.Variants)
             .ToListAsync(cancellationToken);
-        var matter = await db.PublicationMatter
-            .AsNoTracking()
-            .Where(item => item.EditionId == editionId && item.IsIncluded)
-            .OrderBy(item => item.Location)
-            .ThenBy(item => item.SortOrder)
-            .ToListAsync(cancellationToken);
-
         var sections = new List<PublishSectionDocument>();
         var actNumber = 0;
         var chapterNumber = 0;
@@ -246,9 +303,10 @@ public sealed class PublishService(
                 item.SortOrder,
                 ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision)))
             .ToList();
-        var coverDesign = await db.PublicationCoverDesigns
-            .AsNoTracking()
-            .FirstOrDefaultAsync(design => design.EditionId == editionId, cancellationToken);
+        var coverDesign = coreTarget || profile.InheritsCoreCover
+            ? await CoreCoverAsync(projectId, cancellationToken)
+            : await db.PublicationCoverDesigns.AsNoTracking()
+                .FirstOrDefaultAsync(design => design.EditionId == editionId, cancellationToken);
         var coverScene = string.IsNullOrWhiteSpace(coverDesign?.CompositionSceneJson)
             ? null
             : JsonSerializer.Deserialize<CompositionScene>(coverDesign.CompositionSceneJson, ManuscriptCodec.JsonOptions);
@@ -303,7 +361,9 @@ public sealed class PublishService(
             && assets.TryGetValue(selectedCoverImageId, out var selectedCoverImage)
                 ? AssetDocument(selectedCoverImage)
                 : null;
-        var editionStyleMappings = await db.PublicationEditionStyleMappings
+        var editionStyleMappings = coreTarget
+            ? []
+            : await db.PublicationEditionStyleMappings
             .AsNoTracking()
             .Where(mapping => mapping.EditionId == editionId)
             .ToDictionaryAsync(
@@ -436,6 +496,93 @@ public sealed class PublishService(
         };
     }
 
+    private async Task<PublicationCoverDesign?> CoreCoverAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        var book = await db.PublicationBooks.AsNoTracking()
+            .Include(item => item.CoverDesign)
+            .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
+        var cover = book?.CoverDesign;
+        return cover is null ? null : new PublicationCoverDesign
+        {
+            EditionId = Guid.Empty,
+            Title = book!.Title,
+            Subtitle = book.Subtitle,
+            Author = book.Author,
+            BackgroundColor = cover.BackgroundColor,
+            CompositionSceneJson = cover.CompositionSceneJson,
+            Revision = cover.Revision,
+        };
+    }
+
+    private static PublicationEdition CoreProfile(Guid projectId, PublicationBookView core) => new()
+    {
+        ProjectId = projectId,
+        Name = "Core Book",
+        Format = PublicationEditionFormat.DigitalPdf,
+        Vendor = PublicationVendor.Generic,
+        VendorProfileVersion = PublicationRenderProcessor.ProfileFor(PublicationEditionFormat.DigitalPdf, PublicationVendor.Generic),
+        Binding = PublicationBinding.Digital,
+        Paper = PublicationPaper.Digital,
+        Ink = PublicationInk.Digital,
+        TitleOverride = core.Title,
+        Subtitle = core.Subtitle,
+        Author = core.Author,
+        Language = core.Language,
+        Publisher = core.Publisher,
+        Copyright = core.Copyright,
+        Description = core.Description,
+        IncludeTableOfContents = core.IncludeTableOfContents,
+        IncludeVisibleTableOfContents = core.IncludeVisibleTableOfContents,
+        IncludeActSynopses = core.IncludeActSynopses,
+        IncludeChapterSynopses = core.IncludeChapterSynopses,
+        IncludeActHeadings = core.IncludeActHeadings,
+        IncludeChapterHeadings = core.IncludeChapterHeadings,
+        NumberActs = core.NumberActs,
+        NumberChapters = core.NumberChapters,
+        TitlePageMode = core.TitlePageMode,
+        PageWidthInches = core.PageSetup.PageWidthInches,
+        PageHeightInches = core.PageSetup.PageHeightInches,
+        PageMarginInches = core.PageSetup.PageMarginInches,
+        BodyFontSizePoints = core.PageSetup.BodyFontSizePoints,
+        BodyLineHeight = core.PageSetup.BodyLineHeight,
+    };
+
+    private static PublicationEditionOutlineItem CoreOutline(PublicationBookOutlineItem item) => new()
+    {
+        EditionId = Guid.Empty,
+        TargetKind = item.TargetKind,
+        TargetId = item.TargetId,
+        IsIncluded = item.IsIncluded,
+        SortOrder = item.SortOrder,
+    };
+
+    private static PublicationMatter CoreMatter(PublicationBookMatter item) => new()
+    {
+        EditionId = Guid.Empty,
+        Location = item.Location,
+        Kind = item.Kind,
+        Title = item.Title,
+        ManuscriptJson = item.ManuscriptJson,
+        IsIncluded = item.IsIncluded,
+        SortOrder = item.SortOrder,
+    };
+
+    private static PublicationImagePlacement CorePlacement(PublicationBookImagePlacement item) => new()
+    {
+        EditionId = Guid.Empty,
+        AssetId = item.AssetId,
+        TargetKind = item.TargetKind,
+        TargetId = item.TargetId,
+        PlacementKind = item.PlacementKind,
+        Caption = item.Caption,
+        PresentationJson = item.PresentationJson,
+        AltText = item.AltText,
+        Decorative = item.Decorative,
+        Language = item.Language,
+        AccessibilityRole = item.AccessibilityRole,
+        SortOrder = item.SortOrder,
+    };
+
     private static Guid DeterministicFontId(string value) =>
         new(SHA256.HashData(Encoding.UTF8.GetBytes(value)).AsSpan(0, 16));
 
@@ -450,7 +597,7 @@ public sealed class PublishService(
         await db.PublicationEditions.FirstOrDefaultAsync(
             edition => edition.ProjectId == projectId && edition.Id == editionId,
             cancellationToken)
-        ?? throw new InvalidOperationException("Publication edition was not found.");
+        ?? throw new InvalidOperationException("Publication release was not found.");
 
     private static PublishDocumentProfile ProfileDocument(PublicationEdition profile) =>
         new(
