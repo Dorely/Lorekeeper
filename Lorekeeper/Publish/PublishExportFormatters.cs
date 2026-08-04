@@ -84,7 +84,7 @@ public sealed class PlainTextPublishFormatter : IPublishExportFormatter
         AppendMatterStart(sb, "Table of Contents");
         foreach (var section in document.Sections)
         {
-            if (section.IncludePage)
+            if (section.IncludeHeading)
                 sb.AppendLine(section.Title);
             foreach (var chapter in section.Chapters)
                 sb.Append("  ").AppendLine(chapter.Title);

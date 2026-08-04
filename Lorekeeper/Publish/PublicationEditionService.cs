@@ -331,6 +331,8 @@ public sealed class PublicationEditionService(
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedRevision);
         EnsureDraft(edition);
+        if (updates.Any(item => item.TargetKind != PublishOutlineTargetKind.Chapter))
+            throw new InvalidOperationException("Release content inclusion applies to chapters; act presentation is controlled by the release's act heading and summary settings.");
         await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
         await EnsureTargetsAsync(projectId, updates, cancellationToken);
         var before = await FingerprintAsync(projectId, editionId, cancellationToken);

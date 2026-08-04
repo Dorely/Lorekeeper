@@ -263,18 +263,15 @@ public sealed class PublicationBookService(
         CancellationToken cancellationToken = default)
     {
         _ = await GetOrCreateAsync(projectId, cancellationToken);
-        var acts = await db.Acts.AsNoTracking().Where(item => item.ProjectId == projectId)
-            .ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
         var chapters = await db.Chapters.AsNoTracking().Where(item => item.ProjectId == projectId)
             .ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
         return (await db.PublicationBookOutlineItems.AsNoTracking()
-            .Where(item => item.ProjectId == projectId).OrderBy(item => item.SortOrder).ToListAsync(cancellationToken))
+            .Where(item => item.ProjectId == projectId && item.TargetKind == PublishOutlineTargetKind.Chapter)
+            .OrderBy(item => item.SortOrder).ToListAsync(cancellationToken))
             .Select(item => new PublicationBookOutlineView(
                 item.TargetKind,
                 item.TargetId,
-                item.TargetKind == PublishOutlineTargetKind.Act
-                    ? acts.GetValueOrDefault(item.TargetId, "Missing act")
-                    : chapters.GetValueOrDefault(item.TargetId, "Missing chapter"),
+                chapters.GetValueOrDefault(item.TargetId, "Missing chapter"),
                 item.IsIncluded,
                 item.SortOrder)).ToList();
     }
@@ -287,7 +284,11 @@ public sealed class PublicationBookService(
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var book = await GetTrackedBookAsync(projectId, expectedRevision, cancellationToken);
-        var rows = await db.PublicationBookOutlineItems.Where(item => item.ProjectId == projectId).ToListAsync(cancellationToken);
+        if (updates.Any(item => item.TargetKind != PublishOutlineTargetKind.Chapter))
+            throw new InvalidOperationException("Core Book content inclusion applies to chapters; act presentation is controlled by the act heading and summary settings.");
+        var rows = await db.PublicationBookOutlineItems
+            .Where(item => item.ProjectId == projectId && item.TargetKind == PublishOutlineTargetKind.Chapter)
+            .ToListAsync(cancellationToken);
         var requested = updates.ToDictionary(item => (item.TargetKind, item.TargetId), item => item.IsIncluded);
         if (requested.Count != updates.Count || requested.Keys.Any(key => rows.All(row => (row.TargetKind, row.TargetId) != key)))
             throw new InvalidOperationException("One or more Core Book content targets are invalid or duplicated.");

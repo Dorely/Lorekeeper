@@ -260,7 +260,7 @@ else
                 <label class="field"><span>Title page</span><select class="form-select" @bind="_coreDraft.TitlePageMode" @bind:after="() => _coreDirty = true"><option value="@PublishTitlePageMode.Automatic">Automatic</option><option value="@PublishTitlePageMode.Include">Always include</option><option value="@PublishTitlePageMode.Omit">Omit</option></select></label>
             </div>
             <div class="summary-strip"><span><strong>@_core!.IncludedChapterCount</strong> chapters included</span><span><strong>@_core.MatterCount</strong> front/back matter items</span><span><strong>@_core.ImagePlacementCount</strong> opening/ending images</span></div>
-            <details class="content-choices"><summary>Choose included acts and chapters</summary>
+            <details class="content-choices"><summary>Choose included chapters</summary>
                 <div class="content-choice-list">@foreach (var item in _coreOutline){<label class="check-row"><input type="checkbox" checked="@_coreSelections.GetValueOrDefault((item.TargetKind, item.TargetId))" @onchange="e => CoreOutlineChanged(item, (bool)e.Value!)" /><span><small>@item.TargetKind</small>@item.Title</span></label>}</div>
             </details>
         </section>

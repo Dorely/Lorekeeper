@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 5);
-    assert_eq!(value["rendererVersion"], "2.0.0");
+    assert_eq!(value["rendererVersion"], "2.0.1");
     assert_eq!(
         value["profiles"],
         json!([
@@ -62,7 +62,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 5);
-    assert_eq!(response["rendererVersion"], "2.0.0");
+    assert_eq!(response["rendererVersion"], "2.0.1");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");

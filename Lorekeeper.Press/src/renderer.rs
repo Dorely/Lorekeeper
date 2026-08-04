@@ -1120,18 +1120,7 @@ fn paginate_with_cancellation(
                     .unwrap_or(false),
                 "Act",
             );
-            if section
-                .get("includePage")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
-                start_recto(&mut pages, trim);
-                pages.push(centered_page(
-                    &section_title,
-                    &string(section, "synopsis"),
-                    trim,
-                ));
-            } else if section
+            let include_section_heading = section
                 .get("includeHeading")
                 .and_then(Value::as_bool)
                 .unwrap_or_else(|| {
@@ -1139,9 +1128,23 @@ fn paginate_with_cancellation(
                         .get("includeActHeadings")
                         .and_then(Value::as_bool)
                         .unwrap_or(true)
-                })
-                && !section_title.is_empty()
+                });
+            if section
+                .get("includePage")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
             {
+                start_recto(&mut pages, trim);
+                pages.push(centered_page(
+                    if include_section_heading {
+                        &section_title
+                    } else {
+                        ""
+                    },
+                    &string(section, "synopsis"),
+                    trim,
+                ));
+            } else if include_section_heading && !section_title.is_empty() {
                 let style = BlockStyle {
                     size: 18.0,
                     line_height: 1.3,
@@ -5743,7 +5746,7 @@ mod tests {
     }
 
     #[test]
-    fn act_heading_and_numbering_options_apply_without_an_act_divider_page() {
+    fn act_heading_options_apply_to_inline_and_divider_page_layouts() {
         let request = request_with_document(serde_json::json!({
             "title": "Acts",
             "author": "Author",
@@ -5777,6 +5780,33 @@ mod tests {
                 .iter()
                 .any(|page| page.lines.iter().any(|line| line.text == "Chapter"))
         );
+
+        let hidden_divider_heading = request_with_document(serde_json::json!({
+            "title": "Acts",
+            "author": "Author",
+            "language": "en",
+            "includeTitlePage": false,
+            "includeActHeadings": false,
+            "numberActs": true,
+            "sections": [{
+                "id": "act",
+                "title": "Discovery",
+                "includePage": true,
+                "includeHeading": false,
+                "chapters": [{
+                    "id": "chapter",
+                    "title": "Chapter",
+                    "includeHeading": false,
+                    "blocks": [{ "id": "block", "type": "Paragraph", "content": [{ "text": "Body" }] }]
+                }]
+            }]
+        }));
+        let hidden_layout = paginate(&hidden_divider_heading).expect("layout");
+        assert!(!hidden_layout.pages.iter().any(|page| {
+            page.lines
+                .iter()
+                .any(|line| line.text.contains("Discovery"))
+        }));
     }
 
     #[test]

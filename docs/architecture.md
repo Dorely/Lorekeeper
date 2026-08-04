@@ -297,7 +297,10 @@ semantic front/back matter, opening/ending placements, and a reusable front
 cover. Project page setup and Book Text Styles remain the Core geometry and
 typography owners. Core Book exists even when the project has no publication
 release and can produce only a private `ReadingPdf`, never a publication package
-or ISBN claim.
+or ISBN claim. Chapter rows are the selectable publication content. Acts remain
+structural groups: the act-heading and act-summary settings alone determine
+whether their divider presentation is emitted, while act-targeted illustration
+placements remain valid independently of that presentation.
 `IPublicationEditionService` owns optional paperback, EPUB ebook, and PDF ebook
 release aggregates. Releases retain destination, internal immutable profile,
 ISBN, product settings, status, artifacts, packages, proofs, sparse field and
@@ -317,6 +320,11 @@ reading copy; paperback renders and packages interior/full-wrap files; EPUB
 exports, structurally validates, and packages; PDF ebook renders and packages
 one cover-plus-book PDF. It reuses current artifacts and returns plain-language
 blocking actions. `IPublishService` remains projection/export-only.
+Publish documents carry display-ready numbered titles across Markdown, EPUB,
+plain text, and Press. Protocol requests therefore disable Press-side title
+numbering so a chapter or act prefix is emitted exactly once. Press-generated
+Reading, interior, cover, and book PDFs are stale whenever the packaged renderer
+version changes.
 Archived releases are immutable at every owning mutation boundary; their
 existing artifacts remain readable and exportable, and cloning creates the
 editable continuation.

@@ -467,9 +467,10 @@ public sealed class PublicationRenderService(
             artifact.CreatedAt,
             artifact.IsLegacy,
             !string.Equals(artifact.SourceFingerprint, currentFingerprint, StringComparison.Ordinal)
-                || artifact.Kind is PublicationArtifactKind.InteriorPdf or PublicationArtifactKind.CoverPdf
+                || (artifact.Kind is PublicationArtifactKind.ReadingPdf or PublicationArtifactKind.InteriorPdf
+                    or PublicationArtifactKind.CoverPdf or PublicationArtifactKind.BookPdf
                     && currentRendererVersion is not null
-                    && !string.Equals(artifact.RendererVersion, currentRendererVersion, StringComparison.Ordinal));
+                    && !string.Equals(artifact.RendererVersion, currentRendererVersion, StringComparison.Ordinal)));
 
     private static IReadOnlyList<PublicationRenderDiagnostic> DeserializeDiagnostics(string json)
     {
@@ -1039,8 +1040,10 @@ public sealed class PublicationRenderProcessor(
                 includeVisibleTableOfContents = document.Profile.IncludeVisibleTableOfContents,
                 includeActHeadings = document.Profile.IncludeActHeadings,
                 includeChapterHeadings = document.Profile.IncludeChapterHeadings,
-                numberActs = document.Profile.NumberActs,
-                numberChapters = document.Profile.NumberChapters,
+                // PublishDocument titles are already numbered consistently for every export format.
+                // Press receives display-ready titles and must not add a second prefix.
+                numberActs = false,
+                numberChapters = false,
                 sections,
                 styles = document.NamedStyles.Select(style => new
                 {

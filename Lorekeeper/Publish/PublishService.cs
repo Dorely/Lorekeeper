@@ -278,7 +278,8 @@ public sealed class PublishService(
             }
 
             actNumber++;
-            var includeActPage = IsIncluded(selections, PublishOutlineTargetKind.Act, source.Act.Id);
+            var includeActPage = profile.IncludeActHeadings
+                || profile.IncludeActSynopses && !string.IsNullOrWhiteSpace(source.Act.Synopsis);
             var title = profile.NumberActs ? $"Act {actNumber}: {source.Act.Title}" : source.Act.Title;
             sections.Add(new PublishSectionDocument(
                 source.Act.Id,
@@ -286,7 +287,7 @@ public sealed class PublishService(
                 source.Act.Synopsis,
                 IsUnassigned: false,
                 IncludePage: includeActPage,
-                IncludeHeading: includeActPage && profile.IncludeActHeadings,
+                IncludeHeading: profile.IncludeActHeadings,
                 source.SortOrder,
                 chapterDocuments));
         }
@@ -677,7 +678,7 @@ public sealed class PublishService(
                 act.Id,
                 act.Title,
                 IsUnassigned: false,
-                IsIncluded(selections, PublishOutlineTargetKind.Act, act.Id),
+                IsIncluded: true,
                 actChapters));
         }
 
@@ -835,7 +836,7 @@ public sealed class PublishService(
         PublishOutlineTargetKind kind,
         Guid targetId) =>
         kind == PublishOutlineTargetKind.Act
-            ? sections.Any(section => section.ActId == targetId && section.IncludePage)
+            ? sections.Any(section => section.ActId == targetId)
             : sections.SelectMany(section => section.Chapters).Any(chapter => chapter.Id == targetId);
 
     private static string ExportFileName(PublishDocument document, string extension)

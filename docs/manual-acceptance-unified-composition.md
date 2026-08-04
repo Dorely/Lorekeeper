@@ -15,6 +15,10 @@ the live test project; terminate the browser host after the run.
   the reading-PDF actions rather than in a separate section.
   Confirm it is never labeled publishable, packaged, vendor-validated, or ISBN
   bearing.
+- Turn off **Show act headings** and confirm act divider headings disappear
+  without changing chapter inclusion. Confirm the content chooser lists chapters
+  only. Enable chapter numbering and confirm the contents page, bookmarks, and
+  chapter openings contain exactly one `Chapter N:` prefix.
 - Create Paperback (KDP, IngramSpark, and Other printer where applicable), EPUB
   ebook, and PDF ebook releases. Confirm print controls appear only for
   paperback, EPUB controls only for EPUB, and mixed-page/front-cover controls

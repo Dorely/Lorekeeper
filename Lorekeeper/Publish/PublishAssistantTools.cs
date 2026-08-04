@@ -87,11 +87,11 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: () => ReadCoreContentAsync(context),
                 name: "read_publication_book_content",
-                description: "Read the Core Book's ordered acts and chapters with inclusion state in a compact list."),
+                description: "Read the Core Book's ordered chapters with inclusion state in a compact list. Act presentation is configured on Core Book rather than treated as selectable content."),
             AIFunctionFactory.Create(
                 method: (PublicationEditionOutlineItemUpdate[] updates, long expectedBookRevision) => PatchCoreContentAsync(context, updates, expectedBookRevision),
                 name: "patch_publication_book_content",
-                description: "Revision-check changed Core Book act/chapter inclusion choices. Omitted targets are preserved."),
+                description: "Revision-check changed Core Book chapter inclusion choices. Use TargetKind Chapter; omitted chapters are preserved. Configure act headings and summaries with patch_publication_book."),
             AIFunctionFactory.Create(
                 method: (Guid? matterId = null, int blockStart = 0, int blockCount = 20) => ReadCoreMatterAsync(context, matterId, blockStart, blockCount),
                 name: "read_publication_book_matter",
@@ -194,7 +194,7 @@ public sealed class PublishAssistantTools(
                 method: (Guid releaseId, PublicationEditionOutlineItemUpdate[] updates, long expectedRevision) =>
                     SetContentAsync(context, releaseId, updates, expectedRevision),
                 name: "patch_publication_release_content",
-                description: "Include or exclude acts and chapters only where this release differs from Core Book."),
+                description: "Include or exclude chapters only where this release differs from Core Book. Act headings and summaries are sparse release setting overrides, not content rows."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, PublicationEditionOutlineItemOrder[] orderedItems, long expectedRevision) =>
                     ReorderContentAsync(context, releaseId, orderedItems, expectedRevision),
