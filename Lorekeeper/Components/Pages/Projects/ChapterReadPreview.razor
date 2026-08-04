@@ -80,32 +80,31 @@
             </div>
         }
         <div class="chapter-preview-scroll @(_facing ? "facing" : "single") @(_facing && _showFacingSeam ? "show-seam" : null) @($"fit-{_fit}")">
-            @foreach (var page in _result.Pages)
+            @if (_facing)
             {
-                <article id="@($"page-{page.PhysicalPage}")" class="chapter-preview-page" style="@PageStyle(page)" aria-label="Page @(page.PageLabel ?? page.PhysicalPage.ToString())">
-                    @foreach (var shape in page.Shapes)
-                    {
-                        <span class="chapter-preview-shape" style="@ShapeStyle(page, shape)"></span>
-                    }
-                    @foreach (var image in page.Images)
-                    {
-                        <span class="chapter-preview-image-frame" style="@ImageFrameStyle(page, image)">
-                            <img class="chapter-preview-image" src="/projects/@ProjectId.ToString("N")/images/@image.AssetId.ToString("N")/content" alt="@(image.Decorative ? string.Empty : image.AltText)" style="@ImageContentStyle(image)" />
-                        </span>
-                    }
-                    @foreach (var line in page.Lines)
-                    {
-                        @if (line.Link is { } link)
+                @foreach (var spread in BuildFacingSpreads(_result.Pages))
+                {
+                    <div class="chapter-preview-spread">
+                        @foreach (var page in spread)
                         {
-                            <a class="chapter-preview-line" href="@link" style="@LineStyle(page, line)">@RunContent(line)</a>
+                            if (page is null)
+                            {
+                                <span class="chapter-preview-page chapter-preview-page-blank" style="@PageStyle(spread.First(item => item is not null)!)" aria-hidden="true"></span>
+                            }
+                            else
+                            {
+                                @RenderPage(page)
+                            }
                         }
-                        else
-                        {
-                            <span class="chapter-preview-line" style="@LineStyle(page, line)">@RunContent(line)</span>
-                        }
-                    }
-                    <footer>@(page.PageLabel ?? string.Empty)</footer>
-                </article>
+                    </div>
+                }
+            }
+            else
+            {
+                @foreach (var page in _result.Pages)
+                {
+                    @RenderPage(page)
+                }
             }
         </div>
     }
@@ -116,6 +115,52 @@
     [Parameter, EditorRequired] public Guid ChapterId { get; set; }
     [Parameter] public long RefreshSignal { get; set; }
 
+    private static IEnumerable<ChapterPreviewPage?[]> BuildFacingSpreads(IReadOnlyList<ChapterPreviewPage> pages)
+    {
+        ChapterPreviewPage? left = null;
+        foreach (var page in pages)
+        {
+            if (page.PhysicalPage % 2 == 0)
+            {
+                if (left is not null)
+                    yield return [left, null];
+                left = page;
+                continue;
+            }
+
+            yield return [left, page];
+            left = null;
+        }
+
+        if (left is not null)
+            yield return [left, null];
+    }
+
+    private RenderFragment RenderPage(ChapterPreviewPage page) => @<article id="@($"page-{page.PhysicalPage}")" class="chapter-preview-page" style="@PageStyle(page)" aria-label="Page @(page.PageLabel ?? page.PhysicalPage.ToString())">
+                @foreach (var shape in page.Shapes)
+                {
+                    <span class="chapter-preview-shape" style="@ShapeStyle(page, shape)"></span>
+                }
+                @foreach (var image in page.Images)
+                {
+                    <span class="chapter-preview-image-frame" style="@ImageFrameStyle(page, image)">
+                        <img class="chapter-preview-image" src="/projects/@ProjectId.ToString("N")/images/@image.AssetId.ToString("N")/content" alt="@(image.Decorative ? string.Empty : image.AltText)" style="@ImageContentStyle(image)" />
+                    </span>
+                }
+                @foreach (var line in page.Lines)
+                {
+                    @if (line.Link is { } link)
+                    {
+                        <a class="chapter-preview-line" href="@link" style="@LineStyle(page, line)">@RunContent(line)</a>
+                    }
+                    else
+                    {
+                        <span class="chapter-preview-line" style="@LineStyle(page, line)">@RunContent(line)</span>
+                    }
+                }
+                <footer>@(page.PageLabel ?? string.Empty)</footer>
+            </article>;
+
     private ChapterPreviewResult? _result;
     private ProjectPageSetup? _setup;
     private Guid _loadedProject;
@@ -124,7 +169,7 @@
     private bool _loading;
     private bool _facing;
     private bool _showFacingSeam;
-    private string _fit = "page";
+    private string _fit = "width";
     private double _zoom = 1;
     private string? _error;
     private double _setupWidth = 6;

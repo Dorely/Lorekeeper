@@ -256,7 +256,11 @@ compact browser trace, which preserves paint and text-run data but omits
 glyph-level evidence used only by renderer conformance inspection. Preview work
 is cancellable on mode changes and produces a retryable timeout instead of
 leaving the UI indefinitely busy. It supports single/facing display,
-fit-page/fit-width, zoom, and project page setup; it never substitutes a
+fit-page/fit-width, zoom, and project page setup; Fit width is the initial
+display setting. Facing mode groups physical even/odd leaves into fixed
+two-page spread rows, including a hidden parity placeholder when the selected
+chapter begins or ends on an unpaired leaf. Workspace width changes therefore
+never place a third leaf in the same row. It never substitutes a
 read-only ProseMirror view. A Designed Page whose scene declares a facing
 `EditionLeaves` spread always becomes two sequential leaf pages, including in
 Digital PDF preview requests that permit independent page geometry. Facing
