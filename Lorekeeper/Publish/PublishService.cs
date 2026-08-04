@@ -642,6 +642,10 @@ public sealed class PublishService(
             SpaceAfterPoints = normalized.SpaceAfterPoints ?? inherited.SpaceAfterPoints,
             KeepWithNext = normalized.KeepWithNext ?? inherited.KeepWithNext,
             TextAlign = normalized.TextAlign ?? inherited.TextAlign,
+            LeftIndentEm = normalized.LeftIndentEm ?? inherited.LeftIndentEm,
+            RightIndentEm = normalized.RightIndentEm ?? inherited.RightIndentEm,
+            FirstLineIndentEm = normalized.FirstLineIndentEm ?? inherited.FirstLineIndentEm,
+            StartOnNewPage = normalized.StartOnNewPage ?? inherited.StartOnNewPage,
         };
     }
 

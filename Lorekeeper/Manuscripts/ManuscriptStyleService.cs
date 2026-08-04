@@ -426,6 +426,9 @@ public sealed class ManuscriptStyleService(
             value.LineHeight,
             value.SpaceBeforePoints,
             value.SpaceAfterPoints,
+            value.LeftIndentEm,
+            value.RightIndentEm,
+            value.FirstLineIndentEm,
         };
         if (doubles.Any(number => number is double present && !double.IsFinite(present)))
             throw new InvalidOperationException("Style numeric properties must be finite numbers.");
@@ -451,14 +454,22 @@ public sealed class ManuscriptStyleService(
             throw new InvalidOperationException("Line height must be greater than 0 and no more than 5.");
         if (value.SpaceBeforePoints is < 0 or > 288 || value.SpaceAfterPoints is < 0 or > 288)
             throw new InvalidOperationException("Style spacing must be between 0 and 288 points.");
+        if (value.LeftIndentEm is < 0 or > 12 || value.RightIndentEm is < 0 or > 12)
+            throw new InvalidOperationException("Style paragraph indents must be between 0 and 12 em.");
+        if (value.FirstLineIndentEm is < -12 or > 12)
+            throw new InvalidOperationException("Style first-line indent must be between -12 and 12 em.");
         if (kind == ManuscriptStyleKind.Character
             && (value.SpaceBeforePoints is not null
                 || value.SpaceAfterPoints is not null
                 || value.KeepWithNext is not null
-                || value.TextAlign is not null))
+                || value.TextAlign is not null
+                || value.LeftIndentEm is not null
+                || value.RightIndentEm is not null
+                || value.FirstLineIndentEm is not null
+                || value.StartOnNewPage is not null))
         {
             throw new InvalidOperationException(
-                "Character styles cannot define paragraph spacing, keep-with-next, or text alignment.");
+                "Character styles cannot define paragraph spacing, indentation, pagination, or text alignment.");
         }
     }
 
@@ -474,6 +485,7 @@ public sealed class ManuscriptStyleService(
             Italic = definition.Italic is true ? true : null,
             SmallCaps = definition.SmallCaps is true ? true : null,
             KeepWithNext = definition.KeepWithNext is true ? true : null,
+            StartOnNewPage = definition.StartOnNewPage is true ? true : null,
         };
     }
 
@@ -545,7 +557,11 @@ public sealed record ManuscriptStyleProperties(
     double? SpaceBeforePoints = null,
     double? SpaceAfterPoints = null,
     bool? KeepWithNext = null,
-    string? TextAlign = null);
+    string? TextAlign = null,
+    double? LeftIndentEm = null,
+    double? RightIndentEm = null,
+    double? FirstLineIndentEm = null,
+    bool? StartOnNewPage = null);
 
 public sealed class ManuscriptStyleConflictException(long expected, long actual)
     : InvalidOperationException($"Named-style revision conflict: expected {expected}, current revision is {actual}.")

@@ -198,10 +198,12 @@ and Designed Page references; there is no chapter-level visual classification.
 Figures own stable IDs, project images, captions, alternative/decorative
 decisions, language and semantic roles, plus flow, wrap, width, spacing,
 contain/cover fit, internal crop position, bleed, page-break, and
-caption-placement intent. Text-bearing blocks can carry sparse paragraph
-alignment, whole/right/first-line/hanging indent, spacing, and pagination
-overrides; direct overrides take precedence over Book Text Styles and built-in
-defaults.
+caption-placement intent. Paragraph Book Text Styles can define reusable
+alignment, whole/right/first-line/hanging indentation, spacing, keep behavior,
+and page starts. Text-bearing blocks can carry sparse overrides of those
+properties; direct overrides take precedence over Book Text Styles and built-in
+defaults. The semantic editor, EPUB formatter, chapter preview, and publication
+PDF renderer resolve the same style properties.
 `IManuscriptService` is the only runtime manuscript write boundary. Its EF
 optimistic-concurrency token and the project-scoped in-process/file mutation
 lease prevent simultaneous editors, imports, image deletion, and assistants
@@ -312,6 +314,9 @@ flow into releases unless excluded. Core mutations stale only releases whose
 effective source fingerprint changes. Digital PDF defaults to uniform release
 geometry and can explicitly permit independent Designed Page boxes; paperback
 leaves are always uniform.
+Core reading-copy fingerprints include Book Text Style definitions and the
+project font catalog, so typography changes stale an existing reading PDF just
+as they stale release artifacts.
 `IPublicationReleasePresetService` creates releases from only product type and,
 for paperback, destination. Application-owned profile versions and bleed policy
 are not normal UI or assistant inputs. `IPublicationPreparationService` owns

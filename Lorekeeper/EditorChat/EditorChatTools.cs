@@ -262,7 +262,11 @@ public sealed class EditorChatTools(
                     double? spaceBeforePoints = null,
                     double? spaceAfterPoints = null,
                     bool? keepWithNext = null,
-                    string? textAlign = null) =>
+                    string? textAlign = null,
+                    double? leftIndentEm = null,
+                    double? rightIndentEm = null,
+                    double? firstLineIndentEm = null,
+                    bool? startOnNewPage = null) =>
                     UpsertManuscriptStyleAsync(
                         context,
                         styleId,
@@ -279,10 +283,14 @@ public sealed class EditorChatTools(
                         spaceBeforePoints,
                         spaceAfterPoints,
                         keepWithNext,
-                        textAlign),
+                        textAlign,
+                        leftIndentEm,
+                        rightIndentEm,
+                        firstLineIndentEm,
+                        startOnNewPage),
                 name: "upsert_manuscript_style",
                 description:
-                    "Create or revision-check update a named paragraph or character style through the shared style service. "
+                    "Create or revision-check update a named paragraph or character style through the shared style service. Paragraph styles can define spacing, alignment, whole-paragraph and first-line or hanging indents, and page-start behavior. "
                     + "Use list_manuscript_styles first; updates require styleId and expectedRevision."),
             AIFunctionFactory.Create(
                 method: (Guid styleId, long expectedRevision) =>
@@ -436,7 +444,11 @@ public sealed class EditorChatTools(
         double? spaceBeforePoints,
         double? spaceAfterPoints,
         bool? keepWithNext,
-        string? textAlign)
+        string? textAlign,
+        double? leftIndentEm,
+        double? rightIndentEm,
+        double? firstLineIndentEm,
+        bool? startOnNewPage)
     {
         if (!Enum.TryParse<ManuscriptStyleKind>(kind, ignoreCase: true, out var parsedKind))
             throw new InvalidOperationException("Style kind must be Paragraph or Character.");
@@ -457,7 +469,11 @@ public sealed class EditorChatTools(
                     spaceBeforePoints,
                     spaceAfterPoints,
                     keepWithNext,
-                    textAlign),
+                    textAlign,
+                    leftIndentEm,
+                    rightIndentEm,
+                    firstLineIndentEm,
+                    startOnNewPage),
                 expectedRevision);
         if (ctx.ReviewEdits && ctx.EditorStaging is not null)
         {

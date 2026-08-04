@@ -4222,6 +4222,22 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             .get("spaceAfterPoints")
             .and_then(Value::as_f64)
             .unwrap_or(0.0) as f32;
+        style.indent = definition
+            .get("leftIndentEm")
+            .and_then(Value::as_f64)
+            .map_or(style.indent, |value| value as f32 * style.size);
+        style.right_indent = definition
+            .get("rightIndentEm")
+            .and_then(Value::as_f64)
+            .map_or(style.right_indent, |value| value as f32 * style.size);
+        style.first_line_indent = definition
+            .get("firstLineIndentEm")
+            .and_then(Value::as_f64)
+            .map_or(style.first_line_indent, |value| value as f32 * style.size);
+        style.page_break_before = definition
+            .get("startOnNewPage")
+            .and_then(Value::as_bool)
+            .unwrap_or(style.page_break_before);
     }
     if let Some(presentation) = block
         .get("paragraphPresentation")
@@ -4262,7 +4278,7 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
         style.page_break_before = presentation
             .get("startOnNewPage")
             .and_then(Value::as_bool)
-            .unwrap_or(false);
+            .unwrap_or(style.page_break_before);
     }
     style
 }

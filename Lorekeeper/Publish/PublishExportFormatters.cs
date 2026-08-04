@@ -1574,12 +1574,23 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             declarations.Add($"margin-top: {before.ToString("0.###", CultureInfo.InvariantCulture)}pt");
         if (definition.SpaceAfterPoints is double after)
             declarations.Add($"margin-bottom: {after.ToString("0.###", CultureInfo.InvariantCulture)}pt");
+        if (definition.LeftIndentEm is double leftIndent)
+            declarations.Add($"margin-left: {leftIndent.ToString("0.###", CultureInfo.InvariantCulture)}em");
+        if (definition.RightIndentEm is double rightIndent)
+            declarations.Add($"margin-right: {rightIndent.ToString("0.###", CultureInfo.InvariantCulture)}em");
+        if (definition.FirstLineIndentEm is double firstLineIndent)
+            declarations.Add($"text-indent: {firstLineIndent.ToString("0.###", CultureInfo.InvariantCulture)}em");
         if (definition.TextAlign is { } align)
             declarations.Add($"text-align: {align.ToLowerInvariant()}");
         if (definition.KeepWithNext is true)
         {
             declarations.Add("break-after: avoid");
             declarations.Add("page-break-after: avoid");
+        }
+        if (definition.StartOnNewPage is true)
+        {
+            declarations.Add("break-before: page");
+            declarations.Add("page-break-before: always");
         }
         return declarations;
     }

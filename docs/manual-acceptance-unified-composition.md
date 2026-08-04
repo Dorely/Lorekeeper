@@ -83,6 +83,10 @@ the live test project; terminate the browser host after the run.
   spacing, keep-with-next, and start-on-new-page. Confirm inline emphasis survives
   Book Text Style changes and clearing paragraph formatting removes only direct
   paragraph presentation.
+- Create a paragraph Book Text Style that combines zero paragraph spacing,
+  first-line indentation, and justification. Confirm Edit, Read, Core reading
+  PDF, release PDF, and EPUB apply the same values, and confirm changing the
+  style makes existing PDF artifacts stale.
 - Open Advanced at both edges of the editor and confirm its panel remains fully
   inside the editor without horizontal scrolling or position drift. Select a
   Figure by clicking its artwork, scroll the manuscript, and confirm its styled

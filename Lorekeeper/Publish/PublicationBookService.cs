@@ -114,6 +114,40 @@ public sealed class PublicationBookService(
             .OrderBy(item => item.Id).Select(item => new { item.Id, item.UpdatedAt, item.FileName, item.Data }).ToListAsync(cancellationToken);
         var assets = assetRows.Select(item => new { item.Id, item.UpdatedAt, item.FileName,
             Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(item.Data)) }).ToList();
+        var styles = await db.ManuscriptStyleDefinitions.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .OrderBy(item => item.Id)
+            .Select(item => new
+            {
+                item.Id,
+                item.Name,
+                item.Kind,
+                item.SemanticRole,
+                item.DefinitionJson,
+                item.Revision,
+            })
+            .ToListAsync(cancellationToken);
+        var fonts = await db.ProjectFontFamilies.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .OrderBy(item => item.Id)
+            .Select(item => new
+            {
+                item.Id,
+                item.Name,
+                item.EmbeddingRightsConfirmed,
+                item.RightsDeclaration,
+                Faces = item.Faces.OrderBy(face => face.Id).Select(face => new
+                {
+                    face.Id,
+                    face.SubfamilyName,
+                    face.FileName,
+                    face.ContentType,
+                    face.Weight,
+                    face.Italic,
+                    face.Data,
+                }),
+            })
+            .ToListAsync(cancellationToken);
         var bookRows = await db.PublicationBooks.AsNoTracking().Where(item => item.ProjectId == projectId)
             .Select(item => new
             {
@@ -122,7 +156,9 @@ public sealed class PublicationBookService(
                 Placements = item.ImagePlacements.OrderBy(row => row.SortOrder).Select(row => new { row.Id, row.AssetId, row.TargetKind, row.TargetId, row.PlacementKind, row.Caption, row.PresentationJson, row.AltText, row.Decorative, row.Language, row.AccessibilityRole, row.SortOrder }),
                 Cover = item.CoverDesign == null ? null : new { item.CoverDesign.Revision, item.CoverDesign.BackgroundColor, item.CoverDesign.CompositionSceneJson },
             }).SingleAsync(cancellationToken);
-        var payload = JsonSerializer.Serialize(new { core, setup, chapters, compositions, assets, bookRows }, ManuscriptCodec.JsonOptions);
+        var payload = JsonSerializer.Serialize(
+            new { core, setup, chapters, compositions, assets, styles, fonts, bookRows },
+            ManuscriptCodec.JsonOptions);
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
     }
 

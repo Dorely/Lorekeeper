@@ -1439,8 +1439,8 @@ function installNamedStyleRules(root, styles) {
     for (const style of styles) {
         const definition = style.definition || {};
         const selector = style.kind === "character"
-            ? `.semantic-prosemirror span[data-character-style=${JSON.stringify(style.semanticRole)} i]`
-            : `.semantic-prosemirror [data-style-role=${JSON.stringify(style.semanticRole)} i]`;
+            ? `.semantic-editor.semantic-editor .semantic-prosemirror span[data-character-style=${JSON.stringify(style.semanticRole)} i]`
+            : `.semantic-editor.semantic-editor .semantic-prosemirror [data-style-role=${JSON.stringify(style.semanticRole)} i]`;
         const declarations = [];
         const family = fontFamilies[definition.fontFamilyKey?.toLowerCase()];
         if (family) declarations.push(`font-family:${family}`);
@@ -1453,6 +1453,12 @@ function installNamedStyleRules(root, styles) {
             declarations.push(`margin-top:${definition.spaceBeforePoints}pt`);
         if (definition.spaceAfterPoints !== null && definition.spaceAfterPoints !== undefined)
             declarations.push(`margin-bottom:${definition.spaceAfterPoints}pt`);
+        if (definition.leftIndentEm !== null && definition.leftIndentEm !== undefined)
+            declarations.push(`margin-left:${definition.leftIndentEm}em`);
+        if (definition.rightIndentEm !== null && definition.rightIndentEm !== undefined)
+            declarations.push(`margin-right:${definition.rightIndentEm}em`);
+        if (definition.firstLineIndentEm !== null && definition.firstLineIndentEm !== undefined)
+            declarations.push(`text-indent:${definition.firstLineIndentEm}em`);
         if (["left", "right", "center", "justify"].includes(definition.textAlign?.toLowerCase()))
             declarations.push(`text-align:${definition.textAlign.toLowerCase()}`);
         if (declarations.length > 0)

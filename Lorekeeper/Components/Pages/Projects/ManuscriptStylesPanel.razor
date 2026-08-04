@@ -43,6 +43,9 @@
         {
             <label>Space before (pt) <input class="form-control" type="number" min="0" max="288" step="0.5" @bind="_spaceBeforePoints" /></label>
             <label>Space after (pt) <input class="form-control" type="number" min="0" max="288" step="0.5" @bind="_spaceAfterPoints" /></label>
+            <label>Left indent (em) <input class="form-control" type="number" min="0" max="12" step="0.1" @bind="_leftIndentEm" /></label>
+            <label>Right indent (em) <input class="form-control" type="number" min="0" max="12" step="0.1" @bind="_rightIndentEm" /></label>
+            <label title="Use a negative value for a hanging indent.">First-line indent (em) <input class="form-control" type="number" min="-12" max="12" step="0.1" @bind="_firstLineIndentEm" /></label>
             <label>
                 Alignment
                 <select class="form-select" @bind="_textAlign">
@@ -54,6 +57,7 @@
                 </select>
             </label>
             <label><input type="checkbox" @bind="_keepWithNext" /> Keep with next in paginated output</label>
+            <label><input type="checkbox" @bind="_startOnNewPage" /> Start on a new page</label>
         }
         <button type="button" class="btn btn-sm btn-primary" @onclick="SaveAsync">
             @(_editingId is null ? "Add book style" : "Save book style")
@@ -104,6 +108,10 @@
     private double? _spaceAfterPoints;
     private bool _keepWithNext;
     private string? _textAlign;
+    private double? _leftIndentEm;
+    private double? _rightIndentEm;
+    private double? _firstLineIndentEm;
+    private bool _startOnNewPage;
     private string? _error;
 
     protected override async Task OnParametersSetAsync()
@@ -142,7 +150,11 @@
                         _kind == ManuscriptStyleKind.Paragraph ? _spaceBeforePoints : null,
                         _kind == ManuscriptStyleKind.Paragraph ? _spaceAfterPoints : null,
                         _kind == ManuscriptStyleKind.Paragraph ? _keepWithNext : null,
-                        _kind == ManuscriptStyleKind.Paragraph ? _textAlign : null),
+                        _kind == ManuscriptStyleKind.Paragraph ? _textAlign : null,
+                        _kind == ManuscriptStyleKind.Paragraph ? _leftIndentEm : null,
+                        _kind == ManuscriptStyleKind.Paragraph ? _rightIndentEm : null,
+                        _kind == ManuscriptStyleKind.Paragraph ? _firstLineIndentEm : null,
+                        _kind == ManuscriptStyleKind.Paragraph ? _startOnNewPage : null),
                     _expectedRevision));
             ResetForm();
             await ReloadAsync();
@@ -171,6 +183,10 @@
         _spaceAfterPoints = style.Definition.SpaceAfterPoints;
         _keepWithNext = style.Definition.KeepWithNext ?? false;
         _textAlign = style.Definition.TextAlign;
+        _leftIndentEm = style.Definition.LeftIndentEm;
+        _rightIndentEm = style.Definition.RightIndentEm;
+        _firstLineIndentEm = style.Definition.FirstLineIndentEm;
+        _startOnNewPage = style.Definition.StartOnNewPage ?? false;
     }
 
     private async Task DeleteAsync(ManuscriptStyleView style)
@@ -219,6 +235,10 @@
         _spaceAfterPoints = null;
         _keepWithNext = false;
         _textAlign = null;
+        _leftIndentEm = null;
+        _rightIndentEm = null;
+        _firstLineIndentEm = null;
+        _startOnNewPage = false;
     }
 
     private static string RoleFromName(string name)
