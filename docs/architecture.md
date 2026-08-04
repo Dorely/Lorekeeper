@@ -257,10 +257,15 @@ glyph-level evidence used only by renderer conformance inspection. Preview work
 is cancellable on mode changes and produces a retryable timeout instead of
 leaving the UI indefinitely busy. It supports single/facing display,
 fit-page/fit-width, zoom, and project page setup; it never substitutes a
-read-only ProseMirror view. Figure and Designed Page insertion use editor-owned
-forms rather than native browser prompts so the workflows behave consistently
-in the Electron host. Clicking Figure artwork selects the Figure directly; the
-primary toolbar and selected-Figure inspector share a sticky editor header,
+read-only ProseMirror view. A Designed Page whose scene declares a facing
+`EditionLeaves` spread always becomes two sequential leaf pages, including in
+Digital PDF preview requests that permit independent page geometry. Facing
+display joins those leaves into one row by default and offers an optional
+visible seam without changing the document layout. Figure and Designed Page
+insertion use editor-owned forms rather than native browser prompts so the
+workflows behave consistently in the Electron host. Clicking Figure artwork
+selects the Figure directly; the primary toolbar and selected-Figure inspector
+share a sticky editor header,
 keeping the styled Figure controls visible while the manuscript scrolls.
 Advanced controls are bounded and positioned below the complete sticky header
 and within the editor viewport, so they neither cover Figure controls nor create

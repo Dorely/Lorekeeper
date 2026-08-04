@@ -2792,19 +2792,37 @@ fn designed_pages(
         .get("variants")
         .and_then(Value::as_array)
         .and_then(|items| items.first());
-    let surface_kind = variant
+    let surface = variant
         .and_then(|item| item.get("scene"))
-        .and_then(|scene| scene.get("surface"))
+        .and_then(|scene| scene.get("surface"));
+    let surface_kind = surface
         .map(|surface| string(surface, "kind"))
         .unwrap_or_default();
+    let output_page_mode = surface
+        .map(|surface| string(surface, "outputPageMode"))
+        .unwrap_or_default();
+    let facing_edition_leaves = surface_kind == "FacingSpread"
+        && (output_page_mode.is_empty() || output_page_mode == "EditionLeaves");
     if digital {
-        if !allow_independent_page
-            && surface_kind == "FacingSpread"
-            && (width - trim_width * 2.0).abs() <= 0.02
-            && (height - trim_height).abs() <= 0.02
-        {
-            validate_facing_spread_text(&page, trim_width)?;
-            return Ok(split_facing_spread(page, trim_width));
+        if facing_edition_leaves {
+            let leaf_width = width / 2.0;
+            let uses_trim_geometry =
+                (leaf_width - trim_width).abs() <= 0.02 && (height - trim_height).abs() <= 0.02;
+            if !allow_independent_page && !uses_trim_geometry {
+                return Err(Diagnostic::error(
+                    "PRESS_DIGITAL_PAGE_OVERRIDE_DISABLED",
+                    "This Digital PDF edition uses uniform page geometry; enable Designed Page overrides for an independent page box.",
+                ));
+            }
+            validate_facing_spread_text(&page, leaf_width)?;
+            let mut leaves = split_facing_spread(page, leaf_width);
+            if allow_independent_page && !uses_trim_geometry {
+                for leaf in &mut leaves {
+                    leaf.width_points = Some(leaf_width);
+                    leaf.height_points = Some(height);
+                }
+            }
+            return Ok(leaves);
         }
         if !allow_independent_page
             && ((width - trim_width).abs() > 0.02 || (height - trim_height).abs() > 0.02)
@@ -2823,7 +2841,7 @@ fn designed_pages(
             ..page
         }]);
     }
-    if surface_kind == "FacingSpread"
+    if facing_edition_leaves
         && (width - trim_width * 2.0).abs() <= 0.02
         && (height - trim_height).abs() <= 0.02
     {

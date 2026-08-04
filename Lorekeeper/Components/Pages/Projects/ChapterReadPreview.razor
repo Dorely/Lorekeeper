@@ -11,6 +11,16 @@
             <button type="button" class="btn @ButtonClass(!_facing)" @onclick="() => _facing = false">Single page</button>
             <button type="button" class="btn @ButtonClass(_facing)" @onclick="() => _facing = true">Facing pages</button>
         </div>
+        @if (_facing)
+        {
+            <button type="button"
+                    class="btn btn-sm @ButtonClass(_showFacingSeam)"
+                    aria-pressed="@_showFacingSeam"
+                    title="Add space between the left and right pages"
+                    @onclick="() => _showFacingSeam = !_showFacingSeam">
+                @(_showFacingSeam ? "Hide page seam" : "Show page seam")
+            </button>
+        }
         <select class="form-select form-select-sm" value="@_fit" @onchange="ChangeFit">
             <option value="page">Fit page</option>
             <option value="width">Fit width</option>
@@ -69,7 +79,7 @@
                 }
             </div>
         }
-        <div class="chapter-preview-scroll @(_facing ? "facing" : "single") @($"fit-{_fit}")">
+        <div class="chapter-preview-scroll @(_facing ? "facing" : "single") @(_facing && _showFacingSeam ? "show-seam" : null) @($"fit-{_fit}")">
             @foreach (var page in _result.Pages)
             {
                 <article id="@($"page-{page.PhysicalPage}")" class="chapter-preview-page" style="@PageStyle(page)" aria-label="Page @(page.PageLabel ?? page.PhysicalPage.ToString())">
@@ -111,6 +121,7 @@
     private long _loadedSignal = -1;
     private bool _loading;
     private bool _facing;
+    private bool _showFacingSeam;
     private string _fit = "page";
     private double _zoom = 1;
     private string? _error;

@@ -823,6 +823,60 @@ fn protocol_v5_renders_paragraph_presentation_and_structured_page_preview_data()
 }
 
 #[test]
+fn digital_layout_splits_facing_spreads_authored_as_edition_leaves_when_page_overrides_are_enabled()
+{
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["document"]["allowDesignedPageOverrides"] = Value::Bool(true);
+    job.request["document"]["sections"][0]["chapters"][0]["blocks"] = json!([{
+        "id": "designed-spread", "type": "DesignedPage", "styleRole": "designed-page",
+        "pageCompositionId": "spread-composition", "content": []
+    }]);
+    job.request["document"]["sections"][0]["chapters"][0]["pageCompositions"] = json!([{
+        "id": "spread-composition", "name": "Facing artwork", "revision": 1,
+        "semanticBlocks": [],
+        "variants": [{ "id": "spread-variant", "geometryKey": "facing", "revision": 1,
+            "scene": { "schemaVersion": 1,
+                "surface": { "kind": "FacingSpread", "outputPageMode": "EditionLeaves",
+                    "widthPoints": 864, "heightPoints": 648, "bleedPoints": 0,
+                    "safeInsetPoints": 24, "allowIndependentPdfPage": false },
+                "layers": [{ "id": "spread-layer", "name": "Artwork", "order": 0 }],
+                "objects": [{ "id": "spread-image", "layerId": "spread-layer", "kind": "Image",
+                    "bounds": { "xPercent": 0, "yPercent": 0, "widthPercent": 100, "heightPercent": 100 },
+                    "imageId": "90000000-0000-0000-0000-000000000001", "imageFit": "Cover",
+                    "altText": "Facing split sentinel", "decorative": false,
+                    "semanticRole": "Figure", "readingOrder": 1, "zIndex": 0 }]
+            }
+        }]
+    }]);
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let designed_pages = trace["pages"]
+        .as_array()
+        .expect("trace pages")
+        .iter()
+        .filter(|page| {
+            page["images"].as_array().is_some_and(|images| {
+                images
+                    .iter()
+                    .any(|image| image["altText"] == "Facing split sentinel")
+            })
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        designed_pages.len(),
+        2,
+        "an EditionLeaves facing spread must occupy two sequential leaf pages"
+    );
+    for page in designed_pages {
+        assert!((page["widthPoints"].as_f64().unwrap() - 432.0).abs() < 0.01);
+        assert!((page["heightPoints"].as_f64().unwrap() - 648.0).abs() < 0.01);
+        assert_eq!(page["images"].as_array().unwrap().len(), 1);
+    }
+}
+
+#[test]
 fn edition_placements_honor_flow_caption_and_accessibility_presentation() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
     job.request["document"]["placements"] = json!([{
