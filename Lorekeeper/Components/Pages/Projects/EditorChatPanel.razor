@@ -157,10 +157,13 @@
 
     private string? ActiveModelId => _chatAvailability?.Provider?.ModelId;
     private int ConversationTokenLimit => TokenLimits.Resolve(ActiveModelId);
-    private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status == AiChangeStatus.Pending));
+    private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(IsUnresolvedReviewChange));
     private int ContestCandidateCount => _contestBatches.Sum(batch => batch.Candidates.Count);
     private bool HasRunningContest => _contestBatches.Any(batch => batch.Status == ContestBatchStatus.Running);
     private int PendingReviewCount => PendingChangeCount + ContestCandidateCount;
+
+    private static bool IsUnresolvedReviewChange(AiChange change) =>
+        change.Status is AiChangeStatus.Pending or AiChangeStatus.Conflict;
     private string ContestReviewTitle => HasRunningContest
         ? "Open the running Contest Mode review"
         : "Review Contest Mode candidates";
@@ -862,7 +865,7 @@
 
         return _pendingBatches
             .SelectMany(batch => batch.Changes)
-            .Any(change => change.Status == AiChangeStatus.Pending
+            .Any(change => IsUnresolvedReviewChange(change)
                 && (!routeActiveChapterToLineReview
                     || !AiChangeReviewDiffBuilder.IsChapterManuscriptChangeFor(change, chapterId)));
     }

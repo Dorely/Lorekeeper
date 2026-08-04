@@ -105,7 +105,7 @@
 
     private string? ActiveModelId => _chatAvailability?.Provider?.ModelId;
     private int ConversationTokenLimit => TokenLimits.Resolve(ActiveModelId);
-    private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status == AiChangeStatus.Pending));
+    private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status is AiChangeStatus.Pending or AiChangeStatus.Conflict));
     private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
     private string ChatDisabledMessage => _chatAvailability?.Message
         ?? "Configure and test a chat provider in Settings > Providers to enable LLM features.";

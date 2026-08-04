@@ -566,6 +566,10 @@ asks to brainstorm, compare, recommend before acting, or decide together;
 missing nonessential creative details do not create an extra permission gate.
 Review-edits mode may still stage a completed mutation for the existing human
 review workflow, but it does not make the assistant ask before using its tools.
+Approval compares the staged and current semantic manuscript at the recorded
+revision rather than requiring byte-identical JSON serialization. A genuine
+apply conflict remains an unresolved, visible, rejectable review item with its
+diagnostic; it never turns the batch into an apparently completed change.
 
 `BookFormatGuidanceService` derives bounded, genre-aware recommendations from
 the Book Brief, audience, reading level, read-aloud priority, visual direction,

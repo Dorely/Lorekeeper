@@ -241,6 +241,14 @@ public sealed class AiChangeApprovalService(
     {
         var batch = await changes.GetBatchAsync(batchId, cancellationToken)
             ?? throw new InvalidOperationException($"AI change batch {batchId} not found.");
+        var conflict = batch.Changes.FirstOrDefault(change => change.Status == AiChangeStatus.Conflict);
+        if (conflict is not null)
+        {
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(conflict.ErrorMessage)
+                    ? "This batch contains a conflicted change. Reject it and rerun the assistant request against the current project state."
+                    : conflict.ErrorMessage);
+        }
 
         await using var indexDeferral = indexWork.BeginDeferral();
         ExceptionDispatchInfo? capturedException = null;
@@ -340,7 +348,7 @@ public sealed class AiChangeApprovalService(
             ?? throw new InvalidOperationException($"AI change batch {batchId} not found.");
 
         var rejected = batch.Changes
-            .Where(changeItem => changeItem.Status == AiChangeStatus.Pending)
+            .Where(IsUnresolvedReviewChange)
             .OrderBy(changeItem => changeItem.Order)
             .ToList();
         foreach (var changeItem in rejected)
@@ -357,7 +365,7 @@ public sealed class AiChangeApprovalService(
     {
         var change = await changes.GetChangeAsync(changeId, cancellationToken)
             ?? throw new InvalidOperationException($"AI change {changeId} not found.");
-        if (change.Status != AiChangeStatus.Pending)
+        if (!IsUnresolvedReviewChange(change))
             return;
 
         var rejected = CollectDependentPendingChanges(change.Batch, change.Id);
@@ -388,6 +396,7 @@ public sealed class AiChangeApprovalService(
         {
             await ApplyStoredToolChangeAsync(batch.ProjectId, change, cancellationToken);
             change.Status = AiChangeStatus.Applied;
+            change.ErrorMessage = null;
             change.UpdatedAt = DateTime.UtcNow;
             change.ResolvedAt = DateTime.UtcNow;
             changes.UpdateChange(change);
@@ -447,8 +456,7 @@ public sealed class AiChangeApprovalService(
                 var after = ReadRequired<ChapterManuscriptChange>(afterJson);
                 var current = await chapters.GetAsync(after.Id, cancellationToken)
                     ?? throw new InvalidOperationException($"Chapter {after.Id} not found.");
-                if (current.ManuscriptRevision != before.Revision
-                    || !string.Equals(current.ManuscriptJson, before.ManuscriptJson, StringComparison.Ordinal))
+                if (!CurrentManuscriptMatches(current, before))
                 {
                     throw new InvalidOperationException("The chapter body changed after this Designed Page was staged. Reject this change and rerun it against the current manuscript.");
                 }
@@ -519,8 +527,7 @@ public sealed class AiChangeApprovalService(
                 {
                     var current = await chapters.GetAsync(after.Id, cancellationToken)
                         ?? throw new InvalidOperationException($"Chapter {after.Id} not found.");
-                    if (current.ManuscriptRevision != before.Revision
-                        || !string.Equals(current.ManuscriptJson, before.ManuscriptJson, StringComparison.Ordinal))
+                    if (!CurrentManuscriptMatches(current, before))
                         throw new InvalidOperationException("The chapter body changed after this AI edit was staged. Reject this change and rerun the edit against the current chapter text.");
                 }
                 await manuscripts.ReplaceDocumentAsync(
@@ -972,7 +979,7 @@ public sealed class AiChangeApprovalService(
         while (changed)
         {
             changed = false;
-            foreach (var candidate in batch.Changes.Where(changeItem => changeItem.Status == AiChangeStatus.Pending))
+            foreach (var candidate in batch.Changes.Where(IsUnresolvedReviewChange))
             {
                 if (rejectedIds.Contains(candidate.Id)) continue;
                 var dependencies = ReadGuidList(candidate.DependsOnChangeIdsJson);
@@ -985,7 +992,7 @@ public sealed class AiChangeApprovalService(
         }
 
         return batch.Changes
-            .Where(changeItem => rejectedIds.Contains(changeItem.Id) && changeItem.Status == AiChangeStatus.Pending)
+            .Where(changeItem => rejectedIds.Contains(changeItem.Id) && IsUnresolvedReviewChange(changeItem))
             .OrderBy(changeItem => changeItem.Order)
             .ToList();
     }
@@ -1171,7 +1178,12 @@ public sealed class AiChangeApprovalService(
 
     private void UpdateBatchStatus(AiChangeBatch batch)
     {
-        if (batch.Changes.All(changeItem => changeItem.Status != AiChangeStatus.Pending))
+        if (batch.Changes.Any(IsUnresolvedReviewChange))
+        {
+            batch.Status = AiChangeBatchStatus.Pending;
+            batch.ResolvedAt = null;
+        }
+        else
         {
             batch.Status = AiChangeBatchStatus.Resolved;
             batch.ResolvedAt = DateTime.UtcNow;
@@ -1180,6 +1192,13 @@ public sealed class AiChangeApprovalService(
         batch.UpdatedAt = DateTime.UtcNow;
         changes.UpdateBatch(batch);
     }
+
+    private static bool CurrentManuscriptMatches(Chapter current, ChapterManuscriptChange expected) =>
+        current.ManuscriptRevision == expected.Revision
+        && ManuscriptCodec.ContentEquals(current.Manuscript, expected.Manuscript);
+
+    private static bool IsUnresolvedReviewChange(AiChange change) =>
+        change.Status is AiChangeStatus.Pending or AiChangeStatus.Conflict;
 
     private static Guid ParseResourceGuid(AiChange change)
     {
