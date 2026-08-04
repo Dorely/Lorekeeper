@@ -261,7 +261,10 @@ read-only ProseMirror view. A Designed Page whose scene declares a facing
 `EditionLeaves` spread always becomes two sequential leaf pages, including in
 Digital PDF preview requests that permit independent page geometry. Facing
 display joins those leaves into one row by default and offers an optional
-visible seam without changing the document layout. Figure and Designed Page
+visible seam without changing the document layout. The browser trace carries
+each split image's source window through `IChapterPreviewService`; Read mode
+clips one virtual spread image across both leaf frames instead of independently
+fitting the complete source into each page. Figure and Designed Page
 insertion use editor-owned forms rather than native browser prompts so the
 workflows behave consistently in the Electron host. Clicking Figure artwork
 selects the Figure directly; the primary toolbar and selected-Figure inspector

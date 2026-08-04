@@ -586,7 +586,7 @@
 |------|-------------|
 | `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service with fresh cross-scope authoring reads, active authoring geometry, atomic image/fit placement, scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
 | `ProjectPageSetupService.cs` | Revision-aware project authoring page setup presets/custom geometry used by Read preview, new Designed Pages, Figures, and generation targets without publication releases. |
-| `ChapterPreviewService.cs` | Cached, cancellable Press layout-command adapter that stages the selected chapter's declared images/fonts and returns compact page paint plus authoring diagnostics without glyph-level conformance payloads. |
+| `ChapterPreviewService.cs` | Cached, cancellable Press layout-command adapter that stages the selected chapter's declared images/fonts and returns compact page paint, split-image source windows, and authoring diagnostics without glyph-level conformance payloads. |
 | `CompositionAgentPayloads.cs` | Lossless bounded assistant reads and compact revision-safe patch envelopes for semantic fragments, scene objects, layers, and styles. |
 | `CompositionSceneResolver.cs` | Shared deterministic group flattener and PDF/X overlap validator used by export and geometry-target consumers so group transforms, opacity, visibility, locks, and z-order have runtime meaning. |
 | `CoverCompositionFactory.cs` | Seeds and reflows shared structured cover scenes across front-only digital and page-count-derived print-wrap geometry. |

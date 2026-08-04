@@ -70,6 +70,8 @@ public sealed record ChapterPreviewImage(
     string Fit,
     double CropX,
     double CropY,
+    double SourceLeftFraction,
+    double SourceWidthFraction,
     string? AltText,
     bool Decorative,
     int ZIndex);
@@ -439,7 +441,8 @@ public sealed class ChapterPreviewService(
                 .Select(item => new ChapterPreviewImage(
                     Guid.Parse(item.image.AssetId), item.image.X, item.image.Y, item.image.Width, item.image.Height,
                     item.image.RotationDegrees, item.image.Opacity, item.image.Fit, item.image.CropX,
-                    item.image.CropY, item.image.AltText, item.image.Decorative,
+                    item.image.CropY, item.image.SourceLeftFraction, item.image.SourceWidthFraction,
+                    item.image.AltText, item.image.Decorative,
                     imageOrder.GetValueOrDefault(item.index, page.PaintOrder.Length + item.index))).ToArray(),
             page.Shapes.Select((shape, index) => new ChapterPreviewShape(
                 shape.Kind, shape.X, shape.Y, shape.Width, shape.Height, shape.RotationDegrees,
@@ -492,7 +495,7 @@ public sealed class ChapterPreviewService(
     private sealed record LayoutPaint(string Kind, int Index);
     private sealed record LayoutLine(string Text, double Size, double X, double Y, double WordSpacing, double CharacterSpacing, double RotationDegrees, double? RotationOriginX, double? RotationOriginY, double Opacity, double[]? FillRgb, string? SemanticRole, int? LinkPage, LayoutRun[] Runs);
     private sealed record LayoutRun(string Text, string Face, bool Underline, bool Strikethrough, double BaselineShiftEm, double SizeScale);
-    private sealed record LayoutImage(string AssetId, double X, double Y, double Width, double Height, double RotationDegrees, double Opacity, string Fit, double CropX, double CropY, string? AltText, bool Decorative);
+    private sealed record LayoutImage(string AssetId, double X, double Y, double Width, double Height, double RotationDegrees, double Opacity, string Fit, double CropX, double CropY, double SourceLeftFraction, double SourceWidthFraction, string? AltText, bool Decorative);
     private sealed record LayoutShape(string Kind, double X, double Y, double Width, double Height, double RotationDegrees, double Opacity, double[]? FillRgb, double[]? StrokeRgb, double StrokeWidth);
     private sealed record LayoutPageMap(string ChapterId, string BlockId, int PageNumber);
     private sealed record PreviewFont(Guid Id, string FamilyKey, int Weight, bool Italic, string RelativePath, string ContentType, byte[] Data, string Sha256);
