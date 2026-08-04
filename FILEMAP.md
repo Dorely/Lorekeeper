@@ -179,7 +179,7 @@
 |------|-------------|
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared project workspace shell: loads the project, renders the section tabs, condenses Editor navigation into one scrollable header row, and exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
-| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware Edit/Read/Pages/Review chapter workspace with keyed semantic editor, serialized refresh coordination, resizable Chat/Memory columns, and persistent AI/Contest review entry points. |
+| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware Edit/Read/Pages/Review chapter workspace with keyed semantic editor, serialized refresh coordination, composition/variant-aware assistant refresh routing, resizable Chat/Memory columns, and persistent AI/Contest review entry points. |
 | `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with disposal-safe asynchronous attachment, revision-aware save/flush, sticky styled Figure controls, bounded toolbar overlays, Electron-safe Figure/Designed Page setup forms, and discoverable Designed Page cards with live names, surface/status summaries, artwork thumbnails, and editor actions. |
 | `ChapterReadPreview.razor` (+ `.razor.css`) | Press-backed current-chapter page preview with flush-before-layout, single/facing display, fit/zoom controls, project page setup, images, labels, links, visible authoring warnings, and retryable failures. |
 | `ManuscriptStylesPanel.razor` (+ `.razor.css`) | Book Text Style manager with revision-aware paragraph/character typography, spacing, indentation and pagination controls plus stable semantic roles. |
@@ -584,7 +584,7 @@
 
 | File | Description |
 |------|-------------|
-| `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service, active authoring geometry, atomic image/fit placement, scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
+| `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service with fresh cross-scope authoring reads, active authoring geometry, atomic image/fit placement, scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
 | `ProjectPageSetupService.cs` | Revision-aware project authoring page setup presets/custom geometry used by Read preview, new Designed Pages, Figures, and generation targets without publication releases. |
 | `ChapterPreviewService.cs` | Cached, cancellable Press layout-command adapter that stages the selected chapter's declared images/fonts and returns compact page paint plus authoring diagnostics without glyph-level conformance payloads. |
 | `CompositionAgentPayloads.cs` | Lossless bounded assistant reads and compact revision-safe patch envelopes for semantic fragments, scene objects, layers, and styles. |
@@ -638,7 +638,7 @@
 | File | Description |
 |------|-------------|
 | `IEditorChatService.cs` | Project-wide editor chat contract plus per-turn context for compact tools, opaque one-use manuscript previews, composition stages, persisted/model-visible visuals, and generation jobs. |
-| `EditorChatService.cs` | Editor adapter using current semantic Figure/Designed Page prompt guidance, persisted turn context, Review edits, contests, cancellation-safe worker progress, and image-job progress. |
+| `EditorChatService.cs` | Editor adapter using current semantic Figure/Designed Page prompt guidance, persisted turn context, complete composition mutation identities, Review edits, contests, cancellation-safe worker progress, and image-job progress. |
 | `EditorChatOptions.cs` | Configuration for editor-chat-specific paginated chapter reads and prose-only revision worker concurrency/iteration limits. |
 | `EditorChatTools.cs` | Editor tools for grounded reads, one-payload manuscript preview/apply, review-aware focused Figures, compact/staged composition, target-bound generation, canonical visuals/crops, Book Brief updates, revision agents, and Contest preparation. |
 | `EditorManuscriptPreviewService.cs` | Turn-local manuscript preview/apply protocol: validates once, returns compact opaque IDs, rejects stale/reused previews, and persists or review-stages the exact projected document. |

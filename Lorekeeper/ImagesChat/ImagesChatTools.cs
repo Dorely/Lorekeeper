@@ -647,7 +647,7 @@ public sealed class ImagesChatTools(
             var placed = await compositions.AddImageObjectAsync(
                 ctx.ProjectId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder, ctx.TurnCancellationToken);
             ctx.MarkMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = variantId, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the Designed Page.", mutation = new { kind = "pageCompositionVariant", id = variantId, selectId = placed.ObjectId } }, JsonOptions);
+            return JsonSerializer.Serialize(new { ok = true, targetId = variantId, variantId = placed.Variant.Id, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the Designed Page.", mutation = new { kind = "pageComposition", id = placed.Variant.CompositionId, variantId = placed.Variant.Id, selectId = placed.ObjectId } }, JsonOptions);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException or CompositionRevisionConflictException)
         {
@@ -812,7 +812,7 @@ public sealed class ImagesChatTools(
         {
             var variant = await compositions.ApplyStageAsync(ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken);
             ctx.MarkMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, revision = variant.Revision, changedIds = new[] { variant.Id }, summary = "Staged composition applied.", mutation = new { kind = "pageCompositionVariant", id = variant.Id } }, JsonOptions);
+            return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, variantId = variant.Id, revision = variant.Revision, changedIds = new[] { variant.Id }, summary = "Staged composition applied.", mutation = new { kind = "pageComposition", id = variant.CompositionId, variantId = variant.Id } }, JsonOptions);
         }
         catch (CompositionRevisionConflictException ex)
         {

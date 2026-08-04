@@ -1773,7 +1773,7 @@ public sealed class EditorChatTools(
             var placed = await compositions.AddImageObjectAsync(
                 ctx.ProjectId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder, ctx.TurnCancellationToken);
             ctx.OnMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = variantId, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the Designed Page.", mutation = new { kind = "pageCompositionVariant", id = variantId, selectId = placed.ObjectId } });
+            return JsonSerializer.Serialize(new { ok = true, targetId = variantId, variantId = placed.Variant.Id, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the Designed Page.", mutation = new { kind = "pageComposition", id = placed.Variant.CompositionId, variantId = placed.Variant.Id, selectId = placed.ObjectId } });
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException or CompositionRevisionConflictException)
         {
@@ -1831,7 +1831,7 @@ public sealed class EditorChatTools(
         {
             var variant = await compositions.ApplyStageAsync(ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken);
             ctx.OnMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, revision = variant.Revision, summary = "Staged composition applied.", changedIds = new[] { variant.Id }, mutation = new { kind = "pageCompositionVariant", id = variant.Id } });
+            return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, variantId = variant.Id, revision = variant.Revision, summary = "Staged composition applied.", changedIds = new[] { variant.Id }, mutation = new { kind = "pageComposition", id = variant.CompositionId, variantId = variant.Id } });
         }
         catch (CompositionRevisionConflictException ex)
         {

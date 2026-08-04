@@ -1005,7 +1005,7 @@ public sealed class PublishAssistantTools(
                 return Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId = variantId, imageId, summary = "Project image was not found." });
             var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable.");
             var placed = await service.AddImageObjectAsync(context.ProjectId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder, context.TurnCancellationToken);
-            return Serialize(new { ok = true, targetId = variantId, releaseId = editionId, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the release layout.", mutation = new { kind = "pageCompositionVariant", id = variantId, selectId = placed.ObjectId } });
+            return Serialize(new { ok = true, targetId = variantId, releaseId = editionId, variantId = placed.Variant.Id, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the release layout.", mutation = new { kind = "pageComposition", id = placed.Variant.CompositionId, variantId = placed.Variant.Id, selectId = placed.ObjectId } });
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException or CompositionRevisionConflictException)
         {
@@ -1059,7 +1059,7 @@ public sealed class PublishAssistantTools(
 
     private async Task<string> GetOrCreateCompositionVariantAsync(PublishAssistantContext context, Guid compositionId, Guid editionId)
     {
-        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var variant = await service.GetOrCreateVariantAsync(context.ProjectId, compositionId, editionId, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = variant.Id, revision = variant.Revision, summary = "Release layout copied from the authoring layout and is ready for review.", mutation = new { kind = "pageComposition", id = compositionId, selectId = variant.Id } }); }
+        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var variant = await service.GetOrCreateVariantAsync(context.ProjectId, compositionId, editionId, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = variant.Id, variantId = variant.Id, revision = variant.Revision, summary = "Release layout copied from the authoring layout and is ready for review.", mutation = new { kind = "pageComposition", id = compositionId, variantId = variant.Id } }); }
         catch (Exception ex) { return Serialize(new { ok = false, code = "INVALID_TARGET", targetId = compositionId, summary = ex.Message }); }
     }
 
@@ -1072,7 +1072,7 @@ public sealed class PublishAssistantTools(
 
     private async Task<string> ApplyCompositionStageAsync(PublishAssistantContext context, Guid editionId, Guid stageId, long expectedRevision)
     {
-        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var variant = await service.ApplyStageAsync(context.ProjectId, context.ConversationId, stageId, expectedRevision, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = variant.Id, releaseId = editionId, revision = variant.Revision, summary = "Staged composition applied.", changedIds = new[] { variant.Id }, mutation = new { kind = "pageCompositionVariant", id = variant.Id } }); }
+        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var variant = await service.ApplyStageAsync(context.ProjectId, context.ConversationId, stageId, expectedRevision, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = variant.Id, releaseId = editionId, variantId = variant.Id, revision = variant.Revision, summary = "Staged composition applied.", changedIds = new[] { variant.Id }, mutation = new { kind = "pageComposition", id = variant.CompositionId, variantId = variant.Id } }); }
         catch (CompositionRevisionConflictException ex) { return Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread and submit a replacement stage." }); }
         catch (Exception ex) { return Serialize(new { ok = false, code = "STAGE_REJECTED", targetId = stageId, summary = ex.Message }); }
     }
@@ -1100,7 +1100,7 @@ public sealed class PublishAssistantTools(
 
     private async Task<string> ApplyCompositionWorkspaceStageAsync(PublishAssistantContext context, Guid editionId, Guid stageId, long expectedCompositionRevision)
     {
-        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var result = await service.ApplyWorkspaceStageAsync(context.ProjectId, context.ConversationId, stageId, expectedCompositionRevision, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = result.Composition.Id, releaseId = editionId, revision = result.Composition.Revision, variantId = result.Variant.Id, variantRevision = result.Variant.Revision, changedIds = result.ChangedBlockIds, summary = "Designed Page content and layout applied atomically.", mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant.Id } }); }
+        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var result = await service.ApplyWorkspaceStageAsync(context.ProjectId, context.ConversationId, stageId, expectedCompositionRevision, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = result.Composition.Id, releaseId = editionId, revision = result.Composition.Revision, variantId = result.Variant.Id, variantRevision = result.Variant.Revision, changedIds = result.ChangedBlockIds, summary = "Designed Page content and layout applied atomically.", mutation = new { kind = "pageComposition", id = result.Composition.Id, variantId = result.Variant.Id } }); }
         catch (CompositionRevisionConflictException ex) { return Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact workspace and submit a new non-replayed stage." }); }
         catch (Exception ex) { return Serialize(new { ok = false, code = "WORKSPACE_STAGE_REJECTED", targetId = stageId, summary = ex.Message }); }
     }

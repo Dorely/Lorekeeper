@@ -90,10 +90,11 @@ public static class CompositionAgentPayloads
             {
                 ok = true,
                 targetId,
+                variantId = variant.Id,
                 revision = variant.Revision,
                 summary = $"Patched composition {targetKind} {targetId:N}.",
                 changedIds = new[] { targetId },
-                mutation = new { kind = "pageComposition", id = variant.CompositionId, selectId = variant.Id },
+                mutation = new { kind = "pageComposition", id = variant.CompositionId, variantId = variant.Id, selectId = targetId },
             });
         }
         catch (CompositionRevisionConflictException exception)

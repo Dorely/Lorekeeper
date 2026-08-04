@@ -1036,13 +1036,14 @@ public sealed class EditorChatService(
                 return new EditorWorkspaceMutated(EditorWorkspaceMutationKind.ProjectPageSetup, Revision: revision, ChangedIds: changedIds);
             if (string.Equals(kind, "pageComposition", StringComparison.OrdinalIgnoreCase))
             {
-                var variantId = ReadGuid(root, "variantId") ?? ReadGuid(arguments, "variantId");
-                var selectedObjectId = toolName.Contains("patch", StringComparison.Ordinal)
-                    ? ReadGuid(arguments, "targetId")
-                    : null;
+                var compositionId = ReadGuid(mutation, "compositionId") ?? id;
+                var variantId = ReadGuid(mutation, "variantId") ?? ReadGuid(root, "variantId") ?? ReadGuid(arguments, "variantId");
+                var selectedObjectId = ReadGuid(mutation, "selectId")
+                    ?? ReadGuid(root, "selectId")
+                    ?? (toolName.Contains("patch", StringComparison.Ordinal) ? ReadGuid(arguments, "targetId") : null);
                 return new EditorWorkspaceMutated(
                     EditorWorkspaceMutationKind.PageComposition,
-                    CompositionId: id,
+                    CompositionId: compositionId,
                     VariantId: variantId,
                     Revision: revision,
                     ChangedIds: changedIds,
@@ -1051,7 +1052,8 @@ public sealed class EditorChatService(
             if (string.Equals(kind, "pageCompositionVariant", StringComparison.OrdinalIgnoreCase))
                 return new EditorWorkspaceMutated(
                     EditorWorkspaceMutationKind.PageComposition,
-                    VariantId: id,
+                    CompositionId: ReadGuid(mutation, "compositionId"),
+                    VariantId: ReadGuid(mutation, "variantId") ?? id,
                     Revision: revision,
                     ChangedIds: changedIds,
                     SelectedObjectId: ReadGuid(mutation, "selectId") ?? ReadGuid(root, "selectId") ?? ReadGuid(arguments, "targetId"));

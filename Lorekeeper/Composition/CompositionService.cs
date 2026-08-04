@@ -258,18 +258,26 @@ public sealed class CompositionService(
         Guid compositionId,
         CancellationToken cancellationToken = default)
     {
+        var current = await db.PageCompositions.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId, cancellationToken)
+            ?? throw new KeyNotFoundException("Page composition was not found in this project.");
+        if (current.ActiveAuthoringVariantId is Guid currentActiveId)
+            return await ReadVariantAsync(projectId, currentActiveId, cancellationToken);
+
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var composition = await db.PageCompositions.Include(item => item.Variants)
+        var composition = await db.PageCompositions.AsNoTracking().Include(item => item.Variants)
             .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Page composition was not found in this project.");
         if (composition.ActiveAuthoringVariantId is Guid activeId)
-            return composition.Variants.SingleOrDefault(item => item.Id == activeId)
-                ?? throw new InvalidDataException("The active authoring layout is missing from its Designed Page.");
+            return await ReadVariantAsync(projectId, activeId, cancellationToken);
         var existing = composition.Variants.OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
         if (existing is not null)
         {
-            composition.ActiveAuthoringVariantId = existing.Id;
-            await db.SaveChangesAsync(cancellationToken);
+            await db.PageCompositions
+                .Where(item => item.Id == composition.Id && item.ProjectId == projectId)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.ActiveAuthoringVariantId, existing.Id)
+                    .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), cancellationToken);
             return existing;
         }
 
@@ -284,9 +292,11 @@ public sealed class CompositionService(
         db.PageCompositionVariants.Add(variant);
         await TouchProjectAsync(projectId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
-        composition.ActiveAuthoringVariantId = variant.Id;
-        composition.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
+        await db.PageCompositions
+            .Where(item => item.Id == composition.Id && item.ProjectId == projectId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.ActiveAuthoringVariantId, variant.Id)
+                .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), cancellationToken);
         return variant;
     }
 

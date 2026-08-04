@@ -290,7 +290,9 @@ Assistant composition mutation notices carry the chapter,
 composition/variant, revision, changed IDs, and selected object. A newly
 created Designed Page opens Pages mode automatically, and each later placement
 or layout mutation reloads the mounted canvas and follows the affected object
-without replacing dirty manual state.
+without replacing dirty manual state. Authoring-variant refreshes use fresh
+no-tracking reads so mutations performed by a background assistant scope cannot
+be hidden by an older variant already tracked in the Blazor circuit.
 
 `LayoutGenerationTargetDescriptor` is the server-owned geometry boundary for a
 project page, Figure, page surface/frame, or publication cover surface/frame.

@@ -16,6 +16,7 @@
 @inject IChapterService Chapters
 @inject IManuscriptService Manuscripts
 @inject IProjectImageService Images
+@inject ICompositionService Compositions
 @inject IEditorContextService EditorContext
 @inject IActService Acts
 @inject IEditorChatService Chat
@@ -3120,15 +3121,20 @@ else
     private async Task OnAiWorkspaceMutatedAsync(EditorWorkspaceMutated mutation)
     {
         await OnAiChangesAppliedAsync();
-        if (mutation.Kind != EditorWorkspaceMutationKind.PageComposition)
+        if (mutation.Kind != EditorWorkspaceMutationKind.PageComposition || Project is null)
             return;
 
         var compositionId = mutation.CompositionId;
         if (compositionId is null && mutation.VariantId is Guid variantId)
         {
-            compositionId = DesignedPageIds.FirstOrDefault(id => id == _openCompositionId);
-            if (compositionId == Guid.Empty)
+            try
+            {
+                compositionId = (await Compositions.ReadVariantAsync(Project.Id, variantId)).CompositionId;
+            }
+            catch (KeyNotFoundException)
+            {
                 compositionId = null;
+            }
         }
         if (compositionId is null || !DesignedPageIds.Contains(compositionId.Value))
         {
