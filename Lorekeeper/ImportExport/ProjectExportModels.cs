@@ -19,7 +19,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 16;
+    public const int CurrentFormatVersion = 17;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -230,7 +230,10 @@ public sealed record ProjectExportPublicationBook(
     List<ProjectExportEditionOutlineItem> OutlineItems,
     List<ProjectExportPublicationMatter> Matter,
     List<ProjectExportPublicationImagePlacement> ImagePlacements,
-    ProjectExportCoverDesign? CoverDesign);
+    ProjectExportCoverDesign? CoverDesign)
+{
+    public bool AllowDesignedPageOverrides { get; init; }
+}
 
 public sealed record ProjectExportCoverDesign(
     string Title,

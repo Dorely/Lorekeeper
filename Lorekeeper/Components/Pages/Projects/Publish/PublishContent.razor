@@ -396,7 +396,16 @@ else
             </details>
         </section>
 
-        <section class="workspace-card"><header><div><span class="step">03</span><div><h2>Front and back matter</h2><p>Shared dedication, acknowledgements, notes, and other book material.</p></div></div><div class="button-row"><button class="btn btn-sm btn-outline-primary" @onclick="() => AddCoreMatterAsync(PublicationMatterKind.Dedication)">Add dedication</button><button class="btn btn-sm btn-outline-primary" @onclick="() => AddCoreMatterAsync(PublicationMatterKind.Acknowledgments)">Add acknowledgements</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => AddCoreMatterAsync(PublicationMatterKind.Custom)">Add page</button></div></header>
+        <section class="workspace-card"><header><div><span class="step">03</span><div><h2>PDF presentation</h2><p>Defaults for the Core reading PDF and inheriting PDF ebook releases.</p></div></div></header>
+            <div class="option-grid pdf-presentation-options">
+                <label class="check-row"><input type="checkbox" checked="@_coreDraft.AllowDesignedPageOverrides" @onchange="e => CoreToggle(nameof(CoreDraft.AllowDesignedPageOverrides), (bool)e.Value!)" /><span><strong>Preserve Designed Page sizes</strong><small>Full-art facing spreads stay one wide PDF page, and custom Designed Pages keep their own geometry instead of being fitted into regular book pages.</small></span></label>
+                <div class="plain-setting"><strong>Regular pages</strong><span>@_core!.PageSetup.PageWidthInches × @_core.PageSetup.PageHeightInches in, from Project Page Setup</span></div>
+                <div class="plain-setting"><strong>When disabled</strong><span>Facing spreads are divided into two regular book pages while preserving artwork across the seam.</span></div>
+                <div class="plain-setting"><strong>Reader navigation and accessibility</strong><span>Tagged text, bookmarks, internal contents links, language, and logical reading order are included automatically.</span></div>
+            </div>
+        </section>
+
+        <section class="workspace-card"><header><div><span class="step">04</span><div><h2>Front and back matter</h2><p>Shared dedication, acknowledgements, notes, and other book material.</p></div></div><div class="button-row"><button class="btn btn-sm btn-outline-primary" @onclick="() => AddCoreMatterAsync(PublicationMatterKind.Dedication)">Add dedication</button><button class="btn btn-sm btn-outline-primary" @onclick="() => AddCoreMatterAsync(PublicationMatterKind.Acknowledgments)">Add acknowledgements</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => AddCoreMatterAsync(PublicationMatterKind.Custom)">Add page</button></div></header>
             @if (!_coreDetailsLoaded){<div class="deferred-section-loading"><span class="spinner-border spinner-border-sm"></span> Loading front and back matter…</div>}else if (_coreMatter.Count == 0){<p class="muted">No custom matter has been added. Title, copyright, and contents pages are generated from Core Book settings.</p>}else{<div class="compact-list">@foreach (var item in _coreMatter){<div><div><strong>@item.Title</strong><span>@item.Location · @item.Kind · @(item.IsIncluded ? "Included" : "Excluded")</span></div><div class="button-row"><button class="btn btn-sm btn-outline-secondary" @onclick="() => BeginCoreMatterEdit(item)">Edit</button><button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteCoreMatterAsync(item)">Remove</button></div></div>}</div>}
             @if (_editingCoreMatterId is not null)
             {
@@ -442,7 +451,6 @@ else
                 else if (_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf)
                 {
                     <label class="field"><span>ISBN <small>optional</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:after="MarkReleaseDirty" /></label>
-                    <label class="check-row"><input type="checkbox" @bind="_releaseDraft.AllowDesignedPageOverrides" @bind:after="MarkReleaseDirty" /><span>Allow deliberately mixed page sizes</span></label>
                 }
                 else
                 {
@@ -468,7 +476,17 @@ else
 
         @if (_workspace.Edition.Format != PublicationEditionFormat.Epub)
         {
-            <section class="workspace-card"><header><div><span class="step">03</span><div><h2>Page and text design</h2><p>@(_releaseDesignOpen ? "Customized for this release." : "Uses Core Book page setup and Book Text Styles.")</p></div></div><button class="btn btn-sm btn-outline-primary" @onclick="ToggleReleaseDesign">@(_releaseDesignOpen ? "Use Core Book design" : "Customize for this release")</button></header>
+            @if (_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf)
+            {
+                <section class="workspace-card"><header><div><span class="step">03</span><div><h2>PDF presentation</h2><p>Uses Core Book defaults until deliberately customized for this PDF release.</p></div></div></header>
+                    <div class="release-presentation-options">
+                        @InheritedToggle("Preserve Designed Page sizes", PublicationEditionOverrideField.AllowDesignedPageOverrides, _releaseDraft.AllowDesignedPageOverrides, value => ReleaseToggle(nameof(ReleaseDraft.AllowDesignedPageOverrides), value))
+                        <div class="plain-setting"><strong>Page behavior</strong><span>When enabled, full-art spreads remain one wide PDF page and custom Designed Pages retain their geometry. When disabled, spreads use regular book leaves.</span></div>
+                        <div class="plain-setting"><strong>Accessibility</strong><span>Tagged text, bookmarks, links, and logical reading order remain automatic.</span></div>
+                    </div>
+                </section>
+            }
+            <section class="workspace-card"><header><div><span class="step">@(_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf ? "04" : "03")</span><div><h2>Page and text design</h2><p>@(_releaseDesignOpen ? "Customized for this release." : "Uses Core Book page setup and Book Text Styles.")</p></div></div><button class="btn btn-sm btn-outline-primary" @onclick="ToggleReleaseDesign">@(_releaseDesignOpen ? "Use Core Book design" : "Customize for this release")</button></header>
                 @if (_releaseDesignOpen)
                 {
                     <div class="form-grid">
@@ -638,7 +656,7 @@ else
         try
         {
             if (_coreDirty)
-                _core = await Books.UpdateAsync(Project.Id, new PublicationBookPatch(_core.Revision, _coreDraft.Title, _coreDraft.Subtitle, _coreDraft.Author, _coreDraft.Language, _coreDraft.Publisher, _coreDraft.Copyright, _coreDraft.Description, _coreDraft.IncludeTableOfContents, _coreDraft.IncludeVisibleTableOfContents, _coreDraft.IncludeActSynopses, _coreDraft.IncludeChapterSynopses, _coreDraft.IncludeActHeadings, _coreDraft.IncludeChapterHeadings, _coreDraft.NumberActs, _coreDraft.NumberChapters, _coreDraft.TitlePageMode));
+                _core = await Books.UpdateAsync(Project.Id, new PublicationBookPatch(_core.Revision, _coreDraft.Title, _coreDraft.Subtitle, _coreDraft.Author, _coreDraft.Language, _coreDraft.Publisher, _coreDraft.Copyright, _coreDraft.Description, _coreDraft.IncludeTableOfContents, _coreDraft.IncludeVisibleTableOfContents, _coreDraft.IncludeActSynopses, _coreDraft.IncludeChapterSynopses, _coreDraft.IncludeActHeadings, _coreDraft.IncludeChapterHeadings, _coreDraft.NumberActs, _coreDraft.NumberChapters, _coreDraft.TitlePageMode, _coreDraft.AllowDesignedPageOverrides));
             if (_coreOutlineDirty)
                 _core = await Books.SetOutlineSelectionsAsync(Project.Id, _coreSelections.Select(item => new PublicationEditionOutlineItemUpdate(item.Key.Kind, item.Key.Id, item.Value)).ToList(), _core.Revision);
             _coreDraft = CoreDraft.From(_core); _coreDirty = false; _coreOutlineDirty = false; _notice = "Core Book saved. Inheriting releases now use these values.";
@@ -659,7 +677,7 @@ else
                 var reset = _loadedOverrides.Except(_releaseOverrides).ToList();
                 var patch = new PublicationReleaseOverridePatch(
                     revision, _releaseDraft.Name, _releaseDraft.Vendor, _releaseDraft.Isbn,
-                    _releaseDraft.Paper, _releaseDraft.Ink, _releaseDraft.AllowDesignedPageOverrides,
+                    _releaseDraft.Paper, _releaseDraft.Ink, BoolValue(PublicationEditionOverrideField.AllowDesignedPageOverrides, _releaseDraft.AllowDesignedPageOverrides),
                     Value(PublicationEditionOverrideField.Title, _releaseDraft.Title), Value(PublicationEditionOverrideField.Subtitle, _releaseDraft.Subtitle),
                     Value(PublicationEditionOverrideField.Author, _releaseDraft.Author), Value(PublicationEditionOverrideField.Language, _releaseDraft.Language),
                     Value(PublicationEditionOverrideField.Publisher, _releaseDraft.Publisher), Value(PublicationEditionOverrideField.Copyright, _releaseDraft.Copyright),
@@ -973,8 +991,8 @@ else
     private sealed class CoreDraft
     {
         public string Title { get; set; } = ""; public string Subtitle { get; set; } = ""; public string Author { get; set; } = ""; public string Language { get; set; } = "en"; public string Publisher { get; set; } = ""; public string Copyright { get; set; } = ""; public string Description { get; set; } = "";
-        public bool IncludeTableOfContents { get; set; } public bool IncludeVisibleTableOfContents { get; set; } public bool IncludeActSynopses { get; set; } public bool IncludeChapterSynopses { get; set; } public bool IncludeActHeadings { get; set; } public bool IncludeChapterHeadings { get; set; } public bool NumberActs { get; set; } public bool NumberChapters { get; set; } public PublishTitlePageMode TitlePageMode { get; set; }
-        public static CoreDraft From(PublicationBookView item) => new() { Title = item.Title, Subtitle = item.Subtitle, Author = item.Author, Language = item.Language, Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, TitlePageMode = item.TitlePageMode };
+        public bool IncludeTableOfContents { get; set; } public bool IncludeVisibleTableOfContents { get; set; } public bool IncludeActSynopses { get; set; } public bool IncludeChapterSynopses { get; set; } public bool IncludeActHeadings { get; set; } public bool IncludeChapterHeadings { get; set; } public bool NumberActs { get; set; } public bool NumberChapters { get; set; } public PublishTitlePageMode TitlePageMode { get; set; } public bool AllowDesignedPageOverrides { get; set; }
+        public static CoreDraft From(PublicationBookView item) => new() { Title = item.Title, Subtitle = item.Subtitle, Author = item.Author, Language = item.Language, Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, TitlePageMode = item.TitlePageMode, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides };
     }
 
     private sealed class ReleaseDraft

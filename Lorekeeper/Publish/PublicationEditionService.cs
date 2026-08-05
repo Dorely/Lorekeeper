@@ -256,7 +256,8 @@ public sealed class PublicationEditionService(
         if (patch.Isbn is not null) edition.Isbn = PublicationIsbn.NormalizeValidOrEmpty(patch.Isbn);
         if (patch.Paper is { } paper && edition.Format == PublicationEditionFormat.Paperback) edition.Paper = paper;
         if (patch.Ink is { } ink && edition.Format == PublicationEditionFormat.Paperback) edition.Ink = ink;
-        if (patch.AllowDesignedPageOverrides is { } mixed && edition.Format == PublicationEditionFormat.DigitalPdf) edition.AllowDesignedPageOverrides = mixed;
+        if (edition.Format == PublicationEditionFormat.DigitalPdf)
+            Override(fields, PublicationEditionOverrideField.AllowDesignedPageOverrides, patch.AllowDesignedPageOverrides, value => edition.AllowDesignedPageOverrides = value);
 
         Override(fields, PublicationEditionOverrideField.Title, patch.Title, value => edition.TitleOverride = value);
         Override(fields, PublicationEditionOverrideField.Subtitle, patch.Subtitle, value => edition.Subtitle = value);

@@ -559,6 +559,7 @@ public sealed class PublishService(
         NumberActs = core.NumberActs,
         NumberChapters = core.NumberChapters,
         TitlePageMode = core.TitlePageMode,
+        AllowDesignedPageOverrides = core.AllowDesignedPageOverrides,
         PageWidthInches = core.PageSetup.PageWidthInches,
         PageHeightInches = core.PageSetup.PageHeightInches,
         PageMarginInches = core.PageSetup.PageMarginInches,
@@ -641,7 +642,10 @@ public sealed class PublishService(
             profile.PageHeightInches,
             profile.PageMarginInches,
             profile.BodyFontSizePoints,
-            profile.BodyLineHeight);
+            profile.BodyLineHeight)
+        {
+            AllowDesignedPageOverrides = profile.AllowDesignedPageOverrides,
+        };
 
     private static ManuscriptStyleProperties MergeStyleDefinition(
         ManuscriptStyleProperties inherited,
@@ -831,9 +835,28 @@ public sealed class PublishService(
                     .Select(variant => new PublishPageCompositionVariantDocument(
                     variant.Id,
                     variant.GeometryKey,
-                    JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
-                        ?? throw new InvalidOperationException($"Page composition {composition.Id:N} has no scene."),
+                    PdfPresentationScene(
+                        JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
+                            ?? throw new InvalidOperationException($"Page composition {composition.Id:N} has no scene."),
+                        profile),
                     variant.Revision)).ToList())).ToList());
+    }
+
+    private static CompositionScene PdfPresentationScene(CompositionScene scene, PublicationEdition profile)
+    {
+        if (profile.Format != PublicationEditionFormat.DigitalPdf
+            || !profile.AllowDesignedPageOverrides
+            || scene.Surface.Kind is not (CompositionSurfaceKind.FacingSpread or CompositionSurfaceKind.IndependentPage))
+            return scene;
+
+        return scene with
+        {
+            Surface = scene.Surface with
+            {
+                OutputPageMode = CompositionOutputPageMode.SingleSurface,
+                AllowIndependentPdfPage = true,
+            },
+        };
     }
 
     private static PublishAssetDocument AssetDocument(PublishAsset asset) =>

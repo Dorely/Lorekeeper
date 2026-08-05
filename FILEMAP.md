@@ -66,7 +66,7 @@
 | `EditorManuscriptPreviewServiceTests.cs` | Direct and Review-edits fixtures for compact one-use previews, exact projected-document persistence, stale rejection, and approval payloads. |
 | `EditorRevisionAgentResultTests.cs` | Compact coordinator-result and pending progress-read disposal fixtures for revision-agent completion. |
 | `AiChangeReviewDiffBuilderTests.cs` | Approval-diff fixtures proving mark-only and style-only manuscript changes remain visible and truthful. |
-| `ProjectExportCompatibilityTests.cs` | Current v16 manuscript/page-setup/composition/Core Book/sparse-release/cover/font fixtures plus isolated older fail-closed import-boundary checks. |
+| `ProjectExportCompatibilityTests.cs` | Current v17 manuscript/page-setup/composition/Core Book/PDF-presentation/sparse-release/cover/font fixtures plus isolated older fail-closed import-boundary checks. |
 | `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trips for manuscript/image remapping, current and legacy cover-image conversion, and whole-import rollback on late publication conflicts. |
 | `SemanticPublishFormattingTests.cs` | Verifies semantic headings, marks, named roles, Figures, Designed Page reading-order text, ordered matter, and accessible EPUB rendering. |
 | `ManuscriptStyleServiceTests.cs` | Named-style revision, stable-role, uniqueness, content-use, and edition-mapping deletion guards. |
@@ -319,7 +319,7 @@
 | `ProjectImportJob.cs` | EF entity for durable project import job state: uploaded JSON payload, source format metadata, status/progress counters, import counts, warnings, errors, and timestamps. |
 | `ProjectImportReportItem.cs` | EF entity for import job report rows covering validation, structural appends, type/entity/relationship merges, indexing warnings, and failures. |
 | `WebIngestCandidate.cs` | EF entity for cached webpage/search-result sources used by Research and manual webpage ingest. Stores search/fetch provenance, extracted text/excerpt, cached links JSON, content hash, staging rationale, and queued ingest job id. |
-| `PublicationBook.cs` | One revisioned Core Book per project with shared metadata, structure/presentation defaults, ordered content, matter, placements, and reusable front-cover scene. |
+| `PublicationBook.cs` | One revisioned Core Book per project with shared metadata, structure/PDF-presentation defaults, ordered content, matter, placements, and reusable front-cover scene. |
 | `PublicationEdition.cs` | Optional paperback/EPUB/PDF ebook release aggregate with destination/profile, product settings, identifier, status, and sparse Core override markers. |
 | `PublicationEditionOutlineItem.cs` | Sparse release chapter-inclusion and structural act/chapter-order overlays with typed foreign keys; act presentation is controlled by release settings. |
 | `PublicationMatter.cs` | Core-linked replace/exclude/add release matter, sparse Book Text Style mappings, immutable audit entries, and migration journals. |
@@ -544,13 +544,13 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | Current v16 portable DTOs with v4 manuscripts, page setup, authoring variants, Core Book, sparse release overlays/covers, accessibility data, and complete custom-font binaries; retains isolated older input adapters. |
+| `ProjectExportModels.cs` | Current v17 portable DTOs with v4 manuscripts, page setup, authoring variants, Core Book PDF presentation, sparse release overlays/covers, accessibility data, and complete custom-font binaries; retains isolated older input adapters. |
 | `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON including visual/image data for Full exports, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
-| `ProjectImportJobProcessor.cs` | Runs one import job, importing v16 manuscripts/page setup/compositions/Core Book/releases/covers/fonts, adapting older data only at the versioned boundary, then refreshing projections and indexes. |
+| `ProjectImportJobProcessor.cs` | Runs one import job, importing v17 manuscripts/page setup/compositions/Core Book/releases/covers/fonts, adapting older data only at the versioned boundary, then refreshing projections and indexes. |
 
 ### Images/
 

@@ -504,7 +504,8 @@ public sealed class PublishAssistantTools(
             summary = $"{book.IncludedChapterCount} chapters, {book.MatterCount} matter items, {book.ImagePlacementCount} opening/ending images.",
             values = new { book.Title, book.Subtitle, book.Author, book.Language, book.Publisher, book.Copyright, book.Description,
                 book.IncludeTableOfContents, book.IncludeVisibleTableOfContents, book.IncludeActSynopses, book.IncludeChapterSynopses,
-                book.IncludeActHeadings, book.IncludeChapterHeadings, book.NumberActs, book.NumberChapters, book.TitlePageMode, book.PageSetup },
+                book.IncludeActHeadings, book.IncludeChapterHeadings, book.NumberActs, book.NumberChapters, book.TitlePageMode,
+                book.AllowDesignedPageOverrides, book.PageSetup },
             coverRevision = book.CoverRevision });
     }
 

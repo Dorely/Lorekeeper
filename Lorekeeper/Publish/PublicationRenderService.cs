@@ -1116,7 +1116,8 @@ public sealed class PublicationRenderProcessor(
                         placement.SortOrder,
                     }).ToArray(),
                 outputMode = digitalOutput ? "DigitalPdf" : "Print",
-                allowDesignedPageOverrides = release?.AllowDesignedPageOverrides ?? false,
+                allowDesignedPageOverrides = release?.AllowDesignedPageOverrides
+                    ?? document.Profile.AllowDesignedPageOverrides,
             },
             trim = new
             {

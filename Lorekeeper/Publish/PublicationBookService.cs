@@ -26,6 +26,7 @@ public sealed record PublicationBookView(
     bool NumberActs,
     bool NumberChapters,
     PublishTitlePageMode TitlePageMode,
+    bool AllowDesignedPageOverrides,
     ProjectPageSetupView PageSetup,
     int IncludedChapterCount,
     int MatterCount,
@@ -70,6 +71,7 @@ public sealed record PublicationBookPatch(
     bool? NumberActs = null,
     bool? NumberChapters = null,
     PublishTitlePageMode? TitlePageMode = null,
+    bool? AllowDesignedPageOverrides = null,
     IReadOnlyList<string>? ClearFields = null);
 
 public interface IPublicationBookService
@@ -109,6 +111,10 @@ public sealed class PublicationBookService(
                 item.IncludeActSynopses, item.IncludeChapterSynopses, item.IncludeActHeadings,
                 item.IncludeChapterHeadings, item.NumberActs, item.NumberChapters, item.TitlePageMode,
             }).SingleAsync(cancellationToken);
+        var pdfPresentation = await db.PublicationBookPdfPresentations.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .Select(item => new { item.AllowDesignedPageOverrides })
+            .SingleOrDefaultAsync(cancellationToken);
         var setup = await db.ProjectPageSetups.AsNoTracking().Where(item => item.ProjectId == projectId)
             .Select(item => new { item.Revision, item.PageWidthInches, item.PageHeightInches, item.PageMarginInches, item.BodyFontSizePoints, item.BodyLineHeight })
             .SingleOrDefaultAsync(cancellationToken);
@@ -163,7 +169,7 @@ public sealed class PublicationBookService(
                 Cover = item.CoverDesign == null ? null : new { item.CoverDesign.Revision, item.CoverDesign.BackgroundColor, item.CoverDesign.CompositionSceneJson },
             }).SingleAsync(cancellationToken);
         var payload = JsonSerializer.Serialize(
-            new { core, setup, chapters, compositions, assets, styles, fonts, bookRows },
+            new { core, pdfPresentation, setup, chapters, compositions, assets, styles, fonts, bookRows },
             ManuscriptCodec.JsonOptions);
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
     }
@@ -201,6 +207,7 @@ public sealed class PublicationBookService(
                 or BookKind.Poetry),
         };
         db.PublicationBooks.Add(book);
+        book.PdfPresentation = new PublicationBookPdfPresentation { ProjectId = projectId };
         await AddMissingOutlineAsync(book, cancellationToken);
         var coverEntity = new PublicationCoverDesign { EditionId = Guid.Empty };
         var coverEdition = new PublicationEdition
@@ -293,6 +300,16 @@ public sealed class PublicationBookService(
         book.NumberActs = patch.NumberActs ?? book.NumberActs;
         book.NumberChapters = patch.NumberChapters ?? book.NumberChapters;
         book.TitlePageMode = patch.TitlePageMode ?? book.TitlePageMode;
+        var pdfPresentation = await db.PublicationBookPdfPresentations.SingleOrDefaultAsync(
+            item => item.ProjectId == projectId,
+            cancellationToken);
+        if (pdfPresentation is null)
+        {
+            pdfPresentation = new PublicationBookPdfPresentation { ProjectId = projectId };
+            db.PublicationBookPdfPresentations.Add(pdfPresentation);
+        }
+        pdfPresentation.AllowDesignedPageOverrides = patch.AllowDesignedPageOverrides
+            ?? pdfPresentation.AllowDesignedPageOverrides;
         Validate(book);
         book.Revision++;
         book.UpdatedAt = DateTime.UtcNow;
@@ -903,6 +920,8 @@ public sealed class PublicationBookService(
         var setup = await db.ProjectPageSetups.AsNoTracking().SingleAsync(
             item => item.ProjectId == projectId,
             cancellationToken);
+        var pdfPresentation = await db.PublicationBookPdfPresentations.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
         return new PublicationBookView(
             projectId,
             book.Revision,
@@ -922,6 +941,7 @@ public sealed class PublicationBookService(
             book.NumberActs,
             book.NumberChapters,
             book.TitlePageMode,
+            pdfPresentation?.AllowDesignedPageOverrides ?? false,
             new ProjectPageSetupView(
                 setup.PageWidthInches,
                 setup.PageHeightInches,
@@ -963,7 +983,9 @@ public interface IPublicationEffectiveConfigurationResolver
     IReadOnlySet<PublicationEditionOverrideField> ReadOverrideFields(PublicationEdition edition);
 }
 
-public sealed class PublicationEffectiveConfigurationResolver(AppDbContext db) : IPublicationEffectiveConfigurationResolver
+public sealed class PublicationEffectiveConfigurationResolver(
+    AppDbContext db,
+    bool readPdfPresentation = true) : IPublicationEffectiveConfigurationResolver
 {
     public async Task<EffectivePublicationRelease> ResolveReleaseAsync(
         Guid projectId,
@@ -974,6 +996,10 @@ public sealed class PublicationEffectiveConfigurationResolver(AppDbContext db) :
             item => item.ProjectId == projectId && item.Id == editionId,
             cancellationToken);
         var book = await db.PublicationBooks.AsNoTracking().SingleAsync(item => item.ProjectId == projectId, cancellationToken);
+        var pdfPresentation = readPdfPresentation
+            ? await db.PublicationBookPdfPresentations.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken)
+            : null;
         var fields = ReadOverrideFields(stored);
         var setup = await db.ProjectPageSetups.AsNoTracking().SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         var effective = Copy(stored);
@@ -993,6 +1019,9 @@ public sealed class PublicationEffectiveConfigurationResolver(AppDbContext db) :
         effective.NumberActs = Pick(fields, PublicationEditionOverrideField.NumberActs, stored.NumberActs, book.NumberActs);
         effective.NumberChapters = Pick(fields, PublicationEditionOverrideField.NumberChapters, stored.NumberChapters, book.NumberChapters);
         effective.TitlePageMode = Pick(fields, PublicationEditionOverrideField.TitlePageMode, stored.TitlePageMode, book.TitlePageMode);
+        effective.AllowDesignedPageOverrides = effective.Format == PublicationEditionFormat.DigitalPdf
+            && Pick(fields, PublicationEditionOverrideField.AllowDesignedPageOverrides, stored.AllowDesignedPageOverrides,
+                pdfPresentation?.AllowDesignedPageOverrides ?? false);
         effective.PageWidthInches = Pick(fields, PublicationEditionOverrideField.PageWidthInches, stored.PageWidthInches, setup.PageWidthInches);
         effective.PageHeightInches = Pick(fields, PublicationEditionOverrideField.PageHeightInches, stored.PageHeightInches, setup.PageHeightInches);
         effective.PageMarginInches = Pick(fields, PublicationEditionOverrideField.PageMarginInches, stored.PageMarginInches, setup.PageMarginInches);

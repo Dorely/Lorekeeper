@@ -8,7 +8,7 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
-    public void V16WritesCoreBookAndReleasesWithoutObsoleteDefaultReleaseState()
+    public void V17WritesCoreBookPdfPresentationAndReleasesWithoutObsoleteDefaultReleaseState()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
@@ -16,14 +16,15 @@ public sealed class ProjectExportCompatibilityTests
             PublicationBook = new ProjectExportPublicationBook(
                 1, "Book", "", "Author", "en", "", "", "", true, false,
                 false, false, true, true, false, false, PublishTitlePageMode.Automatic,
-                [], [], [], null),
+                [], [], [], null) { AllowDesignedPageOverrides = true },
             PublicationEditions = [Edition(coverImageId, null, []) with { IsDefault = false }],
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(16, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(17, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationBook\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"allowDesignedPageOverrides\":true", json, StringComparison.Ordinal);
         Assert.Contains($"\"selectedCoverImageId\":\"{coverImageId}\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"isDefault\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("selectedCoverChapterId", json, StringComparison.Ordinal);

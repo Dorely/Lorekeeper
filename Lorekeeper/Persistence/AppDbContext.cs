@@ -63,6 +63,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<ProjectImportReportItem> ProjectImportReportItems => Set<ProjectImportReportItem>();
     public DbSet<PublicationEdition> PublicationEditions => Set<PublicationEdition>();
     public DbSet<PublicationBook> PublicationBooks => Set<PublicationBook>();
+    public DbSet<PublicationBookPdfPresentation> PublicationBookPdfPresentations => Set<PublicationBookPdfPresentation>();
     public DbSet<PublicationBookOutlineItem> PublicationBookOutlineItems => Set<PublicationBookOutlineItem>();
     public DbSet<PublicationBookMatter> PublicationBookMatter => Set<PublicationBookMatter>();
     public DbSet<PublicationBookImagePlacement> PublicationBookImagePlacements => Set<PublicationBookImagePlacement>();
@@ -856,6 +857,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Project)
                 .WithOne(e => e.PublicationBook)
                 .HasForeignKey<PublicationBook>(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationBookPdfPresentation>(entity =>
+        {
+            entity.HasKey(e => e.ProjectId);
+            entity.HasOne(e => e.Book).WithOne(e => e.PdfPresentation)
+                .HasForeignKey<PublicationBookPdfPresentation>(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

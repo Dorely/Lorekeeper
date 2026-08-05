@@ -48,6 +48,7 @@ public sealed class PublishChatService(
         - Core Book is always present. It owns shared metadata, content order and inclusion, matter, design defaults, opening and ending images, and the reusable front cover.
         - Paperback, EPUB ebook, and PDF ebook releases are optional products. They inherit Core Book live until a field or section is explicitly customized. ISBN is always release-specific.
         - Core Book can produce a tagged private reading PDF. It is not a publication product and has no ISBN, destination, package, vendor-conformance, or proof claim.
+        - Core Book owns PDF presentation defaults. Preserve Designed Page sizes only when the user wants full-art spreads to remain single wide PDF pages or custom Designed Pages to retain independent geometry. PDF ebook releases inherit this choice unless explicitly overridden.
         - Paperback owns destination, paper and ink, ISBN/barcode, full-wrap additions, print PDFs, and physical proof. Lorekeeper manages vendor profiles and required cover bleed. EPUB uses reflow/navigation settings. PDF ebook uses page-geometry settings. Never apply controls from one product type to another.
         - Profile versions, standards identifiers, bleed rules, and package internals are application-managed. Do not ask the user to choose them.
 

@@ -69,6 +69,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   project search, geometry-aware image creation, Stop/Reset, and reconnectable
   jobs. Cover design is embedded beside the assistant with a live scene canvas
   and one controls column instead of opening a modal.
+  Core PDF presentation can preserve a Designed Page as one wide or custom-sized
+  PDF page; PDF ebook releases inherit that choice until explicitly customized.
 - Lorekeeper-owned paperback and Digital PDF press jobs with cancellation/restart recovery,
   immutable SHA-256-verified interior and full-wrap cover PDFs, actual in-app
   PDF viewing, semantic block-to-page maps, render comparisons, and matching
@@ -94,7 +96,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   content, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded subset fonts, ToUnicode maps, and a
   240% total-ink ceiling. Recorded vendor acceptance and human proof remain
   separate evidence, never assistant-controlled conformance gates.
-- Versioned project import/export (current v16 manuscript-v4/page-setup/
+- Versioned project import/export (current v17 manuscript-v4/page-setup/
   composition model, Core Book, sparse release overlays, covers, custom-font binaries,
   and isolated older structured/text adapters) plus TXT, Markdown,
   accessible mixed-layout EPUB, artifact-backed Generate/Regenerate, separate

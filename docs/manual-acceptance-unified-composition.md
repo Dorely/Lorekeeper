@@ -19,9 +19,14 @@ the live test project; terminate the browser host after the run.
   without changing chapter inclusion. Confirm the content chooser lists chapters
   only. Enable chapter numbering and confirm the contents page, bookmarks, and
   chapter openings contain exactly one `Chapter N:` prefix.
+- Under **PDF presentation**, enable **Preserve Designed Page sizes** and prepare
+  the Core reading PDF. Confirm a full-art facing spread is one wide page while
+  ordinary pages retain Project Page Setup geometry. Disable it and confirm the
+  same spread becomes two regular facing leaves. Create a PDF ebook release and
+  confirm it inherits the Core choice, then customize and reset that release.
 - Create Paperback (KDP, IngramSpark, and Other printer where applicable), EPUB
   ebook, and PDF ebook releases. Confirm print controls appear only for
-  paperback, EPUB controls only for EPUB, and mixed-page/front-cover controls
+  paperback, EPUB controls only for EPUB, and inherited PDF-presentation/front-cover controls
   only for PDF ebook. Raw profiles, hashes, and page-box terms stay under
   Technical details.
 - Change a Core value and confirm an inherited release updates. Customize a

@@ -355,6 +355,12 @@ or ISBN claim. Chapter rows are the selectable publication content. Acts remain
 structural groups: the act-heading and act-summary settings alone determine
 whether their divider presentation is emitted, while act-targeted illustration
 placements remain valid independently of that presentation.
+Core Book also owns Digital PDF presentation defaults. Preserving Designed Page
+sizes keeps a facing composition as one wide PDF page and retains intentional
+independent page geometry; otherwise facing compositions are emitted as two
+regular book leaves. PDF ebook releases inherit this value live and may store a
+sparse override. Tagged structure, bookmarks, links, document language, and
+logical reading order remain mandatory output rather than optional switches.
 `IPublicationEditionService` owns optional paperback, EPUB ebook, and PDF ebook
 release aggregates. Releases retain destination, internal immutable profile,
 ISBN, product settings, status, artifacts, packages, proofs, sparse field and
@@ -364,8 +370,8 @@ overrides at read/render time. Absence means inherit, optional text can be
 explicitly empty, and reset removes the override. Core collection additions
 flow into releases unless excluded. Core mutations stale only releases whose
 effective source fingerprint changes. Digital PDF defaults to uniform release
-geometry and can explicitly permit independent Designed Page boxes; paperback
-leaves are always uniform.
+geometry and can explicitly preserve wide or independent Designed Page boxes;
+paperback leaves are always uniform.
 Core reading-copy fingerprints include Book Text Style definitions and the
 project font catalog, so typography changes stale an existing reading PDF just
 as they stale release artifacts.
@@ -385,7 +391,7 @@ version changes.
 Archived releases are immutable at every owning mutation boundary; their
 existing artifacts remain readable and exportable, and cloning creates the
 editable continuation.
-Project export v16 writes manuscript-v4 documents, project page setup, page
+Project export v17 writes manuscript-v4 documents, project page setup, page
 compositions and exact geometry variants with active authoring variants, Core
 Book, sparse release overlays and cover scenes, Book Text Styles,
 visual references, and project-owned font families/faces with binary hashes.
@@ -777,7 +783,7 @@ keys. Only after successful validation does the cleanup remove the obsolete
 default-release flag and duplicated-field runtime dependency. A mismatch opens
 the projectless recovery shell with the original backup protected.
 
-Project export v16 contains only the current v4/page-setup/composition model,
+Project export v17 contains only the current v4/page-setup/composition model,
 Core Book, sparse release overlays, and target-aware publication records; older
 formats remain importable only through isolated versioned transformers.
 The manuscript migration owner targets its historical EF schema only when that

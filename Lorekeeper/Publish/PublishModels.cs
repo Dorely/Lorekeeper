@@ -367,7 +367,10 @@ public sealed record PublishDocumentProfile(
     double PageHeightInches,
     double PageMarginInches,
     double BodyFontSizePoints,
-    double BodyLineHeight);
+    double BodyLineHeight)
+{
+    public bool AllowDesignedPageOverrides { get; init; }
+}
 
 public sealed record PublishSectionDocument(
     Guid? ActId,

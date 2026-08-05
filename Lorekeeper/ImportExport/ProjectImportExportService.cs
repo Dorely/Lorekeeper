@@ -153,6 +153,7 @@ public sealed class ProjectImportExportService(
                 ? ProjectPublicationBook(await db.PublicationBooks.AsNoTracking()
                     .Include(item => item.OutlineItems).Include(item => item.Matter)
                     .Include(item => item.ImagePlacements).Include(item => item.CoverDesign)
+                    .Include(item => item.PdfPresentation)
                     .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken))
                 : null,
             PublicationEditions = kind == ProjectExportKind.Full
@@ -519,7 +520,10 @@ public sealed class ProjectImportExportService(
             item.AltText, item.Decorative, item.Language, item.AccessibilityRole)).ToList(),
         book.CoverDesign is null ? null : new ProjectExportCoverDesign(
             book.Title, book.Subtitle, book.Author, string.Empty, string.Empty, book.CoverDesign.BackgroundColor,
-            PublicationBarcodeMode.None, 50, 50, book.CoverDesign.CompositionSceneJson, book.CoverDesign.Revision));
+            PublicationBarcodeMode.None, 50, 50, book.CoverDesign.CompositionSceneJson, book.CoverDesign.Revision))
+    {
+        AllowDesignedPageOverrides = book.PdfPresentation?.AllowDesignedPageOverrides ?? false,
+    };
 
     private static List<PublicationEditionOverrideField> ParseOverrideFields(string json)
     {

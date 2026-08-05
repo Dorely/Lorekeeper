@@ -252,6 +252,7 @@ public sealed class LorekeeperPressMigrationTests
                 var coreRecoveryState = await recovery.GetStateAsync();
                 Assert.False(coreRecoveryState.RecoveryRequired, coreRecoveryState.Error);
                 await db.GetService<IMigrator>().MigrateAsync(PublicationCoreMigrationService.CleanupMigrationId);
+                await db.GetService<IMigrator>().MigrateAsync();
             }
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))

@@ -25,6 +25,7 @@ public enum PublicationEditionOverrideField
     PageMarginInches,
     BodyFontSizePoints,
     BodyLineHeight,
+    AllowDesignedPageOverrides,
 }
 
 public class PublicationBook
@@ -55,9 +56,17 @@ public class PublicationBook
     public ICollection<PublicationBookMatter> Matter { get; set; } = [];
     public ICollection<PublicationBookImagePlacement> ImagePlacements { get; set; } = [];
     public PublicationBookCoverDesign? CoverDesign { get; set; }
+    public PublicationBookPdfPresentation? PdfPresentation { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class PublicationBookPdfPresentation
+{
+    public Guid ProjectId { get; set; }
+    public PublicationBook Book { get; set; } = null!;
+    public bool AllowDesignedPageOverrides { get; set; }
 }
 
 public class PublicationBookOutlineItem

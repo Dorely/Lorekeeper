@@ -1996,6 +1996,11 @@ public sealed class ProjectImportJobProcessor(
             NumberActs = imported.NumberActs,
             NumberChapters = imported.NumberChapters,
             TitlePageMode = imported.TitlePageMode,
+            PdfPresentation = new PublicationBookPdfPresentation
+            {
+                ProjectId = projectId,
+                AllowDesignedPageOverrides = imported.AllowDesignedPageOverrides,
+            },
         };
         foreach (var row in imported.OutlineItems)
         {
@@ -2085,6 +2090,12 @@ public sealed class ProjectImportJobProcessor(
             IncludeActHeadings = source?.IncludeActHeadings ?? true, IncludeChapterHeadings = source?.IncludeChapterHeadings ?? true,
             NumberActs = source?.NumberActs ?? false, NumberChapters = source?.NumberChapters ?? false,
             TitlePageMode = source?.TitlePageMode ?? PublishTitlePageMode.Automatic,
+            PdfPresentation = new PublicationBookPdfPresentation
+            {
+                ProjectId = projectId,
+                AllowDesignedPageOverrides = source?.Format == PublicationEditionFormat.DigitalPdf
+                    && source.AllowDesignedPageOverrides,
+            },
             OutlineItems = source?.OutlineItems.Select(row => new PublicationBookOutlineItem
             { ProjectId = projectId, TargetKind = row.TargetKind, TargetId = row.TargetId, ActId = row.ActId, ChapterId = row.ChapterId, IsIncluded = row.IsIncluded, SortOrder = row.SortOrder }).ToList() ?? [],
             Matter = source?.Matter.Select(row => new PublicationBookMatter

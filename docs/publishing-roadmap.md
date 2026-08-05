@@ -253,7 +253,7 @@ Implemented in the application on 2026-07-30 and subsequently advanced to
 manuscript schema v4 by Phase 3. Stable IDs, revisions, migration/recovery,
 assistant operations, contest/revision, import, and projection paths use the
 shared manuscript service. The authorized fixture suite covers codec and mark
-behavior, WAL migration/restore, versioned visual/authoring/Core cutover, and current v16
+behavior, WAL migration/restore, versioned visual/authoring/Core cutover, and current v17
 serialization. This status does not close the release gate below:
 production-like copied-database rehearsal and the remaining historical/export,
 permission, retention, failure-injection, and projection evidence are required
@@ -319,7 +319,7 @@ Deliverables:
 - semantic Markdown/EPUB projection so authored block/mark/figure intent is not
   flattened at the existing publishing boundary;
 - project export introduced semantic style round-tripping in v9; the current
-  v16 format also carries manuscript-v4 project page setup, compositions,
+  v17 format also carries manuscript-v4 project page setup, compositions,
   Core Book, sparse release overlays, cover scenes, and complete custom-font binaries, with isolated older
   adapters;
 - removal of the temporary textarea adapter after every editor workflow uses
@@ -374,7 +374,7 @@ Deliverables:
   artifacts remain readable/exportable and changes continue through a clone.
 - a private tagged Core reading PDF with no publication or ISBN claim;
 - centralized safe release presets and one reconnectable **Prepare files** job;
-- project export introduced release rows in v10; current v16 exports Core Book
+- project export introduced release rows in v10; current v17 exports Core Book
   plus sparse overlays and retains isolated older import adapters.
 
 Assistant parity: the Publish assistant operates Core by default, can create and
@@ -600,7 +600,7 @@ Implemented:
   captions, alternatives, and composition content in reading order;
 - compact, revision-safe Outline, Editor, Images, and Publish assistant tools,
   one-use persisted staging for large scenes, and genre-aware Outline guidance;
-- guarded protected-backup migration and v16 Core/release import/export cutover.
+- guarded protected-backup migration and v17 Core/release import/export cutover.
 
 Deferred without changing the semantic/scene ownership model:
 

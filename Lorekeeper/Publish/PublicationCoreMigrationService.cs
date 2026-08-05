@@ -340,6 +340,8 @@ public sealed class PublicationCoreMigrationService(
         Add(fields, PublicationEditionOverrideField.NumberActs, release.NumberActs != core.NumberActs);
         Add(fields, PublicationEditionOverrideField.NumberChapters, release.NumberChapters != core.NumberChapters);
         Add(fields, PublicationEditionOverrideField.TitlePageMode, release.TitlePageMode != core.TitlePageMode);
+        Add(fields, PublicationEditionOverrideField.AllowDesignedPageOverrides,
+            release.Format == PublicationEditionFormat.DigitalPdf && release.AllowDesignedPageOverrides);
         Add(fields, PublicationEditionOverrideField.PageWidthInches, setup is not null && release.PageWidthInches != setup.PageWidthInches);
         Add(fields, PublicationEditionOverrideField.PageHeightInches, setup is not null && release.PageHeightInches != setup.PageHeightInches);
         Add(fields, PublicationEditionOverrideField.PageMarginInches, setup is not null && release.PageMarginInches != setup.PageMarginInches);
@@ -407,7 +409,7 @@ public sealed class PublicationCoreMigrationService(
         CancellationToken cancellationToken)
     {
         var releases = await db.PublicationEditions.AsNoTracking().OrderBy(item => item.Id).ToListAsync(cancellationToken);
-        var resolver = new PublicationEffectiveConfigurationResolver(db);
+        var resolver = new PublicationEffectiveConfigurationResolver(db, readPdfPresentation: false);
         var projections = new List<object>(releases.Count);
         foreach (var stored in releases)
         {
