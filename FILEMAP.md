@@ -233,7 +233,7 @@
 | File | Description |
 |------|-------------|
 | `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, target chips/add-release flow, live inheritance/override controls, embedded live cover editing, format-gated settings, in-app Core PDF preview, one-action preparation, blockers, and immutable downloads. |
-| `PublishChatPanel.razor` (+ `.razor.css`) | Publish adapter over shared `ChatSurface` with persisted transcript/tool chips, streaming, Stop/Reset, provider/token state, image attachments, active-turn reconnection, and structured workspace mutation callbacks. |
+| `PublishChatPanel.razor` (+ `.razor.css`) | Refresh-safe Publish adapter over shared `ChatSurface` with persisted transcript/tool chips, streaming, Stop/Reset, provider/token state, image attachments, active-turn reconnection, and structured workspace mutation callbacks. |
 
 ### Components/Pages/Projects/Outline/
 

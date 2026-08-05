@@ -19,14 +19,15 @@ else
     <main class="publish-workspace" aria-label="Publish">
         <div class="publish-layout">
             <aside class="publish-assistant-pane" aria-label="Publish assistant">
-                @if (_targetLoading)
+                @if (!_assistantMounted)
                 {
-                    <div class="publish-pane-loading" role="status"><span class="spinner-border spinner-border-sm"></span><span>Loading publishing workspaceâ€¦</span></div>
+                    <div class="publish-pane-loading" role="status"><span class="spinner-border spinner-border-sm"></span><span>Loading publishing workspace...</span></div>
                 }
                 else
                 {
                     <PublishChatPanel ProjectId="Project.Id"
-                                      SelectedEditionId="_selectedReleaseId"
+                                      SelectedEditionId="_assistantSelectedReleaseId"
+                                      WorkspaceRefreshing="_targetLoading"
                                       OnBeforeSend="SavePendingAsync"
                                       OnWorkspaceMutated="HandleAssistantMutationAsync" />
                 }
@@ -77,7 +78,7 @@ else
                     }
                     else if (_targetLoading)
                     {
-                        <div class="publish-target-loading" role="status"><span class="spinner-border spinner-border-sm"></span><span>Loading release settingsâ€¦</span></div>
+                        <div class="publish-target-loading" role="status"><span class="spinner-border spinner-border-sm"></span><span>Loading release settings...</span></div>
                     }
                 </div>
             </section>
@@ -141,9 +142,13 @@ else
     private Dictionary<Guid, bool> _loadedReleaseSelections = [];
     private Guid? _loadedProjectId;
     private Guid? _selectedReleaseId;
+    private Guid? _assistantSelectedReleaseId;
     private bool _loading = true;
     private bool _targetLoading = true;
     private bool _targetLoadPending;
+    private bool _targetLoadRunning;
+    private bool _assistantMounted;
+    private bool _refreshCoreSummaryOnTargetLoad;
     private bool _coreDetailsLoaded;
     private bool _outputsLoaded;
     private bool _busy;
@@ -187,32 +192,43 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!_targetLoadPending || Project is null)
+        if (!_targetLoadPending || _targetLoadRunning || Project is null)
             return;
-        _targetLoadPending = false;
-        var generation = _targetLoadGeneration;
+        _targetLoadRunning = true;
         try
         {
-            if (_selectedReleaseId is Guid releaseId)
-                await LoadReleaseTargetAsync(releaseId, generation);
-            else
-                await LoadCoreTargetAsync(generation);
-        }
-        catch (OperationCanceledException) when (_dispose.IsCancellationRequested || generation != _targetLoadGeneration)
-        {
-        }
-        catch (Exception exception)
-        {
-            if (generation == _targetLoadGeneration)
-                _error = exception.Message;
+            while (_targetLoadPending && !_dispose.IsCancellationRequested)
+            {
+                _targetLoadPending = false;
+                var generation = _targetLoadGeneration;
+                try
+                {
+                    if (_selectedReleaseId is Guid releaseId)
+                        await LoadReleaseTargetAsync(releaseId, generation);
+                    else
+                        await LoadCoreTargetAsync(generation);
+                }
+                catch (OperationCanceledException) when (_dispose.IsCancellationRequested || generation != _targetLoadGeneration)
+                {
+                }
+                catch (Exception exception)
+                {
+                    if (generation == _targetLoadGeneration)
+                        _error = exception.Message;
+                }
+
+                if (generation == _targetLoadGeneration && !_targetLoadPending)
+                {
+                    _assistantSelectedReleaseId = _selectedReleaseId;
+                    _assistantMounted = true;
+                    _targetLoading = false;
+                }
+                await InvokeAsync(StateHasChanged);
+            }
         }
         finally
         {
-            if (generation == _targetLoadGeneration)
-            {
-                _targetLoading = false;
-                await InvokeAsync(StateHasChanged);
-            }
+            _targetLoadRunning = false;
         }
     }
 
@@ -243,6 +259,7 @@ else
             _artifacts = [];
             _selectedReleaseId = null;
             _workspace = null;
+            _refreshCoreSummaryOnTargetLoad = false;
             _targetLoadPending = true;
         }
         catch (Exception exception) { _error = exception.Message; }
@@ -250,7 +267,11 @@ else
         {
             _loading = false;
             if (_error is not null)
+            {
                 _targetLoading = false;
+                _assistantSelectedReleaseId = null;
+                _assistantMounted = true;
+            }
         }
     }
 
@@ -282,6 +303,14 @@ else
     {
         if (Project is null || generation != _targetLoadGeneration)
             return;
+        if (_refreshCoreSummaryOnTargetLoad)
+        {
+            _core = await Books.GetOrCreateAsync(Project.Id, _dispose.Token);
+            _releases = await Releases.ListAsync(Project.Id, _dispose.Token);
+            _coreDraft = CoreDraft.From(_core);
+            _coreDirty = false;
+            _refreshCoreSummaryOnTargetLoad = false;
+        }
         var details = await Books.GetDetailsAsync(Project.Id, _dispose.Token);
         if (generation != _targetLoadGeneration)
             return;
@@ -877,23 +906,45 @@ else
         catch (Exception exception) { _error = exception.Message; }
     }
 
-    private async Task HandleAssistantMutationAsync(PublishWorkspaceMutated mutation)
+    private Task HandleAssistantMutationAsync(PublishWorkspaceMutated mutation)
     {
         if (_coreDirty || _coreOutlineDirty || _releaseDirty || _releaseContentDirty)
         {
             _notice = "The assistant changed publishing settings. Your unsaved form edits were kept; save or reload to reconcile them.";
-            return;
+            return Task.CompletedTask;
         }
         var coverWasOpen = _coverEditorOpen;
-        if (mutation.SelectEdition && mutation.EditionId is Guid id) await SelectReleaseAsync(id);
-        else if (_selectedReleaseId is Guid releaseId) await SelectReleaseAsync(releaseId);
-        else await LoadCoreAsync();
+        var targetReleaseId = mutation.SelectEdition && mutation.EditionId is Guid id
+            ? id
+            : _selectedReleaseId;
+        QueueAssistantTargetRefresh(targetReleaseId);
         if (mutation.Kind == PublishWorkspaceMutationKind.Edition && coverWasOpen)
         {
             _coverEditorOpen = true;
             _coverSelectionId = mutation.SelectedObjectId;
             _coverRefreshSignal++;
         }
+        return Task.CompletedTask;
+    }
+
+    private void QueueAssistantTargetRefresh(Guid? releaseId)
+    {
+        _previewArtifact = null;
+        if (_selectedReleaseId != releaseId)
+        {
+            _selectedReleaseId = releaseId;
+            _workspace = null;
+            _coverEditorOpen = false;
+        }
+        _preparations = [];
+        _artifacts = [];
+        _outputsLoaded = false;
+        _targetLoading = true;
+        _targetLoadPending = true;
+        _refreshCoreSummaryOnTargetLoad = releaseId is null;
+        _targetLoadGeneration++;
+        _error = null;
+        StateHasChanged();
     }
 
     private void CoreChanged(string field, string? value) { typeof(CoreDraft).GetProperty(field)!.SetValue(_coreDraft, value ?? string.Empty); _coreDirty = true; }

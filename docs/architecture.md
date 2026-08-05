@@ -420,6 +420,11 @@ after the first interactive render. Release selection follows the same staged
 path, exposing editable effective settings before output history finishes
 loading. Artifact list and render-status queries project metadata only; PDF,
 EPUB, and package bytes remain behind the immutable view/download endpoints.
+Once mounted, the Publish assistant remains connected while tool mutations
+coalesce through one serialized target-refresh loop. Its prompt target switches
+only after that Core/release refresh completes, preserving the active stream and
+preventing overlapping reads on the circuit-scoped data boundary. The transcript
+remains visible during that refresh while the composer is temporarily disabled.
 
 `Lorekeeper.Press` owns protocol v5, deterministic layout, English/Latin shaping
 and glyph diagnostics, custom project TTF/OTF staging and embedding, font
