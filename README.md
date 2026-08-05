@@ -24,8 +24,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Schema-driven semantic chapter editing with persistent heading levels 1-6,
   intentional line breaks, scene
   breaks, quotations, list items, project-image figures with alt text and
-  captions, Book Text Styles with reusable alignment, indentation, spacing, and
-  pagination, one-click paragraph/chapter application, capture-from-paragraph,
+  captions, direct font/size/line-spacing and paragraph controls, Book Text Styles
+  with reusable typography, alignment, indentation, spacing, and pagination,
+  one-click paragraph/chapter application, capture-from-paragraph,
   compact assistant style tools, sparse per-paragraph overrides, rich inline marks, undo/redo,
   normalized paste, find/replace, and
   outline navigation. Manual edits and AI

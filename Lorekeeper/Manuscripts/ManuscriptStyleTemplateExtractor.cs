@@ -24,6 +24,12 @@ public static class ManuscriptStyleTemplateExtractor
         var presentation = block.ParagraphPresentation;
         var definition = inherited with
         {
+            FontFamilyKey = presentation?.FontFamilyKey ?? inherited.FontFamilyKey,
+            FontSizePoints = presentation?.FontSizePoints ?? inherited.FontSizePoints,
+            FontWeight = presentation?.FontWeight ?? inherited.FontWeight,
+            Italic = presentation?.Italic ?? inherited.Italic,
+            SmallCaps = presentation?.SmallCaps ?? inherited.SmallCaps,
+            LineHeight = presentation?.LineHeight ?? inherited.LineHeight,
             TextAlign = presentation?.Alignment switch
             {
                 ParagraphAlignment.Start => "left",

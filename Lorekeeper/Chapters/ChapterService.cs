@@ -409,6 +409,25 @@ public class ChapterService(
         var styles = styleCatalog
             ?? await manuscriptStyles.ListAsync(projectId, cancellationToken);
         ManuscriptStyleService.ValidateDocumentReferences(document, styles);
+        var directFontKeys = document.Content
+            .Select(block => block.ParagraphPresentation?.FontFamilyKey)
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Select(key => key!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var projectFontIds = directFontKeys
+            .Where(key => key.StartsWith("project:", StringComparison.OrdinalIgnoreCase))
+            .Select(key => Guid.TryParse(key["project:".Length..], out var id) ? id : Guid.Empty)
+            .ToHashSet();
+        if (projectFontIds.Contains(Guid.Empty))
+            throw new InvalidDataException("A paragraph references an invalid project font family.");
+        if (projectFontIds.Count > 0)
+        {
+            var found = await db.ProjectFontFamilies.AsNoTracking()
+                .CountAsync(family => family.ProjectId == projectId && projectFontIds.Contains(family.Id), cancellationToken);
+            if (found != projectFontIds.Count)
+                throw new InvalidDataException("A paragraph references a project font family that is not available in this project.");
+        }
     }
 
     private async Task<ManuscriptSnapshot> SnapshotAsync(Chapter chapter, CancellationToken cancellationToken)

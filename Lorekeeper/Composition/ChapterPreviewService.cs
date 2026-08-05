@@ -20,7 +20,13 @@ public sealed record ChapterPreviewResult(
     IReadOnlyList<ChapterPreviewDiagnostic> Diagnostics,
     IReadOnlyList<ChapterPreviewFont> Fonts);
 
-public sealed record ChapterPreviewFont(string Face, Guid FaceId, int Weight, bool Italic, string ContentType);
+public sealed record ChapterPreviewFont(
+    string Face,
+    Guid FaceId,
+    int Weight,
+    bool Italic,
+    string ContentType,
+    string ContentUrl);
 
 public sealed record ChapterPreviewPage(
     int PhysicalPage,
@@ -99,6 +105,7 @@ public interface IChapterPreviewService
 public sealed class ChapterPreviewService(
     AppDbContext db,
     IPublicationPressRuntime press,
+    IProjectFontService projectFonts,
     IOptions<PublicationPressOptions> options) : IChapterPreviewService
 {
     private static readonly ConcurrentDictionary<string, ChapterPreviewResult> Cache = new(StringComparer.Ordinal);
@@ -139,6 +146,10 @@ public sealed class ChapterPreviewService(
             .ToListAsync(cancellationToken);
         var compositionPayloads = new Dictionary<Guid, object>();
         var usedFontKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var fontKey in documents.Values.SelectMany(document => document.Content)
+            .Select(block => block.ParagraphPresentation?.FontFamilyKey)
+            .Where(key => !string.IsNullOrWhiteSpace(key)))
+            usedFontKeys.Add(fontKey!);
         var imageIds = documents.Values.SelectMany(document => document.Content)
             .Where(block => block.ImageId is not null).Select(block => block.ImageId!.Value).ToHashSet();
         foreach (var composition in compositions)
@@ -185,7 +196,7 @@ public sealed class ChapterPreviewService(
             .Select(key => Guid.TryParse(key["project:".Length..], out var id) ? id : Guid.Empty)
             .ToHashSet();
         if (customFontIds.Contains(Guid.Empty))
-            throw new InvalidDataException("A Book Text Style or Designed Page references an invalid project font key.");
+            throw new InvalidDataException("A paragraph, Book Text Style, or Designed Page references an invalid project font key.");
         var fontFamilies = await db.ProjectFontFamilies.AsNoTracking().Include(item => item.Faces)
             .Where(item => item.ProjectId == projectId && customFontIds.Contains(item.Id))
             .ToListAsync(cancellationToken);
@@ -200,8 +211,38 @@ public sealed class ChapterPreviewService(
             face.Italic,
             face.ContentType == "font/otf" ? $"fonts/{face.Id:N}.otf" : $"fonts/{face.Id:N}.ttf",
             face.ContentType,
+            $"/projects/{projectId:N}/fonts/{face.Id:N}/content",
             face.Data,
-            Convert.ToHexStringLower(SHA256.HashData(face.Data))))).ToArray();
+            Convert.ToHexStringLower(SHA256.HashData(face.Data))))).ToList();
+        foreach (var familyKey in usedFontKeys
+            .Where(key => key.StartsWith("builtin:", StringComparison.OrdinalIgnoreCase))
+            .Order(StringComparer.OrdinalIgnoreCase))
+        {
+            var family = PublicationBuiltInFonts.Find(familyKey)
+                ?? throw new InvalidDataException($"The chapter preview references unsupported bundled font '{familyKey}'.");
+            foreach (var faceView in family.Faces)
+            {
+                var face = await projectFonts.ResolveFaceAsync(
+                    projectId,
+                    family.Key,
+                    faceView.Weight,
+                    faceView.Italic,
+                    requireExact: true,
+                    cancellationToken)
+                    ?? throw new InvalidDataException($"Bundled font '{family.Name}' is missing {faceView.SubfamilyName}.");
+                var faceId = DeterministicFontId($"{family.Key}|{face.Weight}|{face.Italic}");
+                previewFonts.Add(new PreviewFont(
+                    faceId,
+                    family.Key,
+                    face.Weight,
+                    face.Italic,
+                    $"fonts/{faceId:N}.ttf",
+                    face.ContentType,
+                    faceView.ContentUrl,
+                    face.Data,
+                    Convert.ToHexStringLower(SHA256.HashData(face.Data))));
+            }
+        }
         var cacheKey = Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
         {
             setup.Revision,
@@ -369,7 +410,7 @@ public sealed class ChapterPreviewService(
                     diagnostic.Code,
                     diagnostic.Message)).ToArray(),
                 previewFonts.Select((font, index) => new ChapterPreviewFont(
-                    $"Custom{index}", font.Id, font.Weight, font.Italic, font.ContentType)).ToArray());
+                    $"Custom{index}", font.Id, font.Weight, font.Italic, font.ContentType, font.ContentUrl)).ToArray());
             Cache[cacheKey] = result;
             CacheOrder.Enqueue(cacheKey);
             while (Cache.Count > MaximumCachedPreviews && CacheOrder.TryDequeue(out var expired))
@@ -498,5 +539,8 @@ public sealed class ChapterPreviewService(
     private sealed record LayoutImage(string AssetId, double X, double Y, double Width, double Height, double RotationDegrees, double Opacity, string Fit, double CropX, double CropY, double SourceLeftFraction, double SourceWidthFraction, string? AltText, bool Decorative);
     private sealed record LayoutShape(string Kind, double X, double Y, double Width, double Height, double RotationDegrees, double Opacity, double[]? FillRgb, double[]? StrokeRgb, double StrokeWidth);
     private sealed record LayoutPageMap(string ChapterId, string BlockId, int PageNumber);
-    private sealed record PreviewFont(Guid Id, string FamilyKey, int Weight, bool Italic, string RelativePath, string ContentType, byte[] Data, string Sha256);
+    private sealed record PreviewFont(Guid Id, string FamilyKey, int Weight, bool Italic, string RelativePath, string ContentType, string ContentUrl, byte[] Data, string Sha256);
+
+    private static Guid DeterministicFontId(string value) =>
+        new(SHA256.HashData(Encoding.UTF8.GetBytes(value))[..16]);
 }

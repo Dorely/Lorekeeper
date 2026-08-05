@@ -103,6 +103,13 @@ const blockAttrs = {
 function paragraphStyle(presentation) {
     if (!presentation) return null;
     const styles = [];
+    const family = editorFontFamily(presentation.fontFamilyKey);
+    if (family) styles.push(`font-family:${family}`);
+    if (Number.isFinite(presentation.fontSizePoints)) styles.push(`font-size:${presentation.fontSizePoints}pt`);
+    if (Number.isInteger(presentation.fontWeight)) styles.push(`font-weight:${presentation.fontWeight}`);
+    if (presentation.italic === true) styles.push("font-style:italic");
+    if (presentation.smallCaps === true) styles.push("font-variant-caps:small-caps");
+    if (Number.isFinite(presentation.lineHeight)) styles.push(`line-height:${presentation.lineHeight}`);
     const alignment = {start: "left", center: "center", end: "right", justify: "justify"}[presentation.alignment];
     if (alignment) styles.push(`text-align:${alignment}`);
     if (Number.isFinite(presentation.leftIndentEm)) styles.push(`margin-left:${presentation.leftIndentEm}em`);
@@ -111,6 +118,16 @@ function paragraphStyle(presentation) {
     if (Number.isFinite(presentation.spacingBeforePoints)) styles.push(`margin-top:${presentation.spacingBeforePoints}pt`);
     if (Number.isFinite(presentation.spacingAfterPoints)) styles.push(`margin-bottom:${presentation.spacingAfterPoints}pt`);
     return styles.join(";") || null;
+}
+
+function editorFontFamily(key) {
+    const normalized = key?.trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized === "serif") return "Georgia, 'Times New Roman', serif";
+    if (normalized === "sans") return "Arial, Helvetica, sans-serif";
+    if (normalized === "mono") return "'Courier New', Courier, monospace";
+    const safeName = normalized.replaceAll(/[^a-z0-9]+/gu, "-").replaceAll(/^-|-$/gu, "");
+    return safeName ? `'Lorekeeper-${safeName}'` : null;
 }
 
 function textBlockDom(tag, node, extra = {}) {
@@ -824,23 +841,134 @@ function applyMark(view, markName, value = null) {
 }
 
 function updateParagraphPresentation(view, update) {
-    const {from, to} = view.state.selection;
+    const positions = selectedParagraphPositions(view);
+    if (positions.length === 0) return false;
     let transaction = view.state.tr;
     let changed = false;
-    view.state.doc.nodesBetween(from, to, (node, position) => {
-        if (!["paragraph", "heading", "blockquote", "list_item"].includes(node.type.name))
-            return true;
+    for (const position of positions) {
+        const node = transaction.doc.nodeAt(position);
+        if (!node || !paragraphStyleNodeNames.has(node.type.name)) continue;
         const current = node.attrs.paragraphPresentation || {};
-        const next = update({...current});
+        const next = Object.fromEntries(Object.entries(update({...current}))
+            .filter(([, value]) => value !== null && value !== undefined));
         transaction = transaction.setNodeMarkup(position, undefined, {
             ...node.attrs,
             paragraphPresentation: Object.keys(next).length ? next : null
         }, node.marks);
         changed = true;
-        return false;
-    });
+    }
     if (changed) view.dispatch(transaction.scrollIntoView());
     view.focus();
+    return changed;
+}
+
+function setParagraphTypography(view, property, value) {
+    return updateParagraphPresentation(view, current => ({...current, [property]: value}));
+}
+
+function selectedParagraphTypography(view, namedStyles) {
+    const position = selectedParagraphPositions(view)[0];
+    const node = Number.isInteger(position) ? view.state.doc.nodeAt(position) : null;
+    if (!node) return {};
+    const definition = namedStyles.find(style =>
+        style.kind === "paragraph" && style.semanticRole === node.attrs.styleRole)?.definition || {};
+    const presentation = node.attrs.paragraphPresentation || {};
+    return {
+        fontFamilyKey: presentation.fontFamilyKey ?? definition.fontFamilyKey ?? "",
+        fontSizePoints: presentation.fontSizePoints ?? definition.fontSizePoints ?? "",
+        lineHeight: presentation.lineHeight ?? definition.lineHeight ?? ""
+    };
+}
+
+function buildTypographyControls(view, namedStyles, fontFamilies, root) {
+    const group = document.createElement("div");
+    group.className = "semantic-editor-typography-controls";
+    const fontOptions = [
+        ["", "Font"],
+        ["__clear__", "Default font"],
+        ["serif", "Classic serif"],
+        ["sans", "Clean sans serif"],
+        ["mono", "Monospace"]
+    ].concat(
+        fontFamilies.map(family => [family.key, family.name]));
+    const fontControl = selectControl("Font family", fontOptions, value => {
+        if (!value) return;
+        if (!setParagraphTypography(view, "fontFamilyKey", value === "__clear__" ? null : value))
+            showEditorNotice(root, "Place the cursor in a paragraph first.");
+    }, false);
+    fontControl.classList.add("semantic-editor-font-family");
+
+    const sizeGroup = document.createElement("div");
+    sizeGroup.className = "semantic-editor-size-control";
+    const sizeInput = document.createElement("input");
+    sizeInput.type = "number";
+    sizeInput.min = "1";
+    sizeInput.max = "288";
+    sizeInput.step = "0.5";
+    sizeInput.placeholder = "Size";
+    sizeInput.setAttribute("aria-label", "Font size in points");
+    sizeInput.title = "Font size in points";
+    const applySize = () => {
+        if (!sizeInput.value.trim()) {
+            if (!setParagraphTypography(view, "fontSizePoints", null))
+                showEditorNotice(root, "Place the cursor in a paragraph first.");
+            return;
+        }
+        const value = Number(sizeInput.value);
+        if (!Number.isFinite(value) || value <= 0 || value > 288) {
+            showEditorNotice(root, "Choose a font size from 1 through 288 points.");
+            return;
+        }
+        if (!setParagraphTypography(view, "fontSizePoints", value))
+            showEditorNotice(root, "Place the cursor in a paragraph first.");
+    };
+    sizeInput.addEventListener("change", applySize);
+    sizeInput.addEventListener("keydown", event => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        applySize();
+    });
+    const stepSize = delta => {
+        const current = Number(sizeInput.value) || 12;
+        sizeInput.value = String(Math.max(1, Math.min(288, current + delta)));
+        applySize();
+    };
+    sizeGroup.append(
+        button("−", "Decrease paragraph font size", () => stepSize(-1)),
+        sizeInput,
+        button("+", "Increase paragraph font size", () => stepSize(1)));
+
+    const lineHeightControl = selectControl("Line spacing", [
+        ["", "Line spacing"],
+        ["__clear__", "Default spacing"],
+        ["1", "Single"],
+        ["1.15", "1.15"],
+        ["1.5", "1.5"],
+        ["2", "Double"]
+    ], value => {
+        if (!value) return;
+        const lineHeight = value === "__clear__" ? null : Number(value);
+        if (!setParagraphTypography(view, "lineHeight", lineHeight))
+            showEditorNotice(root, "Place the cursor in a paragraph first.");
+    }, false);
+
+    group.append(fontControl, sizeGroup, lineHeightControl);
+    return {
+        group,
+        update() {
+            const current = selectedParagraphTypography(view, namedStyles);
+            const familySelect = fontControl.querySelector("select");
+            familySelect.value = fontOptions.some(([value]) => value === current.fontFamilyKey)
+                ? current.fontFamilyKey
+                : "";
+            sizeInput.value = current.fontSizePoints === "" ? "" : String(current.fontSizePoints);
+            const lineHeightSelect = lineHeightControl.querySelector("select");
+            const lineHeightValue = current.lineHeight === "" ? "" : String(current.lineHeight);
+            lineHeightSelect.value = [...lineHeightSelect.options].some(option => option.value === lineHeightValue)
+                ? lineHeightValue
+                : "";
+        }
+    };
 }
 
 function setParagraphAlignment(view, alignment) {
@@ -1502,23 +1630,32 @@ function sanitizeHtmlForPaste(html, styles = [], images = []) {
     return sanitizePastedSlice(slice, paragraphRoles, characterRoles, imageById);
 }
 
+function installEditorFontRules(root, fontFamilies) {
+    const styleElement = document.createElement("style");
+    styleElement.dataset.bookFonts = "true";
+    for (const family of fontFamilies) {
+        const cssFamily = editorFontFamily(family.key);
+        if (!cssFamily) continue;
+        for (const face of family.faces || []) {
+            if (!face.contentUrl) continue;
+            styleElement.textContent += `@font-face{font-family:${cssFamily};src:url(${JSON.stringify(face.contentUrl)});font-weight:${face.weight || 400};font-style:${face.italic === true ? "italic" : "normal"};font-display:swap}\n`;
+        }
+    }
+    root.append(styleElement);
+}
+
 function installNamedStyleRules(root, styles) {
     const styleElement = document.createElement("style");
     styleElement.dataset.bookTextStyles = "true";
     const update = currentStyles => {
         styleElement.textContent = "";
-        const fontFamilies = {
-            serif: "Georgia, 'Times New Roman', serif",
-            sans: "Arial, Helvetica, sans-serif",
-            mono: "'Courier New', Courier, monospace"
-        };
         for (const style of currentStyles) {
             const definition = style.definition || {};
             const selector = style.kind === "character"
                 ? `.semantic-editor.semantic-editor .semantic-prosemirror span[data-character-style=${JSON.stringify(style.semanticRole)} i]`
                 : `.semantic-editor.semantic-editor .semantic-prosemirror [data-style-role=${JSON.stringify(style.semanticRole)} i]`;
             const declarations = [];
-            const family = fontFamilies[definition.fontFamilyKey?.toLowerCase()];
+            const family = editorFontFamily(definition.fontFamilyKey);
             if (family) declarations.push(`font-family:${family}`);
             if (definition.fontSizePoints) declarations.push(`font-size:${definition.fontSizePoints}pt`);
             if (definition.fontWeight) declarations.push(`font-weight:${definition.fontWeight}`);
@@ -1587,7 +1724,7 @@ function hydrateDesignedPageSummaries(document, compositionById) {
     return document;
 }
 
-export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]") {
+export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]", fontFamiliesJson = "[]") {
     if (!root || typeof root.replaceChildren !== "function" || root.isConnected === false)
         return null;
 
@@ -1596,6 +1733,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     const projectImages = JSON.parse(imagesJson);
     JSON.parse(editionsJson);
     const pageCompositions = JSON.parse(compositionsJson);
+    const fontFamilies = JSON.parse(fontFamiliesJson);
     const imageById = new Map(projectImages.map(image => [String(image.id).toLowerCase(), image]));
     const compositionById = new Map(pageCompositions.map(composition => [String(composition.id).toLowerCase(), composition]));
     const paragraphRoles = new Set([
@@ -1621,6 +1759,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     let conflictDraftJson = null;
     const conflictStorageKey = `lorekeeper.manuscript-conflict.${manuscriptId}`;
     let positionAdvancedControls = () => {};
+    let updateFormattingControls = () => {};
     const applyEffectiveReadOnly = () => {
         readOnly = requestedReadOnly || conflictDraftJson !== null;
         if (!view) return;
@@ -1643,6 +1782,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     status.className = "semantic-editor-status";
     status.setAttribute("aria-live", "polite");
     root.replaceChildren(editorChrome, surface, status);
+    installEditorFontRules(root, fontFamilies);
     const namedStyleRules = installNamedStyleRules(root, namedStyles);
 
     let view;
@@ -1751,6 +1891,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             outline.update();
             figureInspector.update();
             positionAdvancedControls();
+            updateFormattingControls();
             updateStatus();
         },
         handleDOMEvents: {
@@ -1809,6 +1950,9 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         status.textContent = `${words.toLocaleString()} words · ${text.length.toLocaleString()} characters · revision ${revision}`;
     };
 
+    const typographyControls = buildTypographyControls(view, namedStyles, fontFamilies, root);
+    updateFormattingControls = () => typographyControls.update();
+
     let selectedParagraphStyleRole = "";
     const paragraphStyles = () => namedStyles.filter(style => style.kind === "paragraph");
     const styleOptions = () => [["", "Choose a saved style"], ["__reset__", "Reset paragraph to built-in style"]].concat(
@@ -1829,7 +1973,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     styleControls.className = "semantic-editor-style-controls";
     styleControls.append(
         stylePicker,
-        button("Apply to paragraph", "Apply the chosen Book Text Style to the current paragraph or selected paragraphs", () => {
+        button("Apply", "Apply the chosen Book Text Style to the current paragraph or selected paragraphs", () => {
             if (!selectedParagraphStyleRole) {
                 showEditorNotice(root, "Choose a saved Book Text Style first.");
                 return;
@@ -1837,7 +1981,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             if (!applyParagraphStyle(view, selectedParagraphStyleRole))
                 showEditorNotice(root, "Place the cursor in a paragraph, heading, block quote, or list item first.");
         }),
-        button("Apply to chapter", "Apply the chosen Book Text Style to every text paragraph in this chapter", () => {
+        button("Whole chapter", "Apply the chosen Book Text Style to every text paragraph in this chapter", () => {
             if (!selectedParagraphStyleRole) {
                 showEditorNotice(root, "Choose a saved Book Text Style first.");
                 return;
@@ -1845,14 +1989,14 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             if (!applyParagraphStyle(view, selectedParagraphStyleRole, true))
                 showEditorNotice(root, "This chapter has no compatible text paragraphs.");
         }),
-        button("Save paragraph as style", "Capture the current paragraph formatting as a reusable Book Text Style", async () => {
+        button("Save as style", "Capture the current paragraph formatting as a reusable Book Text Style", async () => {
             const selected = selectedParagraphIdentity(view);
             if (!selected) {
                 showEditorNotice(root, "Place the cursor in a paragraph, heading, block quote, or list item first.");
                 return;
             }
             const values = await showEditorForm(root, {
-                title: "Save paragraph as style",
+                title: "Save as Book Text Style",
                 description: "This captures the paragraph's spacing, alignment, indentation, pagination, inherited font settings, and whole-paragraph bold, italic, or small-caps formatting. Inline emphasis remains content formatting.",
                 submitLabel: "Save style",
                 fields: [{name: "name", label: "Style name", required: true}],
@@ -1919,6 +2063,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         ], value => {
             if (value) applyHeadingLevel(view, Number(value));
         }),
+        typographyControls.group,
         styleControls,
         selectControl(
             "Insert project image as figure",
@@ -2017,6 +2162,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     for (const control of [...toolbar.children]) {
         const selectLabel = control.querySelector?.("select")?.getAttribute("aria-label");
         if (control.classList.contains("semantic-editor-style-controls")
+            || control.classList.contains("semantic-editor-typography-controls")
             || primaryTitles.has(control.title)
             || primarySelects.has(selectLabel)) continue;
         advancedControls.append(control);
@@ -2049,6 +2195,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     window.addEventListener("resize", positionAdvancedControls);
     toolbar.append(advancedDetails);
     root.append(findPanel.panel, outline.panel);
+    updateFormattingControls();
     updateStatus();
     outline.update();
     try {

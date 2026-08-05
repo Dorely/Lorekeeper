@@ -104,12 +104,26 @@ public sealed class ProjectFontService(AppDbContext db, IWebHostEnvironment envi
                     .ToListAsync(cancellationToken))
                 .Where(item => SceneUsesFont(item.CompositionSceneJson, key))
                 .Select(item => item.Name))
+            .Concat((await db.ManuscriptStyleDefinitions
+                    .AsNoTracking()
+                    .Where(style => style.ProjectId == projectId)
+                    .Select(style => new { style.Name, style.DefinitionJson })
+                    .ToListAsync(cancellationToken))
+                .Where(item => StyleUsesFont(item.DefinitionJson, key))
+                .Select(item => $"Book Text Style {item.Name}"))
+            .Concat((await db.Chapters
+                    .AsNoTracking()
+                    .Where(chapter => chapter.ProjectId == projectId)
+                    .Select(chapter => new { chapter.Title, chapter.ManuscriptJson })
+                    .ToListAsync(cancellationToken))
+                .Where(item => ManuscriptUsesFont(item.ManuscriptJson, key))
+                .Select(item => $"chapter {item.Title}"))
             .Distinct(StringComparer.Ordinal)
             .ToList();
         if (usedBy.Count > 0)
         {
             throw new InvalidOperationException(
-                $"{family.Name} is used by {usedBy.Count} page or cover composition(s): {string.Join(", ", usedBy)}. Choose another font before deleting it.");
+                $"{family.Name} is used by {usedBy.Count} book item(s): {string.Join(", ", usedBy)}. Choose another font before deleting it.");
         }
 
         db.ProjectFontFamilies.Remove(family);
@@ -129,7 +143,40 @@ public sealed class ProjectFontService(AppDbContext db, IWebHostEnvironment envi
         }
         catch (JsonException)
         {
-            return false;
+            return true;
+        }
+    }
+
+    private static bool StyleUsesFont(string json, string key)
+    {
+        try
+        {
+            var definition = JsonSerializer.Deserialize<ManuscriptStyleProperties>(json, ManuscriptCodec.JsonOptions);
+            return string.Equals(definition?.FontFamilyKey, key, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
+    }
+
+    private static bool ManuscriptUsesFont(string json, string key)
+    {
+        try
+        {
+            var document = ManuscriptCodec.Deserialize(json);
+            return document.Content.Any(block => string.Equals(
+                block.ParagraphPresentation?.FontFamilyKey,
+                key,
+                StringComparison.OrdinalIgnoreCase));
+        }
+        catch (InvalidDataException)
+        {
+            return true;
+        }
+        catch (JsonException)
+        {
+            return true;
         }
     }
 

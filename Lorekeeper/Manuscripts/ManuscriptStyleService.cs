@@ -506,7 +506,7 @@ public sealed class ManuscriptStyleService(
         };
     }
 
-    private static bool IsSupportedFontKey(string value)
+    public static bool IsSupportedFontKey(string value)
     {
         var key = value.Trim();
         return new[] { "serif", "sans", "mono" }.Contains(key, StringComparer.OrdinalIgnoreCase)

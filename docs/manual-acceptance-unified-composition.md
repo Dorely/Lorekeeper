@@ -87,10 +87,11 @@ the live test project; terminate the browser host after the run.
 
 ## Edit and Read modes
 
-- Confirm Edit exposes common block style, emphasis, link, alignment, whole
-  paragraph indent, lists, Figure/Designed Page insertion, search, undo, and redo
-  in the primary toolbar; advanced marks, paragraph controls, Figure settings,
-  and Book Text Styles remain available without crowding it.
+- Confirm Edit exposes block style, font family, point size, line spacing,
+  emphasis, link, alignment, whole-paragraph indent, lists, Figure/Designed Page
+  insertion, search, undo, redo, and reusable-style actions without overflow;
+  advanced marks, paragraph controls, and Figure settings remain available
+  without crowding the primary controls.
 - Exercise toolbar and Tab/Shift+Tab indentation, first-line and hanging indent,
   spacing, keep-with-next, and start-on-new-page. Confirm inline emphasis survives
   Book Text Style changes and clearing paragraph formatting removes only direct
@@ -99,10 +100,15 @@ the live test project; terminate the browser host after the run.
   first-line indentation, and justification. Confirm Edit, Read, Core reading
   PDF, release PDF, and EPUB apply the same values, and confirm changing the
   style makes existing PDF artifacts stale.
-- Format one paragraph directly, choose **Save paragraph as style**, and confirm
+- Place the cursor in a paragraph and use the primary font-family, point-size,
+  and line-spacing controls. Confirm the paragraph updates immediately with a
+  bundled font, then an imported project font, and that selection changes update
+  the displayed toolbar values. Confirm Read mode, EPUB, and PDF retain the same
+  family, size, weight, emphasis, and line height.
+- Format one paragraph directly, choose **Save as style**, and confirm
   the new style is applied to that paragraph and appears in the saved-style
   picker without remounting the editor. Apply it to another selected paragraph,
-  then use **Apply to chapter** and confirm headings, block quotes, list items,
+  then use **Whole chapter** and confirm headings, block quotes, list items,
   and ordinary paragraphs change while Figures, Designed Pages, and scene
   breaks remain intact. Confirm direct paragraph overrides are cleared but
   inline emphasis remains.

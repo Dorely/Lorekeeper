@@ -908,6 +908,9 @@ public sealed class PublicationRenderProcessor(
         var usedFontKeys = document.NamedStyles
             .Select(style => style.Definition.FontFamilyKey)
             .Concat(document.Sections.SelectMany(section => section.Chapters)
+                .SelectMany(chapter => chapter.Manuscript.Content)
+                .Select(block => block.ParagraphPresentation?.FontFamilyKey))
+            .Concat(document.Sections.SelectMany(section => section.Chapters)
                 .SelectMany(chapter => chapter.PageCompositions)
                 .SelectMany(composition => composition.Variants)
                 .SelectMany(variant => variant.Scene.Objects.Select(item => item.FontFamilyKey)

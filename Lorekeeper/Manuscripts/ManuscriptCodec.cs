@@ -419,7 +419,15 @@ public static partial class ManuscriptCodec
             throw new InvalidDataException($"Block {block.Id} cannot contain paragraph presentation settings.");
         if (presentation.Alignment is { } alignment && !Enum.IsDefined(alignment))
             throw new InvalidDataException($"Block {block.Id} has an unsupported paragraph alignment.");
-        if (presentation.LeftIndentEm is < 0 or > 12
+        if (presentation.FontFamilyKey is { } fontFamily
+            && (!string.Equals(fontFamily, fontFamily.Trim(), StringComparison.Ordinal)
+                || !ManuscriptStyleService.IsSupportedFontKey(fontFamily)))
+            throw new InvalidDataException($"Block {block.Id} has an unsupported font family.");
+        if (presentation.FontSizePoints is <= 0 or > 288
+            || presentation.FontWeight is int fontWeight
+                && (fontWeight is < 100 or > 900 || fontWeight % 100 != 0)
+            || presentation.LineHeight is <= 0 or > 5
+            || presentation.LeftIndentEm is < 0 or > 12
             || presentation.RightIndentEm is < 0 or > 12
             || presentation.FirstLineIndentEm is < -12 or > 12
             || presentation.SpacingBeforePoints is < 0 or > 288

@@ -53,7 +53,7 @@
 | `docs/schemas/manuscript-v1.schema.json` | Published JSON Schema for canonical structured-manuscript v1 documents, blocks, inline nodes, marks, and semantic style roles. |
 | `docs/schemas/manuscript-v2.schema.json` | Historical semantic-manuscript v2 schema used only by migration/import boundaries. |
 | `docs/schemas/manuscript-v1.schema.json` / `manuscript-v2.schema.json` / `manuscript-v3.schema.json` | Historical semantic manuscript interchange schemas retained for versioned import documentation. |
-| `docs/schemas/manuscript-v4.schema.json` | Current semantic manuscript schema with paragraph presentation, geometry-neutral Figures, crop positioning, and Designed Page references. |
+| `docs/schemas/manuscript-v4.schema.json` | Current semantic manuscript schema with sparse direct paragraph typography/presentation, geometry-neutral Figures, crop positioning, and Designed Page references. |
 
 ## Lorekeeper.Tests/
 
@@ -180,8 +180,8 @@
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared project workspace shell: loads the project, renders the section tabs, condenses Editor navigation into one scrollable header row, and exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`). Wraps `ProjectLayout` + `EditorContent`. |
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware Edit/Read/Pages/Review chapter workspace with keyed semantic editor, serialized refresh coordination, composition/variant-aware assistant refresh routing, resizable Chat/Memory columns, and persistent AI/Contest review entry points. |
-| `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with disposal-safe asynchronous attachment, revision-aware save/flush, capture/apply Book Text Style controls, sticky styled Figure controls, bounded toolbar overlays, Electron-safe Figure/Designed Page setup forms, and discoverable Designed Page cards with live names, surface/status summaries, artwork thumbnails, and editor actions. |
-| `ChapterReadPreview.razor` (+ `.razor.css`) | Press-backed current-chapter page preview with flush-before-layout, width-fit default, single/facing display, fixed two-leaf spread rows with an optional visible seam, fit/zoom controls, project page setup, images, labels, links, visible authoring warnings, and retryable failures. |
+| `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with disposal-safe asynchronous attachment, revision-aware save/flush, project-font/size/spacing and capture/apply Book Text Style controls, sticky styled Figure controls, bounded toolbar overlays, Electron-safe Figure/Designed Page setup forms, and discoverable Designed Page cards with live names, surface/status summaries, artwork thumbnails, and editor actions. |
+| `ChapterReadPreview.razor` (+ `.razor.css`) | Press-backed current-chapter page preview with flush-before-layout, width-fit default, single/facing display, fixed two-leaf spread rows with an optional visible seam, fit/zoom controls, project page setup, exact bundled/imported font-face URLs, images, labels, links, visible authoring warnings, and retryable failures. |
 | `ManuscriptStylesPanel.razor` (+ `.razor.css`) | Compact Book Text Style manager with an on-demand create/edit form, revision-aware paragraph/character typography, spacing, indentation, pagination, and stable semantic roles. |
 | `DesignedPageWorkspace.razor` (+ `.razor.css`) | Contextual exact-geometry page/spread scene editor with a canvas-first center, compact page/guide strip, unified scrolling right controls, atomic image/fit placement, direct frame/crop manipulation, semantic bindings, layers, advanced vector primitives, diagnostics, undo/redo, and revision-safe save. |
 | `CoverCompositionWorkspace.razor` (+ `.razor.css`) | Embedded format-aware print-wrap/digital-front scene editor with a large live canvas, one right controls column, direct move/resize/rotate/crop, canonical copy bindings, project images/fonts, layers/groups/styles, safety/barcode overlays, and revision-safe save. |
@@ -586,7 +586,7 @@
 |------|-------------|
 | `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service with fresh cross-scope authoring reads, active authoring geometry, atomic image/fit placement, scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
 | `ProjectPageSetupService.cs` | Revision-aware project authoring page setup presets/custom geometry used by Read preview, new Designed Pages, Figures, and generation targets without publication releases. |
-| `ChapterPreviewService.cs` | Cached, cancellable Press layout-command adapter that stages the selected chapter's declared images/fonts and returns compact page paint, split-image source windows, and authoring diagnostics without glyph-level conformance payloads. |
+| `ChapterPreviewService.cs` | Cached, cancellable Press layout-command adapter that stages the selected chapter's declared images plus saved-style/direct-typography fonts and returns compact page paint, split-image source windows, and authoring diagnostics without glyph-level conformance payloads. |
 | `CompositionAgentPayloads.cs` | Lossless bounded assistant reads and compact revision-safe patch envelopes for semantic fragments, scene objects, layers, and styles. |
 | `CompositionSceneResolver.cs` | Shared deterministic group flattener and PDF/X overlap validator used by export and geometry-target consumers so group transforms, opacity, visibility, locks, and z-order have runtime meaning. |
 | `CoverCompositionFactory.cs` | Seeds and reflows shared structured cover scenes across front-only digital and page-count-derived print-wrap geometry. |
@@ -595,7 +595,7 @@
 
 | File | Description |
 |------|-------------|
-| `IProjectFontService.cs` / `ProjectFontService.cs` | Project font catalog/import/delete/face-resolution service combining bundled OFL families with SQLite-backed custom static faces and guarded in-use deletion. |
+| `IProjectFontService.cs` / `ProjectFontService.cs` | Project font catalog/import/delete/face-resolution service combining bundled OFL families with SQLite-backed custom static faces and deletion guards across paragraphs, saved styles, pages, and covers. |
 | `PublicationBuiltInFonts.cs` | Pinned OFL Lora/Nunito/Roboto Mono family/face catalog and static asset URLs shared by manuscript, composition, cover, EPUB, and Press. |
 | `ProjectFontBinary.cs` | Server-side TTF/OTF extension, signature, table-directory, variable-axis, metadata, size, and Skia decode validation. |
 | `ProjectFontEndpoints.cs` | Project-scoped imported font-byte endpoint with content type, ETag, and HTTP range support. |
@@ -640,7 +640,7 @@
 | `IEditorChatService.cs` | Project-wide editor chat contract plus per-turn context for compact tools, opaque one-use manuscript previews, composition stages, persisted/model-visible visuals, and generation jobs. |
 | `EditorChatService.cs` | Editor adapter using current semantic Figure/Designed Page prompt guidance, persisted turn context, shape-safe post-tool mutation projection, complete composition mutation identities, Review edits, contests, cancellation-safe worker progress, and image-job progress. |
 | `EditorChatOptions.cs` | Configuration for editor-chat-specific paginated chapter reads and prose-only revision worker concurrency/iteration limits. |
-| `EditorChatTools.cs` | Editor tools for grounded reads, one-payload manuscript preview/apply, review-aware focused Figures, compact/staged composition, target-bound generation, canonical visuals/crops, Book Brief updates, revision agents, and Contest preparation. |
+| `EditorChatTools.cs` | Editor tools for grounded reads, compact font/style reads and application, one-payload manuscript preview/apply, review-aware focused Figures, compact/staged composition, target-bound generation, canonical visuals/crops, Book Brief updates, revision agents, and Contest preparation. |
 | `EditorManuscriptPreviewService.cs` | Turn-local manuscript preview/apply protocol: validates once, returns compact opaque IDs, rejects stale/reused previews, and persists or review-stages the exact projected document. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
 | `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates with visuals, image-generation progress, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
@@ -684,7 +684,7 @@
 
 | File | Description |
 |------|-------------|
-| `ManuscriptModels.cs` | Manuscript-v4 document/block/inline/mark model with sparse paragraph presentation, geometry-neutral Figure presentation/accessibility, Designed Page references, semantic operations, snapshots, and revision conflicts. |
+| `ManuscriptModels.cs` | Manuscript-v4 document/block/inline/mark model with sparse direct paragraph typography/presentation, geometry-neutral Figure presentation/accessibility, Designed Page references, semantic operations, snapshots, and revision conflicts. |
 | `ManuscriptSemanticRoles.cs` | Safe semantic-role identifier validation plus deterministic normalization for manuscript-v1 migration and v8 import. |
 | `ManuscriptCodec.cs` | Plain-text normalization/projection, deterministic migration IDs, validation, serialization, hashing, and stable-ID reparsing. |
 | `ManuscriptRangeResolver.cs` | Validates non-overlapping UTF-16 semantic text ranges, rejects surrogate splits, resolves frame content exactly once, and identifies unplaced composition content. |

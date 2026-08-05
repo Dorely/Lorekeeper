@@ -2,12 +2,14 @@
 @using Lorekeeper.Images
 @using Lorekeeper.Models
 @using Lorekeeper.Composition
+@using Lorekeeper.Fonts
 @using System.Text.Json
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @inject IManuscriptStyleService Styles
 @inject IManuscriptService Manuscripts
 @inject IProjectImageService Images
+@inject IProjectFontService Fonts
 @inject Lorekeeper.Composition.ICompositionService Compositions
 
 <div class="@RootClass()">
@@ -78,6 +80,9 @@
                 var compositionsJson = JsonSerializer.Serialize(
                     await LoadDesignedPageSummariesAsync(),
                     ManuscriptCodec.JsonOptions);
+                var fontFamiliesJson = JsonSerializer.Serialize(
+                    await Fonts.ListAsync(ProjectId),
+                    ManuscriptCodec.JsonOptions);
                 if (_disposed || _disposing)
                     return;
 
@@ -104,7 +109,8 @@
                     stylesJson,
                     imagesJson,
                     "[]",
-                    compositionsJson);
+                    compositionsJson,
+                    fontFamiliesJson);
                 if (_disposed || _disposing)
                 {
                     if (handle is not null)

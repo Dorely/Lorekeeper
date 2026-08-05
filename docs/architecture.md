@@ -214,11 +214,20 @@ Figures own stable IDs, project images, captions, alternative/decorative
 decisions, language and semantic roles, plus flow, wrap, width, spacing,
 contain/cover fit, internal crop position, bleed, page-break, and
 caption-placement intent. Paragraph Book Text Styles can define reusable
-alignment, whole/right/first-line/hanging indentation, spacing, keep behavior,
-and page starts. Text-bearing blocks can carry sparse overrides of those
-properties; direct overrides take precedence over Book Text Styles and built-in
+typography, alignment, whole/right/first-line/hanging indentation, spacing,
+keep behavior, and page starts. Text-bearing blocks can carry sparse overrides
+of those properties, including font family, font size, weight, italics, small
+caps, line height, alignment, indentation, spacing, and pagination. Direct
+overrides take precedence over Book Text Styles and built-in
 defaults. The semantic editor, EPUB formatter, chapter preview, and publication
 PDF renderer resolve the same style properties.
+The primary editor toolbar loads the project font catalog and exposes direct
+font-family, point-size, line-spacing, emphasis, alignment, indentation, list,
+and link controls in a compact document-editor layout. Bundled and imported font
+faces are loaded into the browser from their project-owned URLs; Read mode and
+publication requests stage the same referenced faces rather than substituting a
+machine font. Imported-font deletion is blocked while a paragraph, saved style,
+page, or cover still references the family.
 The primary editor toolbar keeps a saved-style picker beside focused apply-to-
 paragraph and apply-to-chapter actions. Saving the current paragraph as a style
 flushes it first, extracts inherited style properties plus sparse presentation

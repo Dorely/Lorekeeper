@@ -1495,7 +1495,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
     private static string FontFamilyName(string familyKey) =>
         $"lk-{new string(familyKey.Select(character => char.IsAsciiLetterOrDigit(character) ? character : '-').ToArray())}";
 
-    private static string FontCssFamily(string key)
+    internal static string FontCssFamily(string key)
     {
         if (key.StartsWith("project:", StringComparison.OrdinalIgnoreCase)
             && Guid.TryParse(key["project:".Length..], out _))
@@ -1558,8 +1558,13 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             ["sans"] = "Arial, Helvetica, sans-serif",
             ["mono"] = "\"Courier New\", Courier, monospace",
         };
-        if (definition.FontFamilyKey is { } fontKey && families.TryGetValue(fontKey, out var family))
-            declarations.Add($"font-family: {family}");
+        if (definition.FontFamilyKey is { } fontKey)
+        {
+            if (families.TryGetValue(fontKey, out var family))
+                declarations.Add($"font-family: {family}");
+            else
+                declarations.Add($"font-family: {FontCssFamily(fontKey)}");
+        }
         if (definition.FontSizePoints is double fontSize)
             declarations.Add($"font-size: {fontSize.ToString("0.###", CultureInfo.InvariantCulture)}pt");
         if (definition.FontWeight is int fontWeight)
@@ -1845,6 +1850,21 @@ internal static class SemanticPublishFormatting
     {
         if (presentation is null) return string.Empty;
         var declarations = new List<string>();
+        if (presentation.FontFamilyKey is { } fontFamily)
+        {
+            var genericFamilies = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["serif"] = "Georgia, &quot;Times New Roman&quot;, serif",
+                ["sans"] = "Arial, Helvetica, sans-serif",
+                ["mono"] = "&quot;Courier New&quot;, Courier, monospace",
+            };
+            declarations.Add($"font-family:{(genericFamilies.TryGetValue(fontFamily, out var generic) ? generic : EpubPublishFormatter.FontCssFamily(fontFamily))}");
+        }
+        if (presentation.FontSizePoints is { } fontSize) declarations.Add($"font-size:{fontSize:R}pt");
+        if (presentation.FontWeight is { } fontWeight) declarations.Add($"font-weight:{fontWeight}");
+        if (presentation.Italic == true) declarations.Add("font-style:italic");
+        if (presentation.SmallCaps == true) declarations.Add("font-variant-caps:small-caps");
+        if (presentation.LineHeight is { } lineHeight) declarations.Add($"line-height:{lineHeight:R}");
         if (presentation.Alignment is { } alignment)
             declarations.Add($"text-align:{alignment switch { ParagraphAlignment.Start => "start", ParagraphAlignment.End => "end", ParagraphAlignment.Center => "center", _ => "justify" }}");
         if (presentation.LeftIndentEm is { } left) declarations.Add($"margin-left:{left:R}em");

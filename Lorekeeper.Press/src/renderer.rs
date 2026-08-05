@@ -8,8 +8,8 @@ use sha2::{Digest, Sha256};
 use unicode_linebreak::linebreaks;
 
 use crate::font::{
-    assert_supported_language, configure_custom_fonts, custom_family, is_italic, measure_text,
-    subset_for_layout,
+    assert_supported_language, configure_custom_fonts, custom_family, is_bold, is_italic,
+    measure_text, subset_for_layout,
 };
 use crate::image::prepare_images;
 use crate::inspect;
@@ -4261,6 +4261,31 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
         .get("paragraphPresentation")
         .filter(|value| !value.is_null())
     {
+        if let Some(size) = presentation.get("fontSizePoints").and_then(Value::as_f64) {
+            style.size = size as f32;
+        }
+        if let Some(line_height) = presentation.get("lineHeight").and_then(Value::as_f64) {
+            style.line_height = line_height as f32;
+        }
+        let direct_family = presentation
+            .get("fontFamilyKey")
+            .and_then(Value::as_str)
+            .map(font_family);
+        let direct_bold = presentation
+            .get("fontWeight")
+            .and_then(Value::as_u64)
+            .map(|weight| weight >= 600);
+        let direct_italic = presentation.get("italic").and_then(Value::as_bool);
+        if direct_family.is_some() || direct_bold.is_some() || direct_italic.is_some() {
+            style.face = regular_face(direct_family.unwrap_or_else(|| style.face.family()))
+                .with_emphasis(
+                    direct_bold.unwrap_or_else(|| is_bold(style.face)),
+                    direct_italic.unwrap_or_else(|| is_italic(style.face)),
+                );
+        }
+        if let Some(small_caps) = presentation.get("smallCaps").and_then(Value::as_bool) {
+            style.small_caps = small_caps;
+        }
         if let Some(alignment) = presentation.get("alignment").and_then(Value::as_str) {
             style.alignment = match alignment.to_ascii_lowercase().as_str() {
                 "start" => "left",

@@ -333,7 +333,7 @@
                 || index < 0)
                 continue;
             var format = font.ContentType == "font/otf" ? "opentype" : "truetype";
-            css.Append($"@font-face{{font-family:'LorekeeperPreviewCustom{index}';src:url('/projects/{ProjectId:N}/fonts/{font.FaceId:N}/content') format('{format}');font-weight:{font.Weight};font-style:{(font.Italic ? "italic" : "normal")}}}");
+            css.Append($"@font-face{{font-family:'LorekeeperPreviewCustom{index}';src:url('{font.ContentUrl}') format('{format}');font-weight:{font.Weight};font-style:{(font.Italic ? "italic" : "normal")}}}");
         }
         return css.ToString();
     }

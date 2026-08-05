@@ -84,6 +84,12 @@ public sealed record FigurePresentation
 
 public sealed record ParagraphPresentation
 {
+    public string? FontFamilyKey { get; init; }
+    public double? FontSizePoints { get; init; }
+    public int? FontWeight { get; init; }
+    public bool? Italic { get; init; }
+    public bool? SmallCaps { get; init; }
+    public double? LineHeight { get; init; }
     public ParagraphAlignment? Alignment { get; init; }
     public double? LeftIndentEm { get; init; }
     public double? RightIndentEm { get; init; }

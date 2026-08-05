@@ -406,6 +406,9 @@ public sealed class PublishService(
         var referencedFontKeys = namedStyles
             .Select(item => item.Definition.FontFamilyKey)
             .Concat(sections.SelectMany(section => section.Chapters)
+                .SelectMany(chapter => chapter.Manuscript.Content)
+                .Select(block => block.ParagraphPresentation?.FontFamilyKey))
+            .Concat(sections.SelectMany(section => section.Chapters)
                 .SelectMany(chapter => chapter.PageCompositions)
                 .SelectMany(composition => composition.Variants)
                 .SelectMany(variant => CompositionSceneResolver.Flatten(variant.Scene).Select(item => item.FontFamilyKey)

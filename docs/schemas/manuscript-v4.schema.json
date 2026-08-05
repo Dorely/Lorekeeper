@@ -95,6 +95,12 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "fontFamilyKey": { "type": ["string", "null"], "minLength": 1 },
+        "fontSizePoints": { "type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 288 },
+        "fontWeight": { "type": ["integer", "null"], "minimum": 100, "maximum": 900, "multipleOf": 100 },
+        "italic": { "type": ["boolean", "null"] },
+        "smallCaps": { "type": ["boolean", "null"] },
+        "lineHeight": { "type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 5 },
         "alignment": { "enum": ["start", "center", "end", "justify", null] },
         "leftIndentEm": { "type": ["number", "null"], "minimum": 0, "maximum": 12 },
         "rightIndentEm": { "type": ["number", "null"], "minimum": 0, "maximum": 12 },

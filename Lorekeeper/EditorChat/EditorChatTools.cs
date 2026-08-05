@@ -5,6 +5,7 @@ using Lorekeeper.Chapters;
 using Lorekeeper.Composition;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.Fonts;
 using Lorekeeper.Images;
 using Lorekeeper.Ingest;
 using Lorekeeper.Llm;
@@ -25,6 +26,7 @@ public sealed class EditorChatTools(
     IManuscriptService manuscripts,
     IManuscriptMigrationService manuscriptMigrations,
     IManuscriptStyleService manuscriptStyles,
+    IProjectFontService projectFonts,
     IEntityService entities,
     IEntityTypeService entityTypes,
     IProjectFactService projectFacts,
@@ -192,6 +194,11 @@ public sealed class EditorChatTools(
                 description:
                     "Read structured-manuscript migration, validation journal, protected backup, and recovery state. Read-only; never treats an incomplete migration as successful."),
 
+            AIFunctionFactory.Create(
+                method: () => ListBookFontsAsync(context),
+                name: "list_book_fonts",
+                description:
+                    "List the compact project-owned font catalog with stable family keys and available weights/styles. Read this before choosing an exact font family for direct paragraph formatting or a Book Text Style; never invent a font key."),
             AIFunctionFactory.Create(
                 method: () => ListManuscriptStylesAsync(context),
                 name: "list_manuscript_styles",
@@ -469,6 +476,19 @@ public sealed class EditorChatTools(
                     : await manuscriptStyles.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken),
             },
             ManuscriptCodec.JsonOptions);
+
+    private async Task<string> ListBookFontsAsync(EditorChatContext ctx) =>
+        JsonSerializer.Serialize(new
+        {
+            fonts = (await projectFonts.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken))
+                .Select(family => new
+                {
+                    family.Key,
+                    family.Name,
+                    family.Category,
+                    faces = family.Faces.Select(face => new { face.Weight, face.Italic }),
+                }),
+        }, ManuscriptCodec.JsonOptions);
 
     private async Task<string> UpsertManuscriptStyleAsync(
         EditorChatContext ctx,

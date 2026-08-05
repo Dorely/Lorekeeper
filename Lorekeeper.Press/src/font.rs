@@ -157,6 +157,23 @@ pub fn is_italic(face: FontFace) -> bool {
     }
 }
 
+pub fn is_bold(face: FontFace) -> bool {
+    match face {
+        FontFace::SerifBold
+        | FontFace::SerifBoldItalic
+        | FontFace::SansBold
+        | FontFace::SansBoldItalic
+        | FontFace::MonoBold
+        | FontFace::MonoBoldItalic => true,
+        FontFace::Custom(index) => custom_fonts()
+            .read()
+            .expect("custom font registry poisoned")
+            .get(index as usize)
+            .is_some_and(|font| font.weight >= 600),
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PositionedGlyph {
