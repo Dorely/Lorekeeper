@@ -16,8 +16,8 @@
     position: sticky;
     z-index: 4;
     top: 0;
-    padding: .4rem .5rem .25rem;
     background: var(--bs-body-bg, #fff);
+    box-shadow: 0 .15rem .45rem rgb(15 23 42 / 7%);
 }
 
 .semantic-editor ::deep .semantic-editor-toolbar {
@@ -25,13 +25,12 @@
     z-index: 1;
     display: flex;
     flex-wrap: wrap;
-    gap: .1rem;
+    gap: .18rem;
     align-items: center;
-    min-height: 2.55rem;
-    padding: .3rem .45rem;
-    border: 0;
-    border-radius: .75rem;
-    background: color-mix(in srgb, var(--bs-primary, #0d6efd) 7%, var(--bs-body-bg, #fff));
+    padding: .35rem .45rem;
+    border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+    background: color-mix(in srgb, var(--bs-body-bg, #fff) 94%, transparent);
+    backdrop-filter: blur(10px);
 }
 
 .semantic-editor ::deep .semantic-editor-dialog-backdrop {
@@ -117,36 +116,19 @@
     font-size: .82rem;
 }
 
-.semantic-editor ::deep .semantic-editor-advanced {
-    position: static;
+.semantic-editor ::deep .semantic-editor-tool-group {
+    display: contents;
 }
 
-.semantic-editor ::deep .semantic-editor-advanced > summary {
-    min-height: 1.95rem;
-    padding: .35rem .55rem;
-    border: 0;
-    border-radius: .35rem;
-    background: transparent;
-    cursor: pointer;
-    font-size: .82rem;
-    font-weight: 700;
-    list-style-position: inside;
+.semantic-editor ::deep .semantic-editor-tool-divider {
+    width: 1px;
+    height: 1.35rem;
+    margin-inline: .12rem;
+    background: color-mix(in srgb, var(--bs-body-color, #212529) 18%, transparent);
 }
 
-.semantic-editor ::deep .semantic-editor-advanced-controls {
-    position: absolute;
-    z-index: 1000;
-    display: flex;
-    width: min(42rem, calc(100vw - 3rem));
-    max-height: 18rem;
-    padding: .65rem;
-    gap: .35rem;
-    flex-wrap: wrap;
-    overflow: auto;
-    border: 1px solid var(--bs-border-color, #ced4da);
-    border-radius: .5rem;
-    background: var(--bs-body-bg, #fff);
-    box-shadow: 0 .65rem 1.6rem rgb(0 0 0 / 14%);
+.semantic-editor ::deep .semantic-editor-tool-group:last-child .semantic-editor-tool-divider {
+    display: none;
 }
 
 .semantic-editor ::deep .semantic-editor-button,
@@ -160,35 +142,28 @@
 
 .semantic-editor ::deep .semantic-editor-toolbar .semantic-editor-button,
 .semantic-editor ::deep .semantic-editor-toolbar .semantic-editor-select {
-    min-height: 1.95rem;
-    border: 0;
-    background: transparent;
+    min-height: 1.7rem;
 }
 
 .semantic-editor ::deep .semantic-editor-style-controls {
     display: flex;
     min-width: 0;
-    gap: .1rem;
+    gap: .2rem;
     align-items: center;
-    padding-left: .45rem;
-    margin-left: .25rem;
-    border-left: 1px solid color-mix(in srgb, var(--bs-body-color, #212529) 18%, transparent);
-    background: transparent;
+    flex-wrap: wrap;
 }
 
 .semantic-editor ::deep .semantic-editor-typography-controls {
     display: flex;
     min-width: 0;
-    gap: .1rem;
+    gap: .2rem;
     align-items: center;
-    padding-inline: .45rem;
-    margin-inline: .25rem;
-    border-inline: 1px solid color-mix(in srgb, var(--bs-body-color, #212529) 18%, transparent);
+    flex-wrap: wrap;
 }
 
 .semantic-editor ::deep .semantic-editor-font-family .semantic-editor-select {
-    width: 8.75rem;
-    max-width: 8.75rem;
+    width: 7rem;
+    max-width: 7rem;
 }
 
 .semantic-editor ::deep .semantic-editor-size-control {
@@ -198,24 +173,25 @@
 
 .semantic-editor ::deep .semantic-editor-size-control .semantic-editor-button,
 .semantic-editor ::deep .semantic-editor-size-control input {
-    min-height: 1.95rem;
-    background: transparent;
+    min-height: 1.7rem;
+    border: 1px solid var(--bs-border-color, #ced4da);
+    background: var(--bs-body-bg, #fff);
     color: var(--bs-body-color, #212529);
 }
 
 .semantic-editor ::deep .semantic-editor-size-control .semantic-editor-button:first-child {
-    border-radius: .35rem;
+    border-radius: .3rem 0 0 .3rem;
 }
 
 .semantic-editor ::deep .semantic-editor-size-control .semantic-editor-button:last-child {
-    border-radius: .35rem;
+    border-radius: 0 .3rem .3rem 0;
 }
 
 .semantic-editor ::deep .semantic-editor-size-control input {
-    width: 2.75rem;
+    width: 2.65rem;
     padding: .15rem .2rem;
-    border: 1px solid color-mix(in srgb, var(--bs-body-color, #212529) 45%, transparent);
-    border-radius: .25rem;
+    border-width: 1px 0;
+    border-radius: 0;
     background: var(--bs-body-bg, #fff);
     text-align: center;
 }
@@ -233,23 +209,20 @@
 @media (max-width: 780px) {
     .semantic-editor ::deep .semantic-editor-typography-controls,
     .semantic-editor ::deep .semantic-editor-style-controls {
-        width: 100%;
         flex-wrap: wrap;
     }
 
     .semantic-editor ::deep .semantic-editor-typography-controls {
-        padding-inline: 0;
-        padding-bottom: .35rem;
-        margin-inline: 0;
-        border-inline: 0;
-        border-bottom: 1px solid var(--bs-border-color, #ced4da);
+        padding: 0;
+        margin: 0;
+        border: 0;
     }
 }
 
 .semantic-editor ::deep .semantic-editor-button {
-    padding: .25rem .48rem;
-    font-size: .84rem;
-    font-weight: 500;
+    padding: .15rem .34rem;
+    font-size: .75rem;
+    font-weight: 600;
 }
 
 .semantic-editor ::deep .semantic-editor-button:hover,
@@ -257,32 +230,31 @@
     border-color: var(--bs-primary, #0d6efd);
 }
 
-.semantic-editor ::deep .semantic-editor-toolbar .semantic-editor-button:hover,
-.semantic-editor ::deep .semantic-editor-toolbar .semantic-editor-advanced > summary:hover,
-.semantic-editor ::deep .semantic-editor-toolbar .semantic-editor-select:hover {
-    border-color: transparent;
-    background: color-mix(in srgb, var(--bs-body-color, #212529) 8%, transparent);
+.semantic-editor ::deep .semantic-editor-button--active {
+    border-color: color-mix(in srgb, var(--bs-primary, #0d6efd) 65%, var(--bs-border-color, #ced4da));
+    background: color-mix(in srgb, var(--bs-primary, #0d6efd) 12%, var(--bs-body-bg, #fff));
+    color: var(--bs-primary-text-emphasis, var(--bs-primary, #0d6efd));
 }
 
 .semantic-editor ::deep .semantic-editor-button:focus-visible,
-.semantic-editor ::deep .semantic-editor-select:focus-visible,
-.semantic-editor ::deep .semantic-editor-advanced > summary:focus-visible {
-    outline: 2px solid var(--bs-primary, #0d6efd);
-    outline-offset: -1px;
+.semantic-editor ::deep .semantic-editor-select:focus-visible {
+    border-color: var(--bs-primary, #0d6efd);
+    outline: 2px solid color-mix(in srgb, var(--bs-primary, #0d6efd) 30%, transparent);
+    outline-offset: 1px;
 }
 
 .semantic-editor ::deep .semantic-editor-select {
-    max-width: 10rem;
-    padding: .25rem 1.45rem .25rem .45rem;
-    font-size: .84rem;
+    max-width: 7rem;
+    padding: .15rem 1.3rem .15rem .32rem;
+    font-size: .75rem;
 }
 
 .semantic-editor ::deep .semantic-editor-icon-button {
     display: inline-grid;
-    min-width: 1.95rem;
+    min-width: 1.7rem;
     place-items: center;
     padding-inline: .35rem;
-    font-size: 1rem;
+    font-size: .86rem;
     line-height: 1;
 }
 
@@ -350,6 +322,32 @@
 .semantic-editor ::deep [aria-label="Underline"] {
     text-decoration: underline;
     text-underline-offset: .12rem;
+}
+
+.semantic-editor ::deep [aria-label="Strikethrough"] {
+    text-decoration: line-through;
+}
+
+.semantic-editor ::deep select[aria-label="Block style"] {
+    width: 6.5rem;
+}
+
+.semantic-editor ::deep select[aria-label="Heading level"],
+.semantic-editor ::deep select[aria-label="Insert special character"] {
+    width: 2.7rem;
+}
+
+.semantic-editor ::deep select[aria-label="Line spacing"],
+.semantic-editor ::deep select[aria-label="Book Text character style"] {
+    width: 5.75rem;
+}
+
+.semantic-editor ::deep select[aria-label="Insert project image as figure"] {
+    width: 5rem;
+}
+
+.semantic-editor ::deep select[aria-label="Book Text Style"] {
+    width: 7rem;
 }
 
 .semantic-editor ::deep .semantic-editor-surface {
@@ -532,9 +530,8 @@
 
 .semantic-editor ::deep .semantic-find-panel,
 .semantic-editor ::deep .semantic-outline {
-    position: sticky;
+    position: relative;
     z-index: 3;
-    top: 3.2rem;
     display: flex;
     gap: 0.5rem;
     align-items: center;

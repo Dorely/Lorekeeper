@@ -536,6 +536,21 @@ function alignmentButton(alignment, title, action) {
     return element;
 }
 
+function toolGroup(label, controls) {
+    const group = document.createElement("div");
+    group.className = "semantic-editor-tool-group";
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", label);
+    for (const control of controls) {
+        if (control) group.append(control);
+    }
+    const divider = document.createElement("span");
+    divider.className = "semantic-editor-tool-divider";
+    divider.setAttribute("aria-hidden", "true");
+    group.append(divider);
+    return group;
+}
+
 function selectControl(label, options, onChange, resetAfterChange = true) {
     const wrapper = document.createElement("label");
     wrapper.className = "semantic-editor-select-label";
@@ -545,6 +560,7 @@ function selectControl(label, options, onChange, resetAfterChange = true) {
     const select = document.createElement("select");
     select.className = "semantic-editor-select";
     select.setAttribute("aria-label", label);
+    select.title = label;
     for (const [value, name] of options) {
         const option = document.createElement("option");
         option.value = value;
@@ -859,6 +875,41 @@ function applyMark(view, markName, value = null) {
     view.focus();
 }
 
+function selectedMarkValue(view, markName) {
+    const type = schema.marks[markName];
+    if (!type) return "";
+    const marks = view.state.storedMarks || view.state.selection.$from.marks();
+    return marks.find(mark => mark.type === type)?.attrs?.value || "";
+}
+
+async function editLink(view, root) {
+    const values = await showEditorForm(root, {
+        title: "Link",
+        description: "Enter a web, email, phone, or document-fragment link. Leave it blank to remove the link.",
+        submitLabel: "Apply",
+        fields: [{name: "url", label: "Link URL", type: "text", value: selectedMarkValue(view, "link")}],
+        validate: value => value.url.trim() && !safeLink(value.url)
+            ? "Use an http, https, mailto, tel, or document-fragment link."
+            : null
+    });
+    if (!values) return;
+    applyMark(view, "link", values.url.trim() ? safeLink(values.url) : null);
+}
+
+async function editLanguage(view, root) {
+    const values = await showEditorForm(root, {
+        title: "Text language",
+        description: "Set a BCP 47 language tag for the selection. Leave it blank to use the surrounding language.",
+        submitLabel: "Apply",
+        fields: [{name: "language", label: "Language tag", type: "text", value: selectedMarkValue(view, "language")}],
+        validate: value => value.language.trim() && !safeLanguage(value.language)
+            ? "Use a valid language tag such as en, en-US, or fr-CA."
+            : null
+    });
+    if (!values) return;
+    applyMark(view, "language", values.language.trim() ? safeLanguage(values.language) : null);
+}
+
 function updateParagraphPresentation(view, update) {
     const positions = selectedParagraphPositions(view);
     if (positions.length === 0) return false;
@@ -1001,31 +1052,44 @@ function changeParagraphIndent(view, delta) {
     }));
 }
 
-function editParagraphPresentation(view) {
+async function editParagraphPresentation(view, root) {
     const node = view.state.selection.$from.parent;
     const current = node.attrs.paragraphPresentation || {};
-    const rightIndent = Number(window.prompt("Right indent in em", String(current.rightIndentEm || 0)));
-    const firstLine = Number(window.prompt("First-line indent in em (use a negative value for hanging indent)", String(current.firstLineIndentEm || 0)));
-    if (!Number.isFinite(rightIndent) || rightIndent < 0 || rightIndent > 12
-        || !Number.isFinite(firstLine) || firstLine < -12 || firstLine > 12) return;
-    const before = Number(window.prompt("Space before in points", String(current.spacingBeforePoints || 0)));
-    const after = Number(window.prompt("Space after in points", String(current.spacingAfterPoints || 0)));
-    if (![before, after].every(value => Number.isFinite(value) && value >= 0 && value <= 288)) return;
-    const keepWithNext = window.prompt(
-        "Keep with the next block in paginated output? yes or no",
-        current.keepWithNext ? "yes" : "no")?.trim().toLowerCase();
-    const startOnNewPage = window.prompt(
-        "Start this block on a new page? yes or no",
-        current.startOnNewPage ? "yes" : "no")?.trim().toLowerCase();
-    if (![keepWithNext, startOnNewPage].every(value => value === "yes" || value === "no")) return;
+    const values = await showEditorForm(root, {
+        title: "Paragraph layout",
+        description: "Fine-tune indentation, spacing, and pagination for the selected paragraph.",
+        submitLabel: "Apply",
+        fields: [
+            {name: "rightIndent", label: "Right indent (em)", type: "number", value: current.rightIndentEm || 0},
+            {name: "firstLine", label: "First-line indent (em; negative creates a hanging indent)", type: "number", value: current.firstLineIndentEm || 0},
+            {name: "before", label: "Space before (pt)", type: "number", value: current.spacingBeforePoints || 0},
+            {name: "after", label: "Space after (pt)", type: "number", value: current.spacingAfterPoints || 0},
+            {name: "keepWithNext", label: "Keep with next block", type: "checkbox", value: current.keepWithNext},
+            {name: "startOnNewPage", label: "Start on a new page", type: "checkbox", value: current.startOnNewPage}
+        ],
+        validate: value => {
+            const rightIndent = Number(value.rightIndent);
+            const firstLine = Number(value.firstLine);
+            const before = Number(value.before);
+            const after = Number(value.after);
+            if (!Number.isFinite(rightIndent) || rightIndent < 0 || rightIndent > 12)
+                return "Right indent must be between 0 and 12 em.";
+            if (!Number.isFinite(firstLine) || firstLine < -12 || firstLine > 12)
+                return "First-line indent must be between -12 and 12 em.";
+            if (![before, after].every(number => Number.isFinite(number) && number >= 0 && number <= 288))
+                return "Paragraph spacing must be between 0 and 288 points.";
+            return null;
+        }
+    });
+    if (!values) return;
     updateParagraphPresentation(view, value => ({
         ...value,
-        rightIndentEm: rightIndent,
-        firstLineIndentEm: firstLine,
-        spacingBeforePoints: before,
-        spacingAfterPoints: after,
-        keepWithNext: keepWithNext === "yes",
-        startOnNewPage: startOnNewPage === "yes"
+        rightIndentEm: Number(values.rightIndent),
+        firstLineIndentEm: Number(values.firstLine),
+        spacingBeforePoints: Number(values.before),
+        spacingAfterPoints: Number(values.after),
+        keepWithNext: values.keepWithNext,
+        startOnNewPage: values.startOnNewPage
     }));
 }
 
@@ -1268,54 +1332,72 @@ async function setFigureImage(view, image, root) {
     view.focus();
 }
 
-function editFigureAltText(view) {
+async function editFigureAltText(view, root) {
     const selected = selectedFigure(view);
     if (!selected) {
-        window.alert("Place the cursor in a figure caption first.");
+        showEditorNotice(root, "Select a figure image or place the cursor in its caption first.");
         return;
     }
-    const altText = window.prompt("Alternative text", selected.node.attrs.altText || "")?.trim();
-    const decorative = !altText && window.confirm("Mark this image decorative?");
-    if (!altText && !decorative) return;
+    const values = await showEditorForm(root, {
+        title: "Figure accessibility",
+        description: "Describe meaningful images. Mark purely ornamental images as decorative.",
+        submitLabel: "Apply",
+        fields: [
+            {name: "altText", label: "Alternative text", type: "textarea", value: selected.node.attrs.altText || ""},
+            {name: "decorative", label: "Decorative image", type: "checkbox", value: selected.node.attrs.decorative}
+        ],
+        validate: value => !value.decorative && !value.altText.trim()
+            ? "Enter alternative text or mark the image decorative."
+            : null
+    });
+    if (!values) return;
+    const altText = values.altText.trim();
     view.dispatch(view.state.tr.setNodeMarkup(
         selected.position,
         undefined,
-        {...selected.node.attrs, altText: decorative ? null : altText, decorative}).scrollIntoView());
+        {...selected.node.attrs, altText: values.decorative ? null : altText, decorative: values.decorative}).scrollIntoView());
     view.focus();
 }
 
-function editFigurePresentation(view) {
+async function editFigurePresentation(view, root) {
     const selected = selectedFigure(view);
     if (!selected) {
-        window.alert("Place the cursor in a figure caption first.");
+        showEditorNotice(root, "Select a figure image or place the cursor in its caption first.");
         return;
     }
     const current = {...defaultFigurePresentation, ...(selected.node.attrs.presentation || {})};
-    const placement = window.prompt(
-        "Placement: inline, centered, float, fullWidth, fullBleed, or dedicatedPage",
-        current.placement)?.trim();
-    if (placement === null) return;
-    const allowed = new Set(["inline", "centered", "float", "fullWidth", "fullBleed", "dedicatedPage"]);
-    if (!allowed.has(placement)) {
-        window.alert("Choose inline, centered, float, fullWidth, fullBleed, or dedicatedPage.");
-        return;
-    }
-    const width = Number(window.prompt("Width percent (1-100)", String(current.widthPercent)));
-    if (!Number.isFinite(width) || width <= 0 || width > 100) {
-        window.alert("Width must be between 1 and 100 percent.");
-        return;
-    }
-    const fit = window.prompt("Image fit: contain shows the whole image; cover fills the frame", current.fit)?.trim();
-    if (!new Set(["contain", "cover"]).has(fit)) {
-        window.alert("Choose contain or cover.");
-        return;
-    }
+    const values = await showEditorForm(root, {
+        title: "Figure layout",
+        description: "Choose how the selected image participates in the manuscript flow.",
+        submitLabel: "Apply",
+        fields: [
+            {
+                name: "placement", label: "Placement", type: "select", value: current.placement,
+                options: [
+                    ["inline", "Inline"], ["centered", "Centered"], ["float", "Float with text"],
+                    ["fullWidth", "Full width"], ["fullBleed", "Full bleed"], ["dedicatedPage", "Dedicated page"]
+                ]
+            },
+            {name: "width", label: "Width (%)", type: "number", value: current.widthPercent},
+            {
+                name: "fit", label: "Image fit", type: "select", value: current.fit,
+                options: [["contain", "Show whole image"], ["cover", "Crop to fill"]]
+            }
+        ],
+        validate: value => {
+            const width = Number(value.width);
+            return Number.isFinite(width) && width > 0 && width <= 100
+                ? null
+                : "Width must be between 1 and 100 percent.";
+        }
+    });
+    if (!values) return;
     const presentation = {
         ...current,
-        placement,
-        widthPercent: width,
-        fit,
-        textWrap: placement === "float" ? (current.textWrap === "none" ? "end" : current.textWrap) : "none"
+        placement: values.placement,
+        widthPercent: Number(values.width),
+        fit: values.fit,
+        textWrap: values.placement === "float" ? (current.textWrap === "none" ? "end" : current.textWrap) : "none"
     };
     view.dispatch(view.state.tr.setNodeMarkup(
         selected.position,
@@ -1427,7 +1509,7 @@ function countMatches(doc, search) {
     return textBlockMatches(doc, search).length;
 }
 
-function buildFindPanel(view) {
+function buildFindPanel(view, root) {
     const panel = document.createElement("div");
     panel.className = "semantic-find-panel";
     panel.hidden = true;
@@ -1462,9 +1544,16 @@ function buildFindPanel(view) {
             `${currentMatch + 1}/${count}: ${context} -> ${context.replace(find.value, replacement.value)}`;
     };
     find.addEventListener("input", update);
-    const replaceButton = button("Replace all", "Replace all matching text", () => {
+    const replaceButton = button("Replace all", "Replace all matching text", async () => {
         const count = countMatches(view.state.doc, find.value);
-        if (count > 0 && window.confirm(`Replace ${count} match${count === 1 ? "" : "es"}?`))
+        if (count === 0) return;
+        const confirmation = await showEditorForm(root, {
+            title: "Replace matching text",
+            description: `Replace ${count} match${count === 1 ? "" : "es"} throughout this chapter?`,
+            submitLabel: "Replace all",
+            fields: []
+        });
+        if (confirmation)
             replaceAll(view, find.value, replacement.value);
         update();
     });
@@ -1490,7 +1579,18 @@ function buildFindPanel(view) {
     });
     replacement.addEventListener("input", update);
     panel.append(find, replacement, result, previous, next, preview, replaceButton);
-    return {panel, open() { panel.hidden = !panel.hidden; if (!panel.hidden) find.focus(); }, update};
+    return {
+        panel,
+        open() {
+            const scrollTop = root.scrollTop;
+            panel.hidden = !panel.hidden;
+            if (!panel.hidden) find.focus({preventScroll: true});
+            root.scrollTop = scrollTop;
+            if (typeof requestAnimationFrame === "function")
+                requestAnimationFrame(() => { root.scrollTop = scrollTop; });
+        },
+        update
+    };
 }
 
 function buildOutline(view) {
@@ -1777,7 +1877,6 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     let readOnly = false;
     let conflictDraftJson = null;
     const conflictStorageKey = `lorekeeper.manuscript-conflict.${manuscriptId}`;
-    let positionAdvancedControls = () => {};
     let updateFormattingControls = () => {};
     const applyEffectiveReadOnly = () => {
         readOnly = requestedReadOnly || conflictDraftJson !== null;
@@ -1909,7 +2008,6 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             findPanel.update();
             outline.update();
             figureInspector.update();
-            positionAdvancedControls();
             updateFormattingControls();
             updateStatus();
         },
@@ -1958,10 +2056,10 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         }
     });
 
-    const findPanel = buildFindPanel(view);
+    const findPanel = buildFindPanel(view, root);
     const outline = buildOutline(view);
     const figureInspector = buildFigureInspector(view, projectImages);
-    editorChrome.append(figureInspector.panel);
+    editorChrome.append(findPanel.panel, outline.panel, figureInspector.panel);
     figureInspector.update();
     const updateStatus = () => {
         const text = editorialText(view.state.doc, manuscriptId, revision);
@@ -1992,7 +2090,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     styleControls.className = "semantic-editor-style-controls";
     styleControls.append(
         stylePicker,
-        button("Apply", "Apply the chosen Book Text Style to the current paragraph or selected paragraphs", () => {
+        iconButton("✓", "Apply the chosen Book Text Style to the current paragraph or selected paragraphs", () => {
             if (!selectedParagraphStyleRole) {
                 showEditorNotice(root, "Choose a saved Book Text Style first.");
                 return;
@@ -2000,7 +2098,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             if (!applyParagraphStyle(view, selectedParagraphStyleRole))
                 showEditorNotice(root, "Place the cursor in a paragraph, heading, block quote, or list item first.");
         }),
-        button("Whole chapter", "Apply the chosen Book Text Style to every text paragraph in this chapter", () => {
+        button("All", "Apply the chosen Book Text Style to every text paragraph in this chapter", () => {
             if (!selectedParagraphStyleRole) {
                 showEditorNotice(root, "Choose a saved Book Text Style first.");
                 return;
@@ -2008,7 +2106,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             if (!applyParagraphStyle(view, selectedParagraphStyleRole, true))
                 showEditorNotice(root, "This chapter has no compatible text paragraphs.");
         }),
-        button("Save as style", "Capture the current paragraph formatting as a reusable Book Text Style", async () => {
+        button("+ Style", "Capture the current paragraph formatting as a reusable Book Text Style", async () => {
             const selected = selectedParagraphIdentity(view);
             if (!selected) {
                 showEditorNotice(root, "Place the cursor in a paragraph, heading, block quote, or list item first.");
@@ -2072,7 +2170,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             applyBlock(view, node, role, Number(level));
         }),
         selectControl("Heading level", [
-            ["", "Heading level"],
+            ["", "H"],
             ["1", "Heading level 1"],
             ["2", "Heading level 2"],
             ["3", "Heading level 3"],
@@ -2086,51 +2184,33 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         styleControls,
         selectControl(
             "Insert project image as figure",
-            [["", "Insert figure"]].concat(
+            [["", "Image"]].concat(
                 projectImages.map(image => [image.id, image.fileName])),
             value => void setFigureImage(view, imageById.get(String(value).toLowerCase()), root)),
-        button("Figure alt", "Edit selected figure alternative text", () => editFigureAltText(view)),
-        button("Figure layout", "Edit selected figure placement, width, and crop behavior", () =>
-            editFigurePresentation(view)),
+        button("Alt", "Edit selected figure alternative text", () => void editFigureAltText(view, root)),
+        iconButton("◩", "Edit selected figure placement, width, and crop behavior", () =>
+            void editFigurePresentation(view, root)),
         iconButton("▣", "Insert a designed page at the current manuscript position", () =>
             void insertDesignedPage(view, dotNetRef, () => revision, saveNow, replaceDocument, root)),
-        button("Figure to text", "Convert selected figure to a paragraph", () =>
+        iconButton("¶", "Convert selected figure to a paragraph", () =>
             applyBlock(view, "paragraph", "body", 2)),
         iconButton("B", "Bold (Ctrl+B)", () => applyMark(view, "strong")),
         iconButton("I", "Italic (Ctrl+I)", () => applyMark(view, "em")),
         iconButton("U", "Underline", () => applyMark(view, "underline")),
-        button("S", "Strikethrough", () => applyMark(view, "strikethrough")),
+        iconButton("S", "Strikethrough", () => applyMark(view, "strikethrough")),
         button("</>", "Inline code", () => applyMark(view, "code")),
-        button("SC", "Small caps intent", () => applyMark(view, "small_caps")),
-        button("x²", "Superscript", () => applyMark(view, "superscript")),
-        button("x₂", "Subscript", () => applyMark(view, "subscript")),
+        button("Aᴀ", "Small caps intent", () => applyMark(view, "small_caps")),
+        iconButton("x²", "Superscript", () => applyMark(view, "superscript")),
+        iconButton("x₂", "Subscript", () => applyMark(view, "subscript")),
         (() => {
-            const control = iconButton("", "Add or remove link", () => {
-            const value = window.prompt("Link URL (leave blank to remove)");
-            if (value === null) return;
-            const sanitized = safeLink(value);
-            if (value.trim() && !sanitized) {
-                window.alert("Use an http, https, mailto, tel, or document-fragment link.");
-                return;
-            }
-            applyMark(view, "link", sanitized);
-            });
+            const control = iconButton("", "Add or remove link", () => void editLink(view, root));
             control.classList.add("semantic-editor-link-button");
             return control;
         })(),
-        button("Lang", "Set or remove language", () => {
-            const value = window.prompt("BCP 47 language tag (leave blank to remove)");
-            if (value === null) return;
-            const sanitized = value.trim() ? safeLanguage(value) : null;
-            if (value.trim() && !sanitized) {
-                window.alert("Use a valid BCP 47 language tag such as en, en-US, or fr-CA.");
-                return;
-            }
-            applyMark(view, "language", sanitized);
-        }),
+        button("Lang", "Set or remove language", () => void editLanguage(view, root)),
         selectControl(
             "Book Text character style",
-            [["", "Book Text character style"], ["__remove__", "Remove character style"]].concat(
+            [["", "Character"], ["__remove__", "Remove character style"]].concat(
                 namedStyles
                     .filter(style => style.kind === "character")
                     .map(style => [style.semanticRole, style.name])),
@@ -2138,9 +2218,9 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
                 view,
                 "character_style",
                 value === "__remove__" ? null : value || null)),
-        button("***", "Insert scene break", () => insertSceneBreak(view)),
+        iconButton("⁂", "Insert scene break", () => insertSceneBreak(view)),
         selectControl("Insert special character", [
-            ["", "Special character"],
+            ["", "Ω"],
             ["—", "Em dash —"],
             ["–", "En dash –"],
             ["…", "Ellipsis …"],
@@ -2154,10 +2234,16 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             view.dispatch(view.state.tr.insertText(value).scrollIntoView());
             view.focus();
         }),
-        iconButton("↶", "Undo (Ctrl+Z)", () => { undo(view.state, view.dispatch); view.focus(); }),
-        iconButton("↷", "Redo (Ctrl+Y)", () => { redo(view.state, view.dispatch); view.focus(); }),
+        iconButton("↶", "Undo (Ctrl+Z)", () => {
+            undo(view.state, transaction => view.dispatch(transaction), view);
+            view.focus();
+        }),
+        iconButton("↷", "Redo (Ctrl+Y)", () => {
+            redo(view.state, transaction => view.dispatch(transaction), view);
+            view.focus();
+        }),
         iconButton("⌕", "Find and replace", () => findPanel.open()),
-        button("Outline", "Toggle document outline", () => outline.open())
+        iconButton("☷", "Toggle document outline", () => outline.open())
     );
     toolbar.append(
         alignmentButton("left", "Align paragraph left", () => setParagraphAlignment(view, "start")),
@@ -2166,85 +2252,124 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         alignmentButton("justify", "Justify paragraph", () => setParagraphAlignment(view, "justify")),
         iconButton("⇥", "Increase paragraph indent (Tab)", () => changeParagraphIndent(view, 1.5)),
         iconButton("⇤", "Decrease paragraph indent (Shift+Tab)", () => changeParagraphIndent(view, -1.5)),
-        iconButton("☷", "Toggle list formatting", () => toggleListFormatting(view))
+        iconButton("•≡", "Toggle list formatting", () => toggleListFormatting(view))
     );
-    const primaryTitles = new Set([
-        "Bold (Ctrl+B)", "Italic (Ctrl+I)", "Underline", "Add or remove link",
-        "Insert a designed page at the current manuscript position", "Undo (Ctrl+Z)",
-        "Redo (Ctrl+Y)", "Find and replace", "Align paragraph left", "Center paragraph",
-        "Align paragraph right", "Justify paragraph", "Increase paragraph indent (Tab)",
-        "Decrease paragraph indent (Shift+Tab)", "Toggle list formatting"
-    ]);
-    const primarySelects = new Set(["Block style", "Insert project image as figure"]);
-    const advancedDetails = document.createElement("details");
-    advancedDetails.className = "semantic-editor-advanced";
-    const advancedSummary = document.createElement("summary");
-    advancedSummary.textContent = "Advanced";
-    const advancedControls = document.createElement("div");
-    advancedControls.className = "semantic-editor-advanced-controls";
-    for (const control of [...toolbar.children]) {
-        const selectLabel = control.querySelector?.("select")?.getAttribute("aria-label");
-        if (control.classList.contains("semantic-editor-style-controls")
-            || control.classList.contains("semantic-editor-typography-controls")
-            || primaryTitles.has(control.title)
-            || primarySelects.has(selectLabel)) continue;
-        advancedControls.append(control);
-    }
-    advancedControls.append(
-        button("Paragraph...", "Right, first-line, and hanging indents, spacing, and pagination controls", () => editParagraphPresentation(view)),
-        button("Clear paragraph", "Clear direct paragraph formatting", () => clearParagraphPresentation(view))
+    toolbar.append(
+        iconButton("¶…", "Right, first-line, and hanging indents, spacing, and pagination controls", () =>
+            void editParagraphPresentation(view, root)),
+        button("Tx×", "Clear direct paragraph formatting", () => clearParagraphPresentation(view))
     );
-    const primaryByTitle = title => [...toolbar.children].find(control => control.title === title);
-    const primaryBySelect = label => [...toolbar.children].find(control =>
+    const controlByTitle = title => [...toolbar.children].find(control => control.title === title);
+    const controlBySelect = label => [...toolbar.children].find(control =>
         control.querySelector?.("select")?.getAttribute("aria-label") === label);
-    const googleDocsOrder = [
-        primaryByTitle("Undo (Ctrl+Z)"),
-        primaryByTitle("Redo (Ctrl+Y)"),
-        primaryByTitle("Find and replace"),
-        primaryBySelect("Block style"),
-        typographyControls.group,
-        primaryByTitle("Bold (Ctrl+B)"),
-        primaryByTitle("Italic (Ctrl+I)"),
-        primaryByTitle("Underline"),
-        primaryByTitle("Add or remove link"),
-        primaryBySelect("Insert project image as figure"),
-        primaryByTitle("Insert a designed page at the current manuscript position"),
-        primaryByTitle("Align paragraph left"),
-        primaryByTitle("Center paragraph"),
-        primaryByTitle("Align paragraph right"),
-        primaryByTitle("Justify paragraph"),
-        primaryByTitle("Increase paragraph indent (Tab)"),
-        primaryByTitle("Decrease paragraph indent (Shift+Tab)"),
-        primaryByTitle("Toggle list formatting"),
-        styleControls,
-    ];
-    for (const control of googleDocsOrder) {
-        if (control?.parentElement === toolbar) toolbar.append(control);
-    }
-    advancedDetails.append(advancedSummary, advancedControls);
-    positionAdvancedControls = () => {
-        if (!advancedDetails.open) return;
-        const anchor = advancedSummary.getBoundingClientRect();
-        const toolbarBounds = toolbar.getBoundingClientRect();
-        const chromeBounds = editorChrome.getBoundingClientRect();
-        const editorBounds = root.getBoundingClientRect();
-        const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
-        const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-        const leftBoundary = Math.max(12, editorBounds.left + 8);
-        const rightBoundary = Math.min(viewportWidth - 12, editorBounds.right - 8);
-        const width = Math.max(0, Math.min(672, rightBoundary - leftBoundary));
-        const viewportLeft = Math.max(leftBoundary, Math.min(anchor.left, rightBoundary - width));
-        const controlsTop = Math.max(anchor.bottom, chromeBounds.bottom) + 6;
-        const availableHeight = Math.max(96, viewportHeight - controlsTop - 12);
-        advancedControls.style.width = `${width}px`;
-        advancedControls.style.maxHeight = `${Math.min(288, availableHeight)}px`;
-        advancedControls.style.left = `${viewportLeft - toolbarBounds.left}px`;
-        advancedControls.style.top = `${controlsTop - toolbarBounds.top}px`;
+    toolbar.replaceChildren(
+        toolGroup("History and navigation", [
+            controlByTitle("Undo (Ctrl+Z)"),
+            controlByTitle("Redo (Ctrl+Y)"),
+            controlByTitle("Find and replace"),
+            controlByTitle("Toggle document outline"),
+        ]),
+        toolGroup("Text and typography", [
+            controlBySelect("Block style"),
+            controlBySelect("Heading level"),
+            typographyControls.group,
+        ]),
+        toolGroup("Inline formatting", [
+            controlByTitle("Bold (Ctrl+B)"),
+            controlByTitle("Italic (Ctrl+I)"),
+            controlByTitle("Underline"),
+            controlByTitle("Strikethrough"),
+            controlByTitle("Inline code"),
+            controlByTitle("Small caps intent"),
+            controlByTitle("Superscript"),
+            controlByTitle("Subscript"),
+            controlByTitle("Add or remove link"),
+            controlByTitle("Set or remove language"),
+            controlBySelect("Book Text character style"),
+        ]),
+        toolGroup("Images and structure", [
+            controlBySelect("Insert project image as figure"),
+            controlByTitle("Edit selected figure alternative text"),
+            controlByTitle("Edit selected figure placement, width, and crop behavior"),
+            controlByTitle("Convert selected figure to a paragraph"),
+            controlByTitle("Insert a designed page at the current manuscript position"),
+            controlByTitle("Insert scene break"),
+            controlBySelect("Insert special character"),
+        ]),
+        toolGroup("Paragraph formatting", [
+            controlByTitle("Align paragraph left"),
+            controlByTitle("Center paragraph"),
+            controlByTitle("Align paragraph right"),
+            controlByTitle("Justify paragraph"),
+            controlByTitle("Increase paragraph indent (Tab)"),
+            controlByTitle("Decrease paragraph indent (Shift+Tab)"),
+            controlByTitle("Toggle list formatting"),
+            controlByTitle("Right, first-line, and hanging indents, spacing, and pagination controls"),
+            controlByTitle("Clear direct paragraph formatting"),
+        ]),
+        toolGroup("Reusable styles", [styleControls])
+    );
+    const markControls = new Map([
+        ["Bold (Ctrl+B)", "strong"],
+        ["Italic (Ctrl+I)", "em"],
+        ["Underline", "underline"],
+        ["Strikethrough", "strikethrough"],
+        ["Inline code", "code"],
+        ["Small caps intent", "small_caps"],
+        ["Superscript", "superscript"],
+        ["Subscript", "subscript"],
+    ]);
+    const alignmentControls = new Map([
+        ["Align paragraph left", "start"],
+        ["Center paragraph", "center"],
+        ["Align paragraph right", "end"],
+        ["Justify paragraph", "justify"],
+    ]);
+    const setControlPressed = (control, pressed) => {
+        if (!control) return;
+        control.classList.toggle("semantic-editor-button--active", pressed);
+        control.setAttribute("aria-pressed", String(pressed));
     };
-    advancedDetails.addEventListener("toggle", positionAdvancedControls);
-    window.addEventListener("resize", positionAdvancedControls);
-    toolbar.append(advancedDetails);
-    root.append(findPanel.panel, outline.panel);
+    const updateToolbarState = () => {
+        const {from, to, empty, $from} = view.state.selection;
+        const currentMarks = view.state.storedMarks || $from.marks();
+        for (const [title, markName] of markControls) {
+            const markType = view.state.schema.marks[markName];
+            const pressed = !!markType && (empty
+                ? currentMarks.some(mark => mark.type === markType)
+                : view.state.doc.rangeHasMark(from, to, markType));
+            setControlPressed(toolbar.querySelector(`[title=${JSON.stringify(title)}]`), pressed);
+        }
+        const paragraphPosition = selectedParagraphPositions(view)[0];
+        const paragraph = Number.isInteger(paragraphPosition)
+            ? view.state.doc.nodeAt(paragraphPosition)
+            : null;
+        const alignment = paragraph?.attrs.paragraphPresentation?.alignment || null;
+        for (const [title, value] of alignmentControls) {
+            setControlPressed(toolbar.querySelector(`[title=${JSON.stringify(title)}]`), alignment === value);
+        }
+        setControlPressed(
+            toolbar.querySelector('[title="Toggle list formatting"]'),
+            paragraph?.type.name === "list_item");
+
+        const blockSelect = toolbar.querySelector('select[aria-label="Block style"]');
+        const headingSelect = toolbar.querySelector('select[aria-label="Heading level"]');
+        if (blockSelect) {
+            const blockValue = paragraph && ["paragraph", "heading", "blockquote", "list_item"].includes(paragraph.type.name)
+                ? `${paragraph.type.name}|${paragraph.attrs.styleRole}|${paragraph.attrs.headingLevel || 2}`
+                : "";
+            blockSelect.value = [...blockSelect.options].some(option => option.value === blockValue)
+                ? blockValue
+                : "";
+        }
+        if (headingSelect) headingSelect.value = paragraph?.type.name === "heading"
+            ? String(paragraph.attrs.headingLevel || 2)
+            : "";
+    };
+    updateFormattingControls = () => {
+        typographyControls.update();
+        updateToolbarState();
+    };
     updateFormattingControls();
     updateStatus();
     outline.update();
@@ -2292,7 +2417,6 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         focus() { view.focus(); },
         dispose() {
             if (timer) clearTimeout(timer);
-            window.removeEventListener("resize", positionAdvancedControls);
             view.destroy();
             root.replaceChildren();
         }

@@ -713,47 +713,42 @@ test("List toolbar button toggles a list item back to body text", async () => {
     dom.window.close();
 });
 
-test("Advanced controls remain inside the editor at either toolbar edge", () => {
+test("all formatting controls remain directly available with hover text", () => {
     const dom = installDom();
-    Object.defineProperty(window, "innerWidth", {value: 1000, configurable: true});
-    Object.defineProperty(window, "innerHeight", {value: 600, configurable: true});
     const root = document.createElement("div");
     document.body.append(root);
     const handle = attach(root, {async invokeMethodAsync() {}}, 10_000, JSON.stringify(manuscript()));
     const toolbar = root.querySelector(".semantic-editor-toolbar");
-    const chrome = root.querySelector(".semantic-editor-chrome");
-    const details = root.querySelector(".semantic-editor-advanced");
-    const summary = details.querySelector("summary");
-    const controls = details.querySelector(".semantic-editor-advanced-controls");
-    root.getBoundingClientRect = () => ({
-        left: 30, right: 930, top: 0, bottom: 600, width: 900, height: 600,
-        x: 30, y: 0, toJSON() { return this; }
-    });
-    toolbar.getBoundingClientRect = () => ({
-        left: 30, right: 930, top: 0, bottom: 80, width: 900, height: 80,
-        x: 30, y: 0, toJSON() { return this; }
-    });
-    chrome.getBoundingClientRect = () => ({
-        left: 30, right: 930, top: 0, bottom: 220, width: 900, height: 220,
-        x: 30, y: 0, toJSON() { return this; }
-    });
-
-    summary.getBoundingClientRect = () => ({
-        left: -80, right: 0, top: 40, bottom: 72, width: 80, height: 32,
-        x: -80, y: 40, toJSON() { return this; }
-    });
-    details.open = true;
-    details.dispatchEvent(new window.Event("toggle"));
-    assert.equal(controls.style.left, "8px");
-    assert.equal(controls.style.width, "672px");
-    assert.equal(controls.style.top, "226px");
-
-    summary.getBoundingClientRect = () => ({
-        left: 900, right: 980, top: 40, bottom: 72, width: 80, height: 32,
-        x: 900, y: 40, toJSON() { return this; }
-    });
-    details.dispatchEvent(new window.Event("toggle"));
-    assert.equal(controls.style.left, "220px");
+    assert.equal(root.querySelector(".semantic-editor-advanced"), null);
+    assert.equal(toolbar.querySelectorAll(":scope > .semantic-editor-tool-group").length, 6);
+    assert.ok(root.querySelector(".semantic-editor-chrome > .semantic-find-panel"));
+    assert.ok(root.querySelector(".semantic-editor-chrome > .semantic-outline"));
+    for (const control of toolbar.querySelectorAll("button, select, input")) {
+        assert.ok(control.title, `${control.tagName} ${control.getAttribute("aria-label") || control.textContent} needs hover text`);
+    }
+    for (const title of [
+        "Heading level",
+        "Strikethrough",
+        "Inline code",
+        "Small caps intent",
+        "Superscript",
+        "Subscript",
+        "Set or remove language",
+        "Book Text character style",
+        "Edit selected figure alternative text",
+        "Edit selected figure placement, width, and crop behavior",
+        "Convert selected figure to a paragraph",
+        "Insert scene break",
+        "Insert special character",
+        "Right, first-line, and hanging indents, spacing, and pagination controls",
+        "Clear direct paragraph formatting",
+    ]) {
+        assert.ok(toolbar.querySelector(`[title=${JSON.stringify(title)}]`), `${title} should be directly available`);
+    }
+    root.scrollTop = 325;
+    toolbar.querySelector("button[aria-label='Find and replace']").click();
+    assert.equal(root.scrollTop, 325);
+    assert.equal(root.querySelector(".semantic-find-panel").hidden, false);
     handle.dispose();
     dom.window.close();
 });

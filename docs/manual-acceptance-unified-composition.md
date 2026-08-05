@@ -87,13 +87,13 @@ the live test project; terminate the browser host after the run.
 
 ## Edit and Read modes
 
-- Confirm Edit exposes a compact, pale, rounded document toolbar with flat
-  grouped controls, hover states, icon-scale actions, and a joined point-size
-  stepper. Confirm it exposes block style, font family, point size, line spacing,
+- Confirm Edit exposes a compact Lorekeeper toolbar with bordered controls,
+  clearly separated command groups, understandable icons, native hover text,
+  and a joined point-size stepper. Confirm it exposes block style, font family, point size, line spacing,
   emphasis, link, alignment, whole-paragraph indent, lists, Figure/Designed Page
   insertion, search, undo, redo, and reusable-style actions without overflow;
-  advanced marks, paragraph controls, and Figure settings remain available
-  without crowding the primary controls.
+  character marks, paragraph controls, and Figure settings remain directly
+  available without a secondary menu.
 - Exercise toolbar and Tab/Shift+Tab indentation, first-line and hanging indent,
   spacing, keep-with-next, and start-on-new-page. Confirm inline emphasis survives
   Book Text Style changes and clearing paragraph formatting removes only direct
@@ -107,10 +107,10 @@ the live test project; terminate the browser host after the run.
   bundled font, then an imported project font, and that selection changes update
   the displayed toolbar values. Confirm Read mode, EPUB, and PDF retain the same
   family, size, weight, emphasis, and line height.
-- Format one paragraph directly, choose **Save as style**, and confirm
+- Format one paragraph directly, choose **+ Style**, and confirm
   the new style is applied to that paragraph and appears in the saved-style
   picker without remounting the editor. Apply it to another selected paragraph,
-  then use **Whole chapter** and confirm headings, block quotes, list items,
+  then use **All** and confirm headings, block quotes, list items,
   and ordinary paragraphs change while Figures, Designed Pages, and scene
   breaks remain intact. Confirm direct paragraph overrides are cleared but
   inline emphasis remains.
@@ -118,12 +118,13 @@ the live test project; terminate the browser host after the run.
   chapter. Confirm the transcript contains compact create/apply calls rather
   than one `setBlockStyle` operation per paragraph, and that Review edits stages
   the style before the dependent manuscript change.
-- Open Advanced at both edges of the editor and confirm its panel remains fully
-  inside the editor without horizontal scrolling or position drift. Select a
-  Figure by clicking its artwork, scroll the manuscript, and confirm its styled
+- Confirm every toolbar button and select has understandable hover text and no
+  Advanced control or floating formatting menu exists. Select a Figure by
+  clicking its artwork, scroll the manuscript, and confirm its styled
   layout/accessibility controls remain visible and interactive beneath the
-  toolbar. Open Advanced while those controls are visible and confirm the two
-  panels do not overlap. Insert a project image through the Figure picker,
+  toolbar. Open and close Find while scrolled deep into a chapter and confirm
+  the visible manuscript position is preserved instead of navigating to the end.
+  Insert a project image through the Figure picker,
   insert a Designed Page and confirm Pages opens immediately, then click List
   twice and confirm the block returns to ordinary body text. Confirm Figure and
   Designed Page setup use in-app forms in Electron and never depend on native
