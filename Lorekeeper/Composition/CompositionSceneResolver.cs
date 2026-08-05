@@ -4,6 +4,35 @@ namespace Lorekeeper.Composition;
 
 public static class CompositionSceneResolver
 {
+    public static CompositionReadingOrderNormalization NormalizeLogicalReadingOrder(CompositionScene scene)
+    {
+        var normalizedOrders = new int?[scene.Objects.Count];
+        var semanticObjects = scene.Objects
+            .Select((item, index) => new { Item = item, Index = index })
+            .Where(entry => !entry.Item.Decorative
+                && entry.Item.SemanticRole != CompositionSemanticRole.Artifact)
+            .OrderBy(entry => entry.Item.ReadingOrder is null)
+            .ThenBy(entry => entry.Item.ReadingOrder)
+            .ThenBy(entry => entry.Index)
+            .ToList();
+
+        for (var index = 0; index < semanticObjects.Count; index++)
+            normalizedOrders[semanticObjects[index].Index] = index + 1;
+
+        var changedObjectCount = 0;
+        var objects = scene.Objects.Select((item, index) =>
+        {
+            var readingOrder = normalizedOrders[index];
+            if (item.ReadingOrder != readingOrder)
+                changedObjectCount++;
+            return item with { ReadingOrder = readingOrder };
+        }).ToList();
+
+        return new CompositionReadingOrderNormalization(
+            scene with { Objects = objects },
+            changedObjectCount);
+    }
+
     public static IReadOnlyList<CompositionObject> Flatten(CompositionScene scene)
     {
         var groups = scene.Objects
@@ -118,3 +147,7 @@ public static class CompositionSceneResolver
 }
 
 public sealed record CompositionOpacityOverlap(Guid TransparentObjectId, Guid LowerObjectId);
+
+public sealed record CompositionReadingOrderNormalization(
+    CompositionScene Scene,
+    int ChangedObjectCount);

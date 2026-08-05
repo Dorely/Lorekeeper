@@ -324,7 +324,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (long expectedBookRevision, long expectedCoverRevision, CompositionScene scene) => StageCoreCoverCompositionAsync(context, expectedBookRevision, expectedCoverRevision, scene),
                 name: "stage_publication_core_cover_composition",
-                description: "Submit a complete Core front-cover scene exactly once. Returns an opaque one-use stage ID and compact diagnostics without echoing the scene."),
+                description: "Submit a complete Core front-cover scene exactly once. Reading order may be omitted; Lorekeeper preserves supplied relative order and uses object-array position as the deterministic fallback before validation. Returns an opaque one-use stage ID and compact diagnostics without echoing the scene."),
             AIFunctionFactory.Create(
                 method: (Guid stageId, long expectedBookRevision, long expectedCoverRevision) => ApplyCoreCoverCompositionStageAsync(context, stageId, expectedBookRevision, expectedCoverRevision),
                 name: "apply_publication_core_cover_composition_stage",
@@ -358,7 +358,7 @@ public sealed class PublishAssistantTools(
                 method: (Guid releaseId, long expectedRevision, CompositionScene scene) =>
                     StageCoverCompositionAsync(context, releaseId, expectedRevision, scene),
                 name: "stage_publication_cover_composition",
-                description: "Submit a complete cover scene exactly once. Returns an opaque one-use stage ID and compact diagnostics without echoing the scene."),
+                description: "Submit a complete cover scene exactly once. Reading order may be omitted; Lorekeeper preserves supplied relative order and uses object-array position as the deterministic fallback before validation. Returns an opaque one-use stage ID and compact diagnostics without echoing the scene."),
             AIFunctionFactory.Create(
                 method: (Guid stageId, long expectedRevision) =>
                     ApplyCoverCompositionStageAsync(context, stageId, expectedRevision),
@@ -1378,11 +1378,21 @@ public sealed class PublishAssistantTools(
         long expectedCoverRevision,
         CompositionScene scene)
     {
-        var stage = await books.StageCoverSceneAsync(context.ProjectId, context.ConversationId,
-            expectedBookRevision, expectedCoverRevision, scene, context.TurnCancellationToken);
-        return Serialize(new { ok = true, target = "core", targetId = context.ProjectId,
-            revision = expectedCoverRevision, stageId = stage.Id, stage.ExpiresAt,
-            summary = $"Staged {scene.Objects.Count} Core cover objects across {scene.Layers.Count} layers." });
+        try
+        {
+            var normalized = CompositionSceneResolver.NormalizeLogicalReadingOrder(scene);
+            var stage = await books.StageCoverSceneAsync(context.ProjectId, context.ConversationId,
+                expectedBookRevision, expectedCoverRevision, normalized.Scene, context.TurnCancellationToken);
+            return Serialize(new { ok = true, target = "core", targetId = context.ProjectId,
+                revision = expectedCoverRevision, stageId = stage.Id, stage.ExpiresAt,
+                normalizedReadingOrderCount = normalized.ChangedObjectCount,
+                summary = $"Staged {scene.Objects.Count} Core cover objects across {scene.Layers.Count} layers." });
+        }
+        catch (Exception exception) when (IsExpectedSceneToolFailure(exception))
+        {
+            return SerializeSceneToolFailure(exception, context.ProjectId,
+                "Reread the Core cover, correct the reported scene issue, and retry against its current revisions.");
+        }
     }
 
     private async Task<string> ApplyCoreCoverCompositionStageAsync(
@@ -1391,13 +1401,21 @@ public sealed class PublishAssistantTools(
         long expectedBookRevision,
         long expectedCoverRevision)
     {
-        var cover = await books.ApplyCoverSceneStageAsync(context.ProjectId, context.ConversationId,
-            stageId, expectedBookRevision, expectedCoverRevision, context.TurnCancellationToken);
-        return Serialize(new { ok = true, target = "core", targetId = context.ProjectId,
-            revision = cover.Revision, bookRevision = cover.CoreBookRevision,
-            changedFields = new[] { "compositionScene" }, diagnosticCount = cover.Diagnostics.Count,
-            diagnostics = cover.Diagnostics.Take(5),
-            mutation = new { kind = "core-cover", refresh = new[] { "core", "covers", "readiness", "artifacts" } } });
+        try
+        {
+            var cover = await books.ApplyCoverSceneStageAsync(context.ProjectId, context.ConversationId,
+                stageId, expectedBookRevision, expectedCoverRevision, context.TurnCancellationToken);
+            return Serialize(new { ok = true, target = "core", targetId = context.ProjectId,
+                revision = cover.Revision, bookRevision = cover.CoreBookRevision,
+                changedFields = new[] { "compositionScene" }, diagnosticCount = cover.Diagnostics.Count,
+                diagnostics = cover.Diagnostics.Take(5),
+                mutation = new { kind = "core-cover", refresh = new[] { "core", "covers", "readiness", "artifacts" } } });
+        }
+        catch (Exception exception) when (IsExpectedSceneToolFailure(exception))
+        {
+            return SerializeSceneToolFailure(exception, context.ProjectId,
+                "Reread the Core cover. Restage the scene only if the stage expired or its revisions are stale.");
+        }
     }
 
     private async Task<string> UseCoreCoverAsync(
@@ -1516,22 +1534,32 @@ public sealed class PublishAssistantTools(
         long expectedRevision,
         CompositionScene scene)
     {
-        var stage = await covers.StageSceneAsync(
-            context.ProjectId,
-            context.ConversationId,
-            editionId,
-            expectedRevision,
-            scene,
-            context.TurnCancellationToken);
-        return Serialize(new
+        try
         {
-            ok = true,
-            targetId = editionId,
-            revision = expectedRevision,
-            stageId = stage.Id,
-            stage.ExpiresAt,
-            summary = $"Staged {scene.Objects.Count} cover objects across {scene.Layers.Count} layers.",
-        });
+            var normalized = CompositionSceneResolver.NormalizeLogicalReadingOrder(scene);
+            var stage = await covers.StageSceneAsync(
+                context.ProjectId,
+                context.ConversationId,
+                editionId,
+                expectedRevision,
+                normalized.Scene,
+                context.TurnCancellationToken);
+            return Serialize(new
+            {
+                ok = true,
+                targetId = editionId,
+                revision = expectedRevision,
+                stageId = stage.Id,
+                stage.ExpiresAt,
+                normalizedReadingOrderCount = normalized.ChangedObjectCount,
+                summary = $"Staged {scene.Objects.Count} cover objects across {scene.Layers.Count} layers.",
+            });
+        }
+        catch (Exception exception) when (IsExpectedSceneToolFailure(exception))
+        {
+            return SerializeSceneToolFailure(exception, editionId,
+                "Reread the release cover, correct the reported scene issue, and retry against its current revision.");
+        }
     }
 
     private async Task<string> ApplyCoverCompositionStageAsync(
@@ -1539,23 +1567,53 @@ public sealed class PublishAssistantTools(
         Guid stageId,
         long expectedRevision)
     {
-        var cover = await covers.ApplySceneStageAsync(
-            context.ProjectId,
-            context.ConversationId,
-            stageId,
-            expectedRevision,
-            context.TurnCancellationToken);
-        return Serialize(new
+        try
         {
-            ok = true,
-            targetId = cover.EditionId,
-            revision = cover.Revision,
-            changedFields = new[] { "compositionScene" },
-            diagnosticCount = cover.Diagnostics.Count,
-            diagnostics = cover.Diagnostics.Take(5),
-            mutation = new { kind = "coverComposition", id = cover.EditionId, selectId = cover.EditionId },
-        });
+            var cover = await covers.ApplySceneStageAsync(
+                context.ProjectId,
+                context.ConversationId,
+                stageId,
+                expectedRevision,
+                context.TurnCancellationToken);
+            return Serialize(new
+            {
+                ok = true,
+                targetId = cover.EditionId,
+                revision = cover.Revision,
+                changedFields = new[] { "compositionScene" },
+                diagnosticCount = cover.Diagnostics.Count,
+                diagnostics = cover.Diagnostics.Take(5),
+                mutation = new { kind = "coverComposition", id = cover.EditionId, selectId = cover.EditionId },
+            });
+        }
+        catch (Exception exception) when (IsExpectedSceneToolFailure(exception))
+        {
+            return SerializeSceneToolFailure(exception, stageId,
+                "Reread the release cover. Restage the scene only if the stage expired or its revision is stale.");
+        }
     }
+
+    private static bool IsExpectedSceneToolFailure(Exception exception) =>
+        exception is ArgumentException
+            or InvalidDataException
+            or InvalidOperationException
+            or DbUpdateConcurrencyException
+            or KeyNotFoundException;
+
+    private static string SerializeSceneToolFailure(Exception exception, Guid referenceId, string recovery) =>
+        Serialize(new
+        {
+            ok = false,
+            code = exception switch
+            {
+                DbUpdateConcurrencyException => "REVISION_CONFLICT",
+                KeyNotFoundException => "STAGE_NOT_FOUND",
+                _ => "SCENE_REJECTED",
+            },
+            referenceId,
+            summary = exception.Message,
+            recovery,
+        });
 
     private async Task<string> ExportAsync(
         PublishAssistantContext context,
