@@ -842,6 +842,12 @@ Justify values as direct paragraph formatting; the style service canonicalizes
 logical and left/right aliases at its persistence boundary. Invalid style
 definitions return compact recoverable tool results without terminating the
 active Editor turn.
+Project-image selection is a shared visual modal interaction throughout the UI.
+Callers may filter supported media types and preselect the currently attached
+image, but must not replace the visual library with filename dropdowns. Figure,
+Designed Page, cover, chat-context, and entity-visual placement all return a
+stable project-image ID through this boundary before their owning service applies
+the requested attachment or replacement.
 The keyed Blazor host rechecks disposal across asynchronous catalog loads, and
 the JavaScript attach boundary rejects missing or detached elements before any
 DOM mutation, so chapter switches or navigation cannot turn a stale element

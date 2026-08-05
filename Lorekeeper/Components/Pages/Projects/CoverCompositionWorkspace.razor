@@ -72,9 +72,8 @@
                 <h3>Add content</h3>
                 <button type="button" class="cover-add-text" @onclick="() => AddObject(CompositionObjectKind.Text)">Add cover text</button>
                 <div class="cover-image-add">
-                    <select @bind="_newImageId"><option value="">Choose project artwork</option>@foreach (var image in _images) { <option value="@image.Id">@image.FileName</option> }</select>
                     <select @bind="_newImageFit"><option value="@FigureImageFit.Contain">Show whole image</option><option value="@FigureImageFit.Cover">Fill frame</option></select>
-                    <button type="button" disabled="@(_newImageId is null)" @onclick="AddImageObject">Add image</button>
+                    <button type="button" @onclick="OpenAddArtworkPicker">Choose cover artwork</button>
                 </div>
                 <details class="cover-advanced-objects">
                     <summary>Shapes</summary>
@@ -146,7 +145,18 @@
                     <label>Reading order<input type="number" value="@selected.ReadingOrder" @onchange="e => Patch(selected with { ReadingOrder = NullableInt(e) })" /></label>
                     @if (selected.Kind == CompositionObjectKind.Image)
                     {
-                        <label>Project artwork<select value="@selected.ImageId" @onchange="e => SelectImage(selected, e)"><option value="">Choose artwork</option>@foreach (var image in _images) { <option value="@image.Id">@image.FileName</option> }</select></label>
+                        <div class="cover-current-artwork">
+                            @if (selected.ImageId is Guid currentImageId && Image(currentImageId) is { } currentImage)
+                            {
+                                <img src="@currentImage.PreviewUrl" alt="" />
+                                <span><small>Project artwork</small><strong>@currentImage.FileName</strong></span>
+                            }
+                            else
+                            {
+                                <span><small>Project artwork</small><strong>No artwork selected</strong></span>
+                            }
+                            <button type="button" @onclick="() => OpenReplaceArtworkPicker(selected.Id)">Replace artwork</button>
+                        </div>
                         <label>Fit<select value="@selected.ImageFit" @onchange="e => Patch(selected with { ImageFit = Enum.Parse<FigureImageFit>(e.Value!.ToString()!) })">@foreach (var fit in Enum.GetValues<FigureImageFit>()) { <option value="@fit">@fit</option> }</select></label>
                         @if (selected.ImageFit == FigureImageFit.Cover)
                         {
@@ -189,6 +199,15 @@
     }
 </div>
 
+<ProjectImageLibraryPickerModal ProjectId="@ProjectId"
+                                IsOpen="@(_artworkPickerMode is not null)"
+                                Title="@ArtworkPickerTitle"
+                                PrimaryActionLabel="@ArtworkPickerActionLabel"
+                                AllowedContentTypes="@PublicationImageContentTypes"
+                                InitialSelectedImageId="@ArtworkPickerInitialSelection"
+                                OnPrimaryAction="UsePickedArtworkAsync"
+                                OnClose="CloseArtworkPicker" />
+
 @code {
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public Guid EditionId { get; set; }
@@ -202,8 +221,9 @@
     private readonly Stack<WorkspaceSnapshot> _undo = new(); private readonly Stack<WorkspaceSnapshot> _redo = new();
     private Guid _loadedProjectId; private Guid _loadedEditionId; private bool _loadedCoreBook; private long _loadedRefreshSignal = -1;
     private string _title = "", _subtitle = "", _author = "", _spineText = "", _backCopy = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private string? _error; private bool _dirty, _saving, _snap = true, _guides = true, _cropReposition; private double _zoom = .8;
-    private Guid? _newImageId;
     private FigureImageFit _newImageFit = FigureImageFit.Contain;
+    private ArtworkPickerMode? _artworkPickerMode;
+    private Guid? _artworkPickerTargetId;
     private ElementReference _stageElement; private IJSObjectReference? _workspaceModule; private CoverTransformState? _transform;
     private CompositionObject? Selected => _objects.FirstOrDefault(item => item.Id == _selectedId);
     private bool IsPrint => _edition?.Format == PublicationEditionFormat.Paperback;
@@ -221,20 +241,21 @@
     private void PatchBounds(CompositionObject item, double? x = null, double? y = null, double? width = null, double? height = null) => Patch(item with { Bounds = item.Bounds with { XPercent = Snap(x ?? item.Bounds.XPercent), YPercent = Snap(y ?? item.Bounds.YPercent), WidthPercent = Snap(width ?? item.Bounds.WidthPercent), HeightPercent = Snap(height ?? item.Bounds.HeightPercent) } });
     private double Snap(double value) => _snap ? Math.Round(value * 2, MidpointRounding.AwayFromZero) / 2 : value;
     private void AddObject(CompositionObjectKind kind) { if (_scene is null || kind == CompositionObjectKind.Image) return; Snapshot(); var semantic = kind == CompositionObjectKind.Text; var item = new CompositionObject { Id = Guid.NewGuid(), LayerId = _selectedLayerId ?? _layers.First().Id, Kind = kind, Name = kind.ToString(), Bounds = new CompositionBounds { XPercent = 15, YPercent = 15, WidthPercent = 30, HeightPercent = 20 }, ZIndex = semantic ? _objects.Select(candidate => candidate.ZIndex).DefaultIfEmpty().Max() + 1 : 0, Decorative = !semantic, SemanticRole = semantic ? CompositionSemanticRole.Paragraph : CompositionSemanticRole.Artifact, ReadingOrder = semantic ? NextReadingOrder() : null }; _objects.Add(item); _selectedId = item.Id; _dirty = true; }
-    private void AddImageObject()
+    private void AddImageObject(ProjectImageView image)
     {
-        if (_scene is null || _newImageId is not Guid imageId || !_images.Any(image => image.Id == imageId)) return;
+        if (_scene is null) return;
+        RememberImage(image);
         Snapshot();
         var item = new CompositionObject
         {
             Id = Guid.NewGuid(), LayerId = _selectedLayerId ?? _layers.First().Id,
-            Kind = CompositionObjectKind.Image, Name = "Artwork", ImageId = imageId,
+            Kind = CompositionObjectKind.Image, Name = image.FileName, ImageId = image.Id,
             ImageFit = _newImageFit, Bounds = new() { XPercent = 10, YPercent = 10, WidthPercent = 80, HeightPercent = 80 },
             ZIndex = _objects.Where(candidate => candidate.Kind == CompositionObjectKind.Text).Select(candidate => candidate.ZIndex).DefaultIfEmpty(0).Min() - 1,
             AccessibilityDecisionPending = true, SemanticRole = CompositionSemanticRole.Figure,
             ReadingOrder = NextReadingOrder(),
         };
-        _objects.Add(item); _selectedId = item.Id; _newImageId = null; _dirty = true;
+        _objects.Add(item); _selectedId = item.Id; _dirty = true;
     }
     private void AddLayer() { Snapshot(); var layer = new CompositionLayer(Guid.NewGuid(), $"Layer {_layers.Count + 1}", _layers.Select(item => item.Order).DefaultIfEmpty(-1).Max() + 1); _layers.Add(layer); _selectedLayerId = layer.Id; _dirty = true; }
     private void ToggleLayerVisibility(CompositionLayer layer) { var index = _layers.FindIndex(item => item.Id == layer.Id); if (index >= 0) { Snapshot(); _layers[index] = layer with { Visible = !layer.Visible }; _dirty = true; } }
@@ -267,11 +288,34 @@
     private void MoveReadingOrder(CompositionObject item, int delta) { var ordered = _objects.Where(candidate => candidate.ReadingOrder is not null).OrderBy(candidate => candidate.ReadingOrder).ToList(); var index = ordered.FindIndex(candidate => candidate.Id == item.Id); var target = index + delta; if (index < 0 || target < 0 || target >= ordered.Count) return; Snapshot(); var other = ordered[target]; var order = item.ReadingOrder; _objects = _objects.Select(candidate => candidate.Id == item.Id ? candidate with { ReadingOrder = other.ReadingOrder } : candidate.Id == other.Id ? candidate with { ReadingOrder = order } : candidate).ToList(); _dirty = true; }
     private void Undo() { if (_undo.Count == 0) return; _redo.Push(Capture()); Restore(_undo.Pop()); _dirty = true; }
     private void Redo() { if (_redo.Count == 0) return; _undo.Push(Capture()); Restore(_redo.Pop()); _dirty = true; }
-    private void SelectImage(CompositionObject item, ChangeEventArgs e)
+    private void OpenAddArtworkPicker() { _artworkPickerMode = ArtworkPickerMode.Add; _artworkPickerTargetId = null; }
+    private void OpenReplaceArtworkPicker(Guid targetId) { _artworkPickerMode = ArtworkPickerMode.Replace; _artworkPickerTargetId = targetId; }
+    private void CloseArtworkPicker() { _artworkPickerMode = null; _artworkPickerTargetId = null; }
+    private Task UsePickedArtworkAsync(ProjectImageView image)
     {
-        if (Guid.TryParse(e.Value?.ToString(), out var id) && _images.Any(image => image.Id == id))
-            Patch(item with { ImageId = id });
+        if (_artworkPickerMode == ArtworkPickerMode.Add)
+            AddImageObject(image);
+        else if (_artworkPickerMode == ArtworkPickerMode.Replace
+            && _artworkPickerTargetId is Guid targetId
+            && _objects.FirstOrDefault(item => item.Id == targetId && item.Kind == CompositionObjectKind.Image) is { } target)
+        {
+            RememberImage(image);
+            Patch(target with { ImageId = image.Id, Name = image.FileName });
+        }
+        return Task.CompletedTask;
     }
+    private void RememberImage(ProjectImageView image)
+    {
+        if (_images.All(candidate => candidate.Id != image.Id))
+            _images = _images.Append(image).OrderBy(candidate => candidate.FileName).ToList();
+    }
+    private string ArtworkPickerTitle => _artworkPickerMode == ArtworkPickerMode.Replace ? "Replace cover artwork" : "Choose cover artwork";
+    private string ArtworkPickerActionLabel => _artworkPickerMode == ArtworkPickerMode.Replace ? "Replace artwork" : "Add artwork";
+    private Guid? ArtworkPickerInitialSelection => _artworkPickerMode == ArtworkPickerMode.Replace
+        && _artworkPickerTargetId is Guid targetId
+        ? _objects.FirstOrDefault(item => item.Id == targetId)?.ImageId
+        : null;
+    private static readonly string[] PublicationImageContentTypes = ["image/png", "image/jpeg"];
     private void SetAltText(CompositionObject item, string altText) { altText = altText.Trim(); Patch(item with { AltText = altText, Decorative = false, AccessibilityDecisionPending = altText.Length == 0, SemanticRole = CompositionSemanticRole.Figure, ReadingOrder = item.ReadingOrder ?? NextReadingOrder() }); }
     private void SetDecorative(CompositionObject item, bool decorative) => Patch(item with { Decorative = decorative, AltText = decorative ? string.Empty : item.AltText, AccessibilityDecisionPending = !decorative && string.IsNullOrWhiteSpace(item.AltText), SemanticRole = decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure, ReadingOrder = decorative ? null : item.ReadingOrder ?? NextReadingOrder() });
     private int NextReadingOrder() => _objects.Where(o => o.ReadingOrder is not null).Select(o => o.ReadingOrder!.Value).DefaultIfEmpty().Max() + 1;
@@ -304,6 +348,7 @@
     private static string LayerDisplayName(CompositionLayer layer) =>
         string.Equals(layer.Name, "Cover", StringComparison.OrdinalIgnoreCase) ? "Main cover" : layer.Name;
     private sealed record WorkspaceSnapshot(List<CompositionObject> Objects, List<CompositionLayer> Layers, List<CompositionObjectStyle> Styles);
+    private enum ArtworkPickerMode { Add, Replace }
 
     protected override async Task OnAfterRenderAsync(bool firstRender) { if (firstRender) _workspaceModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-workspace.js"); }
     private async Task BeginTransformAsync(PointerEventArgs e, CompositionObject item, CoverTransformMode mode) { if (IsLocked(item) || _workspaceModule is null) return; Snapshot(); _selectedId = item.Id; var bounds = item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group ? EffectiveBounds(item, group) : item.Bounds; var rect = await _workspaceModule.InvokeAsync<CoverStageRect>("begin", _stageElement, e.PointerId); _transform = new(item.Id, mode, e.ClientX, e.ClientY, bounds, item.Bounds, item.RotationDegrees, item.CropXPercent, item.CropYPercent, e.PointerId, rect); }

@@ -75,6 +75,8 @@
     [Parameter] public string? SecondaryActionLabel { get; set; }
     [Parameter] public bool SecondaryActionEnabled { get; set; } = true;
     [Parameter] public IReadOnlyCollection<Guid> ExcludedImageIds { get; set; } = [];
+    [Parameter] public IReadOnlyCollection<string> AllowedContentTypes { get; set; } = [];
+    [Parameter] public Guid? InitialSelectedImageId { get; set; }
     [Parameter] public EventCallback<ProjectImageView> OnPrimaryAction { get; set; }
     [Parameter] public EventCallback<ProjectImageView> OnSecondaryAction { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
@@ -89,6 +91,8 @@
 
     private IReadOnlyList<ProjectImageView> FilteredImages => _images
         .Where(image => !ExcludedImageIds.Contains(image.Id))
+        .Where(image => AllowedContentTypes.Count == 0
+            || AllowedContentTypes.Contains(image.ContentType, StringComparer.OrdinalIgnoreCase))
         .Where(image => string.IsNullOrWhiteSpace(_query)
             || image.FileName.Contains(_query, StringComparison.OrdinalIgnoreCase)
             || image.AltText.Contains(_query, StringComparison.OrdinalIgnoreCase)
@@ -113,7 +117,12 @@
         try
         {
             _images = await Images.ListAsync(ProjectId);
+            if (_selected is null && InitialSelectedImageId is Guid initialId)
+                _selected = _images.FirstOrDefault(image => image.Id == initialId);
             if (_selected is not null && ExcludedImageIds.Contains(_selected.Id))
+                _selected = null;
+            if (_selected is not null && AllowedContentTypes.Count > 0
+                && !AllowedContentTypes.Contains(_selected.ContentType, StringComparer.OrdinalIgnoreCase))
                 _selected = null;
         }
         catch (Exception ex)

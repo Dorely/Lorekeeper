@@ -99,15 +99,11 @@
                 <h3>Add content</h3>
                 <button type="button" @onclick="AddTextObject">@(_selectedSemanticId is null ? "Add text frame" : "Add frame for selected text")</button>
                 <div class="composition-image-add">
-                    <label>Project image<select aria-label="Project image to add" @bind="_newImageId">
-                        <option value="">Choose image</option>
-                        @foreach (var image in _images) { <option value="@image.Id">@image.FileName</option> }
-                    </select></label>
                     <label>Fit<select aria-label="New image fit" @bind="_newImageFit">
                         <option value="@FigureImageFit.Contain">Show whole image</option>
                         <option value="@FigureImageFit.Cover">Fill frame</option>
                     </select></label>
-                    <button type="button" disabled="@(_newImageId is null)" @onclick="AddImageObject">Add image</button>
+                    <button type="button" @onclick="OpenAddImagePicker">Choose project image</button>
                 </div>
                 <details class="composition-advanced">
                     <summary>Advanced objects</summary>
@@ -162,7 +158,18 @@
                     </details>
                     @if (selected.Kind == CompositionObjectKind.Image)
                     {
-                        <label>Project image<select value="@selected.ImageId" @onchange="e => ReplaceImage(selected, e)">@foreach (var image in _images) { <option value="@image.Id">@image.FileName</option> }</select></label>
+                        <div class="composition-current-image">
+                            @if (selected.ImageId is Guid currentImageId && Image(currentImageId) is { } currentImage)
+                            {
+                                <img src="@currentImage.PreviewUrl" alt="" />
+                                <span><small>Project image</small><strong>@currentImage.FileName</strong></span>
+                            }
+                            else
+                            {
+                                <span><small>Project image</small><strong>No image selected</strong></span>
+                            }
+                            <button type="button" @onclick="() => OpenReplaceImagePicker(selected.Id)">Replace image</button>
+                        </div>
                         <label>Fit<select value="@selected.ImageFit" @onchange="e => Patch(selected with { ImageFit = Enum.Parse<FigureImageFit>(e.Value!.ToString()!) })"><option value="@FigureImageFit.Contain">Show whole image</option><option value="@FigureImageFit.Cover">Fill frame</option></select></label>
                         @if (selected.ImageFit == FigureImageFit.Cover)
                         {
@@ -308,6 +315,15 @@
     }
 </section>
 
+<ProjectImageLibraryPickerModal ProjectId="@ProjectId"
+                                IsOpen="@(_imagePickerMode is not null)"
+                                Title="@ImagePickerTitle"
+                                PrimaryActionLabel="@ImagePickerActionLabel"
+                                AllowedContentTypes="@CompositionImageContentTypes"
+                                InitialSelectedImageId="@ImagePickerInitialSelection"
+                                OnPrimaryAction="UsePickedImageAsync"
+                                OnClose="CloseImagePicker" />
+
 @code {
     [Parameter] public int RefreshSignal { get; set; }
     [Parameter] public Guid? RequestedSelectionId { get; set; }
@@ -328,8 +344,9 @@
     private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = [];
     private readonly Stack<WorkspaceSnapshot> _undo = new();
     private readonly Stack<WorkspaceSnapshot> _redo = new();
-    private Guid? _newImageId;
     private FigureImageFit _newImageFit = FigureImageFit.Contain;
+    private ImagePickerMode? _imagePickerMode;
+    private Guid? _imagePickerTargetId;
     private Guid? _selectedId;
     private Guid? _selectedLayerId;
     private readonly HashSet<Guid> _groupSelection = [];
@@ -484,14 +501,14 @@
         _objects.Add(item); _selectedId = item.Id; MarkDirty();
     }
 
-    private void AddImageObject()
+    private void AddImageObject(ProjectImageView image)
     {
-        if (_scene is null || _newImageId is not Guid imageId || Image(imageId) is null)
+        if (_scene is null)
         {
-            _error = "Choose a project image before adding it to the page.";
             return;
         }
 
+        RememberImage(image);
         Snapshot();
         var layer = _selectedLayerId ?? _layers.FirstOrDefault()?.Id ?? Guid.Empty;
         var item = new CompositionObject
@@ -499,8 +516,8 @@
             Id = Guid.NewGuid(),
             LayerId = layer,
             Kind = CompositionObjectKind.Image,
-            Name = Image(imageId)?.FileName ?? "Image",
-            ImageId = imageId,
+            Name = image.FileName,
+            ImageId = image.Id,
             ImageFit = _newImageFit,
             Bounds = new CompositionBounds { XPercent = 10, YPercent = 10, WidthPercent = 80, HeightPercent = 60 },
             ReadingOrder = NextReadingOrder(),
@@ -510,7 +527,6 @@
         };
         _objects.Add(item);
         _selectedId = item.Id;
-        _newImageId = null;
         MarkDirty();
         _error = null;
     }
@@ -525,12 +541,34 @@
             _objects[index] = _objects[index] with { ContentReferences = [new ManuscriptRangeReference(_selectedSemanticId)] };
     }
 
-    private void ReplaceImage(CompositionObject item, ChangeEventArgs e)
+    private void OpenAddImagePicker() { _imagePickerMode = ImagePickerMode.Add; _imagePickerTargetId = null; }
+    private void OpenReplaceImagePicker(Guid targetId) { _imagePickerMode = ImagePickerMode.Replace; _imagePickerTargetId = targetId; }
+    private void CloseImagePicker() { _imagePickerMode = null; _imagePickerTargetId = null; }
+    private Task UsePickedImageAsync(ProjectImageView image)
     {
-        if (!Guid.TryParse(e.Value?.ToString(), out var imageId) || Image(imageId) is null)
-            return;
-        Patch(item with { ImageId = imageId });
+        if (_imagePickerMode == ImagePickerMode.Add)
+            AddImageObject(image);
+        else if (_imagePickerMode == ImagePickerMode.Replace
+            && _imagePickerTargetId is Guid targetId
+            && _objects.FirstOrDefault(item => item.Id == targetId && item.Kind == CompositionObjectKind.Image) is { } target)
+        {
+            RememberImage(image);
+            Patch(target with { ImageId = image.Id, Name = image.FileName });
+        }
+        return Task.CompletedTask;
     }
+    private void RememberImage(ProjectImageView image)
+    {
+        if (_images.All(candidate => candidate.Id != image.Id))
+            _images = _images.Append(image).OrderBy(candidate => candidate.FileName).ToList();
+    }
+    private string ImagePickerTitle => _imagePickerMode == ImagePickerMode.Replace ? "Replace page image" : "Choose a page image";
+    private string ImagePickerActionLabel => _imagePickerMode == ImagePickerMode.Replace ? "Replace image" : "Add image";
+    private Guid? ImagePickerInitialSelection => _imagePickerMode == ImagePickerMode.Replace
+        && _imagePickerTargetId is Guid targetId
+        ? _objects.FirstOrDefault(item => item.Id == targetId)?.ImageId
+        : null;
+    private static readonly string[] CompositionImageContentTypes = ["image/png", "image/jpeg"];
 
     private void AddSemanticBlock(ManuscriptBlockType type)
     {
@@ -1088,6 +1126,7 @@
     }
 
     private enum TransformMode { Move, Resize, Rotate, Crop }
+    private enum ImagePickerMode { Add, Replace }
     private sealed record TransformState(Guid ObjectId, TransformMode Mode, long PointerId, double StartClientX, double StartClientY, CompositionBounds SurfaceBounds, CompositionBounds LocalBounds, double StartRotation, double StartCropX, double StartCropY, StageRect Stage);
     private sealed record StageRect(double Left, double Top, double Width, double Height);
 
