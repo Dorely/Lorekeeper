@@ -1549,8 +1549,9 @@ public sealed class CompositionService(
             .SingleOrDefaultAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(sceneJson))
             throw new KeyNotFoundException("Core cover was not found. Open Publish once to initialize Core Book.");
-        return JsonSerializer.Deserialize<CompositionScene>(sceneJson, JsonOptions)
+        var scene = JsonSerializer.Deserialize<CompositionScene>(sceneJson, JsonOptions)
             ?? throw new InvalidDataException("The Core cover composition is empty.");
+        return CoverCompositionFactory.KeepArtworkBehindCopy(scene);
     }
 
     private static PublicationEdition CoreCoverEdition(Guid projectId, ProjectPageSetup setup) => new()
@@ -1610,8 +1611,9 @@ public sealed class CompositionService(
         var cover = await covers.GetAsync(projectId, edition.Id, cancellationToken);
         if (requireCurrentInterior && edition.Format == PublicationEditionFormat.Paperback && cover.Template.PageCount <= 0)
             throw new InvalidOperationException("A current interior page count is required before generating full-wrap cover artwork.");
-        return (JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, JsonOptions)
-            ?? throw new InvalidDataException("The cover composition scene is empty."), cover.Template.PageCount);
+        var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, JsonOptions)
+            ?? throw new InvalidDataException("The cover composition scene is empty.");
+        return (CoverCompositionFactory.KeepArtworkBehindCopy(scene), cover.Template.PageCount);
     }
 
     private static (double Width, double Height, IReadOnlyList<LayoutGenerationRegionDescriptor> Regions, IReadOnlyList<string> Diagnostics) FrameDimensions(

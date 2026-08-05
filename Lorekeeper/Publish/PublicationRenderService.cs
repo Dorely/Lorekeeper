@@ -948,6 +948,8 @@ public sealed class PublicationRenderProcessor(
         var coverScene = JsonSerializer.Deserialize<CompositionScene>(
             coverDesign.CompositionSceneJson,
             ManuscriptCodec.JsonOptions);
+        if (coverScene is not null)
+            coverScene = CoverCompositionFactory.KeepArtworkBehindCopy(coverScene);
         var usedFontKeys = document.NamedStyles
             .Select(style => style.Definition.FontFamilyKey)
             .Concat(document.Sections.SelectMany(section => section.Chapters)

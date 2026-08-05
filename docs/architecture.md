@@ -652,8 +652,11 @@ summaries rather than image bytes, rendered manuscripts, or complete unchanged
 scenes. Full cover-scene tools normalize supplied semantic reading order to
 unique contiguous values, using object-array position as a deterministic
 fallback, before strict scene validation. Expected scene and revision failures
-return compact recovery results instead of escaping the assistant turn. Runtime
-prompts describe only the current format-neutral chapter,
+return compact recovery results instead of escaping the assistant turn. Cover
+scenes also normalize artwork beneath canonical cover copy at the shared service
+boundary, so manual and assistant placement cannot obscure title, subtitle,
+author, spine, or back-cover text through z-order changes. Runtime prompts
+describe only the current format-neutral chapter,
 Figure, Designed Page, cover, geometry, and proof boundaries. Artifact results
 include current/stale state and safe view/download URLs; proof-attestation
 writes remain unavailable to every assistant.

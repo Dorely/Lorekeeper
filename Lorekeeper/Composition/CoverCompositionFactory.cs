@@ -4,6 +4,68 @@ namespace Lorekeeper.Composition;
 
 public static class CoverCompositionFactory
 {
+    public static CompositionScene KeepArtworkBehindCopy(CompositionScene scene)
+    {
+        var groups = scene.Objects
+            .Where(item => item.Kind == CompositionObjectKind.Group)
+            .ToDictionary(item => item.Id);
+        static long EffectiveZIndex(CompositionObject item, IReadOnlyDictionary<Guid, CompositionObject> parents) =>
+            (long)item.ZIndex + (item.GroupId is Guid groupId && parents.TryGetValue(groupId, out var group) ? group.ZIndex : 0);
+        var images = scene.Objects
+            .Where(item => item.Kind == CompositionObjectKind.Image)
+            .OrderBy(item => EffectiveZIndex(item, groups))
+            .ThenBy(item => item.Id)
+            .ToList();
+        var copy = scene.Objects
+            .Where(item => item.Kind == CompositionObjectKind.Text)
+            .OrderBy(item => EffectiveZIndex(item, groups))
+            .ThenBy(item => item.Id)
+            .ToList();
+        if (images.Count == 0 || copy.Count == 0)
+            return scene;
+
+        if (scene.Layers.GroupBy(item => item.Id).Any(group => group.Count() > 1))
+            return scene;
+        var layerOrder = scene.Layers.ToDictionary(item => item.Id, item => item.Order);
+        if (images.Concat(copy).Any(item => !layerOrder.ContainsKey(item.LayerId)))
+            return scene;
+        var highestArtworkLayer = images.Select(item => layerOrder[item.LayerId]).Max();
+        var copyLayerIds = copy.Select(item => item.LayerId).ToHashSet();
+        var layersNeedNormalization = scene.Layers.Any(layer =>
+            copyLayerIds.Contains(layer.Id) && layer.Order < highestArtworkLayer);
+        var zIndexesNeedNormalization = EffectiveZIndex(images[^1], groups) >= EffectiveZIndex(copy[0], groups);
+        if (!layersNeedNormalization && !zIndexesNeedNormalization)
+            return scene;
+
+        var imageOrder = zIndexesNeedNormalization
+            ? images.Select((item, index) => (item.Id, ZIndex: index - images.Count))
+                .ToDictionary(item => item.Id, item => item.ZIndex)
+            : new Dictionary<Guid, int>();
+        var copyOrder = zIndexesNeedNormalization
+            ? copy.Select((item, index) => (item.Id, ZIndex: index + 1))
+                .ToDictionary(item => item.Id, item => item.ZIndex)
+            : new Dictionary<Guid, int>();
+        var normalizedGroupIds = zIndexesNeedNormalization
+            ? images.Concat(copy).Where(item => item.GroupId is not null).Select(item => item.GroupId!.Value).ToHashSet()
+            : [];
+        return scene with
+        {
+            Layers = layersNeedNormalization
+                ? scene.Layers.Select(layer => copyLayerIds.Contains(layer.Id) && layer.Order < highestArtworkLayer
+                    ? layer with { Order = highestArtworkLayer }
+                    : layer).ToList()
+                : scene.Layers,
+            Objects = scene.Objects.Select(item =>
+                normalizedGroupIds.Contains(item.Id)
+                    ? item with { ZIndex = 0 }
+                    : imageOrder.TryGetValue(item.Id, out var imageZIndex)
+                    ? item with { ZIndex = imageZIndex }
+                    : copyOrder.TryGetValue(item.Id, out var copyZIndex)
+                        ? item with { ZIndex = copyZIndex }
+                        : item).ToList(),
+        };
+    }
+
     public static CompositionScene CreateCoreFrontFromRelease(
         PublicationEdition sourceEdition,
         CompositionScene sourceScene,
@@ -35,7 +97,7 @@ public static class CoverCompositionFactory
                     RegionConstraint = CompositionRegionConstraint.Front,
                 }).ToList();
         var coreGeometry = Geometry(coreEdition, 0);
-        return sourceScene with
+        return KeepArtworkBehindCopy(sourceScene with
         {
             Surface = sourceScene.Surface with
             {
@@ -48,7 +110,7 @@ public static class CoverCompositionFactory
                 SpineWidthPoints = 0,
             },
             Objects = objects,
-        };
+        });
     }
 
     public static CompositionScene CreateReleaseFromCore(
@@ -77,7 +139,7 @@ public static class CoverCompositionFactory
 
         if (edition.Format != PublicationEditionFormat.Paperback)
         {
-            return coreScene with
+            return KeepArtworkBehindCopy(coreScene with
             {
                 Surface = coreScene.Surface with
                 {
@@ -91,7 +153,7 @@ public static class CoverCompositionFactory
                 },
                 Layers = coreLayers,
                 Objects = coreObjects,
-            };
+            });
         }
 
         var additions = Create(edition, cover, pageCount);
@@ -99,12 +161,12 @@ public static class CoverCompositionFactory
             .Where(item => item.TextBinding is "spineText" or "backCopy")
             .Select(item => item with { ReadingOrder = (item.ReadingOrder ?? 0) + coreObjects.Count })
             .ToList();
-        return additions with
+        return KeepArtworkBehindCopy(additions with
         {
             Layers = coreLayers.Concat(additions.Layers.Where(layer => !coreLayerIds.Contains(layer.Id))).ToList(),
             Styles = coreScene.Styles.Concat(additions.Styles).GroupBy(style => style.Id).Select(group => group.First()).ToList(),
             Objects = coreObjects.Concat(additionObjects).ToList(),
-        };
+        });
     }
 
     public static CompositionScene Create(PublicationEdition edition, PublicationCoverDesign cover, int pageCount = 0)
@@ -149,7 +211,7 @@ public static class CoverCompositionFactory
                 ZIndex = -1,
             });
         }
-        return new CompositionScene
+        return KeepArtworkBehindCopy(new CompositionScene
         {
             Surface = new CompositionSurface
             {
@@ -163,7 +225,7 @@ public static class CoverCompositionFactory
                 SpineWidthPoints = geometry.SpineWidthPoints,
             },
             Layers = [new CompositionLayer(layerId, "Cover", 0)], Objects = objects,
-        };
+        });
     }
 
     public static CompositionScene Reflow(
@@ -208,7 +270,7 @@ public static class CoverCompositionFactory
             var local = FromSurfaceBounds(item.Bounds, oldRegion, oldGeometry);
             return item with { Bounds = ToSurfaceBounds(local, newRegion, newGeometry) };
         }).ToList();
-        return scene with
+        return KeepArtworkBehindCopy(scene with
         {
             Surface = scene.Surface with
             {
@@ -223,7 +285,7 @@ public static class CoverCompositionFactory
                 SpineWidthPoints = newGeometry.SpineWidthPoints,
             },
             Objects = objects,
-        };
+        });
     }
 
     public static CoverGeometry Geometry(PublicationEdition edition, int pageCount)

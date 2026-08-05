@@ -40,23 +40,51 @@
                     <label>Barcode behavior<select @bind="_barcodeMode" @bind:after="MarkDirty"><option value="@PublicationBarcodeMode.LorekeeperBarcode">Generate ISBN-13 barcode</option><option value="@PublicationBarcodeMode.VendorOverlay">Reserve vendor overlay area</option></select></label>
                 }
                 <label>Background<input type="color" @bind="_background" @bind:after="MarkDirty" /></label>
-                <h3>Objects and layers</h3>
-                <div class="cover-add-row"><button type="button" @onclick="AddLayer">Add layer</button></div>
+                <div class="cover-section-heading">
+                    <div>
+                        <h3>Layers</h3>
+                        <p>The active layer receives new objects. Hide or lock a layer without removing it.</p>
+                    </div>
+                    <button type="button" title="Create another organization layer" @onclick="AddLayer">New layer</button>
+                </div>
                 @foreach (var layer in _layers.OrderByDescending(layer => layer.Order))
                 {
-                    <div class="cover-layer-row @(layer.Id == _selectedLayerId ? "selected" : null)"><button type="button" @onclick="() => _selectedLayerId = layer.Id">@layer.Name</button><button type="button" @onclick="() => ToggleLayerVisibility(layer)">@(layer.Visible ? "Eye" : "Hidden")</button><button type="button" @onclick="() => ToggleLayerLock(layer)">@(layer.Locked ? "Locked" : "Open")</button></div>
+                    <div class="cover-layer-row @(layer.Id == _selectedLayerId ? "selected" : null)">
+                        <button type="button" class="cover-layer-select" title="Use this layer for newly added objects" @onclick="() => _selectedLayerId = layer.Id">
+                            <strong>@LayerDisplayName(layer)</strong>
+                            <small>@(layer.Id == _selectedLayerId ? "Active layer" : "Select layer")</small>
+                        </button>
+                        <button type="button" class="cover-icon-button" aria-label="@(layer.Visible ? $"Hide {LayerDisplayName(layer)} layer" : $"Show {LayerDisplayName(layer)} layer")" title="@(layer.Visible ? "Hide layer" : "Show layer")" @onclick="() => ToggleLayerVisibility(layer)">
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path>
+                                <circle cx="12" cy="12" r="2.5"></circle>
+                                @if (!layer.Visible) { <path d="m4 4 16 16"></path> }
+                            </svg>
+                        </button>
+                        <button type="button" class="cover-icon-button" aria-label="@(layer.Locked ? $"Unlock {LayerDisplayName(layer)} layer" : $"Lock {LayerDisplayName(layer)} layer")" title="@(layer.Locked ? "Unlock layer" : "Lock layer")" @onclick="() => ToggleLayerLock(layer)">
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                @if (layer.Locked) { <path d="M7 10V7a5 5 0 0 1 10 0v3M5 10h14v10H5Z"></path> }
+                                else { <path d="M8 10V7a4 4 0 0 1 7.5-2M5 10h14v10H5Z"></path> }
+                            </svg>
+                        </button>
+                    </div>
                 }
-                <div class="cover-add-row">
-                    <button type="button" @onclick="() => AddObject(CompositionObjectKind.Text)">Text</button>
-                    <button type="button" @onclick="() => AddObject(CompositionObjectKind.Rectangle)">Rectangle</button>
-                    <button type="button" @onclick="() => AddObject(CompositionObjectKind.Ellipse)">Ellipse</button>
-                    <button type="button" @onclick="() => AddObject(CompositionObjectKind.Line)">Line</button>
-                </div>
+                <h3>Add content</h3>
+                <button type="button" class="cover-add-text" @onclick="() => AddObject(CompositionObjectKind.Text)">Add cover text</button>
                 <div class="cover-image-add">
                     <select @bind="_newImageId"><option value="">Choose project artwork</option>@foreach (var image in _images) { <option value="@image.Id">@image.FileName</option> }</select>
                     <select @bind="_newImageFit"><option value="@FigureImageFit.Contain">Show whole image</option><option value="@FigureImageFit.Cover">Fill frame</option></select>
                     <button type="button" disabled="@(_newImageId is null)" @onclick="AddImageObject">Add image</button>
                 </div>
+                <details class="cover-advanced-objects">
+                    <summary>Shapes</summary>
+                    <div class="cover-add-row">
+                        <button type="button" @onclick="() => AddObject(CompositionObjectKind.Rectangle)">Rectangle</button>
+                        <button type="button" @onclick="() => AddObject(CompositionObjectKind.Ellipse)">Ellipse</button>
+                        <button type="button" @onclick="() => AddObject(CompositionObjectKind.Line)">Line</button>
+                    </div>
+                </details>
+                <h3>Objects</h3>
                 @foreach (var item in _objects.OrderByDescending(item => item.ZIndex))
                 {
                     <div class="cover-object-row @(item.Id == _selectedId ? "selected" : null)">
@@ -74,7 +102,7 @@
 
             <section class="cover-stage-shell">
                 <div class="cover-toolbar"><button type="button" @onclick="Undo" disabled="@(_undo.Count == 0)">Undo</button><button type="button" @onclick="Redo" disabled="@(_redo.Count == 0)">Redo</button>@if (Selected is { Kind: CompositionObjectKind.Image, ImageFit: FigureImageFit.Cover }) { <button type="button" class="@(_cropReposition ? "selected" : null)" @onclick="() => _cropReposition = !_cropReposition">@(_cropReposition ? "Finish crop" : "Reposition crop")</button> }<button type="button" @onclick="() => _zoom = Math.Max(.3, _zoom - .1)">-</button><span>@Math.Round(_zoom * 100)%</span><button type="button" @onclick="() => _zoom = Math.Min(1.6, _zoom + .1)">+</button><label><input type="checkbox" @bind="_snap" /> Snap</label><label><input type="checkbox" @bind="_guides" /> Guides</label></div>
-                <div class="cover-stage" style="@StageStyle()" @ref="_stageElement" @onclick="() => _selectedId = null" @onpointermove="ContinueTransform" @onpointerup="EndTransform" @onpointercancel="EndTransform">
+                <div class="cover-stage" style="@StageStyle()" @ref="_stageElement" @onpointermove="ContinueTransform" @onpointerup="EndTransform" @onpointercancel="EndTransform">
                     @if (_guides) { <div class="cover-guide cover-guide-x"></div><div class="cover-guide cover-guide-y"></div> }
                     <div class="cover-safe"></div>
                     @if (IsPrint)
@@ -184,7 +212,7 @@
     private static readonly string[] Bindings = ["title", "subtitle", "author", "spineText", "backCopy"];
     private IEnumerable<string> AvailableBindings => IsPrint ? Bindings : Bindings.Take(3);
 
-    protected override async Task OnParametersSetAsync() { if (_loadedProjectId == ProjectId && _loadedEditionId == EditionId && _loadedCoreBook == CoreBook && _loadedRefreshSignal == RefreshSignal) return; if (_dirty) { await SaveAsync(); if (_dirty) return; } try { _edition = CoreBook ? null : (await Editions.ListAsync(ProjectId)).Single(item => item.Id == EditionId); _cover = CoreBook ? await Books.GetCoverAsync(ProjectId) : await Covers.GetAsync(ProjectId, EditionId); _images = (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg").ToList(); _fontFamilies = await ProjectFonts.ListAsync(ProjectId); _scene = JsonSerializer.Deserialize<CompositionScene>(_cover.CompositionSceneJson, ManuscriptCodec.JsonOptions) ?? throw new InvalidDataException("Cover scene is empty."); _objects = _scene.Objects.ToList(); _layers = _scene.Layers.ToList(); _styles = _scene.Styles.ToList(); _selectedId = RequestedSelectionId is Guid requestedId && _objects.Any(item => item.Id == requestedId) ? requestedId : _selectedId is Guid selectedId && _objects.Any(item => item.Id == selectedId) ? selectedId : null; _selectedLayerId = _layers.OrderByDescending(item => item.Order).FirstOrDefault()?.Id; _title = _cover.Title; _subtitle = _cover.Subtitle; _author = _cover.Author; _spineText = _cover.SpineText; _backCopy = _cover.BackCopy; _background = _cover.BackgroundColor; _barcodeMode = _cover.BarcodeMode; _undo.Clear(); _redo.Clear(); _dirty = false; _loadedProjectId = ProjectId; _loadedEditionId = EditionId; _loadedCoreBook = CoreBook; _loadedRefreshSignal = RefreshSignal; } catch (Exception ex) { _error = ex.Message; } }
+    protected override async Task OnParametersSetAsync() { if (_loadedProjectId == ProjectId && _loadedEditionId == EditionId && _loadedCoreBook == CoreBook && _loadedRefreshSignal == RefreshSignal) return; if (_dirty) { await SaveAsync(); if (_dirty) return; } try { _edition = CoreBook ? null : (await Editions.ListAsync(ProjectId)).Single(item => item.Id == EditionId); _cover = CoreBook ? await Books.GetCoverAsync(ProjectId) : await Covers.GetAsync(ProjectId, EditionId); _images = (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg").ToList(); _fontFamilies = await ProjectFonts.ListAsync(ProjectId); _scene = CoverCompositionFactory.KeepArtworkBehindCopy(JsonSerializer.Deserialize<CompositionScene>(_cover.CompositionSceneJson, ManuscriptCodec.JsonOptions) ?? throw new InvalidDataException("Cover scene is empty.")); _objects = _scene.Objects.ToList(); _layers = _scene.Layers.ToList(); _styles = _scene.Styles.ToList(); _selectedId = RequestedSelectionId is Guid requestedId && _objects.Any(item => item.Id == requestedId) ? requestedId : _selectedId is Guid selectedId && _objects.Any(item => item.Id == selectedId) ? selectedId : null; _selectedLayerId = _layers.OrderByDescending(item => item.Order).FirstOrDefault()?.Id; _title = _cover.Title; _subtitle = _cover.Subtitle; _author = _cover.Author; _spineText = _cover.SpineText; _backCopy = _cover.BackCopy; _background = _cover.BackgroundColor; _barcodeMode = _cover.BarcodeMode; _undo.Clear(); _redo.Clear(); _dirty = false; _loadedProjectId = ProjectId; _loadedEditionId = EditionId; _loadedCoreBook = CoreBook; _loadedRefreshSignal = RefreshSignal; } catch (Exception ex) { _error = ex.Message; } }
     private void MarkDirty() => _dirty = true;
     private WorkspaceSnapshot Capture() => new(_objects.ToList(), _layers.ToList(), _styles.ToList());
     private void Restore(WorkspaceSnapshot snapshot) { _objects = snapshot.Objects; _layers = snapshot.Layers; _styles = snapshot.Styles; _selectedId = _objects.FirstOrDefault(item => item.Id == _selectedId)?.Id; _selectedLayerId = _layers.FirstOrDefault(item => item.Id == _selectedLayerId)?.Id ?? _layers.FirstOrDefault()?.Id; }
@@ -192,7 +220,7 @@
     private void Patch(CompositionObject item) { Snapshot(); var index = _objects.FindIndex(candidate => candidate.Id == item.Id); if (index >= 0) _objects[index] = item; _dirty = true; }
     private void PatchBounds(CompositionObject item, double? x = null, double? y = null, double? width = null, double? height = null) => Patch(item with { Bounds = item.Bounds with { XPercent = Snap(x ?? item.Bounds.XPercent), YPercent = Snap(y ?? item.Bounds.YPercent), WidthPercent = Snap(width ?? item.Bounds.WidthPercent), HeightPercent = Snap(height ?? item.Bounds.HeightPercent) } });
     private double Snap(double value) => _snap ? Math.Round(value * 2, MidpointRounding.AwayFromZero) / 2 : value;
-    private void AddObject(CompositionObjectKind kind) { if (_scene is null || kind == CompositionObjectKind.Image) return; Snapshot(); var semantic = kind == CompositionObjectKind.Text; var item = new CompositionObject { Id = Guid.NewGuid(), LayerId = _selectedLayerId ?? _layers.First().Id, Kind = kind, Name = kind.ToString(), Bounds = new CompositionBounds { XPercent = 15, YPercent = 15, WidthPercent = 30, HeightPercent = 20 }, Decorative = !semantic, SemanticRole = semantic ? CompositionSemanticRole.Paragraph : CompositionSemanticRole.Artifact, ReadingOrder = semantic ? NextReadingOrder() : null }; _objects.Add(item); _selectedId = item.Id; _dirty = true; }
+    private void AddObject(CompositionObjectKind kind) { if (_scene is null || kind == CompositionObjectKind.Image) return; Snapshot(); var semantic = kind == CompositionObjectKind.Text; var item = new CompositionObject { Id = Guid.NewGuid(), LayerId = _selectedLayerId ?? _layers.First().Id, Kind = kind, Name = kind.ToString(), Bounds = new CompositionBounds { XPercent = 15, YPercent = 15, WidthPercent = 30, HeightPercent = 20 }, ZIndex = semantic ? _objects.Select(candidate => candidate.ZIndex).DefaultIfEmpty().Max() + 1 : 0, Decorative = !semantic, SemanticRole = semantic ? CompositionSemanticRole.Paragraph : CompositionSemanticRole.Artifact, ReadingOrder = semantic ? NextReadingOrder() : null }; _objects.Add(item); _selectedId = item.Id; _dirty = true; }
     private void AddImageObject()
     {
         if (_scene is null || _newImageId is not Guid imageId || !_images.Any(image => image.Id == imageId)) return;
@@ -202,6 +230,7 @@
             Id = Guid.NewGuid(), LayerId = _selectedLayerId ?? _layers.First().Id,
             Kind = CompositionObjectKind.Image, Name = "Artwork", ImageId = imageId,
             ImageFit = _newImageFit, Bounds = new() { XPercent = 10, YPercent = 10, WidthPercent = 80, HeightPercent = 80 },
+            ZIndex = _objects.Where(candidate => candidate.Kind == CompositionObjectKind.Text).Select(candidate => candidate.ZIndex).DefaultIfEmpty(0).Min() - 1,
             AccessibilityDecisionPending = true, SemanticRole = CompositionSemanticRole.Figure,
             ReadingOrder = NextReadingOrder(),
         };
@@ -223,7 +252,18 @@
     private bool IsVisible(CompositionObject item) => item.Visible && LayerVisible(item.LayerId) && (item.GroupId is not Guid groupId || _objects.FirstOrDefault(candidate => candidate.Id == groupId)?.Visible == true);
     private bool IsLocked(CompositionObject item) => item.Locked || LayerLocked(item.LayerId) || (item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId)?.Locked == true);
     private void Delete(Guid id) { if (_objects.FirstOrDefault(item => item.Id == id)?.Kind == CompositionObjectKind.Group) { _groupSelection.Clear(); _groupSelection.Add(id); UngroupSelected(); return; } Snapshot(); _objects.RemoveAll(item => item.Id == id); _selectedId = null; _dirty = true; }
-    private void ChangeZ(CompositionObject item, int delta) => Patch(item with { ZIndex = item.ZIndex + delta });
+    private void ChangeZ(CompositionObject item, int delta)
+    {
+        var target = item.ZIndex + delta;
+        if (item.Kind == CompositionObjectKind.Image
+            && _objects.Where(candidate => candidate.Kind == CompositionObjectKind.Text).Select(candidate => (int?)candidate.ZIndex).Min() is int lowestCopy)
+            target = Math.Min(target, lowestCopy - 1);
+        if (item.Kind == CompositionObjectKind.Text
+            && _objects.Where(candidate => candidate.Kind == CompositionObjectKind.Image).Select(candidate => (int?)candidate.ZIndex).Max() is int highestArtwork)
+            target = Math.Max(target, highestArtwork + 1);
+        if (target != item.ZIndex)
+            Patch(item with { ZIndex = target });
+    }
     private void MoveReadingOrder(CompositionObject item, int delta) { var ordered = _objects.Where(candidate => candidate.ReadingOrder is not null).OrderBy(candidate => candidate.ReadingOrder).ToList(); var index = ordered.FindIndex(candidate => candidate.Id == item.Id); var target = index + delta; if (index < 0 || target < 0 || target >= ordered.Count) return; Snapshot(); var other = ordered[target]; var order = item.ReadingOrder; _objects = _objects.Select(candidate => candidate.Id == item.Id ? candidate with { ReadingOrder = other.ReadingOrder } : candidate.Id == other.Id ? candidate with { ReadingOrder = order } : candidate).ToList(); _dirty = true; }
     private void Undo() { if (_undo.Count == 0) return; _redo.Push(Capture()); Restore(_undo.Pop()); _dirty = true; }
     private void Redo() { if (_redo.Count == 0) return; _undo.Push(Capture()); Restore(_redo.Pop()); _dirty = true; }
@@ -237,7 +277,7 @@
     private int NextReadingOrder() => _objects.Where(o => o.ReadingOrder is not null).Select(o => o.ReadingOrder!.Value).DefaultIfEmpty().Max() + 1;
     private ProjectImageView? Image(Guid id) => _images.FirstOrDefault(item => item.Id == id);
     private string BoundText(CompositionObject item) => item.TextBinding switch { "title" => _title, "subtitle" => _subtitle, "author" => _author, "spineText" => _spineText, "backCopy" => _backCopy, _ => item.TextBinding };
-    private async Task SaveAsync() { if (_cover is null || _scene is null) return; _saving = true; _error = null; try { var scene = _scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Objects = _objects.ToList() }; var update = new PublicationCoverDesignUpdate(_title, _subtitle, _author, IsPrint ? _spineText : "", IsPrint ? _backCopy : "", _background, IsPrint ? _barcodeMode : PublicationBarcodeMode.None, 50, 50, _cover.Revision, true); _cover = CoreBook ? await Books.SaveCoverAsync(ProjectId, _cover.CoreBookRevision ?? throw new InvalidOperationException("Core Book revision is unavailable."), update, scene) : await Covers.SaveWorkspaceAsync(ProjectId, _cover.EditionId, update, scene); _scene = scene; _dirty = false; await Saved.InvokeAsync(); } catch (Exception ex) { _error = ex.Message; } finally { _saving = false; } }
+    private async Task SaveAsync() { if (_cover is null || _scene is null) return; _saving = true; _error = null; try { var scene = CoverCompositionFactory.KeepArtworkBehindCopy(_scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Objects = _objects.ToList() }); var update = new PublicationCoverDesignUpdate(_title, _subtitle, _author, IsPrint ? _spineText : "", IsPrint ? _backCopy : "", _background, IsPrint ? _barcodeMode : PublicationBarcodeMode.None, 50, 50, _cover.Revision, true); _cover = CoreBook ? await Books.SaveCoverAsync(ProjectId, _cover.CoreBookRevision ?? throw new InvalidOperationException("Core Book revision is unavailable."), update, scene) : await Covers.SaveWorkspaceAsync(ProjectId, _cover.EditionId, update, scene); _scene = scene; _objects = scene.Objects.ToList(); _dirty = false; await Saved.InvokeAsync(); } catch (Exception ex) { _error = ex.Message; } finally { _saving = false; } }
     public async Task FlushAsync() { if (_dirty) await SaveAsync(); }
     private void HandleKeyDown(KeyboardEventArgs e) { if (Selected is not { Locked: false } selected || LayerLocked(selected.LayerId)) return; var delta = e.ShiftKey ? 1d : .25; switch (e.Key) { case "ArrowLeft": PatchBounds(selected, x: selected.Bounds.XPercent - delta); break; case "ArrowRight": PatchBounds(selected, x: selected.Bounds.XPercent + delta); break; case "ArrowUp": PatchBounds(selected, y: selected.Bounds.YPercent - delta); break; case "ArrowDown": PatchBounds(selected, y: selected.Bounds.YPercent + delta); break; } }
     private async Task CloseAsync() { if (_dirty) { await SaveAsync(); if (_dirty) return; } await Closed.InvokeAsync(); }
@@ -261,6 +301,8 @@
     private static int? NullableInt(ChangeEventArgs e) => int.TryParse(e.Value?.ToString(), out var value) ? value : null;
     private static string Color(ChangeEventArgs e) => e.Value?.ToString() ?? "#000000";
     private static string ColorValue(string value) => value.StartsWith('#') && value.Length == 7 ? value : "#000000";
+    private static string LayerDisplayName(CompositionLayer layer) =>
+        string.Equals(layer.Name, "Cover", StringComparison.OrdinalIgnoreCase) ? "Main cover" : layer.Name;
     private sealed record WorkspaceSnapshot(List<CompositionObject> Objects, List<CompositionLayer> Layers, List<CompositionObjectStyle> Styles);
 
     protected override async Task OnAfterRenderAsync(bool firstRender) { if (firstRender) _workspaceModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-workspace.js"); }

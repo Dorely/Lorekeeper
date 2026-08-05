@@ -326,6 +326,8 @@ public sealed class PublishService(
         var coverScene = string.IsNullOrWhiteSpace(coverDesign?.CompositionSceneJson)
             ? null
             : JsonSerializer.Deserialize<CompositionScene>(coverDesign.CompositionSceneJson, ManuscriptCodec.JsonOptions);
+        if (coverScene is not null)
+            coverScene = CoverCompositionFactory.KeepArtworkBehindCopy(coverScene);
         var coverSceneImageIds = coverScene is null
             ? []
             : CompositionSceneResolver.Flatten(coverScene)

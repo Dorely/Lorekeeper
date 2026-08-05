@@ -168,8 +168,22 @@ public sealed class PublicationBookService(
                 Placements = item.ImagePlacements.OrderBy(row => row.SortOrder).Select(row => new { row.Id, row.AssetId, row.TargetKind, row.TargetId, row.PlacementKind, row.Caption, row.PresentationJson, row.AltText, row.Decorative, row.Language, row.AccessibilityRole, row.SortOrder }),
                 Cover = item.CoverDesign == null ? null : new { item.CoverDesign.Revision, item.CoverDesign.BackgroundColor, item.CoverDesign.CompositionSceneJson },
             }).SingleAsync(cancellationToken);
+        var normalizedBookRows = new
+        {
+            bookRows.Outline,
+            bookRows.Matter,
+            bookRows.Placements,
+            Cover = bookRows.Cover is null
+                ? null
+                : new
+                {
+                    bookRows.Cover.Revision,
+                    bookRows.Cover.BackgroundColor,
+                    CompositionSceneJson = NormalizeCoverSceneJson(bookRows.Cover.CompositionSceneJson),
+                },
+        };
         var payload = JsonSerializer.Serialize(
-            new { core, pdfPresentation, setup, chapters, compositions, assets, styles, fonts, bookRows },
+            new { core, pdfPresentation, setup, chapters, compositions, assets, styles, fonts, bookRows = normalizedBookRows },
             ManuscriptCodec.JsonOptions);
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
     }
@@ -638,6 +652,7 @@ public sealed class PublicationBookService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var book = await db.PublicationBooks.SingleOrDefaultAsync(
@@ -695,6 +710,7 @@ public sealed class PublicationBookService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         if (conversationId == Guid.Empty)
             throw new ArgumentException("A conversation is required for staged Core cover changes.", nameof(conversationId));
         _ = await GetOrCreateAsync(projectId, cancellationToken);
@@ -748,6 +764,7 @@ public sealed class PublicationBookService(
             throw new InvalidDataException("The staged Core cover composition failed its integrity check.");
         var payload = JsonSerializer.Deserialize<CoreCoverStagePayload>(stage.OperationsJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The staged Core cover composition is empty.");
+        payload = payload with { Scene = CoverCompositionFactory.KeepArtworkBehindCopy(payload.Scene) };
         if (payload.ExpectedBookRevision != expectedBookRevision)
             throw new DbUpdateConcurrencyException("The staged Core Book revision does not match the requested revision.");
         var book = await db.PublicationBooks.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
@@ -787,6 +804,7 @@ public sealed class PublicationBookService(
     {
         var scene = JsonSerializer.Deserialize<CompositionScene>(design.CompositionSceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The Core cover composition is empty.");
+        scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         var diagnostics = CompositionSceneResolver.Flatten(scene)
             .Where(item => item.Kind == CompositionObjectKind.Image && item.AccessibilityDecisionPending)
             .Select(item => $"Artwork '{item.Name}' needs alternative text or a decorative decision.")
@@ -803,13 +821,22 @@ public sealed class PublicationBookService(
             PublicationBarcodeMode.None,
             50,
             50,
-            design.CompositionSceneJson,
+            JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions),
             design.Revision,
             CoreCoverTemplate(book.PageSetup),
             diagnostics)
         {
             CoreBookRevision = book.Revision,
         };
+    }
+
+    private static string NormalizeCoverSceneJson(string json)
+    {
+        var scene = JsonSerializer.Deserialize<CompositionScene>(json, ManuscriptCodec.JsonOptions)
+            ?? throw new InvalidDataException("The Core cover composition is empty.");
+        return JsonSerializer.Serialize(
+            CoverCompositionFactory.KeepArtworkBehindCopy(scene),
+            ManuscriptCodec.JsonOptions);
     }
 
     private static PublicationCoverTemplate CoreCoverTemplate(ProjectPageSetupView setup) => new(

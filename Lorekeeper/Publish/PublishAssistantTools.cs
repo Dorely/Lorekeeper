@@ -312,7 +312,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (long expectedBookRevision, long expectedCoverRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchCoreCoverElementAsync(context, expectedBookRevision, expectedCoverRevision, targetKind, targetId, patch),
                 name: "patch_publication_core_cover_element",
-                description: "Revision-check and patch one stable Core cover object, layer, or style with changed fields only. Core cover geometry comes from project page setup."),
+                description: "Revision-check and patch one stable Core cover object, layer, or style with changed fields only. Core cover geometry comes from project page setup, and artwork remains below canonical cover copy."),
             AIFunctionFactory.Create(
                 method: (long expectedBookRevision, long expectedCoverRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlaceCoreCoverImageAsync(context, expectedBookRevision, expectedCoverRevision, targetId, imageId, fit, altText, decorative, readingOrder),
                 name: "place_project_image_on_core_cover",
@@ -324,7 +324,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (long expectedBookRevision, long expectedCoverRevision, CompositionScene scene) => StageCoreCoverCompositionAsync(context, expectedBookRevision, expectedCoverRevision, scene),
                 name: "stage_publication_core_cover_composition",
-                description: "Submit a complete Core front-cover scene exactly once. Reading order may be omitted; Lorekeeper preserves supplied relative order and uses object-array position as the deterministic fallback before validation. Returns an opaque one-use stage ID and compact diagnostics without echoing the scene."),
+                description: "Submit a complete Core front-cover scene exactly once. Reading order may be omitted; Lorekeeper preserves supplied relative order and uses object-array position as the deterministic fallback before validation. Artwork is normalized below canonical cover copy. Returns an opaque one-use stage ID and compact diagnostics without echoing the scene."),
             AIFunctionFactory.Create(
                 method: (Guid stageId, long expectedBookRevision, long expectedCoverRevision) => ApplyCoreCoverCompositionStageAsync(context, stageId, expectedBookRevision, expectedCoverRevision),
                 name: "apply_publication_core_cover_composition_stage",
@@ -345,7 +345,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid releaseId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchCoverElementAsync(context, releaseId, expectedRevision, targetKind, targetId, patch),
                 name: "patch_publication_cover_element",
-                description: "Revision-check patch one stable cover object, guide, layer, or style using only changed fields. Preserve unrelated cover state; use full-scene staging for structural changes."),
+                description: "Revision-check patch one stable cover object, guide, layer, or style using only changed fields. Preserve unrelated cover state; cover artwork remains below canonical copy. Use full-scene staging for structural changes."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlaceCoverImageAsync(context, releaseId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
                 name: "place_project_image_on_release_cover",
@@ -358,7 +358,7 @@ public sealed class PublishAssistantTools(
                 method: (Guid releaseId, long expectedRevision, CompositionScene scene) =>
                     StageCoverCompositionAsync(context, releaseId, expectedRevision, scene),
                 name: "stage_publication_cover_composition",
-                description: "Submit a complete cover scene exactly once. Reading order may be omitted; Lorekeeper preserves supplied relative order and uses object-array position as the deterministic fallback before validation. Returns an opaque one-use stage ID and compact diagnostics without echoing the scene."),
+                description: "Submit a complete cover scene exactly once. Reading order may be omitted; Lorekeeper preserves supplied relative order and uses object-array position as the deterministic fallback before validation. Artwork is normalized below canonical cover copy. Returns an opaque one-use stage ID and compact diagnostics without echoing the scene."),
             AIFunctionFactory.Create(
                 method: (Guid stageId, long expectedRevision) =>
                     ApplyCoverCompositionStageAsync(context, stageId, expectedRevision),

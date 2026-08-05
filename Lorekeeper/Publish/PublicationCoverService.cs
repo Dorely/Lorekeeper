@@ -222,6 +222,7 @@ public sealed class PublicationCoverService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         Validate(update);
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -283,6 +284,7 @@ public sealed class PublicationCoverService(
     {
         var scene = System.Text.Json.JsonSerializer.Deserialize<CompositionScene>(sceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("Cover composition is empty.");
+        scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var storedEdition = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
         var edition = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
@@ -321,6 +323,7 @@ public sealed class PublicationCoverService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         if (conversationId == Guid.Empty)
             throw new ArgumentException("A conversation is required for staged cover changes.", nameof(conversationId));
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
@@ -380,6 +383,7 @@ public sealed class PublicationCoverService(
             throw new InvalidDataException("The staged cover composition failed its integrity check.");
         var scene = System.Text.Json.JsonSerializer.Deserialize<CompositionScene>(stage.OperationsJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The staged cover composition is empty.");
+        scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         var storedEdition = await GetEditionAsync(projectId, stage.TargetId, cancellationToken, tracked: true);
         var edition = await GetEffectiveEditionAsync(projectId, stage.TargetId, cancellationToken);
         PublicationEditionService.EnsureDraft(storedEdition);
@@ -460,6 +464,7 @@ public sealed class PublicationCoverService(
             scene = CoverCompositionFactory.Reflow(edition, design, scene, oldPageCount, template.PageCount);
             diagnostics.Add("Cover geometry was recalculated. Review constraint-bound objects and save the composition.");
         }
+        scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         AddSceneDiagnostics(edition, expectedGeometry, scene, diagnostics);
         return new(
             design.Id,

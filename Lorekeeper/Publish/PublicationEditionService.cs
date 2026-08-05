@@ -1241,6 +1241,42 @@ public sealed class PublicationEditionService(
                 })
                 .SingleOrDefaultAsync(cancellationToken)
             : null;
+        var normalizedReleaseCoverScene = coverDesign is null
+            ? null
+            : NormalizeCoverSceneJson(coverDesign.CompositionSceneJson);
+        var normalizedCoreCoverScene = inheritedCoreCover is null
+            ? null
+            : NormalizeCoverSceneJson(inheritedCoreCover.CompositionSceneJson);
+        object? canonicalCoverDesign = null;
+        if (includeCover && inheritedCoreCover is not null)
+        {
+            canonicalCoverDesign = new
+            {
+                inheritedCoreCover.Source,
+                inheritedCoreCover.Title,
+                inheritedCoreCover.Subtitle,
+                inheritedCoreCover.Author,
+                inheritedCoreCover.BackgroundColor,
+                CompositionSceneJson = normalizedCoreCoverScene,
+                inheritedCoreCover.Revision,
+            };
+        }
+        else if (includeCover && coverDesign is not null)
+        {
+            canonicalCoverDesign = new
+            {
+                coverDesign.Title,
+                coverDesign.Subtitle,
+                coverDesign.Author,
+                coverDesign.SpineText,
+                coverDesign.BackCopy,
+                coverDesign.BackgroundColor,
+                coverDesign.BarcodeMode,
+                coverDesign.ImageCropXPercent,
+                coverDesign.ImageCropYPercent,
+                CompositionSceneJson = normalizedReleaseCoverScene,
+            };
+        }
         var referencedAssetIds = new HashSet<Guid>(placements.Select(placement => placement.AssetId));
         foreach (var chapter in chapters)
             CollectReferencedImageIds(chapter.ManuscriptJson, referencedAssetIds);
@@ -1256,10 +1292,10 @@ public sealed class PublicationEditionService(
         {
             if (edition.SelectedCoverImageId is { } selectedCoverImageId)
                 referencedAssetIds.Add(selectedCoverImageId);
-            if (inheritedCoreCover is not null)
-                CollectReferencedImageIds(inheritedCoreCover.CompositionSceneJson, referencedAssetIds);
-            else if (coverDesign is not null)
-                CollectReferencedImageIds(coverDesign.CompositionSceneJson, referencedAssetIds);
+            if (normalizedCoreCoverScene is not null)
+                CollectReferencedImageIds(normalizedCoreCoverScene, referencedAssetIds);
+            else if (normalizedReleaseCoverScene is not null)
+                CollectReferencedImageIds(normalizedReleaseCoverScene, referencedAssetIds);
         }
         var assets = await db.PublishAssets.AsNoTracking()
             .Where(asset => asset.ProjectId == projectId && referencedAssetIds.Contains(asset.Id))
@@ -1324,7 +1360,7 @@ public sealed class PublicationEditionService(
             Assets = assets,
             Styles = styles,
             Fonts = fonts,
-            CoverDesign = includeCover ? (object?)inheritedCoreCover ?? coverDesign : null,
+            CoverDesign = canonicalCoverDesign,
         }, ManuscriptCodec.JsonOptions);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
@@ -1359,6 +1395,17 @@ public sealed class PublicationEditionService(
                     Visit(item);
             }
         }
+    }
+
+    private static string NormalizeCoverSceneJson(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return json;
+        var scene = JsonSerializer.Deserialize<CompositionScene>(json, ManuscriptCodec.JsonOptions)
+            ?? throw new InvalidDataException("The cover composition scene is empty.");
+        return JsonSerializer.Serialize(
+            CoverCompositionFactory.KeepArtworkBehindCopy(scene),
+            ManuscriptCodec.JsonOptions);
     }
 
     private async Task<string> BibliographicContentHashAsync(
