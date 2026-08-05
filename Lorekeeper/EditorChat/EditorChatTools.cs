@@ -276,7 +276,7 @@ public sealed class EditorChatTools(
                     double? spaceBeforePoints = null,
                     double? spaceAfterPoints = null,
                     bool? keepWithNext = null,
-                    string? textAlign = null,
+                    ParagraphAlignment? textAlign = null,
                     double? leftIndentEm = null,
                     double? rightIndentEm = null,
                     double? firstLineIndentEm = null,
@@ -303,7 +303,7 @@ public sealed class EditorChatTools(
                         startOnNewPage),
                 name: "upsert_manuscript_style",
                 description:
-                    "Create or revision-check update a reusable paragraph or character Book Text Style from a compact definition. Lorekeeper owns the internal semantic key. Paragraph styles can define font treatment, spacing, alignment, whole-paragraph and first-line or hanging indents, and page-start behavior. Use list_manuscript_styles first; updates require styleId and expectedRevision."),
+                    "Create or revision-check update a reusable paragraph or character Book Text Style from a compact definition. Lorekeeper owns the internal semantic key. Paragraph styles can define font treatment, spacing, Start/Center/End/Justify alignment, whole-paragraph and first-line or hanging indents, and page-start behavior. Use list_manuscript_styles first; updates require styleId and expectedRevision."),
             AIFunctionFactory.Create(
                 method: (Guid chapterId, long expectedRevision, string blockId, string name) =>
                     CreateParagraphStyleFromBlockAsync(context, chapterId, expectedRevision, blockId, name),
@@ -505,44 +505,79 @@ public sealed class EditorChatTools(
         double? spaceBeforePoints,
         double? spaceAfterPoints,
         bool? keepWithNext,
-        string? textAlign,
+        ParagraphAlignment? textAlign,
         double? leftIndentEm,
         double? rightIndentEm,
         double? firstLineIndentEm,
         bool? startOnNewPage)
     {
-        if (!Enum.TryParse<ManuscriptStyleKind>(kind, ignoreCase: true, out var parsedKind))
-            throw new InvalidOperationException("Style kind must be Paragraph or Character.");
-        var styles = await CurrentManuscriptStylesAsync(ctx);
-        var current = styleId is Guid currentId
-            ? styles.FirstOrDefault(style => style.Id == currentId)
-                ?? throw new InvalidOperationException("The Book Text Style was not found.")
-            : null;
-        var stagedStyleId = styleId
-            ?? (ctx.ReviewEdits && ctx.EditorStaging is not null ? Guid.NewGuid() : null);
-        var input = new ManuscriptStyleInput(
-                stagedStyleId,
-                name,
-                parsedKind,
-                current?.SemanticRole ?? ManuscriptStyleService.RoleFromName(name),
-                new ManuscriptStyleProperties(
-                    fontFamilyKey,
-                    fontSizePoints,
-                    fontWeight,
-                    italic,
-                    smallCaps,
-                    lineHeight,
-                    spaceBeforePoints,
-                    spaceAfterPoints,
-                    keepWithNext,
-                    textAlign,
-                    leftIndentEm,
-                    rightIndentEm,
-                    firstLineIndentEm,
-                    startOnNewPage),
-                expectedRevision);
-        return await UpsertManuscriptStyleInputAsync(ctx, input, current, styles);
+        try
+        {
+            if (!Enum.TryParse<ManuscriptStyleKind>(kind, ignoreCase: true, out var parsedKind))
+                throw new InvalidOperationException("Style kind must be Paragraph or Character.");
+            var styles = await CurrentManuscriptStylesAsync(ctx);
+            var current = styleId is Guid currentId
+                ? styles.FirstOrDefault(style => style.Id == currentId)
+                    ?? throw new InvalidOperationException("The Book Text Style was not found.")
+                : null;
+            var stagedStyleId = styleId
+                ?? (ctx.ReviewEdits && ctx.EditorStaging is not null ? Guid.NewGuid() : null);
+            var input = new ManuscriptStyleInput(
+                    stagedStyleId,
+                    name,
+                    parsedKind,
+                    current?.SemanticRole ?? ManuscriptStyleService.RoleFromName(name),
+                    new ManuscriptStyleProperties(
+                        fontFamilyKey,
+                        fontSizePoints,
+                        fontWeight,
+                        italic,
+                        smallCaps,
+                        lineHeight,
+                        spaceBeforePoints,
+                        spaceAfterPoints,
+                        keepWithNext,
+                        TextAlignmentValue(textAlign),
+                        leftIndentEm,
+                        rightIndentEm,
+                        firstLineIndentEm,
+                        startOnNewPage),
+                    expectedRevision);
+            return await UpsertManuscriptStyleInputAsync(ctx, input, current, styles);
+        }
+        catch (ManuscriptStyleConflictException exception)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                code = "STYLE_REVISION_CONFLICT",
+                targetId = styleId,
+                currentRevision = exception.ActualRevision,
+                summary = exception.Message,
+                recovery = "Reread the compact Book Text Style list and retry with the current revision.",
+            });
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                code = "STYLE_UPDATE_REJECTED",
+                targetId = styleId,
+                summary = exception.Message,
+            });
+        }
     }
+
+    private static string? TextAlignmentValue(ParagraphAlignment? alignment) => alignment switch
+    {
+        ParagraphAlignment.Start => "left",
+        ParagraphAlignment.Center => "center",
+        ParagraphAlignment.End => "right",
+        ParagraphAlignment.Justify => "justify",
+        null => null,
+        _ => throw new InvalidOperationException("Text alignment must be Start, Center, End, Justify, or omitted."),
+    };
 
     private async Task<string> CreateParagraphStyleFromBlockAsync(
         EditorChatContext ctx,

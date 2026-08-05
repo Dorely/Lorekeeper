@@ -834,6 +834,11 @@ ordinal matches taking precedence and ambiguous fallback matches failing
 closed; mutation results return the exact stored ID. Book Text Style semantic roles and
 paragraph/character kinds are immutable stable keys; definitions are
 revision-checked and semantic roles are unique per project and kind.
+Assistant style alignment uses the same typed logical Start, Center, End, and
+Justify values as direct paragraph formatting; the style service canonicalizes
+logical and left/right aliases at its persistence boundary. Invalid style
+definitions return compact recoverable tool results without terminating the
+active Editor turn.
 The keyed Blazor host rechecks disposal across asynchronous catalog loads, and
 the JavaScript attach boundary rejects missing or detached elements before any
 DOM mutation, so chapter switches or navigation cannot turn a stale element

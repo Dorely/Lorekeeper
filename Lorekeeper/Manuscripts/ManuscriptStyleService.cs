@@ -498,7 +498,7 @@ public sealed class ManuscriptStyleService(
         return definition with
         {
             FontFamilyKey = definition.FontFamilyKey?.Trim().ToLowerInvariant(),
-            TextAlign = definition.TextAlign?.Trim().ToLowerInvariant(),
+            TextAlign = NormalizeTextAlignment(definition.TextAlign),
             Italic = definition.Italic is true ? true : null,
             SmallCaps = definition.SmallCaps is true ? true : null,
             KeepWithNext = definition.KeepWithNext is true ? true : null,
@@ -535,11 +535,28 @@ public sealed class ManuscriptStyleService(
         ManuscriptStyleKind kind,
         ManuscriptStyleProperties? definition)
     {
-        ValidateDefinition(kind, definition);
-        return definition! with
+        if (definition is null)
+            throw new InvalidOperationException("Style definition is required.");
+        var normalized = definition with
         {
             FontFamilyKey = definition.FontFamilyKey?.Trim().ToLowerInvariant(),
-            TextAlign = definition.TextAlign?.Trim().ToLowerInvariant(),
+            TextAlign = NormalizeTextAlignment(definition.TextAlign),
+        };
+        ValidateDefinition(kind, normalized);
+        return normalized;
+    }
+
+    private static string? NormalizeTextAlignment(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "start" or "left" => "left",
+            "end" or "right" => "right",
+            "center" => "center",
+            "justify" => "justify",
+            var unsupported => unsupported,
         };
     }
 }
