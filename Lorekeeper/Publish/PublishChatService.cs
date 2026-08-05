@@ -58,6 +58,7 @@ public sealed class PublishChatService(
         - Recommend defaults from the Book Brief, Project Guidance, manuscript visuals, readers, and destination. Do not dump a production checklist.
         - Preserve unrelated values. Customize a release only where it differs; use ResetFields to restore live Core inheritance.
         - Create no release or ISBN unless requested. Never invent an ISBN.
+        - Title, copyright, and visible contents pages are generated from Core or effective release settings. Change those settings with Core/release patch tools. Matter tools are only for user-authored Dedication, Epigraph, Acknowledgments, About Author, Also By, References, or Custom content.
 
         Tool and state integrity:
         - Use tools for every publication read or mutation and honor Core or release revisions.
@@ -476,6 +477,15 @@ public sealed class PublishChatService(
 
         if (toolName is "generate_project_image" or "edit_project_image")
             return new PublishWorkspaceMutated(null, false, PublishWorkspaceMutationKind.ImageLibrary);
+        if (toolName is "prepare_publication_files" or "cancel_publication_preparation")
+        {
+            var preparationReleaseId = ReadGuid(resultJson, "releaseId")
+                ?? ReadGuid(argumentsJson, "releaseId");
+            return new PublishWorkspaceMutated(
+                preparationReleaseId,
+                false,
+                PublishWorkspaceMutationKind.Package);
+        }
         if (toolName is "patch_publication_book" or "patch_publication_book_content"
             or "upsert_publication_book_matter" or "delete_publication_book_matter"
             or "add_publication_book_placement" or "update_publication_book_placement"
@@ -493,11 +503,6 @@ public sealed class PublishChatService(
                     : null);
 
         var selectEdition = toolName is "create_publication_release" or "customize_publication_release_cover" or "use_core_publication_cover";
-        var kind = toolName switch
-        {
-            "prepare_publication_files" or "cancel_publication_preparation" => PublishWorkspaceMutationKind.Package,
-            _ => PublishWorkspaceMutationKind.Edition,
-        };
         var editionId = selectEdition
             ? ReadGuid(resultJson, "id") ?? ReadGuid(resultJson, "targetId")
             : ReadGuid(argumentsJson, "releaseId") ?? ReadGuid(argumentsJson, "editionId")
@@ -509,7 +514,9 @@ public sealed class PublishChatService(
             : toolName == "add_project_image_to_release_cover"
                 ? ReadGuid(resultJson, "selectId")
                 : null;
-        return editionId is { } id ? new PublishWorkspaceMutated(id, selectEdition, kind, selectedObjectId) : null;
+        return editionId is { } id
+            ? new PublishWorkspaceMutated(id, selectEdition, PublishWorkspaceMutationKind.Edition, selectedObjectId)
+            : null;
     }
 
     private static Guid? ReadGuid(string json, string name)

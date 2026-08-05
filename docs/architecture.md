@@ -598,6 +598,12 @@ recorded separately. Vendor-upload results and digital/physical proof
 attestations are optional human evidence and never alter the renderer's scoped
 structural result.
 
+Publish assistant matter tools expose a dedicated user-authored-kind contract
+that omits generated title, copyright, and contents pages. Expected matter
+validation, missing-item, and revision failures return compact recovery results
+inside the assistant turn; generated-page changes route through Core or release
+settings.
+
 ISBN values are strict, checksum-validated, and stored in canonical ISBN-13
 form. The same ISBN may be shared only by same-format vendor editions whose
 bibliographic metadata, visible content settings, physical product settings,
@@ -645,6 +651,11 @@ prompts describe only the current format-neutral chapter,
 Figure, Designed Page, cover, geometry, and proof boundaries. Artifact results
 include current/stale state and safe view/download URLs; proof-attestation
 writes remain unavailable to every assistant.
+
+Preparation and cancellation tool results identify their nullable release
+target at the result root. Their mutation notices refresh and reconnect polling
+for either Core Book or the affected release, so a successful assistant retry
+replaces a prior failure in the mounted Publish readiness card.
 
 Editor turns default to completing direct in-scope requests with reasonable,
 reversible choices. They enter proposal-only collaboration only when the user

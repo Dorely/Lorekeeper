@@ -178,6 +178,28 @@ public sealed record PublicationMatterInput(
     int SortOrder,
     long? ExpectedRevision = null);
 
+[JsonConverter(typeof(JsonStringEnumConverter<PublicationUserMatterKind>))]
+public enum PublicationUserMatterKind
+{
+    Dedication,
+    Epigraph,
+    Acknowledgments,
+    AboutAuthor,
+    AlsoBy,
+    References,
+    Custom,
+}
+
+public sealed record PublicationUserMatterInput(
+    Guid? Id,
+    PublicationMatterLocation Location,
+    PublicationUserMatterKind Kind,
+    string Title,
+    string ManuscriptJson,
+    bool IsIncluded,
+    int SortOrder,
+    long? ExpectedRevision = null);
+
 public sealed record PublicationEditionStyleMappingView(
     Guid Id,
     Guid ManuscriptStyleDefinitionId,

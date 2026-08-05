@@ -182,6 +182,7 @@ public sealed class PublishChatServiceTests
         Assert.Contains("cannot approve", PublishChatService.WorkflowInstructions);
         Assert.Contains("application-managed", PublishChatService.WorkflowInstructions);
         Assert.Contains("vendor acceptance", PublishChatService.WorkflowInstructions);
+        Assert.Contains("Title, copyright, and visible contents pages are generated", PublishChatService.WorkflowInstructions);
 
         var editionId = Guid.NewGuid();
         var created = PublishChatService.TryMutationNotice(
@@ -201,6 +202,12 @@ public sealed class PublishChatServiceTests
                 "prepare_publication_files",
                 $$"""{"releaseId":"{{editionId}}"}""",
                 "{}")?.Kind);
+        Assert.Equal(
+            new PublishWorkspaceMutated(null, SelectEdition: false, PublishWorkspaceMutationKind.Package),
+            PublishChatService.TryMutationNotice(
+                "prepare_publication_files",
+                """{"releaseId":null}""",
+                "{}"));
         Assert.NotNull(PublishChatService.TryMutationNotice("patch_publication_book", "{}", "{}"));
         Assert.Null(PublishChatService.TryMutationNotice("read_publication_release", "{}", "{}"));
     }

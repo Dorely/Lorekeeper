@@ -130,9 +130,9 @@ public sealed class PublishAssistantTools(
                 name: "read_publication_book_matter",
                 description: "List compact shared front/back matter metadata, or supply matterId to read a bounded page of semantic manuscript blocks for revision-safe editing."),
             AIFunctionFactory.Create(
-                method: (PublicationMatterInput input, long expectedBookRevision) => UpsertCoreMatterAsync(context, input, expectedBookRevision),
+                method: (PublicationUserMatterInput input, long expectedBookRevision) => UpsertCoreMatterAsync(context, input, expectedBookRevision),
                 name: "upsert_publication_book_matter",
-                description: "Revision-check create or update one shared semantic front/back matter item."),
+                description: "Revision-check create or update one shared user-authored front/back matter item. Supported kinds are Dedication, Epigraph, Acknowledgments, AboutAuthor, AlsoBy, References, and Custom. Title, copyright, and contents pages are generated from Core settings; change those with patch_publication_book."),
             AIFunctionFactory.Create(
                 method: (Guid matterId, long expectedBookRevision) => DeleteCoreMatterAsync(context, matterId, expectedBookRevision),
                 name: "delete_publication_book_matter",
@@ -258,10 +258,10 @@ public sealed class PublishAssistantTools(
                 name: "reorder_publication_release_content",
                 description: "Set a complete release-only reading order using stable IDs and an expected revision."),
             AIFunctionFactory.Create(
-                method: (Guid releaseId, PublicationMatterInput input, long expectedRevision) =>
+                method: (Guid releaseId, PublicationUserMatterInput input, long expectedRevision) =>
                     UpsertMatterAsync(context, releaseId, input, expectedRevision),
                 name: "upsert_publication_release_matter",
-                description: "Create a release-only matter item or replace an inherited/effective item by ID with a sparse semantic overlay."),
+                description: "Create a release-only user-authored matter item or replace an inherited/effective item by ID with a sparse semantic overlay. Supported kinds are Dedication, Epigraph, Acknowledgments, AboutAuthor, AlsoBy, References, and Custom. Title, copyright, and contents pages are generated from effective release settings; change those with release overrides."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, Guid? matterId = null, int blockStart = 0, int blockCount = 20) => ReadReleaseMatterAsync(context, releaseId, matterId, blockStart, blockCount),
                 name: "read_publication_release_matter",
@@ -582,14 +582,22 @@ public sealed class PublishAssistantTools(
 
     private async Task<string> UpsertCoreMatterAsync(
         PublishAssistantContext context,
-        PublicationMatterInput input,
+        PublicationUserMatterInput input,
         long expectedBookRevision)
     {
-        var matter = await books.UpsertMatterAsync(
-            context.ProjectId, input, expectedBookRevision, context.TurnCancellationToken);
-        return Serialize(new { ok = true, target = "core", targetId = matter.Id, revision = matter.Revision,
-            summary = $"Saved Core Book matter '{matter.Title}'.", changedIds = new[] { matter.Id },
-            mutation = new { kind = "core-matter", refresh = new[] { "core", "releases", "readiness", "artifacts" } } });
+        try
+        {
+            var matter = await books.UpsertMatterAsync(
+                context.ProjectId, ToMatterInput(input), expectedBookRevision, context.TurnCancellationToken);
+            return Serialize(new { ok = true, target = "core", targetId = matter.Id, revision = matter.Revision,
+                summary = $"Saved Core Book matter '{matter.Title}'.", changedIds = new[] { matter.Id },
+                mutation = new { kind = "core-matter", refresh = new[] { "core", "releases", "readiness", "artifacts" } } });
+        }
+        catch (Exception exception) when (IsExpectedMatterToolFailure(exception))
+        {
+            return SerializeMatterToolFailure(exception, context.ProjectId,
+                "Reread Core Book matter and retry with a supported user-authored kind and the current Core revision. Change generated title, copyright, or contents pages through Core settings instead.");
+        }
     }
 
     private async Task<string> DeleteCoreMatterAsync(
@@ -674,14 +682,14 @@ public sealed class PublishAssistantTools(
         var job = releaseId is Guid id
             ? await preparation.PrepareReleaseAsync(context.ProjectId, id)
             : await preparation.PrepareCoreAsync(context.ProjectId);
-        return Serialize(new { ok = true, targetId = releaseId ?? context.ProjectId, job.Id, job.Status, job.Step, job.ProgressPercent, job.Message,
+        return Serialize(new { ok = true, targetId = releaseId ?? context.ProjectId, releaseId, job.Id, job.Status, job.Step, job.ProgressPercent, job.Message,
             summary = releaseId is null ? "Core reading-PDF preparation queued." : "Release file preparation queued.", mutation = new { kind = "preparation", releaseId } });
     }
 
     private async Task<string> CancelPreparationAsync(PublishAssistantContext context, Guid preparationJobId)
     {
         var job = await preparation.CancelAsync(context.ProjectId, preparationJobId);
-        return Serialize(new { ok = true, targetId = job.EditionId ?? context.ProjectId, job.Id, job.Status, job.Message,
+        return Serialize(new { ok = true, targetId = job.EditionId ?? context.ProjectId, releaseId = job.EditionId, job.Id, job.Status, job.Message,
             summary = "Preparation cancellation recorded.", mutation = new { kind = "preparation", releaseId = job.EditionId } });
     }
 
@@ -1133,9 +1141,72 @@ public sealed class PublishAssistantTools(
     private async Task<string> UpsertMatterAsync(
         PublishAssistantContext context,
         Guid editionId,
-        PublicationMatterInput input,
-        long expectedRevision) =>
-        Serialize(await editions.UpsertMatterAsync(context.ProjectId, editionId, input, expectedRevision));
+        PublicationUserMatterInput input,
+        long expectedRevision)
+    {
+        try
+        {
+            var matter = await editions.UpsertMatterAsync(
+                context.ProjectId, editionId, ToMatterInput(input), expectedRevision, context.TurnCancellationToken);
+            return Serialize(new
+            {
+                ok = true,
+                targetId = editionId,
+                revision = matter.Revision,
+                changedIds = new[] { matter.Id },
+                summary = $"Saved release matter '{matter.Title}'.",
+                mutation = new { kind = "release-matter", releaseId = editionId, refresh = new[] { "release", "readiness", "artifacts" } },
+            });
+        }
+        catch (Exception exception) when (IsExpectedMatterToolFailure(exception))
+        {
+            return SerializeMatterToolFailure(exception, editionId,
+                "Reread release matter and retry with a supported user-authored kind and the current release revision. Change generated title, copyright, or contents pages through release settings instead.");
+        }
+    }
+
+    private static PublicationMatterInput ToMatterInput(PublicationUserMatterInput input) => new(
+        input.Id,
+        input.Location,
+        input.Kind switch
+        {
+            PublicationUserMatterKind.Dedication => PublicationMatterKind.Dedication,
+            PublicationUserMatterKind.Epigraph => PublicationMatterKind.Epigraph,
+            PublicationUserMatterKind.Acknowledgments => PublicationMatterKind.Acknowledgments,
+            PublicationUserMatterKind.AboutAuthor => PublicationMatterKind.AboutAuthor,
+            PublicationUserMatterKind.AlsoBy => PublicationMatterKind.AlsoBy,
+            PublicationUserMatterKind.References => PublicationMatterKind.References,
+            PublicationUserMatterKind.Custom => PublicationMatterKind.Custom,
+            _ => throw new InvalidOperationException("The requested user-authored matter kind is unsupported."),
+        },
+        input.Title,
+        input.ManuscriptJson,
+        input.IsIncluded,
+        input.SortOrder,
+        input.ExpectedRevision);
+
+    private static bool IsExpectedMatterToolFailure(Exception exception) =>
+        exception is ArgumentException
+            or InvalidDataException
+            or InvalidOperationException
+            or JsonException
+            or DbUpdateConcurrencyException
+            or KeyNotFoundException;
+
+    private static string SerializeMatterToolFailure(Exception exception, Guid referenceId, string recovery) =>
+        Serialize(new
+        {
+            ok = false,
+            code = exception switch
+            {
+                DbUpdateConcurrencyException => "REVISION_CONFLICT",
+                KeyNotFoundException => "MATTER_NOT_FOUND",
+                _ => "MATTER_REJECTED",
+            },
+            referenceId,
+            summary = exception.Message,
+            recovery,
+        });
 
     private async Task<string> DeleteMatterAsync(
         PublishAssistantContext context,
