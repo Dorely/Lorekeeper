@@ -87,7 +87,9 @@ the live test project; terminate the browser host after the run.
 
 ## Edit and Read modes
 
-- Confirm Edit exposes block style, font family, point size, line spacing,
+- Confirm Edit exposes a compact, pale, rounded document toolbar with flat
+  grouped controls, hover states, icon-scale actions, and a joined point-size
+  stepper. Confirm it exposes block style, font family, point size, line spacing,
   emphasis, link, alignment, whole-paragraph indent, lists, Figure/Designed Page
   insertion, search, undo, redo, and reusable-style actions without overflow;
   advanced marks, paragraph controls, and Figure settings remain available

@@ -517,6 +517,25 @@ function button(label, title, action) {
     return element;
 }
 
+function iconButton(label, title, action) {
+    const element = button(label, title, action);
+    element.classList.add("semantic-editor-icon-button");
+    return element;
+}
+
+function alignmentButton(alignment, title, action) {
+    const element = iconButton("", title, action);
+    const icon = document.createElement("span");
+    icon.className = `semantic-editor-alignment-icon semantic-editor-alignment-icon--${alignment}`;
+    for (const width of [14, 9, 14, 11]) {
+        const line = document.createElement("span");
+        line.style.width = `${width}px`;
+        icon.append(line);
+    }
+    element.append(icon);
+    return element;
+}
+
 function selectControl(label, options, onChange, resetAfterChange = true) {
     const wrapper = document.createElement("label");
     wrapper.className = "semantic-editor-select-label";
@@ -934,9 +953,9 @@ function buildTypographyControls(view, namedStyles, fontFamilies, root) {
         applySize();
     };
     sizeGroup.append(
-        button("−", "Decrease paragraph font size", () => stepSize(-1)),
+        iconButton("−", "Decrease paragraph font size", () => stepSize(-1)),
         sizeInput,
-        button("+", "Increase paragraph font size", () => stepSize(1)));
+        iconButton("+", "Increase paragraph font size", () => stepSize(1)));
 
     const lineHeightControl = selectControl("Line spacing", [
         ["", "Line spacing"],
@@ -2039,7 +2058,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
 
     toolbar.append(
         selectControl("Block style", [
-            ["", "Block style"],
+            ["", "Book text"],
             ["paragraph|body|2", "Body text"],
             ["heading|chapter-heading|1", "Chapter title"],
             ["heading|heading|2", "Heading"],
@@ -2073,19 +2092,20 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         button("Figure alt", "Edit selected figure alternative text", () => editFigureAltText(view)),
         button("Figure layout", "Edit selected figure placement, width, and crop behavior", () =>
             editFigurePresentation(view)),
-        button("Designed page", "Insert a designed page at the current manuscript position", () =>
+        iconButton("▣", "Insert a designed page at the current manuscript position", () =>
             void insertDesignedPage(view, dotNetRef, () => revision, saveNow, replaceDocument, root)),
         button("Figure to text", "Convert selected figure to a paragraph", () =>
             applyBlock(view, "paragraph", "body", 2)),
-        button("B", "Bold (Ctrl+B)", () => applyMark(view, "strong")),
-        button("I", "Italic (Ctrl+I)", () => applyMark(view, "em")),
-        button("U", "Underline", () => applyMark(view, "underline")),
+        iconButton("B", "Bold (Ctrl+B)", () => applyMark(view, "strong")),
+        iconButton("I", "Italic (Ctrl+I)", () => applyMark(view, "em")),
+        iconButton("U", "Underline", () => applyMark(view, "underline")),
         button("S", "Strikethrough", () => applyMark(view, "strikethrough")),
         button("</>", "Inline code", () => applyMark(view, "code")),
         button("SC", "Small caps intent", () => applyMark(view, "small_caps")),
         button("x²", "Superscript", () => applyMark(view, "superscript")),
         button("x₂", "Subscript", () => applyMark(view, "subscript")),
-        button("Link", "Add or remove link", () => {
+        (() => {
+            const control = iconButton("", "Add or remove link", () => {
             const value = window.prompt("Link URL (leave blank to remove)");
             if (value === null) return;
             const sanitized = safeLink(value);
@@ -2094,7 +2114,10 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
                 return;
             }
             applyMark(view, "link", sanitized);
-        }),
+            });
+            control.classList.add("semantic-editor-link-button");
+            return control;
+        })(),
         button("Lang", "Set or remove language", () => {
             const value = window.prompt("BCP 47 language tag (leave blank to remove)");
             if (value === null) return;
@@ -2131,19 +2154,19 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             view.dispatch(view.state.tr.insertText(value).scrollIntoView());
             view.focus();
         }),
-        button("Undo", "Undo (Ctrl+Z)", () => { undo(view.state, view.dispatch); view.focus(); }),
-        button("Redo", "Redo (Ctrl+Y)", () => { redo(view.state, view.dispatch); view.focus(); }),
-        button("Find", "Find and replace", () => findPanel.open()),
+        iconButton("↶", "Undo (Ctrl+Z)", () => { undo(view.state, view.dispatch); view.focus(); }),
+        iconButton("↷", "Redo (Ctrl+Y)", () => { redo(view.state, view.dispatch); view.focus(); }),
+        iconButton("⌕", "Find and replace", () => findPanel.open()),
         button("Outline", "Toggle document outline", () => outline.open())
     );
     toolbar.append(
-        button("Left", "Align paragraph left", () => setParagraphAlignment(view, "start")),
-        button("Center", "Center paragraph", () => setParagraphAlignment(view, "center")),
-        button("Right", "Align paragraph right", () => setParagraphAlignment(view, "end")),
-        button("Justify", "Justify paragraph", () => setParagraphAlignment(view, "justify")),
-        button("Indent +", "Increase paragraph indent (Tab)", () => changeParagraphIndent(view, 1.5)),
-        button("Indent -", "Decrease paragraph indent (Shift+Tab)", () => changeParagraphIndent(view, -1.5)),
-        button("List", "Toggle list formatting", () => toggleListFormatting(view))
+        alignmentButton("left", "Align paragraph left", () => setParagraphAlignment(view, "start")),
+        alignmentButton("center", "Center paragraph", () => setParagraphAlignment(view, "center")),
+        alignmentButton("right", "Align paragraph right", () => setParagraphAlignment(view, "end")),
+        alignmentButton("justify", "Justify paragraph", () => setParagraphAlignment(view, "justify")),
+        iconButton("⇥", "Increase paragraph indent (Tab)", () => changeParagraphIndent(view, 1.5)),
+        iconButton("⇤", "Decrease paragraph indent (Shift+Tab)", () => changeParagraphIndent(view, -1.5)),
+        iconButton("☷", "Toggle list formatting", () => toggleListFormatting(view))
     );
     const primaryTitles = new Set([
         "Bold (Ctrl+B)", "Italic (Ctrl+I)", "Underline", "Add or remove link",
@@ -2171,6 +2194,33 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         button("Paragraph...", "Right, first-line, and hanging indents, spacing, and pagination controls", () => editParagraphPresentation(view)),
         button("Clear paragraph", "Clear direct paragraph formatting", () => clearParagraphPresentation(view))
     );
+    const primaryByTitle = title => [...toolbar.children].find(control => control.title === title);
+    const primaryBySelect = label => [...toolbar.children].find(control =>
+        control.querySelector?.("select")?.getAttribute("aria-label") === label);
+    const googleDocsOrder = [
+        primaryByTitle("Undo (Ctrl+Z)"),
+        primaryByTitle("Redo (Ctrl+Y)"),
+        primaryByTitle("Find and replace"),
+        primaryBySelect("Block style"),
+        typographyControls.group,
+        primaryByTitle("Bold (Ctrl+B)"),
+        primaryByTitle("Italic (Ctrl+I)"),
+        primaryByTitle("Underline"),
+        primaryByTitle("Add or remove link"),
+        primaryBySelect("Insert project image as figure"),
+        primaryByTitle("Insert a designed page at the current manuscript position"),
+        primaryByTitle("Align paragraph left"),
+        primaryByTitle("Center paragraph"),
+        primaryByTitle("Align paragraph right"),
+        primaryByTitle("Justify paragraph"),
+        primaryByTitle("Increase paragraph indent (Tab)"),
+        primaryByTitle("Decrease paragraph indent (Shift+Tab)"),
+        primaryByTitle("Toggle list formatting"),
+        styleControls,
+    ];
+    for (const control of googleDocsOrder) {
+        if (control?.parentElement === toolbar) toolbar.append(control);
+    }
     advancedDetails.append(advancedSummary, advancedControls);
     positionAdvancedControls = () => {
         if (!advancedDetails.open) return;
