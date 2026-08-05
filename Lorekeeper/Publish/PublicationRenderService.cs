@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Linq.Expressions;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -146,6 +147,28 @@ public sealed class PublicationRenderService(
     IPublicationPressRuntime pressRuntime,
     IProjectMutationCoordinator projectMutations) : IPublicationRenderService
 {
+    private static readonly Expression<Func<PublicationArtifact, PublicationArtifact>> ArtifactMetadataProjection =
+        artifact => new PublicationArtifact
+        {
+            Id = artifact.Id,
+            ProjectId = artifact.ProjectId,
+            TargetKind = artifact.TargetKind,
+            EditionId = artifact.EditionId,
+            RenderJobId = artifact.RenderJobId,
+            Kind = artifact.Kind,
+            FileName = artifact.FileName,
+            MediaType = artifact.MediaType,
+            Sha256 = artifact.Sha256,
+            ByteLength = artifact.ByteLength,
+            PageCount = artifact.PageCount,
+            SourceFingerprint = artifact.SourceFingerprint,
+            PaginationFingerprint = artifact.PaginationFingerprint,
+            RendererVersion = artifact.RendererVersion,
+            ProfileId = artifact.ProfileId,
+            IsLegacy = artifact.IsLegacy,
+            CreatedAt = artifact.CreatedAt,
+        };
+
     public PublicationRenderService(
         AppDbContext db,
         IPublicationEditionService editions,
@@ -207,10 +230,11 @@ public sealed class PublicationRenderService(
     public async Task<IReadOnlyList<PublicationRenderJobView>> ListCoreAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         var fingerprint = await books.GetSourceFingerprintAsync(projectId, cancellationToken);
-        var jobs = await db.PublicationRenderJobs.AsNoTracking().Include(job => job.Artifacts)
+        var jobs = await db.PublicationRenderJobs.AsNoTracking()
             .Where(job => job.ProjectId == projectId && job.TargetKind == PublicationTargetKind.CoreBook)
             .OrderByDescending(job => job.CreatedAt).ToListAsync(cancellationToken);
-        return jobs.Select(job => View(job, job.Artifacts, fingerprint, CurrentRendererVersion())).ToList();
+        var artifactsByJob = await ReadArtifactMetadataByJobAsync(jobs.Select(job => job.Id), cancellationToken);
+        return jobs.Select(job => View(job, artifactsByJob.GetValueOrDefault(job.Id, []), fingerprint, CurrentRendererVersion())).ToList();
     }
 
     public async Task<PublicationRenderJobView> CancelCoreAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default)
@@ -298,11 +322,11 @@ public sealed class PublicationRenderService(
         var jobs = await db.PublicationRenderJobs
             .AsNoTracking()
             .Where(job => job.EditionId == editionId && job.ProjectId == projectId)
-            .Include(job => job.Artifacts)
             .OrderByDescending(job => job.CreatedAt)
             .ToListAsync(cancellationToken);
+        var artifactsByJob = await ReadArtifactMetadataByJobAsync(jobs.Select(job => job.Id), cancellationToken);
         var rendererVersion = CurrentRendererVersion();
-        return jobs.Select(job => View(job, job.Artifacts, fingerprint, rendererVersion)).ToList();
+        return jobs.Select(job => View(job, artifactsByJob.GetValueOrDefault(job.Id, []), fingerprint, rendererVersion)).ToList();
     }
 
     public async Task<PublicationRenderJobView> GetAsync(
@@ -314,12 +338,15 @@ public sealed class PublicationRenderService(
         var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
         var job = await db.PublicationRenderJobs
             .AsNoTracking()
-            .Include(candidate => candidate.Artifacts)
             .FirstOrDefaultAsync(candidate => candidate.Id == jobId
                 && candidate.EditionId == editionId
                 && candidate.ProjectId == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Publication render job not found.");
-        return View(job, job.Artifacts, fingerprint, CurrentRendererVersion());
+        var artifacts = await db.PublicationArtifacts.AsNoTracking()
+            .Where(artifact => artifact.RenderJobId == job.Id)
+            .Select(ArtifactMetadataProjection)
+            .ToListAsync(cancellationToken);
+        return View(job, artifacts, fingerprint, CurrentRendererVersion());
     }
 
     public async Task<IReadOnlyList<PublicationPageMapView>> GetPageMapAsync(
@@ -402,9 +429,25 @@ public sealed class PublicationRenderService(
         return (await db.PublicationArtifacts.AsNoTracking()
                 .Where(artifact => artifact.EditionId == editionId && artifact.ProjectId == projectId)
                 .OrderByDescending(artifact => artifact.CreatedAt)
+                .Select(ArtifactMetadataProjection)
                 .ToListAsync(cancellationToken))
             .Select(artifact => ArtifactView(artifact, fingerprint, rendererVersion))
             .ToList();
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, IReadOnlyList<PublicationArtifact>>> ReadArtifactMetadataByJobAsync(
+        IEnumerable<Guid> jobIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = jobIds.ToList();
+        if (ids.Count == 0)
+            return new Dictionary<Guid, IReadOnlyList<PublicationArtifact>>();
+        return (await db.PublicationArtifacts.AsNoTracking()
+                .Where(artifact => artifact.RenderJobId != null && ids.Contains(artifact.RenderJobId.Value))
+                .Select(ArtifactMetadataProjection)
+                .ToListAsync(cancellationToken))
+            .GroupBy(artifact => artifact.RenderJobId!.Value)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<PublicationArtifact>)group.ToList());
     }
 
     private string? CurrentRendererVersion() => pressRuntime.GetReadiness().IsReady

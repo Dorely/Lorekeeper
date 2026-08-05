@@ -413,6 +413,13 @@ artifact state. Save uses hash-verifying immutable endpoints and never invokes
 browser print. EPUB editions cannot request Press output, and non-EPUB editions
 cannot export EPUB, preventing product-form identifiers and metadata from
 crossing formats.
+Publish route initialization is progressive: Core metadata and the release
+navigator form the blocking shell, while outline/matter/placement details,
+preparation state, artifact freshness, and the project-aware assistant mount
+after the first interactive render. Release selection follows the same staged
+path, exposing editable effective settings before output history finishes
+loading. Artifact list and render-status queries project metadata only; PDF,
+EPUB, and package bytes remain behind the immutable view/download endpoints.
 
 `Lorekeeper.Press` owns protocol v5, deterministic layout, English/Latin shaping
 and glyph diagnostics, custom project TTF/OTF staging and embedding, font

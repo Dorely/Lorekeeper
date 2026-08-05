@@ -581,6 +581,12 @@ public sealed class PublicationRenderTests
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task<PublishWorkspaceView> GetWorkspaceForEditingAsync(
+            Guid projectId,
+            Guid editionId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<PublicationBookView> GetCoreWorkspaceAsync(
             Guid projectId,
             CancellationToken cancellationToken = default) =>

@@ -7,6 +7,7 @@ public interface IPublishService
 {
     Task<PublicationBookView> GetCoreWorkspaceAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<PublishWorkspaceView> GetWorkspaceAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
+    Task<PublishWorkspaceView> GetWorkspaceForEditingAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
     Task<PublishDocument> GetCoreDocumentAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<PublishDocument> GetDocumentAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
     Task<ProjectExportFile> ExportCoreAsync(Guid projectId, PublishExportFormat format, CancellationToken cancellationToken = default);

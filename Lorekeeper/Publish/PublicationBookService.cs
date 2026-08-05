@@ -47,6 +47,11 @@ public sealed record PublicationBookOutlineView(
     bool IsIncluded,
     int SortOrder);
 
+public sealed record PublicationBookDetails(
+    IReadOnlyList<PublicationBookOutlineView> Outline,
+    IReadOnlyList<PublicationMatterView> Matter,
+    IReadOnlyList<PublicationImagePlacementView> ImagePlacements);
+
 public sealed record PublicationBookPatch(
     long ExpectedRevision,
     string? Title = null,
@@ -70,6 +75,7 @@ public sealed record PublicationBookPatch(
 public interface IPublicationBookService
 {
     Task<PublicationBookView> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<PublicationBookDetails> GetDetailsAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<PublicationBookView> UpdateAsync(Guid projectId, PublicationBookPatch patch, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PublicationBookOutlineView>> ListOutlineAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<PublicationBookView> SetOutlineSelectionsAsync(Guid projectId, IReadOnlyList<PublicationEditionOutlineItemUpdate> updates, long expectedRevision, CancellationToken cancellationToken = default);
@@ -299,6 +305,24 @@ public sealed class PublicationBookService(
         CancellationToken cancellationToken = default)
     {
         _ = await GetOrCreateAsync(projectId, cancellationToken);
+        return await ReadOutlineAsync(projectId, cancellationToken);
+    }
+
+    public async Task<PublicationBookDetails> GetDetailsAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        _ = await GetOrCreateAsync(projectId, cancellationToken);
+        return new PublicationBookDetails(
+            await ReadOutlineAsync(projectId, cancellationToken),
+            await ReadMatterAsync(projectId, cancellationToken),
+            await ReadImagePlacementsAsync(projectId, cancellationToken));
+    }
+
+    private async Task<IReadOnlyList<PublicationBookOutlineView>> ReadOutlineAsync(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
         var chapters = await db.Chapters.AsNoTracking().Where(item => item.ProjectId == projectId)
             .ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
         return (await db.PublicationBookOutlineItems.AsNoTracking()
@@ -343,6 +367,13 @@ public sealed class PublicationBookService(
         CancellationToken cancellationToken = default)
     {
         _ = await GetOrCreateAsync(projectId, cancellationToken);
+        return await ReadMatterAsync(projectId, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<PublicationMatterView>> ReadMatterAsync(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
         return (await db.PublicationBookMatter.AsNoTracking().Where(item => item.ProjectId == projectId)
             .OrderBy(item => item.Location).ThenBy(item => item.SortOrder).ToListAsync(cancellationToken))
             .Select(item => new PublicationMatterView(
@@ -429,6 +460,13 @@ public sealed class PublicationBookService(
         CancellationToken cancellationToken = default)
     {
         _ = await GetOrCreateAsync(projectId, cancellationToken);
+        return await ReadImagePlacementsAsync(projectId, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<PublicationImagePlacementView>> ReadImagePlacementsAsync(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
         var rows = await db.PublicationBookImagePlacements.AsNoTracking().Where(item => item.ProjectId == projectId)
             .OrderBy(item => item.SortOrder).ToListAsync(cancellationToken);
         var assets = await db.PublishAssets.AsNoTracking().Where(item => item.ProjectId == projectId)

@@ -19,24 +19,31 @@ else
     <main class="publish-workspace" aria-label="Publish">
         <div class="publish-layout">
             <aside class="publish-assistant-pane" aria-label="Publish assistant">
-                <PublishChatPanel ProjectId="Project.Id"
-                                  SelectedEditionId="_selectedReleaseId"
-                                  OnBeforeSend="SavePendingAsync"
-                                  OnWorkspaceMutated="HandleAssistantMutationAsync" />
+                @if (_targetLoading)
+                {
+                    <div class="publish-pane-loading" role="status"><span class="spinner-border spinner-border-sm"></span><span>Loading publishing workspaceâ€¦</span></div>
+                }
+                else
+                {
+                    <PublishChatPanel ProjectId="Project.Id"
+                                      SelectedEditionId="_selectedReleaseId"
+                                      OnBeforeSend="SavePendingAsync"
+                                      OnWorkspaceMutated="HandleAssistantMutationAsync" />
+                }
             </aside>
 
             <section class="publish-main">
                 <nav class="publish-target-nav" aria-label="Book and publication releases">
-                    <button class="target-chip @(_selectedReleaseId is null ? "selected" : null)" @onclick="SelectCoreAsync">
+                    <button class="target-chip @(_selectedReleaseId is null ? "selected" : null)" disabled="@_targetLoading" @onclick="SelectCoreAsync">
                         <span>Core Book</span><small>Shared book</small>
                     </button>
                     @foreach (var release in _releases.Where(item => item.Status != PublicationEditionStatus.Archived))
                     {
-                        <button class="target-chip @(_selectedReleaseId == release.Id ? "selected" : null)" @onclick="() => SelectReleaseAsync(release.Id)">
+                        <button class="target-chip @(_selectedReleaseId == release.Id ? "selected" : null)" disabled="@_targetLoading" @onclick="() => SelectReleaseAsync(release.Id)">
                             <span>@release.Name</span><small>@ReleaseTypeLabel(release.Format)</small>
                         </button>
                     }
-                    <button class="target-chip add" @onclick="() => _addReleaseOpen = true"><span>＋ Add release</span><small>Paperback or ebook</small></button>
+                    <button class="target-chip add" disabled="@_targetLoading" @onclick="() => _addReleaseOpen = true"><span>＋ Add release</span><small>Paperback or ebook</small></button>
                 </nav>
 
                 @if (!string.IsNullOrWhiteSpace(_error))
@@ -62,11 +69,15 @@ else
                     }
                     else if (_selectedReleaseId is null && _core is not null)
                     {
-                        @CoreBookView()
+                        <fieldset class="publish-target-content" disabled="@_targetLoading">@CoreBookView()</fieldset>
                     }
                     else if (_workspace is not null)
                     {
-                        @ReleaseView()
+                        <fieldset class="publish-target-content" disabled="@_targetLoading">@ReleaseView()</fieldset>
+                    }
+                    else if (_targetLoading)
+                    {
+                        <div class="publish-target-loading" role="status"><span class="spinner-border spinner-border-sm"></span><span>Loading release settingsâ€¦</span></div>
                     }
                 </div>
             </section>
@@ -131,6 +142,10 @@ else
     private Guid? _loadedProjectId;
     private Guid? _selectedReleaseId;
     private bool _loading = true;
+    private bool _targetLoading = true;
+    private bool _targetLoadPending;
+    private bool _coreDetailsLoaded;
+    private bool _outputsLoaded;
     private bool _busy;
     private bool _addReleaseOpen;
     private bool _coverEditorOpen;
@@ -161,6 +176,7 @@ else
     private IJSObjectReference? _downloads;
     private readonly CancellationTokenSource _dispose = new();
     private int _pollGeneration;
+    private int _targetLoadGeneration;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -169,31 +185,73 @@ else
         await LoadCoreAsync();
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_targetLoadPending || Project is null)
+            return;
+        _targetLoadPending = false;
+        var generation = _targetLoadGeneration;
+        try
+        {
+            if (_selectedReleaseId is Guid releaseId)
+                await LoadReleaseTargetAsync(releaseId, generation);
+            else
+                await LoadCoreTargetAsync(generation);
+        }
+        catch (OperationCanceledException) when (_dispose.IsCancellationRequested || generation != _targetLoadGeneration)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (generation == _targetLoadGeneration)
+                _error = exception.Message;
+        }
+        finally
+        {
+            if (generation == _targetLoadGeneration)
+            {
+                _targetLoading = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
     private async Task LoadCoreAsync()
     {
         if (Project is null) return;
         _previewArtifact = null;
-        _loading = true; _error = null;
+        var initialLoad = _core is null;
+        _loading = initialLoad;
+        _targetLoading = true;
+        _targetLoadPending = false;
+        _targetLoadGeneration++;
+        _error = null;
         try
         {
             _core = await Books.GetOrCreateAsync(Project.Id);
-            _coreOutline = await Books.ListOutlineAsync(Project.Id);
-            _coreMatter = await Books.ListMatterAsync(Project.Id);
-            _corePlacements = await Books.ListImagePlacementsAsync(Project.Id);
-            _coreSelections = _coreOutline.ToDictionary(item => (item.TargetKind, item.TargetId), item => item.IsIncluded);
             _releases = await Releases.ListAsync(Project.Id);
             _coreDraft = CoreDraft.From(_core);
             _coreDirty = false;
             _coreOutlineDirty = false;
+            _coreOutline = [];
+            _coreMatter = [];
+            _corePlacements = [];
+            _coreSelections = [];
+            _coreDetailsLoaded = false;
+            _outputsLoaded = false;
+            _preparations = [];
+            _artifacts = [];
             _selectedReleaseId = null;
             _workspace = null;
-            _preparations = await Preparation.ListAsync(Project.Id, PublicationTargetKind.CoreBook);
-            var jobs = await Renders.ListCoreAsync(Project.Id);
-            _artifacts = jobs.SelectMany(item => item.Artifacts).OrderByDescending(item => item.CreatedAt).ToList();
+            _targetLoadPending = true;
         }
         catch (Exception exception) { _error = exception.Message; }
-        finally { _loading = false; }
-        ResumeActivePreparation(PublicationTargetKind.CoreBook, null);
+        finally
+        {
+            _loading = false;
+            if (_error is not null)
+                _targetLoading = false;
+        }
     }
 
     private async Task SelectCoreAsync()
@@ -209,34 +267,72 @@ else
         await SavePendingAsync();
         _coverEditorOpen = false;
         _previewArtifact = null;
-        _loading = true; _error = null;
-        try
-        {
-            _selectedReleaseId = id;
-            _workspace = await Publishing.GetWorkspaceAsync(Project.Id, id);
-            _releaseDraft = ReleaseDraft.From(_workspace.Edition);
-            _releaseOverrides = _workspace.OverrideFields.ToHashSet();
-            _loadedOverrides = _releaseOverrides.ToHashSet();
-            _releaseDirty = false;
-            _releaseSelections = _workspace.Sections.SelectMany(section => section.Chapters)
-                .ToDictionary(item => item.Id, item => item.IsIncluded);
-            _loadedReleaseSelections = _releaseSelections.ToDictionary();
-            _releaseContentDirty = false;
-            _releaseContentOpen = _workspace.HasContentOverrides;
-            _releaseDesignOpen = _workspace.OverrideFields.Any(IsDesignOverride);
-            _preparations = await Preparation.ListAsync(Project.Id, PublicationTargetKind.Release, id);
-            _artifacts = await Renders.ListArtifactsAsync(Project.Id, id);
-            _releases = await Releases.ListAsync(Project.Id);
-        }
-        catch (Exception exception) { _error = exception.Message; }
-        finally { _loading = false; }
-        ResumeActivePreparation(PublicationTargetKind.Release, id);
+        _selectedReleaseId = id;
+        _workspace = null;
+        _preparations = [];
+        _artifacts = [];
+        _outputsLoaded = false;
+        _targetLoading = true;
+        _targetLoadPending = true;
+        _targetLoadGeneration++;
+        _error = null;
+    }
+
+    private async Task LoadCoreTargetAsync(int generation)
+    {
+        if (Project is null || generation != _targetLoadGeneration)
+            return;
+        var details = await Books.GetDetailsAsync(Project.Id, _dispose.Token);
+        if (generation != _targetLoadGeneration)
+            return;
+        _coreOutline = details.Outline;
+        _coreMatter = details.Matter;
+        _corePlacements = details.ImagePlacements;
+        _coreSelections = _coreOutline.ToDictionary(item => (item.TargetKind, item.TargetId), item => item.IsIncluded);
+        _coreDetailsLoaded = true;
+        await InvokeAsync(StateHasChanged);
+
+        _preparations = await Preparation.ListAsync(Project.Id, PublicationTargetKind.CoreBook, cancellationToken: _dispose.Token);
+        var jobs = await Renders.ListCoreAsync(Project.Id, _dispose.Token);
+        if (generation != _targetLoadGeneration)
+            return;
+        _artifacts = jobs.SelectMany(item => item.Artifacts).OrderByDescending(item => item.CreatedAt).ToList();
+        _outputsLoaded = true;
+        ResumeActivePreparation(PublicationTargetKind.CoreBook, null);
+    }
+
+    private async Task LoadReleaseTargetAsync(Guid releaseId, int generation)
+    {
+        if (Project is null || generation != _targetLoadGeneration)
+            return;
+        _workspace = await Publishing.GetWorkspaceForEditingAsync(Project.Id, releaseId, _dispose.Token);
+        if (generation != _targetLoadGeneration)
+            return;
+        _releaseDraft = ReleaseDraft.From(_workspace.Edition);
+        _releaseOverrides = _workspace.OverrideFields.ToHashSet();
+        _loadedOverrides = _releaseOverrides.ToHashSet();
+        _releaseDirty = false;
+        _releaseSelections = _workspace.Sections.SelectMany(section => section.Chapters)
+            .ToDictionary(item => item.Id, item => item.IsIncluded);
+        _loadedReleaseSelections = _releaseSelections.ToDictionary();
+        _releaseContentDirty = false;
+        _releaseContentOpen = _workspace.HasContentOverrides;
+        _releaseDesignOpen = _workspace.OverrideFields.Any(IsDesignOverride);
+        await InvokeAsync(StateHasChanged);
+
+        _preparations = await Preparation.ListAsync(Project.Id, PublicationTargetKind.Release, releaseId, _dispose.Token);
+        _artifacts = await Renders.ListArtifactsAsync(Project.Id, releaseId, _dispose.Token);
+        _releases = await Releases.ListAsync(Project.Id, _dispose.Token);
+        if (generation != _targetLoadGeneration)
+            return;
+        _outputsLoaded = true;
+        ResumeActivePreparation(PublicationTargetKind.Release, releaseId);
     }
 
     private RenderFragment CoreBookView() => @<div class="workspace-stack">
         <section class="readiness-card">
             <div><span class="eyebrow">Private review copy</span><h1>Core Book</h1><p>Shared book details, content, design, and cover. Publication releases inherit these values live.</p></div>
-            <div class="primary-action"><button class="btn btn-primary" disabled="@(_busy || HasActivePreparation)" @onclick="PrepareCoreAsync">@PreparationButton("Prepare reading PDF")</button><small>A tagged review PDF—not a publication product.</small></div>
+            <div class="primary-action"><button class="btn btn-primary" disabled="@(_busy || !_outputsLoaded || HasActivePreparation)" @onclick="PrepareCoreAsync">@PreparationButton("Prepare reading PDF")</button><small>A tagged review PDF—not a publication product.</small></div>
             @PreparationStatus()
             @CoreDownloads()
         </section>
@@ -267,12 +363,12 @@ else
             </div>
             <div class="summary-strip"><span><strong>@_core!.IncludedChapterCount</strong> chapters included</span><span><strong>@_core.MatterCount</strong> front/back matter items</span><span><strong>@_core.ImagePlacementCount</strong> opening/ending images</span></div>
             <details class="content-choices"><summary>Choose included chapters</summary>
-                <div class="content-choice-list">@foreach (var item in _coreOutline){<label class="check-row"><input type="checkbox" checked="@_coreSelections.GetValueOrDefault((item.TargetKind, item.TargetId))" @onchange="e => CoreOutlineChanged(item, (bool)e.Value!)" /><span><small>@item.TargetKind</small>@item.Title</span></label>}</div>
+                @if (!_coreDetailsLoaded){<div class="deferred-section-loading"><span class="spinner-border spinner-border-sm"></span> Loading chapter choices…</div>}else{<div class="content-choice-list">@foreach (var item in _coreOutline){<label class="check-row"><input type="checkbox" checked="@_coreSelections.GetValueOrDefault((item.TargetKind, item.TargetId))" @onchange="e => CoreOutlineChanged(item, (bool)e.Value!)" /><span><small>@item.TargetKind</small>@item.Title</span></label>}</div>}
             </details>
         </section>
 
         <section class="workspace-card"><header><div><span class="step">03</span><div><h2>Front and back matter</h2><p>Shared dedication, acknowledgements, notes, and other book material.</p></div></div><div class="button-row"><button class="btn btn-sm btn-outline-primary" @onclick="() => AddCoreMatterAsync(PublicationMatterKind.Dedication)">Add dedication</button><button class="btn btn-sm btn-outline-primary" @onclick="() => AddCoreMatterAsync(PublicationMatterKind.Acknowledgments)">Add acknowledgements</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => AddCoreMatterAsync(PublicationMatterKind.Custom)">Add page</button></div></header>
-            @if (_coreMatter.Count == 0){<p class="muted">No custom matter has been added. Title, copyright, and contents pages are generated from Core Book settings.</p>}else{<div class="compact-list">@foreach (var item in _coreMatter){<div><div><strong>@item.Title</strong><span>@item.Location · @item.Kind · @(item.IsIncluded ? "Included" : "Excluded")</span></div><div class="button-row"><button class="btn btn-sm btn-outline-secondary" @onclick="() => BeginCoreMatterEdit(item)">Edit</button><button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteCoreMatterAsync(item)">Remove</button></div></div>}</div>}
+            @if (!_coreDetailsLoaded){<div class="deferred-section-loading"><span class="spinner-border spinner-border-sm"></span> Loading front and back matter…</div>}else if (_coreMatter.Count == 0){<p class="muted">No custom matter has been added. Title, copyright, and contents pages are generated from Core Book settings.</p>}else{<div class="compact-list">@foreach (var item in _coreMatter){<div><div><strong>@item.Title</strong><span>@item.Location · @item.Kind · @(item.IsIncluded ? "Included" : "Excluded")</span></div><div class="button-row"><button class="btn btn-sm btn-outline-secondary" @onclick="() => BeginCoreMatterEdit(item)">Edit</button><button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteCoreMatterAsync(item)">Remove</button></div></div>}</div>}
             @if (_editingCoreMatterId is not null)
             {
                 <div class="matter-editor">
@@ -299,7 +395,7 @@ else
     private RenderFragment ReleaseView() => @<div class="workspace-stack">
         <section class="readiness-card">
             <div><span class="eyebrow">@ReleaseTypeLabel(_workspace!.Edition.Format)</span><h1>@_workspace.Edition.Name</h1><p>@ReleaseSummary(_workspace.Edition)</p></div>
-            <div class="primary-action"><button class="btn btn-primary" disabled="@(_busy || HasActivePreparation)" @onclick="PrepareReleaseAsync">@PreparationButton("Prepare files")</button><small>Renders, validates, and packages in one step.</small></div>
+            <div class="primary-action"><button class="btn btn-primary" disabled="@(_busy || !_outputsLoaded || HasActivePreparation)" @onclick="PrepareReleaseAsync">@PreparationButton("Prepare files")</button><small>Renders, validates, and packages in one step.</small></div>
             @PreparationStatus()
             @ArtifactDownloads(ReleaseArtifactKinds(_workspace.Edition.Format))
         </section>
@@ -357,7 +453,7 @@ else
             </section>
         }
 
-        <details class="technical"><summary>Advanced and technical details</summary><dl><div><dt>Profile</dt><dd>Managed automatically for @_workspace.Edition.Vendor</dd></div><div><dt>Source state</dt><dd>@_workspace.SourceFingerprint[..Math.Min(12, _workspace.SourceFingerprint.Length)]…</dd></div><div><dt>Release revision</dt><dd>@_workspace.Edition.Revision</dd></div></dl><div class="button-row"><button class="btn btn-sm btn-outline-secondary" @onclick="CloneReleaseAsync">Clone release</button><button class="btn btn-sm btn-outline-danger" @onclick="ArchiveReleaseAsync">Archive release</button></div></details>
+        <details class="technical"><summary>Advanced and technical details</summary><dl><div><dt>Profile</dt><dd>Managed automatically for @_workspace.Edition.Vendor</dd></div><div><dt>Source state</dt><dd>Calculated when files are prepared</dd></div><div><dt>Release revision</dt><dd>@_workspace.Edition.Revision</dd></div></dl><div class="button-row"><button class="btn btn-sm btn-outline-secondary" @onclick="CloneReleaseAsync">Clone release</button><button class="btn btn-sm btn-outline-danger" @onclick="ArchiveReleaseAsync">Archive release</button></div></details>
     </div>;
 
     private RenderFragment Toggle(string Label, bool Value, Action<bool> Changed) => @<label class="check-row"><input type="checkbox" checked="@Value" @onchange="e => Changed((bool)e.Value!)" /><span>@Label</span></label>;
@@ -369,7 +465,11 @@ else
 
     private RenderFragment InheritedToggle(string Label, PublicationEditionOverrideField Field, bool Value, Action<bool> Changed) => @<div class="inherited-toggle"><label class="check-row"><input type="checkbox" disabled="@(!_releaseOverrides.Contains(Field))" checked="@Value" @onchange="e => Changed((bool)e.Value!)" /><span>@Label</span></label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>@(_releaseOverrides.Contains(Field) ? "Customized" : "From Core Book")</span></label></div>;
 
-    private RenderFragment PreparationStatus() => @<text>@if (_preparations.FirstOrDefault() is { } job)
+    private RenderFragment PreparationStatus() => @<text>@if (!_outputsLoaded)
+    {
+        <div class="preparation loading"><span class="spinner-border spinner-border-sm"></span><span>Checking prepared files…</span></div>
+    }
+    else if (_preparations.FirstOrDefault() is { } job)
     {
         <div class="preparation @job.Status.ToString().ToLowerInvariant()"><strong>@job.Message</strong>@if (job.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing){<span>@job.ProgressPercent% · @job.Step</span><button class="btn btn-sm btn-outline-secondary" @onclick="() => CancelPreparationAsync(job.Id)">Cancel</button>}@foreach (var diagnostic in job.Diagnostics.Take(3)){<span>@diagnostic.Message</span>}</div>
     }</text>;
@@ -490,10 +590,12 @@ else
     {
         if (Project is null) return;
         _core = await Books.GetOrCreateAsync(Project.Id);
-        _coreMatter = await Books.ListMatterAsync(Project.Id);
-        _corePlacements = await Books.ListImagePlacementsAsync(Project.Id);
-        _coreOutline = await Books.ListOutlineAsync(Project.Id);
+        var details = await Books.GetDetailsAsync(Project.Id);
+        _coreMatter = details.Matter;
+        _corePlacements = details.ImagePlacements;
+        _coreOutline = details.Outline;
         _coreSelections = _coreOutline.ToDictionary(item => (item.TargetKind, item.TargetId), item => item.IsIncluded);
+        _coreDetailsLoaded = true;
         _coreDraft = CoreDraft.From(_core);
         _coreDirty = false;
         _coreOutlineDirty = false;
@@ -743,11 +845,17 @@ else
 
     private async Task HandleCoverSavedAsync()
     {
-        if (_selectedReleaseId is Guid releaseId)
-            await SelectReleaseAsync(releaseId);
+        if (Project is null)
+            return;
+        if (_selectedReleaseId is null)
+        {
+            _core = await Books.GetOrCreateAsync(Project.Id);
+            _coreDraft = CoreDraft.From(_core);
+        }
         else
-            await LoadCoreAsync();
-        _coverEditorOpen = true;
+        {
+            _releases = await Releases.ListAsync(Project.Id);
+        }
         _coverRefreshSignal++;
     }
 

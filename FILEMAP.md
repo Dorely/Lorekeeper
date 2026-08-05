@@ -232,7 +232,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Two-column Core Book/release workspace with persistent assistant, target chips/add-release flow, live inheritance/override controls, embedded live cover editing, format-gated settings, in-app Core PDF preview, one-action preparation, blockers, and immutable downloads. |
+| `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, target chips/add-release flow, live inheritance/override controls, embedded live cover editing, format-gated settings, in-app Core PDF preview, one-action preparation, blockers, and immutable downloads. |
 | `PublishChatPanel.razor` (+ `.razor.css`) | Publish adapter over shared `ChatSurface` with persisted transcript/tool chips, streaming, Stop/Reset, provider/token state, image attachments, active-turn reconnection, and structured workspace mutation callbacks. |
 
 ### Components/Pages/Projects/Outline/
@@ -605,7 +605,7 @@
 | File | Description |
 |------|-------------|
 | `PublishModels.cs` | Core/release targets, effective workspace/readiness, revision-aware sparse mutations, matter/style/placement, projection, cover, preparation, and artifact contracts. |
-| `PublicationBookService.cs` | Owning Core Book boundary for seeding, metadata/presentation patches, chapter-only content selection, structural order, matter, placements, reusable cover, revisions, and style/font-aware source fingerprint invalidation. |
+| `PublicationBookService.cs` | Owning Core Book boundary for seeding, metadata/presentation patches, consolidated workspace-detail reads, chapter-only content selection, structural order, matter, placements, reusable cover, revisions, and style/font-aware source fingerprint invalidation. |
 | `IPublicationEditionService.cs` / `PublicationEditionService.cs` | Owning release lifecycle and sparse-override boundary for presets, content/matter/style/placement overlays, archive/clone/compare/audit, and effective fingerprints. |
 | `PublicationReleasePresetService.cs` | Centralized safe paperback destination, EPUB ebook, and PDF ebook release defaults with internal immutable profiles. |
 | `PublicationPreparationService.cs` | Persisted/recoverable one-action Core reading-copy and release render/validation/package coordinator with cancellation and blocker reporting. |
@@ -617,7 +617,7 @@
 | `PublishAssistantTools.cs` | Compact Core/release read/patch, bounded project search/image inspection, sparse content/matter/placement/cover, terminal unattached image generation, focused placement, readiness, one-action preparation/cancellation, and artifact tools; raw profiles and proof approval are absent. |
 | `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration with full outline context, temporary generated-image vision, shared active-turn streaming/reconnection, proactive prompt policy, tool activity, and targeted workspace mutation notices. |
 | `PublicationPressRuntime.cs` | Fail-closed exact-manifest resolver for the packaged native renderer, dynamic capabilities, integrity evidence, and empty controlled child environment with no machine-tool fallback. |
-| `PublicationRenderService.cs` | Persisted/recoverable queue, BOM-free protocol-v5 declared image/font staging from effective manuscript/page/cover scenes, display-ready title handoff, native lifecycle, hash-verified paperback/Book PDF artifacts, semantic page maps, renderer-version staleness, and comparison. |
+| `PublicationRenderService.cs` | Persisted/recoverable queue, metadata-only artifact listings, BOM-free protocol-v5 declared image/font staging from effective manuscript/page/cover scenes, display-ready title handoff, native lifecycle, hash-verified paperback/Book PDF artifacts, semantic page maps, renderer-version staleness, and comparison. |
 | `PublicationCoverService.cs` | Revisioned format-aware structured cover aggregate, canonical copy bindings, print-wrap/digital-front geometry reflow, ISBN/vendor/spine diagnostics, and acknowledgement invalidation. |
 | `PublicationPackageService.cs` | Versioned fail-closed Lorekeeper validation preflight, product-form-specific deterministic package assembly, manifests, reports, provenance, legacy guards, and exact-package proof records. |
 | `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying effective Core/release content into Core TXT/Markdown/Reading PDF and release EPUB/PDF/print output with product-form guards. |

@@ -30,10 +30,23 @@ public sealed class PublishService(
         CancellationToken cancellationToken = default) =>
         books.GetOrCreateAsync(projectId, cancellationToken);
 
-    public async Task<PublishWorkspaceView> GetWorkspaceAsync(
+    public Task<PublishWorkspaceView> GetWorkspaceAsync(
         Guid projectId,
         Guid editionId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        GetWorkspaceAsync(projectId, editionId, includeSourceFingerprint: true, cancellationToken);
+
+    public Task<PublishWorkspaceView> GetWorkspaceForEditingAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken = default) =>
+        GetWorkspaceAsync(projectId, editionId, includeSourceFingerprint: false, cancellationToken);
+
+    private async Task<PublishWorkspaceView> GetWorkspaceAsync(
+        Guid projectId,
+        Guid editionId,
+        bool includeSourceFingerprint,
+        CancellationToken cancellationToken)
     {
         var project = await GetProjectAsync(projectId, cancellationToken);
         _ = await books.GetOrCreateAsync(projectId, cancellationToken);
@@ -90,7 +103,9 @@ public sealed class PublishService(
             .Include(mapping => mapping.ManuscriptStyleDefinition)
             .OrderBy(mapping => mapping.SemanticRole)
             .ToListAsync(cancellationToken);
-        var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
+        var fingerprint = includeSourceFingerprint
+            ? await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken)
+            : string.Empty;
         return new PublishWorkspaceView(
             PublicationEditionService.View(project, profile),
             await editions.ListAsync(projectId, cancellationToken),
