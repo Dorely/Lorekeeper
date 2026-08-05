@@ -16,8 +16,8 @@ use crate::inspect;
 use crate::model::{
     Artifact, Diagnostic, FontEvidence, FontFace, FontFamily, ImageEvidence, LayoutDocument,
     LayoutImage, LayoutImageFit, LayoutLine, LayoutPage, LayoutPaint, LayoutRun,
-    LayoutSemanticRole, LayoutShape, LayoutShapeKind, PageKind, PageMapEntry, RenderRequest,
-    RenderResponse, ValidationEvidence,
+    LayoutSemanticRole, LayoutShape, LayoutShapeKind, OutputPurpose, PageKind, PageMapEntry,
+    RenderRequest, RenderResponse, ValidationEvidence,
 };
 use crate::pdf::{PdfOptions, cover_background_total_ink_percent, write_pdf_cancellable};
 
@@ -38,7 +38,9 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     ensure_output_is_safe(job_root)?;
     ensure_not_cancelled(job_root)?;
 
-    let mut layout = paginate_with_cancellation(request, Some(job_root), false)?;
+    let allow_pending_accessibility = request.output_purpose == OutputPurpose::ReadingCopy;
+    let mut layout =
+        paginate_with_cancellation(request, Some(job_root), allow_pending_accessibility)?;
     if layout.pages.len() > MAX_PAGES {
         return Err(Box::new(RenderResponse::failed(
             "failed",
@@ -51,25 +53,30 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     let is_digital_pdf = request.profile == "generic-digital-pdf-v1";
     let mut cover_width = 0.0;
     let mut spine_width = 0.0;
-    let cover_page =
-        if let Some(cover) = request.cover.as_ref() {
-            if is_digital_pdf {
-                cover_width = request.trim.width_inches * 72.0;
-                Some(digital_cover_layout(request).map_err(|diagnostic| {
-                    Box::new(RenderResponse::failed("rejected", diagnostic))
-                })?)
-            } else {
-                spine_width =
-                    layout.pages.len() as f32 * cover.paper_caliper_inches_per_page * 72.0;
-                cover_width =
-                    request.trim.width_inches * 144.0 + spine_width + cover.bleed_inches * 144.0;
-                Some(cover_layout(request, cover_width).map_err(|diagnostic| {
-                    Box::new(RenderResponse::failed("rejected", diagnostic))
-                })?)
-            }
+    let cover_page = if let Some(cover) = request.cover.as_ref() {
+        if is_digital_pdf {
+            cover_width = request.trim.width_inches * 72.0;
+            Some(
+                digital_cover_layout(
+                    request,
+                    allow_pending_accessibility,
+                    &mut layout.diagnostics,
+                )
+                .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?,
+            )
         } else {
-            None
-        };
+            spine_width = layout.pages.len() as f32 * cover.paper_caliper_inches_per_page * 72.0;
+            cover_width =
+                request.trim.width_inches * 144.0 + spine_width + cover.bleed_inches * 144.0;
+            Some(
+                cover_layout(request, cover_width).map_err(|diagnostic| {
+                    Box::new(RenderResponse::failed("rejected", diagnostic))
+                })?,
+            )
+        }
+    } else {
+        None
+    };
     let mut font_pages = layout.pages.clone();
     font_pages.extend(cover_page.iter().cloned());
     let fonts = subset_for_layout(&font_pages)
@@ -560,6 +567,14 @@ fn validate_request(
         return reject(
             "PRESS_PROFILE_UNSUPPORTED",
             format!("The profile '{}' is unsupported.", request.profile),
+        );
+    }
+    if request.output_purpose == OutputPurpose::ReadingCopy
+        && request.profile != "generic-digital-pdf-v1"
+    {
+        return reject(
+            "PRESS_OUTPUT_PURPOSE_INVALID",
+            "Reading-copy output is supported only by the generic Digital PDF profile.",
         );
     }
     if !matches!(request.ink.as_str(), "BlackAndWhite" | "Color") {
@@ -2005,11 +2020,11 @@ fn designed_page(
         }
         match string(&item, "kind").as_str() {
             "Image" => {
-                if item
+                let accessibility_decision_pending = item
                     .get("accessibilityDecisionPending")
                     .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                {
+                    .unwrap_or(false);
+                if accessibility_decision_pending {
                     let message = format!(
                         "Image object '{}' requires alternative text or an explicit decorative decision before publishing.",
                         string(&item, "id")
@@ -2052,10 +2067,14 @@ fn designed_page(
                             .get("altText")
                             .and_then(Value::as_str)
                             .map(str::to_owned),
+                        // A private reading copy can render before the author makes the
+                        // accessibility decision. Keep that unresolved image out of the
+                        // tagged reading order and retain the warning for the user.
                         decorative: item
                             .get("decorative")
                             .and_then(Value::as_bool)
-                            .unwrap_or(false),
+                            .unwrap_or(false)
+                            || (allow_pending_accessibility && accessibility_decision_pending),
                         language: item
                             .get("language")
                             .and_then(Value::as_str)
@@ -4646,7 +4665,7 @@ fn cover_layout(request: &RenderRequest, width: f32) -> Result<LayoutPage, Diagn
         * 72.0;
     let cover = request.cover.as_ref().expect("cover");
     if cover.scene.is_some() {
-        return cover_scene_layout(request, width, height, false);
+        return cover_scene_layout(request, width, height, false, false, &mut Vec::new());
     }
     let bleed = cover.bleed_inches * 72.0;
     let spine_width = (width - bleed * 2.0 - request.trim.width_inches * 144.0).max(0.0);
@@ -4804,12 +4823,23 @@ fn cover_layout(request: &RenderRequest, width: f32) -> Result<LayoutPage, Diagn
     })
 }
 
-fn digital_cover_layout(request: &RenderRequest) -> Result<LayoutPage, Diagnostic> {
+fn digital_cover_layout(
+    request: &RenderRequest,
+    allow_pending_accessibility: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<LayoutPage, Diagnostic> {
     let cover = request.cover.as_ref().expect("cover");
     let width = request.trim.width_inches * 72.0;
     let height = request.trim.height_inches * 72.0;
     if cover.scene.is_some() {
-        return cover_scene_layout(request, width, height, true);
+        return cover_scene_layout(
+            request,
+            width,
+            height,
+            true,
+            allow_pending_accessibility,
+            diagnostics,
+        );
     }
     let margin = (request.trim.margin_inches * 72.0).max(24.0);
     let safe_width = width - margin * 2.0;
@@ -4888,6 +4918,8 @@ fn cover_scene_layout(
     width: f32,
     height: f32,
     digital: bool,
+    allow_pending_accessibility: bool,
+    diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<LayoutPage, Diagnostic> {
     let cover = request.cover.as_ref().expect("cover");
     let mut scene = cover.scene.clone().expect("cover scene");
@@ -5002,13 +5034,12 @@ fn cover_scene_layout(
         "semanticBlocks": [],
         "variants": [{ "scene": scene }]
     });
-    let mut diagnostics = Vec::new();
     let mut page = designed_page(
         &composition,
         &request.document,
         &request.trim,
-        false,
-        &mut diagnostics,
+        allow_pending_accessibility,
+        diagnostics,
     )?;
     page.kind = PageKind::Cover;
     page.width_points = Some(width);
@@ -5477,6 +5508,7 @@ mod tests {
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v1".to_owned(),
             ink: "BlackAndWhite".to_owned(),
+            output_purpose: OutputPurpose::Publication,
             layout_trace_mode: None,
             document: serde_json::json!({
                 "title": "Long contents",
@@ -5759,9 +5791,17 @@ mod tests {
             })),
         });
         let unchanged =
-            cover_scene_layout(&request, old_width, height, false).expect("same geometry");
-        let expanded =
-            cover_scene_layout(&request, old_width + 18.0, height, false).expect("changed spine");
+            cover_scene_layout(&request, old_width, height, false, false, &mut Vec::new())
+                .expect("same geometry");
+        let expanded = cover_scene_layout(
+            &request,
+            old_width + 18.0,
+            height,
+            false,
+            false,
+            &mut Vec::new(),
+        )
+        .expect("changed spine");
         assert_eq!(unchanged.lines.len(), 1);
         assert_eq!(expanded.lines.len(), 1);
         let local_width = unchanged.lines[0].x - old_width * 0.55;
@@ -6103,6 +6143,7 @@ mod tests {
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v1".to_owned(),
             ink: "BlackAndWhite".to_owned(),
+            output_purpose: OutputPurpose::Publication,
             layout_trace_mode: None,
             document,
             trim: standard_trim(),

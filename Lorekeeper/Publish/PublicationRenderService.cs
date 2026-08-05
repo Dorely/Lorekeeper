@@ -869,7 +869,10 @@ public sealed class PublicationRenderProcessor(
             });
         job.Status = PublicationRenderStatus.Completed;
         job.ProgressPercent = 100;
-        job.ProgressMessage = "Lorekeeper validated";
+        job.ProgressMessage = coreTarget
+            && result.Diagnostics?.Any(diagnostic => diagnostic.Severity == "warning") == true
+                ? "Reading PDF ready with warnings"
+                : "Lorekeeper validated";
         job.CompletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         Cleanup(job.Id);
@@ -1072,6 +1075,9 @@ public sealed class PublicationRenderProcessor(
             protocolVersion = 5,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
+            outputPurpose = job.TargetKind == PublicationTargetKind.CoreBook
+                ? "reading-copy"
+                : "publication",
             ink = release?.Ink is null or PublicationInk.Digital
                 ? PublicationInk.Color.ToString()
                 : release.Ink.ToString(),

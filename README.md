@@ -62,7 +62,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - An in-app preview and immutable download for the Core reading PDF used for
   private review and sharing, plus one-action preparation
   jobs that compile, render, validate, and store or package the selected Core or
-  release target. Paperback presets cover KDP, IngramSpark, and other printers;
+  release target. Unresolved image accessibility choices remain visible warnings
+  on the private Core copy, while publication releases require those choices to
+  be resolved. Paperback presets cover KDP, IngramSpark, and other printers;
   EPUB and PDF ebook workspaces expose only relevant controls. The full-height
   conversational Publish assistant has compact Core/release tools, persistent
   streaming history, image attachments, complete outline context, bounded

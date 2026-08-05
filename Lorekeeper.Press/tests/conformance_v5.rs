@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 5);
-    assert_eq!(value["rendererVersion"], "2.0.2");
+    assert_eq!(value["rendererVersion"], "2.0.3");
     assert_eq!(
         value["profiles"],
         json!([
@@ -62,7 +62,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 5);
-    assert_eq!(response["rendererVersion"], "2.0.2");
+    assert_eq!(response["rendererVersion"], "2.0.3");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -1729,6 +1729,85 @@ fn browser_preview_reports_pending_image_accessibility_without_weakening_render_
     assert!(has_diagnostic(
         &response(&render),
         "PRESS_ALT_DECISION_REQUIRED"
+    ));
+}
+
+#[test]
+fn reading_copy_reports_pending_image_accessibility_without_blocking_the_pdf() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["outputPurpose"] = json!("reading-copy");
+    let image = &mut job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"][0]["variants"]
+        [0]["scene"]["objects"][0];
+    image["accessibilityDecisionPending"] = json!(true);
+    image["altText"] = Value::Null;
+    image["decorative"] = json!(false);
+    job.request["cover"]["scene"] = json!({
+        "schemaVersion": 1,
+        "surface": {
+            "kind": "SinglePage",
+            "outputPageMode": "EditionLeaves",
+            "widthPoints": 432.0,
+            "heightPoints": 648.0,
+            "bleedPoints": 0.0,
+            "safeInsetPoints": 18.0,
+            "allowIndependentPdfPage": false
+        },
+        "layers": [{ "id": "cover-layer", "name": "Cover", "order": 0 }],
+        "objects": [{
+            "id": "cover-art",
+            "layerId": "cover-layer",
+            "kind": "Image",
+            "bounds": { "xPercent": 0, "yPercent": 0, "widthPercent": 100, "heightPercent": 100 },
+            "imageId": "90000000-0000-0000-0000-000000000001",
+            "imageFit": "Cover",
+            "altText": null,
+            "decorative": false,
+            "accessibilityDecisionPending": true,
+            "semanticRole": "Figure",
+            "readingOrder": 1,
+            "zIndex": 0
+        }]
+    });
+    job.write_request();
+
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let rendered = response(&output);
+    assert_eq!(rendered["status"], "completed");
+    let warnings = rendered["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == "PRESS_ALT_DECISION_REQUIRED")
+        .collect::<Vec<_>>();
+    assert_eq!(warnings.len(), 2);
+    assert!(
+        warnings
+            .iter()
+            .all(|warning| warning["severity"] == "warning")
+    );
+    assert_eq!(
+        rendered["artifacts"].as_array().expect("artifacts")[0]["kind"],
+        "book-pdf"
+    );
+}
+
+#[test]
+fn reading_copy_purpose_is_rejected_for_publication_profiles() {
+    let mut job = PreparedJob::new("kdp-paperback-v1");
+    job.request["outputPurpose"] = json!("reading-copy");
+    job.write_request();
+
+    let output = job.render();
+    assert!(!output.status.success());
+    assert!(has_diagnostic(
+        &response(&output),
+        "PRESS_OUTPUT_PURPOSE_INVALID"
     ));
 }
 

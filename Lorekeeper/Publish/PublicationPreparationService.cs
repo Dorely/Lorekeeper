@@ -162,6 +162,7 @@ public sealed class PublicationPreparationWorker(
         job.ProgressPercent = 5;
         job.StartedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        var preparationDiagnostics = new List<PublicationPreflightItem>();
 
         var blockers = await ReadinessBlockersAsync(db, job, cancellationToken);
         if (blockers.Count > 0)
@@ -184,7 +185,7 @@ public sealed class PublicationPreparationWorker(
             job.Step = "Typesetting and validating reading PDF";
             job.ProgressPercent = 20;
             await db.SaveChangesAsync(cancellationToken);
-            await WaitForRenderAsync(db, job, cancellationToken);
+            preparationDiagnostics.AddRange(await WaitForRenderAsync(db, job, cancellationToken));
         }
         else if (job.Edition!.Format == PublicationEditionFormat.Epub)
         {
@@ -205,7 +206,7 @@ public sealed class PublicationPreparationWorker(
             job.Step = "Rendering and validating publication files";
             job.ProgressPercent = 20;
             await db.SaveChangesAsync(cancellationToken);
-            await WaitForRenderAsync(db, job, cancellationToken);
+            preparationDiagnostics.AddRange(await WaitForRenderAsync(db, job, cancellationToken));
             db.ChangeTracker.Clear();
             job = await db.PublicationPreparationJobs.Include(item => item.Edition).SingleAsync(item => item.Id == jobId, cancellationToken);
             job.Step = "Building publication package";
@@ -223,7 +224,10 @@ public sealed class PublicationPreparationWorker(
         job.Status = PublicationPreparationStatus.Ready;
         job.Step = "Ready";
         job.ProgressPercent = 100;
-        job.Message = job.TargetKind == PublicationTargetKind.CoreBook ? "Reading PDF ready" : "Publication files ready";
+        job.Message = job.TargetKind == PublicationTargetKind.CoreBook
+            ? preparationDiagnostics.Count > 0 ? "Reading PDF ready with warnings" : "Reading PDF ready"
+            : "Publication files ready";
+        job.DiagnosticsJson = JsonSerializer.Serialize(preparationDiagnostics);
         job.CompletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -246,15 +250,20 @@ public sealed class PublicationPreparationWorker(
         return true;
     }
 
-    private static async Task WaitForRenderAsync(AppDbContext db, PublicationPreparationJob preparation, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<PublicationPreflightItem>> WaitForRenderAsync(
+        AppDbContext db,
+        PublicationPreparationJob preparation,
+        CancellationToken cancellationToken)
     {
         while (true)
         {
             db.ChangeTracker.Clear();
             var state = await db.PublicationRenderJobs.AsNoTracking().SingleAsync(item => item.Id == preparation.RenderJobId, cancellationToken);
-            if (state.Status == PublicationRenderStatus.Completed) return;
+            var diagnostics = JsonSerializer.Deserialize<List<PublicationRenderDiagnostic>>(state.DiagnosticsJson) ?? [];
+            if (state.Status == PublicationRenderStatus.Completed)
+                return diagnostics.Select(item => new PublicationPreflightItem(item.Severity, item.Code, item.Message)).ToList();
             if (state.Status is PublicationRenderStatus.Failed or PublicationRenderStatus.Cancelled)
-                throw new InvalidOperationException(state.ProgressMessage + " " + string.Join(' ', JsonSerializer.Deserialize<List<PublicationRenderDiagnostic>>(state.DiagnosticsJson)?.Select(item => item.Message) ?? []));
+                throw new InvalidOperationException(state.ProgressMessage + " " + string.Join(' ', diagnostics.Select(item => item.Message)));
             await Task.Delay(250, cancellationToken);
         }
     }

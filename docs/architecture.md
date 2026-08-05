@@ -382,7 +382,11 @@ persisted reconnectable one-action jobs: Core compiles/renders/validates its
 reading copy; paperback renders and packages interior/full-wrap files; EPUB
 exports, structurally validates, and packages; PDF ebook renders and packages
 one cover-plus-book PDF. It reuses current artifacts and returns plain-language
-blocking actions. `IPublishService` remains projection/export-only.
+blocking actions. A Core reading copy may complete while image alternative-text
+or decorative decisions remain pending; those images are omitted from the
+copy's tagged reading order and the preparation retains visible warnings.
+Publication releases continue to fail closed on the same unresolved decisions.
+`IPublishService` remains projection/export-only.
 Publish documents carry display-ready numbered titles across Markdown, EPUB,
 plain text, and Press. Protocol requests therefore disable Press-side title
 numbering so a chapter or act prefix is emitted exactly once. Press-generated
@@ -461,13 +465,17 @@ a human proof attestation.
 Protocol v5 stages `input/request.json` plus declared PNG/JPEG assets and
 approved project TTF/OTF fonts in a bounded job root. Declarations carry media
 type, byte length, dimensions where applicable, rights state, and SHA-256.
+Render requests explicitly identify `outputPurpose` as `publication` or
+`reading-copy`; the latter is accepted only by the generic Digital PDF profile
+used for Core Book and cannot weaken a publication profile.
 The `layout` command defaults to its full glyph-evidence trace for conformance
 work; app previews explicitly request `layoutTraceMode: browser-preview`, which
 retains page paint order and typographic runs while omitting unused glyph arrays.
 That authoring trace renders images whose accessibility decision is still
-pending and returns a visible warning; `render` continues to reject the same
-scene until every meaningful image has alternative text or is deliberately
-marked decorative.
+pending and returns a visible warning. Core `reading-copy` renders do the same,
+treating unresolved images as artifacts in that private copy so the tagged PDF
+remains structurally valid. Publication renders reject the scene until every
+meaningful image has alternative text or is deliberately marked decorative.
 Absolute paths, traversal, links/reparse points, undeclared or changed bytes,
 corrupt assets, restricted/unsupported fonts, existing output, and cancellation
 fail before promotion. The renderer writes a fresh staging directory,

@@ -43,6 +43,8 @@ pub struct RenderRequest {
     pub profile: String,
     pub ink: String,
     #[serde(default)]
+    pub output_purpose: OutputPurpose,
+    #[serde(default)]
     pub layout_trace_mode: Option<String>,
     pub document: Value,
     pub trim: Trim,
@@ -51,6 +53,14 @@ pub struct RenderRequest {
     pub assets: Vec<AssetDeclaration>,
     #[serde(default)]
     pub fonts: Vec<FontDeclaration>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum OutputPurpose {
+    #[default]
+    Publication,
+    ReadingCopy,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -73,7 +73,7 @@ public sealed class PublishChatService(
         - Use project page setup for authoring decisions and release geometry only for compatibility and covers. Optional generation geometry derives dimensions but never places the result; ordinary source-image shapes remain valid and are fitted non-destructively.
         - generate_project_image and edit_project_image wait for completion and always return unattached project images. Inspect the visible output, then use its ID with the focused place/add Core cover, release cover, or publication-page tools in this same turn when placement is requested. Never stop after asset generation or imply geometry guidance attached it.
         - Cover artwork always remains beneath canonical title, subtitle, author, spine, and back-cover copy. Adjust the artwork crop, opacity, and framing instead of trying to raise it above cover text.
-        - Require alt text or an explicit decorative decision and preserve logical reading order.
+        - Require alt text or an explicit decorative decision for publication releases and preserve logical reading order. A Core reading PDF may complete with unresolved image accessibility decisions as explicit warnings; report those warnings and do not describe the copy as publication-ready.
         - Submit large composition payloads once to staging, then apply only the stage ID and expected revision.
         - Release format is fixed. Create another release for another product type.
 
