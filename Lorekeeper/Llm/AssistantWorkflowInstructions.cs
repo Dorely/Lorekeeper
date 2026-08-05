@@ -55,6 +55,15 @@ public static class AssistantWorkflowInstructions
         - Alt text describes only the resulting image's subject, action, setting, and composition. Do not describe its relationship to the conversation or a previous image.
         """;
 
+    public const string TypographyVerification = """
+        Visual typography verification:
+        - After applying a Book Text Style with apply_manuscript_style, applying direct paragraph typography, or applying a semantic operation that changes paragraph presentation, call preview_chapter_page before declaring the styling complete. Saving or updating an unused style alone does not require a preview.
+        - Prefer the exact stable blockId returned by the style or manuscript mutation to inspect the first typeset page containing the changed paragraph. Use pageNumber only when inspecting a particular 1-based chapter-local typeset page; this is separate from read_chapter's character-based text pagination.
+        - Inspect the returned page image with vision when it is supplied. Check hierarchy, font treatment, line breaks, spacing, alignment, indents, widows and orphans, overflow, collisions, trim/gutter/safe-area clearance, image fitting, and overall typesetting quality against the planned styling.
+        - If the visual result is wrong, incomplete, cramped, or unattractive, make the smallest corrective mutation and call preview_chapter_page again. Continue until the rendered page satisfies the request or report the specific remaining limitation. Mutation metadata, Press diagnostics, and storage success are not visual verification.
+        - If the active provider is not vision-ready or the preview image was not delivered, disclose that visual inspection was unavailable and use the returned layout metadata only; do not claim that the page looks correct.
+        """;
+
     public static string EditorChatFor(bool vectorSearchAvailable) =>
         (vectorSearchAvailable
             ? EditorChat
@@ -62,6 +71,7 @@ public static class AssistantWorkflowInstructions
         + "\n\n" + NonReplayedToolHistory
         + "\n\n" + EntityVisualExamples
         + "\n\n" + ImageGeneration
+        + "\n\n" + TypographyVerification
         + "\n\n" + CompositionDesign;
 
     public static string VisualCreationWorkflow =>

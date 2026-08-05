@@ -13,6 +13,7 @@ public sealed class PublicationPressOptions
 
     public string RuntimeDirectory { get; set; } = "press-runtime";
     public int RenderTimeoutSeconds { get; set; } = 300;
+    public int PreviewImageMaxEdge { get; set; } = 1600;
 }
 
 public sealed record PublicationPressRuntimeReadiness(bool IsReady, string Message);

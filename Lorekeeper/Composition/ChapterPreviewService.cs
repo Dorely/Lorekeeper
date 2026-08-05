@@ -18,10 +18,36 @@ public sealed record ChapterPreviewResult(
     IReadOnlyList<ChapterPreviewPage> Pages,
     string CacheKey,
     IReadOnlyList<ChapterPreviewDiagnostic> Diagnostics,
-    IReadOnlyList<ChapterPreviewFont> Fonts);
+    IReadOnlyList<ChapterPreviewFont> Fonts,
+    IReadOnlyList<ChapterPreviewPageMap> PageMap);
+
+public sealed record ChapterPreviewSource(
+    ManuscriptDocument Document,
+    IReadOnlyList<ManuscriptStyleView> Styles);
+
+public sealed record ChapterPreviewPageTarget(
+    string? BlockId = null,
+    int? ChapterPageNumber = null);
+
+public sealed record ChapterPreviewImageResult(
+    ChapterPreviewPage Page,
+    int ChapterPageNumber,
+    int PhysicalPage,
+    int PageCount,
+    byte[] Data,
+    int PixelWidth,
+    int PixelHeight,
+    IReadOnlyList<ChapterPreviewDiagnostic> Diagnostics);
+
+public sealed record ChapterPreviewPageMap(
+    Guid ChapterId,
+    string BlockId,
+    int PhysicalPage,
+    int ChapterPageNumber);
 
 public sealed record ChapterPreviewFont(
     string Face,
+    string FamilyKey,
     Guid FaceId,
     int Weight,
     bool Italic,
@@ -100,6 +126,12 @@ public sealed record ChapterPreviewDiagnostic(string Severity, string Code, stri
 public interface IChapterPreviewService
 {
     Task<ChapterPreviewResult> LayoutAsync(Guid projectId, Guid chapterId, CancellationToken cancellationToken = default);
+    Task<ChapterPreviewImageResult> RenderPageAsync(
+        Guid projectId,
+        Guid chapterId,
+        ChapterPreviewSource? source,
+        ChapterPreviewPageTarget target,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class ChapterPreviewService(
@@ -120,6 +152,64 @@ public sealed class ChapterPreviewService(
         Guid projectId,
         Guid chapterId,
         CancellationToken cancellationToken = default)
+        => await LayoutCoreAsync(projectId, chapterId, source: null, cancellationToken);
+
+    public async Task<ChapterPreviewImageResult> RenderPageAsync(
+        Guid projectId,
+        Guid chapterId,
+        ChapterPreviewSource? source,
+        ChapterPreviewPageTarget target,
+        CancellationToken cancellationToken = default)
+    {
+        if ((string.IsNullOrWhiteSpace(target.BlockId)) == (target.ChapterPageNumber is null))
+            throw new ArgumentException("Specify exactly one blockId or chapter page number.", nameof(target));
+        if (target.ChapterPageNumber is <= 0)
+            throw new ArgumentOutOfRangeException(nameof(target), "Chapter page number must be greater than zero.");
+
+        var layout = await LayoutCoreAsync(projectId, chapterId, source, cancellationToken);
+        var orderedPages = layout.Pages.OrderBy(page => page.PhysicalPage).ToArray();
+        if (orderedPages.Length == 0)
+            throw new InvalidDataException("The chapter preview contains no typeset pages.");
+
+        ChapterPreviewPage page;
+        int chapterPageNumber;
+        if (!string.IsNullOrWhiteSpace(target.BlockId))
+        {
+            var targetBlockId = target.BlockId.Trim();
+            var mapping = layout.PageMap.FirstOrDefault(item =>
+                string.Equals(item.BlockId, targetBlockId, StringComparison.Ordinal));
+            if (mapping is null)
+                throw new KeyNotFoundException($"Block '{targetBlockId}' was not found in the chapter page map.");
+
+            chapterPageNumber = mapping.ChapterPageNumber;
+            page = orderedPages.FirstOrDefault(item => item.PhysicalPage == mapping.PhysicalPage)
+                ?? throw new InvalidDataException($"The page mapped for block '{targetBlockId}' was not returned by Press.");
+        }
+        else
+        {
+            chapterPageNumber = target.ChapterPageNumber!.Value;
+            if (chapterPageNumber > orderedPages.Length)
+                throw new ArgumentOutOfRangeException(nameof(target), $"Chapter page {chapterPageNumber} is outside the preview's {orderedPages.Length} page(s).");
+            page = orderedPages[chapterPageNumber - 1];
+        }
+
+        var data = await RasterizePageAsync(projectId, layout, page, cancellationToken);
+        return new ChapterPreviewImageResult(
+            page,
+            chapterPageNumber,
+            page.PhysicalPage,
+            orderedPages.Length,
+            data.Data,
+            data.Width,
+            data.Height,
+            layout.Diagnostics);
+    }
+
+    private async Task<ChapterPreviewResult> LayoutCoreAsync(
+        Guid projectId,
+        Guid chapterId,
+        ChapterPreviewSource? source,
+        CancellationToken cancellationToken)
     {
         var project = await db.Projects.AsNoTracking().SingleOrDefaultAsync(item => item.Id == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Project was not found.");
@@ -132,9 +222,16 @@ public sealed class ChapterPreviewService(
             ?? throw new KeyNotFoundException("Chapter was not found in this project.");
         var chapters = new List<Chapter> { chapter };
 
-        var documents = chapters.ToDictionary(
-            chapter => chapter.Id,
-            chapter => ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision));
+        if (source is not null
+            && (source.Document.ManuscriptId != chapterId
+                || source.Styles is null))
+            throw new InvalidDataException("The chapter preview source does not match the requested chapter.");
+
+        var documents = new Dictionary<Guid, ManuscriptDocument>
+        {
+            [chapterId] = source?.Document
+                ?? ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision),
+        };
         var compositionIds = documents.Values.SelectMany(document => document.Content)
             .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.PageCompositionId is not null)
             .Select(block => block.PageCompositionId!.Value).Distinct().ToArray();
@@ -183,13 +280,33 @@ public sealed class ChapterPreviewService(
         if (assets.Count != imageIds.Count)
             throw new InvalidDataException("The chapter references a missing project image.");
 
-        var styles = await db.ManuscriptStyleDefinitions.AsNoTracking()
-            .Where(item => item.ProjectId == projectId).OrderBy(item => item.NameKey).ToListAsync(cancellationToken);
+        var styles = source is null
+            ? (await db.ManuscriptStyleDefinitions.AsNoTracking()
+                    .Where(item => item.ProjectId == projectId)
+                    .OrderBy(item => item.NameKey)
+                    .ToListAsync(cancellationToken))
+                .Select(item => new PreviewStyle(
+                    item.Id,
+                    item.Name,
+                    item.Kind,
+                    item.SemanticRole,
+                    item.Revision,
+                    JsonSerializer.Deserialize<ManuscriptStyleProperties>(item.DefinitionJson, ManuscriptCodec.JsonOptions)
+                        ?? new ManuscriptStyleProperties()))
+                .ToList()
+            : source.Styles
+                .Select(item => new PreviewStyle(
+                    item.Id,
+                    item.Name,
+                    item.Kind,
+                    item.SemanticRole,
+                    item.Revision,
+                    item.Definition))
+                .ToList();
         foreach (var style in styles)
         {
-            var definition = JsonSerializer.Deserialize<ManuscriptStyleProperties>(style.DefinitionJson, ManuscriptCodec.JsonOptions);
-            if (!string.IsNullOrWhiteSpace(definition?.FontFamilyKey))
-                usedFontKeys.Add(definition.FontFamilyKey);
+            if (!string.IsNullOrWhiteSpace(style.Definition.FontFamilyKey))
+                usedFontKeys.Add(style.Definition.FontFamilyKey);
         }
         var customFontIds = usedFontKeys
             .Where(key => key.StartsWith("project:", StringComparison.OrdinalIgnoreCase))
@@ -250,7 +367,13 @@ public sealed class ChapterPreviewService(
             Compositions = compositions.Select(item => new { item.Id, item.Revision, item.UpdatedAt, item.ActiveAuthoringVariantId }),
             Variants = variants.Select(item => new { item.Id, item.Revision, item.UpdatedAt }),
             Assets = assets.Select(item => new { item.Id, item.UpdatedAt }),
-            Styles = styles.Select(item => new { item.Id, item.Revision }),
+            Documents = documents.Select(item => new
+            {
+                item.Key,
+                item.Value.Revision,
+                Hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(ManuscriptCodec.Serialize(item.Value)))),
+            }),
+            Styles = styles.Select(item => new { item.Id, item.Revision, item.Name, item.Kind, item.SemanticRole, item.Definition }),
             Fonts = previewFonts.Select(item => new { item.Id, item.Sha256 }),
         }, JsonOptions)));
         if (Cache.TryGetValue(cacheKey, out var cached))
@@ -338,7 +461,7 @@ public sealed class ChapterPreviewService(
                         style.Name,
                         kind = style.Kind.ToString(),
                         style.SemanticRole,
-                        definition = JsonSerializer.Deserialize<JsonElement>(style.DefinitionJson, ManuscriptCodec.JsonOptions),
+                        definition = style.Definition,
                     }).ToArray(),
                     placements = Array.Empty<object>(),
                     outputMode = "DigitalPdf",
@@ -402,6 +525,19 @@ public sealed class ChapterPreviewService(
                 .Select(item => item.PageNumber).DefaultIfEmpty(1).Min();
             var pages = response.Pages.Select((page, index) => ToPage(page, index + 1))
                 .Where(page => page.PhysicalPage >= firstPage).ToArray();
+            var pageMap = response.PageMap
+                .Where(item => Guid.TryParse(item.ChapterId, out var mapped)
+                    && mapped == chapterId
+                    && item.PageNumber >= firstPage
+                    && !string.IsNullOrWhiteSpace(item.BlockId))
+                .Select(item => new ChapterPreviewPageMap(
+                    chapterId,
+                    item.BlockId,
+                    item.PageNumber,
+                    item.PageNumber - firstPage + 1))
+                .OrderBy(item => item.PhysicalPage)
+                .ThenBy(item => item.BlockId, StringComparer.Ordinal)
+                .ToArray();
             var result = new ChapterPreviewResult(
                 pages,
                 cacheKey,
@@ -410,7 +546,8 @@ public sealed class ChapterPreviewService(
                     diagnostic.Code,
                     diagnostic.Message)).ToArray(),
                 previewFonts.Select((font, index) => new ChapterPreviewFont(
-                    $"Custom{index}", font.Id, font.Weight, font.Italic, font.ContentType, font.ContentUrl)).ToArray());
+                    $"Custom{index}", font.FamilyKey, font.Id, font.Weight, font.Italic, font.ContentType, font.ContentUrl)).ToArray(),
+                pageMap);
             Cache[cacheKey] = result;
             CacheOrder.Enqueue(cacheKey);
             while (Cache.Count > MaximumCachedPreviews && CacheOrder.TryDequeue(out var expired))
@@ -428,6 +565,352 @@ public sealed class ChapterPreviewService(
             catch (UnauthorizedAccessException) { }
         }
     }
+
+    private async Task<RasterizedPage> RasterizePageAsync(
+        Guid projectId,
+        ChapterPreviewResult layout,
+        ChapterPreviewPage page,
+        CancellationToken cancellationToken)
+    {
+        var maxEdge = Math.Clamp(options.Value.PreviewImageMaxEdge, 320, 4096);
+        var scale = Math.Min(1d, maxEdge / Math.Max(page.WidthPoints, page.HeightPoints));
+        scale = Math.Max(scale, 0.25d);
+        var width = Math.Max(1, (int)Math.Round(page.WidthPoints * scale));
+        var height = Math.Max(1, (int)Math.Round(page.HeightPoints * scale));
+
+        var assetIds = page.Images.Select(image => image.AssetId).Distinct().ToArray();
+        var assets = await db.PublishAssets.AsNoTracking()
+            .Where(asset => asset.ProjectId == projectId && assetIds.Contains(asset.Id))
+            .ToDictionaryAsync(asset => asset.Id, cancellationToken);
+        if (assets.Count != assetIds.Length)
+            throw new InvalidDataException("The selected preview page references a missing project image.");
+
+        var bitmaps = new Dictionary<Guid, SKBitmap>();
+        var typefaces = await LoadTypefacesAsync(projectId, layout, page, cancellationToken);
+        try
+        {
+            foreach (var asset in assets.Values)
+            {
+                var bitmap = SKBitmap.Decode(asset.Data)
+                    ?? throw new InvalidDataException($"Project image '{asset.FileName}' could not be decoded for the page preview.");
+                if (bitmap.Width <= 0 || bitmap.Height <= 0)
+                {
+                    bitmap.Dispose();
+                    throw new InvalidDataException($"Project image '{asset.FileName}' has invalid dimensions.");
+                }
+                bitmaps.Add(asset.Id, bitmap);
+            }
+
+            using var surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul))
+                ?? throw new InvalidOperationException("The page preview surface could not be created.");
+            var canvas = surface.Canvas;
+            canvas.Clear(SKColors.White);
+            canvas.Scale((float)scale, (float)scale);
+
+            foreach (var item in page.Shapes.Select(shape => new PaintItem(shape.ZIndex, shape))
+                .Concat(page.Images.Select(image => new PaintItem(image.ZIndex, image)))
+                .Concat(page.Lines.Select(line => new PaintItem(line.ZIndex, line)))
+                .OrderBy(item => item.ZIndex))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                switch (item.Value)
+                {
+                    case ChapterPreviewShape shape:
+                        DrawShape(canvas, page, shape);
+                        break;
+                    case ChapterPreviewImage image:
+                        DrawImage(canvas, page, image, bitmaps[image.AssetId]);
+                        break;
+                    case ChapterPreviewLine line:
+                        DrawLine(canvas, page, line, typefaces);
+                        break;
+                }
+            }
+
+            using var snapshot = surface.Snapshot();
+            using var encoded = snapshot.Encode(SKEncodedImageFormat.Png, 100)
+                ?? throw new InvalidOperationException("The page preview could not be encoded as PNG.");
+            return new RasterizedPage(encoded.ToArray(), width, height);
+        }
+        finally
+        {
+            foreach (var bitmap in bitmaps.Values)
+                bitmap.Dispose();
+            foreach (var typeface in typefaces.Values)
+                typeface.Dispose();
+        }
+    }
+
+    private async Task<Dictionary<string, SKTypeface>> LoadTypefacesAsync(
+        Guid projectId,
+        ChapterPreviewResult layout,
+        ChapterPreviewPage page,
+        CancellationToken cancellationToken)
+    {
+        var faces = page.Lines
+            .SelectMany(line => line.Runs.Count > 0
+                ? line.Runs.Select(run => run.Face)
+                : [line.Face ?? "SerifRegular"])
+            .Where(face => !string.IsNullOrWhiteSpace(face))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var typefaces = new Dictionary<string, SKTypeface>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var face in faces)
+            {
+                var descriptor = ResolveFontDescriptor(face, layout.Fonts);
+                var data = await projectFonts.ResolveFaceAsync(
+                    projectId,
+                    descriptor.FamilyKey,
+                    descriptor.Weight,
+                    descriptor.Italic,
+                    requireExact: true,
+                    cancellationToken);
+                if (data is null)
+                    throw new InvalidDataException($"The page preview font '{descriptor.FamilyKey}' {descriptor.Weight}{(descriptor.Italic ? " italic" : string.Empty)} could not be resolved.");
+
+                using var skData = SKData.CreateCopy(data.Data);
+                var typeface = SKTypeface.FromData(skData)
+                    ?? throw new InvalidDataException($"The page preview font '{descriptor.FamilyKey}' could not be decoded.");
+                typefaces.Add(face, typeface);
+            }
+            return typefaces;
+        }
+        catch
+        {
+            foreach (var typeface in typefaces.Values)
+                typeface.Dispose();
+            throw;
+        }
+    }
+
+    private static FontDescriptor ResolveFontDescriptor(
+        string? face,
+        IReadOnlyList<ChapterPreviewFont> fonts)
+    {
+        face = string.IsNullOrWhiteSpace(face) ? "SerifRegular" : face;
+        var declared = fonts.FirstOrDefault(item => string.Equals(item.Face, face, StringComparison.Ordinal));
+        if (declared is not null)
+            return new FontDescriptor(declared.FamilyKey, declared.Weight, declared.Italic);
+
+        if (face.StartsWith("Custom", StringComparison.Ordinal))
+            throw new InvalidDataException($"The page preview returned an undeclared custom font face '{face}'.");
+
+        var familyKey = face.StartsWith("Sans", StringComparison.OrdinalIgnoreCase)
+            ? "builtin:nunito"
+            : face.StartsWith("Mono", StringComparison.OrdinalIgnoreCase)
+                ? "builtin:roboto-mono"
+                : "builtin:lora";
+        return new FontDescriptor(
+            familyKey,
+            face.Contains("Bold", StringComparison.OrdinalIgnoreCase) ? 700 : 400,
+            face.Contains("Italic", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void DrawLine(
+        SKCanvas canvas,
+        ChapterPreviewPage page,
+        ChapterPreviewLine line,
+        IReadOnlyDictionary<string, SKTypeface> typefaces)
+    {
+        var originX = line.RotationOriginX ?? line.X;
+        var originY = page.HeightPoints - (line.RotationOriginY ?? line.Y);
+        canvas.Save();
+        canvas.RotateDegrees((float)line.RotationDegrees, (float)originX, (float)originY);
+        var baseline = page.HeightPoints - line.Y;
+        var x = line.X;
+        var runs = line.Runs.Count > 0
+            ? line.Runs
+            : [new ChapterPreviewRun(line.Text, line.Face ?? "SerifRegular", false, false, 0, 1)];
+        foreach (var run in runs)
+        {
+            if (string.IsNullOrEmpty(run.Text))
+                continue;
+            if (!typefaces.TryGetValue(run.Face, out var typeface))
+                throw new InvalidDataException($"The page preview returned an unrenderable font face '{run.Face}'.");
+
+            using var font = new SKFont(typeface, (float)Math.Max(1, line.Size * run.SizeScale));
+            using var paint = new SKPaint
+            {
+                Color = TextColor(line.FillRgb, line.Opacity),
+                IsAntialias = true,
+                Style = SKPaintStyle.Fill,
+            };
+            var runBaseline = baseline - run.BaselineShiftEm * line.Size;
+            var runStart = x;
+            x += DrawRun(canvas, run.Text, x, runBaseline, font, paint, line.WordSpacing, line.CharacterSpacing);
+            if (run.Underline || run.Strikethrough)
+            {
+                using var decoration = new SKPaint
+                {
+                    Color = paint.Color,
+                    IsAntialias = true,
+                    Style = SKPaintStyle.Stroke,
+                    StrokeWidth = (float)Math.Max(0.5, line.Size * 0.045),
+                    StrokeCap = SKStrokeCap.Butt,
+                };
+                if (run.Underline)
+                {
+                    var y = runBaseline + line.Size * 0.08;
+                    canvas.DrawLine((float)runStart, (float)y, (float)x, (float)y, decoration);
+                }
+                if (run.Strikethrough)
+                {
+                    var y = runBaseline - line.Size * 0.3;
+                    canvas.DrawLine((float)runStart, (float)y, (float)x, (float)y, decoration);
+                }
+            }
+        }
+        canvas.Restore();
+    }
+
+    private static double DrawRun(
+        SKCanvas canvas,
+        string text,
+        double x,
+        double baseline,
+        SKFont font,
+        SKPaint paint,
+        double wordSpacing,
+        double characterSpacing)
+    {
+        if (Math.Abs(wordSpacing) < 0.001 && Math.Abs(characterSpacing) < 0.001)
+        {
+            canvas.DrawText(text, (float)x, (float)baseline, font, paint);
+            return font.MeasureText(text);
+        }
+
+        var start = x;
+        foreach (var rune in text.EnumerateRunes())
+        {
+            var glyph = rune.ToString();
+            canvas.DrawText(glyph, (float)x, (float)baseline, font, paint);
+            x += font.MeasureText(glyph)
+                + characterSpacing
+                + (rune.Value is ' ' or '\t' ? wordSpacing : 0);
+        }
+        return x - start;
+    }
+
+    private static void DrawShape(SKCanvas canvas, ChapterPreviewPage page, ChapterPreviewShape shape)
+    {
+        var top = page.HeightPoints - shape.Y - shape.Height;
+        var rect = new SKRect((float)shape.X, (float)top, (float)(shape.X + shape.Width), (float)(top + shape.Height));
+        var centerX = rect.MidX;
+        var centerY = rect.MidY;
+        canvas.Save();
+        canvas.RotateDegrees((float)shape.RotationDegrees, centerX, centerY);
+        if (shape.FillRgb is not null)
+        {
+            using var fill = new SKPaint
+            {
+                Color = TextColor(shape.FillRgb, shape.Opacity),
+                IsAntialias = true,
+                Style = SKPaintStyle.Fill,
+            };
+            DrawShapeGeometry(canvas, shape.Kind, rect, fill);
+        }
+        if (shape.StrokeRgb is not null && shape.StrokeWidth > 0)
+        {
+            using var stroke = new SKPaint
+            {
+                Color = TextColor(shape.StrokeRgb, shape.Opacity),
+                IsAntialias = true,
+                Style = SKPaintStyle.Stroke,
+                StrokeWidth = (float)shape.StrokeWidth,
+            };
+            DrawShapeGeometry(canvas, shape.Kind, rect, stroke);
+        }
+        canvas.Restore();
+    }
+
+    private static void DrawShapeGeometry(SKCanvas canvas, string kind, SKRect rect, SKPaint paint)
+    {
+        if (kind.Equals("Ellipse", StringComparison.OrdinalIgnoreCase))
+        {
+            canvas.DrawOval(rect, paint);
+            return;
+        }
+        if (kind.Equals("Line", StringComparison.OrdinalIgnoreCase))
+        {
+            canvas.DrawLine(rect.Left, rect.MidY, rect.Right, rect.MidY, paint);
+            return;
+        }
+        canvas.DrawRect(rect, paint);
+    }
+
+    private static void DrawImage(
+        SKCanvas canvas,
+        ChapterPreviewPage page,
+        ChapterPreviewImage image,
+        SKBitmap bitmap)
+    {
+        var sourceWidth = image.SourceWidthFraction is > 0 and <= 1
+            ? image.SourceWidthFraction
+            : 1;
+        var sourceLeft = Math.Clamp(image.SourceLeftFraction, 0, 1 - sourceWidth);
+        var source = new SKRect(
+            (float)(sourceLeft * bitmap.Width),
+            0,
+            (float)((sourceLeft + sourceWidth) * bitmap.Width),
+            bitmap.Height);
+        var top = page.HeightPoints - image.Y - image.Height;
+        var frame = new SKRect((float)image.X, (float)top, (float)(image.X + image.Width), (float)(top + image.Height));
+        var scale = image.Fit.Equals("Cover", StringComparison.OrdinalIgnoreCase)
+            ? Math.Max(frame.Width / source.Width, frame.Height / source.Height)
+            : Math.Min(frame.Width / source.Width, frame.Height / source.Height);
+        var destinationWidth = source.Width * scale;
+        var destinationHeight = source.Height * scale;
+        var cropX = image.Fit.Equals("Cover", StringComparison.OrdinalIgnoreCase)
+            ? (float)Math.Clamp(image.CropX, 0, 1)
+            : 0.5f;
+        var cropY = image.Fit.Equals("Cover", StringComparison.OrdinalIgnoreCase)
+            ? (float)Math.Clamp(image.CropY, 0, 1)
+            : 0.5f;
+        var destinationLeft = frame.Left + (frame.Width - destinationWidth) * cropX;
+        var destinationTop = frame.Top + (frame.Height - destinationHeight) * cropY;
+        var destination = new SKRect(
+            (float)destinationLeft,
+            (float)destinationTop,
+            (float)(destinationLeft + destinationWidth),
+            (float)(destinationTop + destinationHeight));
+
+        canvas.Save();
+        canvas.RotateDegrees((float)image.RotationDegrees, frame.MidX, frame.MidY);
+        canvas.ClipRect(frame);
+        using var paint = new SKPaint
+        {
+            Color = SKColors.White.WithAlpha((byte)Math.Clamp(Math.Round(image.Opacity * 255), 0, 255)),
+            IsAntialias = true,
+        };
+        canvas.DrawBitmap(bitmap, source, destination, paint);
+        canvas.Restore();
+    }
+
+    private static SKColor TextColor(double[]? rgb, double opacity)
+    {
+        var red = rgb is { Length: > 0 } ? rgb[0] : 0.125;
+        var green = rgb is { Length: > 1 } ? rgb[1] : 0.145;
+        var blue = rgb is { Length: > 2 } ? rgb[2] : 0.204;
+        return new SKColor(
+            (byte)Math.Clamp(Math.Round(Math.Clamp(red, 0, 1) * 255), 0, 255),
+            (byte)Math.Clamp(Math.Round(Math.Clamp(green, 0, 1) * 255), 0, 255),
+            (byte)Math.Clamp(Math.Round(Math.Clamp(blue, 0, 1) * 255), 0, 255),
+            (byte)Math.Clamp(Math.Round(opacity * 255), 0, 255));
+    }
+
+    private sealed record PreviewStyle(
+        Guid Id,
+        string Name,
+        ManuscriptStyleKind Kind,
+        string SemanticRole,
+        long Revision,
+        ManuscriptStyleProperties Definition);
+
+    private sealed record FontDescriptor(string FamilyKey, int Weight, bool Italic);
+    private sealed record RasterizedPage(byte[] Data, int Width, int Height);
+    private sealed record PaintItem(int ZIndex, object Value);
 
     private static object BlockPayload(ManuscriptBlock block) => new
     {

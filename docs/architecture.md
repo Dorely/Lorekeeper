@@ -295,6 +295,23 @@ workflows behave consistently in the Electron host. Clicking Figure artwork
 selects the Figure directly; the primary toolbar and selected-Figure inspector
 share a sticky editor header,
 keeping the styled Figure controls visible while the manuscript scrolls.
+
+Editor Chat's `preview_chapter_page` reuses the same Press layout request and
+accepts either a stable manuscript block ID or a 1-based chapter-local typeset
+page number. When Review edits is enabled, the tool supplies the projected
+manuscript and staged Book Text Style catalog to Press, so the image reflects
+the pending result rather than the persisted document. Press remains the sole
+pagination and shaping authority; the app only rasterizes the returned paint
+order, text runs, images, and shapes into a bounded PNG for visual inspection.
+The PNG is persisted through the existing `EditorMessageVisual` byte boundary
+and is also sent as model-only visual context when the active provider supports
+vision. A block spanning pages resolves to its first Press-mapped page, while
+the result reports both chapter-local and underlying Press physical page
+numbers. `Publishing:Press:PreviewImageMaxEdge` bounds the generated image and
+defaults to 1600 pixels. Missing fonts/assets, invalid targets, Press failures,
+and unavailable vision are returned as recoverable tool state rather than
+being treated as successful visual verification.
+
 Advanced controls are bounded and positioned below the complete sticky header
 and within the editor viewport, so they neither cover Figure controls nor create
 horizontal overflow.

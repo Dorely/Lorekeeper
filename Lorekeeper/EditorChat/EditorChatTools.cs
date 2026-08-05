@@ -41,6 +41,7 @@ public sealed class EditorChatTools(
     IAgentProjectImageWorkflow imageWorkflow,
     ICompositionService compositions,
     IProjectPageSetupService pageSetups,
+    IChapterPreviewService chapterPreviews,
     IChapterSemanticProjectionService semanticProjection,
     EditorManuscriptPreviewService manuscriptPreviews,
     IOptions<EditorChatOptions> editorOptions,
@@ -156,6 +157,15 @@ public sealed class EditorChatTools(
                     "Use chapter ids from the Context Feed outline when available; use list_chapters for missing ids, line counts, and page counts. " +
                     "Provide pageNumber to read a specific page of the full chapter; omit it to read page 1. " +
                     "Always returns content plus pagination metadata. If this turn already staged an edit to the chapter, returns the latest staged body for this turn."),
+
+            AIFunctionFactory.Create(
+                method: (Guid chapterId, string? blockId = null, int? pageNumber = null) =>
+                    PreviewChapterPageAsync(context, chapterId, blockId, pageNumber),
+                name: "preview_chapter_page",
+                description:
+                    "Render one Press-typeset chapter page as a PNG for visual inspection. Provide exactly one of blockId or pageNumber. " +
+                    "blockId is a stable semantic manuscript block ID and selects the first typeset page containing that block; pageNumber is 1-based chapter-local typeset pagination, not read_chapter text pagination. " +
+                    "The image is attached to the turn and, when vision is available, supplied to the model on the next iteration."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, int startBlock = 0, int blockCount = 40) =>
@@ -578,6 +588,119 @@ public sealed class EditorChatTools(
         null => null,
         _ => throw new InvalidOperationException("Text alignment must be Start, Center, End, Justify, or omitted."),
     };
+
+    private async Task<string> PreviewChapterPageAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        string? blockId,
+        int? pageNumber)
+    {
+        try
+        {
+            blockId = string.IsNullOrWhiteSpace(blockId) ? null : blockId.Trim();
+            if ((blockId is null) == (pageNumber is null))
+                return JsonSerializer.Serialize(new
+                {
+                    ok = false,
+                    code = "PREVIEW_TARGET_REQUIRED",
+                    summary = "Provide exactly one of blockId or pageNumber.",
+                }, ManuscriptCodec.JsonOptions);
+            if (pageNumber is <= 0)
+                return JsonSerializer.Serialize(new
+                {
+                    ok = false,
+                    code = "PREVIEW_PAGE_INVALID",
+                    summary = "pageNumber must be a positive 1-based chapter-local page number.",
+                }, ManuscriptCodec.JsonOptions);
+
+            var chapter = await chapters.GetAsync(chapterId, ctx.TurnCancellationToken);
+            if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+                return JsonSerializer.Serialize(new
+                {
+                    ok = false,
+                    code = "CHAPTER_NOT_FOUND",
+                    summary = $"Chapter {chapterId:N} was not found in this project.",
+                }, ManuscriptCodec.JsonOptions);
+
+            var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken)
+                ?? throw new InvalidDataException("The chapter manuscript was not found.");
+            var sourceIsStaged = false;
+            ManuscriptDocument document;
+            if (ctx.ReviewEdits
+                && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var stagedDocument) == true)
+            {
+                document = stagedDocument;
+                sourceIsStaged = true;
+            }
+            else
+            {
+                document = snapshot.Document;
+            }
+
+            var styles = ctx.ReviewEdits && ctx.EditorStaging is not null
+                ? await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
+                    manuscriptStyles,
+                    ctx.TurnCancellationToken)
+                : await manuscriptStyles.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken);
+            var preview = await chapterPreviews.RenderPageAsync(
+                ctx.ProjectId,
+                chapterId,
+                new ChapterPreviewSource(document, styles),
+                new ChapterPreviewPageTarget(blockId, pageNumber),
+                ctx.TurnCancellationToken);
+
+            var visualId = Guid.NewGuid();
+            var fileName = $"chapter-{chapterId:N}-page-{preview.ChapterPageNumber}.png";
+            var contentUrl = $"/projects/{ctx.ProjectId:N}/editor-chat-visuals/{visualId:N}/content";
+            ctx.AddVisual(new EditorChatVisualAttachment(
+                visualId,
+                $"{chapter.Title} — page {preview.ChapterPageNumber}",
+                "Press-backed page preview for visual typesetting verification.",
+                $"{contentUrl}?maxEdge=640",
+                contentUrl,
+                preview.PixelWidth,
+                preview.PixelHeight,
+                ctx.CurrentToolCallId,
+                SourceKind: "chapterPreview",
+                SourceRefId: chapterId,
+                ContentType: "image/png",
+                FileName: fileName,
+                Data: preview.Data));
+            if (ctx.VisionReady)
+                ctx.AddModelOnlyImage(visualId, fileName, "image/png", preview.Data);
+
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                chapter = new { id = chapter.Id, title = chapter.Title },
+                target = blockId is not null ? "block" : "chapterPage",
+                blockId,
+                requestedPageNumber = pageNumber,
+                chapterPageNumber = preview.ChapterPageNumber,
+                physicalPage = preview.PhysicalPage,
+                pageCount = preview.PageCount,
+                pageLabel = preview.Page.PageLabel,
+                revision = document.Revision,
+                source = sourceIsStaged ? "stagedDraft" : "persisted",
+                dimensions = new { widthPixels = preview.PixelWidth, heightPixels = preview.PixelHeight },
+                visualId,
+                diagnostics = preview.Diagnostics.Take(12),
+                delivery = ctx.VisionReady
+                    ? "The rendered page image is attached as model-only visual context for the next reasoning iteration."
+                    : "The rendered page image is attached for the user, but the active provider is not vision-ready so model-only image delivery was skipped.",
+            }, ManuscriptCodec.JsonOptions);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                code = "CHAPTER_PREVIEW_FAILED",
+                summary = exception.Message,
+                recovery = "Correct the chapter, block ID, page number, font, image, or Press preview issue and retry.",
+            }, ManuscriptCodec.JsonOptions);
+        }
+    }
 
     private async Task<string> CreateParagraphStyleFromBlockAsync(
         EditorChatContext ctx,
