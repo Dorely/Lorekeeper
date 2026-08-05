@@ -786,6 +786,10 @@ the projectless recovery shell with the original backup protected.
 Project export v17 contains only the current v4/page-setup/composition model,
 Core Book, sparse release overlays, and target-aware publication records; older
 formats remain importable only through isolated versioned transformers.
+Startup applies later additive EF migrations only after the guarded Core Book
+transformation and its cleanup migration succeed. This makes current Core-owned
+tables available before runtime services execute without exposing those tables
+to partial-schema migration code, preserving the protected historical cutover order.
 The manuscript migration owner targets its historical EF schema only when that
 schema migration itself is pending; a later unrelated EF migration never causes
 the startup orchestrator to downgrade current application tables. This preserves

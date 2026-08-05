@@ -359,6 +359,9 @@ using (var scope = app.Services.CreateScope())
     if (!await migrationRecovery.IsRecoveryRequiredAsync())
     {
         await db.GetService<IMigrator>().MigrateAsync(PublicationCoreMigrationService.CleanupMigrationId);
+        // Later additive migrations target the current Core schema and must run only
+        // after the guarded Core transformation and cleanup have both succeeded.
+        await db.GetService<IMigrator>().MigrateAsync();
         var embeddingConfiguration = await db.EmbeddingConfigurations.AsNoTracking().FirstOrDefaultAsync();
         var vectorMaintenance = scope.ServiceProvider.GetRequiredService<IVectorStoreMaintenance>();
         vectorMaintenance.Initialize(embeddingConfiguration?.Dimensions);

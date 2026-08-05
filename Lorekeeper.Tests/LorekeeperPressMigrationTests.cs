@@ -257,6 +257,9 @@ public sealed class LorekeeperPressMigrationTests
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
+                Assert.Equal(
+                    await db.PublicationBooks.AsNoTracking().CountAsync(),
+                    await db.PublicationBookPdfPresentations.AsNoTracking().CountAsync());
                 var edition = await db.PublicationEditions.AsNoTracking().SingleAsync(item => item.Id == editionId);
                 var unknownEdition = await db.PublicationEditions.AsNoTracking()
                     .SingleAsync(item => item.Id == unknownEditionId);
