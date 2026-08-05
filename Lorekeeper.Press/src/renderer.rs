@@ -3699,20 +3699,24 @@ fn validate_caption_bounds(value: &Value, trim: &crate::model::Trim) -> Result<(
 fn text_page(lines: Vec<(String, f32)>, trim: &crate::model::Trim) -> LayoutPage {
     let height = trim.height_inches * 72.0;
     let x = trim.margin_inches * 72.0;
+    let available_width = trim.width_inches * 72.0 - x * 2.0;
     let mut y = height - x;
     let lines = lines
         .into_iter()
-        .map(|(text, size)| {
+        .flat_map(|(text, size)| {
+            let face = if size >= 16.0 {
+                FontFace::SansBold
+            } else {
+                FontFace::SerifRegular
+            };
+            wrap_layout_runs(&text, &single_run(&text, face), size, available_width)
+                .into_iter()
+                .map(move |(text, runs)| (text, runs, size))
+        })
+        .map(|(text, runs, size)| {
             let line = LayoutLine {
-                runs: single_run(
-                    &text,
-                    if size >= 16.0 {
-                        FontFace::SansBold
-                    } else {
-                        FontFace::SerifRegular
-                    },
-                ),
                 text,
+                runs,
                 size,
                 x,
                 y,

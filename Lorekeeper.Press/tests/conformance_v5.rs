@@ -922,14 +922,15 @@ fn edition_placements_honor_flow_caption_and_accessibility_presentation() {
     assert_eq!(image["fit"], "Contain");
     assert_eq!(image["accessibilityRole"], "Diagram");
     assert_eq!(image["language"], "en-US");
+    let placement_page_text = placement_page["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|line| line["text"].as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(
-        placement_page["lines"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|line| line["text"]
-                .as_str()
-                .is_some_and(|text| text.contains("First Coordinate"))),
+        placement_page_text.contains("First Coordinate"),
         "ChapterOpening placement must start inside its target chapter rather than on the prior page"
     );
     assert!(
