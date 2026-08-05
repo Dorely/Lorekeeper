@@ -131,6 +131,16 @@
     display: none;
 }
 
+.semantic-editor ::deep .semantic-editor-tool-group[aria-label="Reusable styles"] {
+    display: flex;
+    align-items: center;
+    gap: .18rem;
+    padding: .16rem .22rem;
+    border: 1px solid color-mix(in srgb, var(--bs-primary, #0d6efd) 38%, var(--bs-border-color, #ced4da));
+    border-radius: .38rem;
+    background: color-mix(in srgb, var(--bs-primary, #0d6efd) 5%, var(--bs-body-bg, #fff));
+}
+
 .semantic-editor ::deep .semantic-editor-button,
 .semantic-editor ::deep .semantic-editor-select {
     min-height: 2rem;
@@ -251,22 +261,22 @@
 
 .semantic-editor ::deep .semantic-editor-icon-button {
     display: inline-grid;
-    min-width: 1.7rem;
+    min-width: 1.8rem;
     place-items: center;
     padding-inline: .35rem;
-    font-size: .86rem;
+    font-size: .98rem;
     line-height: 1;
 }
 
 .semantic-editor ::deep .semantic-editor-alignment-icon {
     display: flex;
-    width: .9rem;
+    width: 1rem;
     flex-direction: column;
     gap: 2px;
 }
 
 .semantic-editor ::deep .semantic-editor-alignment-icon > span {
-    height: 1.5px;
+    height: 1.75px;
     border-radius: 1px;
     background: currentcolor;
 }
@@ -294,8 +304,8 @@
 .semantic-editor ::deep .semantic-editor-link-button::before,
 .semantic-editor ::deep .semantic-editor-link-button::after {
     position: absolute;
-    width: .55rem;
-    height: .28rem;
+    width: .62rem;
+    height: .31rem;
     border: 1.5px solid currentcolor;
     border-radius: 999px;
     content: "";
@@ -340,10 +350,6 @@
 .semantic-editor ::deep select[aria-label="Line spacing"],
 .semantic-editor ::deep select[aria-label="Book Text character style"] {
     width: 5.75rem;
-}
-
-.semantic-editor ::deep select[aria-label="Insert project image as figure"] {
-    width: 5rem;
 }
 
 .semantic-editor ::deep select[aria-label="Book Text Style"] {

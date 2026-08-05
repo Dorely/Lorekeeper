@@ -124,9 +124,13 @@ the live test project; terminate the browser host after the run.
   layout/accessibility controls remain visible and interactive beneath the
   toolbar. Open and close Find while scrolled deep into a chapter and confirm
   the visible manuscript position is preserved instead of navigating to the end.
-  Insert a project image through the Figure picker,
-  insert a Designed Page and confirm Pages opens immediately, then click List
-  twice and confirm the block returns to ordinary body text. Confirm Figure and
+  Open **Images**, choose artwork from the shared searchable project-image
+  picker, and confirm the Figure setup form receives that image. Toggle List on
+  and off for a styled paragraph and confirm its font, spacing, indentation,
+  alignment, and inline emphasis remain intact. Open **Manage** inside the
+  bordered Book Text Style group and confirm the full style manager appears in
+  a modal rather than occupying manuscript space. Insert a Designed Page and
+  confirm Pages opens immediately. Confirm Figure and
   Designed Page setup use in-app forms in Electron and never depend on native
   browser prompt dialogs.
 - Switch to Read with unsaved edits and confirm it flushes, lays out the current

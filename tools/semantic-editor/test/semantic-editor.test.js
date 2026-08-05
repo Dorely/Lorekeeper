@@ -610,8 +610,10 @@ test("figure insertion resolves project image IDs without casing assumptions", a
     const root = document.createElement("div");
     document.body.append(root);
     const saves = [];
+    const calls = [];
     const handle = attach(root, {
         async invokeMethodAsync(name, _revision, json) {
+            calls.push(name);
             if (name === "OnDocumentDebounced") saves.push(JSON.parse(json));
             return {saved: true, revision: 5};
         }
@@ -622,9 +624,14 @@ test("figure insertion resolves project image IDs without casing assumptions", a
         previewUrl: "/media/map"
     }]));
 
-    const select = root.querySelector("select[aria-label='Insert project image as figure']");
-    select.value = imageId;
-    select.dispatchEvent(new window.Event("change", {bubbles: true}));
+    root.querySelector("button[aria-label='Choose a project image to insert or replace a Figure']").click();
+    assert.ok(calls.includes("OnOpenProjectImagePicker"));
+    assert.equal(handle.selectProjectImage({
+        id: imageId.toLowerCase(),
+        fileName: "map.png",
+        altText: "A route map",
+        previewUrl: "/media/map"
+    }), true);
     const dialog = root.querySelector("form[aria-label='Insert figure']");
     assert.ok(dialog);
     dialog.elements.caption.value = "Map caption";
@@ -698,12 +705,28 @@ test("List toolbar button toggles a list item back to body text", async () => {
             if (name === "OnDocumentDebounced") saves.push(JSON.parse(json));
             return {saved: true, revision: 5};
         }
-    }, 10_000, JSON.stringify(manuscript()));
+    }, 10_000, JSON.stringify(manuscript([{
+        id: "stable",
+        type: "paragraph",
+        styleRole: "body",
+        headingLevel: null,
+        imageId: null,
+        altText: null,
+        paragraphPresentation: {fontSizePoints: 17, alignment: "center", leftIndentEm: 2},
+        content: [{type: "text", text: "Hello world", marks: [{type: "strong", value: null}]}]
+    }])));
     const list = root.querySelector("button[aria-label='Toggle list formatting']");
 
     list.click();
     await handle.flush();
     assert.equal(saves.at(-1).content[0].type, "listItem");
+    assert.equal(saves.at(-1).content[0].styleRole, "body");
+    assert.deepEqual(saves.at(-1).content[0].paragraphPresentation, {
+        fontSizePoints: 17,
+        alignment: "center",
+        leftIndentEm: 2
+    });
+    assert.deepEqual(saves.at(-1).content[0].content[0].marks, [{type: "strong", value: null}]);
 
     list.click();
     await handle.flush();
@@ -717,7 +740,10 @@ test("all formatting controls remain directly available with hover text", () => 
     const dom = installDom();
     const root = document.createElement("div");
     document.body.append(root);
-    const handle = attach(root, {async invokeMethodAsync() {}}, 10_000, JSON.stringify(manuscript()));
+    const calls = [];
+    const handle = attach(root, {
+        async invokeMethodAsync(name) { calls.push(name); }
+    }, 10_000, JSON.stringify(manuscript()));
     const toolbar = root.querySelector(".semantic-editor-toolbar");
     assert.equal(root.querySelector(".semantic-editor-advanced"), null);
     assert.equal(toolbar.querySelectorAll(":scope > .semantic-editor-tool-group").length, 6);
@@ -735,6 +761,7 @@ test("all formatting controls remain directly available with hover text", () => 
         "Subscript",
         "Set or remove language",
         "Book Text character style",
+        "Choose a project image to insert or replace a Figure",
         "Edit selected figure alternative text",
         "Edit selected figure placement, width, and crop behavior",
         "Convert selected figure to a paragraph",
@@ -742,6 +769,7 @@ test("all formatting controls remain directly available with hover text", () => 
         "Insert special character",
         "Right, first-line, and hanging indents, spacing, and pagination controls",
         "Clear direct paragraph formatting",
+        "Manage Book Text Styles",
     ]) {
         assert.ok(toolbar.querySelector(`[title=${JSON.stringify(title)}]`), `${title} should be directly available`);
     }
@@ -749,6 +777,8 @@ test("all formatting controls remain directly available with hover text", () => 
     toolbar.querySelector("button[aria-label='Find and replace']").click();
     assert.equal(root.scrollTop, 325);
     assert.equal(root.querySelector(".semantic-find-panel").hidden, false);
+    toolbar.querySelector("button[aria-label='Manage Book Text Styles']").click();
+    assert.ok(calls.includes("OnOpenBookTextStyles"));
     handle.dispose();
     dom.window.close();
 });

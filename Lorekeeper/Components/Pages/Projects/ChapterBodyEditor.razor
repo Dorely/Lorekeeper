@@ -45,6 +45,8 @@
     [Parameter] public bool IsVisible { get; set; } = true;
     [Parameter] public bool IsReadOnly { get; set; }
     [Parameter] public EventCallback<Guid> OpenDesignedPage { get; set; }
+    [Parameter] public EventCallback OpenProjectImagePicker { get; set; }
+    [Parameter] public EventCallback OpenBookTextStyles { get; set; }
     [Parameter] public EventCallback StyleCatalogChanged { get; set; }
     [Parameter, EditorRequired]
     public Func<Guid, long, string, Task<SemanticEditorSaveResult>> SaveAsync { get; set; } = null!;
@@ -165,6 +167,26 @@
 
     [JSInvokable]
     public Task OnOpenDesignedPage(Guid compositionId) => OpenDesignedPage.InvokeAsync(compositionId);
+
+    [JSInvokable]
+    public Task OnOpenProjectImagePicker() => OpenProjectImagePicker.InvokeAsync();
+
+    [JSInvokable]
+    public Task OnOpenBookTextStyles() => OpenBookTextStyles.InvokeAsync();
+
+    public async Task SelectProjectImageAsync(ProjectImageView image)
+    {
+        if (_disposed || _handle is null)
+            return;
+
+        try
+        {
+            await _handle.InvokeVoidAsync("selectProjectImage", image);
+        }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+        catch (JSException) { }
+    }
 
     [JSInvokable]
     public async Task<object> OnCreateParagraphStyleFromBlock(

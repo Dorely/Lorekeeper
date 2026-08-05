@@ -178,17 +178,6 @@ else
                         @onclick="OpenReviewModeAsync">@ReviewModeLabel</button>
             </div>
 
-            @if (_mode == EditorMode.Edit)
-            {
-                <details class="manuscript-style-details">
-                    <summary>Manage Book Text Styles</summary>
-                    <ManuscriptStylesPanel @key="_stylePanelVersion"
-                                           ProjectId="Project.Id"
-                                           BeforeChange="FlushAsync"
-                                           Changed="OnManuscriptStylesChangedAsync" />
-                </details>
-            }
-
             <div class="@ChapterEditorClass()">
                 @if (_editorDocument is { } editorDocument)
                 {
@@ -200,6 +189,8 @@ else
                                        IsVisible="@(_mode == EditorMode.Edit)"
                                        IsReadOnly="EditorReadOnly"
                                        OpenDesignedPage="OpenDesignedPage"
+                                       OpenProjectImagePicker="OpenManuscriptImageModal"
+                                       OpenBookTextStyles="OpenBookTextStylesModal"
                                        StyleCatalogChanged="OnEditorStyleCatalogChanged"
                                        SaveAsync="SaveDocumentAsync" />
                 }
@@ -773,6 +764,39 @@ else
                                     OnClose="CloseImagesModal"
                                     OnPrimaryAction="AddImageToContextAsync" />
 
+    <ProjectImageLibraryPickerModal ProjectId="Project.Id"
+                                    IsOpen="_manuscriptImageModalOpen"
+                                    Title="Choose a manuscript image"
+                                    PrimaryActionLabel="Use image"
+                                    PrimaryActionEnabled="@(!LayoutControlsLocked && _bodyEditor is not null)"
+                                    OnClose="CloseManuscriptImageModal"
+                                    OnPrimaryAction="SelectManuscriptImageAsync" />
+
+    @if (_bookTextStylesModalOpen)
+    {
+        <div class="book-text-styles-modal-backdrop" @onclick="CloseBookTextStylesModal">
+            <section class="book-text-styles-modal"
+                     role="dialog"
+                     aria-modal="true"
+                     aria-label="Manage Book Text Styles"
+                     @onclick:stopPropagation="true">
+                <header>
+                    <div>
+                        <span class="eyebrow">Book design</span>
+                        <h2>Book Text Styles</h2>
+                    </div>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseBookTextStylesModal"></button>
+                </header>
+                <div class="book-text-styles-modal-body">
+                    <ManuscriptStylesPanel @key="_stylePanelVersion"
+                                           ProjectId="Project.Id"
+                                           BeforeChange="FlushAsync"
+                                           Changed="OnManuscriptStylesChangedAsync" />
+                </div>
+            </section>
+        </div>
+    }
+
 }
 
 @code {
@@ -829,6 +853,8 @@ else
     private int _contextRefreshSignal;
     private int _reviewRefreshSignal;
     private bool _imagesModalOpen;
+    private bool _manuscriptImageModalOpen;
+    private bool _bookTextStylesModalOpen;
     private int _chapterWordCount;
     private int _chapterTokenCount;
     private bool _chapterTokenIsExact = true;
@@ -1010,6 +1036,28 @@ else
     }
 
     private void CloseImagesModal() => _imagesModalOpen = false;
+
+    private void OpenManuscriptImageModal()
+    {
+        if (LayoutControlsLocked || _bodyEditor is null) return;
+        _manuscriptImageModalOpen = true;
+    }
+
+    private void CloseManuscriptImageModal() => _manuscriptImageModalOpen = false;
+
+    private async Task SelectManuscriptImageAsync(ProjectImageView image)
+    {
+        if (_bodyEditor is null) return;
+        await _bodyEditor.SelectProjectImageAsync(image);
+    }
+
+    private void OpenBookTextStylesModal()
+    {
+        if (LayoutControlsLocked) return;
+        _bookTextStylesModalOpen = true;
+    }
+
+    private void CloseBookTextStylesModal() => _bookTextStylesModalOpen = false;
 
     private async Task AddImageToContextAsync(ProjectImageView image)
     {

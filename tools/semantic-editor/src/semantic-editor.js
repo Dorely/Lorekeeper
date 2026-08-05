@@ -1099,10 +1099,16 @@ function clearParagraphPresentation(view) {
 
 function toggleListFormatting(view) {
     const selectedBlock = view.state.selection.$from.parent;
-    if (selectedBlock.type.name === "list_item")
-        applyBlock(view, "paragraph", "body", 2);
-    else
-        applyBlock(view, "list_item", "list-item", 2);
+    const currentRole = selectedBlock.attrs.styleRole;
+    if (selectedBlock.type.name === "list_item") {
+        applyBlock(
+            view,
+            "paragraph",
+            !currentRole || currentRole === "list-item" ? "body" : currentRole,
+            2);
+    } else {
+        applyBlock(view, "list_item", currentRole || "list-item", 2);
+    }
 }
 
 function insertSceneBreak(view) {
@@ -2151,7 +2157,9 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             } catch (error) {
                 showEditorNotice(root, error?.message || "The Book Text Style could not be saved.");
             }
-        })
+        }),
+        button("Manage", "Manage Book Text Styles", () =>
+            void dotNetRef.invokeMethodAsync("OnOpenBookTextStyles"))
     );
 
     toolbar.append(
@@ -2182,11 +2190,8 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         }),
         typographyControls.group,
         styleControls,
-        selectControl(
-            "Insert project image as figure",
-            [["", "Image"]].concat(
-                projectImages.map(image => [image.id, image.fileName])),
-            value => void setFigureImage(view, imageById.get(String(value).toLowerCase()), root)),
+        button("Images", "Choose a project image to insert or replace a Figure", () =>
+            void dotNetRef.invokeMethodAsync("OnOpenProjectImagePicker")),
         button("Alt", "Edit selected figure alternative text", () => void editFigureAltText(view, root)),
         iconButton("◩", "Edit selected figure placement, width, and crop behavior", () =>
             void editFigurePresentation(view, root)),
@@ -2288,7 +2293,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             controlBySelect("Book Text character style"),
         ]),
         toolGroup("Images and structure", [
-            controlBySelect("Insert project image as figure"),
+            controlByTitle("Choose a project image to insert or replace a Figure"),
             controlByTitle("Edit selected figure alternative text"),
             controlByTitle("Edit selected figure placement, width, and crop behavior"),
             controlByTitle("Convert selected figure to a paragraph"),
@@ -2412,6 +2417,17 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             anchor.download = fileName;
             anchor.click();
             URL.revokeObjectURL(url);
+            return true;
+        },
+        selectProjectImage(image) {
+            const imageId = String(image?.id || "").toLowerCase();
+            if (!imageId) return false;
+            imageById.set(imageId, image);
+            const existingIndex = projectImages.findIndex(candidate =>
+                String(candidate.id).toLowerCase() === imageId);
+            if (existingIndex >= 0) projectImages[existingIndex] = image;
+            else projectImages.push(image);
+            void setFigureImage(view, image, root);
             return true;
         },
         focus() { view.focus(); },

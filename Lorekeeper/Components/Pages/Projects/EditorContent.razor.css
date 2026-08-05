@@ -302,6 +302,49 @@
     opacity: 0.6;
 }
 
+.book-text-styles-modal-backdrop {
+    position: fixed;
+    z-index: 1060;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgb(15 23 42 / 58%);
+    backdrop-filter: blur(2px);
+}
+
+.book-text-styles-modal {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    width: min(62rem, 100%);
+    max-height: min(45rem, 92vh);
+    overflow: hidden;
+    border: 1px solid var(--lk-line, var(--bs-border-color, #dee2e6));
+    border-radius: var(--lk-radius-lg, .75rem);
+    background: var(--lk-surface, var(--bs-body-bg, #fff));
+    box-shadow: var(--lk-shadow-md, 0 1.25rem 3rem rgb(0 0 0 / 24%));
+}
+
+.book-text-styles-modal > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .8rem 1rem;
+    border-bottom: 1px solid var(--lk-line, var(--bs-border-color, #dee2e6));
+}
+
+.book-text-styles-modal h2 {
+    margin: 0;
+    font: 700 1.25rem/1.2 Georgia, "Times New Roman", serif;
+}
+
+.book-text-styles-modal-body {
+    min-height: 0;
+    padding: 1rem;
+    overflow: auto;
+}
+
 .chapter-review-surface {
     position: relative;
     height: 100%;
