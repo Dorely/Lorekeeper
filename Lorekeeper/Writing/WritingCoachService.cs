@@ -289,6 +289,38 @@ public sealed class WritingCoachService(
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
 
+            if (turnEngine.TryCompactContext(messages, providerAvailability.Provider.ModelId) is { } compaction)
+            {
+                manifest.Add(new ChatToolCallManifest(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatContextCompaction.EmptyArgumentsJson));
+                activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
+                await SafePersistAsync(activeAssistant);
+
+                await turnEngine.AddMessageAsync(conversations, new WritingCoachMessage
+                {
+                    ConversationId = conversation.Id,
+                    Order = nextOrder++,
+                    Role = WritingCoachMessageRole.Tool,
+                    Content = ChatTurnEngine.CompactionNotice,
+                    ToolCallId = compaction.CallId,
+                    ToolName = ChatTurnEngine.CompactionToolName,
+                    Status = WritingCoachMessageStatus.Completed,
+                }, CancellationToken.None);
+                yield return new WritingCoachToolCallStarted(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatContextCompaction.EmptyArgumentsJson,
+                    ArgumentsComplete: true);
+                yield return new WritingCoachToolCallCompleted(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatTurnEngine.CompactionNotice,
+                    Error: null,
+                    DurationMs: 0);
+            }
+
             if (iteration == maxIterations - 1)
             {
                 yield return new WritingCoachTurnError(

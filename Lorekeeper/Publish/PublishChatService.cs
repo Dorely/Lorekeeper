@@ -374,8 +374,10 @@ public sealed class PublishChatService(
                 }
 
                 activeAssistant.Content = completedRound.Text;
-                activeAssistant.ToolCallsJson = JsonSerializer.Serialize(
-                    completedRound.ToolCalls.Select(ChatToolCallManifest.From));
+                var manifest = completedRound.ToolCalls
+                    .Select(ChatToolCallManifest.From)
+                    .ToList();
+                activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
                 activeAssistant.Status = PublishMessageStatus.Completed;
                 await SafePersistAsync(activeAssistant);
                 messages.Add(new ChatMessage(
@@ -445,8 +447,40 @@ public sealed class PublishChatService(
                             "Project-image outputs from the preceding tools. Inspect the visible result before choosing an image ID for a separate cover or publication placement tool.",
                             cancellationToken);
                         if (visualMessage is not null)
-                            messages.Add(visualMessage);
+                            messages.Add(ChatTurnEngine.MarkToolContextMessage(visualMessage));
                     }
+                }
+
+                if (turnEngine.TryCompactContext(messages, availability.Provider.ModelId) is { } compaction)
+                {
+                    manifest.Add(new ChatToolCallManifest(
+                        compaction.CallId,
+                        ChatTurnEngine.CompactionToolName,
+                        ChatContextCompaction.EmptyArgumentsJson));
+                    activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
+                    await SafePersistAsync(activeAssistant);
+
+                    await turnEngine.AddMessageAsync(conversations, new PublishMessage
+                    {
+                        ConversationId = conversation.Id,
+                        Order = nextOrder++,
+                        Role = PublishMessageRole.Tool,
+                        Content = ChatTurnEngine.CompactionNotice,
+                        ToolCallId = compaction.CallId,
+                        ToolName = ChatTurnEngine.CompactionToolName,
+                        Status = PublishMessageStatus.Completed,
+                    }, CancellationToken.None);
+                    yield return new PublishToolCallStarted(
+                        compaction.CallId,
+                        ChatTurnEngine.CompactionToolName,
+                        ChatContextCompaction.EmptyArgumentsJson,
+                        ArgumentsComplete: true);
+                    yield return new PublishToolCallCompleted(
+                        compaction.CallId,
+                        ChatTurnEngine.CompactionToolName,
+                        ChatTurnEngine.CompactionNotice,
+                        Error: null,
+                        DurationMs: 0);
                 }
 
                 if (iteration == maxIterations - 1)

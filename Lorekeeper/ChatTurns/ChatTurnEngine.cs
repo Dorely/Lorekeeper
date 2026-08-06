@@ -99,10 +99,21 @@ public sealed record ChatToolInvocationOutcome(string Result, string? Error, boo
 /// Shared model protocol for chat surfaces. Feature services retain only their setup,
 /// persistence mapping, tool-specific progress hooks, and terminal feature behavior.
 /// </summary>
-public sealed class ChatTurnEngine(ILogger<ChatTurnEngine> logger)
+public sealed class ChatTurnEngine(
+    ILogger<ChatTurnEngine> logger,
+    IChatContextCompactionService contextCompaction)
 {
+    public const string CompactionToolName = ChatContextCompaction.ToolName;
+    public const string CompactionNotice = ChatContextCompaction.Notice;
+
     public static string ToolLoopLimitError(int maxIterations) =>
         $"Tool-call loop hit cap of {maxIterations} iterations without producing a final response.";
+
+    public ChatCompactionResult? TryCompactContext(IList<ChatMessage> messages, string? modelId) =>
+        contextCompaction.TryCompact(messages, modelId);
+
+    public static ChatMessage MarkToolContextMessage(ChatMessage message) =>
+        ChatContextCompaction.MarkToolContext(message);
 
     public async Task AddMessageAsync<TMessage>(
         IChatMessageStore<TMessage> store,

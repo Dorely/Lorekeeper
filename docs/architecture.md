@@ -117,6 +117,18 @@ restore it on that assistant message; this is required by providers such as
 Gemini that validate thought signatures on the immediate tool-result round.
 Persisted cross-turn history remains text-only and does not persist or replay
 provider tool protocol metadata.
+After a complete tool-call batch returns, the six interactive chat surfaces use the
+active model's configured `ChatTokens` input limit and existing token counter
+(including its character-estimate fallback). At or above 90%, the active in-memory
+context drops tool-result messages, related function-call protocol entries, and
+messages marked as tool-derived visual context, while preserving system messages,
+user content, assistant prose, and initial visual context. A runtime-only notice
+instructs the assistant not to assume it still knows IDs or other details and to look
+them up again. The operation never interrupts streamed output or an active tool call.
+The completed operation is recorded as a synthetic `Chat Compacted` tool row and
+manifest entry for the transcript UI; the original tool rows remain audit history,
+and no new persistence schema is required. Background ingest, revision, contest, and
+other worker loops do not use this policy.
 Feature adapters must accept any valid JSON shape returned by a read-only tool.
 Post-tool mutation projection inspects only object envelopes that can carry a
 mutation notice; array or scalar read results continue the turn without a

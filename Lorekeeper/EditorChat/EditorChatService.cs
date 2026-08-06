@@ -636,7 +636,41 @@ public sealed class EditorChatService(
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
             if (modelOnlyImagesForNextRound.Count > 0)
-                messages.Add(await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound));
+                messages.Add(ChatTurnEngine.MarkToolContextMessage(
+                    await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound)));
+
+            if (turnEngine.TryCompactContext(messages, providerAvailability.Provider.ModelId) is { } compaction)
+            {
+                manifest.Add(new ChatToolCallManifest(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatContextCompaction.EmptyArgumentsJson));
+                activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
+                await SafePersistAsync(activeAssistant);
+
+                await turnEngine.AddMessageAsync(conversations, new EditorMessage
+                {
+                    ConversationId = conversation.Id,
+                    Order = nextOrder++,
+                    Role = EditorMessageRole.Tool,
+                    Content = ChatTurnEngine.CompactionNotice,
+                    ToolCallId = compaction.CallId,
+                    ToolName = ChatTurnEngine.CompactionToolName,
+                    Status = EditorMessageStatus.Completed,
+                }, CancellationToken.None);
+                yield return new EditorChatToolCallStarted(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatContextCompaction.EmptyArgumentsJson,
+                    ArgumentsComplete: true);
+                yield return new EditorChatToolCallCompleted(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatTurnEngine.CompactionNotice,
+                    Error: null,
+                    DurationMs: 0,
+                    Visuals: []);
+            }
 
             if (iteration == maxIterations - 1)
             {

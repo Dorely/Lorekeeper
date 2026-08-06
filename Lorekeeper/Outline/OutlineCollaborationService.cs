@@ -473,7 +473,39 @@ they commit to a direction, act on it without a second confirmation.
                     "Canonical visual references for entities loaded by the preceding tools. Use them for stable identity/design grounding; do not treat ordinary scenes as entity mappings.",
                     cancellationToken);
                 if (visualMessage is not null)
-                    messages.Add(visualMessage);
+                    messages.Add(ChatTurnEngine.MarkToolContextMessage(visualMessage));
+            }
+
+            if (turnEngine.TryCompactContext(messages, providerAvailability.Provider.ModelId) is { } compaction)
+            {
+                manifest.Add(new ChatToolCallManifest(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatContextCompaction.EmptyArgumentsJson));
+                activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
+                await SafePersistAsync(activeAssistant);
+
+                await turnEngine.AddMessageAsync(conversations, new OutlineMessage
+                {
+                    ConversationId = conversation.Id,
+                    Order = nextOrder++,
+                    Role = OutlineMessageRole.Tool,
+                    Content = ChatTurnEngine.CompactionNotice,
+                    ToolCallId = compaction.CallId,
+                    ToolName = ChatTurnEngine.CompactionToolName,
+                    Status = OutlineMessageStatus.Completed,
+                }, CancellationToken.None);
+                yield return new ToolCallStarted(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatContextCompaction.EmptyArgumentsJson,
+                    ArgumentsComplete: true);
+                yield return new ToolCallCompleted(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatTurnEngine.CompactionNotice,
+                    Error: null,
+                    DurationMs: 0);
             }
 
             if (iteration == maxIterations - 1)

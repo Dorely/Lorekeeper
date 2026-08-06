@@ -142,14 +142,15 @@
 | `ChatModels.cs` | Shared chat UI view models for persisted/live messages, text/image parts, image-bearing composer submissions, duration-aware tool-call chips, and transcript helpers. |
 | `ChatTranscriptTokenCounter.cs` | Shared model-input token adapter for every `ChatSurface`: applies text-only replay, includes pending/live turns, tracks settled counts, and formats advisory maximum/remaining labels. |
 | `ChatSurface.razor` (+ `.razor.css`, `.razor.js`) | Reusable chat shell with transcript/live rendering, image viewing, paste/library image attachments, composer previews, scrolling, and textarea autosizing. |
-| `ChatToolChipView.razor` (+ `.razor.css`) | Reusable expandable tool-call card that shows streamed arguments/results/errors, generic progress rows/previews, and Editor Revision worker transcript links. |
+| `ChatToolChipView.razor` (+ `.razor.css`) | Reusable expandable tool-call card that shows streamed arguments/results/errors, generic progress rows/previews, Editor Revision worker transcript links, and the styled `Chat Compacted` audit chip. |
 
 ### ChatTurns/
 
 | File | Description |
 |------|-------------|
 | `ChatTurnRuntime.cs` | App-wide active-turn coordinator keyed by project and chat surface, with buffered subscriber replay, explicit cancellation, and idle-surface maintenance leases for reset safety across windows. |
-| `ChatTurnEngine.cs` | Shared user-facing chat protocol engine for streaming text/tool parsing, default tool invocation, assistant tool envelopes, and common message persistence operations. |
+| `ChatTurnEngine.cs` | Shared user-facing chat protocol engine for streaming text/tool parsing, default tool invocation, assistant tool envelopes, chat compaction coordination, and common message persistence operations. |
+| `ChatContextCompactionService.cs` | Shared 90%-of-active-model-limit compactor that removes completed tool context at full tool-batch boundaries, preserves user/system context, and emits the runtime re-lookup notice. |
 | `ChatModelHistory.cs` | Canonical cross-turn replay policy: retains non-empty system/user/assistant text while excluding persisted tool calls, tool results, and model-only attachments. |
 | `IChatMessageStore.cs` | Common message persistence boundary implemented by the six existing feature-specific transcript repositories. |
 | `ChatImageAttachmentService.cs` | Shared project-image attachment resolver/persistence and current-turn multimodal message builder for all six user-facing chats. |

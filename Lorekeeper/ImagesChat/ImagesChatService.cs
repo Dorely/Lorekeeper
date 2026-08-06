@@ -426,7 +426,41 @@ public sealed class ImagesChatService(
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
             if (modelOnlyImagesForNextRound.Count > 0)
-                messages.Add(await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound));
+                messages.Add(ChatTurnEngine.MarkToolContextMessage(
+                    await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound)));
+
+            if (turnEngine.TryCompactContext(messages, chatProvider.ModelId) is { } compaction)
+            {
+                manifest.Add(new ChatToolCallManifest(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatContextCompaction.EmptyArgumentsJson));
+                activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
+                await SafePersistAsync(activeAssistant);
+
+                await turnEngine.AddMessageAsync(conversations, new ProjectImageMessage
+                {
+                    ConversationId = conversation.Id,
+                    Order = nextOrder++,
+                    Role = ProjectImageMessageRole.Tool,
+                    Content = ChatTurnEngine.CompactionNotice,
+                    ToolCallId = compaction.CallId,
+                    ToolName = ChatTurnEngine.CompactionToolName,
+                    Status = ProjectImageMessageStatus.Completed,
+                }, CancellationToken.None);
+                yield return new ImagesChatToolCallStarted(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatContextCompaction.EmptyArgumentsJson,
+                    ArgumentsComplete: true);
+                yield return new ImagesChatToolCallCompleted(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatTurnEngine.CompactionNotice,
+                    Error: null,
+                    DurationMs: 0,
+                    Visuals: []);
+            }
 
             if (iteration == maxIterations - 1)
             {

@@ -163,6 +163,10 @@ builder.Services.AddSingleton<TiktokenTokenCounter>();
 builder.Services.AddSingleton<CharEstimateTokenCounter>();
 builder.Services.AddSingleton<ITokenCounter, CompositeTokenCounter>();
 builder.Services.AddSingleton<ChatTokenLimitResolver>();
+builder.Services.AddSingleton<IChatContextCompactionService>(services =>
+    new ChatContextCompactionService(
+        services.GetRequiredService<ITokenCounter>(),
+        services.GetRequiredService<ChatTokenLimitResolver>()));
 builder.Services.AddSingleton<ChatTurnEngine>();
 builder.Services.AddSingleton<ChatTurnRuntime>();
 builder.Services.AddScoped<IChatImageAttachmentService, ChatImageAttachmentService>();

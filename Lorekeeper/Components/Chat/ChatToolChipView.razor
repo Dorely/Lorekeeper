@@ -1,5 +1,6 @@
 @namespace Lorekeeper.Components.Chat
 @using System.Text.Json
+@using Lorekeeper.ChatTurns
 @using Lorekeeper.EditorChat
 @inject IEditorRevisionAgentService RevisionAgents
 
@@ -219,7 +220,11 @@
         await RefreshRevisionJobAsync(jobId, showLoading: false);
     }
 
-    private string StateClass => Chip.Error is not null
+    private bool IsCompaction => string.Equals(Chip.Name, ChatTurnEngine.CompactionToolName, StringComparison.Ordinal);
+
+    private string StateClass => IsCompaction
+        ? "chat-chip-compaction"
+        : Chip.Error is not null
         ? "chat-chip-error"
         : Chip.Completed
             ? "chat-chip-ok"
@@ -229,7 +234,9 @@
 
     private bool ShouldOpen => Chip.Progress is not null && (!Chip.Completed || Chip.Error is not null);
 
-    private string IconText => Chip.Error is not null
+    private string IconText => IsCompaction
+        ? "i"
+        : Chip.Error is not null
         ? "x"
         : Chip.Completed
             ? "ok"

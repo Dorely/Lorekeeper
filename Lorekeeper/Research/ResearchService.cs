@@ -467,7 +467,8 @@ public sealed class ResearchService(
                 var entityMessage = await entityVisualContext.BuildVisionMessageAsync(
                     projectId, toolContext.DrainEntityVisuals(), toolContext.VisionReady,
                     "Canonical visual references for entities loaded by the preceding research tools.", cancellationToken);
-                if (entityMessage is not null) messages.Add(entityMessage);
+                if (entityMessage is not null)
+                    messages.Add(ChatTurnEngine.MarkToolContextMessage(entityMessage));
 
                 var sourceVisuals = toolContext.DrainSourceVisuals();
                 if (toolContext.VisionReady && sourceVisuals.Count > 0)
@@ -478,8 +479,40 @@ public sealed class ResearchService(
                         contents.Add(new TextContent($"Candidate {source.Id:N}: {source.FileName}. Alt: {source.AltText}"));
                         contents.Add(new DataContent(source.Data, source.ContentType) { Name = source.FileName });
                     }
-                    messages.Add(new ChatMessage(ChatRole.User, contents));
+                    messages.Add(ChatTurnEngine.MarkToolContextMessage(new ChatMessage(ChatRole.User, contents)));
                 }
+            }
+
+            if (turnEngine.TryCompactContext(messages, chatProvider.ModelId) is { } compaction)
+            {
+                manifest.Add(new ChatToolCallManifest(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatContextCompaction.EmptyArgumentsJson));
+                activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
+                await SafePersistAsync(activeAssistant);
+
+                await turnEngine.AddMessageAsync(conversations, new ResearchMessage
+                {
+                    ConversationId = conversation.Id,
+                    Order = nextOrder++,
+                    Role = ResearchMessageRole.Tool,
+                    Content = ChatTurnEngine.CompactionNotice,
+                    ToolCallId = compaction.CallId,
+                    ToolName = ChatTurnEngine.CompactionToolName,
+                    Status = ResearchMessageStatus.Completed,
+                }, CancellationToken.None);
+                yield return new ResearchToolCallStarted(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatContextCompaction.EmptyArgumentsJson,
+                    ArgumentsComplete: true);
+                yield return new ResearchToolCallCompleted(
+                    compaction.CallId,
+                    ChatTurnEngine.CompactionToolName,
+                    ChatTurnEngine.CompactionNotice,
+                    Error: null,
+                    DurationMs: 0);
             }
 
             if (iteration == maxIterations - 1)

@@ -369,7 +369,9 @@ public sealed class PublishChatServiceTests
                 tools ?? new ToolCatalogStub(),
                 new PublicationActorContext(),
                 Runtime,
-                new ChatTurnEngine(NullLogger<ChatTurnEngine>.Instance),
+                new ChatTurnEngine(
+                    NullLogger<ChatTurnEngine>.Instance,
+                    new NoopChatContextCompactionService()),
                 Options.Create(new AgentOptions { MaxToolIterations = 4 }),
                 NullLogger<PublishChatService>.Instance);
         }
@@ -381,6 +383,11 @@ public sealed class PublishChatServiceTests
         public ChatTurnRuntime Runtime { get; }
         public PublishChatService Service { get; }
         public static Fixture With(ScriptedChatClient client, IPublishAssistantTools? tools = null) => new(client, tools);
+    }
+
+    private sealed class NoopChatContextCompactionService : IChatContextCompactionService
+    {
+        public ChatCompactionResult? TryCompact(IList<ChatMessage> messages, string? modelId) => null;
     }
 
     private sealed class InMemoryConversationRepository : IPublishConversationRepository
