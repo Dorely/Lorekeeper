@@ -40,9 +40,6 @@ public static class ToolCallArguments
         if (value is null)
             return null;
 
-        if (value is string text && Guid.TryParse(text, out var guid))
-            return guid;
-
         if (value is JsonElement element)
             return NormalizeElement(element);
 
@@ -82,10 +79,7 @@ public static class ToolCallArguments
                 return arrayValue;
 
             case JsonValueKind.String:
-                var stringValue = element.GetString();
-                return stringValue is not null && Guid.TryParse(stringValue, out var guid)
-                    ? guid
-                    : stringValue;
+                return element.GetString();
 
             case JsonValueKind.Null:
             case JsonValueKind.Undefined:

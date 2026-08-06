@@ -66,18 +66,10 @@ public static class ManuscriptStyleTemplateExtractor
         IReadOnlyCollection<string>? blockIds)
     {
         var selectedIds = blockIds is { Count: > 0 }
-            ? blockIds.ToHashSet(StringComparer.Ordinal)
+            ? blockIds
+                .Select(blockId => ResolveBlock(document.Content, blockId).Id)
+                .ToHashSet(StringComparer.Ordinal)
             : null;
-        if (selectedIds is not null)
-        {
-            var foundIds = document.Content
-                .Where(block => selectedIds.Contains(block.Id))
-                .Select(block => block.Id)
-                .ToHashSet(StringComparer.Ordinal);
-            var missing = selectedIds.Except(foundIds, StringComparer.Ordinal).FirstOrDefault();
-            if (missing is not null)
-                throw new InvalidOperationException($"Manuscript block '{missing}' was not found.");
-        }
 
         var targets = document.Content
             .Where(block => (selectedIds is null || selectedIds.Contains(block.Id)) && SupportsParagraphStyle(block))
@@ -92,6 +84,18 @@ public static class ManuscriptStyleTemplateExtractor
                 new SetManuscriptBlockStyle(block.Id, semanticRole),
                 new SetParagraphPresentation(block.Id, null),
             ]).ToList();
+    }
+
+    private static ManuscriptBlock ResolveBlock(IReadOnlyList<ManuscriptBlock> blocks, string blockId)
+    {
+        try
+        {
+            return ManuscriptOperations.FindBlock(blocks, blockId);
+        }
+        catch (KeyNotFoundException exception)
+        {
+            throw new InvalidOperationException($"Manuscript block '{blockId}' was not found.", exception);
+        }
     }
 
     private static bool HasMark(ManuscriptInline inline, ManuscriptMarkType type) =>

@@ -179,6 +179,15 @@ public sealed class ChapterPreviewService(
             var mapping = layout.PageMap.FirstOrDefault(item =>
                 string.Equals(item.BlockId, targetBlockId, StringComparison.Ordinal));
             if (mapping is null)
+            {
+                var equivalentMappings = layout.PageMap
+                    .Where(item => ManuscriptOperations.AreEquivalentBlockIds(item.BlockId, targetBlockId))
+                    .ToArray();
+                if (equivalentMappings.Length > 1)
+                    throw new InvalidOperationException($"Block '{targetBlockId}' is ambiguous in the chapter page map.");
+                mapping = equivalentMappings.SingleOrDefault();
+            }
+            if (mapping is null)
                 throw new KeyNotFoundException($"Block '{targetBlockId}' was not found in the chapter page map.");
 
             chapterPageNumber = mapping.ChapterPageNumber;

@@ -721,9 +721,15 @@ public sealed class EditorChatTools(
                 : snapshot.Document;
         if (source.Revision != expectedRevision)
             throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
-        var block = source.Content.FirstOrDefault(candidate =>
-                string.Equals(candidate.Id, blockId, StringComparison.Ordinal))
-            ?? throw new InvalidOperationException("The source paragraph was not found.");
+        ManuscriptBlock block;
+        try
+        {
+            block = ManuscriptOperations.FindBlock(source.Content, blockId);
+        }
+        catch (KeyNotFoundException exception)
+        {
+            throw new InvalidOperationException("The source paragraph was not found.", exception);
+        }
         var styles = await CurrentManuscriptStylesAsync(ctx);
         var input = new ManuscriptStyleInput(
             ctx.ReviewEdits && ctx.EditorStaging is not null ? Guid.NewGuid() : null,

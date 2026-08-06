@@ -431,6 +431,19 @@ public static class ManuscriptOperations
             }).ToList(),
         };
 
+    internal static ManuscriptBlock FindBlock(IReadOnlyList<ManuscriptBlock> blocks, string blockId) =>
+        blocks[Find(blocks, blockId)];
+
+    internal static bool AreEquivalentBlockIds(string storedBlockId, string requestedBlockId)
+    {
+        if (string.Equals(storedBlockId, requestedBlockId, StringComparison.Ordinal))
+            return true;
+
+        return TryParseCanonicalGuid(storedBlockId, out var storedGuid)
+            && TryParseCanonicalGuid(requestedBlockId, out var requestedGuid)
+            && storedGuid == requestedGuid;
+    }
+
     private static int Find(IReadOnlyList<ManuscriptBlock> blocks, string blockId)
     {
         for (var index = 0; index < blocks.Count; index++)
@@ -439,14 +452,13 @@ public static class ManuscriptOperations
                 return index;
         }
 
-        if (!TryParseCanonicalGuid(blockId, out var requestedGuid))
+        if (!TryParseCanonicalGuid(blockId, out _))
             throw new KeyNotFoundException($"Manuscript block {blockId} was not found.");
 
         int? matchingIndex = null;
         for (var index = 0; index < blocks.Count; index++)
         {
-            if (!TryParseCanonicalGuid(blocks[index].Id, out var storedGuid)
-                || storedGuid != requestedGuid)
+            if (!AreEquivalentBlockIds(blocks[index].Id, blockId))
             {
                 continue;
             }
