@@ -891,7 +891,7 @@ public sealed class EditorRevisionAgentProcessor(
         {
             BatchId = batch.Id,
             Order = 0,
-            ToolCallId = pendingCall.CallId,
+            ToolCallId = session.Job.ToolCallId,
             ToolName = "apply_assigned_manuscript_operations",
             ArgumentsJson = pendingCall.ArgumentsJson,
             Summary = edit.Summary,

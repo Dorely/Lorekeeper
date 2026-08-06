@@ -13,6 +13,26 @@ public sealed class AiChangeRepository(AppDbContext db) : IAiChangeRepository
             .OrderBy(b => b.CreatedAt)
             .ToListAsync(cancellationToken);
 
+    public Task<List<AiChange>> ListPendingRevisionWorkerChangesAsync(
+        Guid projectId,
+        Guid conversationId,
+        Guid? assistantMessageId,
+        string toolCallId,
+        CancellationToken cancellationToken = default) =>
+        db.AiChanges
+            .AsNoTracking()
+            .Include(change => change.Batch)
+            .Where(change =>
+                change.Batch.ProjectId == projectId
+                && change.Batch.ConversationKind == AiChangeConversationKind.Editor
+                && change.Batch.ConversationId == conversationId
+                && change.Batch.AssistantMessageId == assistantMessageId
+                && change.ToolCallId == toolCallId
+                && change.ToolName == "apply_assigned_manuscript_operations"
+                && change.Status == AiChangeStatus.Pending)
+            .OrderBy(change => change.CreatedAt)
+            .ToListAsync(cancellationToken);
+
     public Task<AiChangeBatch?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default) =>
         db.AiChangeBatches
             .Include(b => b.Changes.OrderBy(c => c.Order))

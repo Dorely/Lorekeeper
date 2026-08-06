@@ -134,12 +134,16 @@ workspace opens as soon as a batch enters `Running`, renders pending candidates,
 and stays reachable from both the chat controls and the chapter mode bar. The
 Editor chat component remains mounted while its pane is visually collapsed for
 Contest Review, preserving the active-turn subscription that delivers candidate
-status updates through completion. Editor
-revision agents persist one worker session per assigned chapter and return only
-compact IDs, statuses, summaries, and errors to the coordinating Editor turn.
-Full instructions, operations, proposals, raw responses, and transcripts remain
-in durable session detail for the review UI and never enter the parent model
-result. The coordinator cancels and awaits any pending progress-channel read
+status updates through completion. Editor revision agents persist one worker
+session per assigned chapter and return only compact IDs, statuses, summaries,
+errors, and pending-change IDs to the coordinating Editor turn. Full
+instructions, operations, proposals, raw responses, and transcripts remain in
+durable session detail for the review UI and never enter the parent model
+result. When Review edits is enabled, each worker-created pending manuscript
+change is correlated to its parent tool call and adopted into the active Editor
+turn's manuscript overlay, so subsequent reads and pending-change notifications
+use the projected document while the persisted chapter remains unchanged until
+approval. The coordinator cancels and awaits any pending progress-channel read
 before disposing its async enumerator, so a terminal job cannot end the parent
 turn with a concurrent-disposal `NotSupportedException`. Tool contracts,
 prompts, persistence, review UI, and approval behavior must evolve together.

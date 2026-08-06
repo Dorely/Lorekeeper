@@ -248,6 +248,14 @@ public sealed class EditorManuscriptPreviewServiceTests
         public Task<List<AiChangeBatch>> ListPendingBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
             Task.FromResult(new List<AiChangeBatch>());
 
+        public Task<List<AiChange>> ListPendingRevisionWorkerChangesAsync(
+            Guid projectId,
+            Guid conversationId,
+            Guid? assistantMessageId,
+            string toolCallId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new List<AiChange>());
+
         public Task<AiChangeBatch?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default) =>
             Task.FromResult<AiChangeBatch?>(null);
 

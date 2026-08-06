@@ -11,6 +11,7 @@ public sealed class EditorRevisionAgentService(
     IProjectRepository projects,
     IChapterService chapters,
     IEditorRevisionRepository revisions,
+    IAiChangeRepository changes,
     IOptions<EditorChatOptions> options,
     IServiceScopeFactory scopeFactory,
     IEditorRevisionJobNotifier notifier,
@@ -239,7 +240,15 @@ public sealed class EditorRevisionAgentService(
             updateKind,
             DateTime.UtcNow));
 
-        return ToRunResult(job);
+        var pendingChangeIds = (await changes.ListPendingRevisionWorkerChangesAsync(
+                job.ProjectId,
+                job.ConversationId,
+                job.AssistantMessageId,
+                job.ToolCallId,
+                cancellationToken))
+            .Select(change => change.Id)
+            .ToList();
+        return ToRunResult(job, pendingChangeIds);
     }
 
     private static List<EditorRevisionAgentAssignmentInput> NormalizeAssignments(IReadOnlyList<EditorRevisionAgentAssignmentInput>? input)
@@ -269,14 +278,17 @@ public sealed class EditorRevisionAgentService(
         return normalized;
     }
 
-    private static EditorRevisionAgentRunResult ToRunResult(EditorRevisionJob job) => new(
+    private static EditorRevisionAgentRunResult ToRunResult(
+        EditorRevisionJob job,
+        IReadOnlyList<Guid> pendingChangeIds) => new(
         job.Id,
         job.Status,
         job.Sessions
             .OrderBy(session => session.Order)
             .Select(ToSessionResult)
             .ToList(),
-        job.ErrorMessage);
+        job.ErrorMessage,
+        pendingChangeIds);
 
     private static EditorRevisionSessionResult ToSessionResult(EditorRevisionSession session) => new(
         session.Id,

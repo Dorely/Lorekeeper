@@ -36,7 +36,8 @@ public sealed class EditorRevisionAgentResultTests
                 EditorRevisionSessionStatus.Completed,
                 "Drafted chapter",
                 ErrorMessage: null)],
-            ErrorMessage: null);
+            ErrorMessage: null,
+            PendingChangeIds: []);
 
         var json = EditorRevisionAgentService.SerializeRunResult(result);
 

@@ -12,8 +12,14 @@ public sealed class EditorChatChangeStagingContext(
     Guid conversationId,
     IAiChangeRepository changes) : IChapterManuscriptChangeStagingContext
 {
+    private static readonly JsonSerializerOptions ChangeJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     private AiChangeBatch? _batch;
     private readonly List<AiChange> _newChanges = [];
+    private readonly HashSet<Guid> _adoptedChangeIds = [];
     private readonly Dictionary<Guid, ManuscriptDocument> _chapterManuscriptDrafts = [];
     private readonly Dictionary<Guid, ManuscriptStyleView> _manuscriptStyleDrafts = [];
     private readonly Dictionary<Guid, Guid> _manuscriptStyleProducerChanges = [];
@@ -55,6 +61,41 @@ public sealed class EditorChatChangeStagingContext(
         _chapterManuscriptDrafts.TryGetValue(chapterId, out document!);
 
     public bool HasStagedManuscriptEdits => _chapterManuscriptDrafts.Count > 0;
+
+    public void AdoptChapterManuscriptChange(AiChange change)
+    {
+        if (_adoptedChangeIds.Contains(change.Id))
+            return;
+        if (change.Status != AiChangeStatus.Pending)
+            throw new InvalidOperationException($"AI change {change.Id:N} is not pending.");
+        if (change.ToolName != "apply_assigned_manuscript_operations"
+            || change.ResourceKind != "ChapterManuscript")
+        {
+            throw new InvalidOperationException("Only pending revision-worker chapter manuscript changes can be adopted into the editor turn.");
+        }
+
+        var before = DeserializeChapterChange(change.BeforeJson);
+        var after = DeserializeChapterChange(change.AfterJson);
+        if (before.Id != after.Id
+            || !string.Equals(change.ResourceId, Resource("Chapter", after.Id), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("The revision-worker change does not identify one valid chapter manuscript.");
+        }
+
+        var beforeDocument = before.Manuscript;
+        var afterDocument = after.Manuscript;
+        if (afterDocument.Revision != checked(beforeDocument.Revision + 1))
+            throw new InvalidDataException("The revision-worker change does not advance the manuscript revision exactly once.");
+
+        if (TryGetChapterManuscriptDraft(after.Id, out var currentDraft))
+        {
+            throw new ManuscriptRevisionConflictException(beforeDocument.Revision, currentDraft.Revision);
+        }
+
+        _chapterManuscriptDrafts.Add(after.Id, afterDocument);
+        _adoptedChangeIds.Add(change.Id);
+        _newChanges.Add(change);
+    }
 
     public async Task StageChapterManuscriptEditAsync(
         Chapter chapter,
@@ -231,6 +272,10 @@ public sealed class EditorChatChangeStagingContext(
     }
 
     private static string Resource(string kind, Guid id) => $"{kind}:{id:N}";
+
+    private static ChapterManuscriptChange DeserializeChapterChange(string json) =>
+        JsonSerializer.Deserialize<ChapterManuscriptChange>(json, ChangeJsonOptions)
+        ?? throw new InvalidDataException("The revision-worker change payload is missing its manuscript state.");
 
     private static string Serialize(object? value) =>
         JsonSerializer.Serialize(value, JsonSerializerOptions.Default);

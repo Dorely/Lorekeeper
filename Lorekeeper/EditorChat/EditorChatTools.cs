@@ -14,6 +14,7 @@ using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Publish;
 using Lorekeeper.Search;
+using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using SkiaSharp;
@@ -34,6 +35,7 @@ public sealed class EditorChatTools(
     IEntityRelationContextService entityRelations,
     IProjectSearchService projectSearch,
     IEditorRevisionAgentService revisionAgents,
+    IAiChangeRepository aiChanges,
     OutlineCollaborationTools outlineTools,
     IProjectImageService projectImages,
     IEntityVisualExampleService entityVisualExamples,
@@ -453,10 +455,12 @@ public sealed class EditorChatTools(
             method: (EditorRevisionAgentAssignmentInput[] chapters) => StartRevisionAgentsAsync(context, chapters),
             name: "start_revision_agents",
             description:
-                "Run prose-only revision workers that edit their assigned chapter bodies for explicit chapter assignments. " +
+                "Run prose-only revision workers only for substantial prose work distributed across multiple chapters or a clearly book-wide affected set. " +
+                "Do not use this for a single chapter, local scene, isolated rewrite, or style pass; use the direct manuscript tools for those requests. " +
                 "Each item must include chapterId, reason, and chapter-specific instructions. " +
                 "Workers can only alter chapter body text; this coordinator reviews their completed/staged changes and takes follow-up action only if needed. " +
-                "Before calling this, make any broader canon, outline, entity, beat, relationship, fact, or synopsis updates yourself."));
+                "Before calling this, make any broader canon, outline, entity, beat, relationship, fact, or synopsis updates yourself. " +
+                "A successful worker result is already applied or staged; do not rerun it merely because persisted reads still show the pre-review manuscript."));
 
         var existingNames = tools.OfType<AIFunction>().Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var outlineTool in await outlineTools.BuildAsync(new OutlineCollaborationContext(
@@ -1121,6 +1125,11 @@ public sealed class EditorChatTools(
             var chapter = await chapters.GetAsync(assignment.ChapterId);
             if (chapter is null || chapter.ProjectId != ctx.ProjectId)
                 return $"Error: chapter {assignment.ChapterId} not found in this project.";
+            if (ctx.ReviewEdits
+                && ctx.EditorStaging?.TryGetChapterManuscriptDraft(assignment.ChapterId, out _) == true)
+            {
+                return $"Error: chapter {assignment.ChapterId:N} already has a staged manuscript revision in this turn. Review the existing staged change instead of starting another revision worker.";
+            }
         }
 
         var request = new EditorRevisionAgentRunRequest(
@@ -1130,7 +1139,17 @@ public sealed class EditorChatTools(
             ctx.CurrentToolCallId,
             ctx.CurrentArgumentsJson,
             assignments);
-        var result = await revisionAgents.RunAsync(request);
+        var result = await revisionAgents.RunAsync(request, ctx.TurnCancellationToken);
+        if (ctx.ReviewEdits && ctx.EditorStaging is not null)
+        {
+            foreach (var changeId in result.PendingChangeIds)
+            {
+                var change = await aiChanges.GetChangeAsync(changeId, ctx.TurnCancellationToken)
+                    ?? throw new InvalidOperationException($"The staged revision-worker change {changeId:N} could not be reloaded.");
+                ctx.EditorStaging.AdoptChapterManuscriptChange(change);
+            }
+        }
+
         return EditorRevisionAgentService.SerializeRunResult(result);
     }
 

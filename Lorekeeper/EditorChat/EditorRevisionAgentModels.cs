@@ -23,7 +23,8 @@ public sealed record EditorRevisionAgentRunResult(
     Guid JobId,
     EditorRevisionJobStatus Status,
     IReadOnlyList<EditorRevisionSessionResult> Sessions,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    IReadOnlyList<Guid> PendingChangeIds);
 
 public sealed record EditorRevisionJobProgress(
     Guid JobId,
