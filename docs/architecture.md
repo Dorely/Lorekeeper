@@ -125,6 +125,9 @@ messages marked as tool-derived visual context, while preserving system messages
 user content, assistant prose, and initial visual context. A runtime-only notice
 instructs the assistant not to assume it still knows IDs or other details and to look
 them up again. The operation never interrupts streamed output or an active tool call.
+The live chat header follows that same boundary: completed tool chips remain visible
+for transcript audit, but chips dropped from the active request are excluded from the
+in-progress token estimate and the runtime notice is included until the turn ends.
 The completed operation is recorded as a synthetic `Chat Compacted` tool row and
 manifest entry for the transcript UI; the original tool rows remain audit history,
 and no new persistence schema is required. Background ingest, revision, contest, and

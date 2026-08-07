@@ -113,6 +113,8 @@ public sealed class ChatToolChip
 
     public bool ArgumentsComplete { get; private set; }
 
+    public bool IsDroppedFromActiveContext { get; private set; }
+
     public bool HasArguments => !string.IsNullOrWhiteSpace(ArgumentsJson) && ArgumentsJson != "{}";
 
     public void Rename(string name) => Name = name;
@@ -137,6 +139,8 @@ public sealed class ChatToolChip
             SetArguments(argumentsJson);
         ArgumentsComplete = true;
     }
+
+    public void MarkDroppedFromActiveContext() => IsDroppedFromActiveContext = true;
 }
 
 public sealed class ChatToolProgress
@@ -247,6 +251,9 @@ public sealed class ChatLiveTurn
             chip.MarkArgumentsComplete();
             if (visuals is { Count: > 0 })
                 chip.Visuals.AddRange(visuals);
+
+            if (string.Equals(chip.Name, ChatContextCompaction.ToolName, StringComparison.Ordinal))
+                MarkToolContextDropped();
         }
 
         IsThinking = true;
@@ -272,6 +279,17 @@ public sealed class ChatLiveTurn
     }
 
     public string? ToolNameFor(string callId) => FindToolChip(callId)?.Name;
+
+    private void MarkToolContextDropped()
+    {
+        foreach (var chip in Messages
+            .SelectMany(message => message.Parts)
+            .OfType<ChatToolPart>()
+            .Select(part => part.Chip))
+        {
+            chip.MarkDroppedFromActiveContext();
+        }
+    }
 
     private ChatToolChip? FindToolChip(string callId) => Messages
         .SelectMany(message => message.Parts)
@@ -354,7 +372,16 @@ public static class ChatTranscriptHelpers
                             sb.AppendLine(text);
                         break;
                     case ChatToolPart toolPart:
-                        AppendToolChipForTokenCount(sb, toolPart.Chip);
+                        if (string.Equals(toolPart.Chip.Name, ChatContextCompaction.ToolName, StringComparison.Ordinal))
+                        {
+                            // The chip is transcript-only. The provider receives this runtime notice instead.
+                            sb.Append("User:").AppendLine();
+                            sb.AppendLine(ChatContextCompaction.Notice);
+                        }
+                        else if (!toolPart.Chip.IsDroppedFromActiveContext)
+                        {
+                            AppendToolChipForTokenCount(sb, toolPart.Chip);
+                        }
                         break;
                     case ChatImagePart imagePart:
                         sb.Append("Image: ").Append(imagePart.Visual.Title).Append(' ').AppendLine(imagePart.Visual.Caption);

@@ -17,8 +17,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   writing coaching, research, project images, and publishing, including streaming tools,
   reviewable changes, visual context, and background revision agents.
 - Long-running interactive chat turns automatically compact completed tool context at
-  90% of the active model input limit, preserve an audit chip in the transcript, and
-  tell the assistant to look up IDs and details again before relying on them.
+  90% of the active model input limit, preserve an audit chip in the transcript, keep
+  the live token counter aligned with the reduced in-progress context, and tell the
+  assistant to look up IDs and details again before relying on them.
 - Versioned structured chapter manuscripts with stable block anchors,
   revision-aware manual and assistant operations, plain-text reading projections,
   and semantic Markdown/EPUB publication projections. Editor Chat validates and
