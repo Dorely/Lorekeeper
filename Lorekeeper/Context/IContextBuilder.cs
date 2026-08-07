@@ -68,6 +68,7 @@ public enum ContextItemKind
     ProjectGuidance,
     BookBrief,
     CurrentChapter,
+    ManuscriptStyles,
     ProjectOutline,
     ProjectFacts,
     WritingSample,

@@ -360,7 +360,7 @@ public sealed class EditorRevisionAgentProcessor(
                 method: (int startBlock = 0, int blockCount = 40) =>
                     ReadAssignedManuscriptAsync(assignedChapterId, startBlock, blockCount),
                 name: "read_assigned_manuscript",
-                description: "Read at most 40 assigned semantic manuscript blocks with stable IDs, inline marks, style roles, total/hasMore metadata, source hash, and required revision token."),
+                description: "Read at most 40 assigned semantic manuscript blocks with stable IDs, inline marks, style roles, total/hasMore metadata, source hash, and required revision token. The complete assigned snapshot is normally already in the Context Feed; use this only when it is missing, stale, or insufficient."),
 
             AIFunctionFactory.Create(
                 method: (string? query = null, string? blockType = null, string? styleRole = null, int start = 0, int count = 40) =>
@@ -381,7 +381,7 @@ public sealed class EditorRevisionAgentProcessor(
                 name: "apply_assigned_manuscript_operations",
                 description:
                     "Terminal mutating tool. Edit only the assigned chapter through semantic insert, replace, delete, move, split, merge, block-type, block-style, or inline-mark operations. " +
-                    "Use stable block IDs and expectedRevision from read_assigned_manuscript. " +
+                    "Use stable block IDs and expectedRevision from the assigned-manuscript Context Feed snapshot or a refreshed read_assigned_manuscript result. " +
                     "Semantic styleRole values must be lowercase hyphenated identifiers (for example body or scene-break), and sceneBreak insertions must use an empty text value rather than a visible separator such as ***. " +
                     "Do not call any more tools after this."),
         };
@@ -394,7 +394,7 @@ public sealed class EditorRevisionAgentProcessor(
         var history = await conversations.LoadMessagesAsync(job.ConversationId, cancellationToken);
         var sb = new StringBuilder();
         sb.AppendLine("# Chapter Revision Assignment");
-        sb.AppendLine("You are one prose-only worker. Read the assigned semantic manuscript, then edit it with apply_assigned_manuscript_operations; do not mutate any other project state.");
+        sb.AppendLine("You are one prose-only worker. Use the complete assigned manuscript snapshot in the Context Feed, then edit it with apply_assigned_manuscript_operations; do not mutate any other project state. Read the assigned manuscript only if the snapshot is missing, stale, or insufficient.");
         sb.AppendLine();
         sb.AppendLine("Assigned chapter:");
         sb.AppendLine($"- {session.ChapterTitle} (id={session.ChapterId})");

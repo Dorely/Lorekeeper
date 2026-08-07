@@ -1,6 +1,4 @@
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using Lorekeeper.Chapters;
 using Lorekeeper.Composition;
 using Lorekeeper.EntityVisuals;
@@ -30,6 +28,7 @@ public sealed class ContextBuilder(
     IEntityVisualExampleService entityVisualExamples,
     IManuscriptService manuscripts,
     IChapterSemanticProjectionService semanticProjection,
+    IManuscriptStyleService manuscriptStyles,
     ICompositionService compositions,
     IEmbeddingService embeddings,
     IBookBriefService bookBriefs,
@@ -83,16 +82,26 @@ public sealed class ContextBuilder(
         if (currentChapter is not null
             && request.Purpose is ContextBuildPurpose.Editor or ContextBuildPurpose.EditorRevision)
         {
+            var manuscriptSnapshot = await manuscripts.GetManuscriptAsync(currentChapter.Id, cancellationToken);
+            items.Add(await BuildManuscriptStylesItemAsync(
+                project.Id,
+                manuscriptSnapshot,
+                cancellationToken));
             items.Add(new ContextItem(
                 Key: EditorContextKeys.CurrentChapter,
                 Kind: ContextItemKind.CurrentChapter,
-                Label: $"Current Chapter — {currentChapter.Title} (line-numbered)",
-                Body: await BuildCurrentChapterBlockAsync(currentChapter, cancellationToken),
+                Label: $"Current Chapter — {currentChapter.Title} (editable manuscript snapshot)",
+                Body: ContextManuscriptFormatter.SerializeCurrentChapter(currentChapter, manuscriptSnapshot),
                 IsEnabled: IsIncluded(preferenceMap, ContextItemKind.CurrentChapter, EditorContextKeys.CurrentChapter, defaultIncluded: true),
                 IsRemovable: true,
                 IsProtected: true));
 
-            var visualItem = await BuildChapterVisualLayoutItemAsync(project.Id, currentChapter.Id, preferenceMap, cancellationToken);
+            var visualItem = await BuildChapterVisualLayoutItemAsync(
+                project.Id,
+                currentChapter.Id,
+                manuscriptSnapshot,
+                preferenceMap,
+                cancellationToken);
             if (visualItem is not null)
                 items.Add(visualItem with { IsProtected = true });
 
@@ -454,28 +463,31 @@ public sealed class ContextBuilder(
         return items;
     }
 
-    private async Task<string> BuildCurrentChapterBlockAsync(Chapter chapter, CancellationToken cancellationToken)
+    private async Task<ContextItem> BuildManuscriptStylesItemAsync(
+        Guid projectId,
+        ManuscriptSnapshot? manuscriptSnapshot,
+        CancellationToken cancellationToken)
     {
-        var snapshot = await manuscripts.GetManuscriptAsync(chapter.Id, cancellationToken);
-        var plainText = snapshot?.PlainText ?? chapter.PlainText;
-        var body = new StringBuilder();
-        body.Append("Chapter id: ").AppendLine(chapter.Id.ToString());
-        body.Append("Title: ").AppendLine(chapter.Title);
-        body.AppendLine("Editing contract: This format-neutral chapter contains semantic text blocks, flowing Figures, and Designed Pages. Use revision-checked manuscript operations and geometry-keyed composition variants.");
-        body.AppendLine("Body (line-numbered):");
-        body.Append(string.IsNullOrWhiteSpace(plainText)
-            ? "(empty)"
-            : ChapterFormatting.WithLineNumbers(plainText));
-        return body.ToString();
+        var styles = await manuscriptStyles.ListAsync(projectId, cancellationToken);
+        return new ContextItem(
+            Key: EditorContextKeys.ManuscriptStyles,
+            Kind: ContextItemKind.ManuscriptStyles,
+            Label: "Book Text Styles and Active Formatting",
+            Body: ContextManuscriptFormatter.SerializeStyles(styles, manuscriptSnapshot?.Document),
+            IsEnabled: true,
+            IsRemovable: false,
+            Badge: "Style",
+            Reason: "Named styles and active manuscript formatting",
+            IsProtected: true);
     }
 
     private async Task<ContextItem?> BuildChapterVisualLayoutItemAsync(
         Guid projectId,
         Guid chapterId,
+        ManuscriptSnapshot? snapshot,
         IReadOnlyDictionary<string, EditorContextPreference> preferenceMap,
         CancellationToken cancellationToken)
     {
-        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, cancellationToken);
         if (snapshot is null) return null;
         var visualBlocks = snapshot.Document.Content
             .Where(block => block.Type is ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage)
@@ -805,59 +817,8 @@ public sealed class ContextBuilder(
         CancellationToken cancellationToken)
     {
         var links = await entities.ListLinksAsync(projectId, entity.Id, cancellationToken);
-        var detail = JsonSerializer.SerializeToNode(new
-        {
-            properties = entity.Properties.OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase),
-            summary = entity.Summary,
-            aliases = entity.Aliases,
-            wikiSections = entity.WikiSections,
-            canonSources = entity.CanonSources,
-            canonicalVisualReferences = visualExamples.OrderBy(example => example.SortOrder).Select(example => new
-            {
-                example.Id,
-                example.EntityId,
-                example.Label,
-                example.SortOrder,
-                example.Origin,
-                image = new
-                {
-                    example.Image.Id,
-                    example.Image.FileName,
-                    example.Image.AltText,
-                    example.Image.Prompt,
-                },
-            }),
-            manualLinks = links.Where(link => !link.IsAutoLink).Select(ContextLinkPayload),
-            autoMentionLinks = links.Where(link => link.IsAutoLink).Select(ContextLinkPayload),
-        });
-        return AgentPayloadPaginator.SerializePage(
-            AgentPayloadPaginator.EntityIdentity(
-                entity.Id,
-                entity.Type,
-                entity.Name,
-                entity.Order,
-                entity.ParentId,
-                ("contextFeed", JsonValue.Create(true))),
-            detail,
-            "read_entity",
-            new JsonObject { ["entityId"] = entity.Id },
-            pageNumber: 1);
+        return ContextEntityPayloadFormatter.Serialize(entity, visualExamples, links);
     }
-
-    private static object ContextLinkPayload(EntityLink link) => new
-    {
-        link.EdgeId,
-        link.EdgeType,
-        direction = link.Direction.ToString(),
-        link.OtherEntityId,
-        link.OtherEntityName,
-        link.OtherEntityType,
-        link.SortOrder,
-        link.Properties,
-        link.Summary,
-        link.RelationshipCitations,
-        link.IsAutoLink,
-    };
 
     private async Task AppendChaptersAsync(
         StringBuilder sb,

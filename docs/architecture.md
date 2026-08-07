@@ -104,6 +104,25 @@ graph relationships, project search, and entity visual references.
 `SystemPromptComposer` owns the one system-role prompt shape. Project Guidance
 and Book Brief content remain user-owned inputs; code-owned professional and
 tool instructions must not be persisted as editable project guidance.
+For Editor and Editor Revision turns with an active chapter, `ContextBuilder`
+loads one current `ManuscriptSnapshot` and includes a compact complete editing
+surface: the current revision and source hash, every stable manuscript block ID,
+semantic text, inline marks, style roles, direct paragraph overrides, Figure
+metadata, and Designed Page references. A protected Book Text Styles context
+item supplies named-style IDs, revisions, semantic roles, definitions, active
+role counts, and compact formatting exceptions. Normal active-chapter semantic
+edits therefore use the prompt's exact revision and block IDs without an
+initial `read_chapter` or `read_manuscript` call; those reads remain the
+fallback for missing/stale/non-active state, post-mutation verification, and
+physical page geometry.
+Automatic entity context uses a separate compact projection that retains
+meaningful entity data and minimal relationship identities while omitting empty
+fields and internal edge/provenance metadata. Detailed entity and link tools
+remain explicitly paginated and lossless for follow-up graph inspection.
+The chapter header's word/token metric counts only the chapter's plain-text
+projection, while Assistant Memory counts the enabled assembled context
+including instructions, labels, references, and structured editing metadata;
+these are intentionally different scopes and are not normalized to one value.
 
 ### Assistant Conversations and Review
 
@@ -247,6 +266,11 @@ caps, line height, alignment, indentation, spacing, and pagination. Direct
 overrides take precedence over Book Text Styles and built-in
 defaults. The semantic editor, EPUB formatter, chapter preview, and publication
 PDF renderer resolve the same style properties.
+Editor and revision-agent context includes the named-style catalog and the
+active manuscript's style roles, inline marks, and sparse direct formatting so
+ordinary edits can use the supplied structure without first rereading the
+chapter. Full manuscript and style tools remain available for stale snapshots,
+non-active chapters, and physical layout inspection.
 The primary editor toolbar loads the project font catalog and exposes direct
 font-family, point-size, line-spacing, emphasis, alignment, indentation, list,
 and link controls in a compact document-editor layout. Bundled and imported font

@@ -489,14 +489,17 @@
 
 | File | Description |
 |------|-------------|
-| `IContextBuilder.cs` / `ContextBuilder.cs` | Turn-aware one-system-message assembly with protected authorial direction, canonical visual references, full previous chapter, bounded retrieval, exclusion honoring, token estimates, and provenance snapshots. |
-| `AgentPayloadPaginator.cs` | Shared soft-target model payload paginator; repeats identity fields, packs logical JSON records, and segments only individually oversized text fields with explicit continuation metadata. |
+| `IContextBuilder.cs` / `ContextBuilder.cs` | Turn-aware one-system-message assembly with protected authorial direction, complete active-manuscript/style editing context, canonical visual references, full previous chapter, bounded retrieval, exclusion honoring, token estimates, and provenance snapshots. |
+| `AgentPayloadPaginator.cs` | Shared soft-target model payload paginator with an opt-in compact-object page shape; repeats identity fields, packs logical JSON records, and segments only individually oversized text fields with explicit continuation metadata. |
+| `ContextPayloadJson.cs` | Shared compact JSON serializer settings for model-facing automatic context projections. |
+| `ContextManuscriptFormatter.cs` | Compact complete active-manuscript and Book Text Style context projections with revisions, stable block IDs, inline marks, roles, and sparse formatting metadata. |
+| `ContextEntityPayloadFormatter.cs` | Compact automatic entity projection that preserves meaningful data and minimal explicit/AutoMention relationship identities while leaving detailed tool payloads unchanged. |
 | `IEditorContextService.cs` | Context facade with Project Guidance/Book Brief keys, explicit per-chapter inclusions/exclusions, project-image context, and recommendation key sets. |
 | `IContextRecommendationService.cs` / `ContextRecommendationService.cs` | Produces active-chapter context recommendations from second-degree graph links, direct context-vector hits, and manual search across entities plus structural references. |
 | `IContextIndexingService.cs` / `ContextIndexingService.cs` | Maintains targeted direct vector rows and internal lexical search chunks for addable context items: graph entities, chapters, acts, ingest sources, and ingest source chunks; refreshes source-scoped auto mention links. |
 | `VectorIndexWorkCoordinator.cs` | Scoped coordinator that can defer and dedupe expensive chapter/body/context vector index work during review apply, while normal calls run immediately. |
 | `IEntityRelationContextService.cs` / `EntityRelationContextService.cs` | Shared bounded graph relation/traversal map builder for Context Feed and agent tool payloads that return entity information. |
-| `ChapterFormatting.cs` | `WithLineNumbers` / `SplitLines` / `JoinLines` helpers shared by the editor gutter, Context Feed preview, and AI tool reads so user and LLM see identical line numbers. |
+| `ChapterFormatting.cs` | `WithLineNumbers` / `SplitLines` / `JoinLines` helpers shared by the editor gutter and line-oriented AI chapter reads. |
 
 ### EntityVisuals/
 

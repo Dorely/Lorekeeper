@@ -175,7 +175,7 @@ public sealed class EditorChatTools(
                 name: "read_manuscript",
                 description:
                     "Read bounded semantic manuscript blocks with stable block IDs, inline marks, style roles, source hash, and the current revision token. " +
-                    "Use this before manuscript mutations. For prose/content changes, pass the returned revision and operations once to preview_manuscript_operations, then pass only its previewId to apply_manuscript_operations. For reusable formatting, use the focused Book Text Style tools instead of emitting one operation per block."),
+                    "The active Context Feed normally already includes the complete current manuscript snapshot for direct edits. Use this tool when that snapshot is missing, incomplete, stale, non-active, or insufficient; then pass the returned revision and operations once to preview_manuscript_operations, followed by only its previewId to apply_manuscript_operations. For reusable formatting, use the focused Book Text Style tools instead of emitting one operation per block."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, string? query = null, string? blockType = null, string? styleRole = null, int start = 0, int count = 40) =>

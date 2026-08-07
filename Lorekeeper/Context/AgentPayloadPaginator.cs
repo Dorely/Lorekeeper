@@ -85,6 +85,48 @@ public static class AgentPayloadPaginator
         return result.ToJsonString();
     }
 
+    public static string SerializeCompactObjectPage(
+        JsonObject identity,
+        JsonObject detail,
+        string continuationTool,
+        JsonObject continuationArguments,
+        int? pageNumber = null,
+        int pageMaxChars = DefaultPageMaxChars)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(detail);
+        ArgumentException.ThrowIfNullOrWhiteSpace(continuationTool);
+        ArgumentNullException.ThrowIfNull(continuationArguments);
+
+        pageMaxChars = Math.Max(1_000, pageMaxChars);
+        var requestedPage = Math.Max(1, pageNumber ?? 1);
+        if (requestedPage > 1)
+            return SerializePage(identity, detail, continuationTool, continuationArguments, requestedPage, pageMaxChars);
+
+        var result = (JsonObject)identity.DeepClone();
+        result["continuationTool"] = continuationTool;
+        result["pagination"] = new JsonObject
+        {
+            ["currentPage"] = 1,
+            ["pageCount"] = 1,
+            ["pageMaxChars"] = pageMaxChars,
+            ["totalEntries"] = detail.Count,
+            ["pageEntryCount"] = detail.Count,
+            ["hasPreviousPage"] = false,
+            ["hasNextPage"] = false,
+            ["isComplete"] = true,
+            ["contentFormat"] = "compactObject",
+            ["note"] = "The complete compact payload is present on this page.",
+        };
+        result["previousPageArguments"] = null;
+        result["nextPageArguments"] = null;
+        result["content"] = detail.DeepClone();
+
+        return result.ToJsonString().Length <= pageMaxChars
+            ? result.ToJsonString()
+            : SerializePage(identity, detail, continuationTool, continuationArguments, requestedPage, pageMaxChars);
+    }
+
     public static JsonObject EntityIdentity(
         Guid id,
         string type,
