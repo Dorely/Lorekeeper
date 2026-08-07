@@ -50,9 +50,37 @@ public sealed class AiChangeRepository(AppDbContext db) : IAiChangeRepository
     public async Task AddChangeAsync(AiChange change, CancellationToken cancellationToken = default) =>
         await db.AiChanges.AddAsync(change, cancellationToken);
 
-    public void UpdateBatch(AiChangeBatch batch) => db.AiChangeBatches.Update(batch);
+    public void UpdateBatch(AiChangeBatch batch)
+    {
+        var tracked = db.AiChangeBatches.Local.FirstOrDefault(item => item.Id == batch.Id);
+        if (tracked is not null && !ReferenceEquals(tracked, batch))
+        {
+            db.Entry(tracked).CurrentValues.SetValues(batch);
+            db.Entry(tracked).State = EntityState.Modified;
+            return;
+        }
 
-    public void UpdateChange(AiChange change) => db.AiChanges.Update(change);
+        // Update only the batch row. Detached batches can carry a detached Changes graph
+        // from a no-tracking read, and attaching that graph can introduce duplicate
+        // AiChange instances into the context.
+        db.Entry(batch).State = EntityState.Modified;
+    }
+
+    public void UpdateChange(AiChange change)
+    {
+        var tracked = db.AiChanges.Local.FirstOrDefault(item => item.Id == change.Id);
+        if (tracked is not null && !ReferenceEquals(tracked, change))
+        {
+            db.Entry(tracked).CurrentValues.SetValues(change);
+            db.Entry(tracked).State = EntityState.Modified;
+            return;
+        }
+
+        // Update only the change row. Do not use DbSet.Update here: a detached change
+        // loaded with its batch would otherwise attach the entire detached navigation
+        // graph and can conflict with an existing tracked AiChange.
+        db.Entry(change).State = EntityState.Modified;
+    }
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         db.SaveChangesAsync(cancellationToken);

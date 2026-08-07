@@ -160,6 +160,13 @@ before disposing its async enumerator, so a terminal job cannot end the parent
 turn with a concurrent-disposal `NotSupportedException`. Tool contracts,
 prompts, persistence, review UI, and approval behavior must evolve together.
 
+`AiChangeRepository` keeps pending-review reads no-tracking, but its mutation
+methods update only the root `AiChange` or `AiChangeBatch` row. They reuse a
+locally tracked instance when one exists and copy scalar values onto it;
+otherwise they mark only the supplied root entry modified. Detached
+`Batch.Changes` graphs are never attached during review updates, which keeps
+long-lived Blazor scopes from tracking two instances of the same change.
+
 Editor review routing follows the fidelity of the proposed manuscript change.
 Only chapters whose current and proposed manuscripts are plain body paragraphs
 and scene breaks use the line-oriented Review tab. Figure, Designed Page,
