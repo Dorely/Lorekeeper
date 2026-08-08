@@ -54,9 +54,11 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   typeset page to visually verify applied typography and typesetting.
 - Project image generation and editing, canonical entity visual references,
   permissive source-image geometry, semantic flowing Figures, contextual
-  Designed Page/spread composition, project font management, format-aware
-  dedicated cover composition, exact target-bound generation, accessibility
-  state, and layout diagnostics. Placement always chooses non-destructive
+  Designed Page/spread composition, project font management, and format-aware
+  dedicated cover composition through one canvas-first editor: construction and
+  selection controls stay in a fixed bottom strip while accessibility and exact
+  layout details open only when requested. Exact target-bound generation,
+  accessibility state, and layout diagnostics remain available. Placement always chooses non-destructive
   Contain or Cover fit; crop positioning is adjusted directly in the canvas.
   Every assistant generation/edit waits for a terminal result and produces an
   unattached reusable project image; Figure, page, cover, and canonical-reference

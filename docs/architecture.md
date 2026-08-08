@@ -312,8 +312,10 @@ stores revisioned `PageCompositionVariant` scenes by exact geometry
 fingerprint. Text objects bind stable block/range IDs in that fragment, so
 visual layout never duplicates searchable or accessible content. The shared
 scene vocabulary covers image, text, rectangle, ellipse, line, and group
-objects; layers, z-order, locking, visibility, grouping, object styles, named
-regions, and logical reading order remain independent. Each composition records
+objects; z-order, per-object locking and visibility, grouping, object styles,
+named regions, and logical reading order remain independent. Persisted scenes
+may retain internal stacking planes for renderer and migration compatibility,
+but authors do not manage layers. Each composition records
 an active authoring variant. New pages use the current project setup; an existing
 page keeps its authored surface when the project setup changes. Publish reports
 edition compatibility and can copy the authoring scene into a new exact edition
@@ -376,14 +378,18 @@ IDs. A Designed Page atom
 shows its name, mode, status, and artwork preview, and selecting it opens the
 contextual Pages mode in the same center column. The workspace provides direct
 pointer move/resize/rotate, atomic image placement with required fit, crop
-repositioning, layers, styles, semantic bindings, reading order, computed
+repositioning, styles, semantic bindings, reading order, computed
 trim/safe/gutter/center/bleed overlays, diagnostics, revision-aware save, and
-undo/redo. Its center is reserved for the largest practical canvas: page/spread
-choice and the computed-overlay toggle are the only controls above it, while
-creation, selection, history, zoom, layers, objects, bindings, and properties
-share one independently scrolling right sidebar. Rectangle, ellipse, and line
-tools live under Advanced; custom guides and SVG/path tooling are not runtime
-capabilities. Page saves are serialized per mounted workspace. Each save uses
+undo/redo. Pages and covers share `CompositionVisualEditorShell`: a one-line
+view toolbar sits above the largest practical canvas, while creation, object
+selection, fit, typography, stacking, history, zoom, save, and navigation form
+a fixed bottom control strip. Accessibility, semantic roles, exact geometry,
+content bindings, reading order, grouping, saved variants, and other secondary
+settings live in an independently scrolling details drawer that overlays the
+canvas only while requested. No permanent inspector or author-facing layer
+manager consumes canvas width. Rectangle, ellipse, and line tools remain a
+compact secondary construction menu; custom guides and SVG/path tooling are not
+runtime capabilities. Page saves are serialized per mounted workspace. Each save uses
 an immutable scene/semantic snapshot, adopts the returned revisions before the
 next queued save, and clears the dirty state only when no newer local mutation
 occurred while persistence was in flight.
@@ -616,7 +622,8 @@ backup into the existing projectless recovery shell.
 releases inherit it until customized; paperback releases project it into the
 front panel while retaining release-owned spine, back, and barcode regions.
 Existing release covers and **Customize front** create explicit local
-overrides; inherited Core layers are read-only in the release workspace.
+overrides; inherited Core objects remain protected until the release front is
+customized.
 `PublicationCoverService` owns each release cover override and its shared
 structured scene. Canonical title, subtitle, author, spine, and back copy remain
 bindings, not duplicated frame text. Paperback geometry derives the
@@ -632,13 +639,13 @@ text to DeviceGray; cover color remains independent and uses RGB for
 KDP/generic or CMYK for Ingram.
 
 Cover editing is an embedded Publish workspace mode rather than a modal. The
-Publish assistant remains mounted in the left column; the scene canvas fills
-the main area and bound copy, artwork, layers, accessibility, and object
-properties share one scrolling controls column. Pages and covers use the same
-structured `CompositionScene`, object/layer/style primitives, pointer/crop
-interaction module, undo/redo semantics, explicit Contain/Cover placement, and
-revision-safe persistence; cover bindings and print regions remain
-cover-specific host configuration.
+Publish assistant remains mounted in the left column. Pages and covers use the
+same `CompositionVisualEditorShell`, fixed bottom contextual controls,
+on-demand details drawer, structured `CompositionScene`, object/style
+primitives, pointer/crop interaction module, undo/redo semantics, explicit
+Contain/Cover placement, and revision-safe persistence. The cover host supplies
+canonical copy bindings, background and barcode settings, print regions, and
+format-specific geometry; those details do not create a separate editor UI.
 
 `PublicationPackageService` owns versioned Lorekeeper validation and the final
 artifact-assembly boundary. It verifies current source fingerprints, correlated

@@ -15,11 +15,6 @@
 
 <div class="cover-composer" aria-label="Cover composition editor" tabindex="0" @onkeydown="HandleKeyDown">
     <style>@((MarkupString)FontFaceCss())</style>
-    <header>
-        <div><strong>@(CoreBook ? "Core cover" : "Release cover")</strong><small>@ModeSummary</small></div>
-        <button type="button" class="btn btn-sm btn-primary" disabled="@(!_dirty || _saving)" @onclick="SaveAsync">@(_saving ? "Saving..." : "Save cover")</button>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseAsync">Back to publishing</button>
-    </header>
     @if (!string.IsNullOrWhiteSpace(_error)) { <div class="alert alert-danger m-2">@_error</div> }
     @if (_cover is null || _scene is null || (!CoreBook && _edition is null))
     {
@@ -27,80 +22,14 @@
     }
     else
     {
-        <div class="cover-composer-main">
-            <aside class="cover-copy-panel">
-                <h3>Bound cover copy</h3>
-                <label>Title<input @bind="_title" @bind:after="MarkDirty" /></label>
-                <label>Subtitle<input @bind="_subtitle" @bind:after="MarkDirty" /></label>
-                <label>Author<input @bind="_author" @bind:after="MarkDirty" /></label>
-                @if (IsPrint)
-                {
-                    <label>Spine text<input @bind="_spineText" @bind:after="MarkDirty" /></label>
-                    <label>Back copy<textarea rows="5" @bind="_backCopy" @bind:after="MarkDirty"></textarea></label>
-                    <label>Barcode behavior<select @bind="_barcodeMode" @bind:after="MarkDirty"><option value="@PublicationBarcodeMode.LorekeeperBarcode">Generate ISBN-13 barcode</option><option value="@PublicationBarcodeMode.VendorOverlay">Reserve vendor overlay area</option></select></label>
-                }
-                <label>Background<input type="color" @bind="_background" @bind:after="MarkDirty" /></label>
-                <div class="cover-section-heading">
-                    <div>
-                        <h3>Layers</h3>
-                        <p>The active layer receives new objects. Hide or lock a layer without removing it.</p>
-                    </div>
-                    <button type="button" title="Create another organization layer" @onclick="AddLayer">New layer</button>
-                </div>
-                @foreach (var layer in _layers.OrderByDescending(layer => layer.Order))
-                {
-                    <div class="cover-layer-row @(layer.Id == _selectedLayerId ? "selected" : null)">
-                        <button type="button" class="cover-layer-select" title="Use this layer for newly added objects" @onclick="() => _selectedLayerId = layer.Id">
-                            <strong>@LayerDisplayName(layer)</strong>
-                            <small>@(layer.Id == _selectedLayerId ? "Active layer" : "Select layer")</small>
-                        </button>
-                        <button type="button" class="cover-icon-button" aria-label="@(layer.Visible ? $"Hide {LayerDisplayName(layer)} layer" : $"Show {LayerDisplayName(layer)} layer")" title="@(layer.Visible ? "Hide layer" : "Show layer")" @onclick="() => ToggleLayerVisibility(layer)">
-                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path>
-                                <circle cx="12" cy="12" r="2.5"></circle>
-                                @if (!layer.Visible) { <path d="m4 4 16 16"></path> }
-                            </svg>
-                        </button>
-                        <button type="button" class="cover-icon-button" aria-label="@(layer.Locked ? $"Unlock {LayerDisplayName(layer)} layer" : $"Lock {LayerDisplayName(layer)} layer")" title="@(layer.Locked ? "Unlock layer" : "Lock layer")" @onclick="() => ToggleLayerLock(layer)">
-                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                @if (layer.Locked) { <path d="M7 10V7a5 5 0 0 1 10 0v3M5 10h14v10H5Z"></path> }
-                                else { <path d="M8 10V7a4 4 0 0 1 7.5-2M5 10h14v10H5Z"></path> }
-                            </svg>
-                        </button>
-                    </div>
-                }
-                <h3>Add content</h3>
-                <button type="button" class="cover-add-text" @onclick="() => AddObject(CompositionObjectKind.Text)">Add cover text</button>
-                <div class="cover-image-add">
-                    <select @bind="_newImageFit"><option value="@FigureImageFit.Contain">Show whole image</option><option value="@FigureImageFit.Cover">Fill frame</option></select>
-                    <button type="button" @onclick="OpenAddArtworkPicker">Choose cover artwork</button>
-                </div>
-                <details class="cover-advanced-objects">
-                    <summary>Shapes</summary>
-                    <div class="cover-add-row">
-                        <button type="button" @onclick="() => AddObject(CompositionObjectKind.Rectangle)">Rectangle</button>
-                        <button type="button" @onclick="() => AddObject(CompositionObjectKind.Ellipse)">Ellipse</button>
-                        <button type="button" @onclick="() => AddObject(CompositionObjectKind.Line)">Line</button>
-                    </div>
-                </details>
-                <h3>Objects</h3>
-                @foreach (var item in _objects.OrderByDescending(item => item.ZIndex))
-                {
-                    <div class="cover-object-row @(item.Id == _selectedId ? "selected" : null)">
-                        <input type="checkbox" title="Select for grouping" checked="@_groupSelection.Contains(item.Id)" @onchange="e => ToggleGroupSelection(item.Id, (bool)e.Value!)" />
-                        <button type="button" @onclick="() => _selectedId = item.Id"><span>@item.Kind</span><small>@(string.IsNullOrWhiteSpace(item.Name) ? item.Id.ToString("N")[..8] : item.Name)</small></button>
-                    </div>
-                }
-                <div class="cover-add-row"><button type="button" disabled="@(_groupSelection.Count < 2)" @onclick="GroupSelected">Group</button><button type="button" disabled="@(_groupSelection.Count == 0)" @onclick="UngroupSelected">Ungroup</button></div>
-                <h3>Logical reading order</h3>
-                @foreach (var item in _objects.Where(item => item.Visible && item.ReadingOrder is not null).OrderBy(item => item.ReadingOrder))
-                {
-                    <div class="cover-reading-row"><span>@item.ReadingOrder</span> @item.Name (@item.SemanticRole) <button type="button" @onclick="() => MoveReadingOrder(item, -1)">Up</button><button type="button" @onclick="() => MoveReadingOrder(item, 1)">Down</button></div>
-                }
-            </aside>
-
-            <section class="cover-stage-shell">
-                <div class="cover-toolbar"><button type="button" @onclick="Undo" disabled="@(_undo.Count == 0)">Undo</button><button type="button" @onclick="Redo" disabled="@(_redo.Count == 0)">Redo</button>@if (Selected is { Kind: CompositionObjectKind.Image, ImageFit: FigureImageFit.Cover }) { <button type="button" class="@(_cropReposition ? "selected" : null)" @onclick="() => _cropReposition = !_cropReposition">@(_cropReposition ? "Finish crop" : "Reposition crop")</button> }<button type="button" @onclick="() => _zoom = Math.Max(.3, _zoom - .1)">-</button><span>@Math.Round(_zoom * 100)%</span><button type="button" @onclick="() => _zoom = Math.Min(1.6, _zoom + .1)">+</button><label><input type="checkbox" @bind="_snap" /> Snap</label><label><input type="checkbox" @bind="_guides" /> Guides</label></div>
+        <CompositionVisualEditorShell AccessibleLabel="Cover visual editor">
+            <Toolbar>
+                <nav class="cover-toolbar" aria-label="Cover view controls">
+                    <div class="cover-identity"><strong>@(CoreBook ? "Core cover" : "Release cover")</strong><small>@ModeSummary</small></div>
+                    <label><input type="checkbox" @bind="_snap" /> Snap</label><label><input type="checkbox" @bind="_guides" /> Guides</label>
+                </nav>
+            </Toolbar>
+            <Canvas>
                 <div class="cover-stage" style="@StageStyle()" @ref="_stageElement" @onpointermove="ContinueTransform" @onpointerup="EndTransform" @onpointercancel="EndTransform">
                     @if (_guides) { <div class="cover-guide cover-guide-x"></div><div class="cover-guide cover-guide-y"></div> }
                     <div class="cover-safe"></div>
@@ -113,7 +42,7 @@
                     }
                     @foreach (var item in _objects.Where(IsVisible))
                     {
-                        <div role="button" tabindex="0" class="cover-object cover-object--@item.Kind.ToString().ToLowerInvariant() @(item.Id == _selectedId ? "selected" : null)" style="@ObjectStyle(item)" @onclick:stopPropagation="true" @onclick="() => _selectedId = item.Id" @onpointerdown:stopPropagation="true" @onpointerdown:preventDefault="true" @onpointerdown="e => BeginTransformAsync(e, item, _cropReposition && item.Kind == CompositionObjectKind.Image && item.ImageFit == FigureImageFit.Cover ? CoverTransformMode.Crop : CoverTransformMode.Move)">
+                        <div role="button" tabindex="0" class="cover-object cover-object--@item.Kind.ToString().ToLowerInvariant() @(item.Id == _selectedId ? "selected" : null)" style="@ObjectStyle(item)" @onclick:stopPropagation="true" @onclick="() => SelectObject(item.Id)" @onpointerdown:stopPropagation="true" @onpointerdown:preventDefault="true" @onpointerdown="e => BeginTransformAsync(e, item, _cropReposition && item.Kind == CompositionObjectKind.Image && item.ImageFit == FigureImageFit.Cover ? CoverTransformMode.Crop : CoverTransformMode.Move)">
                             @if (item.Kind == CompositionObjectKind.Text) { <span>@BoundText(item)</span> }
                             else if (item.Kind == CompositionObjectKind.Image && item.ImageId is Guid imageId && Image(imageId) is { } image) { <img src="@image.PreviewUrl" alt="" draggable="false" style="@ImageStyle(item)" /> }
                             else if (item.Kind == CompositionObjectKind.Image) { <span>Choose artwork</span> }
@@ -126,76 +55,146 @@
                         </div>
                     }
                 </div>
-            </section>
-
-            <aside class="cover-inspector">
-                <h3>Inspector</h3>
-                @if (Selected is { } selected)
-                {
-                    <label>Name<input value="@selected.Name" @onchange="e => Patch(selected with { Name = e.Value?.ToString() ?? string.Empty })" /></label>
-                    <div class="cover-grid"><label>X %<input type="number" step=".1" value="@selected.Bounds.XPercent" @onchange="e => PatchBounds(selected, x: Number(e))" /></label><label>Y %<input type="number" step=".1" value="@selected.Bounds.YPercent" @onchange="e => PatchBounds(selected, y: Number(e))" /></label><label>Width %<input type="number" step=".1" value="@selected.Bounds.WidthPercent" @onchange="e => PatchBounds(selected, width: Number(e))" /></label><label>Height %<input type="number" step=".1" value="@selected.Bounds.HeightPercent" @onchange="e => PatchBounds(selected, height: Number(e))" /></label></div>
-                    <label>Constrain to<select value="@selected.RegionConstraint" @onchange="e => Patch(selected with { RegionConstraint = Enum.Parse<CompositionRegionConstraint>(e.Value!.ToString()!) })">@foreach (var region in AvailableRegions) { <option value="@region">@region</option> }</select></label>
-                    <label>Rotation<input type="number" value="@selected.RotationDegrees" @onchange="e => Patch(selected with { RotationDegrees = Number(e) })" /></label>
-                    <label>Opacity<input type="range" min="0" max="1" step=".05" value="@selected.Opacity" @onchange="e => Patch(selected with { Opacity = Number(e) })" /></label>
-                    <label><input type="checkbox" checked="@selected.Visible" @onchange="e => Patch(selected with { Visible = (bool)e.Value! })" /> Visible</label>
-                    <label><input type="checkbox" checked="@selected.Locked" @onchange="e => Patch(selected with { Locked = (bool)e.Value! })" /> Locked</label>
-                    <label>Layer<select value="@selected.LayerId" @onchange="e => MoveToLayer(selected, e)">@foreach (var layer in _layers.OrderBy(layer => layer.Order)) { <option value="@layer.Id">@layer.Name</option> }</select></label>
-                    <label>Object style<select value="@selected.StyleId" @onchange="e => SetObjectStyle(selected, e)"><option value="">Local formatting</option>@foreach (var style in _styles) { <option value="@style.Id">@style.Name</option> }</select></label>
-                    <div class="cover-actions"><button type="button" @onclick="() => CreateStyleFrom(selected)">Save reusable style</button>@if (selected.StyleId is Guid styleId) { <button type="button" @onclick="() => DeleteStyle(styleId)">Delete style</button> }</div>
-                    <label>Reading order<input type="number" value="@selected.ReadingOrder" @onchange="e => Patch(selected with { ReadingOrder = NullableInt(e) })" /></label>
-                    @if (selected.Kind == CompositionObjectKind.Image)
-                    {
-                        <div class="cover-current-artwork">
-                            @if (selected.ImageId is Guid currentImageId && Image(currentImageId) is { } currentImage)
-                            {
-                                <img src="@currentImage.PreviewUrl" alt="" />
-                                <span><small>Project artwork</small><strong>@currentImage.FileName</strong></span>
-                            }
-                            else
-                            {
-                                <span><small>Project artwork</small><strong>No artwork selected</strong></span>
-                            }
-                            <button type="button" @onclick="() => OpenReplaceArtworkPicker(selected.Id)">Replace artwork</button>
-                        </div>
-                        <label>Fit<select value="@selected.ImageFit" @onchange="e => Patch(selected with { ImageFit = Enum.Parse<FigureImageFit>(e.Value!.ToString()!) })">@foreach (var fit in Enum.GetValues<FigureImageFit>()) { <option value="@fit">@fit</option> }</select></label>
-                        @if (selected.ImageFit == FigureImageFit.Cover)
+            </Canvas>
+            <Objects>
+                <div class="cover-object-pane">
+                    <div class="cover-add-tools" aria-label="Add cover content">
+                        <button type="button" title="Add a cover text frame" @onclick="() => AddObject(CompositionObjectKind.Text)"><span aria-hidden="true">T</span> Text</button>
+                        <button type="button" title="Choose artwork from the project image library" @onclick="OpenAddArtworkPicker"><span aria-hidden="true">▧</span> Image</button>
+                        <select aria-label="Fit for newly added artwork" title="Choose how newly added artwork fits its frame" @bind="_newImageFit"><option value="@FigureImageFit.Contain">Whole</option><option value="@FigureImageFit.Cover">Fill</option></select>
+                        <details class="cover-shapes-menu"><summary title="Add a simple shape">◇</summary><div><button type="button" @onclick="() => AddObject(CompositionObjectKind.Rectangle)">Rectangle</button><button type="button" @onclick="() => AddObject(CompositionObjectKind.Ellipse)">Ellipse</button><button type="button" @onclick="() => AddObject(CompositionObjectKind.Line)">Line</button></div></details>
+                    </div>
+                    <div class="cover-object-strip" role="listbox" aria-label="Cover objects">
+                        @foreach (var item in _objects.OrderByDescending(item => item.ZIndex))
                         {
-                            <button type="button" class="@(_cropReposition ? "selected" : null)" @onclick="() => _cropReposition = !_cropReposition">@(_cropReposition ? "Finish repositioning" : "Reposition crop")</button>
+                            <button type="button" role="option" aria-selected="@(item.Id == _selectedId)" class="@(item.Id == _selectedId ? "selected" : null)" title="Select @ObjectLabel(item)" @onclick="() => SelectObject(item.Id)">
+                                @if (item.Kind == CompositionObjectKind.Image && item.ImageId is Guid thumbnailId && Image(thumbnailId) is { } thumbnail) { <img src="@thumbnail.PreviewUrl" alt="" /> } else { <span aria-hidden="true">@ObjectIcon(item.Kind)</span> }
+                                <small>@ObjectLabel(item)</small>
+                            </button>
                         }
-                        <label>Alternative text<textarea value="@selected.AltText" @onchange="e => SetAltText(selected, e.Value?.ToString() ?? string.Empty)"></textarea></label>
-                        <label><input type="checkbox" checked="@selected.Decorative" @onchange="e => SetDecorative(selected, (bool)e.Value!)" /> Decorative artwork</label>
-                    }
-                    @if (selected.Kind == CompositionObjectKind.Text)
-                    {
-                        var resolved = Resolved(selected);
-                        <label>Canonical binding<select value="@selected.TextBinding" @onchange="e => Patch(selected with { TextBinding = e.Value?.ToString() ?? string.Empty })"><option value="">Unbound text</option>@foreach (var binding in AvailableBindings) { <option value="@binding">@binding</option> }</select></label>
-                        <label>Font family<select value="@resolved.FontFamilyKey" @onchange="e => Patch(selected with { StyleId = null, FontFamilyKey = e.Value?.ToString() ?? string.Empty })">@foreach (var family in _fontFamilies) { <option value="@family.Key">@family.Name</option> }</select></label>
-                        <label>Font weight<input type="number" min="100" max="900" step="100" value="@resolved.FontWeight" @onchange="e => Patch(selected with { StyleId = null, FontWeight = (int)Number(e) })" /></label>
-                        <label>Font size<input type="number" min="4" max="144" value="@resolved.FontSizePoints" @onchange="e => Patch(selected with { StyleId = null, FontSizePoints = Number(e) })" /></label>
-                        <label>Line height<input type="number" min=".5" max="4" step=".05" value="@resolved.LineHeight" @onchange="e => Patch(selected with { StyleId = null, LineHeight = Number(e) })" /></label>
-                        <label>Letter spacing (em)<input type="number" min="-1" max="10" step=".01" value="@resolved.LetterSpacingEm" @onchange="e => Patch(selected with { StyleId = null, LetterSpacingEm = Number(e) })" /></label>
-                        <label>Horizontal alignment<select value="@resolved.TextAlignment" @onchange="e => Patch(selected with { StyleId = null, TextAlignment = Enum.Parse<CompositionTextAlignment>(e.Value!.ToString()!) })">@foreach (var alignment in Enum.GetValues<CompositionTextAlignment>()) { <option value="@alignment">@alignment</option> }</select></label>
-                        <label>Vertical alignment<select value="@resolved.VerticalAlignment" @onchange="e => Patch(selected with { StyleId = null, VerticalAlignment = Enum.Parse<CompositionVerticalAlignment>(e.Value!.ToString()!) })">@foreach (var alignment in Enum.GetValues<CompositionVerticalAlignment>()) { <option value="@alignment">@alignment</option> }</select></label>
-                        <label>Text shadow<select value="@resolved.TextShadow" @onchange="e => Patch(selected with { StyleId = null, TextShadow = Enum.Parse<CompositionTextShadow>(e.Value!.ToString()!) })">@foreach (var shadow in Enum.GetValues<CompositionTextShadow>()) { <option value="@shadow">@shadow</option> }</select></label>
-                        <label>Background<input type="color" value="@ColorValue(resolved.BackgroundColor)" @onchange="e => Patch(selected with { StyleId = null, BackgroundColor = Color(e) })" /></label>
-                        <label>Background opacity<input type="range" min="0" max="1" step=".05" value="@resolved.BackgroundOpacity" @onchange="e => Patch(selected with { StyleId = null, BackgroundOpacity = Number(e) })" /></label>
-                    }
-                    @if (selected.Kind is CompositionObjectKind.Text or CompositionObjectKind.Rectangle or CompositionObjectKind.Ellipse or CompositionObjectKind.Line)
-                    {
-                        var resolved = Resolved(selected);
-                        <label>Fill<input type="color" value="@ColorValue(resolved.FillColor)" @onchange="e => Patch(selected with { StyleId = null, FillColor = Color(e) })" /></label>
-                        <label>Stroke<input type="color" value="@ColorValue(resolved.StrokeColor)" @onchange="e => Patch(selected with { StyleId = null, StrokeColor = Color(e) })" /></label>
-                        <label>Stroke width<input type="number" min="0" max="72" step=".25" value="@resolved.StrokeWidthPoints" @onchange="e => Patch(selected with { StyleId = null, StrokeWidthPoints = Number(e) })" /></label>
-                    }
-                    <div class="cover-actions"><button type="button" @onclick="() => ChangeZ(selected, -1)">Send back</button><button type="button" @onclick="() => ChangeZ(selected, 1)">Bring forward</button><button type="button" class="danger" @onclick="() => Delete(selected.Id)">Delete</button></div>
+                    </div>
+                </div>
+            </Objects>
+            <Selection>
+                @if (Selected is { } primarySelection)
+                {
+                    <div class="cover-selection-controls">
+                        <div class="cover-selection-title"><strong>@ObjectLabel(primarySelection)</strong><small>@primarySelection.Kind</small></div>
+                        @if (primarySelection.Kind == CompositionObjectKind.Image)
+                        {
+                            <button type="button" @onclick="() => OpenReplaceArtworkPicker(primarySelection.Id)">Replace image</button>
+                            <div class="cover-fit-choice"><button type="button" class="@(primarySelection.ImageFit == FigureImageFit.Contain ? "selected" : null)" title="Show the complete image" @onclick="() => SetImageFit(primarySelection, FigureImageFit.Contain)">Whole image</button><button type="button" class="@(primarySelection.ImageFit == FigureImageFit.Cover ? "selected" : null)" title="Crop as needed to fill the frame" @onclick="() => SetImageFit(primarySelection, FigureImageFit.Cover)">Fill frame</button></div>
+                            @if (primarySelection.ImageFit == FigureImageFit.Cover) { <button type="button" class="@(_cropReposition ? "selected" : null)" title="Drag the artwork within its frame" @onclick="() => _cropReposition = !_cropReposition">@(_cropReposition ? "Finish crop" : "Reposition crop")</button> }
+                        }
+                        else if (primarySelection.Kind == CompositionObjectKind.Text)
+                        {
+                            var primaryStyle = Resolved(primarySelection);
+                            <label>Content<select value="@primarySelection.TextBinding" @onchange="e => Patch(primarySelection with { TextBinding = e.Value?.ToString() ?? string.Empty })"><option value="">Unbound text</option>@foreach (var binding in AvailableBindings) { <option value="@binding">@binding</option> }</select></label>
+                            <label>Font<select value="@primaryStyle.FontFamilyKey" @onchange="e => Patch(primarySelection with { StyleId = null, FontFamilyKey = e.Value?.ToString() ?? string.Empty })">@foreach (var family in _fontFamilies) { <option value="@family.Key">@family.Name</option> }</select></label>
+                            <label>Size<input class="cover-number" type="number" min="4" max="144" value="@primaryStyle.FontSizePoints" @onchange="e => Patch(primarySelection with { StyleId = null, FontSizePoints = Number(e) })" /></label>
+                            <label>Align<select value="@primaryStyle.TextAlignment" @onchange="e => Patch(primarySelection with { StyleId = null, TextAlignment = Enum.Parse<CompositionTextAlignment>(e.Value!.ToString()!) })">@foreach (var alignment in Enum.GetValues<CompositionTextAlignment>()) { <option value="@alignment">@alignment</option> }</select></label>
+                            <label>Text<input type="color" value="@ColorValue(primaryStyle.FillColor)" @onchange="e => Patch(primarySelection with { StyleId = null, FillColor = Color(e) })" /></label>
+                        }
+                        <span class="cover-control-divider" aria-hidden="true"></span>
+                        <button type="button" title="Send behind the next object" @onclick="() => ChangeZ(primarySelection, -1)">Send back</button><button type="button" title="Bring in front of the next object" @onclick="() => ChangeZ(primarySelection, 1)">Bring front</button><button type="button" class="@(primarySelection.Locked ? "selected" : null)" title="Lock or unlock this object" @onclick="() => ToggleObjectLock(primarySelection)">@(primarySelection.Locked ? "Unlock" : "Lock")</button><button type="button" class="danger" title="Delete selected object" @onclick="() => Delete(primarySelection.Id)">Delete</button>
+                    </div>
                 }
-                else { <p class="text-muted">Select an object to edit its exact geometry and semantics.</p> }
-                <h3>Geometry</h3>
-                <p>@_cover.Template.FullWidthInches.ToString("0.###") × @_cover.Template.FullHeightInches.ToString("0.###") in</p>
-                @if (IsPrint) { <p>@_cover.Template.PageCount pages; @_cover.Template.SpineWidthInches.ToString("0.###") in spine.</p> }
-                @foreach (var diagnostic in _cover.Diagnostics) { <p class="text-warning-emphasis">@diagnostic</p> }
-            </aside>
-        </div>
+                else { <p class="cover-empty-selection">Select an object on the cover to edit it. Drag to move; use the handles to resize or rotate.</p> }
+            </Selection>
+            <Details>
+                <div class="cover-workspace-actions">
+                    <div><button type="button" title="Undo last cover change" @onclick="Undo" disabled="@(_undo.Count == 0)">↶</button><button type="button" title="Redo last undone change" @onclick="Redo" disabled="@(_redo.Count == 0)">↷</button><button type="button" title="Zoom out" @onclick="() => _zoom = Math.Max(.3, _zoom - .1)">−</button><span>@Math.Round(_zoom * 100)%</span><button type="button" title="Zoom in" @onclick="() => _zoom = Math.Min(1.6, _zoom + .1)">+</button></div>
+                    <details class="cover-secondary-controls">
+                    <summary title="Open cover copy, accessibility, and exact layout settings">Cover details</summary>
+                    <div class="cover-details-panel">
+                        <h3>Bound cover copy</h3>
+                        <label>Title<input @bind="_title" @bind:after="MarkDirty" /></label>
+                        <label>Subtitle<input @bind="_subtitle" @bind:after="MarkDirty" /></label>
+                        <label>Author<input @bind="_author" @bind:after="MarkDirty" /></label>
+                        @if (IsPrint)
+                        {
+                            <label>Spine text<input @bind="_spineText" @bind:after="MarkDirty" /></label>
+                            <label>Back copy<textarea rows="5" @bind="_backCopy" @bind:after="MarkDirty"></textarea></label>
+                            <label>Barcode behavior<select @bind="_barcodeMode" @bind:after="MarkDirty"><option value="@PublicationBarcodeMode.LorekeeperBarcode">Generate ISBN-13 barcode</option><option value="@PublicationBarcodeMode.VendorOverlay">Reserve vendor overlay area</option></select></label>
+                        }
+                        <label>Background<input type="color" @bind="_background" @bind:after="MarkDirty" /></label>
+
+                                <h3>Selected object details</h3>
+                        @if (Selected is { } selected)
+                        {
+                            <label>Name<input value="@selected.Name" @onchange="e => Patch(selected with { Name = e.Value?.ToString() ?? string.Empty })" /></label>
+                            <div class="cover-grid"><label>X %<input type="number" step=".1" value="@selected.Bounds.XPercent" @onchange="e => PatchBounds(selected, x: Number(e))" /></label><label>Y %<input type="number" step=".1" value="@selected.Bounds.YPercent" @onchange="e => PatchBounds(selected, y: Number(e))" /></label><label>Width %<input type="number" step=".1" value="@selected.Bounds.WidthPercent" @onchange="e => PatchBounds(selected, width: Number(e))" /></label><label>Height %<input type="number" step=".1" value="@selected.Bounds.HeightPercent" @onchange="e => PatchBounds(selected, height: Number(e))" /></label></div>
+                            <label>Constrain to<select value="@selected.RegionConstraint" @onchange="e => Patch(selected with { RegionConstraint = Enum.Parse<CompositionRegionConstraint>(e.Value!.ToString()!) })">@foreach (var region in AvailableRegions) { <option value="@region">@region</option> }</select></label>
+                            <label>Rotation<input type="number" value="@selected.RotationDegrees" @onchange="e => Patch(selected with { RotationDegrees = Number(e) })" /></label>
+                            <label>Opacity<input type="range" min="0" max="1" step=".05" value="@selected.Opacity" @onchange="e => Patch(selected with { Opacity = Number(e) })" /></label>
+                            <label><input type="checkbox" checked="@selected.Visible" @onchange="e => Patch(selected with { Visible = (bool)e.Value! })" /> Visible</label>
+                            <label><input type="checkbox" checked="@selected.Locked" @onchange="e => Patch(selected with { Locked = (bool)e.Value! })" /> Locked</label>
+                            <label>Object style<select value="@selected.StyleId" @onchange="e => SetObjectStyle(selected, e)"><option value="">Local formatting</option>@foreach (var style in _styles) { <option value="@style.Id">@style.Name</option> }</select></label>
+                            <div class="cover-actions"><button type="button" @onclick="() => CreateStyleFrom(selected)">Save reusable style</button>@if (selected.StyleId is Guid styleId) { <button type="button" @onclick="() => DeleteStyle(styleId)">Delete style</button> }</div>
+                            <label>Semantic role<select value="@selected.SemanticRole" @onchange="e => Patch(selected with { SemanticRole = Enum.Parse<CompositionSemanticRole>(e.Value!.ToString()!) })">@foreach (var role in Enum.GetValues<CompositionSemanticRole>()) { <option value="@role">@role</option> }</select></label>
+                            <label>Reading order<input type="number" value="@selected.ReadingOrder" @onchange="e => Patch(selected with { ReadingOrder = NullableInt(e) })" /></label>
+                            @if (selected.Kind == CompositionObjectKind.Image)
+                            {
+                                <div class="cover-current-artwork">
+                                    @if (selected.ImageId is Guid currentImageId && Image(currentImageId) is { } currentImage)
+                                    {
+                                        <img src="@currentImage.PreviewUrl" alt="" />
+                                        <span><small>Project artwork</small><strong>@currentImage.FileName</strong></span>
+                                    }
+                                    else
+                                    {
+                                        <span><small>Project artwork</small><strong>No artwork selected</strong></span>
+                                    }
+                                    <button type="button" @onclick="() => OpenReplaceArtworkPicker(selected.Id)">Replace artwork</button>
+                                </div>
+                                <label>Fit<select value="@selected.ImageFit" @onchange="e => Patch(selected with { ImageFit = Enum.Parse<FigureImageFit>(e.Value!.ToString()!) })">@foreach (var fit in Enum.GetValues<FigureImageFit>()) { <option value="@fit">@fit</option> }</select></label>
+                                @if (selected.ImageFit == FigureImageFit.Cover)
+                                {
+                                    <button type="button" class="@(_cropReposition ? "selected" : null)" @onclick="() => _cropReposition = !_cropReposition">@(_cropReposition ? "Finish repositioning" : "Reposition crop")</button>
+                                }
+                                <label>Alternative text<textarea value="@selected.AltText" @onchange="e => SetAltText(selected, e.Value?.ToString() ?? string.Empty)"></textarea></label>
+                                <label><input type="checkbox" checked="@selected.Decorative" @onchange="e => SetDecorative(selected, (bool)e.Value!)" /> Decorative artwork</label>
+                            }
+                            @if (selected.Kind == CompositionObjectKind.Text)
+                            {
+                                var resolved = Resolved(selected);
+                                <label>Canonical binding<select value="@selected.TextBinding" @onchange="e => Patch(selected with { TextBinding = e.Value?.ToString() ?? string.Empty })"><option value="">Unbound text</option>@foreach (var binding in AvailableBindings) { <option value="@binding">@binding</option> }</select></label>
+                                <label>Font family<select value="@resolved.FontFamilyKey" @onchange="e => Patch(selected with { StyleId = null, FontFamilyKey = e.Value?.ToString() ?? string.Empty })">@foreach (var family in _fontFamilies) { <option value="@family.Key">@family.Name</option> }</select></label>
+                                <label>Font weight<input type="number" min="100" max="900" step="100" value="@resolved.FontWeight" @onchange="e => Patch(selected with { StyleId = null, FontWeight = (int)Number(e) })" /></label>
+                                <label>Font size<input type="number" min="4" max="144" value="@resolved.FontSizePoints" @onchange="e => Patch(selected with { StyleId = null, FontSizePoints = Number(e) })" /></label>
+                                <label>Line height<input type="number" min=".5" max="4" step=".05" value="@resolved.LineHeight" @onchange="e => Patch(selected with { StyleId = null, LineHeight = Number(e) })" /></label>
+                                <label>Letter spacing (em)<input type="number" min="-1" max="10" step=".01" value="@resolved.LetterSpacingEm" @onchange="e => Patch(selected with { StyleId = null, LetterSpacingEm = Number(e) })" /></label>
+                                <label>Horizontal alignment<select value="@resolved.TextAlignment" @onchange="e => Patch(selected with { StyleId = null, TextAlignment = Enum.Parse<CompositionTextAlignment>(e.Value!.ToString()!) })">@foreach (var alignment in Enum.GetValues<CompositionTextAlignment>()) { <option value="@alignment">@alignment</option> }</select></label>
+                                <label>Vertical alignment<select value="@resolved.VerticalAlignment" @onchange="e => Patch(selected with { StyleId = null, VerticalAlignment = Enum.Parse<CompositionVerticalAlignment>(e.Value!.ToString()!) })">@foreach (var alignment in Enum.GetValues<CompositionVerticalAlignment>()) { <option value="@alignment">@alignment</option> }</select></label>
+                                <label>Text shadow<select value="@resolved.TextShadow" @onchange="e => Patch(selected with { StyleId = null, TextShadow = Enum.Parse<CompositionTextShadow>(e.Value!.ToString()!) })">@foreach (var shadow in Enum.GetValues<CompositionTextShadow>()) { <option value="@shadow">@shadow</option> }</select></label>
+                                <label>Background<input type="color" value="@ColorValue(resolved.BackgroundColor)" @onchange="e => Patch(selected with { StyleId = null, BackgroundColor = Color(e) })" /></label>
+                                <label>Background opacity<input type="range" min="0" max="1" step=".05" value="@resolved.BackgroundOpacity" @onchange="e => Patch(selected with { StyleId = null, BackgroundOpacity = Number(e) })" /></label>
+                            }
+                            @if (selected.Kind is CompositionObjectKind.Text or CompositionObjectKind.Rectangle or CompositionObjectKind.Ellipse or CompositionObjectKind.Line)
+                            {
+                                var resolved = Resolved(selected);
+                                <label>Fill<input type="color" value="@ColorValue(resolved.FillColor)" @onchange="e => Patch(selected with { StyleId = null, FillColor = Color(e) })" /></label>
+                                <label>Stroke<input type="color" value="@ColorValue(resolved.StrokeColor)" @onchange="e => Patch(selected with { StyleId = null, StrokeColor = Color(e) })" /></label>
+                                <label>Stroke width<input type="number" min="0" max="72" step=".25" value="@resolved.StrokeWidthPoints" @onchange="e => Patch(selected with { StyleId = null, StrokeWidthPoints = Number(e) })" /></label>
+                            }
+                            <div class="cover-actions"><button type="button" @onclick="() => ChangeZ(selected, -1)">Send back</button><button type="button" @onclick="() => ChangeZ(selected, 1)">Bring forward</button><button type="button" class="danger" @onclick="() => Delete(selected.Id)">Delete</button></div>
+                        }
+                        else { <p class="text-muted">Select an object to edit its exact geometry and semantics.</p> }
+                        <h3>Logical reading order</h3>
+                        @foreach (var item in _objects.Where(item => item.Visible && item.ReadingOrder is not null).OrderBy(item => item.ReadingOrder))
+                        {
+                            <div class="cover-reading-row"><span>@item.ReadingOrder</span> @ObjectLabel(item) (@item.SemanticRole) <button type="button" @onclick="() => MoveReadingOrder(item, -1)">Up</button><button type="button" @onclick="() => MoveReadingOrder(item, 1)">Down</button></div>
+                        }
+                        <h3>Geometry</h3>
+                        <p>@_cover.Template.FullWidthInches.ToString("0.###") × @_cover.Template.FullHeightInches.ToString("0.###") in</p>
+                        @if (IsPrint) { <p>@_cover.Template.PageCount pages; @_cover.Template.SpineWidthInches.ToString("0.###") in spine.</p> }
+                        @foreach (var diagnostic in _cover.Diagnostics) { <p class="text-warning-emphasis">@diagnostic</p> }
+                    </div>
+                    </details>
+                    <div><button type="button" class="primary" disabled="@(!_dirty || _saving)" @onclick="SaveAsync">@(_saving ? "Saving..." : "Save")</button><button type="button" @onclick="CloseAsync">Back</button></div>
+                </div>
+            </Details>
+        </CompositionVisualEditorShell>
     }
 </div>
 
@@ -217,10 +216,10 @@
     [Parameter] public EventCallback Saved { get; set; }
     [Parameter] public EventCallback Closed { get; set; }
     private PublicationCoverDesignView? _cover; private PublicationEditionSummary? _edition; private CompositionScene? _scene;
-    private List<CompositionObject> _objects = []; private List<CompositionLayer> _layers = []; private List<CompositionObjectStyle> _styles = []; private IReadOnlyList<ProjectImageView> _images = []; private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = []; private Guid? _selectedId; private Guid? _selectedLayerId; private readonly HashSet<Guid> _groupSelection = [];
+    private List<CompositionObject> _objects = []; private List<CompositionLayer> _layers = []; private List<CompositionObjectStyle> _styles = []; private IReadOnlyList<ProjectImageView> _images = []; private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = []; private Guid? _selectedId;
     private readonly Stack<WorkspaceSnapshot> _undo = new(); private readonly Stack<WorkspaceSnapshot> _redo = new();
     private Guid _loadedProjectId; private Guid _loadedEditionId; private bool _loadedCoreBook; private long _loadedRefreshSignal = -1;
-    private string _title = "", _subtitle = "", _author = "", _spineText = "", _backCopy = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private string? _error; private bool _dirty, _saving, _snap = true, _guides = true, _cropReposition; private double _zoom = .8;
+    private string _title = "", _subtitle = "", _author = "", _spineText = "", _backCopy = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private string? _error; private bool _dirty, _saving, _snap = true, _guides = true, _cropReposition; private double _zoom = .95;
     private FigureImageFit _newImageFit = FigureImageFit.Contain;
     private ArtworkPickerMode? _artworkPickerMode;
     private Guid? _artworkPickerTargetId;
@@ -232,15 +231,15 @@
     private static readonly string[] Bindings = ["title", "subtitle", "author", "spineText", "backCopy"];
     private IEnumerable<string> AvailableBindings => IsPrint ? Bindings : Bindings.Take(3);
 
-    protected override async Task OnParametersSetAsync() { if (_loadedProjectId == ProjectId && _loadedEditionId == EditionId && _loadedCoreBook == CoreBook && _loadedRefreshSignal == RefreshSignal) return; if (_dirty) { await SaveAsync(); if (_dirty) return; } try { _edition = CoreBook ? null : (await Editions.ListAsync(ProjectId)).Single(item => item.Id == EditionId); _cover = CoreBook ? await Books.GetCoverAsync(ProjectId) : await Covers.GetAsync(ProjectId, EditionId); _images = (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg").ToList(); _fontFamilies = await ProjectFonts.ListAsync(ProjectId); _scene = CoverCompositionFactory.KeepArtworkBehindCopy(JsonSerializer.Deserialize<CompositionScene>(_cover.CompositionSceneJson, ManuscriptCodec.JsonOptions) ?? throw new InvalidDataException("Cover scene is empty.")); _objects = _scene.Objects.ToList(); _layers = _scene.Layers.ToList(); _styles = _scene.Styles.ToList(); _selectedId = RequestedSelectionId is Guid requestedId && _objects.Any(item => item.Id == requestedId) ? requestedId : _selectedId is Guid selectedId && _objects.Any(item => item.Id == selectedId) ? selectedId : null; _selectedLayerId = _layers.OrderByDescending(item => item.Order).FirstOrDefault()?.Id; _title = _cover.Title; _subtitle = _cover.Subtitle; _author = _cover.Author; _spineText = _cover.SpineText; _backCopy = _cover.BackCopy; _background = _cover.BackgroundColor; _barcodeMode = _cover.BarcodeMode; _undo.Clear(); _redo.Clear(); _dirty = false; _loadedProjectId = ProjectId; _loadedEditionId = EditionId; _loadedCoreBook = CoreBook; _loadedRefreshSignal = RefreshSignal; } catch (Exception ex) { _error = ex.Message; } }
+    protected override async Task OnParametersSetAsync() { if (_loadedProjectId == ProjectId && _loadedEditionId == EditionId && _loadedCoreBook == CoreBook && _loadedRefreshSignal == RefreshSignal) return; if (_dirty) { await SaveAsync(); if (_dirty) return; } try { _edition = CoreBook ? null : (await Editions.ListAsync(ProjectId)).Single(item => item.Id == EditionId); _cover = CoreBook ? await Books.GetCoverAsync(ProjectId) : await Covers.GetAsync(ProjectId, EditionId); _images = (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg").ToList(); _fontFamilies = await ProjectFonts.ListAsync(ProjectId); _scene = CoverCompositionFactory.KeepArtworkBehindCopy(JsonSerializer.Deserialize<CompositionScene>(_cover.CompositionSceneJson, ManuscriptCodec.JsonOptions) ?? throw new InvalidDataException("Cover scene is empty.")); _objects = _scene.Objects.ToList(); _layers = _scene.Layers.ToList(); _styles = _scene.Styles.ToList(); _selectedId = RequestedSelectionId is Guid requestedId && _objects.Any(item => item.Id == requestedId) ? requestedId : _selectedId is Guid selectedId && _objects.Any(item => item.Id == selectedId) ? selectedId : null; _title = _cover.Title; _subtitle = _cover.Subtitle; _author = _cover.Author; _spineText = _cover.SpineText; _backCopy = _cover.BackCopy; _background = _cover.BackgroundColor; _barcodeMode = _cover.BarcodeMode; _undo.Clear(); _redo.Clear(); _dirty = false; _loadedProjectId = ProjectId; _loadedEditionId = EditionId; _loadedCoreBook = CoreBook; _loadedRefreshSignal = RefreshSignal; } catch (Exception ex) { _error = ex.Message; } }
     private void MarkDirty() => _dirty = true;
     private WorkspaceSnapshot Capture() => new(_objects.ToList(), _layers.ToList(), _styles.ToList());
-    private void Restore(WorkspaceSnapshot snapshot) { _objects = snapshot.Objects; _layers = snapshot.Layers; _styles = snapshot.Styles; _selectedId = _objects.FirstOrDefault(item => item.Id == _selectedId)?.Id; _selectedLayerId = _layers.FirstOrDefault(item => item.Id == _selectedLayerId)?.Id ?? _layers.FirstOrDefault()?.Id; }
+    private void Restore(WorkspaceSnapshot snapshot) { _objects = snapshot.Objects; _layers = snapshot.Layers; _styles = snapshot.Styles; _selectedId = _objects.FirstOrDefault(item => item.Id == _selectedId)?.Id; }
     private void Snapshot() { _undo.Push(Capture()); _redo.Clear(); }
     private void Patch(CompositionObject item) { Snapshot(); var index = _objects.FindIndex(candidate => candidate.Id == item.Id); if (index >= 0) _objects[index] = item; _dirty = true; }
     private void PatchBounds(CompositionObject item, double? x = null, double? y = null, double? width = null, double? height = null) => Patch(item with { Bounds = item.Bounds with { XPercent = Snap(x ?? item.Bounds.XPercent), YPercent = Snap(y ?? item.Bounds.YPercent), WidthPercent = Snap(width ?? item.Bounds.WidthPercent), HeightPercent = Snap(height ?? item.Bounds.HeightPercent) } });
     private double Snap(double value) => _snap ? Math.Round(value * 2, MidpointRounding.AwayFromZero) / 2 : value;
-    private void AddObject(CompositionObjectKind kind) { if (_scene is null || kind == CompositionObjectKind.Image) return; Snapshot(); var semantic = kind == CompositionObjectKind.Text; var item = new CompositionObject { Id = Guid.NewGuid(), LayerId = _selectedLayerId ?? _layers.First().Id, Kind = kind, Name = kind.ToString(), Bounds = new CompositionBounds { XPercent = 15, YPercent = 15, WidthPercent = 30, HeightPercent = 20 }, ZIndex = semantic ? _objects.Select(candidate => candidate.ZIndex).DefaultIfEmpty().Max() + 1 : 0, Decorative = !semantic, SemanticRole = semantic ? CompositionSemanticRole.Paragraph : CompositionSemanticRole.Artifact, ReadingOrder = semantic ? NextReadingOrder() : null }; _objects.Add(item); _selectedId = item.Id; _dirty = true; }
+    private void AddObject(CompositionObjectKind kind) { if (_scene is null || kind == CompositionObjectKind.Image) return; Snapshot(); var semantic = kind == CompositionObjectKind.Text; var item = new CompositionObject { Id = Guid.NewGuid(), LayerId = ContentLayerId, Kind = kind, Name = kind.ToString(), Bounds = new CompositionBounds { XPercent = 15, YPercent = 15, WidthPercent = 30, HeightPercent = 20 }, ZIndex = semantic ? _objects.Select(candidate => candidate.ZIndex).DefaultIfEmpty().Max() + 1 : 0, Decorative = !semantic, SemanticRole = semantic ? CompositionSemanticRole.Paragraph : CompositionSemanticRole.Artifact, ReadingOrder = semantic ? NextReadingOrder() : null }; _objects.Add(item); _selectedId = item.Id; _dirty = true; }
     private void AddImageObject(ProjectImageView image)
     {
         if (_scene is null) return;
@@ -248,7 +247,7 @@
         Snapshot();
         var item = new CompositionObject
         {
-            Id = Guid.NewGuid(), LayerId = _selectedLayerId ?? _layers.First().Id,
+            Id = Guid.NewGuid(), LayerId = ContentLayerId,
             Kind = CompositionObjectKind.Image, Name = image.FileName, ImageId = image.Id,
             ImageFit = _newImageFit, Bounds = new() { XPercent = 10, YPercent = 10, WidthPercent = 80, HeightPercent = 80 },
             ZIndex = _objects.Where(candidate => candidate.Kind == CompositionObjectKind.Text).Select(candidate => candidate.ZIndex).DefaultIfEmpty(0).Min() - 1,
@@ -257,22 +256,43 @@
         };
         _objects.Add(item); _selectedId = item.Id; _dirty = true;
     }
-    private void AddLayer() { Snapshot(); var layer = new CompositionLayer(Guid.NewGuid(), $"Layer {_layers.Count + 1}", _layers.Select(item => item.Order).DefaultIfEmpty(-1).Max() + 1); _layers.Add(layer); _selectedLayerId = layer.Id; _dirty = true; }
-    private void ToggleLayerVisibility(CompositionLayer layer) { var index = _layers.FindIndex(item => item.Id == layer.Id); if (index >= 0) { Snapshot(); _layers[index] = layer with { Visible = !layer.Visible }; _dirty = true; } }
-    private void ToggleLayerLock(CompositionLayer layer) { var index = _layers.FindIndex(item => item.Id == layer.Id); if (index >= 0) { Snapshot(); _layers[index] = layer with { Locked = !layer.Locked }; _dirty = true; } }
-    private void MoveToLayer(CompositionObject item, ChangeEventArgs e) { if (!Guid.TryParse(e.Value?.ToString(), out var layerId)) return; if (item.Kind == CompositionObjectKind.Group) { Snapshot(); _objects = _objects.Select(candidate => candidate.Id == item.Id || candidate.GroupId == item.Id ? candidate with { LayerId = layerId } : candidate).ToList(); _dirty = true; } else Patch(item with { LayerId = layerId }); }
+    private Guid ContentLayerId => _layers.FirstOrDefault(layer => layer.Visible && !layer.Locked)?.Id
+        ?? _layers.FirstOrDefault()?.Id
+        ?? Guid.Empty;
+    private void SelectObject(Guid id) { _selectedId = id; _cropReposition = false; }
+    private static string ObjectLabel(CompositionObject item) => string.IsNullOrWhiteSpace(item.Name) ? item.Kind.ToString() : item.Name;
+    private static string ObjectIcon(CompositionObjectKind kind) => kind switch { CompositionObjectKind.Text => "T", CompositionObjectKind.Image => "▧", CompositionObjectKind.Rectangle => "□", CompositionObjectKind.Ellipse => "○", CompositionObjectKind.Line => "—", _ => "◇" };
+    private void SetImageFit(CompositionObject item, FigureImageFit fit) { if (item.ImageFit == fit) return; _cropReposition = false; Patch(item with { ImageFit = fit }); }
+    private void ToggleObjectLock(CompositionObject item) => Patch(item with { Locked = !item.Locked });
     private void SetObjectStyle(CompositionObject item, ChangeEventArgs e) => Patch(item with { StyleId = Guid.TryParse(e.Value?.ToString(), out var styleId) ? styleId : null });
     private CompositionObject Resolved(CompositionObject item) { var style = item.StyleId is Guid styleId ? _styles.FirstOrDefault(candidate => candidate.Id == styleId) : null; return style is null ? item : item with { FontFamilyKey = style.FontFamilyKey, FontWeight = style.FontWeight, Italic = style.Italic, FontSizePoints = style.FontSizePoints, LineHeight = style.LineHeight, LetterSpacingEm = style.LetterSpacingEm, FillColor = style.FillColor, BackgroundColor = style.BackgroundColor, BackgroundOpacity = style.BackgroundOpacity, StrokeColor = style.StrokeColor, StrokeWidthPoints = style.StrokeWidthPoints, TextAlignment = style.TextAlignment, VerticalAlignment = style.VerticalAlignment, TextShadow = style.TextShadow }; }
     private void CreateStyleFrom(CompositionObject item) { Snapshot(); var resolved = Resolved(item); var style = new CompositionObjectStyle { Id = Guid.NewGuid(), Name = $"Style {_styles.Count + 1}", FontFamilyKey = resolved.FontFamilyKey, FontWeight = resolved.FontWeight, Italic = resolved.Italic, FontSizePoints = resolved.FontSizePoints, LineHeight = resolved.LineHeight, LetterSpacingEm = resolved.LetterSpacingEm, FillColor = resolved.FillColor, BackgroundColor = resolved.BackgroundColor, BackgroundOpacity = resolved.BackgroundOpacity, StrokeColor = resolved.StrokeColor, StrokeWidthPoints = resolved.StrokeWidthPoints, TextAlignment = resolved.TextAlignment, VerticalAlignment = resolved.VerticalAlignment, TextShadow = resolved.TextShadow }; _styles.Add(style); var index = _objects.FindIndex(candidate => candidate.Id == item.Id); if (index >= 0) _objects[index] = item with { StyleId = style.Id }; _dirty = true; }
     private void DeleteStyle(Guid styleId) { Snapshot(); _styles.RemoveAll(style => style.Id == styleId); _objects = _objects.Select(item => item.StyleId == styleId ? item with { StyleId = null } : item).ToList(); _dirty = true; }
-    private void ToggleGroupSelection(Guid id, bool selected) { if (selected) _groupSelection.Add(id); else _groupSelection.Remove(id); }
-    private void GroupSelected() { var selected = _objects.Where(item => _groupSelection.Contains(item.Id) && item.Kind != CompositionObjectKind.Group && item.GroupId is null).ToList(); if (selected.Count < 2) return; Snapshot(); var left = selected.Min(item => item.Bounds.XPercent); var top = selected.Min(item => item.Bounds.YPercent); var right = selected.Max(item => item.Bounds.XPercent + item.Bounds.WidthPercent); var bottom = selected.Max(item => item.Bounds.YPercent + item.Bounds.HeightPercent); var width = Math.Max(.01, right - left); var height = Math.Max(.01, bottom - top); var groupId = Guid.NewGuid(); var layerId = selected[0].LayerId; _objects = _objects.Select(item => _groupSelection.Contains(item.Id) ? item with { GroupId = groupId, LayerId = layerId, Bounds = new CompositionBounds { XPercent = (item.Bounds.XPercent - left) / width * 100, YPercent = (item.Bounds.YPercent - top) / height * 100, WidthPercent = item.Bounds.WidthPercent / width * 100, HeightPercent = item.Bounds.HeightPercent / height * 100 } } : item).ToList(); _objects.Add(new CompositionObject { Id = groupId, LayerId = layerId, Kind = CompositionObjectKind.Group, Name = "Group", Bounds = new CompositionBounds { XPercent = left, YPercent = top, WidthPercent = width, HeightPercent = height }, Decorative = true, SemanticRole = CompositionSemanticRole.Artifact, ZIndex = selected.Min(item => item.ZIndex) }); _groupSelection.Clear(); _selectedId = groupId; _dirty = true; }
-    private void UngroupSelected() { var groupIds = _objects.Where(item => _groupSelection.Contains(item.Id)).Select(item => item.Kind == CompositionObjectKind.Group ? item.Id : item.GroupId).Where(id => id is not null).Select(id => id!.Value).Distinct().ToList(); if (groupIds.Count == 0 && Selected?.Kind == CompositionObjectKind.Group) groupIds.Add(Selected.Id); if (groupIds.Count == 0) return; Snapshot(); foreach (var groupId in groupIds) { var group = _objects.FirstOrDefault(item => item.Id == groupId); if (group is null) continue; _objects = _objects.Select(item => item.GroupId == groupId ? item with { GroupId = null, Bounds = EffectiveBounds(item, group), RotationDegrees = item.RotationDegrees + group.RotationDegrees, Opacity = item.Opacity * group.Opacity } : item).ToList(); _objects.RemoveAll(item => item.Id == groupId); } _groupSelection.Clear(); _selectedId = null; _dirty = true; }
+    private void Ungroup(Guid groupId)
+    {
+        var group = _objects.FirstOrDefault(item => item.Id == groupId && item.Kind == CompositionObjectKind.Group);
+        if (group is null)
+            return;
+
+        Snapshot();
+        _objects = _objects.Select(item => item.GroupId == groupId
+            ? item with
+            {
+                GroupId = null,
+                Bounds = EffectiveBounds(item, group),
+                RotationDegrees = item.RotationDegrees + group.RotationDegrees,
+                Opacity = item.Opacity * group.Opacity,
+            }
+            : item).ToList();
+        _objects.RemoveAll(item => item.Id == groupId);
+        _selectedId = null;
+        _dirty = true;
+    }
     private bool LayerVisible(Guid id) => _layers.FirstOrDefault(item => item.Id == id)?.Visible != false;
     private bool LayerLocked(Guid id) => _layers.FirstOrDefault(item => item.Id == id)?.Locked == true;
     private bool IsVisible(CompositionObject item) => item.Visible && LayerVisible(item.LayerId) && (item.GroupId is not Guid groupId || _objects.FirstOrDefault(candidate => candidate.Id == groupId)?.Visible == true);
     private bool IsLocked(CompositionObject item) => item.Locked || LayerLocked(item.LayerId) || (item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId)?.Locked == true);
-    private void Delete(Guid id) { if (_objects.FirstOrDefault(item => item.Id == id)?.Kind == CompositionObjectKind.Group) { _groupSelection.Clear(); _groupSelection.Add(id); UngroupSelected(); return; } Snapshot(); _objects.RemoveAll(item => item.Id == id); _selectedId = null; _dirty = true; }
+    private void Delete(Guid id) { if (_objects.FirstOrDefault(item => item.Id == id)?.Kind == CompositionObjectKind.Group) { Ungroup(id); return; } Snapshot(); _objects.RemoveAll(item => item.Id == id); _selectedId = null; _dirty = true; }
     private void ChangeZ(CompositionObject item, int delta)
     {
         var target = item.ZIndex + delta;
@@ -345,8 +365,6 @@
     private static int? NullableInt(ChangeEventArgs e) => int.TryParse(e.Value?.ToString(), out var value) ? value : null;
     private static string Color(ChangeEventArgs e) => e.Value?.ToString() ?? "#000000";
     private static string ColorValue(string value) => value.StartsWith('#') && value.Length == 7 ? value : "#000000";
-    private static string LayerDisplayName(CompositionLayer layer) =>
-        string.Equals(layer.Name, "Cover", StringComparison.OrdinalIgnoreCase) ? "Main cover" : layer.Name;
     private sealed record WorkspaceSnapshot(List<CompositionObject> Objects, List<CompositionLayer> Layers, List<CompositionObjectStyle> Styles);
     private enum ArtworkPickerMode { Add, Replace }
 

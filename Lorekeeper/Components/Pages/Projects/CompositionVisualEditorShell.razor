@@ -1,0 +1,30 @@
+<section class="visual-editor-shell" aria-label="@AccessibleLabel">
+    <div class="visual-editor-stage">
+        <div class="visual-editor-toolbar">
+            @Toolbar
+        </div>
+        <div class="visual-editor-canvas">
+            @Canvas
+        </div>
+    </div>
+    <div class="visual-editor-controls">
+        <div class="visual-editor-objects">
+            @Objects
+        </div>
+        <div class="visual-editor-selection">
+            @Selection
+        </div>
+        <div class="visual-editor-details">
+            @Details
+        </div>
+    </div>
+</section>
+
+@code {
+    [Parameter] public string AccessibleLabel { get; set; } = "Visual editor";
+    [Parameter, EditorRequired] public RenderFragment Toolbar { get; set; } = null!;
+    [Parameter, EditorRequired] public RenderFragment Canvas { get; set; } = null!;
+    [Parameter, EditorRequired] public RenderFragment Objects { get; set; } = null!;
+    [Parameter, EditorRequired] public RenderFragment Selection { get; set; } = null!;
+    [Parameter, EditorRequired] public RenderFragment Details { get; set; } = null!;
+}
