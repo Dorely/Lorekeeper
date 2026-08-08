@@ -451,8 +451,8 @@ public sealed class LorekeeperPressMigrationTests
                 var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions);
                 Assert.NotNull(scene);
                 Assert.Equal(CompositionSurfaceKind.FacingSpread, scene.Surface.Kind);
-                Assert.Equal(864, scene.Surface.WidthPoints);
-                Assert.Equal(648, scene.Surface.HeightPoints);
+                Assert.Equal(17 * 72, scene.Surface.WidthPoints);
+                Assert.Equal(11 * 72, scene.Surface.HeightPoints);
                 var image = Assert.Single(scene.Objects, item => item.Kind == CompositionObjectKind.Image);
                 Assert.Equal(pictureImageObjectId, image.Id);
                 Assert.Equal(pictureImageId, image.ImageId);

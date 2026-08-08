@@ -849,10 +849,12 @@ canonical hash of protected project, edition, asset, font, artifact, package,
 proof, audit, and page-map data while excluding only the explicitly transformed
 fields. Any failed
 validation enters the projectless recovery shell with the original protected
-backup. Projects without a publication release retain their exact converted
-Picture Page scene in a protected seed until authoring geometry exists. The later
-authoring-page cutover verifies and consumes every such seed, materializes its
-exact single-page or facing-spread geometry, and selects it as the active layout.
+backup. Every converted Picture Page retains its original 8.5 × 11 inch leaf
+geometry in a protected seed, including 17 × 11 inch `DoublePortrait` and
+22 × 8.5 inch `DoubleLandscape` spreads, regardless of publication releases.
+The later authoring-page cutover verifies and consumes every such seed,
+materializes its exact single-page or facing-spread geometry, and selects it as
+the active layout.
 It adds one project-owned page setup, removes Figure
 edition links and persisted workspace guides, renames stored crop coordinates,
 and supplies `Contain` wherever old image fit is absent or unsupported. It seeds

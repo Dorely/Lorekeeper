@@ -130,12 +130,10 @@ public sealed class VisualCompositionMigrationService(
                             warnings);
                         sourceVisualHashes.Add(sourceVisualHash);
                         targetVisualHashes.Add(HashCompositionVisual(composition));
-                        if (projectEditions.Count == 0)
-                        {
-                            var seed = composition.Variants.Single();
-                            composition.Variants.Clear();
-                            db.CompositionMutationStages.Add(CreateCompositionSeed(composition, seed.SceneJson));
-                        }
+                        var seed = composition.Variants.Single(item =>
+                            string.Equals(item.GeometryKey, "migration-seed", StringComparison.Ordinal));
+                        composition.Variants.Remove(seed);
+                        db.CompositionMutationStages.Add(CreateCompositionSeed(composition, seed.SceneJson));
                         await InsertPreAuthoringCompositionAsync(db, composition, cancellationToken);
                         compositionCount++;
                         targetDocument = ManuscriptCodec.Deserialize(
@@ -555,13 +553,14 @@ public sealed class VisualCompositionMigrationService(
         var unplaced = source.Content.Count(block => !referenced.Contains(block.Id));
         if (unplaced > 0)
             warnings.Add($"Picture Page chapter {chapter.Id:N} retained {unplaced} unplaced semantic block(s).");
-        var (surfaceKind, width, height) = chapter.PageLayoutKind switch
+        var surfaceKind = chapter.PageLayoutKind switch
         {
-            ChapterPageLayoutKind.SingleLandscape => (CompositionSurfaceKind.IndependentPage, 648d, 432d),
-            ChapterPageLayoutKind.DoublePortrait => (CompositionSurfaceKind.FacingSpread, 864d, 648d),
-            ChapterPageLayoutKind.DoubleLandscape => (CompositionSurfaceKind.FacingSpread, 1296d, 432d),
-            _ => (CompositionSurfaceKind.SinglePage, 432d, 648d),
+            ChapterPageLayoutKind.SingleLandscape => CompositionSurfaceKind.IndependentPage,
+            ChapterPageLayoutKind.DoublePortrait or ChapterPageLayoutKind.DoubleLandscape =>
+                CompositionSurfaceKind.FacingSpread,
+            _ => CompositionSurfaceKind.SinglePage,
         };
+        var (width, height) = LegacyPicturePageGeometry.SurfacePoints(chapter.PageLayoutKind);
         var legacyScene = new CompositionScene
         {
             Surface = new CompositionSurface { Kind = surfaceKind, WidthPoints = width, HeightPoints = height },
@@ -576,13 +575,14 @@ public sealed class VisualCompositionMigrationService(
             Name = chapter.Title,
             SemanticManuscriptJson = ManuscriptCodec.Serialize(semantic),
             Revision = source.Revision,
-            Variants = editions.Count == 0
-                ? [new PageCompositionVariant
+            Variants =
+            [
+                new PageCompositionVariant
                 {
                     GeometryKey = "migration-seed",
                     SceneJson = JsonSerializer.Serialize(legacyScene, ManuscriptCodec.JsonOptions),
-                }]
-                : editions.Select(edition => new
+                },
+                .. editions.Select(edition => new
                     {
                         Edition = edition,
                         Scene = AdaptLegacySceneForEdition(legacyScene, chapter.PageLayoutKind, edition),
@@ -597,7 +597,8 @@ public sealed class VisualCompositionMigrationService(
                     {
                         GeometryKey = group.Key,
                         SceneJson = JsonSerializer.Serialize(group.First().Scene, ManuscriptCodec.JsonOptions),
-                    }).ToList(),
+                    }),
+            ],
         };
     }
 

@@ -280,7 +280,7 @@
 | `BookBrief.cs` | Canonical high-level authorial-direction model, `BookKind` enum, and partial-patch contract whose null values are unchanged and `ClearFields` explicitly removes values. |
 | `Act.cs` | EF entity for a top-level outline grouping (Title/Synopsis/Order) under a `Project`. Cascade-deleted with the project. Owned chapters survive act deletion (FK `OnDelete.SetNull`). |
 | `Chapter.cs` | EF chapter with canonical manuscript-v4 JSON/revision and computed plain-text/document projections, plus title/synopsis/order, optional act, and vector-index state. |
-| `ChapterVisualMode.cs` / `ChapterVisualLayouts.cs` | Isolated legacy import/migration DTOs for interpreting earlier chapter visual records; no current runtime authoring path consumes them. |
+| `ChapterVisualMode.cs` / `ChapterVisualLayouts.cs` | Isolated legacy import/migration DTOs and original 8.5 × 11 leaf-geometry mapping for interpreting earlier chapter visual records; no current runtime authoring path consumes them. |
 | `CompositionModels.cs` | Page composition/variant/stage entities, active authoring-variant ownership, and shared scene, object/style, reading-order, region, and geometry-neutral generation-target contracts. |
 | `ProjectPageSetup.cs` | One-to-one project-owned authoring page geometry, margins, body typography, preset, and revision state. |
 | `ManuscriptMigrationJournal.cs` | Durable structured-manuscript migration phase, counts, hashes, backup path, timing, and redacted failure state. |
@@ -701,7 +701,7 @@
 | `ManuscriptStyleTemplateExtractor.cs` | Shared paragraph-style capture and compact style-application policy used by the manual editor and Editor assistant. |
 | `IManuscriptService.cs` | Canonical revision-aware chapter manuscript read, replace, and semantic-operation service contract. |
 | `ManuscriptMigrationService.cs` | Cross-process-serialized, WAL-safe Online Backup API migration/recovery owner for resumable schema/data transformation, atomic validation journaling, retention, confirmed restore, and non-downgrading later-migration orchestration. |
-| `VisualCompositionMigrationService.cs` | Guarded protected-backup v3/composition cutover and geometry-policy rekey that preserve semantic IDs/text and visual styles, map Figures/pages/covers/pending Outline state, verify artifacts/hashes/foreign keys, and invoke cleanup. |
+| `VisualCompositionMigrationService.cs` | Guarded protected-backup v3/composition cutover and geometry-policy rekey that preserve semantic IDs/text, original Picture Page geometry, visual styles, Figures/pages/covers/pending Outline state, artifacts/hashes, and foreign keys before cleanup. |
 | `AuthoringPageMigrationService.cs` | Guarded protected-backup v4 authoring cutover that materializes staged Picture Page scenes into active exact-geometry variants, seeds page setup, normalizes Figure/scene fit and crop state, preserves artifacts/hashes, and validates scene hashes, ownership, counts, references, and foreign keys. |
 
 ### wwwroot/

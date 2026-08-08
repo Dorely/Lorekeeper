@@ -272,9 +272,10 @@ chapters, cover scenes, page setup, authoring variants, and pending Outline
 changes. They verify semantic text and stable IDs, scene/image ownership and
 geometry, staged Picture Page hashes, active authoring layouts, protected row
 counts, foreign keys, artifacts, hashes, packages, audits, and proofs before
-removing obsolete visual state. Picture Pages in projects without a publication
-release retain their exact scene until the authoring migration materializes it
-as the active Designed Page layout. A failure
+removing obsolete visual state. Every Picture Page retains its original 8.5 × 11
+inch leaf geometry (including 17 × 11 facing spreads) until the authoring
+migration materializes it as the active Designed Page layout, independently of
+publication releases. A failure
 opens Lorekeeper's projectless recovery shell and leaves the original database
 available under **Settings > Data Recovery**. Existing generated artifacts keep
 their exact bytes and hashes but are labeled Legacy until regenerated through

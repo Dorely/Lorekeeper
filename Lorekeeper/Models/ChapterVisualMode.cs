@@ -19,6 +19,22 @@ public enum ChapterPageLayoutKind
     DoubleLandscape,
 }
 
+internal static class LegacyPicturePageGeometry
+{
+    private const double PointsPerInch = 72;
+
+    public static (double WidthPoints, double HeightPoints) SurfacePoints(ChapterPageLayoutKind kind)
+    {
+        var isLandscape = kind is ChapterPageLayoutKind.SingleLandscape or ChapterPageLayoutKind.DoubleLandscape;
+        var isSpread = kind is ChapterPageLayoutKind.DoublePortrait or ChapterPageLayoutKind.DoubleLandscape;
+        var leafWidthInches = isLandscape ? 11d : 8.5d;
+        var leafHeightInches = isLandscape ? 8.5d : 11d;
+        return (
+            leafWidthInches * (isSpread ? 2 : 1) * PointsPerInch,
+            leafHeightInches * PointsPerInch);
+    }
+}
+
 [JsonConverter(typeof(JsonStringEnumConverter<ChapterImageFit>))]
 public enum ChapterImageFit
 {

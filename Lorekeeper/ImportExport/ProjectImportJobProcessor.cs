@@ -2694,13 +2694,14 @@ public sealed class ProjectImportJobProcessor(
                 _ => CompositionSemanticRole.Paragraph,
             },
         }));
-        var (kind, width, height) = chapter.PageLayoutKind switch
+        var kind = chapter.PageLayoutKind switch
         {
-            ChapterPageLayoutKind.SingleLandscape => (CompositionSurfaceKind.IndependentPage, 648d, 432d),
-            ChapterPageLayoutKind.DoublePortrait => (CompositionSurfaceKind.FacingSpread, 864d, 648d),
-            ChapterPageLayoutKind.DoubleLandscape => (CompositionSurfaceKind.FacingSpread, 1296d, 432d),
-            _ => (CompositionSurfaceKind.SinglePage, 432d, 648d),
+            ChapterPageLayoutKind.SingleLandscape => CompositionSurfaceKind.IndependentPage,
+            ChapterPageLayoutKind.DoublePortrait or ChapterPageLayoutKind.DoubleLandscape =>
+                CompositionSurfaceKind.FacingSpread,
+            _ => CompositionSurfaceKind.SinglePage,
         };
+        var (width, height) = LegacyPicturePageGeometry.SurfacePoints(chapter.PageLayoutKind);
         var scene = new CompositionScene
         {
             Surface = new CompositionSurface { Kind = kind, WidthPoints = width, HeightPoints = height },
