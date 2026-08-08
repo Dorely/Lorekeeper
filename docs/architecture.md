@@ -792,8 +792,12 @@ backup discovery, and protected pruning for every guarded migration. It never
 prunes a backup referenced by a running/failed journal, scheduled restore, or
 active recovery state.
 
-Startup delegates the structured-manuscript cutover to
-`IManuscriptMigrationService` before normal initialization. For a legacy
+`IDatabaseStartupMigrationService` is the single ordered schema/data migration
+orchestrator used by both the application host and installed-database migration
+fixtures. Tests therefore exercise the same migration boundaries and recovery
+checks as a normal application start instead of maintaining a parallel sequence.
+It delegates the structured-manuscript cutover to `IManuscriptMigrationService`
+before normal initialization. For a legacy
 database it runs `PRAGMA quick_check`, creates a consistent SQLite Online Backup
 API snapshot under `.migration-backups/manuscripts`, applies the forward schema,
 converts all live and historical prose and visual anchors transactionally,
@@ -832,20 +836,30 @@ frame IDs/bindings/geometry/typography/z-order/reading order, keeps unreferenced
 text in an unplaced tray with a blocking diagnostic, maps layouts to leaf/spread
 scenes, marks visual-only pending Outline changes `RequiresReplan`, and marks
 existing artifacts `Legacy` without changing their bytes or hashes. Before
-commit it validates every resulting scene, checks foreign keys, and compares a
+commit it validates every resulting variant or protected authoring seed,
+including its SHA-256, semantic bindings, image ownership, and scene structure;
+legacy text frames that contain neither literal nor semantic content are omitted.
+It checks foreign keys and compares a
 canonical hash of protected project, edition, asset, font, artifact, package,
 proof, audit, and page-map data while excluding only the explicitly transformed
 fields. Any failed
 validation enters the projectless recovery shell with the original protected
-backup. The later authoring-page cutover adds one project-owned page setup,
-selects an active authoring variant for every composition, removes Figure
+backup. Projects without a publication release retain their exact converted
+Picture Page scene in a protected seed until authoring geometry exists. The later
+authoring-page cutover verifies and consumes every such seed, materializes its
+exact single-page or facing-spread geometry, and selects it as the active layout.
+It adds one project-owned page setup, removes Figure
 edition links and persisted workspace guides, renames stored crop coordinates,
 and supplies `Contain` wherever old image fit is absent or unsupported. It seeds
 appearance from an existing composition surface, then a default publication
 geometry, then 6 x 9 in. Its protected migration validates semantic text and
-hashes, scene/image ownership, references, protected row counts, artifacts,
+hashes, restored scene hashes, scene/image ownership, mandatory active Designed
+Page references, protected row-count deltas, artifacts,
 packages, proofs, and foreign keys before journaling success. Existing artifact
-bytes and hashes stay unchanged and become Legacy.
+bytes and hashes stay unchanged and become Legacy. The same guarded service also
+repairs a valid database from an interrupted/pre-release cutover when a completed
+authoring journal still has orphaned Picture Page seeds; it never overwrites a
+different non-empty layout for the same exact geometry.
 
 The Core Book cutover uses an additive schema followed by the guarded
 `PublicationCoreMigrationService` and a cleanup migration. For each project it

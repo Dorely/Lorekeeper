@@ -268,8 +268,11 @@ The guarded manuscript/composition and authoring-page migrations create a
 protected SQLite backup before transforming Figure presentation, page-layout
 chapters, cover scenes, page setup, authoring variants, and pending Outline
 changes. They verify semantic text and stable IDs, scene/image ownership and
-geometry, protected row counts, foreign keys, artifacts, hashes, packages,
-audits, and proofs before removing obsolete visual state. A failure
+geometry, staged Picture Page hashes, active authoring layouts, protected row
+counts, foreign keys, artifacts, hashes, packages, audits, and proofs before
+removing obsolete visual state. Picture Pages in projects without a publication
+release retain their exact scene until the authoring migration materializes it
+as the active Designed Page layout. A failure
 opens Lorekeeper's projectless recovery shell and leaves the original database
 available under **Settings > Data Recovery**. Existing generated artifacts keep
 their exact bytes and hashes but are labeled Legacy until regenerated through

@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.Text.Json;
+using Lorekeeper.Composition;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -17,7 +19,7 @@ public sealed class LorekeeperPressMigrationTests
     private const string PreviousMigration = "20260801022548_PublicationCoverImagesV14";
 
     [Fact]
-    public async Task PopulatedPressDatabasePreservesArtifactsAndSafelyCutsOverProfilesAndJobs()
+    public async Task InstalledPopulatedDatabaseRunsActualStartupMigrationWithoutDataLossOrRecovery()
     {
         var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -28,6 +30,7 @@ public sealed class LorekeeperPressMigrationTests
                 .UseSqlite($"Data Source={databasePath}")
                 .Options;
             var projectId = Guid.NewGuid();
+            var pictureProjectId = Guid.NewGuid();
             var editionId = Guid.NewGuid();
             var unknownEditionId = Guid.NewGuid();
             var completedJobId = Guid.NewGuid();
@@ -35,22 +38,110 @@ public sealed class LorekeeperPressMigrationTests
             var artifactId = Guid.NewGuid();
             var actId = Guid.NewGuid();
             var chapterId = Guid.NewGuid();
+            var pictureChapterId = Guid.NewGuid();
+            var pictureImageId = Guid.NewGuid();
+            var pictureImageObjectId = Guid.NewGuid();
+            var pictureTextObjectId = Guid.NewGuid();
+            var emptyPictureTextObjectId = Guid.NewGuid();
+            const string pictureBlockId = "picture-page-story-text";
             var styleId = Guid.NewGuid();
             var assetId = Guid.NewGuid();
             var matterId = Guid.NewGuid();
             var coverDesignId = Guid.NewGuid();
             var assetBytes = "preserved publish image bytes"u8.ToArray();
+            var pictureImageBytes = "preserved picture page image bytes"u8.ToArray();
             var bytes = "%PDF-1.7\nimmutable legacy bytes"u8.ToArray();
             var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
             var now = DateTime.UtcNow;
             var emptyJson = "{}";
             var legacyManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(chapterId, revision: 7))
                 .Replace($"\"schemaVersion\":{ManuscriptDocument.CurrentSchemaVersion}", "\"schemaVersion\":2", StringComparison.Ordinal);
+            var pictureManuscriptJson = ManuscriptCodec.Serialize(new ManuscriptDocument
+            {
+                ManuscriptId = pictureChapterId,
+                Revision = 3,
+                Content =
+                [
+                    new ManuscriptBlock
+                    {
+                        Id = pictureBlockId,
+                        Type = ManuscriptBlockType.Paragraph,
+                        StyleRole = ManuscriptStyleRoles.Body,
+                        Content = [new ManuscriptInline { Text = "The lighthouse shone across the water." }],
+                    },
+                ],
+            }).Replace($"\"schemaVersion\":{ManuscriptDocument.CurrentSchemaVersion}", "\"schemaVersion\":2", StringComparison.Ordinal);
+            var pictureLayoutJson = JsonSerializer.Serialize(new PicturePageLayout(
+                [
+                    new PicturePageImageElement(
+                        pictureImageObjectId,
+                        pictureImageId,
+                        0,
+                        0,
+                        100,
+                        100,
+                        ChapterImageFit.Cover,
+                        1,
+                        9,
+                        "A lighthouse shines across dark water."),
+                ],
+                [
+                    new PicturePageTextElement(
+                        pictureTextObjectId,
+                        string.Empty,
+                        55,
+                        10,
+                        35,
+                        25,
+                        10,
+                        1,
+                        "builtin:andika",
+                        400,
+                        false,
+                        32,
+                        0,
+                        1.15,
+                        "#ffffff",
+                        "#000000",
+                        0,
+                        PicturePageTextAlign.Left,
+                        ChapterTextVerticalAlign.Top,
+                        PicturePageTextShadow.Soft,
+                        PicturePageTextRole.Body,
+                        [new ManuscriptRangeReference(pictureBlockId, null, null)]),
+                    new PicturePageTextElement(
+                        emptyPictureTextObjectId,
+                        string.Empty,
+                        5,
+                        5,
+                        20,
+                        10,
+                        11,
+                        3,
+                        "builtin:andika",
+                        400,
+                        false,
+                        12,
+                        0,
+                        1.2,
+                        "#ffffff",
+                        "transparent",
+                        0,
+                        PicturePageTextAlign.Left,
+                        ChapterTextVerticalAlign.Top,
+                        PicturePageTextShadow.None),
+                ]), ManuscriptCodec.JsonOptions);
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 await db.GetService<IMigrator>().MigrateAsync(PreviousMigration);
                 db.Projects.Add(new Project { Id = projectId, Name = "Existing", Slug = $"existing-{projectId:N}" });
+                db.Projects.Add(new Project
+                {
+                    Id = pictureProjectId,
+                    Name = "Installed picture book",
+                    Slug = $"picture-{pictureProjectId:N}",
+                });
                 db.Acts.Add(new Act { Id = actId, ProjectId = projectId, Title = "Existing act" });
                 db.ManuscriptStyleDefinitions.Add(new ManuscriptStyleDefinition
                 {
@@ -73,6 +164,17 @@ public sealed class LorekeeperPressMigrationTests
                         VectorIndexedAt, CreatedAt, UpdatedAt)
                     VALUES ({chapterId}, {projectId}, {actId}, 'Existing chapter', '', 0, 'Prose',
                         '', '', 'SinglePortrait', {legacyManuscriptJson}, 7,
+                        'Stale', NULL, NULL, {now}, {now});
+                    """);
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    INSERT INTO Chapters (
+                        Id, ProjectId, ActId, Title, Synopsis, "Order", VisualMode,
+                        IllustrationLayoutJson, PageLayoutJson, PageLayoutKind,
+                        ManuscriptJson, ManuscriptRevision, VectorIndexState, VectorIndexError,
+                        VectorIndexedAt, CreatedAt, UpdatedAt)
+                    VALUES ({pictureChapterId}, {pictureProjectId}, NULL, 'Picture page', '', 0, 'PicturePage',
+                        '', {pictureLayoutJson}, 'DoublePortrait', {pictureManuscriptJson}, 3,
                         'Stale', NULL, NULL, {now}, {now});
                     """);
                 await db.Database.ExecuteSqlInterpolatedAsync(
@@ -140,6 +242,16 @@ public sealed class LorekeeperPressMigrationTests
                     ContentType = "image/png",
                     Data = assetBytes,
                     AltText = "Preserved art",
+                });
+                db.PublishAssets.Add(new PublishAsset
+                {
+                    Id = pictureImageId,
+                    ProjectId = pictureProjectId,
+                    Source = PublishAssetSource.Uploaded,
+                    FileName = "picture-page.png",
+                    ContentType = "image/png",
+                    Data = pictureImageBytes,
+                    AltText = "A lighthouse shines across dark water.",
                 });
                 db.PublicationEditionOutlineItems.Add(new PublicationEditionOutlineItem
                 {
@@ -220,39 +332,41 @@ public sealed class LorekeeperPressMigrationTests
             var recovery = new DatabaseMigrationRecoveryService(
                 configuration,
                 NullLogger<DatabaseMigrationRecoveryService>.Instance);
-            var migration = new PublicationPressMigrationService(
-                configuration,
-                recovery,
-                NullLogger<PublicationPressMigrationService>.Instance);
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
-                await migration.ApplyPendingAsync(db);
-                var recoveryState = await recovery.GetStateAsync();
-                Assert.False(recoveryState.RecoveryRequired, recoveryState.Error);
-                await db.GetService<IMigrator>().MigrateAsync(
-                    VisualCompositionMigrationService.AdditiveMigrationId);
-                var visualMigration = new VisualCompositionMigrationService(
-                    recovery,
-                    NullLogger<VisualCompositionMigrationService>.Instance);
-                await visualMigration.ApplyPendingAsync(db);
-                var visualRecoveryState = await recovery.GetStateAsync();
-                Assert.False(visualRecoveryState.RecoveryRequired, visualRecoveryState.Error);
-                await visualMigration.ApplyFinalSchemaAsync(db);
-                await db.GetService<IMigrator>().MigrateAsync(PublicationCoreMigrationService.SchemaMigrationId);
-                var authoringMigration = new AuthoringPageMigrationService(
-                    recovery,
-                    NullLogger<AuthoringPageMigrationService>.Instance);
-                await authoringMigration.ApplyPendingAsync(db);
-                var authoringRecoveryState = await recovery.GetStateAsync();
-                Assert.False(authoringRecoveryState.RecoveryRequired, authoringRecoveryState.Error);
-                var coreMigration = new PublicationCoreMigrationService(
-                    recovery,
-                    NullLogger<PublicationCoreMigrationService>.Instance);
-                await coreMigration.ApplyPendingAsync(db);
-                var coreRecoveryState = await recovery.GetStateAsync();
-                Assert.False(coreRecoveryState.RecoveryRequired, coreRecoveryState.Error);
-                await db.GetService<IMigrator>().MigrateAsync(PublicationCoreMigrationService.CleanupMigrationId);
-                await db.GetService<IMigrator>().MigrateAsync();
+                var startupMigration = new DatabaseStartupMigrationService(
+                    db,
+                    new ManuscriptMigrationService(
+                        configuration,
+                        recovery,
+                        NullLogger<ManuscriptMigrationService>.Instance),
+                    new PublicationEditionMigrationService(
+                        configuration,
+                        recovery,
+                        NullLogger<PublicationEditionMigrationService>.Instance),
+                    new PublicationPressMigrationService(
+                        configuration,
+                        recovery,
+                        NullLogger<PublicationPressMigrationService>.Instance),
+                    new VisualCompositionMigrationService(
+                        recovery,
+                        NullLogger<VisualCompositionMigrationService>.Instance),
+                    new AuthoringPageMigrationService(
+                        recovery,
+                        NullLogger<AuthoringPageMigrationService>.Instance),
+                    new PublicationCoreMigrationService(
+                        recovery,
+                        NullLogger<PublicationCoreMigrationService>.Instance),
+                    recovery);
+                Assert.True(await startupMigration.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+                var picturePdfPresentation = await db.PublicationBookPdfPresentations
+                    .SingleAsync(item => item.ProjectId == pictureProjectId);
+                picturePdfPresentation.AllowDesignedPageOverrides = true;
+                await db.SaveChangesAsync();
+                Assert.True(await startupMigration.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+                db.ChangeTracker.Clear();
+                Assert.True((await db.PublicationBookPdfPresentations.AsNoTracking()
+                    .SingleAsync(item => item.ProjectId == pictureProjectId)).AllowDesignedPageOverrides);
             }
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
@@ -282,11 +396,13 @@ public sealed class LorekeeperPressMigrationTests
                 Assert.Equal(artifactId, artifact.Id);
                 Assert.Equal(hash, artifact.Sha256);
                 Assert.Equal(bytes, artifact.Data);
-                Assert.Equal(assetBytes, (await db.PublishAssets.AsNoTracking().SingleAsync()).Data);
-                var coreBook = await db.PublicationBooks.AsNoTracking().SingleAsync();
+                Assert.Equal(assetBytes, (await db.PublishAssets.AsNoTracking().SingleAsync(item => item.Id == assetId)).Data);
+                var coreBook = await db.PublicationBooks.AsNoTracking().SingleAsync(item => item.ProjectId == projectId);
                 Assert.Equal("Existing title", coreBook.Title);
                 Assert.Equal("Author", coreBook.Author);
-                Assert.Single(await db.PublicationBookOutlineItems.AsNoTracking().ToListAsync());
+                Assert.Single(await db.PublicationBookOutlineItems.AsNoTracking()
+                    .Where(item => item.ProjectId == coreBook.ProjectId)
+                    .ToListAsync());
                 Assert.Single(await db.PublicationBookMatter.AsNoTracking().ToListAsync());
                 Assert.Single(await db.PublicationBookImagePlacements.AsNoTracking().ToListAsync());
                 var releaseOutline = Assert.Single(await db.PublicationEditionOutlineItems.AsNoTracking().ToListAsync());
@@ -315,6 +431,48 @@ public sealed class LorekeeperPressMigrationTests
                 var resolver = new PublicationEffectiveConfigurationResolver(db);
                 Assert.Single((await resolver.ResolveReleaseAsync(projectId, editionId)).Matter);
                 Assert.Empty((await resolver.ResolveReleaseAsync(projectId, unknownEditionId)).Matter);
+
+                var pictureChapter = await db.Chapters.AsNoTracking()
+                    .SingleAsync(item => item.Id == pictureChapterId);
+                var designedPage = Assert.Single(pictureChapter.Manuscript.Content);
+                Assert.Equal(ManuscriptBlockType.DesignedPage, designedPage.Type);
+                var compositionId = Assert.IsType<Guid>(designedPage.PageCompositionId);
+                var composition = await db.PageCompositions.AsNoTracking()
+                    .SingleAsync(item => item.Id == compositionId && item.ProjectId == pictureProjectId);
+                Assert.Equal(
+                    "The lighthouse shone across the water.",
+                    ManuscriptCodec.ProjectPlainText(
+                        composition.SemanticManuscriptJson,
+                        composition.Id,
+                        composition.Revision));
+                var activeVariantId = Assert.IsType<Guid>(composition.ActiveAuthoringVariantId);
+                var variant = await db.PageCompositionVariants.AsNoTracking()
+                    .SingleAsync(item => item.Id == activeVariantId && item.CompositionId == composition.Id);
+                var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions);
+                Assert.NotNull(scene);
+                Assert.Equal(CompositionSurfaceKind.FacingSpread, scene.Surface.Kind);
+                Assert.Equal(864, scene.Surface.WidthPoints);
+                Assert.Equal(648, scene.Surface.HeightPoints);
+                var image = Assert.Single(scene.Objects, item => item.Kind == CompositionObjectKind.Image);
+                Assert.Equal(pictureImageObjectId, image.Id);
+                Assert.Equal(pictureImageId, image.ImageId);
+                Assert.Equal(FigureImageFit.Cover, image.ImageFit);
+                Assert.Equal("A lighthouse shines across dark water.", image.AltText);
+                var text = Assert.Single(scene.Objects, item => item.Kind == CompositionObjectKind.Text);
+                Assert.Equal(pictureTextObjectId, text.Id);
+                Assert.DoesNotContain(scene.Objects, item => item.Id == emptyPictureTextObjectId);
+                Assert.Equal(pictureBlockId, Assert.Single(text.ContentReferences).BlockId);
+                Assert.Equal(32, text.FontSizePoints);
+                Assert.Equal(CompositionTextShadow.Soft, text.TextShadow);
+                Assert.Equal(
+                    pictureImageBytes,
+                    (await db.PublishAssets.AsNoTracking().SingleAsync(item => item.Id == pictureImageId)).Data);
+                Assert.False(await db.CompositionMutationStages.AsNoTracking().AnyAsync(item =>
+                    item.TargetKind == "page-composition-seed" && item.TargetId == composition.Id));
+                var authoringJournal = await db.ManuscriptMigrationJournals.AsNoTracking()
+                    .SingleAsync(item => item.MigrationName == AuthoringPageMigrationService.MigrationName);
+                Assert.Contains("\"restoredPicturePages\":1", authoringJournal.ValidationReportJson, StringComparison.Ordinal);
+                Assert.False((await recovery.GetStateAsync()).RecoveryRequired);
             }
         }
         finally

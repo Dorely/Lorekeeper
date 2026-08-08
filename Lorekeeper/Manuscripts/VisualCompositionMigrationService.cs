@@ -502,7 +502,9 @@ public sealed class VisualCompositionMigrationService(
                 ReadingOrder = nextImageReadingOrder++,
             });
         }
-        objects.AddRange(layout.TextElements.Select(text => new CompositionObject
+        objects.AddRange(layout.TextElements
+            .Where(text => text.ContentReferences is { Count: > 0 })
+            .Select(text => new CompositionObject
         {
             Id = text.Id,
             LayerId = layerId,
@@ -1054,6 +1056,12 @@ public sealed class VisualCompositionMigrationService(
             })
             .ToListAsync(cancellationToken);
         var variants = await db.PageCompositionVariants.AsNoTracking().ToListAsync(cancellationToken);
+        var picturePageSeeds = await db.CompositionMutationStages.AsNoTracking()
+            .Where(item => item.TargetKind == "page-composition-seed" && item.ConversationId == Guid.Empty)
+            .ToListAsync(cancellationToken);
+        var imageOwners = await db.PublishAssets.AsNoTracking()
+            .Select(item => new { item.Id, item.ProjectId })
+            .ToDictionaryAsync(item => item.Id, item => item.ProjectId, cancellationToken);
         foreach (var composition in compositions)
             composition.Variants = variants.Where(item => item.CompositionId == composition.Id).ToList();
         var editions = await ReadEditionsBeforeCoreAsync(db, cancellationToken);
@@ -1063,6 +1071,9 @@ public sealed class VisualCompositionMigrationService(
                 composition.SemanticManuscriptJson,
                 composition.Id,
                 composition.Revision);
+            var seeds = picturePageSeeds.Where(item => item.TargetId == composition.Id).ToList();
+            if (composition.Variants.Count == 0 && seeds.Count != 1)
+                throw new InvalidDataException($"Migrated Picture Page {composition.Id:N} has neither a layout nor a unique authoring seed.");
             foreach (var variant in composition.Variants)
             {
                 var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
@@ -1073,7 +1084,29 @@ public sealed class VisualCompositionMigrationService(
                 if (matchingEdition is not null)
                     CompositionService.ValidateVariantGeometry(matchingEdition, scene);
             }
+            foreach (var seed in seeds)
+            {
+                if (seed.ProjectId != composition.ProjectId
+                    || seed.ExpectedRevision != composition.Revision
+                    || seed.AppliedAt is not null
+                    || !string.Equals(
+                        seed.PayloadSha256,
+                        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(seed.OperationsJson))),
+                        StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException($"Migrated Picture Page seed {seed.Id:N} failed its ownership, revision, or hash validation.");
+                var scene = JsonSerializer.Deserialize<CompositionScene>(seed.OperationsJson, ManuscriptCodec.JsonOptions)
+                    ?? throw new InvalidDataException($"Migrated Picture Page seed {seed.Id:N} has no scene.");
+                CompositionService.Validate(scene, semantic);
+                foreach (var imageId in scene.Objects
+                    .Where(item => item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
+                    .Select(item => item.ImageId!.Value)
+                    .Distinct())
+                    if (!imageOwners.TryGetValue(imageId, out var owner) || owner != composition.ProjectId)
+                        throw new InvalidDataException($"Migrated Picture Page seed {seed.Id:N} references an image outside its project.");
+            }
         }
+        if (picturePageSeeds.Any(seed => compositions.All(composition => composition.Id != seed.TargetId)))
+            throw new InvalidDataException("A migrated Picture Page seed references a missing Designed Page.");
         foreach (var cover in await ReadCoversBeforeCoreAsync(db, cancellationToken))
         {
             var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)

@@ -27,8 +27,6 @@ using Lorekeeper.Writing;
 using ElectronNET.API;
 using ElectronNET.API.Entities;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 
 var builder = WebApplication.CreateBuilder(args);
 var desktopUpdates = new DesktopUpdateService();
@@ -184,6 +182,7 @@ builder.Services.AddScoped<IChapterService>(services => services.GetRequiredServ
 builder.Services.AddScoped<IManuscriptService>(services => services.GetRequiredService<ChapterService>());
 builder.Services.AddSingleton<IDatabaseMigrationRecoveryService, DatabaseMigrationRecoveryService>();
 builder.Services.AddSingleton<IManuscriptMigrationService, ManuscriptMigrationService>();
+builder.Services.AddScoped<IDatabaseStartupMigrationService, DatabaseStartupMigrationService>();
 builder.Services.AddScoped<IVisualCompositionMigrationService, VisualCompositionMigrationService>();
 builder.Services.AddScoped<IAuthoringPageMigrationService, AuthoringPageMigrationService>();
 builder.Services.AddScoped<IPublicationCoreMigrationService, PublicationCoreMigrationService>();
@@ -318,54 +317,10 @@ app.Lifetime.ApplicationStopping.Register(desktopUpdateMonitorCancellation.Cance
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var startupLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
 
-    var manuscriptMigration = scope.ServiceProvider.GetRequiredService<IManuscriptMigrationService>();
-    await manuscriptMigration.ApplyPendingAsync(db);
-    var editionMigration = scope.ServiceProvider.GetRequiredService<IPublicationEditionMigrationService>();
-    await editionMigration.ApplyPendingAsync(db);
-    var pressMigration = scope.ServiceProvider.GetRequiredService<IPublicationPressMigrationService>();
-    await pressMigration.ApplyPendingAsync(db);
-    var appliedMigrations = (await db.Database.GetAppliedMigrationsAsync()).ToHashSet(StringComparer.Ordinal);
-    if (!appliedMigrations.Contains(VisualCompositionMigrationService.CleanupMigrationId))
+    var startupMigration = scope.ServiceProvider.GetRequiredService<IDatabaseStartupMigrationService>();
+    if (await startupMigration.ApplyAsync())
     {
-        // The composition tables must exist while the legacy columns remain readable.
-        // The guarded transformation validates and journals the cutover before the
-        // cleanup migration is permitted to remove those columns.
-        await db.GetService<IMigrator>().MigrateAsync(VisualCompositionMigrationService.AdditiveMigrationId);
-        var visualCompositionMigration = scope.ServiceProvider.GetRequiredService<IVisualCompositionMigrationService>();
-        await visualCompositionMigration.ApplyPendingAsync(db);
-        var recovery = scope.ServiceProvider.GetRequiredService<IDatabaseMigrationRecoveryService>();
-        if (!await recovery.IsRecoveryRequiredAsync())
-            await visualCompositionMigration.ApplyFinalSchemaAsync(db);
-    }
-    else
-    {
-        var visualCompositionMigration = scope.ServiceProvider.GetRequiredService<IVisualCompositionMigrationService>();
-        await visualCompositionMigration.ApplyFinalSchemaAsync(db);
-        await visualCompositionMigration.ApplyPendingAsync(db);
-    }
-
-    // The Core Book schema change is additive and supplies columns now mapped by the
-    // current model. Apply it before the later authoring/Core transforms inspect
-    // pre-Core rows; the protected Core transformation and cleanup run afterward.
-    var migrationsBeforeAuthoring = (await db.Database.GetAppliedMigrationsAsync()).ToHashSet(StringComparer.Ordinal);
-    if (!migrationsBeforeAuthoring.Contains(PublicationCoreMigrationService.SchemaMigrationId))
-        await db.GetService<IMigrator>().MigrateAsync(PublicationCoreMigrationService.SchemaMigrationId);
-
-    var authoringPageMigration = scope.ServiceProvider.GetRequiredService<IAuthoringPageMigrationService>();
-    await authoringPageMigration.ApplyPendingAsync(db);
-
-    var publicationCoreMigration = scope.ServiceProvider.GetRequiredService<IPublicationCoreMigrationService>();
-    await publicationCoreMigration.ApplyPendingAsync(db);
-
-    var migrationRecovery = scope.ServiceProvider.GetRequiredService<IDatabaseMigrationRecoveryService>();
-    if (!await migrationRecovery.IsRecoveryRequiredAsync())
-    {
-        await db.GetService<IMigrator>().MigrateAsync(PublicationCoreMigrationService.CleanupMigrationId);
-        // Later additive migrations target the current Core schema and must run only
-        // after the guarded Core transformation and cleanup have both succeeded.
-        await db.GetService<IMigrator>().MigrateAsync();
         var embeddingConfiguration = await db.EmbeddingConfigurations.AsNoTracking().FirstOrDefaultAsync();
         var vectorMaintenance = scope.ServiceProvider.GetRequiredService<IVectorStoreMaintenance>();
         vectorMaintenance.Initialize(embeddingConfiguration?.Dimensions);
