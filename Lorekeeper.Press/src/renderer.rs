@@ -28,6 +28,21 @@ const MAX_REQUEST_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PAGES: usize = 10_000;
 type RenderResult<T> = Result<T, Box<RenderResponse>>;
 
+#[derive(Clone, Copy, Default)]
+struct LayoutTolerance {
+    allow_pending_accessibility: bool,
+    clip_composition_text_overflow: bool,
+}
+
+impl LayoutTolerance {
+    fn authoring_preview() -> Self {
+        Self {
+            allow_pending_accessibility: true,
+            clip_composition_text_overflow: true,
+        }
+    }
+}
+
 pub fn run(job_root: &Path) -> RenderResult<()> {
     let request = load_request(job_root)?;
     bind_job_id(run_parsed(job_root, &request), &request.job_id)
@@ -38,9 +53,11 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     ensure_output_is_safe(job_root)?;
     ensure_not_cancelled(job_root)?;
 
-    let allow_pending_accessibility = request.output_purpose == OutputPurpose::ReadingCopy;
-    let mut layout =
-        paginate_with_cancellation(request, Some(job_root), allow_pending_accessibility)?;
+    let tolerance = LayoutTolerance {
+        allow_pending_accessibility: request.output_purpose == OutputPurpose::ReadingCopy,
+        ..LayoutTolerance::default()
+    };
+    let mut layout = paginate_with_cancellation(request, Some(job_root), tolerance)?;
     if layout.pages.len() > MAX_PAGES {
         return Err(Box::new(RenderResponse::failed(
             "failed",
@@ -59,7 +76,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             Some(
                 digital_cover_layout(
                     request,
-                    allow_pending_accessibility,
+                    tolerance.allow_pending_accessibility,
                     &mut layout.diagnostics,
                 )
                 .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?,
@@ -342,7 +359,12 @@ pub fn trace(job_root: &Path) -> RenderResult<()> {
 fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     validate_request(request, job_root)?;
     let browser_preview = request.layout_trace_mode.as_deref() == Some("browser-preview");
-    let layout = paginate_with_cancellation(request, None, browser_preview)?;
+    let tolerance = if browser_preview {
+        LayoutTolerance::authoring_preview()
+    } else {
+        LayoutTolerance::default()
+    };
+    let layout = paginate_with_cancellation(request, None, tolerance)?;
     let fonts = if browser_preview {
         None
     } else {
@@ -1051,13 +1073,13 @@ fn pdf_failure(diagnostic: Diagnostic) -> Box<RenderResponse> {
 
 #[cfg(test)]
 fn paginate(request: &RenderRequest) -> RenderResult<LayoutDocument> {
-    paginate_with_cancellation(request, None, false)
+    paginate_with_cancellation(request, None, LayoutTolerance::default())
 }
 
 fn paginate_with_cancellation(
     request: &RenderRequest,
     job_root: Option<&Path>,
-    allow_pending_accessibility: bool,
+    tolerance: LayoutTolerance,
 ) -> RenderResult<LayoutDocument> {
     let trim = &request.trim;
     if !(3.5..=12.0).contains(&trim.width_inches)
@@ -1316,7 +1338,7 @@ fn paginate_with_cancellation(
                                     .get("allowDesignedPageOverrides")
                                     .and_then(Value::as_bool)
                                     .unwrap_or(false),
-                                allow_pending_accessibility,
+                                tolerance,
                                 &mut diagnostics,
                             )
                             .map_err(|diagnostic| {
@@ -1869,7 +1891,7 @@ fn designed_page(
     composition: &Value,
     document: &Value,
     trim: &crate::model::Trim,
-    allow_pending_accessibility: bool,
+    tolerance: LayoutTolerance,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<LayoutPage, Diagnostic> {
     let variant = composition
@@ -2029,7 +2051,7 @@ fn designed_page(
                         "Image object '{}' requires alternative text or an explicit decorative decision before publishing.",
                         string(&item, "id")
                     );
-                    if allow_pending_accessibility {
+                    if tolerance.allow_pending_accessibility {
                         diagnostics
                             .push(Diagnostic::warning("PRESS_ALT_DECISION_REQUIRED", message));
                     } else {
@@ -2074,7 +2096,8 @@ fn designed_page(
                             .get("decorative")
                             .and_then(Value::as_bool)
                             .unwrap_or(false)
-                            || (allow_pending_accessibility && accessibility_decision_pending),
+                            || (tolerance.allow_pending_accessibility
+                                && accessibility_decision_pending),
                         language: item
                             .get("language")
                             .and_then(Value::as_str)
@@ -2209,11 +2232,23 @@ fn designed_page(
                     red * 0.2126 + green * 0.7152 + blue * 0.0722 >= 0.6
                 });
                 let text_height = wrapped.len() as f32 * line_height;
-                if text_height > height * scene_height + 0.01 {
-                    return Err(Diagnostic::error(
-                        "PRESS_COMPOSITION_TEXT_OVERFLOW",
-                        format!("Text frame '{}' overflows its bounds.", string(&item, "id")),
-                    ));
+                let text_overflows_vertically = text_height > height * scene_height + 0.01;
+                let mut overflow_reported = false;
+                if text_overflows_vertically {
+                    let message =
+                        format!("Text frame '{}' overflows its bounds.", string(&item, "id"));
+                    if tolerance.clip_composition_text_overflow {
+                        diagnostics.push(Diagnostic::warning(
+                            "PRESS_COMPOSITION_TEXT_OVERFLOW",
+                            format!("{message} Excess text is hidden in this authoring preview."),
+                        ));
+                        overflow_reported = true;
+                    } else {
+                        return Err(Diagnostic::error(
+                            "PRESS_COMPOSITION_TEXT_OVERFLOW",
+                            message,
+                        ));
+                    }
                 }
                 let object_opacity =
                     item.get("opacity").and_then(Value::as_f64).unwrap_or(1.0) as f32;
@@ -2267,25 +2302,65 @@ fn designed_page(
                     });
                     page.paint_order.push(LayoutPaint::Shape(shape_index));
                 }
-                let vertical_offset = match scene_style_value(scene, &item, "verticalAlignment")
-                    .and_then(Value::as_str)
-                    .unwrap_or("Top")
-                {
-                    "Center" => (height * scene_height - text_height) / 2.0,
-                    "Bottom" => height * scene_height - text_height,
-                    _ => 0.0,
+                let vertical_offset = if text_overflows_vertically {
+                    0.0
+                } else {
+                    match scene_style_value(scene, &item, "verticalAlignment")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Top")
+                    {
+                        "Center" => (height * scene_height - text_height) / 2.0,
+                        "Bottom" => height * scene_height - text_height,
+                        _ => 0.0,
+                    }
                 };
-                for (line_index, (line_text, runs)) in wrapped.into_iter().enumerate() {
-                    let measured_width = measured_run_width(&runs, size)
+                let frame_bottom = scene_height - (y + height) * scene_height;
+                for (line_index, (mut line_text, mut runs)) in wrapped.into_iter().enumerate() {
+                    let line_y = scene_height
+                        - y * scene_height
+                        - vertical_offset
+                        - size
+                        - line_index as f32 * line_height;
+                    if tolerance.clip_composition_text_overflow
+                        && line_y - size * 0.3 < frame_bottom - 0.01
+                    {
+                        continue;
+                    }
+                    let mut measured_width = measured_run_width(&runs, size)
                         + character_spacing * line_text.chars().count().saturating_sub(1) as f32;
                     if measured_width > width * scene_width + 0.01 {
-                        return Err(Diagnostic::error(
-                            "PRESS_COMPOSITION_TEXT_OVERFLOW",
-                            format!(
-                                "Text frame '{}' overflows its bounds after letter spacing.",
-                                string(&item, "id")
-                            ),
-                        ));
+                        let message = format!(
+                            "Text frame '{}' overflows its bounds after letter spacing.",
+                            string(&item, "id")
+                        );
+                        if tolerance.clip_composition_text_overflow {
+                            if !overflow_reported {
+                                diagnostics.push(Diagnostic::warning(
+                                    "PRESS_COMPOSITION_TEXT_OVERFLOW",
+                                    format!(
+                                        "{message} Excess text is hidden in this authoring preview."
+                                    ),
+                                ));
+                                overflow_reported = true;
+                            }
+                            (line_text, runs) = clip_layout_runs_to_width(
+                                &runs,
+                                size,
+                                character_spacing,
+                                width * scene_width,
+                            );
+                            if line_text.is_empty() {
+                                continue;
+                            }
+                            measured_width = measured_run_width(&runs, size)
+                                + character_spacing
+                                    * line_text.chars().count().saturating_sub(1) as f32;
+                        } else {
+                            return Err(Diagnostic::error(
+                                "PRESS_COMPOSITION_TEXT_OVERFLOW",
+                                message,
+                            ));
+                        }
                     }
                     let line_x = x * scene_width
                         + match scene_style_value(scene, &item, "textAlignment")
@@ -2296,11 +2371,6 @@ fn designed_page(
                             "End" => width * scene_width - measured_width,
                             _ => 0.0,
                         };
-                    let line_y = scene_height
-                        - y * scene_height
-                        - vertical_offset
-                        - size
-                        - line_index as f32 * line_height;
                     let shadow = scene_style_value(scene, &item, "textShadow")
                         .and_then(Value::as_str)
                         .unwrap_or("None");
@@ -2793,16 +2863,10 @@ fn designed_pages(
     trim: &crate::model::Trim,
     digital: bool,
     allow_independent_page: bool,
-    allow_pending_accessibility: bool,
+    tolerance: LayoutTolerance,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Vec<LayoutPage>, Diagnostic> {
-    let page = designed_page(
-        composition,
-        document,
-        trim,
-        allow_pending_accessibility,
-        diagnostics,
-    )?;
+    let page = designed_page(composition, document, trim, tolerance, diagnostics)?;
     let trim_width = trim.width_inches * 72.0;
     let trim_height = trim.height_inches * 72.0;
     let width = page.width_points.unwrap_or(trim_width);
@@ -4116,6 +4180,42 @@ fn measured_run_width(runs: &[LayoutRun], size: f32) -> f32 {
         .sum()
 }
 
+fn clip_layout_runs_to_width(
+    runs: &[LayoutRun],
+    size: f32,
+    character_spacing: f32,
+    maximum_width: f32,
+) -> (String, Vec<LayoutRun>) {
+    let mut output = Vec::new();
+    'runs: for source in runs {
+        let mut clipped = source.clone();
+        clipped.text.clear();
+        for character in source.text.chars() {
+            clipped.text.push(character);
+            let character_count = output
+                .iter()
+                .map(|run: &LayoutRun| run.text.chars().count())
+                .sum::<usize>()
+                + clipped.text.chars().count();
+            let width = measured_run_width(&output, size)
+                + measure_text(clipped.face, &clipped.text, size * clipped.size_scale)
+                + character_spacing * character_count.saturating_sub(1) as f32;
+            if width > maximum_width + 0.01 {
+                clipped.text.pop();
+                if !clipped.text.is_empty() {
+                    output.push(clipped);
+                }
+                break 'runs;
+            }
+        }
+        if !clipped.text.is_empty() {
+            output.push(clipped);
+        }
+    }
+    let text = output.iter().map(|run| run.text.as_str()).collect();
+    (text, output)
+}
+
 fn runs_for_line(
     full_text: &str,
     source_runs: &[LayoutRun],
@@ -5042,7 +5142,10 @@ fn cover_scene_layout(
         &composition,
         &request.document,
         &request.trim,
-        allow_pending_accessibility,
+        LayoutTolerance {
+            allow_pending_accessibility,
+            ..LayoutTolerance::default()
+        },
         diagnostics,
     )?;
     page.kind = PageKind::Cover;
@@ -6006,7 +6109,7 @@ mod tests {
             &composition,
             &serde_json::json!({}),
             &standard_trim(),
-            false,
+            LayoutTolerance::default(),
             &mut Vec::new(),
         )
         .expect("designed page");
@@ -6038,7 +6141,7 @@ mod tests {
             &composition,
             &serde_json::json!({}),
             &standard_trim(),
-            false,
+            LayoutTolerance::default(),
             &mut Vec::new(),
         )
         .expect("spread page");
@@ -6077,7 +6180,7 @@ mod tests {
             &standard_trim(),
             false,
             false,
-            false,
+            LayoutTolerance::default(),
             &mut Vec::new(),
         )
         .expect_err("gutter-crossing text must be blocked");

@@ -326,7 +326,9 @@ The preview request contains only the selected chapter and asks Press for its
 compact browser trace, which preserves paint and text-run data but omits
 glyph-level evidence used only by renderer conformance inspection. Preview work
 is cancellable on mode changes and produces a retryable timeout instead of
-leaving the UI indefinitely busy. It supports single/facing display,
+leaving the UI indefinitely busy. Designed Page text that exceeds its authored
+frame is clipped in this authoring trace and returned as a visible warning;
+publication renders retain strict overflow rejection. It supports single/facing display,
 fit-page/fit-width, zoom, and project page setup; Fit width is the initial
 display setting. Facing mode groups physical even/odd leaves into fixed
 two-page spread rows, including a hidden parity placeholder when the selected
@@ -539,10 +541,13 @@ The `layout` command defaults to its full glyph-evidence trace for conformance
 work; app previews explicitly request `layoutTraceMode: browser-preview`, which
 retains page paint order and typographic runs while omitting unused glyph arrays.
 That authoring trace renders images whose accessibility decision is still
-pending and returns a visible warning. Core `reading-copy` renders do the same,
-treating unresolved images as artifacts in that private copy so the tagged PDF
-remains structurally valid. Publication renders reject the scene until every
-meaningful image has alternative text or is deliberately marked decorative.
+pending and clips composition text at the authored frame, returning visible
+warnings instead of rejecting the chapter preview. Core `reading-copy` renders
+tolerate pending accessibility decisions but retain strict text-overflow
+validation, as do publication renders. Core reading copies treat unresolved
+images as artifacts in that private copy so the tagged PDF remains structurally
+valid. Publication renders reject the scene until every meaningful image has
+alternative text or is deliberately marked decorative.
 Absolute paths, traversal, links/reparse points, undeclared or changed bytes,
 corrupt assets, restricted/unsupported fonts, existing output, and cancellation
 fail before promotion. The renderer writes a fresh staging directory,

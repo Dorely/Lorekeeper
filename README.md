@@ -47,7 +47,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Project-owned authoring page setup, Press-backed current-chapter Read preview,
   and contextual Edit/Read/Pages/Review modes. Read shows actual pagination,
   line breaks, images, captions, and Designed Pages with single/facing and zoom
-  controls; it does not depend on a publication release. Editor Chat can also
+  controls; it does not depend on a publication release. Designed Page text
+  overflow is clipped to its authored frame and reported as a preview warning
+  instead of preventing the chapter from opening. Editor Chat can also
   request a Press-rendered page image by stable paragraph block or chapter-local
   typeset page to visually verify applied typography and typesetting.
 - Project image generation and editing, canonical entity visual references,

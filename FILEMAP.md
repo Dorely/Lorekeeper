@@ -98,7 +98,7 @@
 | `Cargo.toml` / `Cargo.lock` / `rust-toolchain.toml` | Rust 1.97.1 crate with exact permissive serialization, shaping, subsetting, line-breaking, hyphenation, image/color, PDF-writing, hashing, and inspection dependencies. |
 | `src/main.rs` / `src/lib.rs` | Native `describe`, full conformance and compact browser chapter-layout traces, and bounded protocol-v5 render CLI plus the independently testable library surface. |
 | `src/model.rs` | Protocol-v5 image/font requests, publication-versus-reading-copy purpose, diagnostics, artifacts, validation evidence, structured page-paint layout, accessibility, and page-map contracts. |
-| `src/renderer.rs` | Contained staging, validation, deterministic pagination, flowing Figures, structured page/cover composition with leaf-correct facing-spread splitting, warning-tolerant private reading copies, strict publication PDF rendering, barcodes, atomic promotion, and evidence. |
+| `src/renderer.rs` | Contained staging, validation, deterministic pagination, flowing Figures, structured page/cover composition with leaf-correct facing-spread splitting, warning-and-clipping authoring traces, warning-tolerant private reading copies, strict publication PDF rendering, barcodes, atomic promotion, and evidence. |
 | `src/font.rs` | Bundled/project TTF and TrueType/CFF OTF validation, shaping, subsetting, widths, embedding, and multi-codepoint ToUnicode mapping. |
 | `src/image.rs` | Bounded PNG/JPEG decoding, alpha flattening, grayscale/registered-profile CMYK conversion, crop-position handling, and total-ink enforcement. |
 | `src/pdf.rs` | Owned deterministic PDF 1.7/PDF 1.3 writer for mixed page boxes, collision-safe page-scoped tagged structure, bookmarks/links, ordered vector scenes, PDF 1.7 opacity, bounded PDF/X opacity flattening, fonts, images, output intent, and barcodes. |
@@ -107,7 +107,7 @@
 | `fixtures/full-model-v4.json` | Canonical complete publication-model protocol fixture used by black-box conformance tests. |
 | `fixtures/negative-cases-v4.json` | Frozen adversarial protocol mutations and expected fail-closed diagnostic codes. |
 | `fixtures/invalid-pdf-structures-v3.json` | Frozen malformed raw-PDF cases proving the black-box harness fails closed independently of production preflight. |
-| `tests/conformance_v5.rs` / `fixtures/full-model-v5.json` / `tests/fixtures/` | Test-owned CLI harness/assets and raw-PDF/layout assertions for protocol, containment, atomicity, determinism, paragraph presentation, Figures, compositions, custom fonts, color/bleed, KDP/PDF-X, tagged Digital PDF, covers, and negatives. |
+| `tests/conformance_v5.rs` / `fixtures/full-model-v5.json` / `tests/fixtures/` | Test-owned CLI harness/assets and raw-PDF/layout assertions for protocol, containment, atomicity, determinism, warning-tolerant clipped authoring overflow, paragraph presentation, Figures, compositions, custom fonts, color/bleed, KDP/PDF-X, tagged Digital PDF, covers, and negatives. |
 
 ## Lorekeeper/ — Blazor Web App (Interactive Server)
 

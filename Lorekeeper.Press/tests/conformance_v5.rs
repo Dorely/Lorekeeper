@@ -1734,6 +1734,55 @@ fn browser_preview_reports_pending_image_accessibility_without_weakening_render_
 }
 
 #[test]
+fn browser_preview_clips_overflowing_composition_text_without_weakening_render_validation() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["layoutTraceMode"] = json!("browser-preview");
+    let composition =
+        &mut job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"][0];
+    composition["semanticBlocks"][0]["content"][0]["text"] =
+        Value::String("Overflow sentinel ".repeat(40));
+    composition["variants"][0]["scene"]["objects"][1]["bounds"]["heightPercent"] = json!(3);
+    job.write_request();
+
+    let layout = job.layout();
+    assert!(
+        layout.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&layout.stdout),
+        stderr(&layout)
+    );
+    let layout_response = response(&layout);
+    let warning = layout_response["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "PRESS_COMPOSITION_TEXT_OVERFLOW")
+        .expect("overflow warning");
+    assert_eq!(warning["severity"], "warning");
+    let visible_sentinels = layout_response["pages"]
+        .as_array()
+        .expect("pages")
+        .iter()
+        .flat_map(|page| page["lines"].as_array().into_iter().flatten())
+        .filter(|line| {
+            line["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("Overflow sentinel"))
+        })
+        .count();
+    assert!(
+        visible_sentinels < 40,
+        "preview must omit text hidden below the frame"
+    );
+
+    let render = job.render();
+    assert!(!render.status.success());
+    let rendered = response(&render);
+    assert!(has_diagnostic(&rendered, "PRESS_COMPOSITION_TEXT_OVERFLOW"));
+    assert_eq!(rendered["diagnostics"][0]["severity"], "error");
+}
+
+#[test]
 fn reading_copy_reports_pending_image_accessibility_without_blocking_the_pdf() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
     job.request["outputPurpose"] = json!("reading-copy");
