@@ -354,7 +354,7 @@ public sealed class ImagePromptComposer(
             .Append(descriptor.HeightInches.ToString("0.####", CultureInfo.InvariantCulture)).Append(" inches; target ")
             .Append(descriptor.EffectiveDpiExpectation.ToString("0", CultureInfo.InvariantCulture)).AppendLine(" effective DPI.");
         prompt.Append("Lorekeeper selected the provider's ").Append(descriptor.ProviderCanvas)
-            .Append(" canvas. Compose for the target aspect and keep important content within its usable regions. Lorekeeper preserves the returned raster; the selected Show whole image or Fill frame placement fits it non-destructively, and crop position can be adjusted directly afterward.").AppendLine();
+            .Append(" canvas. Compose for the target aspect and keep important content within its usable regions. Lorekeeper preserves the returned raster; proportional placement keeps its native shape, while an explicitly unconstrained frame may stretch it. Crop position can be adjusted directly when a cropped legacy placement is used.").AppendLine();
         foreach (var region in descriptor.Regions)
         {
             prompt.Append(region.KeepClear ? "Keep clear" : "Layout boundary").Append(": ").Append(region.Label)

@@ -770,14 +770,27 @@ where
                 let source_left = image.source_left_fraction.clamp(0.0, 1.0);
                 let width_scale = image.width / source_width;
                 let height_scale = image.height / source.height as f32;
-                let scale = if image.fit == LayoutImageFit::Contain {
-                    width_scale.min(height_scale)
-                } else {
-                    width_scale.max(height_scale)
+                let (drawn_width, drawn_height, visible_width) = match image.fit {
+                    LayoutImageFit::Contain => {
+                        let scale = width_scale.min(height_scale);
+                        (
+                            source.width as f32 * scale,
+                            source.height as f32 * scale,
+                            source_width * scale,
+                        )
+                    }
+                    LayoutImageFit::Cover => {
+                        let scale = width_scale.max(height_scale);
+                        (
+                            source.width as f32 * scale,
+                            source.height as f32 * scale,
+                            source_width * scale,
+                        )
+                    }
+                    LayoutImageFit::Stretch => {
+                        (image.width / source_fraction, image.height, image.width)
+                    }
                 };
-                let drawn_width = source.width as f32 * scale;
-                let drawn_height = source.height as f32 * scale;
-                let visible_width = source_width * scale;
                 let drawn_x = if source_fraction < 1.0 {
                     -image.width / 2.0 - drawn_width * source_left
                 } else {

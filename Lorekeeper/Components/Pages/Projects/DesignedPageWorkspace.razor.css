@@ -21,12 +21,12 @@
 .page-thumb.spread { width: 1.65rem; background: linear-gradient(90deg,white 49%,#667085 49% 52%,white 52%); }
 .page-thumb.custom { width: 1.3rem; height: .9rem; }
 .composition-zoom-value { min-width: 2.5rem; color: #4e5d74; font-size: .68rem; text-align: center; font-variant-numeric: tabular-nums; }
-.composition-stage { position: relative; width: min(calc((100cqh - 10.9rem) * var(--surface-ratio)), calc(100cqw - 1.25rem)); aspect-ratio: var(--surface-ratio); container-type: size; overflow: hidden; background: white; box-shadow: 0 .4rem 1.4rem #0003; transform: scale(var(--zoom)); transform-origin: center; touch-action: none; user-select: none; }
+.composition-stage { position: relative; width: min(calc((100cqh - 12.4rem) * var(--surface-ratio)), calc(100cqw - 2.75rem)); aspect-ratio: var(--surface-ratio); container-type: size; overflow: visible; background: white; box-shadow: 0 .4rem 1.4rem #0003; transform: scale(var(--zoom)); transform-origin: center; touch-action: none; user-select: none; }
 .composition-safe { position: absolute; inset: 5%; z-index: 10000; border: 1px dashed #2a9d70; pointer-events: none; }
 .composition-gutter { position: absolute; inset-block: 0; left: calc(50% - 1.5%); width: 3%; z-index: 10000; background: #d14a4a18; border-inline: 1px dashed #d14a4a; pointer-events: none; }
 .composition-ruler,.composition-guide { position: absolute; z-index: 10001; pointer-events: none; }
-.composition-ruler-x { inset: 0 0 auto; height: 1.1rem; background: repeating-linear-gradient(90deg,#4a5568 0 1px,transparent 1px 5%,#4a5568 5% calc(5% + 1px),transparent calc(5% + 1px) 10%),#f5f7fae8; }
-.composition-ruler-y { inset: 0 auto 0 0; width: 1.1rem; background: repeating-linear-gradient(0deg,#4a5568 0 1px,transparent 1px 5%,#4a5568 5% calc(5% + 1px),transparent calc(5% + 1px) 10%),#f5f7fae8; }
+.composition-ruler-x { right: 0; bottom: calc(100% + .15rem); left: 0; height: 1.1rem; background: repeating-linear-gradient(90deg,#4a5568 0 1px,transparent 1px 5%,#4a5568 5% calc(5% + 1px),transparent calc(5% + 1px) 10%),#f5f7fae8; }
+.composition-ruler-y { top: 0; right: calc(100% + .15rem); bottom: 0; width: 1.1rem; background: repeating-linear-gradient(0deg,#4a5568 0 1px,transparent 1px 5%,#4a5568 5% calc(5% + 1px),transparent calc(5% + 1px) 10%),#f5f7fae8; }
 .composition-guide-x { left: 0; width: 100%; border-top: 1px solid #2f80ed88; }
 .composition-guide-y { top: 0; height: 100%; border-left: 1px solid #2f80ed88; }
 .composition-object { position: absolute; overflow: hidden; padding: .25rem; display: flex; flex-direction: column; color: inherit; }
@@ -51,6 +51,8 @@
 
 .composition-object-pane { width: 12rem; height: 100%; display: grid; grid-template-rows: auto minmax(0,1fr); gap: .25rem; }
 .composition-add-tools { display: flex; gap: .2rem; align-items: center; }
+.composition-retain-aspect { display: inline-flex; gap: .25rem; align-items: center; margin: 0; color: #34415a; font-size: .65rem; font-weight: 700; white-space: nowrap; }
+.composition-retain-aspect input { margin: 0; }
 .composition-add-tools button,.composition-add-tools select,.composition-add-tools summary { min-height: 1.8rem; padding: .2rem .35rem; border: 1px solid #cbd2df; border-radius: .32rem; background: white; color: #27364f; font-size: .65rem; white-space: nowrap; }
 .composition-add-tools select { min-width: 0; width: 3.6rem; }
 .composition-object-strip { display: flex; gap: .3rem; align-items: center; max-width: 12rem; height: 100%; overflow-x: auto; overflow-y: hidden; padding: .05rem .5rem .05rem 0; }

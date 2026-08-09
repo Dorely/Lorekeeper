@@ -1913,7 +1913,11 @@ public sealed class CompositionService(
         {
             if (item.Id == Guid.Empty || !objectIds.Add(item.Id) || !layerIds.Contains(item.LayerId))
                 throw new InvalidDataException("Composition objects require unique IDs and an existing layer.");
-            if (item.Bounds.WidthPercent is <= 0 or > 400 || item.Bounds.HeightPercent is <= 0 or > 400
+            if (!double.IsFinite(item.Bounds.XPercent)
+                || !double.IsFinite(item.Bounds.YPercent)
+                || !double.IsFinite(item.Bounds.WidthPercent)
+                || !double.IsFinite(item.Bounds.HeightPercent)
+                || item.Bounds.WidthPercent is <= 0 or > 400 || item.Bounds.HeightPercent is <= 0 or > 400
                 || item.Opacity is < 0 or > 1 || item.BackgroundOpacity is < 0 or > 1
                 || item.LetterSpacingEm is < -1 or > 10
                 || item.CropXPercent is < 0 or > 100 || item.CropYPercent is < 0 or > 100)

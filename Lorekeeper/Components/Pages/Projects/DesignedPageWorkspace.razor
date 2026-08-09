@@ -42,6 +42,7 @@
                     @foreach (var item in _objects.Where(item => item.LayerId != Guid.Empty && IsVisible(item)))
                     {
                         <div role="button" tabindex="0"
+                                data-composition-object-id="@item.Id.ToString("N")"
                                 class="composition-object composition-object--@item.Kind.ToString().ToLowerInvariant() @(item.Id == _selectedId ? "selected" : null) @(IsCropRepositioning(item) ? "crop-repositioning" : null)"
                                 style="@ObjectStyle(item)"
                                 @onclick:stopPropagation="true"
@@ -98,7 +99,7 @@
                     <div class="composition-add-tools" aria-label="Add page content">
                         <button type="button" title="Add a text frame" @onclick="AddTextObject"><span aria-hidden="true">T</span> Text</button>
                         <button type="button" title="Choose artwork from the project image library" @onclick="OpenAddImagePicker"><span aria-hidden="true">▧</span> Image</button>
-                        <select aria-label="Fit for newly added images" title="Choose how newly added artwork fits its frame" @bind="_newImageFit"><option value="@FigureImageFit.Contain">Whole</option><option value="@FigureImageFit.Cover">Fill</option></select>
+                        <label class="composition-retain-aspect" title="Keep newly added artwork proportional when it is resized"><input type="checkbox" @bind="_newRetainAspectRatio" /> Keep ratio</label>
                         <details class="composition-shapes-menu"><summary title="Add a simple shape">◇</summary><div><button type="button" @onclick="() => AddObject(CompositionObjectKind.Rectangle)">Rectangle</button><button type="button" @onclick="() => AddObject(CompositionObjectKind.Ellipse)">Ellipse</button><button type="button" @onclick="() => AddObject(CompositionObjectKind.Line)">Line</button></div></details>
                     </div>
                     <div class="composition-object-strip" role="listbox" aria-label="Page objects">
@@ -119,7 +120,8 @@
                         @if (primarySelection.Kind == CompositionObjectKind.Image)
                         {
                             <button type="button" @onclick="() => OpenReplaceImagePicker(primarySelection.Id)">Replace image</button>
-                            <div class="composition-fit-choice" aria-label="Image fit"><button type="button" class="@(primarySelection.ImageFit == FigureImageFit.Contain ? "selected" : null)" title="Show the complete image inside the frame" @onclick="() => SetImageFit(primarySelection, FigureImageFit.Contain)">Whole image</button><button type="button" class="@(primarySelection.ImageFit == FigureImageFit.Cover ? "selected" : null)" title="Crop the image as needed to fill the frame" @onclick="() => SetImageFit(primarySelection, FigureImageFit.Cover)">Fill frame</button></div>
+                            <label class="composition-retain-aspect" title="Keep the artwork's original proportions while resizing"><input type="checkbox" checked="@RetainsAspectRatio(primarySelection)" @onchange="e => SetRetainAspectRatioAsync(primarySelection, (bool)e.Value!)" /> Retain aspect ratio</label>
+                            <button type="button" title="Make this image as large as the page permits" @onclick="() => FillCanvasAsync(primarySelection)">Fill canvas</button>
                             @if (primarySelection.ImageFit == FigureImageFit.Cover) { <button type="button" class="@(IsCropRepositioning(primarySelection) ? "selected" : null)" title="Drag the artwork within its fixed frame to choose the crop" @onclick="() => ToggleCropReposition(primarySelection)">@(IsCropRepositioning(primarySelection) ? "Finish crop" : "Reposition crop")</button> }
                         }
                         else if (primarySelection.Kind == CompositionObjectKind.Text)
@@ -188,7 +190,8 @@
                                     }
                                     <button type="button" @onclick="() => OpenReplaceImagePicker(selected.Id)">Replace image</button>
                                 </div>
-                                <label>Fit<select value="@selected.ImageFit" @onchange="e => Patch(selected with { ImageFit = Enum.Parse<FigureImageFit>(e.Value!.ToString()!) })"><option value="@FigureImageFit.Contain">Show whole image</option><option value="@FigureImageFit.Cover">Fill frame</option></select></label>
+                                <label><input type="checkbox" checked="@RetainsAspectRatio(selected)" @onchange="e => SetRetainAspectRatioAsync(selected, (bool)e.Value!)" /> Retain aspect ratio</label>
+                                <button type="button" @onclick="() => FillCanvasAsync(selected)">Fill canvas</button>
                                 @if (selected.ImageFit == FigureImageFit.Cover)
                                 {
                                     <button type="button" class="@(IsCropRepositioning(selected) ? "selected" : null)" @onclick="() => ToggleCropReposition(selected)">@(IsCropRepositioning(selected) ? "Finish repositioning" : "Reposition crop")</button>
@@ -301,7 +304,7 @@
     private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = [];
     private readonly Stack<WorkspaceSnapshot> _undo = new();
     private readonly Stack<WorkspaceSnapshot> _redo = new();
-    private FigureImageFit _newImageFit = FigureImageFit.Contain;
+    private bool _newRetainAspectRatio = true;
     private ImagePickerMode? _imagePickerMode;
     private Guid? _imagePickerTargetId;
     private Guid? _selectedId;
@@ -350,7 +353,65 @@
     }
     private static string ObjectLabel(CompositionObject item) => string.IsNullOrWhiteSpace(item.Name) ? item.Kind.ToString() : item.Name;
     private static string ObjectIcon(CompositionObjectKind kind) => kind switch { CompositionObjectKind.Text => "T", CompositionObjectKind.Image => "▧", CompositionObjectKind.Rectangle => "□", CompositionObjectKind.Ellipse => "○", CompositionObjectKind.Line => "—", _ => "◇" };
-    private void SetImageFit(CompositionObject item, FigureImageFit fit) { if (item.ImageFit == fit) return; _cropReposition = false; Patch(item with { ImageFit = fit }); }
+    private static bool RetainsAspectRatio(CompositionObject item) => item.ImageFit != FigureImageFit.Stretch;
+    private async Task SetRetainAspectRatioAsync(CompositionObject item, bool retain)
+    {
+        _cropReposition = false;
+        if (!retain)
+        {
+            Patch(item with { ImageFit = FigureImageFit.Stretch });
+            return;
+        }
+        var aspectRatio = await ImageAspectRatioAsync(item);
+        Patch(item with
+        {
+            ImageFit = FigureImageFit.Contain,
+            Bounds = FitInsideBounds(item.Bounds, aspectRatio),
+        });
+    }
+    private async Task FillCanvasAsync(CompositionObject item)
+    {
+        var retain = RetainsAspectRatio(item);
+        var bounds = retain
+            ? FitInsideBounds(new CompositionBounds(), await ImageAspectRatioAsync(item))
+            : new CompositionBounds();
+        Patch(item with { Bounds = bounds, ImageFit = retain ? item.ImageFit : FigureImageFit.Stretch });
+    }
+    private async Task<double> ImageAspectRatioAsync(CompositionObject item)
+    {
+        if (_workspaceModule is not null)
+        {
+            var ratio = await _workspaceModule.InvokeAsync<double?>(
+                "imageAspectRatio",
+                _stageElement,
+                item.Id.ToString("N"));
+            if (ratio is > 0 && double.IsFinite(ratio.Value))
+                return ratio.Value;
+        }
+        return Math.Max(.01, item.Bounds.WidthPercent * _scene!.Surface.WidthPoints)
+            / Math.Max(.01, item.Bounds.HeightPercent * _scene.Surface.HeightPoints);
+    }
+    private CompositionBounds FitInsideBounds(CompositionBounds bounds, double imageAspectRatio)
+    {
+        var surface = _scene!.Surface;
+        var availableWidth = bounds.WidthPercent * surface.WidthPoints / 100;
+        var availableHeight = bounds.HeightPercent * surface.HeightPoints / 100;
+        var width = availableWidth;
+        var height = availableHeight;
+        if (availableWidth / Math.Max(.01, availableHeight) > imageAspectRatio)
+            width = availableHeight * imageAspectRatio;
+        else
+            height = availableWidth / Math.Max(.01, imageAspectRatio);
+        var widthPercent = width / surface.WidthPoints * 100;
+        var heightPercent = height / surface.HeightPoints * 100;
+        return bounds with
+        {
+            XPercent = bounds.XPercent + (bounds.WidthPercent - widthPercent) / 2,
+            YPercent = bounds.YPercent + (bounds.HeightPercent - heightPercent) / 2,
+            WidthPercent = widthPercent,
+            HeightPercent = heightPercent,
+        };
+    }
     private bool IsCropRepositioning(CompositionObject item) =>
         _cropReposition
         && item.Id == _selectedId
@@ -507,8 +568,8 @@
             Kind = CompositionObjectKind.Image,
             Name = image.FileName,
             ImageId = image.Id,
-            ImageFit = _newImageFit,
-            Bounds = new CompositionBounds { XPercent = 10, YPercent = 10, WidthPercent = 80, HeightPercent = 60 },
+            ImageFit = _newRetainAspectRatio ? FigureImageFit.Contain : FigureImageFit.Stretch,
+            Bounds = new CompositionBounds(),
             ZIndex = zIndex,
             ReadingOrder = NextReadingOrder(),
             Decorative = false,
@@ -1017,7 +1078,13 @@
 
     private string StageStyle() => $"--surface-ratio:{_scene!.Surface.WidthPoints / _scene.Surface.HeightPoints:R};--zoom:{_zoom:R}";
     private string ObjectStyle(CompositionObject item) { var resolved = Resolved(item); var group = item.GroupId is Guid groupId ? _objects.FirstOrDefault(candidate => candidate.Id == groupId) : null; var bounds = group is null ? item.Bounds : EffectiveBounds(item, group); var rotation = item.RotationDegrees + (group?.RotationDegrees ?? 0); var opacity = item.Opacity * (group?.Opacity ?? 1); var background = item.Kind == CompositionObjectKind.Text ? CssColor(resolved.BackgroundColor, resolved.BackgroundOpacity) : item.Kind is CompositionObjectKind.Rectangle or CompositionObjectKind.Ellipse ? resolved.FillColor : "transparent"; var strokeCqw = resolved.StrokeWidthPoints / _scene!.Surface.WidthPoints * 100; var fontCqw = resolved.FontSizePoints / _scene.Surface.WidthPoints * 100; var border = item.Kind == CompositionObjectKind.Line ? "0" : $"{strokeCqw:R}cqw solid {resolved.StrokeColor}"; var radius = item.Kind == CompositionObjectKind.Ellipse ? "50%" : "0"; return FormattableString.Invariant($"left:{bounds.XPercent}%;top:{bounds.YPercent}%;width:{bounds.WidthPercent}%;height:{bounds.HeightPercent}%;opacity:{opacity};transform:rotate({rotation}deg);z-index:{item.ZIndex + (group?.ZIndex ?? 0)};background:{background};border:{border};border-radius:{radius};color:{resolved.FillColor};font-family:{FontCssName(resolved.FontFamilyKey)};font-size:{fontCqw:R}cqw;font-style:{(resolved.Italic ? "italic" : "normal")};font-weight:{resolved.FontWeight};line-height:{resolved.LineHeight};letter-spacing:{resolved.LetterSpacingEm}em;text-align:{CssTextAlignment(resolved.TextAlignment)};justify-content:{CssVerticalAlignment(resolved.VerticalAlignment)};text-shadow:{CssTextShadow(resolved.TextShadow)}"); }
-    private string ImageStyle(CompositionObject item) => FormattableString.Invariant($"width:100%;height:100%;object-fit:{(item.ImageFit == FigureImageFit.Contain ? "contain" : "cover")};object-position:{item.CropXPercent}% {item.CropYPercent}%");
+    private string ImageStyle(CompositionObject item) => FormattableString.Invariant($"width:100%;height:100%;object-fit:{ImageFitCss(item.ImageFit)};object-position:{item.CropXPercent}% {item.CropYPercent}%");
+    private static string ImageFitCss(FigureImageFit fit) => fit switch
+    {
+        FigureImageFit.Cover => "cover",
+        FigureImageFit.Stretch => "fill",
+        _ => "contain",
+    };
     private string LineStyle(CompositionObject item) { var resolved = Resolved(item); return FormattableString.Invariant($"border-top:{resolved.StrokeWidthPoints / _scene!.Surface.WidthPoints * 100:R}cqw solid {resolved.StrokeColor}"); }
     private static string FontCssName(string key) => $"lk-{new string(key.Select(character => char.IsLetterOrDigit(character) ? character : '-').ToArray())}";
     private string FontFaceCss() => string.Join("\n", _fontFamilies.SelectMany(family => family.Faces.Select(face => $"@font-face{{font-family:{FontCssName(family.Key)};src:url('{face.ContentUrl.Replace("'", "%27", StringComparison.Ordinal)}');font-weight:{face.Weight};font-style:{(face.Italic ? "italic" : "normal")};font-display:swap;}}")));
@@ -1275,7 +1342,7 @@
         Snapshot();
         _selectedId = item.Id;
         var bounds = item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group ? EffectiveBounds(item, group) : item.Bounds;
-        var rect = await _workspaceModule.InvokeAsync<StageRect>("begin", _stageElement, e.PointerId);
+        var rect = await _workspaceModule.InvokeAsync<StageRect>("begin", _stageElement, e.PointerId, item.Id.ToString("N"));
         _transform = new TransformState(item.Id, mode, e.PointerId, e.ClientX, e.ClientY, bounds, item.Bounds, item.RotationDegrees, item.CropXPercent, item.CropYPercent, rect);
     }
 
@@ -1299,7 +1366,7 @@
         item = state.Mode switch
         {
             TransformMode.Move => item with { Bounds = state.LocalBounds with { XPercent = Snap(state.LocalBounds.XPercent + dx, CompositionGuideAxis.Vertical), YPercent = Snap(state.LocalBounds.YPercent + dy, CompositionGuideAxis.Horizontal) } },
-            TransformMode.Resize => item with { Bounds = state.LocalBounds with { WidthPercent = Math.Max(.25, Snap(state.LocalBounds.WidthPercent + dx)), HeightPercent = Math.Max(.25, Snap(state.LocalBounds.HeightPercent + dy)) } },
+            TransformMode.Resize => item with { Bounds = ResizeBounds(item, state, dx, dy, e.ClientX - state.StartClientX, e.ClientY - state.StartClientY) },
             TransformMode.Rotate => item with { RotationDegrees = state.StartRotation + RotationDelta(e, state) },
             TransformMode.Crop => item with
             {
@@ -1310,6 +1377,33 @@
         };
         _objects[index] = item;
         MarkDirty();
+    }
+
+    private CompositionBounds ResizeBounds(CompositionObject item, TransformState state, double dx, double dy, double clientDx, double clientDy)
+    {
+        if (item.Kind != CompositionObjectKind.Image || !RetainsAspectRatio(item) || state.Stage.ImageAspectRatio is not > 0)
+            return state.LocalBounds with
+            {
+                WidthPercent = Math.Max(.25, Snap(state.LocalBounds.WidthPercent + dx)),
+                HeightPercent = Math.Max(.25, Snap(state.LocalBounds.HeightPercent + dy)),
+            };
+
+        var ratio = state.Stage.ImageAspectRatio.Value;
+        var widthPixels = Math.Max(2, state.SurfaceBounds.WidthPercent / 100 * state.Stage.Width + clientDx);
+        var heightPixels = Math.Max(2, state.SurfaceBounds.HeightPercent / 100 * state.Stage.Height + clientDy);
+        if (Math.Abs(clientDx) >= Math.Abs(clientDy))
+            heightPixels = widthPixels / ratio;
+        else
+            widthPixels = heightPixels * ratio;
+        var surfaceWidth = widthPixels / Math.Max(1, state.Stage.Width) * 100;
+        var surfaceHeight = heightPixels / Math.Max(1, state.Stage.Height) * 100;
+        var widthScale = surfaceWidth / Math.Max(.01, state.SurfaceBounds.WidthPercent);
+        var heightScale = surfaceHeight / Math.Max(.01, state.SurfaceBounds.HeightPercent);
+        return state.LocalBounds with
+        {
+            WidthPercent = Math.Max(.25, state.LocalBounds.WidthPercent * widthScale),
+            HeightPercent = Math.Max(.25, state.LocalBounds.HeightPercent * heightScale),
+        };
     }
 
     private static double RotationDelta(PointerEventArgs e, TransformState state)
@@ -1353,7 +1447,7 @@
     private enum TransformMode { Move, Resize, Rotate, Crop }
     private enum ImagePickerMode { Add, Replace }
     private sealed record TransformState(Guid ObjectId, TransformMode Mode, long PointerId, double StartClientX, double StartClientY, CompositionBounds SurfaceBounds, CompositionBounds LocalBounds, double StartRotation, double StartCropX, double StartCropY, StageRect Stage);
-    private sealed record StageRect(double Left, double Top, double Width, double Height);
+    private sealed record StageRect(double Left, double Top, double Width, double Height, double? ImageAspectRatio);
     private sealed record TextEditState(string Text, int Start, int End);
     private sealed record TextSelectionRestore(Guid ObjectId, int Start, int End);
     private sealed record TextFocusRequest(Guid ObjectId, double ClientX, double ClientY);

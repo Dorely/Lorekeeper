@@ -681,10 +681,16 @@ public sealed class PublicationCoverService(
         {
             if (item.Id == Guid.Empty || !objectIds.Add(item.Id) || !layerIds.Contains(item.LayerId))
                 throw new InvalidDataException("Cover objects require unique IDs and an existing layer.");
-            if (item.Bounds.WidthPercent <= 0 || item.Bounds.HeightPercent <= 0
-                || item.Bounds.XPercent < 0 || item.Bounds.YPercent < 0
-                || item.Bounds.XPercent + item.Bounds.WidthPercent > 100.001
-                || item.Bounds.YPercent + item.Bounds.HeightPercent > 100.001
+            if (!double.IsFinite(item.Bounds.XPercent)
+                || !double.IsFinite(item.Bounds.YPercent)
+                || !double.IsFinite(item.Bounds.WidthPercent)
+                || !double.IsFinite(item.Bounds.HeightPercent)
+                || item.Bounds.WidthPercent is <= 0 or > 400
+                || item.Bounds.HeightPercent is <= 0 or > 400
+                || (item.Kind != CompositionObjectKind.Image
+                    && (item.Bounds.XPercent < 0 || item.Bounds.YPercent < 0
+                        || item.Bounds.XPercent + item.Bounds.WidthPercent > 100.001
+                        || item.Bounds.YPercent + item.Bounds.HeightPercent > 100.001))
                 || item.Opacity is < 0 or > 1)
                 throw new InvalidDataException($"Cover object {item.Id:N} has invalid geometry.");
             if (item.Kind == CompositionObjectKind.Image && item.ImageId is null)

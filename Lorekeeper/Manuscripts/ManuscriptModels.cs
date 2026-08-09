@@ -152,6 +152,7 @@ public enum FigureImageFit
 {
     Contain,
     Cover,
+    Stretch,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<FigureCaptionPlacement>))]

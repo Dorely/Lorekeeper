@@ -356,6 +356,7 @@ pub enum PageKind {
 pub enum LayoutImageFit {
     Contain,
     Cover,
+    Stretch,
 }
 
 #[derive(Debug, Clone, Serialize)]

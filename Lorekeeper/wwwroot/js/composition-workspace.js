@@ -1,10 +1,27 @@
-export function begin(stage, pointerId) {
+export function begin(stage, pointerId, objectId) {
     if (!stage) {
         throw new Error("The page canvas is not available.");
     }
     stage.setPointerCapture(pointerId);
     const rect = stage.getBoundingClientRect();
-    return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    return {
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+        imageAspectRatio: imageAspectRatio(stage, objectId),
+    };
+}
+
+export function imageAspectRatio(stage, objectId) {
+    if (!stage || !objectId) {
+        return null;
+    }
+    const image = stage.querySelector(`[data-composition-object-id="${objectId}"] img`);
+    if (!image || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+        return null;
+    }
+    return image.naturalWidth / image.naturalHeight;
 }
 
 export function end(stage, pointerId) {

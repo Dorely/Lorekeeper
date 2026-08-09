@@ -251,11 +251,11 @@ public sealed class OutlineCollaborationTools(
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlacePageImageAsync(context, variantId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
                 name: "place_project_image_in_outline_page_frame",
-                description: "Place an existing project-image ID into an existing Designed Page image frame. Requires explicit Contain/Cover fit and an alt-text or decorative decision. This is separate from generation."),
+                description: "Place an existing project-image ID into an existing Designed Page image frame. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an alt-text or decorative decision. This is separate from generation."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddPageImageAsync(context, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
                 name: "add_project_image_to_outline_page",
-                description: "Add a new image object to a Designed Page from an existing project-image ID. Requires explicit Contain/Cover fit and an alt-text or decorative decision."),
+                description: "Add a new image object to a Designed Page from an existing project-image ID. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an alt-text or decorative decision."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, CompositionScene scene) => StageCompositionAsync(context, variantId, expectedRevision, scene),
                 name: "stage_outline_page_composition",

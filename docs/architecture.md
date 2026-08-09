@@ -411,6 +411,14 @@ Crop repositioning is an explicit selected-image mode shared by Pages and Cover:
 dragging and arrow keys adjust only the image position inside its fixed frame,
 resize/rotate handles are unavailable, and the mode remains active until the
 author finishes it or selects another object.
+Image frames retain the loaded raster's physical aspect ratio by default. The
+shared pointer bridge reports native image geometry at transform start, so both
+Pages and Cover constrain drag resizing without guessing from a provider canvas.
+Disabling the constraint stores an explicit stretched fit. `Fill canvas` either
+centers the largest proportional frame or occupies the complete surface when
+stretching is enabled. Rulers sit outside the page and selected handles remain
+reachable beyond the surface; Press clips out-of-surface image paint to the PDF
+page instead of rejecting otherwise valid image geometry.
 
 Assistant composition mutation notices carry the chapter,
 composition/variant, revision, changed IDs, and selected object. A newly
@@ -535,7 +543,8 @@ subsetting and ToUnicode maps, inline typography, bounded pagination, TOC
 convergence, stable block/page maps, sparse paragraph presentation, flowing
 Figures with wrapping, crop positioning,
 bleed, and captions, structured Designed Pages and cover scenes, reusable
-styles, vector shapes, logical reading order, page-size overrides for eligible
+styles, proportional or explicitly stretched raster frames, page-clipped
+out-of-surface artwork, vector shapes, logical reading order, page-size overrides for eligible
 Digital PDFs, full-wrap cover geometry, EAN-13 bars, and PDF serialization.
 Structured text remains text in the output rather than a rasterized page image.
 Digital covers declare no barcode mode; print-only Lorekeeper and vendor-overlay
@@ -661,7 +670,8 @@ Publish assistant remains mounted in the left column. Pages and covers use the
 same `CompositionVisualEditorShell`, fixed bottom contextual controls,
 on-demand details drawer, structured `CompositionScene`, object/style
 primitives, pointer/crop interaction module, undo/redo semantics, explicit
-Contain/Cover placement, and revision-safe persistence. The cover host supplies
+aspect-ratio retention with one-action canvas fitting, deliberate free stretching,
+legacy crop placement, and revision-safe persistence. The cover host supplies
 canonical copy bindings, background and barcode settings, print regions, and
 format-specific geometry; those details do not create a separate editor UI.
 

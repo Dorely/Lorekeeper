@@ -168,9 +168,12 @@ the live test project; terminate the browser host after the run.
 - Confirm the canvas has no left sidebar, construction and selection controls
   remain in the fixed bottom strip without horizontal scrolling, and only
   page/spread selection plus the computed guide toggle appear above the canvas.
-- Add an existing image only after choosing `Contain` or `Cover`. Confirm native
-  browser dragging is suppressed, frame drag/resize works, Cover crop
-  repositioning pans the raster, and pointer-up saves. Exercise replace image,
+- Add an existing image with aspect-ratio retention enabled. Confirm native
+  browser dragging is suppressed, proportional frame drag/resize works, and
+  `Fill canvas` creates the largest centered proportional frame. Disable aspect
+  retention and confirm free resizing deliberately stretches the image and
+  `Fill canvas` occupies the entire surface. Existing Cover crop repositioning
+  continues to pan its raster, and pointer-up saves. Exercise replace image,
   direct text editing, z-order, visibility, locking, delete, undo/redo, zoom,
   and computed overlay toggle.
 - Add multiple images and confirm each new image appears above older images but
@@ -186,7 +189,10 @@ the live test project; terminate the browser host after the run.
   and confirm preserved unplaced content and overflow diagnostics remain clear.
 - Generate surface/frame art and confirm reserved text and gutter regions reach
   the generation brief, the provider's returned raster is retained, and the
-  required fit determines letterboxing or crop-to-fill placement.
+  selected aspect-ratio behavior determines proportional or stretched placement.
+- Move a selected image partly outside the surface and confirm its handles remain
+  reachable outside the canvas. Confirm Read mode and generated PDFs clip the
+  artwork at the page edge instead of rejecting the render.
 
 ## Covers
 

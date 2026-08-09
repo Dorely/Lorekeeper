@@ -520,6 +520,7 @@ fn placement_dpi(
     let points_per_pixel = match placement.fit {
         LayoutImageFit::Contain => width_scale.min(height_scale),
         LayoutImageFit::Cover => width_scale.max(height_scale),
+        LayoutImageFit::Stretch => width_scale.max(height_scale),
     };
     Some(72.0 / points_per_pixel)
 }
@@ -2025,12 +2026,17 @@ fn designed_page(
             .and_then(Value::as_f64)
             .unwrap_or(100.0) as f32
             / 100.0;
-        if x < 0.0
-            || y < 0.0
+        let kind = string(&item, "kind");
+        if !x.is_finite()
+            || !y.is_finite()
+            || !width.is_finite()
+            || !height.is_finite()
             || width <= 0.0
             || height <= 0.0
-            || x + width > 1.0001
-            || y + height > 1.0001
+            || width > 4.0
+            || height > 4.0
+            || (kind != "Image"
+                && (x < 0.0 || y < 0.0 || x + width > 1.0001 || y + height > 1.0001))
         {
             return Err(Diagnostic::error(
                 "PRESS_COMPOSITION_BOUNDS_INVALID",
@@ -2040,7 +2046,7 @@ fn designed_page(
                 ),
             ));
         }
-        match string(&item, "kind").as_str() {
+        match kind.as_str() {
             "Image" => {
                 let accessibility_decision_pending = item
                     .get("accessibilityDecisionPending")
@@ -3071,6 +3077,7 @@ fn layout_image_fit(value: &str) -> LayoutImageFit {
     match value {
         "Contain" => LayoutImageFit::Contain,
         "Cover" => LayoutImageFit::Cover,
+        "Stretch" => LayoutImageFit::Stretch,
         _ => LayoutImageFit::Contain,
     }
 }

@@ -218,11 +218,11 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid releaseId, Guid variantId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlacePublicationPageImageAsync(context, releaseId, variantId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
                 name: "place_project_image_in_publication_page_frame",
-                description: "Place an existing project-image ID into an existing release-specific Designed Page frame with explicit Contain/Cover fit and an accessibility decision."),
+                description: "Place an existing project-image ID into an existing release-specific Designed Page frame. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an accessibility decision."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, Guid variantId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddPublicationPageImageAsync(context, releaseId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
                 name: "add_project_image_to_publication_page",
-                description: "Add a new image object to a release-specific Designed Page from an existing project-image ID with explicit Contain/Cover fit and an accessibility decision."),
+                description: "Add a new image object to a release-specific Designed Page from an existing project-image ID. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an accessibility decision."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, CompositionScene scene) => StageCompositionAsync(context, variantId, expectedRevision, scene),
                 name: "stage_publication_composition",
@@ -316,11 +316,11 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (long expectedBookRevision, long expectedCoverRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlaceCoreCoverImageAsync(context, expectedBookRevision, expectedCoverRevision, targetId, imageId, fit, altText, decorative, readingOrder),
                 name: "place_project_image_on_core_cover",
-                description: "Place an existing project-image ID into one existing Core cover image object. Requires explicit Contain/Cover fit and an alt-text or decorative decision. This is separate from image generation."),
+                description: "Place an existing project-image ID into one existing Core cover image object. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an alt-text or decorative decision. This is separate from image generation."),
             AIFunctionFactory.Create(
                 method: (long expectedBookRevision, long expectedCoverRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddCoreCoverImageAsync(context, expectedBookRevision, expectedCoverRevision, imageId, fit, altText, decorative, bounds, readingOrder),
                 name: "add_project_image_to_core_cover",
-                description: "Add an existing project-image ID as a new Core cover image object. Requires explicit Contain/Cover fit and an alt-text or decorative decision. This is separate from image generation."),
+                description: "Add an existing project-image ID as a new Core cover image object. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an alt-text or decorative decision. This is separate from image generation."),
             AIFunctionFactory.Create(
                 method: (long expectedBookRevision, long expectedCoverRevision, CompositionScene scene) => StageCoreCoverCompositionAsync(context, expectedBookRevision, expectedCoverRevision, scene),
                 name: "stage_publication_core_cover_composition",
@@ -349,11 +349,11 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid releaseId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlaceCoverImageAsync(context, releaseId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
                 name: "place_project_image_on_release_cover",
-                description: "Place an existing project-image ID into one existing release-cover image object. Requires explicit Contain/Cover fit and an alt-text or decorative decision. This is separate from image generation."),
+                description: "Place an existing project-image ID into one existing release-cover image object. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an alt-text or decorative decision. This is separate from image generation."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddCoverImageAsync(context, releaseId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
                 name: "add_project_image_to_release_cover",
-                description: "Add an existing project-image ID as a new release-cover image object. Requires explicit Contain/Cover fit and an alt-text or decorative decision. This is separate from image generation."),
+                description: "Add an existing project-image ID as a new release-cover image object. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an alt-text or decorative decision. This is separate from image generation."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, long expectedRevision, CompositionScene scene) =>
                     StageCoverCompositionAsync(context, releaseId, expectedRevision, scene),

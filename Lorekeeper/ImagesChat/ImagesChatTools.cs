@@ -180,11 +180,11 @@ public sealed class ImagesChatTools(
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlacePageImageAsync(context, variantId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
                 name: "place_project_image_in_page_frame",
-                description: "Place an existing project-image ID into an existing Designed Page image frame with explicit Contain/Cover fit and an accessibility decision."),
+                description: "Place an existing project-image ID into an existing Designed Page image frame. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an accessibility decision."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddPageImageAsync(context, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
                 name: "add_project_image_to_page",
-                description: "Add a new image object to a Designed Page from an existing project-image ID with explicit Contain/Cover fit and an accessibility decision."),
+                description: "Add a new image object to a Designed Page from an existing project-image ID. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an accessibility decision."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, CompositionScene scene) => StageCompositionAsync(context, variantId, expectedRevision, scene),
                 name: "stage_page_composition",
@@ -230,7 +230,7 @@ public sealed class ImagesChatTools(
             AIFunctionFactory.Create(
                 method: (Guid editionId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlaceCoverImageAsync(context, editionId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
                 name: "place_project_image_in_cover_frame",
-                description: "Place an existing project-image ID into an existing publication-cover image frame with explicit Contain/Cover fit and an accessibility decision."),
+                description: "Place an existing project-image ID into an existing publication-cover image frame. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an accessibility decision."),
 
             AIFunctionFactory.Create(
                 method: (Guid editionId, long expectedRevision, CompositionScene scene) => StageCoverAsync(context, editionId, expectedRevision, scene),

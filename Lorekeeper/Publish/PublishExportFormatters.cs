@@ -904,7 +904,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 figureCss += presentation.Alignment switch { FigureAlignment.Start => "margin-left:0;margin-right:auto;", FigureAlignment.End => "margin-left:auto;margin-right:0;", _ => "margin-left:auto;margin-right:auto;" };
             if (presentation.Placement == FigurePlacementIntent.FullBleed)
                 figureCss += "width:100vw;max-width:none;margin-left:calc(50% - 50vw);";
-            var objectFit = presentation.Fit == FigureImageFit.Contain ? "contain" : "cover";
+            var objectFit = ImageFitCss(presentation.Fit);
             var frameHeight = presentation.Placement is FigurePlacementIntent.DedicatedPage or FigurePlacementIntent.FullBleed ? "75vh" : "40vh";
             var imageCss = $"display:block;width:100%;height:100%;object-fit:{objectFit};object-position:{presentation.CropXPercent.ToString(CultureInfo.InvariantCulture)}% {presentation.CropYPercent.ToString(CultureInfo.InvariantCulture)}%;";
             var alt = placement.Decorative ? string.Empty : placement.AltText;
@@ -1524,7 +1524,12 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         _ => "none",
     };
 
-    private static string ImageFitCss(FigureImageFit fit) => fit == FigureImageFit.Contain ? "contain" : "cover";
+    private static string ImageFitCss(FigureImageFit fit) => fit switch
+    {
+        FigureImageFit.Cover => "cover",
+        FigureImageFit.Stretch => "fill",
+        _ => "contain",
+    };
 
     internal static string RenderSemanticInlineRules() =>
         ".small-caps { font-variant-caps: small-caps; }";
@@ -1743,6 +1748,13 @@ internal static class DesignedPageSemanticProjection
 
 internal static class SemanticPublishFormatting
 {
+    private static string ImageFitCss(FigureImageFit fit) => fit switch
+    {
+        FigureImageFit.Cover => "cover",
+        FigureImageFit.Stretch => "fill",
+        _ => "contain",
+    };
+
     public static string PlainText(
         ManuscriptDocument manuscript,
         Func<Guid, PublishAssetDocument?> asset)
@@ -1915,7 +1927,7 @@ internal static class SemanticPublishFormatting
         if (presentation.Placement == FigurePlacementIntent.FullBleed)
             figureStyle.Append("width:100%;max-width:100%;");
         var frameHeight = presentation.Placement is FigurePlacementIntent.DedicatedPage or FigurePlacementIntent.FullBleed ? "75vh" : "40vh";
-        var imageStyle = $"display:block;width:100%;height:100%;object-fit:{presentation.Fit.ToString().ToLowerInvariant()};object-position:{presentation.CropXPercent.ToString(CultureInfo.InvariantCulture)}% {presentation.CropYPercent.ToString(CultureInfo.InvariantCulture)}%;";
+        var imageStyle = $"display:block;width:100%;height:100%;object-fit:{ImageFitCss(presentation.Fit)};object-position:{presentation.CropXPercent.ToString(CultureInfo.InvariantCulture)}% {presentation.CropYPercent.ToString(CultureInfo.InvariantCulture)}%;";
         var image = $"<div class=\"figure-media\" style=\"position:relative;width:100%;height:{frameHeight};overflow:hidden\"><img src=\"{WebUtility.HtmlEncode(href)}\" alt=\"{WebUtility.HtmlEncode(block.Decorative ? string.Empty : block.AltText)}\"{decorative} style=\"{imageStyle}\" />{(presentation.CaptionPlacement == FigureCaptionPlacement.Overlay ? $"<div class=\"figure-overlay-caption\" style=\"position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.65);color:white;padding:.5em\">{content}</div>" : string.Empty)}</div>";
         var contents = presentation.CaptionPlacement == FigureCaptionPlacement.Above ? caption + image : image + (presentation.CaptionPlacement == FigureCaptionPlacement.Overlay ? string.Empty : caption);
         return $"<figure id=\"{anchor}\" data-style-role=\"{role}\" data-accessibility-role=\"{(block.AccessibilityRole ?? FigureAccessibilityRole.Figure).ToString().ToLowerInvariant()}\"{language} style=\"{figureStyle}\">{contents}</figure>";

@@ -62,8 +62,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   directly on the canvas; selected text uses the same semantic inline marks as
   ordinary manuscript paragraphs, without exposing content bindings or offsets.
   Exact target-bound generation,
-  accessibility state, and layout diagnostics remain available. Placement always chooses non-destructive
-  Contain or Cover fit; crop positioning is adjusted directly in the canvas.
+  accessibility state, and layout diagnostics remain available. Image frames
+  retain the raster's aspect ratio by default, can fill the largest proportional
+  canvas area in one action, and permit deliberate stretching only when the user
+  disables that constraint. Legacy cropped placement remains repositionable.
   Every assistant generation/edit waits for a terminal result and produces an
   unattached reusable project image; Figure, page, cover, and canonical-reference
   placement is a separate revision-safe step using that image ID.

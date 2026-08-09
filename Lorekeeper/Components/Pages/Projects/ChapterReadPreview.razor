@@ -293,7 +293,11 @@
         var sourceLeft = Math.Clamp(image.SourceLeftFraction, 0, 1 - sourceWidth);
         var virtualWidth = 100 / sourceWidth;
         var virtualLeft = -sourceLeft / sourceWidth * 100;
-        var fit = image.Fit.Equals("Cover", StringComparison.OrdinalIgnoreCase) ? "cover" : "contain";
+        var fit = image.Fit.Equals("Cover", StringComparison.OrdinalIgnoreCase)
+            ? "cover"
+            : image.Fit.Equals("Stretch", StringComparison.OrdinalIgnoreCase)
+                ? "fill"
+                : "contain";
         var cropXPercent = Math.Clamp(image.CropX, 0, 1) * 100;
         var cropYPercent = Math.Clamp(image.CropY, 0, 1) * 100;
         return $"left:{virtualLeft:R}%;top:0;width:{virtualWidth:R}%;height:100%;object-fit:{fit};object-position:{cropXPercent:R}% {cropYPercent:R}%";
