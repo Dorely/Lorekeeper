@@ -6,10 +6,10 @@
 .project-image-picker-results { min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: .25rem; scrollbar-gutter: stable; }
 .project-image-picker-results > .alert { margin-bottom: .65rem !important; }
 .project-image-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); grid-auto-rows: 12rem; gap: .75rem; align-content: start; }
-.project-image-picker-card { min-width: 0; min-height: 0; display: grid; grid-template-rows: 8.75rem minmax(0, 1fr); overflow: hidden; padding: 0; border: 1px solid var(--lk-line); border-radius: var(--lk-radius-md); color: inherit; text-align: left; background: var(--lk-surface); }
+.project-image-picker-card { --project-image-picker-preview-height: 8.75rem; min-width: 0; min-height: 0; display: grid; grid-template-rows: var(--project-image-picker-preview-height) minmax(0, 1fr); overflow: hidden; padding: 0; border: 1px solid var(--lk-line); border-radius: var(--lk-radius-md); color: inherit; text-align: left; background: var(--lk-surface); }
 .project-image-picker-card:hover,.project-image-picker-card.selected { border-color: var(--lk-accent); background: var(--lk-accent-soft); }
-.project-image-picker-preview { min-width: 0; min-height: 0; display: grid; place-items: center; overflow: hidden; background: var(--lk-soft); }
-.project-image-picker-preview img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.project-image-picker-preview { width: 100%; height: var(--project-image-picker-preview-height); min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: .35rem; background: var(--lk-soft); }
+.project-image-picker-preview img { display: block; width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: scale-down; object-position: center; }
 .project-image-picker-card-body { min-width: 0; display: grid; align-content: center; gap: .2rem; overflow: hidden; padding: .45rem .55rem; font-size: .78rem; }
 .project-image-picker-card-body strong,.project-image-picker-card-body span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-image-picker-card-body span { color: var(--lk-muted); font-size: .72rem; }
@@ -21,5 +21,5 @@
     .project-image-picker-backdrop { padding: .5rem; }
     .project-image-picker { height: calc(100vh - 1rem); padding: .75rem; }
     .project-image-picker-grid { grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); grid-auto-rows: 10.5rem; gap: .5rem; }
-    .project-image-picker-card { grid-template-rows: 7.5rem minmax(0, 1fr); }
+    .project-image-picker-card { --project-image-picker-preview-height: 7.5rem; }
 }
