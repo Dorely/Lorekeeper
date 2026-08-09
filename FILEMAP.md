@@ -133,7 +133,7 @@
 | `ImageViewerModal.razor` (+ `.razor.css`) | App-wide full-size image viewer for project assets, chat visuals, source candidates, and publish images, with shared metadata, dismissal, and optional actions. |
 | `ImageEntityAssociations.razor` (+ `.razor.css`) | Image-side attached-entity chips and association editor used by the Images workspace. |
 | `EntityVisualTargetPicker.razor` (+ `.razor.css`) | Reusable multi-entity target picker for image generation and editing. |
-| `ProjectImageLibraryPickerModal.razor` (+ `.razor.css`) | Project-wide searchable single-image library picker with caller-defined actions, optional media-type filtering, and current-image preselection; used by chats, entity visuals, manuscript Figures, Designed Pages, and covers. |
+| `ProjectImageLibraryPickerModal.razor` (+ `.razor.css`) | Project-wide searchable single-image library picker with fixed fully-visible image cards, a bounded vertical result scroller, caller-defined actions, optional media-type filtering, and current-image preselection; used by chats, entity visuals, manuscript Figures, Designed Pages, and covers. |
 
 ### Components/Chat/
 

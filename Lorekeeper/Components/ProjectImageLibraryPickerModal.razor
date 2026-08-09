@@ -16,39 +16,43 @@
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ReloadAsync">Refresh</button>
             </div>
 
-            @if (!string.IsNullOrWhiteSpace(_error))
-            {
-                <div class="alert alert-danger py-2 mb-0">@_error</div>
-            }
+            <div class="project-image-picker-results">
+                @if (!string.IsNullOrWhiteSpace(_error))
+                {
+                    <div class="alert alert-danger py-2 mb-0">@_error</div>
+                }
 
-            @if (_loading)
-            {
-                <p class="text-muted"><em>Loading images...</em></p>
-            }
-            else if (FilteredImages.Count == 0)
-            {
-                <div class="project-image-picker-empty">No available images found.</div>
-            }
-            else
-            {
-                <div class="project-image-picker-grid">
-                    @foreach (var image in FilteredImages)
-                    {
-                        var selected = _selected?.Id == image.Id;
-                        <button type="button" class="project-image-picker-card @(selected ? "selected" : null)"
-                                aria-pressed="@selected" @onclick="() => Select(image)" @key="image.Id">
-                            <img src="@image.PreviewUrl" alt="@ImageAlt(image)" />
-                            <span class="project-image-picker-card-body">
-                                <strong>@image.FileName</strong>
-                                @if (!string.IsNullOrWhiteSpace(image.AltText))
-                                {
-                                    <span>@image.AltText</span>
-                                }
-                            </span>
-                        </button>
-                    }
-                </div>
-            }
+                @if (_loading)
+                {
+                    <p class="project-image-picker-status text-muted"><em>Loading images...</em></p>
+                }
+                else if (FilteredImages.Count == 0)
+                {
+                    <div class="project-image-picker-empty">No available images found.</div>
+                }
+                else
+                {
+                    <div class="project-image-picker-grid">
+                        @foreach (var image in FilteredImages)
+                        {
+                            var selected = _selected?.Id == image.Id;
+                            <button type="button" class="project-image-picker-card @(selected ? "selected" : null)"
+                                    aria-pressed="@selected" @onclick="() => Select(image)" @key="image.Id">
+                                <span class="project-image-picker-preview">
+                                    <img src="@image.PreviewUrl" alt="@ImageAlt(image)" />
+                                </span>
+                                <span class="project-image-picker-card-body">
+                                    <strong title="@image.FileName">@image.FileName</strong>
+                                    @if (!string.IsNullOrWhiteSpace(image.AltText))
+                                    {
+                                        <span title="@image.AltText">@image.AltText</span>
+                                    }
+                                </span>
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
 
             <footer class="project-image-picker-footer">
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseAsync">Cancel</button>
