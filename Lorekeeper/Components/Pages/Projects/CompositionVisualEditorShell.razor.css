@@ -21,7 +21,7 @@
 
 .visual-editor-toolbar {
     position: relative;
-    z-index: 20;
+    z-index: 2;
     min-width: 0;
 }
 
