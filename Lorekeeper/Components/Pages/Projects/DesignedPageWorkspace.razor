@@ -45,13 +45,29 @@
                                 class="composition-object composition-object--@item.Kind.ToString().ToLowerInvariant() @(item.Id == _selectedId ? "selected" : null)"
                                 style="@ObjectStyle(item)"
                                 @onclick:stopPropagation="true"
-                                @onclick="() => SelectObject(item.Id)"
+                                @onclick="e => SelectOrEditObject(item, e)"
                                 @onpointerdown:stopPropagation="true"
                                 @onpointerdown:preventDefault="true"
-                                @onpointerdown="e => BeginTransformAsync(e, item, _cropReposition && item.Kind == CompositionObjectKind.Image && item.ImageFit == FigureImageFit.Cover ? TransformMode.Crop : TransformMode.Move)">
+                                @onpointerdown="e => BeginObjectTransformAsync(e, item)">
                             @if (item.Kind == CompositionObjectKind.Text)
                             {
-                                <span>@RenderedText(item)</span>
+                                @if (_editingTextId == item.Id)
+                                {
+                                    <div class="composition-text-editor"
+                                         data-composition-text-id="@item.Id"
+                                         contenteditable="true"
+                                         role="textbox"
+                                         aria-multiline="true"
+                                         spellcheck="true"
+                                         @onclick:stopPropagation="true"
+                                         @onpointerdown:stopPropagation="true"
+                                         @onkeydown:stopPropagation="true"
+                                         @onblur="() => FinishTextEditAsync(item.Id)">@((MarkupString)RenderedInlineHtml(item))</div>
+                                }
+                                else
+                                {
+                                    <span class="composition-rendered-text">@((MarkupString)RenderedInlineHtml(item))</span>
+                                }
                             }
                             else if (item.Kind == CompositionObjectKind.Image)
                             {
@@ -100,7 +116,10 @@
                 @if (Selected is { } primarySelection)
                 {
                     <div class="composition-selection-controls">
-                        <div class="composition-selection-title"><strong>@ObjectLabel(primarySelection)</strong><small>@primarySelection.Kind</small></div>
+                        @if (primarySelection.Kind != CompositionObjectKind.Text)
+                        {
+                            <div class="composition-selection-title"><strong>@ObjectLabel(primarySelection)</strong><small>@primarySelection.Kind</small></div>
+                        }
                         @if (primarySelection.Kind == CompositionObjectKind.Image)
                         {
                             <button type="button" @onclick="() => OpenReplaceImagePicker(primarySelection.Id)">Replace image</button>
@@ -110,7 +129,13 @@
                         else if (primarySelection.Kind == CompositionObjectKind.Text)
                         {
                             var primaryStyle = Resolved(primarySelection);
-                            <label>Content<select value="@BoundBlockId(primarySelection)" @onchange="e => BindTextBlock(primarySelection, e)"><option value="">Choose text</option>@foreach (var block in _semanticBlocks) { <option value="@block.Id">@ShortText(block)</option> }</select></label>
+                            <button type="button" class="@(_editingTextId == primarySelection.Id ? "selected" : null)" title="Edit the text directly in this frame" @onclick="() => BeginTextEdit(primarySelection)">@(_editingTextId == primarySelection.Id ? "Editing text" : "Edit text")</button>
+                            <div class="composition-inline-formatting" aria-label="Inline text formatting">
+                                <button type="button" title="Bold selected text" aria-label="Bold selected text" @onpointerdown:preventDefault="true" @onclick="() => ToggleInlineMarkAsync(primarySelection, ManuscriptMarkType.Strong)"><strong>B</strong></button>
+                                <button type="button" title="Italicize selected text" aria-label="Italicize selected text" @onpointerdown:preventDefault="true" @onclick="() => ToggleInlineMarkAsync(primarySelection, ManuscriptMarkType.Emphasis)"><em>I</em></button>
+                                <button type="button" title="Underline selected text" aria-label="Underline selected text" @onpointerdown:preventDefault="true" @onclick="() => ToggleInlineMarkAsync(primarySelection, ManuscriptMarkType.Underline)"><u>U</u></button>
+                                <button type="button" title="Strike through selected text" aria-label="Strike through selected text" @onpointerdown:preventDefault="true" @onclick="() => ToggleInlineMarkAsync(primarySelection, ManuscriptMarkType.Strikethrough)"><s>S</s></button>
+                            </div>
                             <label>Font<select value="@primaryStyle.FontFamilyKey" @onchange="e => Patch(primarySelection with { StyleId = null, FontFamilyKey = e.Value?.ToString() ?? string.Empty })">@foreach (var family in _fontFamilies) { <option value="@family.Key">@family.Name</option> }</select></label>
                             <label>Size<input class="composition-number" type="number" min="4" max="240" value="@primaryStyle.FontSizePoints" @onchange="e => Patch(primarySelection with { StyleId = null, FontSizePoints = Number(e) })" /></label>
                             <label>Align<select value="@primaryStyle.TextAlignment" @onchange="e => Patch(primarySelection with { StyleId = null, TextAlignment = Enum.Parse<CompositionTextAlignment>(e.Value!.ToString()!) })">@foreach (var alignment in Enum.GetValues<CompositionTextAlignment>()) { <option value="@alignment">@alignment</option> }</select></label>
@@ -123,7 +148,7 @@
                             <label>Fill<input type="color" value="@ColorValue(primaryStyle.FillColor)" @onchange="e => Patch(primarySelection with { StyleId = null, FillColor = Color(e) })" /></label><label>Border<input type="color" value="@ColorValue(primaryStyle.StrokeColor)" @onchange="e => Patch(primarySelection with { StyleId = null, StrokeColor = Color(e) })" /></label>
                         }
                         <span class="composition-control-divider" aria-hidden="true"></span>
-                        <button type="button" title="Send behind the next object" @onclick="() => ChangeZOrder(primarySelection, -1)">Send back</button><button type="button" title="Bring in front of the next object" @onclick="() => ChangeZOrder(primarySelection, 1)">Bring front</button><button type="button" class="@(primarySelection.Locked ? "selected" : null)" title="Lock or unlock this object's position" @onclick="() => ToggleObjectLock(primarySelection)">@(primarySelection.Locked ? "Unlock" : "Lock")</button><button type="button" class="danger" title="Delete selected object" @onclick="() => Delete(primarySelection.Id)">Delete</button>
+                        <button type="button" title="Send behind the next object" @onclick="() => ChangeZOrder(primarySelection, -1)">Send back</button><button type="button" title="Bring in front of the next object" @onclick="() => ChangeZOrder(primarySelection, 1)">Bring front</button><button type="button" class="@(!primarySelection.Visible ? "selected" : null)" title="Show or hide this object" @onclick="() => ToggleObjectVisibility(primarySelection)">@(primarySelection.Visible ? "Hide" : "Show")</button><button type="button" class="@(primarySelection.Locked ? "selected" : null)" title="Lock or unlock this object's position" @onclick="() => ToggleObjectLock(primarySelection)">@(primarySelection.Locked ? "Unlock" : "Lock")</button><button type="button" class="danger" title="Delete selected object" @onclick="() => Delete(primarySelection.Id)">Delete</button>
                     </div>
                 }
                 else { <p class="composition-empty-selection">Select an object on the page to edit it. Drag to move; use the handles to resize or rotate.</p> }
@@ -148,8 +173,6 @@
                                 </div>
                                 <label>Rotation<input type="number" value="@selected.RotationDegrees" @onchange="e => Patch(selected with { RotationDegrees = Number(e) })" /></label>
                                 <label>Opacity<input type="range" min="0" max="1" step=".05" value="@selected.Opacity" @onchange="e => Patch(selected with { Opacity = Number(e) })" /></label>
-                                <label><input type="checkbox" checked="@selected.Visible" @onchange="e => Patch(selected with { Visible = (bool)e.Value! })" /> Visible</label>
-                                <label><input type="checkbox" checked="@selected.Locked" @onchange="e => Patch(selected with { Locked = (bool)e.Value! })" /> Locked</label>
                                 <label>Object style<select value="@selected.StyleId" @onchange="e => SetObjectStyle(selected, e)"><option value="">Local formatting</option>@foreach (var style in _styles) { <option value="@style.Id">@style.Name</option> }</select></label>
                                 <div class="composition-action-row"><button type="button" @onclick="() => CreateStyleFrom(selected)">Save as reusable style</button>@if (selected.StyleId is Guid styleId) { <button type="button" @onclick="() => DeleteStyle(styleId)">Delete style</button> }</div>
                                 <label>Semantic role<select value="@selected.SemanticRole" @onchange="e => Patch(selected with { SemanticRole = Enum.Parse<CompositionSemanticRole>(e.Value!.ToString()!) })">@foreach (var role in Enum.GetValues<CompositionSemanticRole>()) { <option value="@role">@role</option> }</select></label>
@@ -180,20 +203,6 @@
                             @if (selected.Kind == CompositionObjectKind.Text)
                             {
                                 var resolved = Resolved(selected);
-                                <label>Content binding<select value="@BoundBlockId(selected)" @onchange="e => BindTextBlock(selected, e)"><option value="">Choose semantic content</option>@foreach (var block in _semanticBlocks) { <option value="@block.Id">@ShortText(block)</option> }</select></label>
-                                @foreach (var indexed in selected.ContentReferences.Select((reference, index) => (reference, index)))
-                                {
-                                    <div class="composition-range-editor">
-                                        <strong>@indexed.reference.BlockId</strong>
-                                        <label>Start offset<input type="number" min="0" value="@indexed.reference.StartOffset" @onchange="e => PatchReference(selected, indexed.index, start: NullableInt(e))" /></label>
-                                        <label>End offset<input type="number" min="1" value="@indexed.reference.EndOffset" @onchange="e => PatchReference(selected, indexed.index, end: NullableInt(e))" /></label>
-                                        <button type="button" @onclick="() => RemoveReference(selected, indexed.index)">Remove range</button>
-                                    </div>
-                                }
-                                @if (SelectedSemantic is { } selectedBlock)
-                                {
-                                    <button type="button" @onclick="() => AddReference(selected, selectedBlock.Id)">Add selected content range</button>
-                                }
                                 <details class="composition-advanced">
                                     <summary>Advanced typography</summary>
                                     <label>Font family<select value="@resolved.FontFamilyKey" @onchange="e => Patch(selected with { StyleId = null, FontFamilyKey = e.Value?.ToString() ?? string.Empty })">@foreach (var family in _fontFamilies) { <option value="@family.Key">@family.Name</option> }</select></label>
@@ -240,48 +249,9 @@
                             <div class="reading-row"><span>@item.ReadingOrder</span> @item.SemanticRole <button type="button" @onclick="() => MoveReadingOrder(item, -1)">Up</button><button type="button" @onclick="() => MoveReadingOrder(item, 1)">Down</button></div>
                         }
 
-                        <h3>Semantic content</h3>
-                        <p class="composition-hint">Text lives here once. Frames bind to these stable blocks.</p>
-                        <div class="composition-add-row">
-                            <button type="button" @onclick="() => AddSemanticBlock(ManuscriptBlockType.Paragraph)">Paragraph</button>
-                            <button type="button" @onclick="() => AddSemanticBlock(ManuscriptBlockType.Heading)">Heading</button>
-                            <button type="button" @onclick="() => AddSemanticBlock(ManuscriptBlockType.BlockQuote)">Caption</button>
-                        </div>
-                        @foreach (var block in _semanticBlocks)
-                        {
-                            <button type="button" class="composition-content-row @(block.Id == _selectedSemanticId ? "selected" : null)" @onclick="() => SelectSemantic(block)">
-                                <span>@block.Type</span><small>@ShortText(block)</small><em>@PlacementStatus(block.Id)</em>
-                            </button>
-                        }
                         @if (UnplacedCount > 0)
                         {
-                            <p class="composition-unplaced" role="status">@UnplacedCount unplaced content block@(UnplacedCount == 1 ? string.Empty : "s") must be bound before output.</p>
-                        }
-
-                        @if (SelectedSemantic is { } semantic)
-                        {
-                            <h3>Content editor</h3>
-                            <label>Semantic role<select value="@semantic.Type" @onchange="e => ChangeSemanticType(semantic, e)"><option value="Paragraph">Paragraph</option><option value="Heading">Heading</option><option value="BlockQuote">Caption / quote</option><option value="ListItem">List item</option></select></label>
-                            <label>Text<textarea rows="6" value="@ManuscriptCodec.Text(semantic)" @onchange="e => ChangeSemanticText(semantic, e.Value?.ToString() ?? string.Empty)"></textarea></label>
-                            <fieldset class="composition-mark-editor">
-                                <legend>Inline formatting</legend>
-                                <div class="composition-grid-2">
-                                    <label>Start<input type="number" min="0" max="@ManuscriptCodec.Text(semantic).Length" @bind="_markStart" /></label>
-                                    <label>End<input type="number" min="0" max="@ManuscriptCodec.Text(semantic).Length" @bind="_markEnd" /></label>
-                                </div>
-                                <label>Format<select @bind="_markType">@foreach (var mark in Enum.GetValues<ManuscriptMarkType>()) { <option value="@mark">@MarkLabel(mark)</option> }</select></label>
-                                @if (MarkNeedsValue(_markType))
-                                {
-                                    <label>@MarkValueLabel(_markType)<input @bind="_markValue" placeholder="@MarkValuePlaceholder(_markType)" /></label>
-                                }
-                                <div class="composition-action-row">
-                                    <button type="button" @onclick="SelectWholeSemanticText">Select all text</button>
-                                    <button type="button" @onclick="() => ApplySemanticMark(true)">Apply</button>
-                                    <button type="button" @onclick="() => ApplySemanticMark(false)">Remove</button>
-                                </div>
-                                <small>Offsets count characters in the semantic text. Formatting is preserved in EPUB, Digital PDF, and text frames.</small>
-                            </fieldset>
-                            <button type="button" class="danger" @onclick="() => DeleteSemanticBlock(semantic.Id)" disabled="@IsReferenced(semantic.Id)">Delete unplaced block</button>
+                            <p class="composition-unplaced" role="status">This page contains text left over from an older layout. It is preserved, but must be placed before publication.</p>
                         }
                         <h3>Saved layouts</h3>
                         <div class="composition-variant-list">
@@ -298,7 +268,7 @@
                             </div>
                             <small>Custom page boxes apply only to this Digital PDF Designed Page.</small>
                         }
-                        <p>@(_scene.Surface.WidthPoints / 72).ToString("0.###") × @(_scene.Surface.HeightPoints / 72).ToString("0.###") in</p>
+                        <p>@SurfaceSizeLabel(_scene.Surface)</p>
                         </div>
                     </details>
                     <div><button type="button" class="primary" disabled="@(!_dirty)" @onclick="SaveAsync">Save</button><button type="button" @onclick="CloseAsync">Back</button></div>
@@ -342,14 +312,14 @@
     private Guid? _imagePickerTargetId;
     private Guid? _selectedId;
     private readonly HashSet<Guid> _groupSelection = [];
-    private string? _selectedSemanticId;
+    private Guid? _editingTextId;
+    private Guid? _focusTextId;
+    private TextFocusRequest? _textFocusRequest;
+    private Guid? _suppressTextEditId;
+    private TextSelectionRestore? _textSelectionRestore;
     private Guid _loadedProjectId;
     private Guid _loadedCompositionId;
     private int _loadedRefreshSignal = -1;
-    private int _markStart;
-    private int _markEnd;
-    private ManuscriptMarkType _markType = ManuscriptMarkType.Emphasis;
-    private string _markValue = string.Empty;
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private bool _dirty;
     private long _changeVersion;
@@ -361,12 +331,36 @@
     private IJSObjectReference? _workspaceModule;
     private TransformState? _transform;
     private CompositionObject? Selected => _objects.FirstOrDefault(item => item.Id == _selectedId);
-    private void SelectObject(Guid id) { _selectedId = id; _cropReposition = false; }
+    private void SelectObject(Guid id)
+    {
+        if (_selectedId != id)
+            _editingTextId = null;
+        _selectedId = id;
+        _cropReposition = false;
+    }
+    private void SelectOrEditObject(CompositionObject item, MouseEventArgs e)
+    {
+        if (_suppressTextEditId == item.Id)
+        {
+            _suppressTextEditId = null;
+            SelectObject(item.Id);
+            return;
+        }
+        if (_selectedId == item.Id && item.Kind == CompositionObjectKind.Text && !IsLocked(item))
+            BeginTextEdit(item, e.ClientX, e.ClientY);
+        else
+            SelectObject(item.Id);
+    }
     private static string ObjectLabel(CompositionObject item) => string.IsNullOrWhiteSpace(item.Name) ? item.Kind.ToString() : item.Name;
     private static string ObjectIcon(CompositionObjectKind kind) => kind switch { CompositionObjectKind.Text => "T", CompositionObjectKind.Image => "▧", CompositionObjectKind.Rectangle => "□", CompositionObjectKind.Ellipse => "○", CompositionObjectKind.Line => "—", _ => "◇" };
     private void SetImageFit(CompositionObject item, FigureImageFit fit) { if (item.ImageFit == fit) return; _cropReposition = false; Patch(item with { ImageFit = fit }); }
     private void ToggleObjectLock(CompositionObject item) => Patch(item with { Locked = !item.Locked });
-    private ManuscriptBlock? SelectedSemantic => _semanticBlocks.FirstOrDefault(item => item.Id == _selectedSemanticId);
+    private void ToggleObjectVisibility(CompositionObject item)
+    {
+        if (item.Visible)
+            _editingTextId = null;
+        Patch(item with { Visible = !item.Visible });
+    }
     private HashSet<string> UnplacedIds
     {
         get
@@ -529,12 +523,27 @@
 
     private void AddTextObject()
     {
-        AddObject(CompositionObjectKind.Text);
-        if (_selectedId is not Guid id || string.IsNullOrWhiteSpace(_selectedSemanticId))
+        if (_scene is null)
             return;
-        var index = _objects.FindIndex(item => item.Id == id);
-        if (index >= 0)
-            _objects[index] = _objects[index] with { ContentReferences = [new ManuscriptRangeReference(_selectedSemanticId)] };
+        Snapshot();
+        var blockId = Guid.NewGuid().ToString("N");
+        _semanticBlocks.Add(NewTextBlock(blockId));
+        var item = new CompositionObject
+        {
+            Id = Guid.NewGuid(),
+            LayerId = ContentLayerId,
+            Kind = CompositionObjectKind.Text,
+            Name = "Text",
+            Bounds = new CompositionBounds { XPercent = 10, YPercent = 10, WidthPercent = 40, HeightPercent = 20 },
+            ContentReferences = [new ManuscriptRangeReference(blockId)],
+            ReadingOrder = NextReadingOrder(),
+            SemanticRole = CompositionSemanticRole.Paragraph,
+        };
+        _objects.Add(item);
+        _selectedId = item.Id;
+        _editingTextId = item.Id;
+        _focusTextId = item.Id;
+        MarkDirty();
     }
 
     private void OpenAddImagePicker() { _imagePickerMode = ImagePickerMode.Add; _imagePickerTargetId = null; }
@@ -566,78 +575,27 @@
         : null;
     private static readonly string[] CompositionImageContentTypes = ["image/png", "image/jpeg"];
 
-    private void AddSemanticBlock(ManuscriptBlockType type)
+    private static ManuscriptBlock NewTextBlock(string id, IReadOnlyList<ManuscriptInline>? content = null) => new()
     {
-        Snapshot();
-        var id = Guid.NewGuid().ToString("N");
-        _semanticBlocks.Add(new ManuscriptBlock
-        {
-            Id = id,
-            Type = type,
-            StyleRole = type switch
-            {
-                ManuscriptBlockType.Heading => ManuscriptStyleRoles.Heading,
-                ManuscriptBlockType.BlockQuote => ManuscriptStyleRoles.BlockQuote,
-                ManuscriptBlockType.ListItem => ManuscriptStyleRoles.ListItem,
-                _ => ManuscriptStyleRoles.Body,
-            },
-            HeadingLevel = type == ManuscriptBlockType.Heading ? 2 : null,
-            Content = [new ManuscriptInline { Text = string.Empty }],
-        });
-        _selectedSemanticId = id;
-        _markStart = 0;
-        _markEnd = 0;
-        MarkDirty();
-    }
+        Id = id,
+        Type = ManuscriptBlockType.Paragraph,
+        StyleRole = ManuscriptStyleRoles.Body,
+        Content = content?.ToList() ?? [new ManuscriptInline { Text = string.Empty }],
+    };
 
-    private void SelectSemantic(ManuscriptBlock block)
+    private void BeginTextEdit(CompositionObject item, double? clientX = null, double? clientY = null)
     {
-        _selectedSemanticId = block.Id;
-        _markStart = 0;
-        _markEnd = ManuscriptCodec.Text(block).Length;
-    }
-
-    private void SelectWholeSemanticText()
-    {
-        _markStart = 0;
-        _markEnd = SelectedSemantic is { } block ? ManuscriptCodec.Text(block).Length : 0;
-    }
-
-    private void ApplySemanticMark(bool enabled)
-    {
-        if (SelectedSemantic is not { } block)
+        if (item.Kind != CompositionObjectKind.Text || IsLocked(item))
             return;
-        var text = ManuscriptCodec.Text(block);
-        if (_markStart < 0 || _markEnd <= _markStart || _markEnd > text.Length)
-        {
-            _error = "Choose a valid non-empty character range before changing inline formatting.";
-            return;
-        }
-        if (enabled && MarkNeedsValue(_markType) && string.IsNullOrWhiteSpace(_markValue))
-        {
-            _error = $"{MarkValueLabel(_markType)} is required for this format.";
-            return;
-        }
         try
         {
-            Snapshot();
-            var source = new ManuscriptDocument
-            {
-                ManuscriptId = CompositionId,
-                Revision = _composition?.Revision ?? 0,
-                Content = _semanticBlocks,
-            };
-            var (updated, _) = ManuscriptOperations.Apply(
-                source,
-                [new SetManuscriptInlineMark(
-                    block.Id,
-                    _markStart,
-                    _markEnd,
-                    _markType,
-                    enabled,
-                    enabled && MarkNeedsValue(_markType) ? _markValue.Trim() : null)]);
-            _semanticBlocks = updated.Content;
-            MarkDirty();
+            EnsureOwnedTextBlock(item.Id);
+            _selectedId = item.Id;
+            _editingTextId = item.Id;
+            _focusTextId = item.Id;
+            _textFocusRequest = clientX is not null && clientY is not null
+                ? new TextFocusRequest(item.Id, clientX.Value, clientY.Value)
+                : null;
             _error = null;
         }
         catch (Exception exception)
@@ -646,116 +604,173 @@
         }
     }
 
-    private static bool MarkNeedsValue(ManuscriptMarkType mark) => mark is
-        ManuscriptMarkType.Link or ManuscriptMarkType.Language or ManuscriptMarkType.CharacterStyle;
-
-    private static string MarkLabel(ManuscriptMarkType mark) => mark switch
+    private ManuscriptBlock EnsureOwnedTextBlock(Guid objectId)
     {
-        ManuscriptMarkType.SmallCaps => "Small caps",
-        ManuscriptMarkType.CharacterStyle => "Character style",
-        _ => mark.ToString(),
-    };
+        var item = _objects.FirstOrDefault(candidate => candidate.Id == objectId && candidate.Kind == CompositionObjectKind.Text)
+            ?? throw new InvalidOperationException("The selected text frame no longer exists.");
+        if (item.ContentReferences.Count == 1
+            && item.ContentReferences[0] is { StartOffset: null, EndOffset: null } reference
+            && _objects.Count(candidate => candidate.Kind == CompositionObjectKind.Text
+                && candidate.ContentReferences.Any(content => content.BlockId == reference.BlockId)) == 1
+            && _semanticBlocks.FirstOrDefault(block => block.Id == reference.BlockId) is { } owned)
+        {
+            return owned;
+        }
 
-    private static string MarkValueLabel(ManuscriptMarkType mark) => mark switch
-    {
-        ManuscriptMarkType.Link => "Link URL",
-        ManuscriptMarkType.Language => "Language tag",
-        ManuscriptMarkType.CharacterStyle => "Character style key",
-        _ => "Value",
-    };
-
-    private static string MarkValuePlaceholder(ManuscriptMarkType mark) => mark switch
-    {
-        ManuscriptMarkType.Link => "https://example.com",
-        ManuscriptMarkType.Language => "en-US",
-        ManuscriptMarkType.CharacterStyle => "emphasis-accent",
-        _ => string.Empty,
-    };
-
-    private void ChangeSemanticText(ManuscriptBlock block, string text)
-    {
-        var index = _semanticBlocks.FindIndex(item => item.Id == block.Id);
-        if (index < 0) return;
         Snapshot();
-        _semanticBlocks[index] = block with { Content = ReplaceTextPreservingMarks(block.Content, text.Replace("\r\n", "\n").Replace('\r', '\n')) };
+        if (item.ContentReferences.Count == 0)
+        {
+            var block = NewTextBlock(Guid.NewGuid().ToString("N"),
+                [new ManuscriptInline { Text = item.TextBinding }]);
+            _semanticBlocks.Add(block);
+            ReplaceObject(item with { TextBinding = string.Empty, ContentReferences = [new ManuscriptRangeReference(block.Id)] });
+            MarkDirty();
+            return block;
+        }
+
+        var sourceBlockIds = item.ContentReferences.Select(reference => reference.BlockId).Distinct(StringComparer.Ordinal).ToList();
+        if (sourceBlockIds.Count != 1)
+            throw new InvalidDataException("This text frame contains incompatible legacy content and cannot be edited safely.");
+        var sourceBlockId = sourceBlockIds[0];
+        if (UnplacedIds.Contains(sourceBlockId))
+            throw new InvalidDataException("This older layout contains preserved text outside its frames. Place that text before editing this frame.");
+
+        var sourceDocument = new ManuscriptDocument { ManuscriptId = CompositionId, Content = _semanticBlocks };
+        var sourceFrames = _objects.Where(candidate => candidate.Kind == CompositionObjectKind.Text
+            && candidate.ContentReferences.Any(reference => reference.BlockId == sourceBlockId))
+            .OrderBy(candidate => candidate.ReadingOrder ?? int.MaxValue)
+            .ThenBy(candidate => candidate.ZIndex)
+            .ToList();
+        var sourceIndex = _semanticBlocks.FindIndex(block => block.Id == sourceBlockId);
+        var materialized = new List<ManuscriptBlock>();
+        ManuscriptBlock? requested = null;
+        foreach (var frame in sourceFrames)
+        {
+            var slices = ManuscriptRangeResolver.ResolveBlocks(sourceDocument, frame.ContentReferences);
+            var content = JoinInlineSlices(slices.Select(slice => slice.Content));
+            var template = slices.FirstOrDefault() ?? _semanticBlocks.First(block => block.Id == sourceBlockId);
+            var block = template with { Id = Guid.NewGuid().ToString("N"), Content = content };
+            materialized.Add(block);
+            ReplaceObject(frame with { TextBinding = string.Empty, ContentReferences = [new ManuscriptRangeReference(block.Id)] });
+            if (frame.Id == objectId)
+                requested = block;
+        }
+        _semanticBlocks.RemoveAll(block => block.Id == sourceBlockId);
+        _semanticBlocks.InsertRange(Math.Max(0, sourceIndex), materialized);
         MarkDirty();
+        return requested ?? throw new InvalidOperationException("The selected text frame could not be prepared for editing.");
     }
 
-    private void ChangeSemanticType(ManuscriptBlock block, ChangeEventArgs e)
+    private static List<ManuscriptInline> JoinInlineSlices(IEnumerable<IReadOnlyList<ManuscriptInline>> slices)
     {
-        if (!Enum.TryParse<ManuscriptBlockType>(e.Value?.ToString(), out var type)) return;
-        var index = _semanticBlocks.FindIndex(item => item.Id == block.Id);
-        if (index < 0) return;
-        Snapshot();
-        _semanticBlocks[index] = block with
+        var result = new List<ManuscriptInline>();
+        foreach (var slice in slices)
         {
-            Type = type,
-            StyleRole = type switch
+            if (result.Count > 0)
+                result.Add(new ManuscriptInline { Text = " " });
+            result.AddRange(slice.Select(inline => inline with
             {
-                ManuscriptBlockType.Heading => ManuscriptStyleRoles.Heading,
-                ManuscriptBlockType.BlockQuote => ManuscriptStyleRoles.BlockQuote,
-                ManuscriptBlockType.ListItem => ManuscriptStyleRoles.ListItem,
-                _ => ManuscriptStyleRoles.Body,
-            },
-            HeadingLevel = type == ManuscriptBlockType.Heading ? 2 : null,
-        };
-        MarkDirty();
+                Marks = inline.Marks.Select(mark => mark with { }).ToList(),
+            }));
+        }
+        return CoalesceInlines(result);
     }
 
-    private void DeleteSemanticBlock(string id)
+    private async Task FinishTextEditAsync(Guid objectId)
     {
-        if (IsReferenced(id)) return;
-        Snapshot();
-        _semanticBlocks.RemoveAll(item => item.Id == id);
-        _selectedSemanticId = null;
-        MarkDirty();
+        if (_editingTextId != objectId || _workspaceModule is null)
+            return;
+        var state = await _workspaceModule.InvokeAsync<TextEditState?>("readTextEditor", _stageElement, objectId);
+        if (state is not null)
+            UpdateFrameText(objectId, state.Text, takeSnapshot: true);
+        _editingTextId = null;
+        if (_dirty)
+            await SaveAsync();
     }
 
-    private void BindTextBlock(CompositionObject item, ChangeEventArgs e)
+    private async Task ToggleInlineMarkAsync(CompositionObject item, ManuscriptMarkType mark)
     {
-        var id = e.Value?.ToString() ?? string.Empty;
-        Patch(item with
+        if (_workspaceModule is null)
+            return;
+        if (_editingTextId != item.Id)
         {
-            TextBinding = string.Empty,
-            ContentReferences = string.IsNullOrWhiteSpace(id) ? [] : [new ManuscriptRangeReference(id)],
-        });
-    }
-
-    private void PatchReference(CompositionObject item, int index, int? start = null, int? end = null)
-    {
-        if (index < 0 || index >= item.ContentReferences.Count) return;
-        var references = item.ContentReferences.ToList();
-        var current = references[index];
-        references[index] = current with
+            BeginTextEdit(item);
+            _error = "Select text inside the frame, then choose a formatting button.";
+            return;
+        }
+        var state = await _workspaceModule.InvokeAsync<TextEditState?>("readTextEditor", _stageElement, item.Id);
+        if (state is null || state.End <= state.Start)
         {
-            StartOffset = start ?? current.StartOffset,
-            EndOffset = end ?? current.EndOffset,
-        };
-        Patch(item with { ContentReferences = references });
+            _error = "Select the text you want to format inside the frame.";
+            return;
+        }
+        try
+        {
+            Snapshot();
+            var block = UpdateFrameText(item.Id, state.Text, takeSnapshot: false);
+            var enabled = !SelectionHasMark(block.Content, state.Start, state.End, mark);
+            var source = new ManuscriptDocument
+            {
+                ManuscriptId = CompositionId,
+                Revision = _composition?.Revision ?? 0,
+                Content = _semanticBlocks,
+            };
+            var (updated, _) = ManuscriptOperations.Apply(
+                source,
+                [new SetManuscriptInlineMark(block.Id, state.Start, state.End, mark, enabled)]);
+            _semanticBlocks = updated.Content;
+            _textSelectionRestore = new TextSelectionRestore(item.Id, state.Start, state.End);
+            MarkDirty();
+            _error = null;
+            await SaveAsync();
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
     }
 
-    private void AddReference(CompositionObject item, string blockId)
+    private ManuscriptBlock UpdateFrameText(Guid objectId, string text, bool takeSnapshot)
     {
-        if (item.ContentReferences.Any(reference => reference.BlockId == blockId)) return;
-        Patch(item with { TextBinding = string.Empty, ContentReferences = [.. item.ContentReferences, new ManuscriptRangeReference(blockId)] });
+        var block = EnsureOwnedTextBlock(objectId);
+        var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        if (ManuscriptCodec.Text(block) == normalized)
+            return block;
+        if (takeSnapshot)
+            Snapshot();
+        var index = _semanticBlocks.FindIndex(candidate => candidate.Id == block.Id);
+        _semanticBlocks[index] = block with { Content = ReplaceTextPreservingMarks(block.Content, normalized) };
+        MarkDirty();
+        return _semanticBlocks[index];
     }
 
-    private void RemoveReference(CompositionObject item, int index)
+    private static bool SelectionHasMark(
+        IReadOnlyList<ManuscriptInline> content,
+        int start,
+        int end,
+        ManuscriptMarkType mark)
     {
-        if (index < 0 || index >= item.ContentReferences.Count) return;
-        Patch(item with { ContentReferences = item.ContentReferences.Where((_, candidate) => candidate != index).ToList() });
+        var cursor = 0;
+        var touched = false;
+        foreach (var inline in content)
+        {
+            var inlineEnd = cursor + inline.Text.Length;
+            if (start < inlineEnd && cursor < end)
+            {
+                touched = true;
+                if (inline.Marks.All(candidate => candidate.Type != mark))
+                    return false;
+            }
+            cursor = inlineEnd;
+        }
+        return touched;
     }
 
-    private bool IsReferenced(string blockId) => _objects.Any(item => item.Kind == CompositionObjectKind.Text
-        && IsVisible(item) && item.ContentReferences.Any(reference => reference.BlockId == blockId));
-    private string PlacementStatus(string blockId) => !IsReferenced(blockId)
-        ? "Unplaced"
-        : UnplacedIds.Contains(blockId) ? "Partially placed" : "Placed";
-    private static string BoundBlockId(CompositionObject item) => item.ContentReferences.FirstOrDefault()?.BlockId ?? string.Empty;
-    private static string ShortText(ManuscriptBlock block)
+    private void ReplaceObject(CompositionObject replacement)
     {
-        var text = ManuscriptCodec.Text(block).Trim();
-        return text.Length == 0 ? "Empty block" : text.Length <= 42 ? text : text[..39] + "...";
+        var index = _objects.FindIndex(candidate => candidate.Id == replacement.Id);
+        if (index >= 0)
+            _objects[index] = replacement;
     }
     private bool LayerVisible(Guid layerId) => _layers.FirstOrDefault(layer => layer.Id == layerId)?.Visible != false;
     private bool LayerLocked(Guid layerId) => _layers.FirstOrDefault(layer => layer.Id == layerId)?.Locked == true;
@@ -834,7 +849,37 @@
         if (target == item.ZIndex) return;
         Patch(item with { ZIndex = target });
     }
-    private void Delete(Guid id) { if (_objects.FirstOrDefault(item => item.Id == id)?.Kind == CompositionObjectKind.Group) { _groupSelection.Clear(); _groupSelection.Add(id); UngroupSelected(); return; } Snapshot(); _objects.RemoveAll(item => item.Id == id); _selectedId = null; MarkDirty(); }
+    private void Delete(Guid id)
+    {
+        var item = _objects.FirstOrDefault(candidate => candidate.Id == id);
+        if (item?.Kind == CompositionObjectKind.Group)
+        {
+            _groupSelection.Clear();
+            _groupSelection.Add(id);
+            UngroupSelected();
+            return;
+        }
+        if (item is null)
+            return;
+        try
+        {
+            var ownedBlockId = item.Kind == CompositionObjectKind.Text
+                ? EnsureOwnedTextBlock(item.Id).Id
+                : null;
+            Snapshot();
+            _objects.RemoveAll(candidate => candidate.Id == id);
+            if (ownedBlockId is not null)
+                _semanticBlocks.RemoveAll(block => block.Id == ownedBlockId);
+            _selectedId = null;
+            _editingTextId = null;
+            MarkDirty();
+            _error = null;
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+    }
     private WorkspaceSnapshot Capture() => new(_objects.ToList(), _layers.ToList(), _styles.ToList(), _semanticBlocks.ToList(), _scene!.Surface);
     private void Restore(WorkspaceSnapshot snapshot) { _objects = snapshot.Objects; _layers = snapshot.Layers; _styles = snapshot.Styles; _semanticBlocks = snapshot.SemanticBlocks; _scene = _scene! with { Surface = snapshot.Surface }; _selectedId = _objects.FirstOrDefault(item => item.Id == _selectedId)?.Id; }
     private void Snapshot() { if (_scene is null) return; _undo.Push(Capture()); _redo.Clear(); }
@@ -900,12 +945,51 @@
     private static string FontCssName(string key) => $"lk-{new string(key.Select(character => char.IsLetterOrDigit(character) ? character : '-').ToArray())}";
     private string FontFaceCss() => string.Join("\n", _fontFamilies.SelectMany(family => family.Faces.Select(face => $"@font-face{{font-family:{FontCssName(family.Key)};src:url('{face.ContentUrl.Replace("'", "%27", StringComparison.Ordinal)}');font-weight:{face.Weight};font-style:{(face.Italic ? "italic" : "normal")};font-display:swap;}}")));
     private ProjectImageView? Image(Guid id) => _images.FirstOrDefault(image => image.Id == id);
-    private string RenderedText(CompositionObject item)
+    private string RenderedInlineHtml(CompositionObject item)
     {
-        if (!string.IsNullOrWhiteSpace(item.TextBinding)) return item.TextBinding;
-        try { return ManuscriptRangeResolver.ResolveText(new ManuscriptDocument { ManuscriptId = CompositionId, Content = _semanticBlocks }, item.ContentReferences); }
-        catch (InvalidDataException) { return "Invalid content binding"; }
+        if (!string.IsNullOrWhiteSpace(item.TextBinding))
+            return EncodeText(item.TextBinding);
+        try
+        {
+            var blocks = ManuscriptRangeResolver.ResolveBlocks(
+                new ManuscriptDocument { ManuscriptId = CompositionId, Content = _semanticBlocks },
+                item.ContentReferences);
+            return string.Join(" ", blocks.Select(block => string.Concat(block.Content.Select(InlineHtml))));
+        }
+        catch (InvalidDataException)
+        {
+            return "Invalid text content";
+        }
     }
+
+    private static string InlineHtml(ManuscriptInline inline)
+    {
+        var html = EncodeText(inline.Text);
+        foreach (var mark in inline.Marks.OrderBy(candidate => candidate.Type))
+        {
+            html = mark.Type switch
+            {
+                ManuscriptMarkType.Strong => $"<strong>{html}</strong>",
+                ManuscriptMarkType.Emphasis => $"<em>{html}</em>",
+                ManuscriptMarkType.Underline => $"<u>{html}</u>",
+                ManuscriptMarkType.Strikethrough => $"<s>{html}</s>",
+                ManuscriptMarkType.Code => $"<code>{html}</code>",
+                ManuscriptMarkType.SmallCaps => $"<span class=\"composition-small-caps\">{html}</span>",
+                ManuscriptMarkType.Superscript => $"<sup>{html}</sup>",
+                ManuscriptMarkType.Subscript => $"<sub>{html}</sub>",
+                ManuscriptMarkType.Link => $"<span class=\"composition-inline-link\">{html}</span>",
+                ManuscriptMarkType.Language => $"<span lang=\"{System.Net.WebUtility.HtmlEncode(mark.Value ?? string.Empty)}\">{html}</span>",
+                ManuscriptMarkType.CharacterStyle => $"<span data-character-style=\"{System.Net.WebUtility.HtmlEncode(mark.Value ?? string.Empty)}\">{html}</span>",
+                _ => html,
+            };
+        }
+        return html;
+    }
+
+    private static string EncodeText(string text) => System.Net.WebUtility.HtmlEncode(text)
+        .Replace("\r\n", "\n", StringComparison.Ordinal)
+        .Replace('\r', '\n')
+        .Replace("\n", "<br />", StringComparison.Ordinal);
     private static string CssTextAlignment(CompositionTextAlignment alignment) => alignment switch { CompositionTextAlignment.Center => "center", CompositionTextAlignment.End => "right", _ => "left" };
     private static string CssVerticalAlignment(CompositionVerticalAlignment alignment) => alignment switch { CompositionVerticalAlignment.Center => "center", CompositionVerticalAlignment.Bottom => "flex-end", _ => "flex-start" };
     private static string CssTextShadow(CompositionTextShadow shadow) => shadow switch { CompositionTextShadow.Soft => "0 1px 2px #0006", CompositionTextShadow.Strong => "0 2px 4px #000b", CompositionTextShadow.Glow => "0 0 4px currentColor", _ => "none" };
@@ -922,10 +1006,35 @@
         if (suffix > 0 && suffix < original.Length && char.IsHighSurrogate(original[original.Length - suffix - 1])) suffix--;
         var result = SliceInlines(source, 0, prefix);
         var inserted = replacement[prefix..(replacement.Length - suffix)];
-        if (inserted.Length > 0) result.Add(new ManuscriptInline { Text = inserted });
+        if (inserted.Length > 0)
+        {
+            result.Add(new ManuscriptInline
+            {
+                Text = inserted,
+                Marks = InheritedInsertionMarks(source, prefix),
+            });
+        }
         result.AddRange(SliceInlines(source, original.Length - suffix, original.Length));
         if (result.Count == 0) result.Add(new ManuscriptInline { Text = string.Empty });
         return CoalesceInlines(result);
+    }
+
+    private static List<ManuscriptMark> InheritedInsertionMarks(
+        IReadOnlyList<ManuscriptInline> source,
+        int insertionOffset)
+    {
+        if (source.Count == 0)
+            return [];
+        var targetOffset = insertionOffset > 0 ? insertionOffset - 1 : 0;
+        var cursor = 0;
+        for (var index = 0; index < source.Count; index++)
+        {
+            var inline = source[index];
+            if (targetOffset < cursor + inline.Text.Length || index == source.Count - 1)
+                return inline.Marks.Select(mark => mark with { }).ToList();
+            cursor += inline.Text.Length;
+        }
+        return [];
     }
 
     private static List<ManuscriptInline> SliceInlines(IReadOnlyList<ManuscriptInline> source, int start, int end)
@@ -964,6 +1073,8 @@
     private bool TextOverflows(CompositionObject item) { var text = string.IsNullOrWhiteSpace(item.TextBinding) ? ManuscriptRangeResolver.ResolveText(new ManuscriptDocument { ManuscriptId = CompositionId, Content = _semanticBlocks }, item.ContentReferences) : item.TextBinding; var resolved = Resolved(item); var widthPoints = _scene!.Surface.WidthPoints * item.Bounds.WidthPercent / 100; var heightPoints = _scene.Surface.HeightPoints * item.Bounds.HeightPercent / 100; var charsPerLine = Math.Max(1, (int)(widthPoints / Math.Max(1, resolved.FontSizePoints * .55))); var lines = Math.Max(1, (int)Math.Ceiling((double)text.Length / charsPerLine)); return lines * resolved.FontSizePoints * resolved.LineHeight > heightPoints; }
     private static string ColorValue(string value) => value.StartsWith('#') && value.Length == 7 ? value : "#000000";
     private static string Color(ChangeEventArgs e) => e.Value?.ToString() ?? "#000000";
+    private static string SurfaceSizeLabel(CompositionSurface surface) =>
+        $"{surface.WidthPoints / 72:0.###} × {surface.HeightPoints / 72:0.###} in";
 
     private string SurfaceClass(CompositionSurfaceKind kind) => _scene?.Surface.Kind == kind ? "selected" : string.Empty;
 
@@ -1041,6 +1152,44 @@
     {
         if (firstRender)
             _workspaceModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-workspace.js");
+        if (_workspaceModule is not null && _focusTextId is Guid focusId)
+        {
+            _focusTextId = null;
+            if (_textFocusRequest is { } focus && focus.ObjectId == focusId)
+            {
+                _textFocusRequest = null;
+                await _workspaceModule.InvokeVoidAsync(
+                    "focusTextEditorAt",
+                    _stageElement,
+                    focusId,
+                    focus.ClientX,
+                    focus.ClientY);
+            }
+            else
+            {
+                await _workspaceModule.InvokeVoidAsync("focusTextEditor", _stageElement, focusId);
+            }
+        }
+        if (_workspaceModule is not null && _textSelectionRestore is { } restore)
+        {
+            _textSelectionRestore = null;
+            await _workspaceModule.InvokeVoidAsync(
+                "restoreTextSelection",
+                _stageElement,
+                restore.ObjectId,
+                restore.Start,
+                restore.End);
+        }
+    }
+
+    private Task BeginObjectTransformAsync(PointerEventArgs e, CompositionObject item)
+    {
+        return BeginTransformAsync(
+            e,
+            item,
+            _cropReposition && item.Kind == CompositionObjectKind.Image && item.ImageFit == FigureImageFit.Cover
+                ? TransformMode.Crop
+                : TransformMode.Move);
     }
 
     private async Task BeginTransformAsync(PointerEventArgs e, CompositionObject item, TransformMode mode)
@@ -1061,6 +1210,8 @@
         var item = _objects[index];
         var dx = (e.ClientX - state.StartClientX) / Math.Max(1, state.Stage.Width) * 100;
         var dy = (e.ClientY - state.StartClientY) / Math.Max(1, state.Stage.Height) * 100;
+        if (item.Kind == CompositionObjectKind.Text && Math.Abs(dx) + Math.Abs(dy) > .15)
+            _suppressTextEditId = item.Id;
         if (item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group)
         {
             dx = dx / Math.Max(.01, group.Bounds.WidthPercent) * 100;
@@ -1119,6 +1270,9 @@
     private enum ImagePickerMode { Add, Replace }
     private sealed record TransformState(Guid ObjectId, TransformMode Mode, long PointerId, double StartClientX, double StartClientY, CompositionBounds SurfaceBounds, CompositionBounds LocalBounds, double StartRotation, double StartCropX, double StartCropY, StageRect Stage);
     private sealed record StageRect(double Left, double Top, double Width, double Height);
+    private sealed record TextEditState(string Text, int Start, int End);
+    private sealed record TextSelectionRestore(Guid ObjectId, int Start, int End);
+    private sealed record TextFocusRequest(Guid ObjectId, double ClientX, double ClientY);
 
     private void HandleKeyDown(KeyboardEventArgs e)
     {

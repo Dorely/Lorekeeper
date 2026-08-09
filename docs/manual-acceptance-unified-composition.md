@@ -165,17 +165,21 @@ the live test project; terminate the browser host after the run.
   their own returned revisions.
 - Confirm a new page uses project page setup and an existing page retains its
   authored geometry after project setup changes.
-- Confirm the canvas has no left sidebar, all creation/selection/layer/content
-  controls live in one scrolling right sidebar, and only page/spread selection
-  plus the computed guide toggle appear above the canvas.
+- Confirm the canvas has no left sidebar, construction and selection controls
+  remain in the fixed bottom strip without horizontal scrolling, and only
+  page/spread selection plus the computed guide toggle appear above the canvas.
 - Add an existing image only after choosing `Contain` or `Cover`. Confirm native
   browser dragging is suppressed, frame drag/resize works, Cover crop
   repositioning pans the raster, and pointer-up saves. Exercise replace image,
-  text binding, z-order, delete, undo/redo, zoom, and computed overlay toggle.
+  direct text editing, z-order, visibility, locking, delete, undo/redo, zoom,
+  and computed overlay toggle.
 - Create/edit rectangle, ellipse, and line primitives from Advanced. Confirm no
   custom-guide, SVG/path, or surface-generation navigation control is present.
-- Bind semantic text, reorder its logical reading sequence independently from
-  layers, and confirm unplaced content and overflow block validation.
+- Add a text frame, click the selected frame to edit it in place, select text,
+  and apply/remove bold, italic, underline, and strike formatting from the
+  bottom toolbar. Confirm Page details exposes no content-binding, block-ID,
+  range-offset, or technical inline-mark editor. Reorder logical reading order
+  and confirm preserved unplaced content and overflow diagnostics remain clear.
 - Generate surface/frame art and confirm reserved text and gutter regions reach
   the generation brief, the provider's returned raster is retained, and the
   required fit determines letterboxing or crop-to-fill placement.

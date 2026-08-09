@@ -311,6 +311,13 @@ generation without creating or selecting a publication release.
 stores revisioned `PageCompositionVariant` scenes by exact geometry
 fingerprint. Text objects bind stable block/range IDs in that fragment, so
 visual layout never duplicates searchable or accessible content. The shared
+authoring surface treats that reference as an internal ownership detail: every
+new text frame creates its own semantic block, authors edit it directly in the
+canvas, and selection-aware formatting writes ordinary `ManuscriptInline`
+marks. It does not expose reusable-content binding, block IDs, or character
+offset controls. Older range-based layouts remain losslessly readable and are
+materialized into frame-owned blocks when directly edited.
+The shared
 scene vocabulary covers image, text, rectangle, ellipse, line, and group
 objects; z-order, per-object locking and visibility, grouping, object styles,
 named regions, and logical reading order remain independent. Persisted scenes
@@ -378,13 +385,14 @@ IDs. A Designed Page atom
 shows its name, mode, status, and artwork preview, and selecting it opens the
 contextual Pages mode in the same center column. The workspace provides direct
 pointer move/resize/rotate, atomic image placement with required fit, crop
-repositioning, styles, semantic bindings, reading order, computed
+repositioning, direct canvas text editing, selection-aware inline formatting,
+styles, reading order, computed
 trim/safe/gutter/center/bleed overlays, diagnostics, revision-aware save, and
 undo/redo. Pages and covers share `CompositionVisualEditorShell`: a one-line
 view toolbar sits above the largest practical canvas, while creation, object
 selection, fit, typography, stacking, history, zoom, save, and navigation form
 a fixed bottom control strip. Accessibility, semantic roles, exact geometry,
-content bindings, reading order, grouping, saved variants, and other secondary
+reading order, grouping, saved variants, and other secondary
 settings live in an independently scrolling details drawer that overlays the
 canvas only while requested. No permanent inspector or author-facing layer
 manager consumes canvas width. Rectangle, ellipse, and line tools remain a

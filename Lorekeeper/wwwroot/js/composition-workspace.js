@@ -12,3 +12,150 @@ export function end(stage, pointerId) {
         stage.releasePointerCapture(pointerId);
     }
 }
+
+function textEditor(stage, objectId) {
+    if (!stage) {
+        return null;
+    }
+    return stage.querySelector(`[data-composition-text-id="${objectId}"]`);
+}
+
+function normalizeText(value) {
+    return (value || "").replace(/\r\n?/g, "\n").replace(/\u00a0/g, " ");
+}
+
+function prepareTextEditor(editor) {
+    if (editor.dataset.plainTextPaste === "true") {
+        return;
+    }
+    editor.dataset.plainTextPaste = "true";
+    editor.addEventListener("paste", event => {
+        event.preventDefault();
+        const text = event.clipboardData?.getData("text/plain") || "";
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) {
+            return;
+        }
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        const node = document.createTextNode(text);
+        range.insertNode(node);
+        range.setStartAfter(node);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    });
+}
+
+function boundaryOffset(editor, node, offset) {
+    if (!node || !editor.contains(node) && node !== editor) {
+        return 0;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.setEnd(node, offset);
+    return normalizeText(range.toString()).length;
+}
+
+export function focusTextEditor(stage, objectId) {
+    const editor = textEditor(stage, objectId);
+    if (!editor) {
+        return;
+    }
+    prepareTextEditor(editor);
+    editor.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    if (!selection) {
+        return;
+    }
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+}
+
+export function focusTextEditorAt(stage, objectId, clientX, clientY) {
+    const editor = textEditor(stage, objectId);
+    if (!editor) {
+        return;
+    }
+    prepareTextEditor(editor);
+    editor.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    if (!selection) {
+        return;
+    }
+    const position = document.caretPositionFromPoint?.(clientX, clientY);
+    const legacyRange = position ? null : document.caretRangeFromPoint?.(clientX, clientY);
+    const node = position?.offsetNode || legacyRange?.startContainer;
+    const offset = position?.offset ?? legacyRange?.startOffset;
+    if (!node || offset === undefined || !editor.contains(node)) {
+        focusTextEditor(stage, objectId);
+        return;
+    }
+    const range = document.createRange();
+    range.setStart(node, offset);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+}
+
+export function readTextEditor(stage, objectId) {
+    const editor = textEditor(stage, objectId);
+    if (!editor) {
+        return null;
+    }
+    const text = normalizeText(editor.innerText);
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0
+        || !editor.contains(selection.anchorNode)
+        || !editor.contains(selection.focusNode)) {
+        return { text, start: text.length, end: text.length };
+    }
+    const anchor = boundaryOffset(editor, selection.anchorNode, selection.anchorOffset);
+    const focus = boundaryOffset(editor, selection.focusNode, selection.focusOffset);
+    return {
+        text,
+        start: Math.min(anchor, focus),
+        end: Math.max(anchor, focus),
+    };
+}
+
+function textBoundary(editor, requestedOffset) {
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    let remaining = Math.max(0, requestedOffset);
+    let node = walker.nextNode();
+    let last = editor;
+    while (node) {
+        last = node;
+        if (remaining <= node.data.length) {
+            return { node, offset: remaining };
+        }
+        remaining -= node.data.length;
+        node = walker.nextNode();
+    }
+    return last === editor
+        ? { node: editor, offset: editor.childNodes.length }
+        : { node: last, offset: last.data.length };
+}
+
+export function restoreTextSelection(stage, objectId, start, end) {
+    const editor = textEditor(stage, objectId);
+    if (!editor) {
+        return;
+    }
+    prepareTextEditor(editor);
+    editor.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    if (!selection) {
+        return;
+    }
+    const from = textBoundary(editor, start);
+    const to = textBoundary(editor, end);
+    const range = document.createRange();
+    range.setStart(from.node, from.offset);
+    range.setEnd(to.node, to.offset);
+    selection.removeAllRanges();
+    selection.addRange(range);
+}

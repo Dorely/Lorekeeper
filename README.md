@@ -57,7 +57,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   Designed Page/spread composition, project font management, and format-aware
   dedicated cover composition through one canvas-first editor: construction and
   selection controls stay in a fixed bottom strip while accessibility and exact
-  layout details open only when requested. Exact target-bound generation,
+  layout details open only when requested. Designed Page text frames are edited
+  directly on the canvas; selected text uses the same semantic inline marks as
+  ordinary manuscript paragraphs, without exposing content bindings or offsets.
+  Exact target-bound generation,
   accessibility state, and layout diagnostics remain available. Placement always chooses non-destructive
   Contain or Cover fit; crop positioning is adjusted directly in the canvas.
   Every assistant generation/edit waits for a terminal result and produces an

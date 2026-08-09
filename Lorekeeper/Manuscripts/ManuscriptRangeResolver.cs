@@ -97,6 +97,8 @@ public static class ManuscriptRangeResolver
     {
         var start = reference.StartOffset ?? 0;
         var end = reference.EndOffset ?? text.Length;
+        if (text.Length == 0 && start == 0 && end == 0)
+            return (0, 0);
         if (start < 0 || end <= start || end > text.Length)
             throw new InvalidDataException($"Content reference '{reference.BlockId}' has an invalid text range.");
         RequireUnicodeBoundary(text, start, reference.BlockId);
