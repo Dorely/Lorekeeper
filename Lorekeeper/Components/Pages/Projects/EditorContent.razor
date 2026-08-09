@@ -225,8 +225,7 @@ else
                                                    ProjectId="Project.Id"
                                                    CompositionId="selectedCompositionId"
                                                    RefreshSignal="_pageWorkspaceRefreshSignal"
-                                                   RequestedSelectionId="_pageWorkspaceSelectionId"
-                                                   Closed="CloseDesignedPage" />
+                                                   RequestedSelectionId="_pageWorkspaceSelectionId" />
                         }
                     </div>
                 }
@@ -914,11 +913,6 @@ else
             return;
         _openCompositionId = compositionId;
         await SetModeAsync(EditorMode.Pages);
-    }
-    private async Task CloseDesignedPage()
-    {
-        await SetModeAsync(EditorMode.Edit);
-        _openCompositionId = null;
     }
     private bool EffectiveChatPaneCollapsed => ContestReviewActive || _chatPaneCollapsed;
     private bool EffectiveRightPaneCollapsed => ContestReviewActive || _rightPaneCollapsed;

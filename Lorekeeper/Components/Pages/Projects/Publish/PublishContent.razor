@@ -65,8 +65,7 @@ else
                                                    CoreBook="@(_selectedReleaseId is null)"
                                                    RefreshSignal="_coverRefreshSignal"
                                                    RequestedSelectionId="_coverSelectionId"
-                                                   Saved="HandleCoverSavedAsync"
-                                                   Closed="CloseCoverEditorAsync" />
+                                                   Saved="HandleCoverSavedAsync" />
                     }
                     else if (_selectedReleaseId is null && _core is not null)
                     {
@@ -903,13 +902,6 @@ else
         {
             _releases = await Releases.ListAsync(Project.Id);
         }
-        _coverRefreshSignal++;
-    }
-
-    private Task CloseCoverEditorAsync()
-    {
-        _coverEditorOpen = false;
-        return Task.CompletedTask;
     }
 
     private async Task ExportCoreAsync(PublishExportFormat format)

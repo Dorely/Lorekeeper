@@ -54,15 +54,12 @@
 .cover-selection-controls select,.cover-selection-controls input { min-height: 1.9rem; max-width: 8rem; padding: .2rem .3rem; border: 1px solid #cbd2df; border-radius: .32rem; background: white; color: #27364f; font-size: .7rem; text-transform: none; }
 .cover-selection-controls input[type=color] { width: 2.2rem; padding: .1rem; }
 .cover-selection-controls .cover-number { width: 4rem; }
-.cover-selection-title { flex: 0 0 6.5rem; display: grid; gap: .05rem; }
-.cover-selection-title strong { overflow: hidden; font-size: .73rem; text-overflow: ellipsis; white-space: nowrap; }
-.cover-selection-title small { color: #667085; font-size: .62rem; }
 .cover-fit-choice { display: inline-flex; }
 .cover-fit-choice button { border-radius: 0; }
 .cover-fit-choice button:first-child { border-radius: .35rem 0 0 .35rem; }
 .cover-fit-choice button:last-child { margin-left: -1px; border-radius: 0 .35rem .35rem 0; }
 .cover-empty-selection { align-self: center; margin: 0; color: #667085; font-size: .75rem; }
-.cover-workspace-actions { width:10.2rem; height:100%; display:grid; grid-template-rows:repeat(3,auto); gap:.2rem; align-content:center; }
+.cover-workspace-actions { width:10.2rem; height:100%; display:grid; grid-template-rows:repeat(2,auto); gap:.2rem; align-content:center; }
 .cover-workspace-actions > div { display:flex; gap:.2rem; align-items:center; justify-content:center; }
 .cover-workspace-actions button,.cover-workspace-actions .cover-secondary-controls > summary { min-height:1.75rem; padding:.2rem .38rem; border:1px solid #cbd2df; border-radius:.32rem; background:white; color:#34415a; font-size:.65rem; }
 .cover-workspace-actions button.primary { border-color:#4568d4; background:#4568d4; color:white; }

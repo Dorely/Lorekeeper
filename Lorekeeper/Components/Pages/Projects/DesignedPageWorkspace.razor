@@ -116,10 +116,6 @@
                 @if (Selected is { } primarySelection)
                 {
                     <div class="composition-selection-controls">
-                        @if (primarySelection.Kind != CompositionObjectKind.Text)
-                        {
-                            <div class="composition-selection-title"><strong>@ObjectLabel(primarySelection)</strong><small>@primarySelection.Kind</small></div>
-                        }
                         @if (primarySelection.Kind == CompositionObjectKind.Image)
                         {
                             <button type="button" @onclick="() => OpenReplaceImagePicker(primarySelection.Id)">Replace image</button>
@@ -148,7 +144,7 @@
                             <label>Fill<input type="color" value="@ColorValue(primaryStyle.FillColor)" @onchange="e => Patch(primarySelection with { StyleId = null, FillColor = Color(e) })" /></label><label>Border<input type="color" value="@ColorValue(primaryStyle.StrokeColor)" @onchange="e => Patch(primarySelection with { StyleId = null, StrokeColor = Color(e) })" /></label>
                         }
                         <span class="composition-control-divider" aria-hidden="true"></span>
-                        <button type="button" title="Send behind the next object" @onclick="() => ChangeZOrder(primarySelection, -1)">Send back</button><button type="button" title="Bring in front of the next object" @onclick="() => ChangeZOrder(primarySelection, 1)">Bring front</button><button type="button" class="@(!primarySelection.Visible ? "selected" : null)" title="Show or hide this object" @onclick="() => ToggleObjectVisibility(primarySelection)">@(primarySelection.Visible ? "Hide" : "Show")</button><button type="button" class="@(primarySelection.Locked ? "selected" : null)" title="Lock or unlock this object's position" @onclick="() => ToggleObjectLock(primarySelection)">@(primarySelection.Locked ? "Unlock" : "Lock")</button><button type="button" class="danger" title="Delete selected object" @onclick="() => Delete(primarySelection.Id)">Delete</button>
+                        <button type="button" title="Move this object behind every other object" @onclick="() => SendToBack(primarySelection)">Send back</button><button type="button" title="Move this object in front of every other object" @onclick="() => BringToFront(primarySelection)">Bring front</button><button type="button" class="@(!primarySelection.Visible ? "selected" : null)" title="Show or hide this object" @onclick="() => ToggleObjectVisibility(primarySelection)">@(primarySelection.Visible ? "Hide" : "Show")</button><button type="button" class="@(primarySelection.Locked ? "selected" : null)" title="Lock or unlock this object's position" @onclick="() => ToggleObjectLock(primarySelection)">@(primarySelection.Locked ? "Unlock" : "Lock")</button><button type="button" class="danger" title="Delete selected object" @onclick="() => Delete(primarySelection.Id)">Delete</button>
                     </div>
                 }
                 else { <p class="composition-empty-selection">Select an object on the page to edit it. Drag to move; use the handles to resize or rotate.</p> }
@@ -271,7 +267,6 @@
                         <p>@SurfaceSizeLabel(_scene.Surface)</p>
                         </div>
                     </details>
-                    <div><button type="button" class="primary" disabled="@(!_dirty)" @onclick="SaveAsync">Save</button><button type="button" @onclick="CloseAsync">Back</button></div>
                 </div>
             </Details>
         </CompositionVisualEditorShell>
@@ -292,7 +287,6 @@
     [Parameter] public Guid? RequestedSelectionId { get; set; }
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter, EditorRequired] public Guid CompositionId { get; set; }
-    [Parameter] public EventCallback Closed { get; set; }
 
     private PageComposition? _composition;
     private PageCompositionVariant? _variant;
@@ -321,6 +315,7 @@
     private Guid _loadedCompositionId;
     private int _loadedRefreshSignal = -1;
     private readonly SemaphoreSlim _saveGate = new(1, 1);
+    private CancellationTokenSource? _autosaveCancellation;
     private bool _dirty;
     private long _changeVersion;
     private double _zoom = 1;
@@ -416,17 +411,6 @@
         catch (Exception exception) { _error = exception.Message; }
     }
 
-    private async Task CloseAsync()
-    {
-        if (_dirty)
-        {
-            await SaveAsync();
-            if (_dirty)
-                return;
-        }
-        await Closed.InvokeAsync();
-    }
-
     private async Task LoadVariantAsync()
     {
         _authoringGeometry = await Compositions.GetAuthoringGeometryAsync(ProjectId);
@@ -483,6 +467,7 @@
         {
             Id = Guid.NewGuid(), LayerId = layer, Kind = kind, Name = kind.ToString(),
             Bounds = new CompositionBounds { XPercent = 10, YPercent = 10, WidthPercent = 40, HeightPercent = 20 },
+            ZIndex = NextFrontZIndex(),
             ReadingOrder = readingOrder,
             Decorative = false,
             AccessibilityDecisionPending = kind == CompositionObjectKind.Image,
@@ -500,6 +485,7 @@
 
         RememberImage(image);
         Snapshot();
+        var zIndex = ReserveNewImageZIndex();
         var layer = ContentLayerId;
         var item = new CompositionObject
         {
@@ -510,6 +496,7 @@
             ImageId = image.Id,
             ImageFit = _newImageFit,
             Bounds = new CompositionBounds { XPercent = 10, YPercent = 10, WidthPercent = 80, HeightPercent = 60 },
+            ZIndex = zIndex,
             ReadingOrder = NextReadingOrder(),
             Decorative = false,
             AccessibilityDecisionPending = true,
@@ -535,6 +522,7 @@
             Kind = CompositionObjectKind.Text,
             Name = "Text",
             Bounds = new CompositionBounds { XPercent = 10, YPercent = 10, WidthPercent = 40, HeightPercent = 20 },
+            ZIndex = NextFrontZIndex(),
             ContentReferences = [new ManuscriptRangeReference(blockId)],
             ReadingOrder = NextReadingOrder(),
             SemanticRole = CompositionSemanticRole.Paragraph,
@@ -680,7 +668,18 @@
     {
         if (_editingTextId != objectId || _workspaceModule is null)
             return;
+        if (_objects.All(item => item.Id != objectId))
+        {
+            _editingTextId = null;
+            return;
+        }
         var state = await _workspaceModule.InvokeAsync<TextEditState?>("readTextEditor", _stageElement, objectId);
+        if (_editingTextId != objectId || _objects.All(item => item.Id != objectId))
+        {
+            if (_editingTextId == objectId)
+                _editingTextId = null;
+            return;
+        }
         if (state is not null)
             UpdateFrameText(objectId, state.Text, takeSnapshot: true);
         _editingTextId = null;
@@ -843,11 +842,39 @@
     }
 
     private void Nudge(CompositionObject item, double x, double y) => PatchBounds(item, item.Bounds.XPercent + x, item.Bounds.YPercent + y);
-    private void ChangeZOrder(CompositionObject item, int delta)
+    private void SendToBack(CompositionObject item)
     {
-        var target = Math.Max(0, item.ZIndex + delta);
-        if (target == item.ZIndex) return;
-        Patch(item with { ZIndex = target });
+        var others = _objects.Where(candidate => candidate.Id != item.Id).ToList();
+        if (others.Count == 0 || item.ZIndex < others.Min(candidate => candidate.ZIndex))
+            return;
+        MoveToZIndex(item, others.Min(candidate => candidate.ZIndex) - 1);
+    }
+    private void BringToFront(CompositionObject item)
+    {
+        var others = _objects.Where(candidate => candidate.Id != item.Id).ToList();
+        if (others.Count == 0 || item.ZIndex > others.Max(candidate => candidate.ZIndex))
+            return;
+        MoveToZIndex(item, others.Max(candidate => candidate.ZIndex) + 1);
+    }
+    private void MoveToZIndex(CompositionObject item, int zIndex)
+    {
+        if (zIndex == item.ZIndex)
+            return;
+        Patch(item with { ZIndex = zIndex });
+    }
+    private int NextFrontZIndex() => _objects.Select(candidate => candidate.ZIndex).DefaultIfEmpty(0).Max() + 1;
+    private int ReserveNewImageZIndex()
+    {
+        var imageZIndex = _objects.Where(candidate => candidate.Kind == CompositionObjectKind.Image).Select(candidate => candidate.ZIndex).DefaultIfEmpty(-1).Max() + 1;
+        var foreground = _objects.Where(candidate => candidate.Kind != CompositionObjectKind.Image).ToList();
+        if (foreground.Count == 0)
+            return imageZIndex;
+        var lowestForeground = foreground.Min(candidate => candidate.ZIndex);
+        if (imageZIndex < lowestForeground)
+            return imageZIndex;
+        var offset = imageZIndex - lowestForeground + 1;
+        _objects = _objects.Select(candidate => candidate.Kind == CompositionObjectKind.Image ? candidate : candidate with { ZIndex = candidate.ZIndex + offset }).ToList();
+        return imageZIndex;
     }
     private void Delete(Guid id)
     {
@@ -881,7 +908,22 @@
         }
     }
     private WorkspaceSnapshot Capture() => new(_objects.ToList(), _layers.ToList(), _styles.ToList(), _semanticBlocks.ToList(), _scene!.Surface);
-    private void Restore(WorkspaceSnapshot snapshot) { _objects = snapshot.Objects; _layers = snapshot.Layers; _styles = snapshot.Styles; _semanticBlocks = snapshot.SemanticBlocks; _scene = _scene! with { Surface = snapshot.Surface }; _selectedId = _objects.FirstOrDefault(item => item.Id == _selectedId)?.Id; }
+    private void Restore(WorkspaceSnapshot snapshot)
+    {
+        _objects = snapshot.Objects;
+        _layers = snapshot.Layers;
+        _styles = snapshot.Styles;
+        _semanticBlocks = snapshot.SemanticBlocks;
+        _scene = _scene! with { Surface = snapshot.Surface };
+        _selectedId = _objects.FirstOrDefault(item => item.Id == _selectedId)?.Id;
+        if (_editingTextId is Guid editingTextId && _objects.All(item => item.Id != editingTextId))
+        {
+            _editingTextId = null;
+            _focusTextId = null;
+            _textFocusRequest = null;
+            _textSelectionRestore = null;
+        }
+    }
     private void Snapshot() { if (_scene is null) return; _undo.Push(Capture()); _redo.Clear(); }
     private void Undo() { if (_undo.Count == 0) return; _redo.Push(Capture()); Restore(_undo.Pop()); MarkDirty(); }
     private void Redo() { if (_redo.Count == 0) return; _undo.Push(Capture()); Restore(_redo.Pop()); MarkDirty(); }
@@ -892,6 +934,27 @@
     {
         _dirty = true;
         _changeVersion++;
+        ScheduleAutosave();
+    }
+
+    private void ScheduleAutosave()
+    {
+        _autosaveCancellation?.Cancel();
+        _autosaveCancellation?.Dispose();
+        _autosaveCancellation = new CancellationTokenSource();
+        _ = AutosaveAsync(_autosaveCancellation);
+    }
+
+    private async Task AutosaveAsync(CancellationTokenSource autosave)
+    {
+        try
+        {
+            await Task.Delay(250, autosave.Token);
+            await InvokeAsync(SaveAsync);
+        }
+        catch (OperationCanceledException) when (autosave.IsCancellationRequested)
+        {
+        }
     }
 
     private async Task SaveAsync()
@@ -928,6 +991,7 @@
 
     public async Task<bool> FlushAsync()
     {
+        _autosaveCancellation?.Cancel();
         while (_dirty)
         {
             var changeVersion = _changeVersion;
@@ -1250,11 +1314,16 @@
         if (_workspaceModule is not null)
             await _workspaceModule.InvokeVoidAsync("end", _stageElement, state.PointerId);
         if (_dirty)
+        {
+            _autosaveCancellation?.Cancel();
             await SaveAsync();
+        }
     }
 
     public async ValueTask DisposeAsync()
     {
+        _autosaveCancellation?.Cancel();
+        _autosaveCancellation?.Dispose();
         if (_workspaceModule is null) return;
         try
         {

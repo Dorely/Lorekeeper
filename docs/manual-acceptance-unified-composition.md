@@ -160,7 +160,7 @@ the live test project; terminate the browser host after the run.
   Confirm a newly created page can open immediately without reloading the chapter.
   Exercise zero-, one-, and multiple-page selection plus previous/next movement,
   mode/page switches, autosave, and revision conflicts. Rapidly drag and resize,
-  then press Save or switch pages while pointer-up autosave is still completing;
+  then switch pages while pointer-up autosave is still completing;
   confirm saves serialize, retain the newest edit, and do not conflict with
   their own returned revisions.
 - Confirm a new page uses project page setup and an existing page retains its
@@ -173,6 +173,10 @@ the live test project; terminate the browser host after the run.
   repositioning pans the raster, and pointer-up saves. Exercise replace image,
   direct text editing, z-order, visibility, locking, delete, undo/redo, zoom,
   and computed overlay toggle.
+- Add multiple images and confirm each new image appears above older images but
+  below text and shapes. Add a text frame and confirm it starts in front. Verify
+  Send back and Bring front move the selection to the actual stack edge, and
+  that neither Pages nor Cover exposes manual Save or Back buttons.
 - Create/edit rectangle, ellipse, and line primitives from Advanced. Confirm no
   custom-guide, SVG/path, or surface-generation navigation control is present.
 - Add a text frame, click the selected frame to edit it in place, select text,
@@ -196,6 +200,9 @@ the live test project; terminate the browser host after the run.
 - Verify canonical title/subtitle/author/spine/back-copy bindings, project font
   selection, image crop-position state, shapes, layers, grouping, styles, and
   logical reading order.
+- Add several cover images and text objects. Confirm artwork remains behind copy,
+  newly added artwork is above older artwork, front/back actions reorder within
+  the appropriate artwork or content band, and every mutation autosaves.
 - Change trim or page count and confirm constraint-bound objects reflow, free
   objects are not stretched, and overflow is surfaced.
 - Confirm full-wrap generation requires current interior page count while

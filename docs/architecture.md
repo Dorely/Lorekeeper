@@ -386,18 +386,22 @@ shows its name, mode, status, and artwork preview, and selecting it opens the
 contextual Pages mode in the same center column. The workspace provides direct
 pointer move/resize/rotate, atomic image placement with required fit, crop
 repositioning, direct canvas text editing, selection-aware inline formatting,
-styles, reading order, computed
-trim/safe/gutter/center/bleed overlays, diagnostics, revision-aware save, and
-undo/redo. Pages and covers share `CompositionVisualEditorShell`: a one-line
-view toolbar sits above the largest practical canvas, while creation, object
-selection, fit, typography, stacking, history, zoom, save, and navigation form
-a fixed bottom control strip. Accessibility, semantic roles, exact geometry,
+  styles, reading order, computed
+  trim/safe/gutter/center/bleed overlays, diagnostics, serialized autosave, and
+  undo/redo. Pages and covers share `CompositionVisualEditorShell`: a one-line
+  view toolbar sits above the largest practical canvas, while creation, object
+  selection, fit, typography, stacking, history, and zoom form a fixed bottom
+  control strip. Accessibility, semantic roles, exact geometry,
 reading order, grouping, saved variants, and other secondary
 settings live in an independently scrolling details drawer that overlays the
 canvas only while requested. No permanent inspector or author-facing layer
-manager consumes canvas width. Rectangle, ellipse, and line tools remain a
+  manager consumes canvas width. New images enter behind content but immediately
+  above older images, while new text and shapes enter at the front. Front/back
+  controls move an object to the actual edge of its applicable stack rather than
+  changing its depth by one. Rectangle, ellipse, and line tools remain a
 compact secondary construction menu; custom guides and SVG/path tooling are not
-runtime capabilities. Page saves are serialized per mounted workspace. Each save uses
+  runtime capabilities. Page and cover changes schedule autosave without an
+  explicit Save or Back action, and saves are serialized per mounted workspace. Each save uses
 an immutable scene/semantic snapshot, adopts the returned revisions before the
 next queued save, and clears the dirty state only when no newer local mutation
 occurred while persistence was in flight.

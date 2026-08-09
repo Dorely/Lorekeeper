@@ -65,9 +65,6 @@
 .composition-selection-controls select,.composition-selection-controls input { min-height: 1.9rem; max-width: 8rem; padding: .2rem .3rem; border: 1px solid #cbd2df; border-radius: .32rem; background: white; color: #27364f; font-size: .7rem; text-transform: none; }
 .composition-selection-controls input[type=color] { width: 2.2rem; padding: .1rem; }
 .composition-selection-controls .composition-number { width: 4rem; }
-.composition-selection-title { flex: 0 0 6.5rem; display: grid; gap: .05rem; }
-.composition-selection-title strong { overflow: hidden; font-size: .73rem; text-overflow: ellipsis; white-space: nowrap; }
-.composition-selection-title small { color: #667085; font-size: .62rem; }
 .composition-inline-formatting { display: inline-flex; }
 .composition-inline-formatting button { min-width: 2rem; margin-left: -1px; border-radius: 0; }
 .composition-inline-formatting button:first-child { margin-left: 0; border-radius: .35rem 0 0 .35rem; }
@@ -78,7 +75,7 @@
 .composition-fit-choice button:last-child { margin-left: -1px; border-radius: 0 .35rem .35rem 0; }
 .composition-warning { padding: .25rem .4rem; border-radius: .35rem; background: #fff3cd; color: #6a4d00; font-size: .65rem; white-space: nowrap; }
 .composition-empty-selection { align-self: center; margin: 0; color: #667085; font-size: .75rem; }
-.composition-workspace-actions { width: 10.2rem; height: 100%; display: grid; grid-template-rows: repeat(3,auto); gap: .2rem; align-content: center; }
+.composition-workspace-actions { width: 10.2rem; height: 100%; display: grid; grid-template-rows: repeat(2,auto); gap: .2rem; align-content: center; }
 .composition-workspace-actions > div { display: flex; gap: .2rem; align-items: center; justify-content: center; }
 .composition-workspace-actions button,.composition-workspace-actions .composition-secondary-controls > summary { min-height: 1.75rem; padding: .2rem .38rem; border: 1px solid #cbd2df; border-radius: .32rem; background: white; color: #34415a; font-size: .65rem; }
 .composition-workspace-actions button.primary { border-color: #4568d4; background: #4568d4; color: white; }
