@@ -3680,23 +3680,47 @@ fn wrap_layout_runs(
     size: f32,
     available_width: f32,
 ) -> Vec<(String, Vec<LayoutRun>)> {
-    let mut max_chars = (available_width / (size * 0.52)).floor().max(4.0) as usize;
-    loop {
-        let candidate_lines = wrap(text, max_chars);
-        let mut search_offset = 0;
-        let candidate_runs = candidate_lines
-            .iter()
-            .map(|line| runs_for_line(text, source_runs, line, &mut search_offset))
-            .collect::<Vec<_>>();
-        if max_chars <= 4
-            || candidate_runs
-                .iter()
-                .all(|runs| measured_run_width(runs, size) <= available_width + 0.01)
-        {
-            return candidate_lines.into_iter().zip(candidate_runs).collect();
+    let mut lines = Vec::new();
+    let mut paragraph_offset = 0usize;
+    for paragraph in text.split('\n') {
+        if paragraph.is_empty() {
+            lines.push(String::new());
+            paragraph_offset = paragraph_offset.saturating_add(1);
+            continue;
         }
-        max_chars -= 1;
+
+        let maximum = paragraph.chars().count().max(4);
+        let mut minimum = 4usize;
+        let mut maximum_candidate = maximum;
+        let mut fitted = wrap(paragraph, minimum);
+        // Character averages are too conservative for the display fonts used by
+        // Designed Pages. Find the widest Unicode-safe wrapping whose shaped
+        // runs actually fit the authored frame instead.
+        while minimum <= maximum_candidate {
+            let candidate_limit = minimum + (maximum_candidate - minimum) / 2;
+            let candidate = wrap(paragraph, candidate_limit);
+            let mut candidate_offset = paragraph_offset;
+            let fits = candidate.iter().all(|line| {
+                let runs = runs_for_line(text, source_runs, line, &mut candidate_offset);
+                measured_run_width(&runs, size) <= available_width + 0.01
+            });
+            if fits {
+                fitted = candidate;
+                minimum = candidate_limit.saturating_add(1);
+            } else {
+                maximum_candidate = candidate_limit - 1;
+            }
+        }
+        lines.extend(fitted);
+        paragraph_offset = paragraph_offset.saturating_add(paragraph.len() + 1);
     }
+
+    let mut search_offset = 0;
+    let runs = lines
+        .iter()
+        .map(|line| runs_for_line(text, source_runs, line, &mut search_offset))
+        .collect::<Vec<_>>();
+    lines.into_iter().zip(runs).collect()
 }
 
 fn wrapped_caption(caption: &str, width: f32) -> Vec<(String, Vec<LayoutRun>)> {

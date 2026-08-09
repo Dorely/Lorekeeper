@@ -333,8 +333,10 @@ command to render the current chapter as clean page canvases with real line
 breaks, images, captions, Designed Pages, recto parity, labels, links, and boxes.
 The preview request contains only the selected chapter and asks Press for its
 compact browser trace, which preserves paint and text-run data but omits
-glyph-level evidence used only by renderer conformance inspection. Preview work
-is cancellable on mode changes and produces a retryable timeout instead of
+glyph-level evidence used only by renderer conformance inspection. Designed Page
+line fitting uses the declared font's shaped widths and preserves authored hard
+line breaks, so the canvas and Press preview share the same frame capacity.
+Preview work is cancellable on mode changes and produces a retryable timeout instead of
 leaving the UI indefinitely busy. Designed Page text that exceeds its authored
 frame is clipped in this authoring trace and returned as a visible warning;
 publication renders retain strict overflow rejection. It supports single/facing display,
