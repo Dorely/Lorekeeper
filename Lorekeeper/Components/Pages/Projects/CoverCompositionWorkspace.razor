@@ -26,7 +26,10 @@
             <Toolbar>
                 <nav class="cover-toolbar" aria-label="Cover view controls">
                     <div class="cover-identity"><strong>@(CoreBook ? "Core cover" : "Release cover")</strong><small>@ModeSummary</small></div>
-                    <label><input type="checkbox" @bind="_snap" /> Snap</label><label><input type="checkbox" @bind="_guides" /> Guides</label>
+                    <div class="cover-view-toggles" role="group" aria-label="Cover canvas aids">
+                        <label title="Snap objects to the cover regions while moving or resizing"><input type="checkbox" @bind="_snap" /><span aria-hidden="true">&#8982;</span><span>Snap</span></label>
+                        <label title="Show or hide safe-area and panel guides"><input type="checkbox" @bind="_guides" /><span aria-hidden="true">&#9638;</span><span>Guides</span></label>
+                    </div>
                 </nav>
             </Toolbar>
             <Canvas>

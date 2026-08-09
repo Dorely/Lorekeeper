@@ -4,7 +4,7 @@
     min-height: 0;
     height: 100%;
     display: grid;
-    grid-template-rows: minmax(0, 1fr) 6.8rem;
+    grid-template-rows: minmax(0, 1fr) 6.35rem;
     overflow: hidden;
     container-type: size;
     background: #eef1f6;
@@ -16,13 +16,15 @@
     display: grid;
     grid-template-rows: auto minmax(0, 1fr);
     overflow: hidden;
-    padding: .55rem;
+    padding: 0;
 }
 
 .visual-editor-toolbar {
     position: relative;
     z-index: 2;
     min-width: 0;
+    border-bottom: 1px solid #d8dde7;
+    background: #f8fafc;
 }
 
 .visual-editor-canvas {
@@ -30,8 +32,12 @@
     min-height: 0;
     display: grid;
     place-items: center;
-    overflow: auto;
-    padding: 1.3rem;
+    overflow: hidden;
+    padding: 1.4rem 1.55rem 1rem 1.8rem;
+    container-type: size;
+    background:
+        radial-gradient(circle at 50% 42%, #fff8 0, transparent 62%),
+        #e9edf3;
 }
 
 .visual-editor-controls {
@@ -39,10 +45,10 @@
     min-height: 0;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: .6rem;
+    gap: .5rem;
     align-items: stretch;
     overflow: hidden;
-    padding: .5rem;
+    padding: .42rem .5rem;
     border-top: 1px solid #d8dde7;
     background: #fbfcfe;
 }
@@ -73,7 +79,6 @@
 }
 
 @container (max-width: 45rem) {
-    .visual-editor-shell { grid-template-rows: minmax(0, 1fr) 6.5rem; }
-    .visual-editor-stage { padding: .4rem; }
-    .visual-editor-controls { gap: .35rem; padding: .35rem; }
+    .visual-editor-shell { grid-template-rows: minmax(0, 1fr) 6.15rem; }
+    .visual-editor-controls { gap: .35rem; padding: .35rem .4rem; }
 }

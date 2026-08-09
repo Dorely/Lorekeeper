@@ -20,10 +20,12 @@
             <Toolbar>
                 <nav class="composition-page-strip" aria-label="Page and spread mode">
                     <div class="composition-page-identity"><strong>@(_composition?.Name ?? "Designed page")</strong><small>@($"{_scene.Surface.WidthPoints / 72:0.##} × {_scene.Surface.HeightPoints / 72:0.##} in")</small></div>
-                    <button type="button" class="@SurfaceClass(CompositionSurfaceKind.SinglePage)" @onclick="() => SetSurfaceKind(CompositionSurfaceKind.SinglePage)"><span class="page-thumb single"></span>Single page</button>
-                    <button type="button" class="@SurfaceClass(CompositionSurfaceKind.FacingSpread)" @onclick="() => SetSurfaceKind(CompositionSurfaceKind.FacingSpread)"><span class="page-thumb spread"></span>Facing spread</button>
-                    @if (_scene.Surface.AllowIndependentPdfPage) { <button type="button" class="@SurfaceClass(CompositionSurfaceKind.IndependentPage)" @onclick="() => SetSurfaceKind(CompositionSurfaceKind.IndependentPage)"><span class="page-thumb custom"></span>Digital override</button> }
-                    <label class="composition-guide-toggle"><input type="checkbox" @bind="_showGuides" /> Guides</label>
+                    <div class="composition-view-modes" role="group" aria-label="Page surface">
+                        <button type="button" class="@SurfaceClass(CompositionSurfaceKind.SinglePage)" @onclick="() => SetSurfaceKind(CompositionSurfaceKind.SinglePage)"><span class="page-thumb single"></span>Single page</button>
+                        <button type="button" class="@SurfaceClass(CompositionSurfaceKind.FacingSpread)" @onclick="() => SetSurfaceKind(CompositionSurfaceKind.FacingSpread)"><span class="page-thumb spread"></span>Facing spread</button>
+                        @if (_scene.Surface.AllowIndependentPdfPage) { <button type="button" class="@SurfaceClass(CompositionSurfaceKind.IndependentPage)" @onclick="() => SetSurfaceKind(CompositionSurfaceKind.IndependentPage)"><span class="page-thumb custom"></span>Digital override</button> }
+                    </div>
+                    <label class="composition-guide-toggle" title="Show or hide trim, safe-area, gutter, and measurement guides"><input type="checkbox" @bind="_showGuides" /><span class="composition-guides-icon" aria-hidden="true">&#9638;</span><span>Guides</span></label>
                 </nav>
             </Toolbar>
             <Canvas>
