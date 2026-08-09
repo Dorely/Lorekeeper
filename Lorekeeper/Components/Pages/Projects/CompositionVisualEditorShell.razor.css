@@ -44,13 +44,13 @@
     min-width: 0;
     min-height: 0;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: 11rem minmax(0, 1fr) 8.5rem;
     gap: .5rem;
     align-items: stretch;
     overflow: hidden;
     padding: .42rem .5rem;
     border-top: 1px solid #d8dde7;
-    background: #fbfcfe;
+    background: #f1f4f8;
 }
 
 .visual-editor-objects,
@@ -58,17 +58,21 @@
 .visual-editor-details {
     min-width: 0;
     min-height: 0;
+    border: 1px solid #d8dde7;
+    border-radius: .5rem;
+    background: #fff;
+    box-shadow: 0 1px 2px #1820320a;
 }
 
 .visual-editor-objects {
-    overflow-x: auto;
-    overflow-y: hidden;
-    border-right: 1px solid #d8dde7;
+    padding: .3rem .4rem;
+    overflow: hidden;
 }
 
 .visual-editor-selection {
     display: flex;
     align-items: center;
+    padding: .25rem .45rem;
     overflow-x: auto;
     overflow-y: hidden;
 }
@@ -76,9 +80,12 @@
 .visual-editor-details {
     display: flex;
     align-items: center;
+    justify-content: center;
+    padding: .25rem .35rem;
 }
 
 @container (max-width: 45rem) {
     .visual-editor-shell { grid-template-rows: minmax(0, 1fr) 6.15rem; }
+    .visual-editor-controls { grid-template-columns: 10rem minmax(0, 1fr) 8rem; }
     .visual-editor-controls { gap: .35rem; padding: .35rem .4rem; }
 }

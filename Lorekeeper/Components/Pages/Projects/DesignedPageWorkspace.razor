@@ -101,7 +101,7 @@
                     <div class="composition-add-tools" aria-label="Add page content">
                         <button type="button" title="Add a text frame" @onclick="AddTextObject"><span aria-hidden="true">T</span> Text</button>
                         <button type="button" title="Choose artwork from the project image library" @onclick="OpenAddImagePicker"><span aria-hidden="true">▧</span> Image</button>
-                        <label class="composition-retain-aspect" title="Keep newly added artwork proportional when it is resized"><input type="checkbox" @bind="_newRetainAspectRatio" /> Keep ratio</label>
+                        <label class="composition-retain-aspect composition-retain-aspect--compact" title="Keep newly added artwork proportional when it is resized"><input type="checkbox" aria-label="Keep new artwork proportional" @bind="_newRetainAspectRatio" /><span class="visually-hidden">Keep ratio</span></label>
                         <details class="composition-shapes-menu"><summary title="Add a simple shape">◇</summary><div><button type="button" @onclick="() => AddObject(CompositionObjectKind.Rectangle)">Rectangle</button><button type="button" @onclick="() => AddObject(CompositionObjectKind.Ellipse)">Ellipse</button><button type="button" @onclick="() => AddObject(CompositionObjectKind.Line)">Line</button></div></details>
                     </div>
                     <div class="composition-object-strip" role="listbox" aria-label="Page objects">
@@ -121,8 +121,8 @@
                     <div class="composition-selection-controls">
                         @if (primarySelection.Kind == CompositionObjectKind.Image)
                         {
-                            <button type="button" @onclick="() => OpenReplaceImagePicker(primarySelection.Id)">Replace image</button>
-                            <label class="composition-retain-aspect" title="Keep the artwork's original proportions while resizing"><input type="checkbox" checked="@RetainsAspectRatio(primarySelection)" @onchange="e => SetRetainAspectRatioAsync(primarySelection, (bool)e.Value!)" /> Retain aspect ratio</label>
+                            <button type="button" title="Choose different artwork for this image" @onclick="() => OpenReplaceImagePicker(primarySelection.Id)">Replace</button>
+                            <label class="composition-retain-aspect" title="Keep the artwork's original proportions while resizing"><input type="checkbox" checked="@RetainsAspectRatio(primarySelection)" @onchange="e => SetRetainAspectRatioAsync(primarySelection, (bool)e.Value!)" /> Ratio</label>
                             <button type="button" title="Make this image as large as the page permits" @onclick="() => FillCanvasAsync(primarySelection)">Fill canvas</button>
                             @if (primarySelection.ImageFit == FigureImageFit.Cover) { <button type="button" class="@(IsCropRepositioning(primarySelection) ? "selected" : null)" title="Drag the artwork within its fixed frame to choose the crop" @onclick="() => ToggleCropReposition(primarySelection)">@(IsCropRepositioning(primarySelection) ? "Finish crop" : "Reposition crop")</button> }
                         }
@@ -148,7 +148,7 @@
                             <label>Fill<input type="color" value="@ColorValue(primaryStyle.FillColor)" @onchange="e => Patch(primarySelection with { StyleId = null, FillColor = Color(e) })" /></label><label>Border<input type="color" value="@ColorValue(primaryStyle.StrokeColor)" @onchange="e => Patch(primarySelection with { StyleId = null, StrokeColor = Color(e) })" /></label>
                         }
                         <span class="composition-control-divider" aria-hidden="true"></span>
-                        <button type="button" title="Move this object behind every other object" @onclick="() => SendToBack(primarySelection)">Send back</button><button type="button" title="Move this object in front of every other object" @onclick="() => BringToFront(primarySelection)">Bring front</button><button type="button" class="@(!primarySelection.Visible ? "selected" : null)" title="Show or hide this object" @onclick="() => ToggleObjectVisibility(primarySelection)">@(primarySelection.Visible ? "Hide" : "Show")</button><button type="button" class="@(primarySelection.Locked ? "selected" : null)" title="Lock or unlock this object's position" @onclick="() => ToggleObjectLock(primarySelection)">@(primarySelection.Locked ? "Unlock" : "Lock")</button><button type="button" class="danger" title="Delete selected object" @onclick="() => Delete(primarySelection.Id)">Delete</button>
+                        <button type="button" title="Move this object behind every other object" @onclick="() => SendToBack(primarySelection)">Back</button><button type="button" title="Move this object in front of every other object" @onclick="() => BringToFront(primarySelection)">Front</button><button type="button" class="@(!primarySelection.Visible ? "selected" : null)" title="Show or hide this object" @onclick="() => ToggleObjectVisibility(primarySelection)">@(primarySelection.Visible ? "Hide" : "Show")</button><button type="button" class="@(primarySelection.Locked ? "selected" : null)" title="Lock or unlock this object's position" @onclick="() => ToggleObjectLock(primarySelection)">@(primarySelection.Locked ? "Unlock" : "Lock")</button><button type="button" class="danger" title="Delete selected object" @onclick="() => Delete(primarySelection.Id)">Delete</button>
                     </div>
                 }
                 else { <p class="composition-empty-selection">Select an object on the page to edit it. Drag to move; use the handles to resize or rotate.</p> }
