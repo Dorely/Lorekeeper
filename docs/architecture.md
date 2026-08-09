@@ -407,6 +407,10 @@ compact secondary construction menu; custom guides and SVG/path tooling are not
 an immutable scene/semantic snapshot, adopts the returned revisions before the
 next queued save, and clears the dirty state only when no newer local mutation
 occurred while persistence was in flight.
+Crop repositioning is an explicit selected-image mode shared by Pages and Cover:
+dragging and arrow keys adjust only the image position inside its fixed frame,
+resize/rotate handles are unavailable, and the mode remains active until the
+author finishes it or selects another object.
 
 Assistant composition mutation notices carry the chapter,
 composition/variant, revision, changed IDs, and selected object. A newly

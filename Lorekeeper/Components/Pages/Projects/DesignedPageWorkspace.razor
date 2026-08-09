@@ -42,7 +42,7 @@
                     @foreach (var item in _objects.Where(item => item.LayerId != Guid.Empty && IsVisible(item)))
                     {
                         <div role="button" tabindex="0"
-                                class="composition-object composition-object--@item.Kind.ToString().ToLowerInvariant() @(item.Id == _selectedId ? "selected" : null)"
+                                class="composition-object composition-object--@item.Kind.ToString().ToLowerInvariant() @(item.Id == _selectedId ? "selected" : null) @(IsCropRepositioning(item) ? "crop-repositioning" : null)"
                                 style="@ObjectStyle(item)"
                                 @onclick:stopPropagation="true"
                                 @onclick="e => SelectOrEditObject(item, e)"
@@ -84,7 +84,7 @@
                             {
                                 <span class="composition-line" style="@LineStyle(item)"></span>
                             }
-                            @if (item.Id == _selectedId && !IsLocked(item))
+                            @if (item.Id == _selectedId && !IsLocked(item) && !IsCropRepositioning(item))
                             {
                                 <span class="composition-handle composition-handle-resize" title="Drag to resize" @onpointerdown:stopPropagation="true" @onpointerdown:preventDefault="true" @onpointerdown="e => BeginTransformAsync(e, item, TransformMode.Resize)"></span>
                                 <span class="composition-handle composition-handle-rotate" title="Drag to rotate" @onpointerdown:stopPropagation="true" @onpointerdown:preventDefault="true" @onpointerdown="e => BeginTransformAsync(e, item, TransformMode.Rotate)"></span>
@@ -120,7 +120,7 @@
                         {
                             <button type="button" @onclick="() => OpenReplaceImagePicker(primarySelection.Id)">Replace image</button>
                             <div class="composition-fit-choice" aria-label="Image fit"><button type="button" class="@(primarySelection.ImageFit == FigureImageFit.Contain ? "selected" : null)" title="Show the complete image inside the frame" @onclick="() => SetImageFit(primarySelection, FigureImageFit.Contain)">Whole image</button><button type="button" class="@(primarySelection.ImageFit == FigureImageFit.Cover ? "selected" : null)" title="Crop the image as needed to fill the frame" @onclick="() => SetImageFit(primarySelection, FigureImageFit.Cover)">Fill frame</button></div>
-                            @if (primarySelection.ImageFit == FigureImageFit.Cover) { <button type="button" class="@(_cropReposition ? "selected" : null)" title="Drag the artwork within its frame to choose the crop" @onclick="() => _cropReposition = !_cropReposition">@(_cropReposition ? "Finish crop" : "Reposition crop")</button> }
+                            @if (primarySelection.ImageFit == FigureImageFit.Cover) { <button type="button" class="@(IsCropRepositioning(primarySelection) ? "selected" : null)" title="Drag the artwork within its fixed frame to choose the crop" @onclick="() => ToggleCropReposition(primarySelection)">@(IsCropRepositioning(primarySelection) ? "Finish crop" : "Reposition crop")</button> }
                         }
                         else if (primarySelection.Kind == CompositionObjectKind.Text)
                         {
@@ -191,7 +191,7 @@
                                 <label>Fit<select value="@selected.ImageFit" @onchange="e => Patch(selected with { ImageFit = Enum.Parse<FigureImageFit>(e.Value!.ToString()!) })"><option value="@FigureImageFit.Contain">Show whole image</option><option value="@FigureImageFit.Cover">Fill frame</option></select></label>
                                 @if (selected.ImageFit == FigureImageFit.Cover)
                                 {
-                                    <button type="button" class="@(_cropReposition ? "selected" : null)" @onclick="() => _cropReposition = !_cropReposition">@(_cropReposition ? "Finish repositioning" : "Reposition crop")</button>
+                                    <button type="button" class="@(IsCropRepositioning(selected) ? "selected" : null)" @onclick="() => ToggleCropReposition(selected)">@(IsCropRepositioning(selected) ? "Finish repositioning" : "Reposition crop")</button>
                                 }
                                 <label>Alternative text<textarea value="@selected.AltText" @onchange="e => SetAltText(selected, e.Value?.ToString() ?? string.Empty)"></textarea></label>
                                 <label><input type="checkbox" checked="@selected.Decorative" @onchange="e => SetDecorative(selected, (bool)e.Value!)" /> Decorative</label>
@@ -329,9 +329,11 @@
     private void SelectObject(Guid id)
     {
         if (_selectedId != id)
+        {
             _editingTextId = null;
+            _cropReposition = false;
+        }
         _selectedId = id;
-        _cropReposition = false;
     }
     private void SelectOrEditObject(CompositionObject item, MouseEventArgs e)
     {
@@ -349,6 +351,17 @@
     private static string ObjectLabel(CompositionObject item) => string.IsNullOrWhiteSpace(item.Name) ? item.Kind.ToString() : item.Name;
     private static string ObjectIcon(CompositionObjectKind kind) => kind switch { CompositionObjectKind.Text => "T", CompositionObjectKind.Image => "▧", CompositionObjectKind.Rectangle => "□", CompositionObjectKind.Ellipse => "○", CompositionObjectKind.Line => "—", _ => "◇" };
     private void SetImageFit(CompositionObject item, FigureImageFit fit) { if (item.ImageFit == fit) return; _cropReposition = false; Patch(item with { ImageFit = fit }); }
+    private bool IsCropRepositioning(CompositionObject item) =>
+        _cropReposition
+        && item.Id == _selectedId
+        && item.Kind == CompositionObjectKind.Image
+        && item.ImageFit == FigureImageFit.Cover;
+    private void ToggleCropReposition(CompositionObject item)
+    {
+        if (item.Id != _selectedId)
+            SelectObject(item.Id);
+        _cropReposition = !IsCropRepositioning(item);
+    }
     private void ToggleObjectLock(CompositionObject item) => Patch(item with { Locked = !item.Locked });
     private void ToggleObjectVisibility(CompositionObject item)
     {
@@ -1251,7 +1264,7 @@
         return BeginTransformAsync(
             e,
             item,
-            _cropReposition && item.Kind == CompositionObjectKind.Image && item.ImageFit == FigureImageFit.Cover
+            IsCropRepositioning(item)
                 ? TransformMode.Crop
                 : TransformMode.Move);
     }
@@ -1272,8 +1285,10 @@
         var index = _objects.FindIndex(item => item.Id == state.ObjectId);
         if (index < 0) return;
         var item = _objects[index];
-        var dx = (e.ClientX - state.StartClientX) / Math.Max(1, state.Stage.Width) * 100;
-        var dy = (e.ClientY - state.StartClientY) / Math.Max(1, state.Stage.Height) * 100;
+        var surfaceDx = (e.ClientX - state.StartClientX) / Math.Max(1, state.Stage.Width) * 100;
+        var surfaceDy = (e.ClientY - state.StartClientY) / Math.Max(1, state.Stage.Height) * 100;
+        var dx = surfaceDx;
+        var dy = surfaceDy;
         if (item.Kind == CompositionObjectKind.Text && Math.Abs(dx) + Math.Abs(dy) > .15)
             _suppressTextEditId = item.Id;
         if (item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group)
@@ -1288,8 +1303,8 @@
             TransformMode.Rotate => item with { RotationDegrees = state.StartRotation + RotationDelta(e, state) },
             TransformMode.Crop => item with
             {
-                CropXPercent = Math.Clamp(state.StartCropX - dx, 0, 100),
-                CropYPercent = Math.Clamp(state.StartCropY - dy, 0, 100),
+                CropXPercent = Math.Clamp(state.StartCropX - surfaceDx / Math.Max(.01, state.SurfaceBounds.WidthPercent) * 100, 0, 100),
+                CropYPercent = Math.Clamp(state.StartCropY - surfaceDy / Math.Max(.01, state.SurfaceBounds.HeightPercent) * 100, 0, 100),
             },
             _ => item,
         };
@@ -1347,6 +1362,17 @@
     {
         if (Selected is not { Locked: false } selected) return;
         var delta = e.ShiftKey ? 1d : .25;
+        if (IsCropRepositioning(selected))
+        {
+            switch (e.Key)
+            {
+                case "ArrowLeft": Patch(selected with { CropXPercent = Math.Clamp(selected.CropXPercent + delta, 0, 100) }); break;
+                case "ArrowRight": Patch(selected with { CropXPercent = Math.Clamp(selected.CropXPercent - delta, 0, 100) }); break;
+                case "ArrowUp": Patch(selected with { CropYPercent = Math.Clamp(selected.CropYPercent + delta, 0, 100) }); break;
+                case "ArrowDown": Patch(selected with { CropYPercent = Math.Clamp(selected.CropYPercent - delta, 0, 100) }); break;
+            }
+            return;
+        }
         switch (e.Key)
         {
             case "ArrowLeft": Nudge(selected, -delta, 0); break;
