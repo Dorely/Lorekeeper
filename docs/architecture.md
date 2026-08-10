@@ -361,6 +361,11 @@ project setup change reflows active layouts transactionally. Publish reports
 edition compatibility and can copy the authoring scene into a separate exact
 edition variant for review without making a publication release govern
 authoring geometry.
+Pages, covers, and assistant tools share one image-frame layout contract.
+`Fill canvas` always sets the frame to the complete surface; proportional mode
+uses crop-to-fill while non-proportional mode explicitly stretches. Bounded
+assistant composition reads report whether each returned image frame covers the
+canvas and describe its fit behavior without requiring scene-coordinate inference.
 The chapter center column has Edit, Read, Pages, and Review modes. A chapter
 whose manuscript contains only Designed Page blocks initially opens in Pages;
 after the author chooses a mode, that chapter's last mode is restored across

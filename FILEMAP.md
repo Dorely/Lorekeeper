@@ -592,6 +592,7 @@
 | File | Description |
 |------|-------------|
 | `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service with setup-normalized active authoring geometry, atomic image/fit placement, scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
+| `CompositionImageLayout.cs` | Shared proportional image-layout rules for canvas filling, frame coverage inspection, and consistent Pages/Cover/assistant behavior. |
 | `ProjectPageSetupService.cs` | Revision-aware project authoring page setup used by Read preview, Core Book, Designed Pages, Figures, and generation targets; geometry changes transactionally reflow the reusable Core cover and active Designed Page layouts. |
 | `ChapterPreviewService.cs` | Cached, cancellable Press layout adapter that accepts staged manuscript/style sources, exposes chapter/block page maps, and rasterizes bounded PNG page-inspection images from compact Press paint and text-run traces. |
 | `CompositionAgentPayloads.cs` | Lossless bounded assistant reads and compact revision-safe patch envelopes for semantic fragments, scene objects, layers, and styles. |

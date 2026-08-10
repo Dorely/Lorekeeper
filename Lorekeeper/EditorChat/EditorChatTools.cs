@@ -399,6 +399,11 @@ public sealed class EditorChatTools(
                 name: "patch_page_composition_element",
                 description: "Revision-check patch one stable object, layer, or style without resending or replacing the scene. Page guides are computed overlays. Send only changed fields; use one-use staging only for large structural edits."),
             AIFunctionFactory.Create(
+                method: (Guid variantId, long expectedRevision, Guid targetId, bool retainAspectRatio = true) =>
+                    FillPageImageCanvasAsync(context, variantId, expectedRevision, targetId, retainAspectRatio),
+                name: "fill_page_image_canvas",
+                description: "Make one Designed Page image cover the complete canvas. With retainAspectRatio=true, this uses proportional crop-to-fill (Cover) so no edge bands remain; false stretches the raster. Use read_page_composition afterward and verify imageCoversCanvas."),
+            AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) =>
                     PlacePageImageAsync(context, variantId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
                 name: "place_project_image_in_page_frame",
@@ -2150,6 +2155,41 @@ public sealed class EditorChatTools(
             compositions, ctx.ProjectId, variantId, expectedRevision, targetKind, targetId, patch, ctx.TurnCancellationToken);
         if (JsonDocument.Parse(result).RootElement.GetProperty("ok").GetBoolean()) ctx.OnMutated();
         return result;
+    }
+
+    private async Task<string> FillPageImageCanvasAsync(
+        EditorChatContext ctx,
+        Guid variantId,
+        long expectedRevision,
+        Guid targetId,
+        bool retainAspectRatio)
+    {
+        try
+        {
+            var variant = await compositions.ReadVariantAsync(ctx.ProjectId, variantId, ctx.TurnCancellationToken);
+            var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
+                ?? throw new InvalidDataException("The composition scene is empty.");
+            var item = scene.Objects.FirstOrDefault(candidate => candidate.Id == targetId)
+                ?? throw new KeyNotFoundException("Composition object was not found.");
+            var filled = CompositionImageLayout.FillCanvas(item, retainAspectRatio);
+            return await PatchCompositionElementAsync(
+                ctx,
+                variantId,
+                expectedRevision,
+                "object",
+                targetId,
+                new CompositionElementPatch(Bounds: filled.Bounds, ImageFit: filled.ImageFit));
+        }
+        catch (Exception exception) when (exception is InvalidDataException or ArgumentException or KeyNotFoundException)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                code = "IMAGE_LAYOUT_REJECTED",
+                targetId,
+                summary = exception.Message,
+            });
+        }
     }
 
     private async Task<string> PlacePageImageAsync(

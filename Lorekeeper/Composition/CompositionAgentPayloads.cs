@@ -39,6 +39,17 @@ public static class CompositionAgentPayloads
             text = Truncate(ManuscriptCodec.Text(block), 800),
         }).ToList();
         var objectPage = scene.Objects.Skip(objectStart).Take(objectCount).ToList();
+        var imageLayout = objectPage
+            .Where(item => item.Kind == Lorekeeper.Models.CompositionObjectKind.Image)
+            .Select(item => new
+            {
+                objectId = item.Id,
+                frameCoversCanvas = CompositionImageLayout.FrameCoversCanvas(item),
+                imageCoversCanvas = CompositionImageLayout.ImageCoversCanvas(item),
+                retainsAspectRatio = CompositionImageLayout.RetainsAspectRatio(item),
+                presentation = CompositionImageLayout.Presentation(item),
+            })
+            .ToList();
         return JsonSerializer.Serialize(new
         {
             ok = true,
@@ -54,6 +65,7 @@ public static class CompositionAgentPayloads
                 layers = scene.Layers.Skip(structureStart).Take(structureCount),
                 styles = scene.Styles.Skip(structureStart).Take(structureCount),
                 objects = objectPage,
+                imageLayout,
             },
             semanticBlocks = semanticPage,
             objectContinuation = Continuation(objectStart, objectPage.Count, scene.Objects.Count),

@@ -93,7 +93,7 @@
                         {
                             <button type="button" title="Choose different artwork for this image" @onclick="() => OpenReplaceArtworkPicker(primarySelection.Id)">Replace</button>
                             <label class="cover-retain-aspect" title="Keep the artwork's original proportions while resizing"><input type="checkbox" checked="@RetainsAspectRatio(primarySelection)" @onchange="e => SetRetainAspectRatioAsync(primarySelection, (bool)e.Value!)" /> Ratio</label>
-                            <button type="button" title="Make this image as large as the cover canvas permits" @onclick="() => FillCanvasAsync(primarySelection)">Fill canvas</button>
+                            <button type="button" title="Fill the entire cover; proportional artwork is cropped rather than stretched" @onclick="() => FillCanvasAsync(primarySelection)">Fill canvas</button>
                             @if (primarySelection.ImageFit == FigureImageFit.Cover) { <button type="button" class="@(IsCropRepositioning(primarySelection) ? "selected" : null)" title="Drag the artwork within its fixed frame" @onclick="() => ToggleCropReposition(primarySelection)">@(IsCropRepositioning(primarySelection) ? "Finish crop" : "Reposition crop")</button> }
                         }
                         else if (primarySelection.Kind == CompositionObjectKind.Text)
@@ -158,7 +158,7 @@
                                     <button type="button" @onclick="() => OpenReplaceArtworkPicker(selected.Id)">Replace artwork</button>
                                 </div>
                                 <label><input type="checkbox" checked="@RetainsAspectRatio(selected)" @onchange="e => SetRetainAspectRatioAsync(selected, (bool)e.Value!)" /> Retain aspect ratio</label>
-                                <button type="button" @onclick="() => FillCanvasAsync(selected)">Fill canvas</button>
+                                <button type="button" title="Fill the entire cover; proportional artwork is cropped rather than stretched" @onclick="() => FillCanvasAsync(selected)">Fill canvas</button>
                                 @if (selected.ImageFit == FigureImageFit.Cover)
                                 {
                                     <button type="button" class="@(IsCropRepositioning(selected) ? "selected" : null)" @onclick="() => ToggleCropReposition(selected)">@(IsCropRepositioning(selected) ? "Finish repositioning" : "Reposition crop")</button>
@@ -366,7 +366,7 @@
     private void SelectObject(Guid id) { if (_selectedId != id) _cropReposition = false; _selectedId = id; }
     private static string ObjectLabel(CompositionObject item) => string.IsNullOrWhiteSpace(item.Name) ? item.Kind.ToString() : item.Name;
     private static string ObjectIcon(CompositionObjectKind kind) => kind switch { CompositionObjectKind.Text => "T", CompositionObjectKind.Image => "▧", CompositionObjectKind.Rectangle => "□", CompositionObjectKind.Ellipse => "○", CompositionObjectKind.Line => "—", _ => "◇" };
-    private static bool RetainsAspectRatio(CompositionObject item) => item.ImageFit != FigureImageFit.Stretch;
+    private static bool RetainsAspectRatio(CompositionObject item) => CompositionImageLayout.RetainsAspectRatio(item);
     private async Task SetRetainAspectRatioAsync(CompositionObject item, bool retain)
     {
         _cropReposition = false;
@@ -381,11 +381,10 @@
             Bounds = FitInsideBounds(item.Bounds, await ImageAspectRatioAsync(item)),
         });
     }
-    private async Task FillCanvasAsync(CompositionObject item)
+    private Task FillCanvasAsync(CompositionObject item)
     {
-        var retain = RetainsAspectRatio(item);
-        var bounds = retain ? FitInsideBounds(new CompositionBounds(), await ImageAspectRatioAsync(item)) : new CompositionBounds();
-        Patch(item with { Bounds = bounds, ImageFit = retain ? item.ImageFit : FigureImageFit.Stretch });
+        Patch(CompositionImageLayout.FillCanvas(item, RetainsAspectRatio(item)));
+        return Task.CompletedTask;
     }
     private async Task<double> ImageAspectRatioAsync(CompositionObject item)
     {
