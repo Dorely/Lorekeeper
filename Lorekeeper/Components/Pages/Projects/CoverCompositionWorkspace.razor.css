@@ -65,12 +65,13 @@
 .cover-object-strip small { overflow: hidden; width: 100%; font-size: .62rem; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .cover-selection-controls { min-width: 0; display: flex; gap: .28rem; align-items: center; align-content: center; flex-wrap: wrap; overflow: hidden; width: 100%; padding: 0; }
 .cover-selection-controls button { min-height: 1.85rem; padding: .24rem .45rem; border: 1px solid #cbd2df; border-radius: .35rem; background: white; color: #27364f; font-size: .68rem; white-space: nowrap; }
+.cover-selection-controls > button,.cover-selection-controls > .cover-fit-choice { align-self: flex-end; }
 .cover-selection-controls button:hover { border-color: #4568d4; }
 .cover-selection-controls button.selected,.cover-fit-choice button.selected { border-color: #4568d4; background: #edf1ff; color: #294db8; }
 .cover-selection-controls button.danger { color: #a21b2d; }
-.cover-selection-controls label { flex: 0 0 auto; display: grid; gap: .15rem; color: #667085; font-size: .58rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.cover-selection-controls label { flex: 0 0 auto; display: grid; gap: .15rem; align-self: stretch; align-content: end; color: #667085; font-size: .58rem; font-weight: 700; line-height: 1; text-transform: uppercase; letter-spacing: .04em; }
 .cover-selection-controls select,.cover-selection-controls input { min-height: 1.8rem; max-width: 8rem; padding: .18rem .3rem; border: 1px solid #cbd2df; border-radius: .32rem; background: white; color: #27364f; font-size: .68rem; text-transform: none; }
-.cover-selection-controls .cover-retain-aspect { display: inline-flex; gap: .35rem; min-height: 1.85rem; padding: .2rem .4rem; font-size: .65rem; text-transform: none; letter-spacing: 0; }
+.cover-selection-controls .cover-retain-aspect { display: inline-flex; gap: .35rem; align-self: flex-end; min-height: 1.85rem; padding: .2rem .4rem; font-size: .65rem; line-height: normal; text-transform: none; letter-spacing: 0; }
 .cover-selection-controls .cover-retain-aspect input { flex: 0 0 1.7rem; width: 1.7rem; min-height: 0; height: .95rem; max-width: none; padding: 0; border: 0; border-radius: 999px; }
 .cover-selection-controls input[type=color] { width: 2.2rem; padding: .1rem; }
 .cover-selection-controls .cover-number { width: 4rem; }

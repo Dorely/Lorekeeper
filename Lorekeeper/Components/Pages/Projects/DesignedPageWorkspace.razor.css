@@ -78,17 +78,18 @@
 .composition-object-strip small { overflow: hidden; width: 100%; font-size: .62rem; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .composition-selection-controls { min-width: 0; width: 100%; display: flex; gap: .25rem; align-items: center; align-content: center; flex-wrap: wrap; overflow: hidden; padding: 0; }
 .composition-selection-controls button,.composition-fit-choice button { min-height: 1.85rem; padding: .24rem .45rem; border: 1px solid #cbd2df; border-radius: .35rem; background: white; color: #27364f; font-size: .68rem; white-space: nowrap; }
+.composition-selection-controls > button,.composition-selection-controls > .composition-inline-formatting { align-self: flex-end; }
 .composition-selection-controls button:hover { border-color: #4568d4; }
 .composition-selection-controls button.selected,.composition-fit-choice button.selected { border-color: #4568d4; background: #edf1ff; color: #294db8; }
 .composition-selection-controls button.danger { color: #a21b2d; }
-.composition-selection-controls label { flex: 0 0 auto; display: grid; gap: .15rem; color: #667085; font-size: .58rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.composition-selection-controls label { flex: 0 0 auto; display: grid; gap: .15rem; align-self: stretch; align-content: end; color: #667085; font-size: .58rem; font-weight: 700; line-height: 1; text-transform: uppercase; letter-spacing: .04em; }
 .composition-selection-controls select,.composition-selection-controls input { min-height: 1.8rem; max-width: 8rem; padding: .18rem .3rem; border: 1px solid #cbd2df; border-radius: .32rem; background: white; color: #27364f; font-size: .68rem; text-transform: none; }
-.composition-selection-controls .composition-retain-aspect { display: inline-flex; gap: .35rem; min-height: 1.85rem; padding: .2rem .4rem; font-size: .65rem; text-transform: none; letter-spacing: 0; }
+.composition-selection-controls .composition-retain-aspect { display: inline-flex; gap: .35rem; align-self: flex-end; min-height: 1.85rem; padding: .2rem .4rem; font-size: .65rem; line-height: normal; text-transform: none; letter-spacing: 0; }
 .composition-selection-controls .composition-retain-aspect input { flex: 0 0 1.7rem; width: 1.7rem; min-height: 0; height: .95rem; max-width: none; padding: 0; border: 0; border-radius: 999px; }
 .composition-selection-controls input[type=color] { width: 2.2rem; padding: .1rem; }
 .composition-selection-controls .composition-number { width: 4rem; }
-.composition-inline-formatting { display: inline-flex; }
-.composition-inline-formatting button { min-width: 2rem; margin-left: -1px; border-radius: 0; }
+.composition-inline-formatting { display: inline-flex; height: 1.85rem; }
+.composition-inline-formatting button { min-width: 2rem; min-height: 1.85rem; margin-left: -1px; border-radius: 0; }
 .composition-inline-formatting button:first-child { margin-left: 0; border-radius: .35rem 0 0 .35rem; }
 .composition-inline-formatting button:last-child { border-radius: 0 .35rem .35rem 0; }
 .composition-fit-choice { display: inline-flex; }
