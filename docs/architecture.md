@@ -590,6 +590,9 @@ bleed, and captions, structured Designed Pages and cover scenes, reusable
 styles, proportional or explicitly stretched raster frames, page-clipped
 out-of-surface artwork, vector shapes, logical reading order, page-size overrides for eligible
 Digital PDFs, full-wrap cover geometry, EAN-13 bars, and PDF serialization.
+Recto chapter starts apply to flowing-content chapters. Chapters whose meaningful
+content consists only of Designed Pages remain a continuous leaf sequence, so
+picture-book authoring containers do not introduce blank pages between designs.
 Structured text remains text in the output rather than a rasterized page image.
 Digital covers declare no barcode mode; print-only Lorekeeper and vendor-overlay
 barcode modes are rejected for the Digital PDF profile. PDF structure,

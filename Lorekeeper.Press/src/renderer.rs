@@ -1216,7 +1216,9 @@ fn paginate_with_cancellation(
                     trim,
                     true,
                 );
-                start_recto(&mut pages, trim);
+                if !is_designed_page_only_chapter(chapter) {
+                    start_recto(&mut pages, trim);
+                }
                 let chapter_start = pages.len() + 1;
                 body_start_page.get_or_insert(chapter_start);
                 let chapter_page_index = pages.len();
@@ -5291,6 +5293,27 @@ fn start_recto(pages: &mut Vec<LayoutPage>, trim: &crate::model::Trim) {
             bookmark: None,
         });
     }
+}
+
+fn is_designed_page_only_chapter(chapter: &Value) -> bool {
+    let Some(blocks) = chapter.get("blocks").and_then(Value::as_array) else {
+        return false;
+    };
+    let mut has_designed_page = false;
+    for block in blocks {
+        let block_type = string(block, "type");
+        if block_type.eq_ignore_ascii_case("DesignedPage") {
+            has_designed_page = true;
+            continue;
+        }
+        if block_type.eq_ignore_ascii_case("Paragraph")
+            && display_block_text(block).trim().is_empty()
+        {
+            continue;
+        }
+        return false;
+    }
+    has_designed_page
 }
 
 fn assign_page_labels(pages: &mut [LayoutPage], body_start: usize) {
