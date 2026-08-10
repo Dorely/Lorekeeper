@@ -266,6 +266,7 @@ public sealed class ChapterPreviewService(
                 throw new InvalidDataException($"Designed Page '{composition.Name}' has no authoring layout.");
             var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
                 ?? throw new InvalidDataException($"Designed Page '{composition.Name}' has an empty authoring layout.");
+            scene = NormalizeSceneLanguages(scene);
             foreach (var fontKey in scene.Objects.Select(item => item.FontFamilyKey)
                 .Concat(scene.Styles.Select(item => item.FontFamilyKey))
                 .Where(item => !string.IsNullOrWhiteSpace(item)))
@@ -931,7 +932,7 @@ public sealed class ChapterPreviewService(
         caption = ManuscriptCodec.Text(block),
         block.Decorative,
         block.AltText,
-        language = string.IsNullOrWhiteSpace(block.Language) ? null : block.Language.Trim(),
+        language = PublicationLanguage.NormalizeOptional(block.Language),
         accessibilityRole = block.AccessibilityRole.ToString(),
         presentation = block.FigurePresentation,
         paragraphPresentation = block.ParagraphPresentation,
@@ -945,8 +946,18 @@ public sealed class ChapterPreviewService(
                 .Select(mark => new
                 {
                     type = mark.Type.ToString(),
-                    value = mark.Type == ManuscriptMarkType.Language ? mark.Value?.Trim() : mark.Value,
+                    value = mark.Type == ManuscriptMarkType.Language
+                        ? PublicationLanguage.NormalizeOptional(mark.Value)
+                        : mark.Value,
                 }).ToArray(),
+        }).ToArray(),
+    };
+
+    private static CompositionScene NormalizeSceneLanguages(CompositionScene scene) => scene with
+    {
+        Objects = scene.Objects.Select(item => item with
+        {
+            Language = PublicationLanguage.NormalizeOptional(item.Language) ?? string.Empty,
         }).ToArray(),
     };
 

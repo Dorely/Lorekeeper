@@ -911,9 +911,10 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             var caption = string.IsNullOrWhiteSpace(placement.Caption) || presentation.CaptionPlacement == FigureCaptionPlacement.Hidden
                 ? string.Empty
                 : $"<figcaption>{Html(placement.Caption)}</figcaption>";
+            var language = PublicationLanguage.Normalize(placement.Language);
             sb.Append("<figure class=\"edition-illustration caption-").Append(presentation.CaptionPlacement.ToString().ToLowerInvariant())
-                .Append("\" style=\"").Append(figureCss).Append("\" lang=\"").Append(Html(placement.Language)).Append("\" xml:lang=\"")
-                .Append(Html(placement.Language)).Append("\" data-accessibility-role=\"")
+                .Append("\" style=\"").Append(figureCss).Append("\" lang=\"").Append(Html(language)).Append("\" xml:lang=\"")
+                .Append(Html(language)).Append("\" data-accessibility-role=\"")
                 .Append(Html(placement.AccessibilityRole.ToString().ToLowerInvariant())).Append("\">");
             if (presentation.CaptionPlacement == FigureCaptionPlacement.Above)
                 sb.Append(caption);
@@ -981,8 +982,8 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 var (tag, epubType) = CompositionTextSemantics(item.SemanticRole);
                 sb.Append('<').Append(tag).Append(" class=\"composition-object composition-text\"");
                 if (epubType is not null) sb.Append(" epub:type=\"").Append(epubType).Append('"');
-                if (!string.IsNullOrWhiteSpace(item.Language))
-                    sb.Append(" lang=\"").Append(Html(item.Language)).Append("\" xml:lang=\"").Append(Html(item.Language)).Append('"');
+                if (PublicationLanguage.NormalizeOptional(item.Language) is { } language)
+                    sb.Append(" lang=\"").Append(Html(language)).Append("\" xml:lang=\"").Append(Html(language)).Append('"');
                 sb.Append(" style=\"").Append(style)
                     .Append(";font-family:").Append(Html(FontCssFamily(item.FontFamilyKey))).Append(";font-weight:")
                     .Append(item.FontWeight).Append(";font-style:").Append(item.Italic ? "italic" : "normal")
@@ -1669,7 +1670,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 : "png";
 
     private static string Language(PublishDocument document) =>
-        string.IsNullOrWhiteSpace(document.Profile.Language) ? "en" : document.Profile.Language.Trim();
+        PublicationLanguage.Normalize(document.Profile.Language);
 
     private static string Html(string value) => WebUtility.HtmlEncode(value);
 
@@ -1839,9 +1840,9 @@ internal static class SemanticPublishFormatting
         var content = HtmlInlineContent(block);
         var role = WebUtility.HtmlEncode(block.StyleRole);
         var anchor = $"block-{block.Id:N}";
-        var language = string.IsNullOrWhiteSpace(block.Language)
+        var language = PublicationLanguage.NormalizeOptional(block.Language) is not { } languageTag
             ? string.Empty
-            : $" lang=\"{WebUtility.HtmlEncode(block.Language)}\" xml:lang=\"{WebUtility.HtmlEncode(block.Language)}\"";
+            : $" lang=\"{WebUtility.HtmlEncode(languageTag)}\" xml:lang=\"{WebUtility.HtmlEncode(languageTag)}\"";
         var presentation = ParagraphPresentationAttribute(block.ParagraphPresentation);
         return block.Type switch
         {
@@ -1907,9 +1908,9 @@ internal static class SemanticPublishFormatting
             || presentation.CaptionPlacement == FigureCaptionPlacement.Hidden
             ? string.Empty
             : $"<figcaption>{content}</figcaption>";
-        var language = string.IsNullOrWhiteSpace(block.Language)
+        var language = PublicationLanguage.NormalizeOptional(block.Language) is not { } languageTag
             ? string.Empty
-            : $" lang=\"{WebUtility.HtmlEncode(block.Language)}\" xml:lang=\"{WebUtility.HtmlEncode(block.Language)}\"";
+            : $" lang=\"{WebUtility.HtmlEncode(languageTag)}\" xml:lang=\"{WebUtility.HtmlEncode(languageTag)}\"";
         var decorative = block.Decorative ? " role=\"presentation\" aria-hidden=\"true\"" : string.Empty;
         var figureStyle = new StringBuilder();
         var outputWidth = presentation.Placement is FigurePlacementIntent.FullWidth or FigurePlacementIntent.FullBleed
@@ -1965,7 +1966,7 @@ internal static class SemanticPublishFormatting
                 ManuscriptMarkType.Strikethrough => $"~~{text}~~",
                 ManuscriptMarkType.Link =>
                     $"<a href=\"{WebUtility.HtmlEncode(mark.Value!)}\">{text}</a>",
-                ManuscriptMarkType.Language => $"<span lang=\"{WebUtility.HtmlEncode(mark.Value!)}\">{text}</span>",
+                ManuscriptMarkType.Language => $"<span lang=\"{WebUtility.HtmlEncode(PublicationLanguage.Normalize(mark.Value))}\">{text}</span>",
                 ManuscriptMarkType.SmallCaps => $"<span class=\"small-caps\">{text}</span>",
                 ManuscriptMarkType.Superscript => $"<sup>{text}</sup>",
                 ManuscriptMarkType.Subscript => $"<sub>{text}</sub>",
@@ -1990,7 +1991,7 @@ internal static class SemanticPublishFormatting
                 ManuscriptMarkType.Strikethrough => $"<s>{text}</s>",
                 ManuscriptMarkType.Code => $"<code>{text}</code>",
                 ManuscriptMarkType.Link => $"<a href=\"{WebUtility.HtmlEncode(mark.Value)}\">{text}</a>",
-                ManuscriptMarkType.Language => $"<span lang=\"{WebUtility.HtmlEncode(mark.Value)}\">{text}</span>",
+                ManuscriptMarkType.Language => $"<span lang=\"{WebUtility.HtmlEncode(PublicationLanguage.Normalize(mark.Value))}\">{text}</span>",
                 ManuscriptMarkType.SmallCaps => $"<span class=\"small-caps\">{text}</span>",
                 ManuscriptMarkType.Superscript => $"<sup>{text}</sup>",
                 ManuscriptMarkType.Subscript => $"<sub>{text}</sub>",

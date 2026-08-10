@@ -952,7 +952,7 @@ public sealed class PublicationRenderProcessor(
             coverDesign.CompositionSceneJson,
             ManuscriptCodec.JsonOptions);
         if (coverScene is not null)
-            coverScene = CoverCompositionFactory.KeepArtworkBehindCopy(coverScene);
+            coverScene = NormalizeSceneLanguages(CoverCompositionFactory.KeepArtworkBehindCopy(coverScene));
         var usedFontKeys = document.NamedStyles
             .Select(style => style.Definition.FontFamilyKey)
             .Concat(document.Sections.SelectMany(section => section.Chapters)
@@ -1040,9 +1040,9 @@ public sealed class PublicationRenderProcessor(
                         id = variant.Id,
                         variant.GeometryKey,
                         variant.Revision,
-                        scene = CompositionService.WithDerivedTextSemanticRoles(
+                        scene = NormalizeSceneLanguages(CompositionService.WithDerivedTextSemanticRoles(
                             variant.Scene,
-                            composition.SemanticManuscript),
+                            composition.SemanticManuscript)),
                     }).ToArray(),
                 }).ToArray(),
             }).ToArray(),
@@ -1086,7 +1086,7 @@ public sealed class PublicationRenderProcessor(
                 title = string.IsNullOrWhiteSpace(document.DisplayTitle) ? document.ProjectName : document.DisplayTitle,
                 subtitle = document.Profile.Subtitle,
                 author = string.IsNullOrWhiteSpace(document.Profile.Author) ? "Unknown author" : document.Profile.Author,
-                language = string.IsNullOrWhiteSpace(document.Profile.Language) ? "en" : document.Profile.Language,
+                language = PublicationLanguage.Normalize(document.Profile.Language),
                 publisher = document.Profile.Publisher,
                 copyright = document.Profile.Copyright,
                 matter,
@@ -1119,7 +1119,7 @@ public sealed class PublicationRenderProcessor(
                         presentation = placement.Presentation ?? new FigurePresentation { Placement = FigurePlacementIntent.DedicatedPage },
                         placement.AltText,
                         placement.Decorative,
-                        placement.Language,
+                        language = PublicationLanguage.NormalizeOptional(placement.Language),
                         accessibilityRole = placement.AccessibilityRole.ToString(),
                         placement.SortOrder,
                     }).ToArray(),
@@ -1368,7 +1368,7 @@ public sealed class PublicationRenderProcessor(
         caption = string.Concat(block.Content.Select(inline => inline.Text)),
         block.Decorative,
         block.AltText,
-        language = block.Language,
+        language = PublicationLanguage.NormalizeOptional(block.Language),
         accessibilityRole = block.AccessibilityRole.ToString(),
         presentation = block.FigurePresentation,
         paragraphPresentation = block.ParagraphPresentation,
@@ -1380,8 +1380,18 @@ public sealed class PublicationRenderProcessor(
             marks = inline.Marks.Select(mark => new
             {
                 type = mark.Type.ToString(),
-                mark.Value,
+                value = mark.Type == ManuscriptMarkType.Language
+                    ? PublicationLanguage.NormalizeOptional(mark.Value)
+                    : mark.Value,
             }).ToArray(),
+        }).ToArray(),
+    };
+
+    private static CompositionScene NormalizeSceneLanguages(CompositionScene scene) => scene with
+    {
+        Objects = scene.Objects.Select(item => item with
+        {
+            Language = PublicationLanguage.NormalizeOptional(item.Language) ?? string.Empty,
         }).ToArray(),
     };
 

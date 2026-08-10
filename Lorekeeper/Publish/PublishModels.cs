@@ -1,8 +1,58 @@
+using System.Globalization;
 using System.Text.Json.Serialization;
 using Lorekeeper.Models;
 using Lorekeeper.Manuscripts;
 
 namespace Lorekeeper.Publish;
+
+public static class PublicationLanguage
+{
+    private static readonly IReadOnlyDictionary<string, string> KnownNames = BuildKnownNames();
+
+    public static string Normalize(string? value, string fallback = "en") =>
+        NormalizeOptional(value) ?? fallback;
+
+    public static string? NormalizeOptional(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var candidate = value.Trim().Replace('_', '-');
+        try
+        {
+            var culture = CultureInfo.GetCultureInfo(candidate);
+            if (!string.IsNullOrWhiteSpace(culture.Name))
+                return culture.Name;
+        }
+        catch (CultureNotFoundException)
+        {
+        }
+
+        return KnownNames.GetValueOrDefault(candidate, candidate);
+    }
+
+    private static IReadOnlyDictionary<string, string> BuildKnownNames()
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var culture in CultureInfo.GetCultures(CultureTypes.NeutralCultures | CultureTypes.SpecificCultures)
+            .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+            .OrderBy(item => item.IsNeutralCulture ? 0 : 1)
+            .ThenBy(item => item.Name, StringComparer.Ordinal))
+        {
+            result.TryAdd(culture.Name, culture.Name);
+            result.TryAdd(culture.IetfLanguageTag, culture.Name);
+            result.TryAdd(culture.EnglishName, culture.Name);
+            if (culture.IsNeutralCulture)
+                result.TryAdd(culture.TwoLetterISOLanguageName, culture.Name);
+        }
+
+        result["American English"] = "en-US";
+        result["British English"] = "en-GB";
+        result["English (US)"] = "en-US";
+        result["English (UK)"] = "en-GB";
+        return result;
+    }
+}
 
 [JsonConverter(typeof(JsonStringEnumConverter<PublishExportFormat>))]
 public enum PublishExportFormat

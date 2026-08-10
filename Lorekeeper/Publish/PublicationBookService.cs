@@ -211,9 +211,7 @@ public sealed class PublicationBookService(
         {
             ProjectId = projectId,
             Title = project.Name.Trim(),
-            Language = string.IsNullOrWhiteSpace(project.BookBrief?.LanguageLocale)
-                ? "en"
-                : project.BookBrief.LanguageLocale.Trim(),
+            Language = PublicationLanguage.Normalize(project.BookBrief?.LanguageLocale),
             IncludeVisibleTableOfContents = project.BookBrief?.BookKind is not (BookKind.Novel
                 or BookKind.Novella
                 or BookKind.ShortStory
@@ -301,7 +299,8 @@ public sealed class PublicationBookService(
         book.Title = Value(patch.Title, book.Title, clear, nameof(patch.Title));
         book.Subtitle = Value(patch.Subtitle, book.Subtitle, clear, nameof(patch.Subtitle));
         book.Author = Value(patch.Author, book.Author, clear, nameof(patch.Author));
-        book.Language = Value(patch.Language, book.Language, clear, nameof(patch.Language));
+        book.Language = PublicationLanguage.Normalize(
+            Value(patch.Language, book.Language, clear, nameof(patch.Language)));
         book.Publisher = Value(patch.Publisher, book.Publisher, clear, nameof(patch.Publisher));
         book.Copyright = Value(patch.Copyright, book.Copyright, clear, nameof(patch.Copyright));
         book.Description = Value(patch.Description, book.Description, clear, nameof(patch.Description));
@@ -538,7 +537,7 @@ public sealed class PublicationBookService(
             PlacementKind = input.PlacementKind, Caption = input.Caption.Trim(), SortOrder = sortOrder,
             PresentationJson = JsonSerializer.Serialize(input.Presentation ?? new FigurePresentation { Placement = FigurePlacementIntent.DedicatedPage }, ManuscriptCodec.JsonOptions),
             AltText = altText, Decorative = input.Decorative,
-            Language = string.IsNullOrWhiteSpace(input.Language) ? "en" : input.Language.Trim(),
+            Language = PublicationLanguage.Normalize(input.Language),
             AccessibilityRole = input.AccessibilityRole,
         };
         db.PublicationBookImagePlacements.Add(placement);
@@ -597,7 +596,7 @@ public sealed class PublicationBookService(
         placement.PresentationJson = JsonSerializer.Serialize(input.Presentation ?? new FigurePresentation { Placement = FigurePlacementIntent.DedicatedPage }, ManuscriptCodec.JsonOptions);
         placement.AltText = altText;
         placement.Decorative = input.Decorative;
-        placement.Language = string.IsNullOrWhiteSpace(input.Language) ? "en" : input.Language.Trim();
+        placement.Language = PublicationLanguage.Normalize(input.Language);
         placement.AccessibilityRole = input.AccessibilityRole;
         placement.UpdatedAt = DateTime.UtcNow;
         Touch(book);
@@ -1020,7 +1019,7 @@ public sealed class PublicationBookService(
             book.Title,
             book.Subtitle,
             book.Author,
-            book.Language,
+            PublicationLanguage.Normalize(book.Language),
             book.Publisher,
             book.Copyright,
             book.Description,

@@ -80,7 +80,7 @@ public sealed class PublishService(
                 placement.PresentationJson,
                 placement.AltText,
                 placement.Decorative,
-                placement.Language,
+                PublicationLanguage.Normalize(placement.Language),
                 placement.AccessibilityRole,
                 placement.SortOrder))
             .ToList();
@@ -371,7 +371,7 @@ public sealed class PublishService(
                 JsonSerializer.Deserialize<FigurePresentation>(placement.PresentationJson, ManuscriptCodec.JsonOptions) ?? new FigurePresentation(),
                 placement.AltText,
                 placement.Decorative,
-                placement.Language,
+                PublicationLanguage.Normalize(placement.Language),
                 placement.AccessibilityRole,
                 placement.SortOrder))
             .ToList();
@@ -548,7 +548,7 @@ public sealed class PublishService(
         TitleOverride = core.Title,
         Subtitle = core.Subtitle,
         Author = core.Author,
-        Language = core.Language,
+        Language = PublicationLanguage.Normalize(core.Language),
         Publisher = core.Publisher,
         Copyright = core.Copyright,
         Description = core.Description,
@@ -600,7 +600,7 @@ public sealed class PublishService(
         PresentationJson = item.PresentationJson,
         AltText = item.AltText,
         Decorative = item.Decorative,
-        Language = item.Language,
+        Language = PublicationLanguage.Normalize(item.Language),
         AccessibilityRole = item.AccessibilityRole,
         SortOrder = item.SortOrder,
     };
@@ -626,7 +626,7 @@ public sealed class PublishService(
             profile.TitleOverride,
             profile.Subtitle,
             profile.Author,
-            profile.Language,
+            PublicationLanguage.Normalize(profile.Language),
             profile.Publisher,
             profile.Copyright,
             PublicationIsbn.CanonicalForOutput(profile.Isbn),
@@ -757,7 +757,7 @@ public sealed class PublishService(
             JsonSerializer.Deserialize<FigurePresentation>(placement.PresentationJson, ManuscriptCodec.JsonOptions) ?? new FigurePresentation(),
             placement.AltText,
             placement.Decorative,
-            placement.Language,
+            PublicationLanguage.Normalize(placement.Language),
             placement.AccessibilityRole,
             placement.SortOrder);
 
@@ -837,12 +837,20 @@ public sealed class PublishService(
                     .Select(variant => new PublishPageCompositionVariantDocument(
                     variant.Id,
                     variant.GeometryKey,
-                    PdfPresentationScene(
+                    NormalizeSceneLanguages(PdfPresentationScene(
                         JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
                             ?? throw new InvalidOperationException($"Page composition {composition.Id:N} has no scene."),
-                        profile),
+                        profile)),
                     variant.Revision)).ToList())).ToList());
     }
+
+    private static CompositionScene NormalizeSceneLanguages(CompositionScene scene) => scene with
+    {
+        Objects = scene.Objects.Select(item => item with
+        {
+            Language = PublicationLanguage.NormalizeOptional(item.Language) ?? string.Empty,
+        }).ToArray(),
+    };
 
     private static CompositionScene PdfPresentationScene(CompositionScene scene, PublicationEdition profile)
     {

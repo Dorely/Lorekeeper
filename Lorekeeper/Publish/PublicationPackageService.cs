@@ -231,6 +231,7 @@ public sealed class PublicationPackageService(
         CancellationToken cancellationToken = default)
     {
         var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
+        edition.Language = PublicationLanguage.Normalize(edition.Language);
         var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
         var artifacts = await db.PublicationArtifacts.AsNoTracking()
             .Where(artifact => artifact.EditionId == editionId
@@ -1315,9 +1316,9 @@ public sealed class PublicationPackageService(
     }
 
     private static bool IsEnglishLanguage(string? value) =>
-        !string.IsNullOrWhiteSpace(value)
-        && (string.Equals(value, "en", StringComparison.OrdinalIgnoreCase)
-            || value.StartsWith("en-", StringComparison.OrdinalIgnoreCase));
+        PublicationLanguage.NormalizeOptional(value) is { } language
+        && (string.Equals(language, "en", StringComparison.OrdinalIgnoreCase)
+            || language.StartsWith("en-", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsSupportedLatinRune(Rune rune) =>
         rune.Value <= 0x024F

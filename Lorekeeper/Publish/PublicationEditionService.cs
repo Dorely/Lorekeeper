@@ -206,7 +206,7 @@ public sealed class PublicationEditionService(
         edition.TitleOverride = Clean(input.TitleOverride);
         edition.Subtitle = Clean(input.Subtitle);
         edition.Author = Clean(input.Author);
-        edition.Language = string.IsNullOrWhiteSpace(input.Language) ? "en" : Clean(input.Language);
+        edition.Language = PublicationLanguage.Normalize(input.Language);
         edition.Publisher = Clean(input.Publisher);
         edition.Copyright = Clean(input.Copyright);
         edition.Isbn = normalizedIsbn;
@@ -262,7 +262,8 @@ public sealed class PublicationEditionService(
         Override(fields, PublicationEditionOverrideField.Title, patch.Title, value => edition.TitleOverride = value);
         Override(fields, PublicationEditionOverrideField.Subtitle, patch.Subtitle, value => edition.Subtitle = value);
         Override(fields, PublicationEditionOverrideField.Author, patch.Author, value => edition.Author = value);
-        Override(fields, PublicationEditionOverrideField.Language, patch.Language, value => edition.Language = value);
+        Override(fields, PublicationEditionOverrideField.Language, patch.Language,
+            value => edition.Language = PublicationLanguage.Normalize(value));
         Override(fields, PublicationEditionOverrideField.Publisher, patch.Publisher, value => edition.Publisher = value);
         Override(fields, PublicationEditionOverrideField.Copyright, patch.Copyright, value => edition.Copyright = value);
         Override(fields, PublicationEditionOverrideField.Description, patch.Description, value => edition.Description = value);
@@ -739,7 +740,7 @@ public sealed class PublicationEditionService(
             PresentationJson = JsonSerializer.Serialize(presentation, ManuscriptCodec.JsonOptions),
             AltText = input.Decorative ? string.Empty : altText,
             Decorative = input.Decorative,
-            Language = Clean(input.Language),
+            Language = PublicationLanguage.Normalize(input.Language),
             AccessibilityRole = input.AccessibilityRole,
             SortOrder = order + 1,
         };
@@ -825,7 +826,7 @@ public sealed class PublicationEditionService(
         placement.PresentationJson = JsonSerializer.Serialize(presentation, ManuscriptCodec.JsonOptions);
         placement.AltText = input.Decorative ? string.Empty : altText;
         placement.Decorative = input.Decorative;
-        placement.Language = Clean(input.Language);
+        placement.Language = PublicationLanguage.Normalize(input.Language);
         placement.AccessibilityRole = input.AccessibilityRole;
         placement.IsExcluded = false;
         placement.UpdatedAt = DateTime.UtcNow;
@@ -1483,7 +1484,7 @@ public sealed class PublicationEditionService(
         string.Equals(edition.TitleOverride, Clean(input.TitleOverride), StringComparison.Ordinal)
         && string.Equals(edition.Subtitle, Clean(input.Subtitle), StringComparison.Ordinal)
         && string.Equals(edition.Author, Clean(input.Author), StringComparison.Ordinal)
-        && string.Equals(edition.Language, string.IsNullOrWhiteSpace(input.Language) ? "en" : Clean(input.Language), StringComparison.OrdinalIgnoreCase)
+        && string.Equals(edition.Language, PublicationLanguage.Normalize(input.Language), StringComparison.OrdinalIgnoreCase)
         && string.Equals(edition.Publisher, Clean(input.Publisher), StringComparison.Ordinal)
         && string.Equals(edition.Copyright, Clean(input.Copyright), StringComparison.Ordinal)
         && string.Equals(edition.Description, Clean(input.Description), StringComparison.Ordinal)
