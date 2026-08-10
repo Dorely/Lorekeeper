@@ -7,6 +7,13 @@ namespace Lorekeeper.Llm;
 /// </summary>
 public static class AssistantWorkflowInstructions
 {
+    public const string CanonicalAppearanceImages = """
+        Canonical appearance images:
+        - Generate or edit an image only when the user explicitly asks to establish or revise an entity's canonical visual appearance or design. Ordinary manuscript illustration, page composition, and cover work belong to Editor, Images, or Publish.
+        - Generation and editing create unattached project images without layout geometry. Inspect the completed image, then attach its project-image ID to the intended entity with a separate canonical-reference tool call in the same turn.
+        - Never imply that generating an image attached it to an entity. If generation fails, is cancelled, or times out, do not create an attachment.
+        """;
+
     public const string NonReplayedToolHistory = """
         Context lifetime:
         - Persisted user and assistant text is replayed between turns. Prior tool calls, tool results, and model-only image attachments are intentionally not replayed so the user does not have to manage an ever-growing tool transcript.
@@ -262,13 +269,14 @@ public static class AssistantWorkflowInstructions
         - Call list_outline early in the conversation, and again after major changes, to stay synced with the current outline. The result includes projectFacts and a beatCount per chapter.
         - Use tools for concrete changes. High-level authorial intent lives in the Book Brief; story structure and canon live in acts, chapters, beats, entities, links, and narrowly scoped project facts. Do not write the outline only as prose in chat.
         - Use update_book_brief in the same turn whenever the user commits to a Book Brief direction. Null patch fields are unchanged and clearFields explicitly removes values. Brief updates apply directly even when Review edits is enabled.
-        - Chapters are format-neutral structural containers. Plan visual treatment with Figure placeholders, Designed Pages, facing spreads, semantic styles, and edition variants at the block or page level. A direct request to add or change visual structure should be executed with sensible defaults; stay in recommendation mode only when the user specifically asks to brainstorm, compare, or decide collaboratively.
-        - When the user asks about written chapter text, wants beats inferred from prose, or asks you to reconcile the outline with an existing draft, use read_chapter after list_outline gives you the relevant chapter id. For long chapters, read focused line ranges instead of the whole body when that is enough.
+        - Chapters are format-neutral structural containers. Recommend or describe desired Figures, Designed Pages, spreads, and other visual beats in chapter synopses or beats when useful, but do not insert or edit manuscript blocks, Figures, page compositions, or authoring geometry. Manuscript synchronization and page-layout execution are Editor work.
+        - Synopsis and beat text is ordinary outline data, including copy the user labels as exact chapter text. Store it there when requested; do not attempt to move or synchronize it into the manuscript.
+        - Use read_chapter only when manuscript text is explicitly relevant to the user's request, such as inferring beats from existing prose or reconciling the structural outline with a draft. For long chapters, read focused line ranges when enough. Reading manuscript text never authorizes changing it.
         - Before creating a Character, Location, ProjectFact, or other project-scoped entity, inspect likely existing matches with list_outline or search_entities when a duplicate is plausible. Update or link an existing entity when it is the same story subject.
         - Prefer the narrowest canonical home for information: the Book Brief for the project's creative target; acts and chapters for outline structure; Event entities for beats; Character/Location/custom entities for story subjects; links for relationships; and ProjectFacts only for canon or global constraints that fit nowhere else. Never create new outline.* facts for Book Brief fields.
         - AutoMention links are low-priority text mention hints. Manual graph links remain the authoritative relationship layer; create or update manual links only when the source evidence shows a meaningful relationship.
         - Rework requests replace the current canonical story state. Do not record that a rework happened unless the user explicitly asks for a change log; remove or overwrite obsolete wording when the requested target is clear.
-        - When Review edits is enabled, new acts, chapters, entities, beats/facts, and first prose in an empty chapter may apply immediately; changes to existing story data are staged for author approval. Mutation results that include updated/staged payloads count as verification; use list_outline, search_entities, read_entity, or list_entity_links only when the result is insufficient, surprising, ambiguous, or errored.
+        - When Review edits is enabled, new acts, chapters, entities, and beats/facts may apply immediately; changes to existing story data are staged for author approval. Mutation results that include updated/staged payloads count as verification; use list_outline, search_entities, read_entity, or list_entity_links only when the result is insufficient, surprising, ambiguous, or errored.
         - When Review edits is disabled, mutating tools apply immediately. Mutation results that include current payloads count as persisted-state verification; read back only when more context is needed.
         - When the user asks you to look in a specific source text, first resolve the source with list_search_sources when needed, read it with read_project_source, then call search_project with sourceIds or containerSourceId and lexicalOnly=true. Do not broaden to global project search unless the filtered search fails and the user allows broadening.
         - Entity/link reads and large Context Feed entity blocks use explicit JSON-path pages with full identity fields repeated. Follow nextPageArguments for omitted pages; read labeled oversized-field segments in order.

@@ -450,7 +450,7 @@ public sealed class AiChangeApprovalService(
                 await chapters.UpdateAsync(after.Id, after.Title, after.Synopsis, new ChapterActAssignment(after.ActId), cancellationToken);
                 break;
             }
-            case "insert_outline_designed_page":
+            case "insert_manuscript_designed_page":
             {
                 var before = ReadRequired<ChapterManuscriptChange>(change.BeforeJson);
                 var after = ReadRequired<ChapterManuscriptChange>(afterJson);
@@ -519,8 +519,6 @@ public sealed class AiChangeApprovalService(
             case "apply_assigned_manuscript_operations":
             case "insert_manuscript_figure":
             case "patch_manuscript_figure":
-            case "insert_outline_figure":
-            case "patch_outline_figure":
             {
                 var before = ReadOptional<ChapterManuscriptChange>(change.BeforeJson);
                 var after = ReadRequired<ChapterManuscriptChange>(afterJson);

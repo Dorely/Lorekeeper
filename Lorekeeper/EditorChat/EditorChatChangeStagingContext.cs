@@ -10,7 +10,7 @@ namespace Lorekeeper.EditorChat;
 public sealed class EditorChatChangeStagingContext(
     Guid projectId,
     Guid conversationId,
-    IAiChangeRepository changes) : IChapterManuscriptChangeStagingContext
+    IAiChangeRepository changes)
 {
     private static readonly JsonSerializerOptions ChangeJsonOptions = new(JsonSerializerDefaults.Web)
     {

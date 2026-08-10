@@ -182,6 +182,29 @@ before disposing its async enumerator, so a terminal job cannot end the parent
 turn with a concurrent-disposal `NotSupportedException`. Tool contracts,
 prompts, persistence, review UI, and approval behavior must evolve together.
 
+Outline Chat is a structural-planning and canon surface. Its normal system
+prompt includes Project Guidance, the Book Brief, and structure-only
+genre/audience guidance; publication releases are not queried or injected.
+Outline can mutate the Book Brief, acts, chapters, synopses, beats, entities,
+links, and project facts, and can search/read project sources. Chapter-body
+reads are available only for explicitly relevant reconciliation or inference,
+but Outline has no manuscript, Figure, Designed Page, composition, page-setup,
+or geometry-target mutation tools. Desired illustrations and spatial treatment
+remain synopsis/beat planning notes until Editor performs the authoring work.
+Canonical-appearance generation is the sole Outline image workflow: it produces
+an unattached project image without geometry, then a separate entity-reference
+tool attaches the inspected result. Publication-aware book-format guidance is
+available only through an explicit on-demand scope.
+
+`OutlineCollaborationTools` owns a shared structural/canon catalog and exposes
+intentional surface subsets rather than making Editor filter the entire Outline
+surface. Editor retains full outline/entity mutation access alongside its own
+manuscript and composition catalog, including
+`insert_manuscript_designed_page`. Outline's `delete_chapter` tool rejects a
+chapter containing semantic text, a scene break, Figure, Designed Page, or any
+other meaningful manuscript block with `CHAPTER_HAS_MANUSCRIPT`; Editor's tool
+surface and the manual UI continue to use the unrestricted chapter service.
+
 `AiChangeRepository` keeps pending-review reads no-tracking, but its mutation
 methods update only the root `AiChange` or `AiChangeBatch` row. They reuse a
 locally tracked instance when one exists and copy scalar values onto it;
@@ -194,7 +217,7 @@ Only chapters whose current and proposed manuscripts are plain body paragraphs
 and scene breaks use the line-oriented Review tab. Figure, Designed Page,
 semantic-style, inline-formatting, or other structured manuscript changes remain
 in the pending-edits modal, which shows body text plus separate structure and
-visual-block diffs. Focused Figure tools and Designed Page insertion obey the
+visual-block diffs. Focused Figure tools and Editor-owned Designed Page insertion obey the
 same Review-edits staging boundary as the general manuscript preview/apply
 protocol. A staged Designed Page preallocates its composition and manuscript
 block IDs and retains its project authoring geometry and page/spread mode.
@@ -239,8 +262,10 @@ boundary for Outline, Editor, Images, and Publish. It creates one unattached
 project-image job, registers its durable job ID, waits to a readable terminal
 state, cancels timed-out or interrupted work, and returns compact status,
 project-image IDs, diagnostics, and temporary visual context. Geometry
-descriptors guide prompt composition and provider-canvas choice only. Focused
-Figure, Designed Page, cover, and canonical-reference tools consume a completed
+descriptors guide prompt composition and provider-canvas choice only. Outline
+requests omit geometry and are restricted by prompt and tool contract to
+explicit canonical entity-appearance work. Focused Figure, Designed Page,
+cover, and canonical-reference tools consume a completed
 image ID in a subsequent tool round; revision conflicts never discard or
 regenerate that library asset. Job read/wait/cancel tools reconnect without
 replaying the original prompt, and persisted chat never stores image bytes or

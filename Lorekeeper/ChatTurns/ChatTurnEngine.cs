@@ -51,10 +51,6 @@ public sealed record ChatToolCallManifest(
         "stage_page_composition_workspace",
         "stage_publication_composition_semantic",
         "stage_publication_composition_workspace",
-        "stage_outline_page_composition",
-        "stage_outline_composition_semantic",
-        "stage_outline_composition_workspace",
-        "stage_outline_cover_composition",
     };
 
     public static ChatToolCallManifest From(ChatPendingToolCall call) =>

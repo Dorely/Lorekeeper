@@ -114,30 +114,9 @@ public sealed class ResearchTools(
                 description: "After the user confirms storage, promote an inspected web image and attach it to one entity only when it is a stable canonical appearance or design reference. If the entity occupies part of a broader image, pass a tight subject-only crop and cropAltText. Make a separate crop/import call for each entity; do not attach ordinary narrative scenes or ambiguous images."),
         };
 
-        var allowedGraphToolNames = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "list_entity_types",
-            "list_search_sources",
-            "read_project_source",
-            "search_project",
-            "search_entities",
-            "create_entity",
-            "update_entity",
-            "link_entities",
-            "list_entity_canonical_references",
-            "attach_entity_canonical_reference",
-            "update_entity_canonical_reference",
-            "detach_entity_canonical_reference",
-            "crop_project_image",
-        };
-
         var outlineContext = new OutlineCollaborationContext(
             context.ProjectId, context.OnMutated, context.Staging, context.VisionReady, context.QueueEntityVisuals);
-        foreach (var tool in (await outlineTools.BuildAsync(outlineContext, cancellationToken)).OfType<AIFunction>())
-        {
-            if (allowedGraphToolNames.Contains(tool.Name))
-                tools.Add(tool);
-        }
+        tools.AddRange(await outlineTools.BuildResearchSharedAsync(outlineContext));
 
         return tools;
     }

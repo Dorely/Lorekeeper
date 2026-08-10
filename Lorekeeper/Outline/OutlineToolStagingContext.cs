@@ -6,9 +6,7 @@ using Lorekeeper.Chapters;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Ingest;
 using Lorekeeper.Models;
-using Lorekeeper.Manuscripts;
 using Lorekeeper.Persistence.Repositories;
-using Lorekeeper.Persistence;
 
 namespace Lorekeeper.Outline;
 
@@ -23,8 +21,7 @@ public sealed class OutlineToolStagingContext(
     IEntityService entities,
     IEntityTypeService entityTypes,
     IEntityVisualExampleService entityVisualExamples,
-    AppDbContext db,
-    Action? onDirectMutationApplied = null) : IChapterManuscriptChangeStagingContext
+    Action? onDirectMutationApplied = null)
 {
     private const string _eventNodeType = "Event";
 
@@ -38,7 +35,6 @@ public sealed class OutlineToolStagingContext(
 
     private readonly Dictionary<Guid, ActState> _acts = [];
     private readonly Dictionary<Guid, ChapterState> _chapters = [];
-    private readonly Dictionary<Guid, ManuscriptDocument> _chapterManuscriptDrafts = [];
     private readonly Dictionary<Guid, EntityState> _entities = [];
     private readonly Dictionary<string, EntityTypeDefinition> _entityTypes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Guid> _createdResourceProducers = new(StringComparer.OrdinalIgnoreCase);
@@ -74,57 +70,9 @@ public sealed class OutlineToolStagingContext(
         return result;
     }
 
-    public bool TryGetChapterManuscriptDraft(Guid chapterId, out ManuscriptDocument document) =>
-        _chapterManuscriptDrafts.TryGetValue(chapterId, out document!);
-
-    public async Task StageChapterManuscriptEditAsync(
-        Chapter chapter,
-        ManuscriptDocument beforeDocument,
-        ManuscriptDocument afterDocument,
-        string summary,
-        string resultJson,
-        CancellationToken cancellationToken = default)
-    {
-        await EnsureLoadedAsync(cancellationToken);
-        if (TryGetChapterManuscriptDraft(chapter.Id, out var currentDraft)
-            && (beforeDocument.Revision != currentDraft.Revision
-                || !ManuscriptCodec.ContentEquals(beforeDocument, currentDraft)))
-        {
-            throw new ManuscriptRevisionConflictException(beforeDocument.Revision, currentDraft.Revision);
-        }
-
-        var before = new ChapterManuscriptChange(
-            chapter.Id,
-            chapter.Title,
-            beforeDocument.Revision,
-            ManuscriptCodec.Serialize(beforeDocument));
-        var after = new ChapterManuscriptChange(
-            chapter.Id,
-            chapter.Title,
-            afterDocument.Revision,
-            ManuscriptCodec.Serialize(afterDocument));
-        await StageChangeAsync(
-            summary,
-            before,
-            after,
-            resultJson,
-            resourceKind: "ChapterManuscript",
-            resourceId: Resource("Chapter", chapter.Id),
-            createdResources: [],
-            referencedResources: [Resource("Chapter", chapter.Id)],
-            cancellationToken);
-        _chapterManuscriptDrafts[chapter.Id] = afterDocument;
-        if (_chapters.TryGetValue(chapter.Id, out var state))
-        {
-            state.FigureCount = afterDocument.Content.Count(block => block.Type == ManuscriptBlockType.Figure);
-            state.DesignedPageCount = afterDocument.Content.Count(block => block.Type == ManuscriptBlockType.DesignedPage);
-        }
-    }
-
     public async Task<string> ListOutlineAsync(CancellationToken cancellationToken = default)
     {
         await EnsureLoadedAsync(cancellationToken);
-        var visualMetrics = await OutlineVisualMetrics.ReadAsync(db, ProjectId, cancellationToken);
 
         object ProjectChapter(ChapterState chapter) => new
         {
@@ -132,11 +80,6 @@ public sealed class OutlineToolStagingContext(
             order = chapter.Order,
             title = chapter.Title,
             synopsis = chapter.Synopsis,
-            figureCount = chapter.FigureCount,
-            designedPageCount = chapter.DesignedPageCount,
-            designedSpreadCount = visualMetrics.GetValueOrDefault(chapter.Id)?.DesignedSpreadCount ?? 0,
-            layoutDiagnosticCount = visualMetrics.GetValueOrDefault(chapter.Id)?.LayoutDiagnosticCount ?? 0,
-            visualTreatment = visualMetrics.GetValueOrDefault(chapter.Id)?.Summary,
             beatCount = _entities.Values.Count(entity =>
                 !entity.Deleted
                 && string.Equals(entity.Type, _eventNodeType, StringComparison.OrdinalIgnoreCase)
@@ -1478,8 +1421,6 @@ public sealed class OutlineToolStagingContext(
         order = chapter.Order,
         title = chapter.Title,
         synopsis = chapter.Synopsis,
-        figureCount = chapter.FigureCount,
-        designedPageCount = chapter.DesignedPageCount,
     };
 
     private static string Serialize(object? value) => JsonSerializer.Serialize(value, JsonSerializerOptions.Default);
@@ -1500,31 +1441,24 @@ public sealed class OutlineToolStagingContext(
         int Order,
         string Title,
         string Synopsis,
-        int FigureCount,
-        int DesignedPageCount,
         bool Deleted)
     {
         public Guid? ActId { get; set; } = ActId;
         public int Order { get; set; } = Order;
         public string Title { get; set; } = Title;
         public string Synopsis { get; set; } = Synopsis;
-        public int FigureCount { get; set; } = FigureCount;
-        public int DesignedPageCount { get; set; } = DesignedPageCount;
         public bool Deleted { get; set; } = Deleted;
 
         public OutlineChapterChange ToChange() => new(Id, ActId, Order, Title, Synopsis);
 
         public static ChapterState From(Chapter chapter)
         {
-            var manuscript = chapter.Manuscript;
             return new ChapterState(
                 chapter.Id,
                 chapter.ActId,
                 chapter.Order,
                 chapter.Title,
                 chapter.Synopsis,
-                manuscript.Content.Count(block => block.Type == Lorekeeper.Manuscripts.ManuscriptBlockType.Figure),
-                manuscript.Content.Count(block => block.Type == Lorekeeper.Manuscripts.ManuscriptBlockType.DesignedPage),
                 Deleted: false);
         }
     }

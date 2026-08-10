@@ -85,7 +85,7 @@ public sealed class SystemPromptComposer(
                 "dynamic-guidance",
                 SystemPromptSectionKind.DynamicGuidance,
                 "Book and Active-Page Guidance",
-                DynamicGuidanceFor(request.BookBrief, request.ActiveChapter, request.PublicationFormats, formatGuidance)),
+                DynamicGuidanceFor(request.BookBrief, request.ActiveChapter, request.AgentRole, request.PublicationFormats, formatGuidance)),
             new(
                 "project-guidance",
                 SystemPromptSectionKind.ProjectGuidance,
@@ -168,11 +168,15 @@ public sealed class SystemPromptComposer(
     private static string DynamicGuidanceFor(
         BookBrief brief,
         Chapter? chapter,
+        SystemPromptAgentRole agentRole,
         IReadOnlyCollection<PublicationEditionFormat>? formats,
         IBookFormatGuidanceService formatGuidance)
     {
         var builder = new StringBuilder();
-        builder.Append(formatGuidance.GetConcise(brief, formats));
+        var guidanceScope = agentRole == SystemPromptAgentRole.Outline
+            ? BookFormatGuidanceScope.StructureOnly
+            : BookFormatGuidanceScope.StructureAndPublication;
+        builder.Append(formatGuidance.GetConcise(brief, guidanceScope, formats));
 
         if (chapter is null)
         {

@@ -49,15 +49,6 @@ public sealed class EditorChatTools(
     IOptions<EditorChatOptions> editorOptions,
     IOptions<ProjectImageGenerationOptions> imageOptions)
 {
-    private static readonly HashSet<string> ImportedOutlineToolNames =
-    [
-        "list_outline", "create_act", "update_act", "delete_act",
-        "create_chapter", "update_chapter", "delete_chapter",
-        "reorder_acts", "reorder_chapters", "insert_outline_designed_page",
-        "list_entity_types", "create_entity", "update_entity", "delete_entity",
-        "reorder_entities", "link_entities", "read_book_format_guidance", "update_book_brief",
-    ];
-
     private static readonly EntityRelationContextOptions _listEntityRelationOptions = new()
     {
         Depth = 2,
@@ -274,6 +265,11 @@ public sealed class EditorChatTools(
                 name: "patch_manuscript_figure",
                 description: "Revision-check replace or reformat one stable Figure while preserving every unrelated manuscript block. Omit caption to preserve it."),
             AIFunctionFactory.Create(
+                method: (Guid chapterId, long expectedRevision, int blockIndex, string name, DesignedPageLayoutMode layoutMode = DesignedPageLayoutMode.SinglePage) =>
+                    InsertDesignedPageAsync(context, chapterId, expectedRevision, blockIndex, name, layoutMode),
+                name: "insert_manuscript_designed_page",
+                description: "Insert an empty single-page or facing-spread Designed Page into a chapter at an exact manuscript revision. Add completed project images afterward through separate focused placement tools."),
+            AIFunctionFactory.Create(
                 method: (
                     string name,
                     string kind,
@@ -463,16 +459,14 @@ public sealed class EditorChatTools(
                 "A successful worker result is already applied or staged; do not rerun it merely because persisted reads still show the pre-review manuscript."));
 
         var existingNames = tools.OfType<AIFunction>().Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var outlineTool in await outlineTools.BuildAsync(new OutlineCollaborationContext(
+        foreach (var outlineTool in await outlineTools.BuildEditorSharedAsync(new OutlineCollaborationContext(
             context.ProjectId,
             context.OnMutated,
             context.OutlineStaging,
             bookBriefUpdatePolicy: BookBriefUpdatePolicy.ExplicitUserRequestOnly,
-            manuscriptStaging: context.EditorStaging), cancellationToken))
+            surface: OutlineToolSurface.Editor)))
         {
-            if (outlineTool is AIFunction function
-                && ImportedOutlineToolNames.Contains(function.Name)
-                && existingNames.Add(function.Name))
+            if (outlineTool is AIFunction function && existingNames.Add(function.Name))
                 tools.Add(outlineTool);
         }
 
@@ -1974,6 +1968,100 @@ public sealed class EditorChatTools(
             return JsonSerializer.Serialize(new { ok = false, code = "FIGURE_REJECTED", targetId = chapterId, summary = ex.Message });
         }
     }
+
+    private async Task<string> InsertDesignedPageAsync(
+        EditorChatContext ctx,
+        Guid chapterId,
+        long expectedRevision,
+        int blockIndex,
+        string name,
+        DesignedPageLayoutMode layoutMode)
+    {
+        var chapter = await chapters.GetAsync(chapterId, ctx.TurnCancellationToken);
+        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
+            return JsonSerializer.Serialize(new { ok = false, code = "CHAPTER_NOT_FOUND", targetId = chapterId, summary = "Chapter was not found in this project." });
+
+        try
+        {
+            var initialContent = new DesignedPageInitialContent { LayoutMode = layoutMode };
+            if (ctx.ReviewEdits && ctx.EditorStaging is not null)
+            {
+                var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken)
+                    ?? throw new KeyNotFoundException("Manuscript was not found.");
+                var source = ctx.EditorStaging.TryGetChapterManuscriptDraft(chapterId, out var staged)
+                    ? staged
+                    : snapshot.Document;
+                if (source.Revision != expectedRevision)
+                    throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
+
+                var identity = new DesignedPageIdentity(Guid.NewGuid(), Guid.NewGuid().ToString("N"));
+                var applied = ManuscriptOperations.Apply(
+                    source,
+                    [new InsertManuscriptBlock(
+                        blockIndex,
+                        ManuscriptBlockType.DesignedPage,
+                        string.Empty,
+                        ManuscriptStyleRoles.DesignedPage,
+                        PageCompositionId: identity.CompositionId,
+                        BlockId: identity.BlockId)]);
+                var stagedResult = JsonSerializer.Serialize(new
+                {
+                    ok = true,
+                    staged = true,
+                    requiresReview = true,
+                    targetId = identity.CompositionId,
+                    revision = applied.Document.Revision,
+                    changedIds = applied.ChangedBlockIds,
+                    variantId = (Guid?)null,
+                    layoutMode,
+                    summary = $"{LayoutLabel(layoutMode)} Designed Page is ready for review.",
+                });
+                await ctx.EditorStaging.StageChapterManuscriptEditAsync(
+                    chapter,
+                    source,
+                    applied.Document,
+                    $"Insert {LayoutLabel(layoutMode)} Designed Page '{(string.IsNullOrWhiteSpace(name) ? "Designed page" : name.Trim())}'",
+                    stagedResult,
+                    ctx.TurnCancellationToken);
+                return stagedResult;
+            }
+
+            var result = await compositions.CreateDesignedPageAsync(
+                ctx.ProjectId,
+                chapterId,
+                blockIndex,
+                name,
+                expectedRevision,
+                initialContent,
+                ctx.TurnCancellationToken);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                targetId = result.Composition.Id,
+                revision = result.Manuscript.Revision,
+                changedIds = new[] { result.BlockId },
+                variantId = result.Variant?.Id,
+                layoutMode,
+                summary = "Designed Page inserted.",
+                mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant?.Id },
+            });
+        }
+        catch (ManuscriptRevisionConflictException ex)
+        {
+            return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = chapterId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the manuscript and retry against its current revision." });
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException)
+        {
+            return JsonSerializer.Serialize(new { ok = false, code = "COMPOSITION_REJECTED", targetId = chapterId, summary = ex.Message });
+        }
+    }
+
+    private static string LayoutLabel(DesignedPageLayoutMode layoutMode) => layoutMode switch
+    {
+        DesignedPageLayoutMode.FacingSpread => "facing-spread",
+        _ => "single-page",
+    };
 
     private async Task<string> ApplyFocusedManuscriptOperationsAsync(
         EditorChatContext ctx,
