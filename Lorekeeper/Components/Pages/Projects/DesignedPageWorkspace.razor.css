@@ -114,7 +114,8 @@
 .composition-details-panel h3 { margin-top: .8rem; font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; }
 .composition-details-panel label { display: grid; gap: .2rem; margin-bottom: .5rem; font-size: .72rem; }
 .composition-details-panel input,.composition-details-panel textarea,.composition-details-panel select { width: 100%; border: 1px solid #cbd2df; border-radius: .3rem; padding: .32rem; background: white; }
-.composition-details-panel input[type="checkbox"] { width: auto; margin: 0; }
+.composition-details-panel label:has(> input[type="checkbox"]) { display: inline-flex; align-items: center; gap: .4rem; width: 100%; }
+.composition-details-panel input[type="checkbox"] { flex: 0 0 auto; width: 1rem; height: 1rem; min-height: 0; margin: 0; padding: 0; }
 .composition-details-panel > button { width: 100%; margin-bottom: .5rem; border: 1px solid #cbd2df; border-radius: .35rem; background: white; }
 .composition-details-panel .selected,.composition-variant-list .selected { border-color: #4568d4; background: #edf1ff; }
 .composition-current-image { display: grid; grid-template-columns: 3.25rem minmax(0,1fr); gap: .45rem; align-items: center; margin-bottom: .55rem; padding: .4rem; border: 1px solid #cbd2df; border-radius: .4rem; background: white; }
