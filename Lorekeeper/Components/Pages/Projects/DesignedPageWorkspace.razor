@@ -192,14 +192,12 @@
                                     }
                                     <button type="button" @onclick="() => OpenReplaceImagePicker(selected.Id)">Replace image</button>
                                 </div>
-                                <label><input type="checkbox" checked="@RetainsAspectRatio(selected)" @onchange="e => SetRetainAspectRatioAsync(selected, (bool)e.Value!)" /> Retain aspect ratio</label>
                                 <button type="button" @onclick="() => FillCanvasAsync(selected)">Fill canvas</button>
                                 @if (selected.ImageFit == FigureImageFit.Cover)
                                 {
                                     <button type="button" class="@(IsCropRepositioning(selected) ? "selected" : null)" @onclick="() => ToggleCropReposition(selected)">@(IsCropRepositioning(selected) ? "Finish repositioning" : "Reposition crop")</button>
                                 }
                                 <label>Alternative text<textarea value="@selected.AltText" @onchange="e => SetAltText(selected, e.Value?.ToString() ?? string.Empty)"></textarea></label>
-                                <label><input type="checkbox" checked="@selected.Decorative" @onchange="e => SetDecorative(selected, (bool)e.Value!)" /> Decorative</label>
                             }
                             @if (selected.Kind == CompositionObjectKind.Text)
                             {
@@ -872,7 +870,6 @@
     }
     private void DeleteStyle(Guid styleId) { Snapshot(); _styles.RemoveAll(style => style.Id == styleId); _objects = _objects.Select(item => item.StyleId == styleId ? item with { StyleId = null } : item).ToList(); MarkDirty(); }
     private void SetAltText(CompositionObject item, string altText) { altText = altText.Trim(); Patch(item with { AltText = altText, Decorative = false, AccessibilityDecisionPending = altText.Length == 0, SemanticRole = CompositionSemanticRole.Figure, ReadingOrder = item.ReadingOrder ?? NextReadingOrder() }); }
-    private void SetDecorative(CompositionObject item, bool decorative) => Patch(item with { Decorative = decorative, AltText = decorative ? string.Empty : item.AltText, AccessibilityDecisionPending = !decorative && string.IsNullOrWhiteSpace(item.AltText), SemanticRole = decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure, ReadingOrder = decorative ? null : item.ReadingOrder ?? NextReadingOrder() });
     private int NextReadingOrder() => _objects.Where(o => o.ReadingOrder is not null).Select(o => o.ReadingOrder!.Value).DefaultIfEmpty().Max() + 1;
     private void ToggleGroupSelection(Guid id, bool selected) { if (selected) _groupSelection.Add(id); else _groupSelection.Remove(id); }
     private void GroupSelected()
