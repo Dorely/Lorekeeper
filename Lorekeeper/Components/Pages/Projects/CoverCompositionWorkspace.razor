@@ -15,7 +15,13 @@
 
 <div class="cover-composer" aria-label="Cover composition editor" tabindex="0" @onkeydown="HandleKeyDown">
     <style>@((MarkupString)FontFaceCss())</style>
-    @if (!string.IsNullOrWhiteSpace(_error)) { <div class="alert alert-danger m-2">@_error</div> }
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="cover-editor-alert" role="alert">
+            <span>@_error</span>
+            <button type="button" title="Dismiss this message" aria-label="Dismiss cover editor error" @onclick="DismissError">&#215;</button>
+        </div>
+    }
     @if (_cover is null || _scene is null || (!CoreBook && _edition is null))
     {
         <p class="p-3 text-muted">Loading cover composition...</p>
@@ -236,7 +242,70 @@
     private static readonly string[] Bindings = ["title", "subtitle", "author", "spineText", "backCopy"];
     private IEnumerable<string> AvailableBindings => IsPrint ? Bindings : Bindings.Take(3);
 
-    protected override async Task OnParametersSetAsync() { if (_loadedProjectId == ProjectId && _loadedEditionId == EditionId && _loadedCoreBook == CoreBook && _loadedRefreshSignal == RefreshSignal) return; if (_dirty) { await SaveAsync(); if (_dirty) return; } try { _edition = CoreBook ? null : (await Editions.ListAsync(ProjectId)).Single(item => item.Id == EditionId); _cover = CoreBook ? await Books.GetCoverAsync(ProjectId) : await Covers.GetAsync(ProjectId, EditionId); _images = (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg").ToList(); _fontFamilies = await ProjectFonts.ListAsync(ProjectId); _scene = CoverCompositionFactory.KeepArtworkBehindCopy(JsonSerializer.Deserialize<CompositionScene>(_cover.CompositionSceneJson, ManuscriptCodec.JsonOptions) ?? throw new InvalidDataException("Cover scene is empty.")); _objects = _scene.Objects.ToList(); _layers = _scene.Layers.ToList(); _styles = _scene.Styles.ToList(); _selectedId = RequestedSelectionId is Guid requestedId && _objects.Any(item => item.Id == requestedId) ? requestedId : _selectedId is Guid selectedId && _objects.Any(item => item.Id == selectedId) ? selectedId : null; _title = _cover.Title; _subtitle = _cover.Subtitle; _author = _cover.Author; _spineText = _cover.SpineText; _backCopy = _cover.BackCopy; _background = _cover.BackgroundColor; _barcodeMode = _cover.BarcodeMode; _undo.Clear(); _redo.Clear(); _dirty = false; _loadedProjectId = ProjectId; _loadedEditionId = EditionId; _loadedCoreBook = CoreBook; _loadedRefreshSignal = RefreshSignal; } catch (Exception ex) { _error = ex.Message; } }
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedProjectId == ProjectId
+            && _loadedEditionId == EditionId
+            && _loadedCoreBook == CoreBook
+            && _loadedRefreshSignal == RefreshSignal)
+            return;
+        if (_dirty)
+        {
+            await SaveAsync();
+            if (_dirty)
+                return;
+        }
+
+        try
+        {
+            _edition = CoreBook
+                ? null
+                : (await Editions.ListAsync(ProjectId)).Single(item => item.Id == EditionId);
+            _cover = CoreBook
+                ? await Books.GetCoverAsync(ProjectId)
+                : await Covers.GetAsync(ProjectId, EditionId);
+            _images = (await Images.ListAsync(ProjectId))
+                .Where(image => image.ContentType is "image/png" or "image/jpeg")
+                .ToList();
+            _fontFamilies = await ProjectFonts.ListAsync(ProjectId);
+            _scene = CoverCompositionFactory.KeepArtworkBehindCopy(
+                JsonSerializer.Deserialize<CompositionScene>(
+                    _cover.CompositionSceneJson,
+                    ManuscriptCodec.JsonOptions)
+                ?? throw new InvalidDataException("Cover scene is empty."));
+            _objects = _scene.Objects.ToList();
+            _layers = _scene.Layers.ToList();
+            _styles = _scene.Styles.ToList();
+            _selectedId = RequestedSelectionId is Guid requestedId
+                && _objects.Any(item => item.Id == requestedId)
+                    ? requestedId
+                    : _selectedId is Guid selectedId
+                        && _objects.Any(item => item.Id == selectedId)
+                            ? selectedId
+                            : null;
+            _title = _cover.Title;
+            _subtitle = _cover.Subtitle;
+            _author = _cover.Author;
+            _spineText = _cover.SpineText;
+            _backCopy = _cover.BackCopy;
+            _background = _cover.BackgroundColor;
+            _barcodeMode = _cover.BarcodeMode;
+            _undo.Clear();
+            _redo.Clear();
+            _dirty = false;
+            _error = null;
+            _loadedProjectId = ProjectId;
+            _loadedEditionId = EditionId;
+            _loadedCoreBook = CoreBook;
+            _loadedRefreshSignal = RefreshSignal;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void DismissError() => _error = null;
     private void MarkDirty()
     {
         _dirty = true;
@@ -438,9 +507,10 @@
             var changeVersion = _changeVersion;
             var scene = CoverCompositionFactory.KeepArtworkBehindCopy(_scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Objects = _objects.ToList() });
             var update = new PublicationCoverDesignUpdate(_title, _subtitle, _author, IsPrint ? _spineText : "", IsPrint ? _backCopy : "", _background, IsPrint ? _barcodeMode : PublicationBarcodeMode.None, 50, 50, _cover.Revision, true);
-            _cover = CoreBook
-                ? await Books.SaveCoverAsync(ProjectId, _cover.CoreBookRevision ?? throw new InvalidOperationException("Core Book revision is unavailable."), update, scene)
-                : await Covers.SaveWorkspaceAsync(ProjectId, _cover.EditionId, update, scene);
+            var saveProjectId = _loadedProjectId == Guid.Empty ? ProjectId : _loadedProjectId;
+            _cover = _loadedCoreBook
+                ? await Books.SaveCoverAsync(saveProjectId, _cover.CoreBookRevision ?? throw new InvalidOperationException("Core Book revision is unavailable."), update, scene)
+                : await Covers.SaveWorkspaceAsync(saveProjectId, _cover.EditionId, update, scene);
             if (_changeVersion == changeVersion)
             {
                 _scene = scene;

@@ -246,6 +246,7 @@ public sealed class PublicationCoverService(
             throw new DbUpdateConcurrencyException("The cover design changed.");
         }
         var template = await TemplateAsync(edition, design, cancellationToken);
+        scene = ReflowToCurrentGeometry(edition, design, template, scene, out _);
         ValidateScene(scene, edition, template);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         design.Title = update.Title.Trim();
@@ -294,6 +295,7 @@ public sealed class PublicationCoverService(
         if (design.Revision != expectedRevision)
             throw new DbUpdateConcurrencyException("The cover composition changed.");
         var template = await TemplateAsync(edition, design, cancellationToken);
+        scene = ReflowToCurrentGeometry(edition, design, template, scene, out _);
         ValidateScene(scene, edition, template);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         if (db.Entry(design).State == EntityState.Detached)
@@ -338,6 +340,7 @@ public sealed class PublicationCoverService(
         if (design.Revision != expectedRevision)
             throw new DbUpdateConcurrencyException("The cover composition changed.");
         var template = await TemplateAsync(edition, design, cancellationToken);
+        scene = ReflowToCurrentGeometry(edition, design, template, scene, out _);
         ValidateScene(scene, edition, template);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         var payload = System.Text.Json.JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
@@ -392,6 +395,7 @@ public sealed class PublicationCoverService(
         if (design.Revision != expectedRevision)
             throw new DbUpdateConcurrencyException("The cover composition changed after it was staged.");
         var template = await TemplateAsync(edition, design, cancellationToken);
+        scene = ReflowToCurrentGeometry(edition, design, template, scene, out _);
         ValidateScene(scene, edition, template);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         if (db.Entry(design).State == EntityState.Detached)
@@ -457,11 +461,9 @@ public sealed class PublicationCoverService(
             : System.Text.Json.JsonSerializer.Deserialize<CompositionScene>(design.CompositionSceneJson, ManuscriptCodec.JsonOptions)
                 ?? CoverCompositionFactory.Create(edition, design, template.PageCount);
         var expectedGeometry = CoverCompositionFactory.Geometry(edition, template.PageCount);
-        if (Math.Abs(scene.Surface.WidthPoints - expectedGeometry.WidthPoints) > .01
-            || Math.Abs(scene.Surface.HeightPoints - expectedGeometry.HeightPoints) > .01)
+        scene = ReflowToCurrentGeometry(edition, design, template, scene, out var geometryChanged);
+        if (geometryChanged)
         {
-            var oldPageCount = EstimatePageCount(edition, scene.Surface.WidthPoints);
-            scene = CoverCompositionFactory.Reflow(edition, design, scene, oldPageCount, template.PageCount);
             diagnostics.Add("Cover geometry was recalculated. Review constraint-bound objects and save the composition.");
         }
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
@@ -653,6 +655,33 @@ public sealed class PublicationCoverService(
         var trim = edition.PageWidthInches * 72;
         var caliperPoints = (edition.Paper == PublicationPaper.Cream ? .0025 : .002252) * 72;
         return Math.Max(0, (int)Math.Round((widthPoints - trim * 2 - bleed * 2) / caliperPoints));
+    }
+
+    private static CompositionScene ReflowToCurrentGeometry(
+        PublicationEdition edition,
+        PublicationCoverDesign design,
+        PublicationCoverTemplate template,
+        CompositionScene scene,
+        out bool geometryChanged)
+    {
+        var expected = CoverCompositionFactory.Geometry(edition, template.PageCount);
+        geometryChanged = scene.SchemaVersion == CompositionScene.CurrentSchemaVersion
+            && double.IsFinite(scene.Surface.WidthPoints)
+            && double.IsFinite(scene.Surface.HeightPoints)
+            && scene.Surface.WidthPoints > 0
+            && scene.Surface.HeightPoints > 0
+            && (Math.Abs(scene.Surface.WidthPoints - expected.WidthPoints) > .01
+                || Math.Abs(scene.Surface.HeightPoints - expected.HeightPoints) > .01);
+        if (!geometryChanged)
+            return scene;
+
+        var oldPageCount = EstimatePageCount(edition, scene.Surface.WidthPoints);
+        return CoverCompositionFactory.Reflow(
+            edition,
+            design,
+            scene,
+            oldPageCount,
+            template.PageCount);
     }
 
     internal static void ValidateScene(

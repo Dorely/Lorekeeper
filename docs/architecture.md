@@ -993,6 +993,13 @@ image, but must not replace the visual library with filename dropdowns. Figure,
 Designed Page, cover, chat-context, and entity-visual placement all return a
 stable project-image ID through this boundary before their owning service applies
 the requested attachment or replacement.
+Release cover reads and every cover-scene mutation normalize a valid current-schema
+scene onto the release's effective trim, bleed, and page-count-derived geometry
+before validation. Constraint-bound objects retain their region-local layout and
+page-bound objects retain their physical size, so a stale open workspace can save
+after release geometry changes without trapping the user in a validation loop.
+Cover-editor errors are dismissible overlays inside the fixed visual workspace and
+never consume the canvas or bottom control area.
 The keyed Blazor host rechecks disposal across asynchronous catalog loads, and
 the JavaScript attach boundary rejects missing or detached elements before any
 DOM mutation, so chapter switches or navigation cannot turn a stale element
