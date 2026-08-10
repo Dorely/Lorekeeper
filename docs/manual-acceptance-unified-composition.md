@@ -163,8 +163,10 @@ the live test project; terminate the browser host after the run.
   then switch pages while pointer-up autosave is still completing;
   confirm saves serialize, retain the newest edit, and do not conflict with
   their own returned revisions.
-- Confirm a new page uses project page setup and an existing page retains its
-  authored geometry after project setup changes.
+- Confirm new and existing authoring pages use project page setup, active layouts
+  reflow after setup changes without stretched objects, and Pages offers no
+  independent width or height controls. Confirm single-page and facing-spread
+  mode remain available as layout choices.
 - Confirm the canvas has no left sidebar, construction and selection controls
   remain in the fixed bottom strip without horizontal scrolling, and only
   page/spread selection plus the computed guide toggle appear above the canvas.

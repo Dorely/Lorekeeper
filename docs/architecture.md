@@ -308,9 +308,10 @@ body typography, preset selection, and revision. New projects start at 6 x 9 in.
 This setup drives chapter preview, Figures, new Designed Pages, and authoring-time
 generation without creating or selecting a publication release. Core Book also
 edits this shared setup directly. A geometry change reflows the reusable Core
-cover scene in the same project-scoped transaction, preserves its objects and
-bindings, and advances the cover and Core revisions so preparation cannot pair
-new page boxes with an old-sized cover.
+cover and every active Designed Page authoring scene in the same project-scoped
+transaction. Reflow preserves objects and bindings, maps the authored layout
+without stretching it, and advances the affected revisions so preview and
+preparation cannot pair new page boxes with old-sized visual scenes.
 `ICompositionService` owns Designed Page semantic fragments exactly once and
 stores revisioned `PageCompositionVariant` scenes by exact geometry
 fingerprint. Text objects bind stable block/range IDs in that fragment, so
@@ -327,10 +328,14 @@ objects; z-order, per-object locking and visibility, grouping, object styles,
 named regions, and logical reading order remain independent. Persisted scenes
 may retain internal stacking planes for renderer and migration compatibility,
 but authors do not manage layers. Each composition records
-an active authoring variant. New pages use the current project setup; an existing
-page keeps its authored surface when the project setup changes. Publish reports
-edition compatibility and can copy the authoring scene into a new exact edition
-variant for review, but it never rewrites the authoring layout.
+an active authoring variant. Active authoring pages always use the current
+project setup, retaining only their single-page or facing-spread layout mode;
+the Pages workspace exposes no independent physical-dimension controls. Opening
+an older mismatched authoring variant repairs it to the current setup, while a
+project setup change reflows active layouts transactionally. Publish reports
+edition compatibility and can copy the authoring scene into a separate exact
+edition variant for review without making a publication release govern
+authoring geometry.
 The chapter center column has Edit, Read, Pages, and Review modes. A chapter
 whose manuscript contains only Designed Page blocks initially opens in Pages;
 after the author chooses a mode, that chapter's last mode is restored across
@@ -998,8 +1003,15 @@ scene onto the release's effective trim, bleed, and page-count-derived geometry
 before validation. Constraint-bound objects retain their region-local layout and
 page-bound objects retain their physical size, so a stale open workspace can save
 after release geometry changes without trapping the user in a validation loop.
+Core cover reads and mutations apply the same normalization against Project Page
+Setup, including databases whose stored Core scene predates a page-size change.
+Cover autosave validates structural integrity and asset ownership but persists
+incomplete copy bindings, accessibility decisions, reading order, and layout
+placement as editable draft state. Those conditions remain visible readiness
+diagnostics and publication/render blockers rather than reasons to discard edits.
 Cover-editor errors are dismissible overlays inside the fixed visual workspace and
-never consume the canvas or bottom control area.
+never consume the canvas or bottom control area. Its top toolbar returns to the
+selected Core Book or release after flushing the current autosave queue.
 The keyed Blazor host rechecks disposal across asynchronous catalog loads, and
 the JavaScript attach boundary rejects missing or detached elements before any
 DOM mutation, so chapter switches or navigation cannot turn a stale element

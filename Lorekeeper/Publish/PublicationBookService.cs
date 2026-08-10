@@ -638,11 +638,35 @@ public sealed class PublicationBookService(
         Guid projectId,
         CancellationToken cancellationToken = default)
     {
-        var book = await GetOrCreateAsync(projectId, cancellationToken);
-        var design = await db.PublicationBookCoverDesigns.AsNoTracking().SingleAsync(
-            item => item.ProjectId == projectId,
-            cancellationToken);
-        return CoreCoverView(book, design);
+        _ = await GetOrCreateAsync(projectId, cancellationToken);
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        var book = await db.PublicationBooks.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
+        var design = await db.PublicationBookCoverDesigns.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
+        var setup = await db.ProjectPageSetups.AsNoTracking().SingleAsync(item => item.ProjectId == projectId, cancellationToken);
+        var edition = CoreCoverEdition(projectId, setup);
+        var template = CoreCoverTemplate(setup);
+        var scene = JsonSerializer.Deserialize<CompositionScene>(design.CompositionSceneJson, ManuscriptCodec.JsonOptions)
+            ?? throw new InvalidDataException("The Core cover composition is empty.");
+        scene = PublicationCoverService.ReflowToCurrentGeometry(
+            edition,
+            new PublicationCoverDesign { EditionId = Guid.Empty },
+            template,
+            scene,
+            out var geometryChanged);
+        if (geometryChanged)
+        {
+            PublicationCoverService.ValidateAuthoringScene(scene, edition, template);
+            design.CompositionSceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
+            design.Revision = checked(design.Revision + 1);
+            design.UpdatedAt = DateTime.UtcNow;
+            book.Revision = checked(book.Revision + 1);
+            book.UpdatedAt = DateTime.UtcNow;
+            var project = await db.Projects.SingleAsync(item => item.Id == projectId, cancellationToken);
+            project.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design);
     }
 
     public async Task<PublicationCoverDesignView> SaveCoverAsync(
@@ -672,7 +696,14 @@ public sealed class PublicationBookService(
             item => item.ProjectId == projectId,
             cancellationToken);
         var edition = CoreCoverEdition(projectId, setup);
-        PublicationCoverService.ValidateScene(scene, edition, CoreCoverTemplate(setup));
+        var template = CoreCoverTemplate(setup);
+        scene = PublicationCoverService.ReflowToCurrentGeometry(
+            edition,
+            new PublicationCoverDesign { EditionId = Guid.Empty },
+            template,
+            scene,
+            out _);
+        PublicationCoverService.ValidateAuthoringScene(scene, edition, template);
         var imageIds = CompositionSceneResolver.Flatten(scene)
             .Where(item => item.ImageId is not null)
             .Select(item => item.ImageId!.Value)
@@ -721,7 +752,7 @@ public sealed class PublicationBookService(
         var cover = await db.PublicationBookCoverDesigns.AsNoTracking().SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         if (book.Revision != expectedBookRevision || cover.Revision != expectedCoverRevision)
             throw new DbUpdateConcurrencyException("The Core Book or its cover changed; reread it before staging a replacement scene.");
-        await ValidateCoreSceneAsync(projectId, scene, cancellationToken);
+        scene = await ValidateCoreSceneAsync(projectId, scene, cancellationToken);
         var payload = JsonSerializer.Serialize(new CoreCoverStagePayload(expectedBookRevision, scene), ManuscriptCodec.JsonOptions);
         var stage = new CompositionMutationStage
         {
@@ -771,7 +802,7 @@ public sealed class PublicationBookService(
         var cover = await db.PublicationBookCoverDesigns.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         if (book.Revision != expectedBookRevision || cover.Revision != expectedCoverRevision)
             throw new DbUpdateConcurrencyException("The Core Book or its cover changed after the scene was staged.");
-        await ValidateCoreSceneAsync(projectId, payload.Scene, cancellationToken);
+        payload = payload with { Scene = await ValidateCoreSceneAsync(projectId, payload.Scene, cancellationToken) };
         cover.CompositionSceneJson = JsonSerializer.Serialize(payload.Scene, ManuscriptCodec.JsonOptions);
         cover.Revision = checked(cover.Revision + 1);
         cover.UpdatedAt = DateTime.UtcNow;
@@ -783,17 +814,26 @@ public sealed class PublicationBookService(
         return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, cover);
     }
 
-    private async Task ValidateCoreSceneAsync(Guid projectId, CompositionScene scene, CancellationToken cancellationToken)
+    private async Task<CompositionScene> ValidateCoreSceneAsync(Guid projectId, CompositionScene scene, CancellationToken cancellationToken)
     {
         var setup = await db.ProjectPageSetups.AsNoTracking().SingleAsync(
             item => item.ProjectId == projectId, cancellationToken);
-        PublicationCoverService.ValidateScene(scene, CoreCoverEdition(projectId, setup), CoreCoverTemplate(setup));
+        var edition = CoreCoverEdition(projectId, setup);
+        var template = CoreCoverTemplate(setup);
+        scene = PublicationCoverService.ReflowToCurrentGeometry(
+            edition,
+            new PublicationCoverDesign { EditionId = Guid.Empty },
+            template,
+            scene,
+            out _);
+        PublicationCoverService.ValidateAuthoringScene(scene, edition, template);
         var imageIds = CompositionSceneResolver.Flatten(scene).Where(item => item.ImageId is not null)
             .Select(item => item.ImageId!.Value).Distinct().ToList();
         var count = await db.PublishAssets.AsNoTracking().CountAsync(item => item.ProjectId == projectId
             && imageIds.Contains(item.Id) && (item.ContentType == "image/png" || item.ContentType == "image/jpeg"), cancellationToken);
         if (count != imageIds.Count)
             throw new InvalidDataException("The Core cover references artwork outside this project or an unsupported publication image.");
+        return scene;
     }
 
     private sealed record CoreCoverStagePayload(long ExpectedBookRevision, CompositionScene Scene);
@@ -804,11 +844,21 @@ public sealed class PublicationBookService(
     {
         var scene = JsonSerializer.Deserialize<CompositionScene>(design.CompositionSceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The Core cover composition is empty.");
+        var edition = CoreCoverEdition(book.ProjectId, book.PageSetup);
+        var template = CoreCoverTemplate(book.PageSetup);
+        scene = PublicationCoverService.ReflowToCurrentGeometry(
+            edition,
+            new PublicationCoverDesign { EditionId = Guid.Empty },
+            template,
+            scene,
+            out _);
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
-        var diagnostics = CompositionSceneResolver.Flatten(scene)
-            .Where(item => item.Kind == CompositionObjectKind.Image && item.AccessibilityDecisionPending)
-            .Select(item => $"Artwork '{item.Name}' needs alternative text or a decorative decision.")
-            .ToList();
+        var diagnostics = new List<string>();
+        PublicationCoverService.AddSceneDiagnostics(
+            edition,
+            CoverCompositionFactory.Geometry(edition, 0),
+            scene,
+            diagnostics);
         return new PublicationCoverDesignView(
             design.Id,
             Guid.Empty,
@@ -823,7 +873,7 @@ public sealed class PublicationBookService(
             50,
             JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions),
             design.Revision,
-            CoreCoverTemplate(book.PageSetup),
+            template,
             diagnostics)
         {
             CoreBookRevision = book.Revision,
@@ -862,6 +912,21 @@ public sealed class PublicationBookService(
         setup.Revision));
 
     private static PublicationEdition CoreCoverEdition(Guid projectId, ProjectPageSetup setup) => new()
+    {
+        ProjectId = projectId,
+        Name = "Core Book",
+        Format = PublicationEditionFormat.DigitalPdf,
+        Binding = PublicationBinding.Digital,
+        Paper = PublicationPaper.Digital,
+        Ink = PublicationInk.Digital,
+        PageWidthInches = setup.PageWidthInches,
+        PageHeightInches = setup.PageHeightInches,
+        PageMarginInches = setup.PageMarginInches,
+        BodyFontSizePoints = setup.BodyFontSizePoints,
+        BodyLineHeight = setup.BodyLineHeight,
+    };
+
+    private static PublicationEdition CoreCoverEdition(Guid projectId, ProjectPageSetupView setup) => new()
     {
         ProjectId = projectId,
         Name = "Core Book",

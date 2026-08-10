@@ -187,7 +187,7 @@
 | `ManuscriptStylesPanel.razor` (+ `.razor.css`) | Compact Book Text Style manager with an on-demand create/edit form, revision-aware paragraph/character typography, spacing, indentation, pagination, and stable semantic roles. |
 | `CompositionVisualEditorShell.razor` (+ `.razor.css`) | Shared Pages/Cover visual-editor chrome with a compact view toolbar, canvas-first stage, fixed bottom object/context controls, and a host-supplied on-demand details drawer. |
 | `DesignedPageWorkspace.razor` (+ `.razor.css`) | Contextual exact-geometry page/spread editor using the shared visual shell, modal image picking, proportional or free image resizing, one-action canvas fitting, externally rendered rulers/handles, true front/back ordering, legacy crop repositioning, in-canvas semantic-text editing, compact controls, diagnostics, undo/redo, and serialized autosave. |
-| `CoverCompositionWorkspace.razor` (+ `.razor.css`) | Embedded print-wrap/digital-front editor using the shared visual shell and interaction language, with persistent selection, modal artwork picking, proportional or free image resizing, one-action canvas fitting, artwork-behind-copy stacking, move/rotate and legacy crop repositioning, canonical copy bindings, safety/barcode overlays, non-displacing dismissible errors, on-demand details, and serialized autosave. |
+| `CoverCompositionWorkspace.razor` (+ `.razor.css`) | Embedded print-wrap/digital-front editor using the shared visual shell and interaction language, with top-bar return navigation, persistent selection, modal artwork picking, proportional or free image resizing, one-action canvas fitting, artwork-behind-copy stacking, move/rotate and legacy crop repositioning, canonical copy bindings, safety/barcode overlays, non-displacing dismissible errors, on-demand details, and draft-tolerant serialized autosave. |
 | `ProjectFontManagerModal.razor` | Project font catalog manager for TTF/OTF imports, available-face inspection, embedding-right declarations, and guarded in-use deletion. |
 | `EditorChatPanel.razor` (+ `.razor.css`) | Editor chat adapter over `ChatSurface`: defers/coalesces transcript hydration, reconciles editor lock state with persistent turns, streams tool/contest updates, routes plain-text changes to Review mode and structured changes to the pending-edits modal, and opens current contests. |
 | `ContextItemDetailModal.razor` (+ `.razor.css`) | Shared context detail modal for project material plus editable Project Guidance and structured Book Brief fields; preserves the distinction between user direction and the assembled code-owned system prompt. |
@@ -235,7 +235,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, editable Core page/text defaults, shared style management, target chips/add-release flow, live inheritance/override controls, embedded cover editing, format-gated settings, in-app Core PDF preview, one-action preparation, blockers, and immutable downloads. |
+| `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, editable Core page/text defaults, shared style management, target chips/add-release flow, live inheritance/override controls, embedded cover editing with refreshed return navigation, format-gated settings, in-app Core PDF preview, one-action preparation, blockers, and immutable downloads. |
 | `PublishChatPanel.razor` (+ `.razor.css`) | Refresh-safe Publish adapter over shared `ChatSurface` with persisted transcript/tool chips, streaming, Stop/Reset, provider/token state, image attachments, active-turn reconnection, and structured workspace mutation callbacks. |
 
 ### Components/Pages/Projects/Outline/
@@ -591,8 +591,8 @@
 
 | File | Description |
 |------|-------------|
-| `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service with fresh cross-scope authoring reads, active authoring geometry, atomic image/fit placement, scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
-| `ProjectPageSetupService.cs` | Revision-aware project authoring page setup used by Read preview, Core Book, Designed Pages, Figures, and generation targets; geometry changes transactionally reflow the reusable Core cover. |
+| `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service with setup-normalized active authoring geometry, atomic image/fit placement, scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
+| `ProjectPageSetupService.cs` | Revision-aware project authoring page setup used by Read preview, Core Book, Designed Pages, Figures, and generation targets; geometry changes transactionally reflow the reusable Core cover and active Designed Page layouts. |
 | `ChapterPreviewService.cs` | Cached, cancellable Press layout adapter that accepts staged manuscript/style sources, exposes chapter/block page maps, and rasterizes bounded PNG page-inspection images from compact Press paint and text-run traces. |
 | `CompositionAgentPayloads.cs` | Lossless bounded assistant reads and compact revision-safe patch envelopes for semantic fragments, scene objects, layers, and styles. |
 | `CompositionSceneResolver.cs` | Shared deterministic group flattener and PDF/X overlap validator used by export and geometry-target consumers so group transforms, opacity, visibility, locks, and z-order have runtime meaning. |
@@ -612,7 +612,7 @@
 | File | Description |
 |------|-------------|
 | `PublishModels.cs` | Core/release targets, effective workspace/readiness, revision-aware sparse mutations, matter/style/placement, projection, cover, preparation, and artifact contracts. |
-| `PublicationBookService.cs` | Owning Core Book boundary for seeding, metadata/presentation patches, consolidated workspace-detail reads, chapter-only content selection, structural order, matter, placements, reusable cover, revisions, and style/font-aware source fingerprint invalidation. |
+| `PublicationBookService.cs` | Owning Core Book boundary for seeding, metadata/presentation patches, consolidated workspace-detail reads, chapter-only content selection, structural order, matter, placements, page-setup-normalized reusable covers, revisions, and style/font-aware source fingerprint invalidation. |
 | `IPublicationEditionService.cs` / `PublicationEditionService.cs` | Owning release lifecycle and sparse-override boundary for presets, content/matter/style/placement overlays, archive/clone/compare/audit, and effective fingerprints. |
 | `PublicationReleasePresetService.cs` | Centralized safe paperback destination, EPUB ebook, and PDF ebook release defaults with internal immutable profiles. |
 | `PublicationPreparationService.cs` | Persisted/recoverable one-action Core reading-copy and release render/validation/package coordinator with cancellation, blockers, and retained Core accessibility warnings. |
@@ -625,7 +625,7 @@
 | `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration with full outline context, temporary generated-image vision, shared active-turn streaming/reconnection, proactive prompt policy, tool activity, and Core/release-targeted workspace and preparation mutation notices. |
 | `PublicationPressRuntime.cs` | Fail-closed exact-manifest resolver for the packaged native renderer, dynamic capabilities, integrity evidence, and empty controlled child environment with no machine-tool fallback. |
 | `PublicationRenderService.cs` | Persisted/recoverable queue, metadata-only artifact listings, purpose-bound protocol-v5 declared image/font staging from effective manuscript/page/cover scenes, display-ready title handoff, native lifecycle, hash-verified paperback/Book PDF artifacts, semantic page maps, renderer-version staleness, and comparison. |
-| `PublicationCoverService.cs` | Revisioned format-aware structured cover aggregate with copy-safe artwork stacking, canonical bindings, save-time print-wrap/digital-front geometry reflow, ISBN/vendor/spine diagnostics, and acknowledgement invalidation. |
+| `PublicationCoverService.cs` | Revisioned format-aware structured cover aggregate with copy-safe artwork stacking, canonical bindings, draft-tolerant structural persistence, save-time print-wrap/digital-front geometry reflow, publication-readiness diagnostics, and acknowledgement invalidation. |
 | `PublicationPackageService.cs` | Versioned fail-closed Lorekeeper validation preflight, product-form-specific deterministic package assembly, manifests, reports, provenance, legacy guards, and exact-package proof records. |
 | `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying effective Core/release content into Core TXT/Markdown/Reading PDF and release EPUB/PDF/print output with product-form guards. |
 | `PublishEndpoints.cs` | Cacheable/range project-scoped immutable publication artifact viewing/download endpoints. |

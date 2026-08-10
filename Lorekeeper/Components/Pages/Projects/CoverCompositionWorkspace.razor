@@ -31,6 +31,7 @@
         <CompositionVisualEditorShell AccessibleLabel="Cover visual editor">
             <Toolbar>
                 <nav class="cover-toolbar" aria-label="Cover view controls">
+                    <button type="button" class="cover-back" title="Return to the publishing workspace" @onclick="NavigateBackAsync"><span aria-hidden="true">&#8592;</span> Back</button>
                     <div class="cover-identity"><strong>@(CoreBook ? "Core cover" : "Release cover")</strong><small>@ModeSummary</small></div>
                     <div class="cover-view-toggles" role="group" aria-label="Cover canvas aids">
                         <label title="Snap objects to the cover regions while moving or resizing"><input type="checkbox" @bind="_snap" /><span aria-hidden="true">&#8982;</span><span>Snap</span></label>
@@ -223,6 +224,7 @@
     [Parameter] public long RefreshSignal { get; set; }
     [Parameter] public Guid? RequestedSelectionId { get; set; }
     [Parameter] public EventCallback Saved { get; set; }
+    [Parameter] public EventCallback Back { get; set; }
     private PublicationCoverDesignView? _cover; private PublicationEditionSummary? _edition; private CompositionScene? _scene;
     private List<CompositionObject> _objects = []; private List<CompositionLayer> _layers = []; private List<CompositionObjectStyle> _styles = []; private IReadOnlyList<ProjectImageView> _images = []; private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = []; private Guid? _selectedId;
     private readonly Stack<WorkspaceSnapshot> _undo = new(); private readonly Stack<WorkspaceSnapshot> _redo = new();
@@ -306,6 +308,11 @@
     }
 
     private void DismissError() => _error = null;
+    private async Task NavigateBackAsync()
+    {
+        await FlushAsync();
+        await Back.InvokeAsync();
+    }
     private void MarkDirty()
     {
         _dirty = true;
@@ -513,8 +520,14 @@
                 : await Covers.SaveWorkspaceAsync(saveProjectId, _cover.EditionId, update, scene);
             if (_changeVersion == changeVersion)
             {
-                _scene = scene;
-                _objects = scene.Objects.ToList();
+                _scene = CoverCompositionFactory.KeepArtworkBehindCopy(
+                    JsonSerializer.Deserialize<CompositionScene>(
+                        _cover.CompositionSceneJson,
+                        ManuscriptCodec.JsonOptions)
+                    ?? throw new InvalidDataException("The saved cover scene is empty."));
+                _objects = _scene.Objects.ToList();
+                _layers = _scene.Layers.ToList();
+                _styles = _scene.Styles.ToList();
                 _dirty = false;
             }
             await Saved.InvokeAsync();

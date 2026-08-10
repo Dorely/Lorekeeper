@@ -58,8 +58,9 @@ public sealed class ProjectPageSetupService(
         if (setup.Revision != expectedRevision)
             throw new InvalidOperationException($"Page setup revision conflict: expected {expectedRevision}, current revision is {setup.Revision}.");
 
-        var geometryChanged = setup.PageWidthInches != input.PageWidthInches
-            || setup.PageHeightInches != input.PageHeightInches;
+        var authoringGeometryChanged = setup.PageWidthInches != input.PageWidthInches
+            || setup.PageHeightInches != input.PageHeightInches
+            || setup.PageMarginInches != input.PageMarginInches;
         setup.PageWidthInches = input.PageWidthInches;
         setup.PageHeightInches = input.PageHeightInches;
         setup.PageMarginInches = input.PageMarginInches;
@@ -69,8 +70,11 @@ public sealed class ProjectPageSetupService(
         setup.UpdatedAt = DateTime.UtcNow;
         var project = await db.Projects.SingleAsync(item => item.Id == projectId, cancellationToken);
         project.UpdatedAt = DateTime.UtcNow;
-        if (geometryChanged)
+        if (authoringGeometryChanged)
+        {
             await ReflowCoreCoverAsync(projectId, input, cancellationToken);
+            await ReflowDesignedPagesAsync(projectId, input, cancellationToken);
+        }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return setup;
@@ -120,6 +124,46 @@ public sealed class ProjectPageSetupService(
         cover.UpdatedAt = DateTime.UtcNow;
         book.Revision = checked(book.Revision + 1);
         book.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private async Task ReflowDesignedPagesAsync(
+        Guid projectId,
+        ProjectPageSetupInput input,
+        CancellationToken cancellationToken)
+    {
+        var compositions = await db.PageCompositions
+            .Include(item => item.Variants)
+            .Where(item => item.ProjectId == projectId && item.ActiveAuthoringVariantId != null)
+            .ToListAsync(cancellationToken);
+        foreach (var composition in compositions)
+        {
+            var source = composition.Variants.SingleOrDefault(item => item.Id == composition.ActiveAuthoringVariantId);
+            if (source is null)
+                continue;
+
+            var scene = JsonSerializer.Deserialize<CompositionScene>(source.SceneJson, ManuscriptCodec.JsonOptions)
+                ?? throw new InvalidDataException($"Designed Page '{composition.Name}' has an empty composition scene.");
+            var adapted = CompositionService.AdaptAuthoringScene(
+                scene,
+                input.PageWidthInches,
+                input.PageHeightInches,
+                input.PageMarginInches);
+            CompositionService.Validate(adapted, ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson));
+            var geometryKey = CompositionService.SceneGeometryKey(adapted);
+            var target = composition.Variants.SingleOrDefault(item =>
+                item.Id != source.Id && string.Equals(item.GeometryKey, geometryKey, StringComparison.Ordinal));
+            if (target is null)
+            {
+                target = source;
+                target.GeometryKey = geometryKey;
+            }
+
+            target.SceneJson = JsonSerializer.Serialize(adapted, ManuscriptCodec.JsonOptions);
+            target.Revision = checked(target.Revision + 1);
+            target.UpdatedAt = DateTime.UtcNow;
+            composition.ActiveAuthoringVariantId = target.Id;
+            composition.UpdatedAt = DateTime.UtcNow;
+        }
     }
 
     private static void Validate(ProjectPageSetupInput input)

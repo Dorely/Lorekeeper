@@ -262,27 +262,31 @@ public sealed class CompositionService(
             .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Page composition was not found in this project.");
         if (current.ActiveAuthoringVariantId is Guid currentActiveId)
-            return await ReadVariantAsync(projectId, currentActiveId, cancellationToken);
-
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var composition = await db.PageCompositions.AsNoTracking().Include(item => item.Variants)
-            .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId, cancellationToken)
-            ?? throw new KeyNotFoundException("Page composition was not found in this project.");
-        if (composition.ActiveAuthoringVariantId is Guid activeId)
-            return await ReadVariantAsync(projectId, activeId, cancellationToken);
-        var existing = composition.Variants.OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
-        if (existing is not null)
         {
-            await db.PageCompositions
-                .Where(item => item.Id == composition.Id && item.ProjectId == projectId)
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(item => item.ActiveAuthoringVariantId, existing.Id)
-                    .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), cancellationToken);
-            return existing;
+            var active = await ReadVariantAsync(projectId, currentActiveId, cancellationToken);
+            var setup = await db.ProjectPageSetups.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
+            if (setup is not null)
+            {
+                var activeScene = JsonSerializer.Deserialize<CompositionScene>(active.SceneJson, JsonOptions)
+                    ?? throw new InvalidDataException("The composition scene is empty.");
+                var adapted = AdaptAuthoringScene(activeScene, setup.PageWidthInches, setup.PageHeightInches, setup.PageMarginInches);
+                if (string.Equals(active.GeometryKey, SceneGeometryKey(adapted), StringComparison.Ordinal))
+                    return active;
+            }
         }
 
-        var setup = await RequirePageSetupUnderLeaseAsync(projectId, cancellationToken);
-        var scene = CreatePageScene(setup);
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        var composition = await db.PageCompositions.Include(item => item.Variants)
+            .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId, cancellationToken)
+            ?? throw new KeyNotFoundException("Page composition was not found in this project.");
+        var setupUnderLease = await RequirePageSetupUnderLeaseAsync(projectId, cancellationToken);
+        var existing = composition.Variants.SingleOrDefault(item => item.Id == composition.ActiveAuthoringVariantId)
+            ?? composition.Variants.OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
+        if (existing is not null)
+            return await NormalizeAuthoringVariantAsync(composition, existing, setupUnderLease, cancellationToken);
+
+        var scene = CreatePageScene(setupUnderLease);
         var variant = new PageCompositionVariant
         {
             CompositionId = composition.Id,
@@ -290,14 +294,50 @@ public sealed class CompositionService(
             SceneJson = SerializeAndValidate(scene, composition.SemanticManuscriptJson),
         };
         db.PageCompositionVariants.Add(variant);
+        composition.ActiveAuthoringVariantId = variant.Id;
+        composition.UpdatedAt = DateTime.UtcNow;
         await TouchProjectAsync(projectId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
-        await db.PageCompositions
-            .Where(item => item.Id == composition.Id && item.ProjectId == projectId)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(item => item.ActiveAuthoringVariantId, variant.Id)
-                .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), cancellationToken);
         return variant;
+    }
+
+    private async Task<PageCompositionVariant> NormalizeAuthoringVariantAsync(
+        PageComposition composition,
+        PageCompositionVariant source,
+        ProjectPageSetup setup,
+        CancellationToken cancellationToken)
+    {
+        var scene = JsonSerializer.Deserialize<CompositionScene>(source.SceneJson, JsonOptions)
+            ?? throw new InvalidDataException("The composition scene is empty.");
+        var adapted = AdaptAuthoringScene(scene, setup.PageWidthInches, setup.PageHeightInches, setup.PageMarginInches);
+        var geometryKey = SceneGeometryKey(adapted);
+        var sceneJson = SerializeAndValidate(adapted, composition.SemanticManuscriptJson);
+        var target = composition.Variants.SingleOrDefault(item =>
+            item.Id != source.Id && string.Equals(item.GeometryKey, geometryKey, StringComparison.Ordinal));
+        if (target is null
+            && string.Equals(source.GeometryKey, geometryKey, StringComparison.Ordinal)
+            && string.Equals(source.SceneJson, sceneJson, StringComparison.Ordinal))
+        {
+            composition.ActiveAuthoringVariantId = source.Id;
+            composition.UpdatedAt = DateTime.UtcNow;
+            await TouchProjectAsync(composition.ProjectId, cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+            return source;
+        }
+        if (target is null)
+        {
+            target = source;
+            target.GeometryKey = geometryKey;
+        }
+
+        target.SceneJson = sceneJson;
+        target.Revision = checked(target.Revision + 1);
+        target.UpdatedAt = DateTime.UtcNow;
+        composition.ActiveAuthoringVariantId = target.Id;
+        composition.UpdatedAt = DateTime.UtcNow;
+        await TouchProjectAsync(composition.ProjectId, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return target;
     }
 
     private async Task<ProjectPageSetup> RequirePageSetupUnderLeaseAsync(
@@ -319,16 +359,13 @@ public sealed class CompositionService(
         CancellationToken cancellationToken = default)
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var composition = await db.PageCompositions.SingleOrDefaultAsync(
+        var composition = await db.PageCompositions.Include(item => item.Variants).SingleOrDefaultAsync(
             item => item.Id == compositionId && item.ProjectId == projectId,
             cancellationToken) ?? throw new KeyNotFoundException("Page composition was not found in this project.");
-        var variant = await db.PageCompositionVariants.SingleOrDefaultAsync(
-            item => item.Id == variantId && item.CompositionId == compositionId,
-            cancellationToken) ?? throw new KeyNotFoundException("Composition variant was not found in this project.");
-        composition.ActiveAuthoringVariantId = variant.Id;
-        composition.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
-        return variant;
+        var variant = composition.Variants.SingleOrDefault(item => item.Id == variantId)
+            ?? throw new KeyNotFoundException("Composition variant was not found in this project.");
+        var setup = await RequirePageSetupUnderLeaseAsync(projectId, cancellationToken);
+        return await NormalizeAuthoringVariantAsync(composition, variant, setup, cancellationToken);
     }
 
     public async Task<PageCompositionVariant> GetOrCreateVariantAsync(
@@ -445,9 +482,40 @@ public sealed class CompositionService(
             && edition.AllowDesignedPageOverrides)
             return scene with { Surface = scene.Surface with { OutputPageMode = CompositionOutputPageMode.SingleSurface, AllowIndependentPdfPage = true } };
 
+        return AdaptScene(
+            scene,
+            edition.PageWidthInches,
+            edition.PageHeightInches,
+            edition.PageMarginInches,
+            edition.Bleed);
+    }
+
+    internal static CompositionScene AdaptAuthoringScene(
+        CompositionScene scene,
+        double pageWidthInches,
+        double pageHeightInches,
+        double pageMarginInches) =>
+        AdaptScene(scene, pageWidthInches, pageHeightInches, pageMarginInches, bleed: false);
+
+    private static CompositionScene AdaptScene(
+        CompositionScene scene,
+        double pageWidthInches,
+        double pageHeightInches,
+        double pageMarginInches,
+        bool bleed)
+    {
         var facing = scene.Surface.Kind == CompositionSurfaceKind.FacingSpread;
-        var targetWidth = edition.PageWidthInches * 72 * (facing ? 2 : 1);
-        var targetHeight = edition.PageHeightInches * 72;
+        var targetWidth = pageWidthInches * 72 * (facing ? 2 : 1);
+        var targetHeight = pageHeightInches * 72;
+        if (Math.Abs(scene.Surface.WidthPoints - targetWidth) <= .01
+            && Math.Abs(scene.Surface.HeightPoints - targetHeight) <= .01
+            && Math.Abs(scene.Surface.SafeInsetPoints - pageMarginInches * 72) <= .01
+            && scene.Surface.Kind is CompositionSurfaceKind.SinglePage or CompositionSurfaceKind.FacingSpread
+            && scene.Surface.OutputPageMode == CompositionOutputPageMode.EditionLeaves
+            && !scene.Surface.AllowIndependentPdfPage
+            && Math.Abs(scene.Surface.BleedPoints - (bleed ? 9 : 0)) <= .01)
+            return scene;
+
         var scale = Math.Min(targetWidth / scene.Surface.WidthPoints, targetHeight / scene.Surface.HeightPoints);
         var contentWidth = scene.Surface.WidthPoints * scale;
         var contentHeight = scene.Surface.HeightPoints * scale;
@@ -468,8 +536,8 @@ public sealed class CompositionService(
                 OutputPageMode = CompositionOutputPageMode.EditionLeaves,
                 WidthPoints = targetWidth,
                 HeightPoints = targetHeight,
-                BleedPoints = edition.Bleed ? 9 : 0,
-                SafeInsetPoints = edition.PageMarginInches * 72,
+                BleedPoints = bleed ? 9 : 0,
+                SafeInsetPoints = pageMarginInches * 72,
                 AllowIndependentPdfPage = false,
             },
             // Group children use coordinates local to their group. Mapping the group moves the

@@ -23,7 +23,6 @@
                     <div class="composition-view-modes" role="group" aria-label="Page surface">
                         <button type="button" class="@SurfaceClass(CompositionSurfaceKind.SinglePage)" @onclick="() => SetSurfaceKind(CompositionSurfaceKind.SinglePage)"><span class="page-thumb single"></span>Single page</button>
                         <button type="button" class="@SurfaceClass(CompositionSurfaceKind.FacingSpread)" @onclick="() => SetSurfaceKind(CompositionSurfaceKind.FacingSpread)"><span class="page-thumb spread"></span>Facing spread</button>
-                        @if (_scene.Surface.AllowIndependentPdfPage) { <button type="button" class="@SurfaceClass(CompositionSurfaceKind.IndependentPage)" @onclick="() => SetSurfaceKind(CompositionSurfaceKind.IndependentPage)"><span class="page-thumb custom"></span>Digital override</button> }
                     </div>
                     <label class="composition-guide-toggle" title="Show or hide trim, safe-area, gutter, and measurement guides"><input type="checkbox" @bind="_showGuides" /><span class="composition-guides-icon" aria-hidden="true">&#9638;</span><span>Guides</span></label>
                 </nav>
@@ -259,14 +258,6 @@
                                 <button type="button" class="@(candidate.Id == _variant?.Id ? "selected" : null)" title="Select saved exact-geometry layout" @onclick="() => SelectVariantAsync(candidate.Id)">@VariantLabel(candidate)</button>
                             }
                         </div>
-                        @if (_scene.Surface.Kind == CompositionSurfaceKind.IndependentPage)
-                        {
-                            <div class="composition-grid-2">
-                                <label>Width (in)<input type="number" min="1" max="40" step=".125" value="@(_scene.Surface.WidthPoints / 72)" @onchange="e => ChangeIndependentDimension(e, true)" /></label>
-                                <label>Height (in)<input type="number" min="1" max="40" step=".125" value="@(_scene.Surface.HeightPoints / 72)" @onchange="e => ChangeIndependentDimension(e, false)" /></label>
-                            </div>
-                            <small>Custom page boxes apply only to this Digital PDF Designed Page.</small>
-                        }
                         <p>@SurfaceSizeLabel(_scene.Surface)</p>
                         </div>
                     </details>
@@ -1225,14 +1216,13 @@
     {
         if (_scene is null) return;
         if (_authoringGeometry is null) return;
+        if (kind is not CompositionSurfaceKind.SinglePage and not CompositionSurfaceKind.FacingSpread) return;
         Snapshot();
         var current = _scene.Surface;
         var leafWidth = _authoringGeometry.LeafWidthPoints;
         var leafHeight = _authoringGeometry.LeafHeightPoints;
-        var keepCustomDimensions = kind == CompositionSurfaceKind.IndependentPage
-            && current.Kind == CompositionSurfaceKind.IndependentPage;
-        var targetWidth = keepCustomDimensions ? current.WidthPoints : kind == CompositionSurfaceKind.FacingSpread ? leafWidth * 2 : leafWidth;
-        var targetHeight = keepCustomDimensions ? current.HeightPoints : leafHeight;
+        var targetWidth = kind == CompositionSurfaceKind.FacingSpread ? leafWidth * 2 : leafWidth;
+        var targetHeight = leafHeight;
         RemapSurfaceContents(current.WidthPoints, current.HeightPoints, targetWidth, targetHeight);
         _scene = _scene with
         {
@@ -1241,26 +1231,9 @@
                 Kind = kind,
                 WidthPoints = targetWidth,
                 HeightPoints = targetHeight,
-                OutputPageMode = kind == CompositionSurfaceKind.IndependentPage
-                    ? CompositionOutputPageMode.SingleSurface
-                    : CompositionOutputPageMode.EditionLeaves,
+                OutputPageMode = CompositionOutputPageMode.EditionLeaves,
+                AllowIndependentPdfPage = false,
             },
-        };
-        MarkDirty();
-    }
-
-    private void ChangeIndependentDimension(ChangeEventArgs e, bool width)
-    {
-        if (_scene?.Surface.Kind != CompositionSurfaceKind.IndependentPage) return;
-        var inches = Math.Clamp(Number(e), 1, 40);
-        var current = _scene.Surface;
-        var targetWidth = width ? inches * 72 : current.WidthPoints;
-        var targetHeight = width ? current.HeightPoints : inches * 72;
-        Snapshot();
-        RemapSurfaceContents(current.WidthPoints, current.HeightPoints, targetWidth, targetHeight);
-        _scene = _scene with
-        {
-            Surface = current with { WidthPoints = targetWidth, HeightPoints = targetHeight },
         };
         MarkDirty();
     }

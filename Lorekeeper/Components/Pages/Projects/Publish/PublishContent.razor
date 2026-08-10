@@ -67,7 +67,8 @@ else
                                                    CoreBook="@(_selectedReleaseId is null)"
                                                    RefreshSignal="_coverRefreshSignal"
                                                    RequestedSelectionId="_coverSelectionId"
-                                                   Saved="HandleCoverSavedAsync" />
+                                                   Saved="HandleCoverSavedAsync"
+                                                   Back="CloseCoverEditorAsync" />
                     }
                     else if (_selectedReleaseId is null && _core is not null)
                     {
@@ -1061,6 +1062,16 @@ else
         {
             _releases = await Releases.ListAsync(Project.Id);
         }
+    }
+
+    private async Task CloseCoverEditorAsync()
+    {
+        var releaseId = _selectedReleaseId;
+        _coverEditorOpen = false;
+        if (releaseId is Guid id)
+            await SelectReleaseAsync(id);
+        else
+            await LoadCoreAsync();
     }
 
     private async Task ExportCoreAsync(PublishExportFormat format)

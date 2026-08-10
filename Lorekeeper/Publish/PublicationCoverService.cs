@@ -223,7 +223,7 @@ public sealed class PublicationCoverService(
         CancellationToken cancellationToken = default)
     {
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
-        Validate(update);
+        ValidateAuthoringUpdate(update);
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var storedEdition = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
@@ -247,7 +247,7 @@ public sealed class PublicationCoverService(
         }
         var template = await TemplateAsync(edition, design, cancellationToken);
         scene = ReflowToCurrentGeometry(edition, design, template, scene, out _);
-        ValidateScene(scene, edition, template);
+        ValidateAuthoringScene(scene, edition, template);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         design.Title = update.Title.Trim();
         design.Subtitle = update.Subtitle.Trim();
@@ -296,7 +296,7 @@ public sealed class PublicationCoverService(
             throw new DbUpdateConcurrencyException("The cover composition changed.");
         var template = await TemplateAsync(edition, design, cancellationToken);
         scene = ReflowToCurrentGeometry(edition, design, template, scene, out _);
-        ValidateScene(scene, edition, template);
+        ValidateAuthoringScene(scene, edition, template);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         if (db.Entry(design).State == EntityState.Detached)
         {
@@ -341,7 +341,7 @@ public sealed class PublicationCoverService(
             throw new DbUpdateConcurrencyException("The cover composition changed.");
         var template = await TemplateAsync(edition, design, cancellationToken);
         scene = ReflowToCurrentGeometry(edition, design, template, scene, out _);
-        ValidateScene(scene, edition, template);
+        ValidateAuthoringScene(scene, edition, template);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         var payload = System.Text.Json.JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
         var stage = new CompositionMutationStage
@@ -396,7 +396,7 @@ public sealed class PublicationCoverService(
             throw new DbUpdateConcurrencyException("The cover composition changed after it was staged.");
         var template = await TemplateAsync(edition, design, cancellationToken);
         scene = ReflowToCurrentGeometry(edition, design, template, scene, out _);
-        ValidateScene(scene, edition, template);
+        ValidateAuthoringScene(scene, edition, template);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         if (db.Entry(design).State == EntityState.Detached)
         {
@@ -486,7 +486,7 @@ public sealed class PublicationCoverService(
             diagnostics);
     }
 
-    private static void AddSceneDiagnostics(
+    internal static void AddSceneDiagnostics(
         PublicationEdition edition,
         CoverGeometry geometry,
         CompositionScene scene,
@@ -500,9 +500,22 @@ public sealed class PublicationCoverService(
         var barcode = CoverCompositionFactory.RegionBoundsPercent(CompositionRegionConstraint.BarcodeReserve, geometry);
         foreach (var item in CompositionSceneResolver.Flatten(scene).Where(item => item.Visible))
         {
-            if (item.Kind == CompositionObjectKind.Text && string.IsNullOrWhiteSpace(item.TextBinding))
+            if (item.Kind == CompositionObjectKind.Text
+                && item.TextBinding is not "title" and not "subtitle" and not "author" and not "spineText" and not "backCopy")
                 diagnostics.Add($"Text object {item.Id:N} requires a canonical cover-copy binding.");
-            if (item.Kind == CompositionObjectKind.Image && item.AccessibilityDecisionPending)
+            if (edition.Format != PublicationEditionFormat.Paperback
+                && item.Kind == CompositionObjectKind.Text
+                && item.TextBinding is ("spineText" or "backCopy"))
+                diagnostics.Add($"Digital cover text object {item.Id:N} requires a front-cover copy binding before publishing.");
+            if (edition.Format != PublicationEditionFormat.Paperback
+                && item.RegionConstraint is not CompositionRegionConstraint.Page
+                    and not CompositionRegionConstraint.SafeArea
+                    and not CompositionRegionConstraint.Front)
+                diagnostics.Add($"Digital cover object {item.Id:N} requires a front-cover region before publishing.");
+            if (item.Kind == CompositionObjectKind.Image && item.ImageId is null)
+                diagnostics.Add($"Image object {item.Id:N} requires project artwork before publishing.");
+            if (item.Kind == CompositionObjectKind.Image && !item.Decorative
+                && (item.AccessibilityDecisionPending || string.IsNullOrWhiteSpace(item.AltText)))
                 diagnostics.Add($"Image object {item.Id:N} requires alternative text or an explicit decorative decision.");
             if (!item.Decorative && item.SemanticRole != CompositionSemanticRole.Artifact
                 && item.RegionConstraint != CompositionRegionConstraint.BarcodeReserve
@@ -524,6 +537,19 @@ public sealed class PublicationCoverService(
             };
             if (!Contains(safe, item.Bounds))
                 diagnostics.Add($"Object {item.Id:N} extends outside the safe area for its {item.RegionConstraint} region.");
+        }
+        var semanticObjects = CompositionSceneResolver.Flatten(scene)
+            .Where(item => item.Visible && !item.Decorative && item.SemanticRole != CompositionSemanticRole.Artifact)
+            .ToList();
+        var duplicateReadingOrders = semanticObjects.Where(item => item.ReadingOrder is not null)
+            .GroupBy(item => item.ReadingOrder!.Value)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet();
+        foreach (var item in semanticObjects.Where(item => item.ReadingOrder is null
+            || duplicateReadingOrders.Contains(item.ReadingOrder.Value)))
+        {
+            diagnostics.Add($"Object {item.Id:N} requires a unique logical reading order before publishing.");
         }
     }
 
@@ -657,7 +683,7 @@ public sealed class PublicationCoverService(
         return Math.Max(0, (int)Math.Round((widthPoints - trim * 2 - bleed * 2) / caliperPoints));
     }
 
-    private static CompositionScene ReflowToCurrentGeometry(
+    internal static CompositionScene ReflowToCurrentGeometry(
         PublicationEdition edition,
         PublicationCoverDesign design,
         PublicationCoverTemplate template,
@@ -684,7 +710,7 @@ public sealed class PublicationCoverService(
             template.PageCount);
     }
 
-    internal static void ValidateScene(
+    internal static void ValidateAuthoringScene(
         CompositionScene scene,
         PublicationEdition edition,
         PublicationCoverTemplate template)
@@ -705,7 +731,6 @@ public sealed class PublicationCoverService(
                 || style.StrokeWidthPoints is < 0 or > 72))
             throw new InvalidDataException("Cover object styles require unique IDs, names, and valid typography and stroke values.");
         var objectIds = new HashSet<Guid>();
-        var readingOrder = new HashSet<int>();
         foreach (var item in scene.Objects)
         {
             if (item.Id == Guid.Empty || !objectIds.Add(item.Id) || !layerIds.Contains(item.LayerId))
@@ -716,42 +741,18 @@ public sealed class PublicationCoverService(
                 || !double.IsFinite(item.Bounds.HeightPercent)
                 || item.Bounds.WidthPercent is <= 0 or > 400
                 || item.Bounds.HeightPercent is <= 0 or > 400
-                || (item.Kind != CompositionObjectKind.Image
-                    && (item.Bounds.XPercent < 0 || item.Bounds.YPercent < 0
-                        || item.Bounds.XPercent + item.Bounds.WidthPercent > 100.001
-                        || item.Bounds.YPercent + item.Bounds.HeightPercent > 100.001))
                 || item.Opacity is < 0 or > 1)
                 throw new InvalidDataException($"Cover object {item.Id:N} has invalid geometry.");
-            if (item.Kind == CompositionObjectKind.Image && item.ImageId is null)
-                throw new InvalidDataException($"Cover image object {item.Id:N} has no project image.");
-            if (item.Kind == CompositionObjectKind.Text
-                && item.TextBinding is not "title" and not "subtitle" and not "author" and not "spineText" and not "backCopy")
-                throw new InvalidDataException($"Cover text object {item.Id:N} requires a supported canonical copy binding.");
-            if (edition.Format != PublicationEditionFormat.Paperback
-                && item.Kind == CompositionObjectKind.Text
-                && item.TextBinding is ("spineText" or "backCopy"))
-                throw new InvalidDataException($"Digital cover text object {item.Id:N} uses a print-only canonical binding.");
-            if (edition.Format != PublicationEditionFormat.Paperback
-                && item.RegionConstraint is not CompositionRegionConstraint.Page
-                    and not CompositionRegionConstraint.SafeArea
-                    and not CompositionRegionConstraint.Front)
-                throw new InvalidDataException($"Digital cover object {item.Id:N} uses a print-only region constraint.");
             if (item.StyleId is Guid styleId && !styleIds.Contains(styleId))
                 throw new InvalidDataException($"Cover object {item.Id:N} references a missing object style.");
-            if (item.Kind == CompositionObjectKind.Image && !item.Decorative
-                && string.IsNullOrWhiteSpace(item.AltText) && !item.AccessibilityDecisionPending)
-                throw new InvalidDataException($"Cover image object {item.Id:N} requires alternative text or a decorative decision.");
-            if (!item.Decorative && item.SemanticRole != CompositionSemanticRole.Artifact
-                && (item.ReadingOrder is null || !readingOrder.Add(item.ReadingOrder.Value)))
-                throw new InvalidDataException($"Cover object {item.Id:N} requires a unique logical reading order.");
         }
     }
 
-    private static void Validate(PublicationCoverDesignUpdate update)
+    private static void ValidateAuthoringUpdate(PublicationCoverDesignUpdate update)
     {
         if (!Enum.IsDefined(update.BarcodeMode))
             throw new ArgumentException("Barcode mode is invalid.");
-        if (update.Title.Trim().Length is < 1 or > 160
+        if (update.Title.Trim().Length > 160
             || update.Subtitle.Trim().Length > 240
             || update.Author.Trim().Length > 160
             || update.SpineText.Trim().Length > 120
@@ -764,6 +765,13 @@ public sealed class PublicationCoverService(
             || update.ImageCropXPercent is < 0 or > 100
             || update.ImageCropYPercent is < 0 or > 100)
             throw new ArgumentException("Image crop positions must be between 0 and 100 percent.");
+    }
+
+    private static void Validate(PublicationCoverDesignUpdate update)
+    {
+        ValidateAuthoringUpdate(update);
+        if (update.Title.Trim().Length == 0)
+            throw new ArgumentException("A publication cover title is required.");
     }
 
     private static void ValidateProduct(PublicationCoverDesignUpdate update, PublicationEdition edition)
