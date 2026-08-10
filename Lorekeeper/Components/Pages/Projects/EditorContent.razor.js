@@ -2,6 +2,8 @@
 
 const lastChapterKey = (projectId) => `Lorekeeper.editor.lastChapter:${projectId}`;
 const columnLayoutKey = (projectId) => `Lorekeeper.editor.columnLayout:v1:${projectId}`;
+const workspacePreferencesKey = (projectId) => `Lorekeeper.editor.workspace:v1:${projectId}`;
+const editorModes = new Set(["Edit", "Read", "Pages", "Review"]);
 
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
 
@@ -26,6 +28,30 @@ export function clearLastEditorChapterId(projectId) {
     } catch (_) {
         // Storage can be unavailable in private or restricted browsing modes.
     }
+}
+
+export function getEditorWorkspacePreferences(projectId) {
+    return readWorkspacePreferences(projectId);
+}
+
+export function setEditorChapterMode(projectId, chapterId, mode) {
+    if (!chapterId || !editorModes.has(mode)) return;
+    const preferences = readWorkspacePreferences(projectId);
+    preferences.chapterModes[chapterId] = mode;
+    writeWorkspacePreferences(projectId, preferences);
+}
+
+export function setEditorReadFacing(projectId, facing) {
+    const preferences = readWorkspacePreferences(projectId);
+    preferences.readFacing = facing === true;
+    writeWorkspacePreferences(projectId, preferences);
+}
+
+export function setEditorPaneCollapsed(projectId, pane, collapsed) {
+    if (pane !== "chat" && pane !== "memory") return;
+    const preferences = readWorkspacePreferences(projectId);
+    preferences[`${pane}Collapsed`] = collapsed === true;
+    writeWorkspacePreferences(projectId, preferences);
 }
 
 export function attachColumnLayout(elements, projectId) {
@@ -349,6 +375,47 @@ function readStoredRatios(projectId) {
         };
     } catch (_) {
         return { chat: 1, memory: 1 };
+    }
+}
+
+function readWorkspacePreferences(projectId) {
+    const defaults = {
+        chapterModes: {},
+        readFacing: false,
+        chatCollapsed: false,
+        memoryCollapsed: false
+    };
+
+    try {
+        const raw = window.localStorage.getItem(workspacePreferencesKey(projectId));
+        const saved = raw ? JSON.parse(raw) : null;
+        if (!saved || typeof saved !== "object" || Array.isArray(saved)) return defaults;
+
+        const chapterModes = {};
+        if (saved.chapterModes && typeof saved.chapterModes === "object" && !Array.isArray(saved.chapterModes)) {
+            for (const [chapterId, mode] of Object.entries(saved.chapterModes)) {
+                if (typeof chapterId === "string" && editorModes.has(mode)) {
+                    chapterModes[chapterId] = mode;
+                }
+            }
+        }
+
+        return {
+            chapterModes,
+            readFacing: saved.readFacing === true,
+            chatCollapsed: saved.chatCollapsed === true,
+            memoryCollapsed: saved.memoryCollapsed === true
+        };
+    } catch (_) {
+        return defaults;
+    }
+}
+
+function writeWorkspacePreferences(projectId, preferences) {
+    try {
+        window.localStorage.setItem(workspacePreferencesKey(projectId), JSON.stringify(preferences));
+    } catch (_) {
+        // Storage can be unavailable in private or restricted browsing modes.
     }
 }
 

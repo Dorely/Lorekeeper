@@ -8,10 +8,10 @@
     <style>@((MarkupString)PreviewFontCss())</style>
     <header class="chapter-preview-toolbar">
         <div class="btn-group btn-group-sm" role="group" aria-label="Page display">
-            <button type="button" class="btn @ButtonClass(!_facing)" @onclick="() => _facing = false">Single page</button>
-            <button type="button" class="btn @ButtonClass(_facing)" @onclick="() => _facing = true">Facing pages</button>
+            <button type="button" class="btn @ButtonClass(!FacingPages)" @onclick="() => ChangeFacingAsync(false)">Single page</button>
+            <button type="button" class="btn @ButtonClass(FacingPages)" @onclick="() => ChangeFacingAsync(true)">Facing pages</button>
         </div>
-        @if (_facing)
+        @if (FacingPages)
         {
             <button type="button"
                     class="btn btn-sm @ButtonClass(_showFacingSeam)"
@@ -79,8 +79,8 @@
                 }
             </div>
         }
-        <div class="chapter-preview-scroll @(_facing ? "facing" : "single") @(_facing && _showFacingSeam ? "show-seam" : null) @($"fit-{_fit}")">
-            @if (_facing)
+        <div class="chapter-preview-scroll @(FacingPages ? "facing" : "single") @(FacingPages && _showFacingSeam ? "show-seam" : null) @($"fit-{_fit}")">
+            @if (FacingPages)
             {
                 @foreach (var spread in BuildFacingSpreads(_result.Pages))
                 {
@@ -114,6 +114,8 @@
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter, EditorRequired] public Guid ChapterId { get; set; }
     [Parameter] public long RefreshSignal { get; set; }
+    [Parameter] public bool FacingPages { get; set; }
+    [Parameter] public EventCallback<bool> FacingPagesChanged { get; set; }
 
     private static IEnumerable<ChapterPreviewPage?[]> BuildFacingSpreads(IReadOnlyList<ChapterPreviewPage> pages)
     {
@@ -167,7 +169,6 @@
     private Guid _loadedChapter;
     private long _loadedSignal = -1;
     private bool _loading;
-    private bool _facing;
     private bool _showFacingSeam;
     private string _fit = "width";
     private double _zoom = 1;
@@ -270,6 +271,11 @@
         _ => "custom",
     };
     private static string ButtonClass(bool active) => active ? "btn-primary" : "btn-outline-secondary";
+    private async Task ChangeFacingAsync(bool facing)
+    {
+        if (FacingPages == facing) return;
+        await FacingPagesChanged.InvokeAsync(facing);
+    }
     private void ChangeFit(ChangeEventArgs e) { _fit = e.Value?.ToString() ?? "page"; if (_fit != "zoom") _zoom = 1; }
     private void ChangeZoom(double amount) { _fit = "zoom"; _zoom = Math.Clamp(_zoom + amount, .35, 2.5); }
     private string PageStyle(ChapterPreviewPage page)

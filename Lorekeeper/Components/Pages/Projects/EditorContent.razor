@@ -199,6 +199,8 @@ else
                 {
                     <ChapterReadPreview ProjectId="Project.Id"
                                         ChapterId="_current.Id"
+                                        FacingPages="_readFacing"
+                                        FacingPagesChanged="SetReadFacingAsync"
                                         RefreshSignal="_previewRefreshSignal" />
                 }
 
@@ -825,6 +827,9 @@ else
     private EditorMode _mode = EditorMode.Edit;
     private bool _chatPaneCollapsed;
     private bool _rightPaneCollapsed;
+    private bool _readFacing;
+    private Guid? _workspacePreferencesProjectId;
+    private readonly Dictionary<Guid, EditorMode> _rememberedChapterModes = [];
 
     private ElementReference _reviewSurfaceRef;
     private ElementReference _editorGridRef;
@@ -939,6 +944,11 @@ else
             _editorDocument = null;
             _restoreChapterAfterRender = false;
             _pendingRememberChapterId = null;
+            _workspacePreferencesProjectId = null;
+            _rememberedChapterModes.Clear();
+            _readFacing = false;
+            _chatPaneCollapsed = false;
+            _rightPaneCollapsed = false;
             _contestReviewBatches = [];
             _contestReviewProjection = null;
             _reviewPendingBatches = [];
@@ -1017,9 +1027,12 @@ else
         _saveError = null;
         _pendingRememberChapterId = targetId;
 
-        if (!await ActivateCurrentContestReviewAsync() && _mode == EditorMode.Review)
+        if (!await ActivateCurrentContestReviewAsync())
         {
-            await RefreshReviewChangesAsync();
+            _contestReviewProjection = null;
+            SelectInitialModeForCurrentChapter();
+            if (_mode == EditorMode.Review)
+                await RefreshReviewChangesAsync();
         }
     }
 
@@ -1080,6 +1093,14 @@ else
         }
 
         if (_disposed) return;
+
+        if (Project is not null && _editorModule is not null && _workspacePreferencesProjectId != Project.Id)
+        {
+            await RestoreEditorWorkspacePreferencesAsync(Project.Id);
+            if (_disposed) return;
+            StateHasChanged();
+            return;
+        }
 
         if (_restoreChapterAfterRender)
         {
@@ -1472,6 +1493,51 @@ else
         _stylePanelVersion++;
     }
 
+    private async Task RestoreEditorWorkspacePreferencesAsync(Guid projectId)
+    {
+        var editorModule = _editorModule;
+        if (_disposed || editorModule is null) return;
+
+        EditorWorkspacePreferences preferences;
+        try
+        {
+            preferences = await editorModule.InvokeAsync<EditorWorkspacePreferences>(
+                "getEditorWorkspacePreferences",
+                projectId.ToString("N"));
+        }
+        catch (JSDisconnectedException) { return; }
+        catch (OperationCanceledException) { return; }
+        catch (ObjectDisposedException)
+        {
+            if (!_disposed && ReferenceEquals(_editorModule, editorModule))
+                _editorModule = null;
+            return;
+        }
+        catch (JSException)
+        {
+            preferences = new EditorWorkspacePreferences();
+        }
+
+        _rememberedChapterModes.Clear();
+        foreach (var (chapterId, mode) in preferences.ChapterModes)
+        {
+            if (Guid.TryParse(chapterId, out var parsedChapterId)
+                && Enum.TryParse<EditorMode>(mode, ignoreCase: true, out var parsedMode))
+            {
+                _rememberedChapterModes[parsedChapterId] = parsedMode;
+            }
+        }
+
+        _readFacing = preferences.ReadFacing;
+        _chatPaneCollapsed = preferences.ChatCollapsed;
+        _rightPaneCollapsed = preferences.MemoryCollapsed;
+        _workspacePreferencesProjectId = projectId;
+        SelectInitialModeForCurrentChapter();
+        await ApplyEditorReadOnlyAsync(EditorReadOnly);
+        if (_mode == EditorMode.Review && !ContestReviewActive)
+            await RefreshReviewChangesAsync();
+    }
+
     private void OnEditorStyleCatalogChanged() => _stylePanelVersion++;
 
     private string ModeButtonClass(EditorMode mode) =>
@@ -1510,19 +1576,126 @@ else
             await RefreshReviewChangesAsync();
         }
 
+        await RememberEditorModeAsync(_mode);
+
         StateHasChanged();
     }
 
-    private void ToggleChatPane()
+    private async Task ToggleChatPane()
     {
         if (ContestReviewActive) return;
         _chatPaneCollapsed = !_chatPaneCollapsed;
+        await RememberPaneCollapsedAsync("chat", _chatPaneCollapsed);
     }
 
-    private void ToggleRightPane()
+    private async Task ToggleRightPane()
     {
         if (ContestReviewActive) return;
         _rightPaneCollapsed = !_rightPaneCollapsed;
+        await RememberPaneCollapsedAsync("memory", _rightPaneCollapsed);
+    }
+
+    private async Task SetReadFacingAsync(bool facing)
+    {
+        if (_readFacing == facing) return;
+        _readFacing = facing;
+        var project = Project;
+        var editorModule = _editorModule;
+        if (project is null || editorModule is null) return;
+
+        try
+        {
+            await editorModule.InvokeVoidAsync(
+                "setEditorReadFacing",
+                project.Id.ToString("N"),
+                facing);
+        }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { }
+    }
+
+    private async Task RememberEditorModeAsync(EditorMode mode)
+    {
+        if (_activeChapterId is not Guid chapterId) return;
+        _rememberedChapterModes[chapterId] = mode;
+        var project = Project;
+        var editorModule = _editorModule;
+        if (project is null || editorModule is null) return;
+
+        try
+        {
+            await editorModule.InvokeVoidAsync(
+                "setEditorChapterMode",
+                project.Id.ToString("N"),
+                chapterId.ToString("N"),
+                mode.ToString());
+        }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { }
+    }
+
+    private async Task RememberPaneCollapsedAsync(string pane, bool collapsed)
+    {
+        var project = Project;
+        var editorModule = _editorModule;
+        if (project is null || editorModule is null) return;
+
+        try
+        {
+            await editorModule.InvokeVoidAsync(
+                "setEditorPaneCollapsed",
+                project.Id.ToString("N"),
+                pane,
+                collapsed);
+        }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (JSException) { }
+    }
+
+    private void SelectInitialModeForCurrentChapter()
+    {
+        if (_current is null || ContestReviewActive) return;
+
+        var selectedMode = _rememberedChapterModes.GetValueOrDefault(_current.Id,
+            CurrentChapterContainsOnlyDesignedPages ? EditorMode.Pages : EditorMode.Edit);
+        if (selectedMode == EditorMode.Pages && DesignedPageIds.Count == 0)
+            selectedMode = EditorMode.Edit;
+
+        _mode = selectedMode;
+        if (_mode == EditorMode.Pages)
+        {
+            var pages = DesignedPageIds;
+            if (_openCompositionId is null || !pages.Contains(_openCompositionId.Value))
+                _openCompositionId = pages[0];
+        }
+    }
+
+    private bool CurrentChapterContainsOnlyDesignedPages
+    {
+        get
+        {
+            if (_editorDocument is not { } document) return false;
+            try
+            {
+                var content = ManuscriptCodec.Deserialize(
+                    document.ManuscriptJson,
+                    document.ChapterId,
+                    document.ManuscriptRevision).Content;
+                return content.Count > 0
+                    && content.All(block => block.Type == ManuscriptBlockType.DesignedPage
+                        && block.PageCompositionId is not null);
+            }
+            catch (InvalidDataException)
+            {
+                return false;
+            }
+        }
     }
 
     private string EditorSidePaneClass()
@@ -3194,6 +3367,7 @@ else
 
         _openCompositionId = compositionId;
         _mode = EditorMode.Pages;
+        await RememberEditorModeAsync(_mode);
         _pageWorkspaceSelectionId = mutation.SelectedObjectId;
         _pageWorkspaceRefreshSignal++;
         StateHasChanged();
@@ -3319,6 +3493,14 @@ else
         long RenderVersion);
 
     private readonly record struct EditorDocumentKey(Guid ChapterId, long Revision, long StyleCatalogVersion);
+
+    private sealed record EditorWorkspacePreferences
+    {
+        public Dictionary<string, string> ChapterModes { get; init; } = [];
+        public bool ReadFacing { get; init; }
+        public bool ChatCollapsed { get; init; }
+        public bool MemoryCollapsed { get; init; }
+    }
 
     private sealed record ReviewProjection(
         bool HasChanges,

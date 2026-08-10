@@ -327,7 +327,12 @@ an active authoring variant. New pages use the current project setup; an existin
 page keeps its authored surface when the project setup changes. Publish reports
 edition compatibility and can copy the authoring scene into a new exact edition
 variant for review, but it never rewrites the authoring layout.
-The chapter center column has Edit, Read, Pages, and Review modes. Read flushes
+The chapter center column has Edit, Read, Pages, and Review modes. A chapter
+whose manuscript contains only Designed Page blocks initially opens in Pages;
+after the author chooses a mode, that chapter's last mode is restored across
+Editor navigation and reloads. Read's single/facing choice and the Chat/Memory
+column widths and collapsed states are retained as browser-local, per-project
+workspace preferences rather than project publication data. Read flushes
 pending manuscript edits and uses `IChapterPreviewService` plus the Press layout
 command to render the current chapter as clean page canvases with real line
 breaks, images, captions, Designed Pages, recto parity, labels, links, and boxes.
