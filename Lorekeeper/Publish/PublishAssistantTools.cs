@@ -89,7 +89,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (PublicationBookPatch patch) => PatchPublicationBookAsync(context, patch),
                 name: "patch_publication_book",
-                description: "Revision-check a sparse Core Book patch. Supply only changed values; omitted fields are preserved. Results contain changed state and refresh metadata, not repeated manuscript or scene payloads."),
+                description: "Revision-check a sparse Core Book patch. Supply only changed values; omitted fields are preserved. Language accepts en, en-US, or en-GB. Results contain changed state and refresh metadata, not repeated manuscript or scene payloads."),
             AIFunctionFactory.Create(
                 method: () => ReadEditionsAsync(context),
                 name: "list_publication_releases",
@@ -105,7 +105,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid releaseId, PublicationReleaseOverridePatch patch) => PatchReleaseAsync(context, releaseId, patch),
                 name: "patch_publication_release_overrides",
-                description: "Revision-check sparse release product settings and field overrides. ResetFields restores live Core inheritance. Vendor profile versions are application-managed and cannot be supplied."),
+                description: "Revision-check sparse release product settings and field overrides. ResetFields restores live Core inheritance. Language accepts en, en-US, or en-GB. Vendor profile versions are application-managed and cannot be supplied."),
             AIFunctionFactory.Create(
                 method: (Guid? releaseId = null) => PrepareFilesAsync(context, releaseId),
                 name: "prepare_publication_files",

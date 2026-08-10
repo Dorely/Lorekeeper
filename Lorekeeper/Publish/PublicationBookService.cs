@@ -1055,6 +1055,8 @@ public sealed class PublicationBookService(
             || book.Language.Length > 40 || book.Publisher.Length > 500
             || book.Copyright.Length > 100_000 || book.Description.Length > 100_000)
             throw new InvalidOperationException("One or more Core Book fields exceed supported limits.");
+        if (!PublicationLanguage.IsPressSupported(book.Language))
+            throw new InvalidOperationException("Choose English, English (United States), or English (United Kingdom) as the Core Book language.");
         if (!Enum.IsDefined(book.TitlePageMode))
             throw new InvalidOperationException("The Core Book title-page setting is invalid.");
     }

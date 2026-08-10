@@ -1659,6 +1659,8 @@ public sealed class PublicationEditionService(
             || edition.Language.Length > 40 || edition.Publisher.Length > 500
             || edition.Copyright.Length > 100_000 || edition.Description.Length > 100_000)
             throw new InvalidOperationException("One or more release overrides exceed supported limits.");
+        if (!PublicationLanguage.IsPressSupported(edition.Language))
+            throw new InvalidOperationException("Choose English, English (United States), or English (United Kingdom) as the release language.");
     }
 
     private static void ValidateUpdate(PublicationEditionUpdate input)

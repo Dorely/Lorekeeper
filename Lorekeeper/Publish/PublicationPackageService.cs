@@ -1316,9 +1316,7 @@ public sealed class PublicationPackageService(
     }
 
     private static bool IsEnglishLanguage(string? value) =>
-        PublicationLanguage.NormalizeOptional(value) is { } language
-        && (string.Equals(language, "en", StringComparison.OrdinalIgnoreCase)
-            || language.StartsWith("en-", StringComparison.OrdinalIgnoreCase));
+        PublicationLanguage.IsPressSupported(value);
 
     private static bool IsSupportedLatinRune(Rune rune) =>
         rune.Value <= 0x024F

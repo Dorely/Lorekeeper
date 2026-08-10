@@ -419,7 +419,7 @@ else
                 <label class="field wide"><span>Title</span><input class="form-control" value="@_coreDraft.Title" @oninput="e => CoreChanged(nameof(CoreDraft.Title), e.Value?.ToString())" /></label>
                 <label class="field wide"><span>Subtitle <small>optional</small></span><input class="form-control" value="@_coreDraft.Subtitle" @oninput="e => CoreChanged(nameof(CoreDraft.Subtitle), e.Value?.ToString())" /></label>
                 <label class="field"><span>Author</span><input class="form-control" value="@_coreDraft.Author" @oninput="e => CoreChanged(nameof(CoreDraft.Author), e.Value?.ToString())" /></label>
-                <label class="field"><span>Language</span><input class="form-control" placeholder="en" value="@_coreDraft.Language" @oninput="e => CoreChanged(nameof(CoreDraft.Language), e.Value?.ToString())" /></label>
+                <label class="field"><span>Language</span>@LanguageSelect(_coreDraft.Language, false, value => CoreChanged(nameof(CoreDraft.Language), value))</label>
                 <label class="field"><span>Publisher <small>optional</small></span><input class="form-control" value="@_coreDraft.Publisher" @oninput="e => CoreChanged(nameof(CoreDraft.Publisher), e.Value?.ToString())" /></label>
                 <label class="field"><span>Copyright <small>optional</small></span><input class="form-control" value="@_coreDraft.Copyright" @oninput="e => CoreChanged(nameof(CoreDraft.Copyright), e.Value?.ToString())" /></label>
                 <label class="field full"><span>Description <small>optional</small></span><textarea class="form-control" rows="4" value="@_coreDraft.Description" @oninput="e => CoreChanged(nameof(CoreDraft.Description), e.Value?.ToString())"></textarea></label>
@@ -511,7 +511,7 @@ else
                 @InheritedText("Title", PublicationEditionOverrideField.Title, _releaseDraft.Title, value => ReleaseText(nameof(ReleaseDraft.Title), value))
                 @InheritedText("Subtitle", PublicationEditionOverrideField.Subtitle, _releaseDraft.Subtitle, value => ReleaseText(nameof(ReleaseDraft.Subtitle), value))
                 @InheritedText("Author", PublicationEditionOverrideField.Author, _releaseDraft.Author, value => ReleaseText(nameof(ReleaseDraft.Author), value))
-                @InheritedText("Language", PublicationEditionOverrideField.Language, _releaseDraft.Language, value => ReleaseText(nameof(ReleaseDraft.Language), value))
+                @InheritedLanguage()
                 @InheritedText("Publisher", PublicationEditionOverrideField.Publisher, _releaseDraft.Publisher, value => ReleaseText(nameof(ReleaseDraft.Publisher), value))
                 @InheritedText("Copyright", PublicationEditionOverrideField.Copyright, _releaseDraft.Copyright, value => ReleaseText(nameof(ReleaseDraft.Copyright), value))
                 @InheritedText("Description", PublicationEditionOverrideField.Description, _releaseDraft.Description, value => ReleaseText(nameof(ReleaseDraft.Description), value))
@@ -555,6 +555,22 @@ else
         <div class="inherited-heading"><label>@Label</label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>@(_releaseOverrides.Contains(Field) ? "Customized" : "From Core Book")</span></label></div>
         <input class="form-control" disabled="@(!_releaseOverrides.Contains(Field))" value="@Value" @oninput="e => Changed(e.Value?.ToString())" />
     </div>;
+
+    private RenderFragment InheritedLanguage() => @<div class="inherited-field">
+        <div class="inherited-heading"><label>Language</label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(PublicationEditionOverrideField.Language)" @onchange="e => ToggleOverride(PublicationEditionOverrideField.Language, (bool)e.Value!)" /><span>@(_releaseOverrides.Contains(PublicationEditionOverrideField.Language) ? "Customized" : "From Core Book")</span></label></div>
+        @LanguageSelect(_releaseDraft.Language, !_releaseOverrides.Contains(PublicationEditionOverrideField.Language), value => ReleaseText(nameof(ReleaseDraft.Language), value))
+    </div>;
+
+    private RenderFragment LanguageSelect(string Value, bool Disabled, Action<string?> Changed) => @<select class="form-select" disabled="@Disabled" value="@PublicationLanguage.Normalize(Value)" @onchange="e => Changed(e.Value?.ToString())">
+        @if (!PublicationLanguage.IsPressSupported(Value))
+        {
+            <option value="@PublicationLanguage.Normalize(Value)" disabled>Unsupported saved value (@Value)</option>
+        }
+        @foreach (var option in PublicationLanguage.SupportedOptions)
+        {
+            <option value="@option.Tag">@option.Label</option>
+        }
+    </select>;
 
     private RenderFragment InheritedToggle(string Label, PublicationEditionOverrideField Field, bool Value, Action<bool> Changed) => @<div class="inherited-toggle"><label class="check-row"><input type="checkbox" disabled="@(!_releaseOverrides.Contains(Field))" checked="@Value" @onchange="e => Changed((bool)e.Value!)" /><span>@Label</span></label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>@(_releaseOverrides.Contains(Field) ? "Customized" : "From Core Book")</span></label></div>;
 
@@ -1163,6 +1179,6 @@ else
         public string Title { get; set; } = ""; public string Subtitle { get; set; } = ""; public string Author { get; set; } = ""; public string Language { get; set; } = ""; public string Publisher { get; set; } = ""; public string Copyright { get; set; } = ""; public string Description { get; set; } = "";
         public bool IncludeTableOfContents { get; set; } public bool IncludeVisibleTableOfContents { get; set; } public bool IncludeActSynopses { get; set; } public bool IncludeChapterSynopses { get; set; } public bool IncludeActHeadings { get; set; } public bool IncludeChapterHeadings { get; set; } public bool NumberActs { get; set; } public bool NumberChapters { get; set; }
         public double PageWidthInches { get; set; } public double PageHeightInches { get; set; } public double PageMarginInches { get; set; } public double BodyFontSizePoints { get; set; } public double BodyLineHeight { get; set; }
-        public static ReleaseDraft From(PublicationEditionView item) => new() { Name = item.Name, Vendor = item.Vendor, Isbn = item.Isbn, Paper = item.Paper, Ink = item.Ink, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, Title = item.TitleOverride, Subtitle = item.Subtitle, Author = item.Author, Language = item.Language, Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, PageWidthInches = item.PageWidthInches, PageHeightInches = item.PageHeightInches, PageMarginInches = item.PageMarginInches, BodyFontSizePoints = item.BodyFontSizePoints, BodyLineHeight = item.BodyLineHeight };
+        public static ReleaseDraft From(PublicationEditionView item) => new() { Name = item.Name, Vendor = item.Vendor, Isbn = item.Isbn, Paper = item.Paper, Ink = item.Ink, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, Title = item.TitleOverride, Subtitle = item.Subtitle, Author = item.Author, Language = PublicationLanguage.Normalize(item.Language), Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, PageWidthInches = item.PageWidthInches, PageHeightInches = item.PageHeightInches, PageMarginInches = item.PageMarginInches, BodyFontSizePoints = item.BodyFontSizePoints, BodyLineHeight = item.BodyLineHeight };
     }
 }

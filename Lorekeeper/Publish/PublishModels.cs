@@ -9,6 +9,13 @@ public static class PublicationLanguage
 {
     private static readonly IReadOnlyDictionary<string, string> KnownNames = BuildKnownNames();
 
+    public static IReadOnlyList<PublicationLanguageOption> SupportedOptions { get; } =
+    [
+        new("en", "English"),
+        new("en-US", "English (United States)"),
+        new("en-GB", "English (United Kingdom)"),
+    ];
+
     public static string Normalize(string? value, string fallback = "en") =>
         NormalizeOptional(value) ?? fallback;
 
@@ -29,6 +36,12 @@ public static class PublicationLanguage
         }
 
         return KnownNames.GetValueOrDefault(candidate, candidate);
+    }
+
+    public static bool IsPressSupported(string? value)
+    {
+        var normalized = NormalizeOptional(value);
+        return SupportedOptions.Any(item => string.Equals(item.Tag, normalized, StringComparison.OrdinalIgnoreCase));
     }
 
     private static IReadOnlyDictionary<string, string> BuildKnownNames()
@@ -53,6 +66,8 @@ public static class PublicationLanguage
         return result;
     }
 }
+
+public sealed record PublicationLanguageOption(string Tag, string Label);
 
 [JsonConverter(typeof(JsonStringEnumConverter<PublishExportFormat>))]
 public enum PublishExportFormat

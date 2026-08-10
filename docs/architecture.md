@@ -968,7 +968,9 @@ Human-readable language names from Book Briefs and publication inputs are
 canonicalized to culture tags when new Core/release values are persisted and at
 export, preview, preflight, and Press-request boundaries. Existing values such as
 `English` therefore produce `en` without requiring a schema migration or manual
-database repair.
+database repair. Publish presents the renderer's exact supported document-language
+set (`en`, `en-US`, and `en-GB`) as selectors for Core Book and release overrides;
+unsupported historical values remain visible until the user chooses a supported tag.
 Startup applies later additive EF migrations only after the guarded Core Book
 transformation and its cleanup migration succeed. This makes current Core-owned
 tables available before runtime services execute without exposing those tables
