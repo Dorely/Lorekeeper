@@ -209,6 +209,9 @@ public sealed class PublishChatServiceTests
                 """{"releaseId":null}""",
                 "{}"));
         Assert.NotNull(PublishChatService.TryMutationNotice("patch_publication_book", "{}", "{}"));
+        Assert.NotNull(PublishChatService.TryMutationNotice("patch_publication_book_page_setup", "{}", "{}"));
+        Assert.NotNull(PublishChatService.TryMutationNotice("upsert_publication_book_text_style", "{}", "{}"));
+        Assert.NotNull(PublishChatService.TryMutationNotice("delete_publication_book_text_style", "{}", "{}"));
         Assert.Null(PublishChatService.TryMutationNotice("read_publication_release", "{}", "{}"));
     }
 

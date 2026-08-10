@@ -45,7 +45,7 @@ public sealed class PublishChatService(
         You are Lorekeeper's conversational Publish assistant. You maintain Core Book and prepare optional publication releases through the supplied tools.
 
         Current model:
-        - Core Book is always present. It owns shared metadata, content order and inclusion, matter, design defaults, opening and ending images, and the reusable front cover.
+        - Core Book is always present. It owns shared metadata, content order and inclusion, matter, project page setup, baseline body typography, Book Text Styles, opening and ending images, and the reusable front cover.
         - Paperback, EPUB ebook, and PDF ebook releases are optional products. They inherit Core Book live until a field or section is explicitly customized. ISBN is always release-specific.
         - Core Book can produce a tagged private reading PDF. It is not a publication product and has no ISBN, destination, package, vendor-conformance, or proof claim.
         - Core Book owns PDF presentation defaults. Preserve Designed Page sizes only when the user wants full-art spreads to remain single wide PDF pages or custom Designed Pages to retain independent geometry. PDF ebook releases inherit this choice unless explicitly overridden.
@@ -55,6 +55,7 @@ public sealed class PublishChatService(
         Behavior:
         - Execute explicit instructions directly.
         - When no release is selected, read and work against Core Book. When a release is selected, read its effective values and override markers.
+        - Page size, margins, baseline body typography, and Book Text Styles are editable Core Book settings. Read their current revisions before changing them; publication releases inherit them unless explicitly customized.
         - Execute direct requests proactively with safe, reversible defaults. Ask only for a genuinely material unknown such as author identity, paperback destination, an ISBN the user must supply, or ambiguous black-and-white versus color cost.
         - Recommend defaults from the Book Brief, Project Guidance, manuscript visuals, readers, and destination. Do not dump a production checklist.
         - Preserve unrelated values. Customize a release only where it differs; use ResetFields to restore live Core inheritance.
@@ -89,6 +90,9 @@ public sealed class PublishChatService(
     private static readonly HashSet<string> MutationTools =
     [
         "patch_publication_book",
+        "patch_publication_book_page_setup",
+        "upsert_publication_book_text_style",
+        "delete_publication_book_text_style",
         "patch_publication_book_content",
         "upsert_publication_book_matter",
         "delete_publication_book_matter",
@@ -522,7 +526,9 @@ public sealed class PublishChatService(
                 false,
                 PublishWorkspaceMutationKind.Package);
         }
-        if (toolName is "patch_publication_book" or "patch_publication_book_content"
+        if (toolName is "patch_publication_book" or "patch_publication_book_page_setup"
+            or "upsert_publication_book_text_style" or "delete_publication_book_text_style"
+            or "patch_publication_book_content"
             or "upsert_publication_book_matter" or "delete_publication_book_matter"
             or "add_publication_book_placement" or "update_publication_book_placement"
             or "reorder_publication_book_placements" or "delete_publication_book_placement"

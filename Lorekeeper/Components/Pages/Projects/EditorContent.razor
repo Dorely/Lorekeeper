@@ -773,30 +773,12 @@ else
                                     OnClose="CloseManuscriptImageModal"
                                     OnPrimaryAction="SelectManuscriptImageAsync" />
 
-    @if (_bookTextStylesModalOpen)
-    {
-        <div class="book-text-styles-modal-backdrop" @onclick="CloseBookTextStylesModal">
-            <section class="book-text-styles-modal"
-                     role="dialog"
-                     aria-modal="true"
-                     aria-label="Manage Book Text Styles"
-                     @onclick:stopPropagation="true">
-                <header>
-                    <div>
-                        <span class="eyebrow">Book design</span>
-                        <h2>Book Text Styles</h2>
-                    </div>
-                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseBookTextStylesModal"></button>
-                </header>
-                <div class="book-text-styles-modal-body">
-                    <ManuscriptStylesPanel @key="_stylePanelVersion"
-                                           ProjectId="Project.Id"
-                                           BeforeChange="FlushAsync"
-                                           Changed="OnManuscriptStylesChangedAsync" />
-                </div>
-            </section>
-        </div>
-    }
+    <BookTextStylesModal ProjectId="Project.Id"
+                         IsOpen="_bookTextStylesModalOpen"
+                         RefreshSignal="_stylePanelVersion"
+                         BeforeChange="FlushAsync"
+                         Changed="OnManuscriptStylesChangedAsync"
+                         OnClose="CloseBookTextStylesModal" />
 
 }
 

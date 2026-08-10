@@ -1,6 +1,7 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Publish
 @using Lorekeeper.Manuscripts
+@using Lorekeeper.Composition
 @implements IAsyncDisposable
 @inject IPublishService Publishing
 @inject IPublicationBookService Books
@@ -8,6 +9,7 @@
 @inject IPublicationCoverService Covers
 @inject IPublicationPreparationService Preparation
 @inject IPublicationRenderService Renders
+@inject IProjectPageSetupService PageSetups
 @inject IJSRuntime JS
 
 @if (Project is null || _loading)
@@ -121,6 +123,16 @@ else
     </div>
 }
 
+@if (Project is not null)
+{
+    <BookTextStylesModal ProjectId="Project.Id"
+                         IsOpen="_bookTextStylesModalOpen"
+                         RefreshSignal="_bookTextStylesRefreshSignal"
+                         BeforeChange="FlushBeforeBookStyleChangeAsync"
+                         Changed="HandleBookTextStylesChangedAsync"
+                         OnClose="CloseBookTextStylesModal" />
+}
+
 @code {
     [CascadingParameter] public Project? Project { get; set; }
 
@@ -153,12 +165,20 @@ else
     private bool _busy;
     private bool _addReleaseOpen;
     private bool _coverEditorOpen;
+    private bool _bookTextStylesModalOpen;
+    private long _bookTextStylesRefreshSignal;
     private CoverCompositionWorkspace? _coverWorkspace;
     private long _coverRefreshSignal;
     private Guid? _coverSelectionId;
     private PublicationArtifactView? _previewArtifact;
     private bool _coreDirty;
     private bool _coreOutlineDirty;
+    private bool _pageSetupDirty;
+    private double _pageWidthInches = 6;
+    private double _pageHeightInches = 9;
+    private double _pageMarginInches = .75;
+    private double _bodyFontSizePoints = 12;
+    private double _bodyLineHeight = 1.55;
     private bool _releaseDirty;
     private bool _releaseContentDirty;
     private bool _releaseContentOpen;
@@ -246,8 +266,10 @@ else
             _core = await Books.GetOrCreateAsync(Project.Id);
             _releases = await Releases.ListAsync(Project.Id);
             _coreDraft = CoreDraft.From(_core);
+            CopyPageSetupDraft();
             _coreDirty = false;
             _coreOutlineDirty = false;
+            _pageSetupDirty = false;
             _coreOutline = [];
             _coreMatter = [];
             _corePlacements = [];
@@ -307,7 +329,9 @@ else
             _core = await Books.GetOrCreateAsync(Project.Id, _dispose.Token);
             _releases = await Releases.ListAsync(Project.Id, _dispose.Token);
             _coreDraft = CoreDraft.From(_core);
+            CopyPageSetupDraft();
             _coreDirty = false;
+            _pageSetupDirty = false;
             _refreshCoreSummaryOnTargetLoad = false;
         }
         var details = await Books.GetDetailsAsync(Project.Id, _dispose.Token);
@@ -363,6 +387,30 @@ else
             <div class="primary-action"><button class="btn btn-primary" disabled="@(_busy || !_outputsLoaded || HasActivePreparation)" @onclick="PrepareCoreAsync">@PreparationButton("Prepare reading PDF")</button><small>A tagged review PDF—not a publication product.</small></div>
             @PreparationStatus()
             @CoreDownloads()
+        </section>
+
+        <section class="workspace-card core-book-design-card">
+            <header>
+                <div><div><span class="eyebrow">Book design</span><h2>Page, text, and cover defaults</h2><p>These shared choices flow into the reading PDF and publication releases unless customized.</p></div></div>
+                <button class="btn btn-sm btn-primary" disabled="@(!_pageSetupDirty || _busy)" @onclick="SavePageSetupAsync">Save design</button>
+            </header>
+            <div class="core-book-design-grid">
+                <div class="core-design-pane">
+                    <div class="core-design-heading"><div><h3>Page and text defaults</h3><p>Set the regular page geometry and baseline body typography.</p></div><button type="button" class="btn btn-sm btn-outline-primary" @onclick="OpenBookTextStylesModal">Manage Book Text Styles</button></div>
+                    <div class="page-setup-grid">
+                        <label class="field full"><span>Page size</span><select class="form-select" value="@PageSetupPreset()" @onchange="PageSetupPresetChanged"><option value="6x9">6 × 9 in</option><option value="5.5x8.5">5.5 × 8.5 in</option><option value="8.5x11">8.5 × 11 in</option><option value="custom">Custom</option></select></label>
+                        <label class="field"><span>Width (in)</span><input class="form-control" type="number" min="3" max="24" step="0.125" @bind="_pageWidthInches" @bind:after="MarkPageSetupDirty" /></label>
+                        <label class="field"><span>Height (in)</span><input class="form-control" type="number" min="3" max="24" step="0.125" @bind="_pageHeightInches" @bind:after="MarkPageSetupDirty" /></label>
+                        <label class="field"><span>Margins (in)</span><input class="form-control" type="number" min="0.25" max="3" step="0.0625" @bind="_pageMarginInches" @bind:after="MarkPageSetupDirty" /></label>
+                        <label class="field"><span>Body size (pt)</span><input class="form-control" type="number" min="6" max="36" step="0.25" @bind="_bodyFontSizePoints" @bind:after="MarkPageSetupDirty" /></label>
+                        <label class="field"><span>Line height</span><input class="form-control" type="number" min="0.8" max="3" step="0.05" @bind="_bodyLineHeight" @bind:after="MarkPageSetupDirty" /></label>
+                    </div>
+                </div>
+                <div class="core-design-pane core-cover-summary">
+                    <div><span class="eyebrow">Core cover</span><h3>Reusable front cover</h3><p>The front cover flows into EPUB and PDF releases and becomes the front panel of paperback covers.</p></div>
+                    <div class="button-row"><button class="btn btn-sm btn-outline-primary" @onclick="OpenCoreCoverAsync">Edit Core cover</button><span class="status-pill">Revision @_core!.CoverRevision</span></div>
+                </div>
+            </div>
         </section>
 
         <section class="workspace-card"><header><div><span class="step">01</span><div><h2>Book details</h2><p>Enter these once. Releases use them unless customized.</p></div></div><button class="btn btn-sm btn-primary" disabled="@((!_coreDirty && !_coreOutlineDirty) || _busy)" @onclick="SaveCoreAsync">Save changes</button></header>
@@ -424,8 +472,6 @@ else
             }
             @if (_corePlacements.Count > 0){<h3 class="subheading">Opening and ending images</h3><div class="compact-list">@foreach (var item in _corePlacements){<div><strong>@item.AssetFileName</strong><span>@item.PlacementKind · @item.TargetTitle</span></div>}</div>}
         </section>
-
-        <section class="workspace-card split"><div><span class="eyebrow">Book design</span><h2>Page and text defaults</h2><p>@_core!.PageSetup.PageWidthInches × @_core.PageSetup.PageHeightInches in pages · @_core.PageSetup.PageMarginInches in margins · @_core.PageSetup.BodyFontSizePoints pt body text</p><p class="muted">Managed by Project Page Setup and Book Text Styles. Print releases check compatibility when prepared.</p></div><div><span class="eyebrow">Core cover</span><h2>Reusable front cover</h2><p>The front cover flows into EPUB and PDF releases and becomes the front panel of paperback covers.</p><div class="button-row"><button class="btn btn-sm btn-outline-primary" @onclick="OpenCoreCoverAsync">Edit Core cover</button><span class="status-pill">Revision @_core.CoverRevision</span></div></div></section>
 
     </div>;
 
@@ -664,6 +710,109 @@ else
         finally { _busy = false; }
     }
 
+    private async Task SavePageSetupAsync()
+    {
+        if (Project is null || _core is null || !_pageSetupDirty)
+            return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            await PageSetups.UpdateAsync(
+                Project.Id,
+                _core.PageSetup.Revision,
+                new ProjectPageSetupInput(
+                    _pageWidthInches,
+                    _pageHeightInches,
+                    _pageMarginInches,
+                    _bodyFontSizePoints,
+                    _bodyLineHeight));
+            _core = await Books.GetOrCreateAsync(Project.Id);
+            CopyPageSetupDraft();
+            _pageSetupDirty = false;
+            _releases = await Releases.ListAsync(Project.Id);
+            _artifacts = (await Renders.ListCoreAsync(Project.Id))
+                .SelectMany(item => item.Artifacts)
+                .OrderByDescending(item => item.CreatedAt)
+                .ToList();
+            _notice = "Core Book page and text defaults saved. Inheriting releases now use these values.";
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void CopyPageSetupDraft()
+    {
+        if (_core is null)
+            return;
+        _pageWidthInches = _core.PageSetup.PageWidthInches;
+        _pageHeightInches = _core.PageSetup.PageHeightInches;
+        _pageMarginInches = _core.PageSetup.PageMarginInches;
+        _bodyFontSizePoints = _core.PageSetup.BodyFontSizePoints;
+        _bodyLineHeight = _core.PageSetup.BodyLineHeight;
+    }
+
+    private void MarkPageSetupDirty() => _pageSetupDirty = true;
+
+    private string PageSetupPreset() => (_pageWidthInches, _pageHeightInches) switch
+    {
+        (6, 9) => "6x9",
+        (5.5, 8.5) => "5.5x8.5",
+        (8.5, 11) => "8.5x11",
+        _ => "custom",
+    };
+
+    private void PageSetupPresetChanged(ChangeEventArgs e)
+    {
+        switch (e.Value?.ToString())
+        {
+            case "6x9":
+                _pageWidthInches = 6;
+                _pageHeightInches = 9;
+                break;
+            case "5.5x8.5":
+                _pageWidthInches = 5.5;
+                _pageHeightInches = 8.5;
+                break;
+            case "8.5x11":
+                _pageWidthInches = 8.5;
+                _pageHeightInches = 11;
+                break;
+            default:
+                return;
+        }
+        _pageSetupDirty = true;
+    }
+
+    private void OpenBookTextStylesModal() => _bookTextStylesModalOpen = true;
+    private void CloseBookTextStylesModal() => _bookTextStylesModalOpen = false;
+
+    private async Task<bool> FlushBeforeBookStyleChangeAsync()
+    {
+        await SavePendingAsync();
+        return !_coreDirty && !_coreOutlineDirty && !_pageSetupDirty
+            && !_releaseDirty && !_releaseContentDirty;
+    }
+
+    private async Task HandleBookTextStylesChangedAsync()
+    {
+        if (Project is null)
+            return;
+        _bookTextStylesRefreshSignal++;
+        _releases = await Releases.ListAsync(Project.Id);
+        _artifacts = (await Renders.ListCoreAsync(Project.Id))
+            .SelectMany(item => item.Artifacts)
+            .OrderByDescending(item => item.CreatedAt)
+            .ToList();
+        _notice = "Book Text Styles saved. Existing reading and release files may need to be prepared again.";
+    }
+
     private async Task SaveReleaseAsync()
     {
         if (Project is null || _workspace is null || _selectedReleaseId is not Guid id || (!_releaseDirty && !_releaseContentDirty)) return;
@@ -748,8 +897,16 @@ else
     {
         if (_coverEditorOpen && _coverWorkspace is not null)
             await _coverWorkspace.FlushAsync();
-        if (_coreDirty || _coreOutlineDirty) await SaveCoreAsync();
-        if (_releaseDirty || _releaseContentDirty) await SaveReleaseAsync();
+        if (_coreDirty || _coreOutlineDirty)
+            await SaveCoreAsync();
+        if (_coreDirty || _coreOutlineDirty)
+            return;
+        if (_pageSetupDirty)
+            await SavePageSetupAsync();
+        if (_pageSetupDirty)
+            return;
+        if (_releaseDirty || _releaseContentDirty)
+            await SaveReleaseAsync();
     }
 
     private async Task PrepareCoreAsync()
@@ -850,6 +1007,8 @@ else
     private async Task OpenCoreCoverAsync()
     {
         await SavePendingAsync();
+        if (_coreDirty || _coreOutlineDirty || _pageSetupDirty)
+            return;
         _selectedReleaseId = null;
         _coverEditorOpen = true;
     }
@@ -918,7 +1077,7 @@ else
 
     private Task HandleAssistantMutationAsync(PublishWorkspaceMutated mutation)
     {
-        if (_coreDirty || _coreOutlineDirty || _releaseDirty || _releaseContentDirty)
+        if (_coreDirty || _coreOutlineDirty || _pageSetupDirty || _releaseDirty || _releaseContentDirty)
         {
             _notice = "The assistant changed publishing settings. Your unsaved form edits were kept; save or reload to reconcile them.";
             return Task.CompletedTask;

@@ -183,6 +183,7 @@
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware Edit/Read/Pages/Review chapter workspace with keyed semantic editor, serialized refresh coordination, reusable project-image and Book Text Style modals, composition/variant-aware assistant refresh routing, and browser-local per-project chapter mode, Read view, and resizable/collapsible Chat/Memory preferences. |
 | `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with disposal-safe asynchronous attachment, revision-aware save/flush, compact grouped project-font/size/spacing/character/paragraph controls, style-preserving list conversion, modal image selection, capture/apply/manage Book Text Styles, sticky styled Figure controls, Electron-safe Figure/Designed Page setup forms, and discoverable Designed Page cards with live names, surface/status summaries, artwork thumbnails, and editor actions. |
 | `ChapterReadPreview.razor` (+ `.razor.css`) | Press-backed current-chapter page preview with flush-before-layout, width-fit default, single/facing display, fixed two-leaf spread rows with an optional visible seam, fit/zoom controls, project page setup, exact bundled/imported font-face URLs, images, labels, links, visible authoring warnings, and retryable failures. |
+| `BookTextStylesModal.razor` (+ `.razor.css`) | Shared Editor/Publish modal shell for the revision-aware Book Text Styles manager. |
 | `ManuscriptStylesPanel.razor` (+ `.razor.css`) | Compact Book Text Style manager with an on-demand create/edit form, revision-aware paragraph/character typography, spacing, indentation, pagination, and stable semantic roles. |
 | `CompositionVisualEditorShell.razor` (+ `.razor.css`) | Shared Pages/Cover visual-editor chrome with a compact view toolbar, canvas-first stage, fixed bottom object/context controls, and a host-supplied on-demand details drawer. |
 | `DesignedPageWorkspace.razor` (+ `.razor.css`) | Contextual exact-geometry page/spread editor using the shared visual shell, modal image picking, proportional or free image resizing, one-action canvas fitting, externally rendered rulers/handles, true front/back ordering, legacy crop repositioning, in-canvas semantic-text editing, compact controls, diagnostics, undo/redo, and serialized autosave. |
@@ -234,7 +235,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, target chips/add-release flow, live inheritance/override controls, embedded live cover editing, format-gated settings, in-app Core PDF preview, one-action preparation, blockers, and immutable downloads. |
+| `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, editable Core page/text defaults, shared style management, target chips/add-release flow, live inheritance/override controls, embedded cover editing, format-gated settings, in-app Core PDF preview, one-action preparation, blockers, and immutable downloads. |
 | `PublishChatPanel.razor` (+ `.razor.css`) | Refresh-safe Publish adapter over shared `ChatSurface` with persisted transcript/tool chips, streaming, Stop/Reset, provider/token state, image attachments, active-turn reconnection, and structured workspace mutation callbacks. |
 
 ### Components/Pages/Projects/Outline/
@@ -591,7 +592,7 @@
 | File | Description |
 |------|-------------|
 | `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service with fresh cross-scope authoring reads, active authoring geometry, atomic image/fit placement, scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
-| `ProjectPageSetupService.cs` | Revision-aware project authoring page setup presets/custom geometry used by Read preview, new Designed Pages, Figures, and generation targets without publication releases. |
+| `ProjectPageSetupService.cs` | Revision-aware project authoring page setup used by Read preview, Core Book, Designed Pages, Figures, and generation targets; geometry changes transactionally reflow the reusable Core cover. |
 | `ChapterPreviewService.cs` | Cached, cancellable Press layout adapter that accepts staged manuscript/style sources, exposes chapter/block page maps, and rasterizes bounded PNG page-inspection images from compact Press paint and text-run traces. |
 | `CompositionAgentPayloads.cs` | Lossless bounded assistant reads and compact revision-safe patch envelopes for semantic fragments, scene objects, layers, and styles. |
 | `CompositionSceneResolver.cs` | Shared deterministic group flattener and PDF/X overlap validator used by export and geometry-target consumers so group transforms, opacity, visibility, locks, and z-order have runtime meaning. |

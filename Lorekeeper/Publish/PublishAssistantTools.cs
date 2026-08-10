@@ -48,6 +48,7 @@ public sealed class PublishAssistantTools(
     IPublicationRenderService renders,
     IPublicationCoverService covers,
     IManuscriptStyleService manuscriptStyles,
+    IProjectPageSetupService pageSetups,
     IProjectImageService projectImages,
     ICompositionService? compositions = null,
     AppDbContext? db = null,
@@ -161,6 +162,42 @@ public sealed class PublishAssistantTools(
                 method: (int offset = 0, int limit = 30) => ListNamedStylesAsync(context, offset, limit),
                 name: "list_publication_book_text_styles",
                 description: "List a compact page of project Book Text Styles with stable IDs, definitions, revisions, and continuation metadata."),
+            AIFunctionFactory.Create(
+                method: (long expectedRevision, double pageWidthInches, double pageHeightInches, double pageMarginInches, double bodyFontSizePoints, double bodyLineHeight) =>
+                    PatchPageSetupAsync(context, expectedRevision, pageWidthInches, pageHeightInches, pageMarginInches, bodyFontSizePoints, bodyLineHeight),
+                name: "patch_publication_book_page_setup",
+                description: "Revision-check the Core Book page and baseline text defaults. Read Core Book first and preserve unchanged values. Geometry changes safely reflow the reusable Core cover."),
+            AIFunctionFactory.Create(
+                method: (
+                    string name,
+                    string kind,
+                    Guid? styleId = null,
+                    long? expectedRevision = null,
+                    string? fontFamilyKey = null,
+                    double? fontSizePoints = null,
+                    int? fontWeight = null,
+                    bool? italic = null,
+                    bool? smallCaps = null,
+                    double? lineHeight = null,
+                    double? spaceBeforePoints = null,
+                    double? spaceAfterPoints = null,
+                    bool? keepWithNext = null,
+                    ParagraphAlignment? textAlign = null,
+                    double? leftIndentEm = null,
+                    double? rightIndentEm = null,
+                    double? firstLineIndentEm = null,
+                    bool? startOnNewPage = null) =>
+                    UpsertBookTextStyleAsync(
+                        context, styleId, name, kind, expectedRevision, fontFamilyKey,
+                        fontSizePoints, fontWeight, italic, smallCaps, lineHeight,
+                        spaceBeforePoints, spaceAfterPoints, keepWithNext, textAlign,
+                        leftIndentEm, rightIndentEm, firstLineIndentEm, startOnNewPage),
+                name: "upsert_publication_book_text_style",
+                description: "Create or revision-check update one shared paragraph or character Book Text Style. Lorekeeper owns its stable semantic key. Read the style list first; updates require styleId and expectedRevision."),
+            AIFunctionFactory.Create(
+                method: (Guid styleId, long expectedRevision) => DeleteBookTextStyleAsync(context, styleId, expectedRevision),
+                name: "delete_publication_book_text_style",
+                description: "Delete one unused shared Book Text Style through the revision-checked service. Read the style list first."),
             AIFunctionFactory.Create(
                 method: (int offset = 0, int limit = 30) => ListProjectImagesAsync(context, offset, limit),
                 name: "list_project_images",
@@ -379,7 +416,7 @@ public sealed class PublishAssistantTools(
             "read_publication_book_content", "patch_publication_book_content", "read_publication_book_matter",
             "upsert_publication_book_matter", "delete_publication_book_matter", "read_publication_book_placements",
             "add_publication_book_placement", "update_publication_book_placement", "reorder_publication_book_placements", "delete_publication_book_placement",
-            "list_publication_book_text_styles", "list_publication_manuscript_visuals",
+            "list_publication_book_text_styles", "patch_publication_book_page_setup", "upsert_publication_book_text_style", "delete_publication_book_text_style", "list_publication_manuscript_visuals",
             "read_publication_page_composition", "read_publication_generation_target", "validate_publication_page_composition",
             "generate_project_image", "edit_project_image", "read_project_image_job", "wait_project_image_job", "cancel_project_image_job", "get_or_create_publication_composition_variant",
             "patch_publication_composition_element", "place_project_image_in_publication_page_frame", "add_project_image_to_publication_page", "stage_publication_composition", "apply_publication_composition_stage",
@@ -930,6 +967,232 @@ public sealed class PublishAssistantTools(
         var items = all.Skip(start).Take(take).ToList();
         return Serialize(new { ok = true, summary = $"{all.Count} Book Text Style(s).", items, continuation = Continuation(start, items.Count, all.Count) });
     }
+
+    private async Task<string> PatchPageSetupAsync(
+        PublishAssistantContext context,
+        long expectedRevision,
+        double pageWidthInches,
+        double pageHeightInches,
+        double pageMarginInches,
+        double bodyFontSizePoints,
+        double bodyLineHeight)
+    {
+        try
+        {
+            var current = await books.GetOrCreateAsync(context.ProjectId, context.TurnCancellationToken);
+            if (current.PageSetup.Revision != expectedRevision)
+                throw new InvalidOperationException($"Page setup revision conflict: expected {expectedRevision}, current revision is {current.PageSetup.Revision}.");
+            var changedFields = new List<string>();
+            if (current.PageSetup.PageWidthInches != pageWidthInches) changedFields.Add("pageWidthInches");
+            if (current.PageSetup.PageHeightInches != pageHeightInches) changedFields.Add("pageHeightInches");
+            if (current.PageSetup.PageMarginInches != pageMarginInches) changedFields.Add("pageMarginInches");
+            if (current.PageSetup.BodyFontSizePoints != bodyFontSizePoints) changedFields.Add("bodyFontSizePoints");
+            if (current.PageSetup.BodyLineHeight != bodyLineHeight) changedFields.Add("bodyLineHeight");
+            if (changedFields.Count == 0)
+            {
+                return Serialize(new
+                {
+                    ok = true,
+                    target = "core-page-setup",
+                    targetId = context.ProjectId,
+                    revision = current.PageSetup.Revision,
+                    changedFields,
+                    summary = "Core Book page and baseline text defaults were already current.",
+                });
+            }
+            var setup = await pageSetups.UpdateAsync(
+                context.ProjectId,
+                expectedRevision,
+                new ProjectPageSetupInput(
+                    pageWidthInches,
+                    pageHeightInches,
+                    pageMarginInches,
+                    bodyFontSizePoints,
+                    bodyLineHeight),
+                context.TurnCancellationToken);
+            var book = await books.GetOrCreateAsync(context.ProjectId, context.TurnCancellationToken);
+            return Serialize(new
+            {
+                ok = true,
+                target = "core-page-setup",
+                targetId = context.ProjectId,
+                revision = setup.Revision,
+                coverRevision = book.CoverRevision,
+                changedFields,
+                summary = "Core Book page and baseline text defaults updated.",
+                mutation = new
+                {
+                    kind = "core-book",
+                    refresh = new[] { "core", "releases", "cover", "readiness", "artifacts" },
+                },
+            });
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        {
+            return Serialize(new
+            {
+                ok = false,
+                code = exception.Message.Contains("revision conflict", StringComparison.OrdinalIgnoreCase)
+                    ? "PAGE_SETUP_REVISION_CONFLICT"
+                    : "PAGE_SETUP_REJECTED",
+                targetId = context.ProjectId,
+                summary = exception.Message,
+                recovery = "Reread Core Book and retry with the current page-setup revision and complete unchanged values.",
+            });
+        }
+    }
+
+    private async Task<string> UpsertBookTextStyleAsync(
+        PublishAssistantContext context,
+        Guid? styleId,
+        string name,
+        string kind,
+        long? expectedRevision,
+        string? fontFamilyKey,
+        double? fontSizePoints,
+        int? fontWeight,
+        bool? italic,
+        bool? smallCaps,
+        double? lineHeight,
+        double? spaceBeforePoints,
+        double? spaceAfterPoints,
+        bool? keepWithNext,
+        ParagraphAlignment? textAlign,
+        double? leftIndentEm,
+        double? rightIndentEm,
+        double? firstLineIndentEm,
+        bool? startOnNewPage)
+    {
+        try
+        {
+            if (!Enum.TryParse<ManuscriptStyleKind>(kind, ignoreCase: true, out var parsedKind))
+                throw new InvalidOperationException("Style kind must be Paragraph or Character.");
+            var current = styleId is Guid currentId
+                ? (await manuscriptStyles.ListAsync(context.ProjectId, context.TurnCancellationToken))
+                    .FirstOrDefault(style => style.Id == currentId)
+                    ?? throw new InvalidOperationException("The Book Text Style was not found.")
+                : null;
+            var style = await manuscriptStyles.UpsertAsync(
+                context.ProjectId,
+                new ManuscriptStyleInput(
+                    styleId,
+                    name,
+                    parsedKind,
+                    current?.SemanticRole ?? ManuscriptStyleService.RoleFromName(name),
+                    new ManuscriptStyleProperties(
+                        fontFamilyKey,
+                        fontSizePoints,
+                        fontWeight,
+                        italic,
+                        smallCaps,
+                        lineHeight,
+                        spaceBeforePoints,
+                        spaceAfterPoints,
+                        keepWithNext,
+                        PublicationStyleAlignment(textAlign),
+                        leftIndentEm,
+                        rightIndentEm,
+                        firstLineIndentEm,
+                        startOnNewPage),
+                    expectedRevision),
+                context.TurnCancellationToken);
+            return Serialize(new
+            {
+                ok = true,
+                target = "core-book-text-style",
+                targetId = style.Id,
+                revision = style.Revision,
+                changedFields = new[] { "definition" },
+                summary = $"Book Text Style '{style.Name}' saved.",
+                mutation = new
+                {
+                    kind = "core-book",
+                    refresh = new[] { "core", "releases", "readiness", "artifacts" },
+                },
+            });
+        }
+        catch (ManuscriptStyleConflictException exception)
+        {
+            return Serialize(new
+            {
+                ok = false,
+                code = "STYLE_REVISION_CONFLICT",
+                targetId = styleId,
+                currentRevision = exception.ActualRevision,
+                summary = exception.Message,
+                recovery = "Reread the compact Book Text Style list and retry with the current revision.",
+            });
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        {
+            return Serialize(new
+            {
+                ok = false,
+                code = "STYLE_UPDATE_REJECTED",
+                targetId = styleId,
+                summary = exception.Message,
+            });
+        }
+    }
+
+    private async Task<string> DeleteBookTextStyleAsync(
+        PublishAssistantContext context,
+        Guid styleId,
+        long expectedRevision)
+    {
+        try
+        {
+            await manuscriptStyles.DeleteAsync(
+                context.ProjectId,
+                styleId,
+                expectedRevision,
+                context.TurnCancellationToken);
+            return Serialize(new
+            {
+                ok = true,
+                target = "core-book-text-style",
+                targetId = styleId,
+                summary = "Book Text Style deleted.",
+                mutation = new
+                {
+                    kind = "core-book",
+                    refresh = new[] { "core", "releases", "readiness", "artifacts" },
+                },
+            });
+        }
+        catch (ManuscriptStyleConflictException exception)
+        {
+            return Serialize(new
+            {
+                ok = false,
+                code = "STYLE_REVISION_CONFLICT",
+                targetId = styleId,
+                currentRevision = exception.ActualRevision,
+                summary = exception.Message,
+                recovery = "Reread the compact Book Text Style list and retry with the current revision.",
+            });
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or KeyNotFoundException)
+        {
+            return Serialize(new
+            {
+                ok = false,
+                code = "STYLE_DELETE_REJECTED",
+                targetId = styleId,
+                summary = exception.Message,
+            });
+        }
+    }
+
+    private static string? PublicationStyleAlignment(ParagraphAlignment? alignment) => alignment switch
+    {
+        ParagraphAlignment.Start => "left",
+        ParagraphAlignment.Center => "center",
+        ParagraphAlignment.End => "right",
+        ParagraphAlignment.Justify => "justify",
+        null => null,
+        _ => throw new InvalidOperationException("Text alignment must be Start, Center, End, Justify, or omitted."),
+    };
 
     private async Task<string> ListProjectImagesAsync(PublishAssistantContext context, int offset, int limit)
     {

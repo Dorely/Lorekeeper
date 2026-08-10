@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -50,11 +52,14 @@ public sealed class ProjectPageSetupService(
     {
         Validate(input);
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var setup = await db.ProjectPageSetups.SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Project page setup was not found.");
         if (setup.Revision != expectedRevision)
             throw new InvalidOperationException($"Page setup revision conflict: expected {expectedRevision}, current revision is {setup.Revision}.");
 
+        var geometryChanged = setup.PageWidthInches != input.PageWidthInches
+            || setup.PageHeightInches != input.PageHeightInches;
         setup.PageWidthInches = input.PageWidthInches;
         setup.PageHeightInches = input.PageHeightInches;
         setup.PageMarginInches = input.PageMarginInches;
@@ -64,8 +69,57 @@ public sealed class ProjectPageSetupService(
         setup.UpdatedAt = DateTime.UtcNow;
         var project = await db.Projects.SingleAsync(item => item.Id == projectId, cancellationToken);
         project.UpdatedAt = DateTime.UtcNow;
+        if (geometryChanged)
+            await ReflowCoreCoverAsync(projectId, input, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return setup;
+    }
+
+    private async Task ReflowCoreCoverAsync(
+        Guid projectId,
+        ProjectPageSetupInput input,
+        CancellationToken cancellationToken)
+    {
+        var book = await db.PublicationBooks.SingleOrDefaultAsync(
+            item => item.ProjectId == projectId,
+            cancellationToken);
+        var cover = await db.PublicationBookCoverDesigns.SingleOrDefaultAsync(
+            item => item.ProjectId == projectId,
+            cancellationToken);
+        if (book is null || cover is null || string.IsNullOrWhiteSpace(cover.CompositionSceneJson))
+            return;
+
+        var scene = JsonSerializer.Deserialize<CompositionScene>(
+            cover.CompositionSceneJson,
+            ManuscriptCodec.JsonOptions) ?? throw new InvalidDataException("The Core cover composition is empty.");
+        var edition = new PublicationEdition
+        {
+            ProjectId = projectId,
+            Name = "Core Book",
+            Format = PublicationEditionFormat.DigitalPdf,
+            Binding = PublicationBinding.Digital,
+            Paper = PublicationPaper.Digital,
+            Ink = PublicationInk.Digital,
+            PageWidthInches = input.PageWidthInches,
+            PageHeightInches = input.PageHeightInches,
+            PageMarginInches = input.PageMarginInches,
+            BodyFontSizePoints = input.BodyFontSizePoints,
+            BodyLineHeight = input.BodyLineHeight,
+        };
+        var reflowed = CoverCompositionFactory.Reflow(
+            edition,
+            new PublicationCoverDesign { EditionId = Guid.Empty },
+            scene,
+            0,
+            0);
+        cover.CompositionSceneJson = JsonSerializer.Serialize(
+            reflowed,
+            ManuscriptCodec.JsonOptions);
+        cover.Revision = checked(cover.Revision + 1);
+        cover.UpdatedAt = DateTime.UtcNow;
+        book.Revision = checked(book.Revision + 1);
+        book.UpdatedAt = DateTime.UtcNow;
     }
 
     private static void Validate(ProjectPageSetupInput input)

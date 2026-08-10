@@ -575,6 +575,7 @@ public sealed class PublicationPackageTests
             null!,
             null!,
             null!,
+            null!,
             null!);
 
         var catalog = await tools.BuildAsync(new PublishAssistantContext(Guid.NewGuid()));
@@ -592,6 +593,9 @@ public sealed class PublicationPackageTests
             "cancel_publication_preparation",
             "read_publication_readiness",
             "list_publication_book_text_styles",
+            "patch_publication_book_page_setup",
+            "upsert_publication_book_text_style",
+            "delete_publication_book_text_style",
             "list_project_images",
             "read_project_image",
             "generate_project_image",

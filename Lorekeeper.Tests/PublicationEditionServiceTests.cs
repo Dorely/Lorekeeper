@@ -224,6 +224,7 @@ public sealed class PublicationEditionServiceTests
                 null!,
                 coverService,
                 null!,
+                null!,
                 null!);
             var tools = await assistantTools.BuildAsync(new PublishAssistantContext(project.Id));
             var updateTool = Assert.Single(

@@ -1,0 +1,35 @@
+@if (IsOpen)
+{
+    <div class="book-text-styles-modal-backdrop" @onclick="CloseAsync">
+        <section class="book-text-styles-modal"
+                 role="dialog"
+                 aria-modal="true"
+                 aria-label="Manage Book Text Styles"
+                 @onclick:stopPropagation="true">
+            <header>
+                <div>
+                    <span class="eyebrow">Book design</span>
+                    <h2>Book Text Styles</h2>
+                </div>
+                <button type="button" class="btn-close" aria-label="Close" @onclick="CloseAsync"></button>
+            </header>
+            <div class="book-text-styles-modal-body">
+                <ManuscriptStylesPanel @key="RefreshSignal"
+                                       ProjectId="ProjectId"
+                                       BeforeChange="BeforeChange"
+                                       Changed="Changed" />
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public long RefreshSignal { get; set; }
+    [Parameter] public Func<Task<bool>>? BeforeChange { get; set; }
+    [Parameter] public EventCallback Changed { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private Task CloseAsync() => OnClose.InvokeAsync();
+}

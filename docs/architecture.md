@@ -306,7 +306,11 @@ supersedes the older one.
 `IProjectPageSetupService` owns each project's authoring width, height, margins,
 body typography, preset selection, and revision. New projects start at 6 x 9 in.
 This setup drives chapter preview, Figures, new Designed Pages, and authoring-time
-generation without creating or selecting a publication release.
+generation without creating or selecting a publication release. Core Book also
+edits this shared setup directly. A geometry change reflows the reusable Core
+cover scene in the same project-scoped transaction, preserves its objects and
+bindings, and advances the cover and Core revisions so preparation cannot pair
+new page boxes with an old-sized cover.
 `ICompositionService` owns Designed Page semantic fragments exactly once and
 stores revisioned `PageCompositionVariant` scenes by exact geometry
 fingerprint. Text objects bind stable block/range IDs in that fragment, so
@@ -481,6 +485,11 @@ paperback leaves are always uniform.
 Core reading-copy fingerprints include Book Text Style definitions and the
 project font catalog, so typography changes stale an existing reading PDF just
 as they stale release artifacts.
+The Core Book workspace places page setup, Book Text Styles, and its reusable
+front cover immediately after reading-copy readiness. Page defaults are edited
+inline through the shared page-setup service, while Editor and Publish reuse one
+Book Text Styles modal and manager. Publish-assistant tools expose the same
+revision-safe page-setup and style mutations with compact refresh notices.
 `IPublicationReleasePresetService` creates releases from only product type and,
 for paperback, destination. Application-owned profile versions and bleed policy
 are not normal UI or assistant inputs. `IPublicationPreparationService` owns
