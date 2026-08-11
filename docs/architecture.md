@@ -810,6 +810,10 @@ aspect-ratio retention with one-action canvas fitting, deliberate free stretchin
 legacy crop placement, and revision-safe persistence. The cover host supplies
 canonical copy bindings, background and barcode settings, print regions, and
 format-specific geometry; those details do not create a separate editor UI.
+After acquiring the project mutation lock, release, Core Book, and cover
+mutation paths refresh any locally tracked target rows before checking expected
+revisions. A long-lived Publish circuit therefore cannot mistake its older EF
+snapshot for current persisted state after background or cross-scope changes.
 
 `PublicationPackageService` owns versioned Lorekeeper validation and the final
 artifact-assembly boundary. It verifies current source fingerprints, correlated

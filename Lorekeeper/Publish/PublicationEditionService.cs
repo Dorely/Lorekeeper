@@ -1519,11 +1519,19 @@ public sealed class PublicationEditionService(
         await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
         ?? throw new InvalidOperationException($"Project {projectId:N} was not found.");
 
-    private async Task<PublicationEdition> GetTrackedAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken) =>
-        await db.PublicationEditions.FirstOrDefaultAsync(
+    private async Task<PublicationEdition> GetTrackedAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken)
+    {
+        if (db.PublicationEditions.Local.FirstOrDefault(edition => edition.Id == editionId) is { } tracked)
+            await db.Entry(tracked).ReloadAsync(cancellationToken);
+
+        return await db.PublicationEditions.FirstOrDefaultAsync(
             edition => edition.ProjectId == projectId && edition.Id == editionId,
             cancellationToken)
-        ?? throw new InvalidOperationException("Publication release was not found.");
+            ?? throw new InvalidOperationException("Publication release was not found.");
+    }
 
     private async Task<PublicationEdition> GetReadOnlyAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken) =>
         await db.PublicationEditions.AsNoTracking().FirstOrDefaultAsync(
