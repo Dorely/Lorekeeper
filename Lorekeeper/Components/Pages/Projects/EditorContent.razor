@@ -836,7 +836,7 @@ else
     [Parameter] public string? RequestedMode { get; set; }
     [Parameter] public Guid? RequestedCompositionId { get; set; }
     [Parameter] public Guid? RequestedObjectId { get; set; }
-    [Parameter] public EventCallback<Guid> ChapterChanged { get; set; }
+    [Parameter] public Action<Guid>? SynchronizeChapter { get; set; }
 
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private readonly SemaphoreSlim _chapterRefreshGate = new(1, 1);
@@ -1063,7 +1063,7 @@ else
         if (_activeChapterId == chapterId) return;
         if (!await LoadChapterAsync(chapterId, _contentTarget, applyRequestedRouteState: false)) return;
 
-        await ChapterChanged.InvokeAsync(chapterId);
+        SynchronizeChapter?.Invoke(chapterId);
         await UpdateEditorLocationAsync(EditorHref(chapterId));
     }
 

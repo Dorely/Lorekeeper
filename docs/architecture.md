@@ -171,13 +171,14 @@ the draft contract, although pasted/uploaded images remain normal project assets
 Editor Chat is one project conversation, not a chapter conversation. Its component
 is keyed only by project. The Editor chapter picker flushes the outgoing manuscript,
 loads the selected chapter inside the mounted `EditorContent`, synchronizes the page
-parameter, and pushes the canonical chapter URL through its browser module without
-starting routed/enhanced navigation. The chat subtree therefore stays mounted and
-does not rehydrate or rebuild panel state for an ordinary chapter switch. Direct
-chapter URLs remain routable entry points. The next Editor turn always receives the
-selected chapter and rebuilds authoritative context in `EditorChatService`; explicit
-context, review, or edition-target changes may still refresh the panel's advisory
-token state.
+parameter through a non-rendering delegate, and pushes the canonical chapter URL
+through its browser module without starting routed/enhanced navigation or scheduling
+a parent render. The chat subtree and JavaScript-sized Editor grid therefore stay
+mounted without transcript hydration or default-width flashes for an ordinary
+chapter switch. Direct chapter URLs remain routable entry points. The next Editor
+turn always receives the selected chapter and rebuilds authoritative context in
+`EditorChatService`; explicit context, review, or edition-target changes may still
+refresh the panel's advisory token state.
 
 Assistant tool mutations that require review are stored as `AiChange` batches
 and applied through `IAiChangeApprovalService`. Editor Contest Mode captures a
