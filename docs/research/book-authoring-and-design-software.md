@@ -111,7 +111,7 @@ Status reflects repository behavior on the review date:
 | Vendor-aware preflight/package | Missing | versioned profiles, actionable diagnostics, manifest and artifacts | Phase 1 |
 | EPUB 3 validation/accessibility | Partial | semantic nav/landmarks/metadata/alt text plus EPUBCheck | Phase 1 |
 | Track changes and comments | Partial | insert/delete/move/format changes, comments, queries, authorship, accept/reject | Phase 2 |
-| Professional DOCX interchange | Missing | import/export named styles, comments, tracked changes, document metadata, and explicit fidelity diagnostics | Phase 2 |
+| DOCX manuscript interchange | Missing | baseline import/export for semantic text, named styles, Figures, captions, document metadata, and explicit fidelity diagnostics; comments and tracked changes are optional later extensions | Later |
 | Version comparison and page proofs | Partial | snapshots, semantic compare, edition page-map comparison, proof annotations | Phase 2 |
 | Editorial modes and house style | Missing | developmental/copy/line/proof modes, term/style rules, consistency reports | Phase 2 |
 | International typography | Partial | Phase 1 certifies English and tested Latin-script LTR text; complex shaping, RTL, CJK, vertical text, line-breaking, and localized proofing require dedicated profiles | Phase 3 |
@@ -156,9 +156,10 @@ Status reflects repository behavior on the review date:
 - accept/reject one, selection, chapter, filtered set, or all;
 - compare revisions and show changed passages without line-number fragility;
 - snapshots and named milestones;
-- DOCX import/export that round-trips supported named styles, comments, tracked
-  changes, authorship, dates, and document metadata, while surfacing every
-  unsupported or lossy construct before acceptance;
+- DOCX import/export that round-trips supported semantic blocks, named styles,
+  Figures, captions, and document metadata while surfacing unsupported or lossy
+  constructs before acceptance; comments and tracked changes may be added later
+  without defining the baseline interchange scope;
 - copyediting rules for spelling variants, capitalization, numbers, quotations,
   punctuation, character names, and forbidden terms;
 - style sheet/house-style workspace;

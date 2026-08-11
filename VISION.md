@@ -10,7 +10,7 @@ The product's foundational insight remains:
 > evolving story state, authorial intent, and reviewable change.
 
 The destination extends that insight through the rest of bookmaking. An author
-should be able to plan, draft, revise, design, proof, and produce validated
+should be able to plan, draft, revise, design, inspect, and produce validated
 publication files without moving the manuscript through a chain of unrelated
 external tools.
 
@@ -32,7 +32,8 @@ external tools.
 - Support long-form organization, rich editing, Book Text Styles, references,
   assets, and stable anchors for review.
 - Preserve one canonical source while allowing paperback, ebook, illustrated,
-  and later reference-book editions to differ intentionally.
+  and later reference-book releases to differ intentionally through explicit
+  Editor-owned content and style overrides.
 - Make migrations, imports, exports, and revisions safe, inspectable, and
   recoverable.
 
@@ -44,8 +45,8 @@ external tools.
   through shared application services.
 - Require stable references, validation, revision awareness, and reviewable
   mutations rather than opaque document replacement.
-- Reserve proof approval, external publication, rights declarations, purchases,
-  and other consequential actions for explicit human decisions.
+- Reserve external publication, rights declarations, purchases, and other
+  consequential actions for explicit human decisions.
 
 ### 4. Book design and edition production
 
@@ -55,13 +56,15 @@ external tools.
   in one Core Book. Let optional publication releases inherit that intent live
   and override only product-specific decisions.
 - Make a private Core reading copy available without implying an ISBN, vendor,
-  package, proof, or publication claim; reserve those concepts for releases.
+  package, or publication claim; reserve those concepts for releases.
 - Generate deterministic pagination, real previews, full-wrap covers, EPUB, and
   vendor-specific print artifacts from the semantic manuscript.
+- Provide Generic profiles for unknown or custom destinations and built-in,
+  versioned Specific profiles for named vendors and products.
 - Preflight fonts, images, color, geometry, metadata, accessibility, and format
   constraints inside Lorekeeper.
 - Make every artifact traceable to its source revision, edition settings,
-  assets, renderer, validation profile, and proof state.
+  assets, renderer, and validation profile.
 
 ### 5. Trustworthy publication
 
@@ -75,13 +78,14 @@ external tools.
 
 ## Delivery shape
 
-Lorekeeper will grow in five deliberate phases:
+Lorekeeper will grow through deliberate publication milestones:
 
-1. publisher-ready novel and paperback/EPUB foundation;
-2. professional editing and proofing;
-3. illustrated and picture-book design;
-4. nonfiction and reference books;
-5. publisher operations and controlled distribution.
+1. the current paperback, EPUB, PDF ebook, Core Book, illustration, and cover
+   foundation;
+2. artifact-complete releases with edition-specific authoring in Editor;
+3. DOCX manuscript import/export;
+4. hardcover and additional Generic and Specific publication profiles;
+5. advanced design, language, accessibility, and reference-book support.
 
 The detailed scope and verification gates live in
 [`docs/publishing-roadmap.md`](docs/publishing-roadmap.md). That roadmap
@@ -96,10 +100,10 @@ Lorekeeper succeeds when:
 - authors understand what context and changes AI assistants use;
 - manual and assistant actions follow the same validation and review paths;
 - existing projects survive structural evolution without content loss;
-- a supported edition can be created, edited, designed, rendered, preflighted,
-  proofed, and packaged inside the application;
+- a supported release can be created, edited, designed, rendered, validated,
+  previewed, and downloaded inside the application;
 - publication claims are backed by repeatable automated checks, independent
-  inspection, vendor acceptance, and physical proofs where relevant;
+  inspection, and a versioned Generic or Specific profile;
 - the system remains maintainable enough to extend from novels to illustrated
   and reference books without parallel document or rendering models.
 

@@ -11,9 +11,16 @@ The supported profiles are
 `ingram-paperback-pdfx1a-v1`, plus `generic-digital-pdf-v1`. The application does not require a separate PDF
 converter or preflight product.
 
+These profiles establish the durable taxonomy used by the application:
+Generic profiles provide configurable output without a named-vendor claim,
+while Specific profiles are built-in, versioned contracts for a named vendor
+and product. KDP and Ingram are the current Specific print profiles. Additional
+digital vendors and future hardcover products require new versioned profiles;
+they are not aliases for an existing generic or paperback profile.
+
 “Lorekeeper validated” means the artifact passed the renderer's scoped
 post-write rules and the corresponding independently implemented test fixture.
-It does not mean a retailer accepted an upload or that a human approved a proof.
+It does not mean a retailer accepted an upload.
 
 Canonical fixtures are requirements inputs, not snapshots of renderer output.
 After the in-flow illustration test exposed that the initial full-model fixture
@@ -43,7 +50,7 @@ assertion was removed or relaxed.
 | Post-write validation | Reparse candidates independently from the writer and reject mismatched version, boxes, fonts, CMaps, color, output intent, actions, annotations, security, or transparency | Production `lopdf` inspector challenged by malformed fixtures |
 | Packaging | Rust 1.97.1; exact `Cargo.lock`; approved license-expression allowlist; native executable, approved font faces/profile, asset-inclusive notices/SBOM, and exact hash manifest only | Debug/Release build, tamper/unexpected-file tests, native release matrix |
 | Application | Current render states are NotGenerated, Rendering, Invalid, Validated, Stale, and Legacy; renderer/profile upgrades invalidate prior readiness; immutable downloads; database-scoped cross-process guarded backup/journal/recovery cutover; package provenance | Fully populated whole-database migration/hash/image-byte fixtures, malformed-marker and cross-service competing-owner drills, state/endpoint tests, and real C#-to-Rust renders |
-| Assistant | Dynamic renderer capabilities, complete configuration/render/preflight/package tools, structured refresh notices, truthful scoped claims, and no proof-approval tool | Prompt/tool catalog and denial fixtures |
+| Assistant | Dynamic renderer capabilities, complete configuration/render/preflight/package tools, structured refresh notices, and truthful scoped claims | Prompt and tool-catalog fixtures |
 
 ## Dependencies and distribution
 
@@ -90,6 +97,10 @@ paths. The renderer accepts no undeclared file and inherits no `PATH`.
   page intervention without changing semantic ownership.
 - Manual page intervention: add stable page/column breaks and keep controls that
   remain edition-scoped, revisioned, assistant-accessible, and comparable.
+- Hardcover products: add Generic and Specific profiles for the required
+  interior, case-wrap, printed-case, and dust-jacket artifact sets, including
+  material- and page-count-dependent spine, hinge, board, bleed, and safe-area
+  geometry.
 - Standalone extraction: move `Lorekeeper.Press` only after its protocol,
   fixtures, licenses, release matrix, and deterministic build remain independently
   versioned without weakening the app's integrity checks.

@@ -14,7 +14,7 @@
 | `AGENTS.md` | Authoritative operating rules for agents and contributors. |
 | `CLAUDE.md` | Claude compatibility entry point that delegates all project guidance to `AGENTS.md`. |
 | `docs/architecture.md` | Current technical architecture, ownership boundaries, persistence/security constraints, platform scope, and validation commands. |
-| `docs/publishing-roadmap.md` | Status-labeled five-phase route to end-to-end book production, including Phase 1 feature order, assistant parity, migration safety, and verification gates. |
+| `docs/publishing-roadmap.md` | Artifact-focused route to complete paperback, EPUB, and PDF ebook production, with Generic/Specific profiles, Editor-owned release variations, eventual DOCX interchange, and hardcover goals. |
 | `docs/manual-acceptance-unified-composition.md` | Manual UI/output checklist for genre guidance, Figures, Designed Pages, covers, geometry-bound generation, accessibility, and assistants. |
 | `FILEMAP.md` | This file — concise map of every source file. |
 | `Lorekeeper.sln` | Solution file containing the application and authorized fixture-test projects. |
@@ -71,10 +71,10 @@
 | `SemanticPublishFormattingTests.cs` | Verifies semantic headings, marks, named roles, Figures, Designed Page reading-order text, ordered matter, and accessible EPUB rendering. |
 | `ManuscriptStyleServiceTests.cs` | Named-style revision, stable-role, uniqueness, content-use, and edition-mapping deletion guards. |
 | `ProjectMutationCoordinatorTests.cs` | Cross-instance file-lock fixture for project-scoped mutation serialization against one SQLite data store. |
-| `PublicationPackageTests.cs` | Fail-closed EPUB structure, deterministic/product-specific packages, current/legacy render provenance, language/ISBN/profile/color rejection, product-form proof isolation, and assistant-authorization fixtures. |
+| `PublicationPackageTests.cs` | Fail-closed EPUB structure, deterministic/product-specific packages, current/legacy render provenance, language/ISBN/profile/color rejection, retained legacy-proof isolation, and assistant-authorization fixtures. |
 | `PublicationEditionServiceTests.cs` | Core live inheritance/reset/explicit-empty behavior, sparse overlays, release presets, one-action preparation persistence/cancellation, archive guards, and ISBN/matter ownership fixtures. |
 | `PublicationRenderTests.cs` | Native-runtime integrity, artifact-integrity/staleness, BOM-free staged-request, and clean publication-worker cancellation fixtures. |
-| `PublishChatServiceTests.cs` | Publish conversation persistence/reset, streaming completion/failure/cancellation, Core/release targeting, compact tools, mutation notices, proof denial, and active-turn reconnection fixtures. |
+| `PublishChatServiceTests.cs` | Publish conversation persistence/reset, streaming completion/failure/cancellation, Core/release targeting, compact tools, mutation notices, exclusion of legacy proof writes, and active-turn reconnection fixtures. |
 | `PublishConversationMigrationTests.cs` | Populated pre-v13 upgrade fixture proving manuscript, edition, render, artifact hash/bytes, and new Publish transcript persistence survive unchanged. |
 | `LorekeeperPressMigrationTests.cs` | Fully populated installed-schema fixture run through the real startup migrator, including no-release Picture Page scene/asset/binding preservation, Press/Core projection equality, recovery cases, and whole-database byte/hash checks. |
 | `LorekeeperPressProcessIntegrationTests.cs` | Real C#-to-packaged-Rust protocol-v5 render of interior and cover with a cleared machine environment. |
@@ -419,7 +419,7 @@
 | `OpenAIChatToolMetadataClient.cs` | OpenAI-compatible client boundary that preserves unknown streamed tool-call extensions and restores them on the correlated assistant/tool-result request. |
 | `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs Codex or metadata-preserving OpenAI-compatible chat clients, applies exact per-model reasoning effort and Codex timeout, and exposes configured verification probes. |
 | `IVisionModelClientFactory.cs` / `VisionModelClientFactory.cs` | Provider-backed image reader for vision probes and PDF transcription, with per-model reasoning effort across Codex Responses and OpenAI-compatible requests. |
-| `AssistantWorkflowInstructions.cs` | Current code-owned AI workflow/tool rules for proactive Editor execution, exact IDs, compact paging/staging, post-style visual typesetting verification, Figures, Designed Pages/covers, image generation, validation, proof restrictions, and Contest preparation. |
+| `AssistantWorkflowInstructions.cs` | Current code-owned AI workflow/tool rules for proactive Editor execution, exact IDs, compact paging/staging, post-style visual typesetting verification, Figures, Designed Pages/covers, image generation, publication validation, and Contest preparation. |
 | `SystemPromptComposer.cs` | Central composer for the one actual system-role prompt: professional charter, tool rules, dynamic book/page guidance, Project Guidance, Book Brief, then working context. |
 | `AgentOptions.cs` | Shared agent options bound from `Agents:*`; caps iterative tool-call rounds, configures transient ingest LLM retry attempts/delays, and sets Codex/OAuth request timeout. |
 | `SeedSystemPrompt.cs` | Frozen historical seed retained only so legacy migrations can identify and clear untouched seeded guidance; runtime prompts no longer use it. |
@@ -625,15 +625,15 @@
 | `PublicationMigrationLock.cs` | Database-scoped process and crash-releasing file lease shared by edition recovery and Press schema advancement so the v14 rebuild/history window has one migration owner. |
 | `PublicationPressMigrationService.cs` | Guarded v15 Press cutover/reconciliation owner with protected backup, atomic marker, integrity and byte/hash invariants, journal evidence, and recovery-shell fallback. |
 | `PublicationActorContext.cs` | Scoped UI/assistant actor attribution carried into immutable publication-edition audit entries. |
-| `PublishAssistantTools.cs` | Compact Core/release read/patch, bounded project search/image inspection, user-authored matter contracts, sparse placement/cover operations, terminal unattached image generation, direct transient cover-canvas previews, readiness, preparation/cancellation, and artifact tools; raw profiles and proof approval are absent. |
+| `PublishAssistantTools.cs` | Compact Core/release read/patch, bounded project search/image inspection, user-authored matter contracts, sparse placement/cover operations, terminal unattached image generation, direct transient cover-canvas previews, readiness, preparation/cancellation, and artifact tools; raw profiles and legacy proof writes are absent. |
 | `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration with full outline context, temporary generated-image and direct cover-canvas vision, active-turn streaming/reconnection, proactive prompt policy, tool activity, and Core/release-targeted mutation notices. |
 | `PublicationPressRuntime.cs` | Fail-closed exact-manifest resolver for the packaged native renderer, dynamic capabilities, integrity evidence, and empty controlled child environment with no machine-tool fallback. |
 | `PublicationRenderService.cs` | Persisted/recoverable queue, metadata-only artifact listings, purpose-bound protocol-v5 declared image/font staging from effective manuscript/page/cover scenes, display-ready title handoff, native lifecycle, hash-verified paperback/Book PDF artifacts, semantic page maps, renderer-version staleness, and comparison. |
 | `PublicationCoverService.cs` | Revisioned format-aware structured cover aggregate with copy-safe artwork stacking, canonical bindings, draft-tolerant structural persistence, save-time print-wrap/digital-front geometry reflow, publication-readiness diagnostics, and acknowledgement invalidation. |
-| `PublicationPackageService.cs` | Versioned fail-closed Lorekeeper validation preflight, product-form-specific deterministic package assembly, manifests, reports, provenance, legacy guards, and exact-package proof records. |
+| `PublicationPackageService.cs` | Versioned fail-closed Lorekeeper validation preflight, product-form-specific deterministic package assembly, manifests, reports, provenance, legacy guards, and retained non-gating legacy proof records. |
 | `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying effective Core/release content into Core TXT/Markdown/Reading PDF and release EPUB/PDF/print output with product-form guards. |
 | `PublishEndpoints.cs` | Cacheable/range project-scoped immutable publication artifact viewing/download endpoints. |
-| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown plus accessible EPUB writer for flowing Figures, real-text fixed-layout Designed Pages/covers, reading order, captions, and alternatives. |
+| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown plus semantic EPUB writer for flowing Figures, real-text fixed-layout Designed Pages/covers, reading order, captions, and alternatives. |
 
 ### Graph/
 

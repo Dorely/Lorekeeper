@@ -6,6 +6,11 @@ Scope: trade books, print-on-demand paperbacks, reflowable EPUB, and the
 submission artifacts Lorekeeper should eventually create without requiring a
 separate conversion or preflight application.
 
+This document records industry workflow as research evidence. References to
+reviewing digital or physical proofs describe common external publishing
+practice, not a Lorekeeper artifact-readiness requirement. The current product
+scope is defined by [`../publishing-roadmap.md`](../publishing-roadmap.md).
+
 ## Executive conclusion
 
 Publishers and print-on-demand services do not accept an editable manuscript as
@@ -32,6 +37,13 @@ artifacts. A browser print dialog is not a press-output system, and a generic
 Requirements change, and a service can vary them by trim, paper, binding,
 market, or page count. Lorekeeper must version its vendor profiles and show the
 source and review date behind every profile.
+
+Lorekeeper therefore distinguishes **Generic** profiles from **Specific**
+profiles. Generic profiles serve unknown vendors and custom purposes without a
+vendor-compatibility claim. Specific profiles are built-in, versioned contracts
+for a named vendor and product, such as KDP, IngramSpark, or a future Google
+Books target. Hardcover and other bindings use additional product-specific
+profiles rather than inheriting paperback assumptions.
 
 | Destination | Interior | Cover | Important constraints |
 |---|---|---|---|
@@ -63,7 +75,8 @@ Across the reviewed services, the repeated requirements are:
 - controlled color spaces, with grayscale/black handling for monochrome
   interiors and color-managed cover output;
 - metadata and visible title/author/ISBN information that agree;
-- a final human proof of the actual generated files.
+- final human review of the actual generated files is common publishing
+  practice, but remains outside Lorekeeper's artifact contract.
 
 These are shared patterns, not universal numeric values. Lorekeeper must obtain
 the numbers from a selected edition and vendor profile.
@@ -145,7 +158,7 @@ Sources: [ISBN Users' Manual](https://www.isbn-international.org/index.php/conte
 [GS1 ISBN barcode guidance](https://support.gs1.org/support/solutions/articles/43000734165-how-is-an-isbn-used-in-a-gs1-barcode-),
 and [EDItEUR ONIX for Books](https://www.editeur.org/83/Overview/).
 
-## Current Lorekeeper gap
+## Lorekeeper baseline at the research date
 
 Current behavior, confirmed in the repository on the review date:
 
@@ -155,7 +168,7 @@ Current behavior, confirmed in the repository on the review date:
   browser/operating-system print path;
 - one `PublishProfile` owns general page metrics and presentation choices;
 - no edition-scoped identifier, vendor profile, rendered artifact, preflight
-  report, PDF standard declaration, output intent, or proof approval is stored;
+  report, PDF standard declaration, or output intent is stored;
 - the cover is selected from a Picture Page rather than built as a
   page-count-dependent full wrap;
 - assistant tools do not have a complete publishing control surface.
@@ -178,7 +191,7 @@ between products:
 - ISBN and edition metadata;
 - cover variant and calculated spine;
 - renderer/profile version;
-- artifact hashes, preflight results, proof state, and export history.
+- artifact hashes, preflight results, and export history.
 
 The existing publish profile becomes the initial default edition during a safe
 migration. It is not discarded.
@@ -194,7 +207,6 @@ semantic manuscript
   -> interior and cover render
   -> structural and visual preflight
   -> immutable artifact set + manifest + report
-  -> explicit user proof approval
 ```
 
 The package contains the actual deliverables, not instructions to use another
@@ -237,8 +249,8 @@ safe operation a user can invoke:
 
 Mutations use the same application services as the UI, honor revision tokens,
 and enter the existing review/approval system where appropriate. Export and
-preflight may be automated. Proof approval and any external submission remain
-explicit user decisions.
+preflight may be automated. Any external submission remains an explicit user
+decision.
 
 ## Acceptance evidence for a certified profile
 
@@ -253,8 +265,8 @@ A vendor profile is `Verified` only when all of the following exist:
   with deliberate negative fixtures, rather than being trusted because the
   renderer returned success;
 - representative files pass the vendor's upload preflight;
-- physical proofs have been inspected for at least the supported reference
-  products;
+- representative outputs have been visually inspected for geometry and content
+  regressions without making that inspection a persisted readiness gate;
 - the same inputs reproduce byte-stable or semantically equivalent outputs
   under a pinned renderer;
 - failure messages identify the edition, page/object, rule, observed value, and

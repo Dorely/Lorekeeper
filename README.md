@@ -73,14 +73,15 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   order, presentation, semantic matter, image placements, project typography,
   and reusable front-cover design. Optional paperback, EPUB ebook, and PDF ebook
   releases inherit Core values live and store only explicit field or collection
-  overrides; ISBN, destination, proof, package, and product settings remain
+  overrides; ISBN, destination, package, and product settings remain
   release-specific. No release or ISBN is created automatically.
 - An in-app preview and immutable download for the Core reading PDF used for
   private review and sharing, plus one-action preparation
   jobs that compile, render, validate, and store or package the selected Core or
   release target. Unresolved image accessibility choices remain visible warnings
   on the private Core copy, while publication releases require those choices to
-  be resolved. Paperback presets cover KDP, IngramSpark, and other printers;
+  be resolved. Paperback output includes a configurable Generic profile plus
+  built-in Specific profiles for Amazon KDP and IngramSpark;
   EPUB and PDF ebook workspaces expose only relevant controls. The full-height
   conversational Publish assistant has compact Core/release tools, persistent
   streaming history, image attachments, complete outline context, bounded
@@ -107,17 +108,16 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   ISBN-13/EAN-13 barcode or KDP reserve behavior.
 - Versioned Lorekeeper validation with independent post-write inspection,
   deterministic EPUB 3/package assembly, downloadable manifests and reports,
-  exact-package digital proof records plus paperback-only physical-proof
-  records, and matching assistant preflight/package controls. The owned KDP
+  and matching assistant preflight/package controls. The owned KDP
   profile emits PDF 1.7, and the owned Ingram profile emits restricted PDF 1.3
   with PDF/X-1a:2001 identification, embedded CMYK output intent, CMYK/gray
   content, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded subset fonts, ToUnicode maps, and a
-  240% total-ink ceiling. Recorded vendor acceptance and human proof remain
-  separate evidence, never assistant-controlled conformance gates.
+  240% total-ink ceiling. These checks establish only the exact named
+  Lorekeeper profile; they do not claim that a vendor accepted an upload.
 - Versioned project import/export (current v17 manuscript-v4/page-setup/
   composition model, Core Book, sparse release overlays, covers, custom-font binaries,
   and isolated older structured/text adapters) plus TXT, Markdown,
-  accessible mixed-layout EPUB, artifact-backed Generate/Regenerate, separate
+  semantic mixed-layout EPUB, artifact-backed Generate/Regenerate, separate
   paperback interior/cover saves, and one Digital PDF Book save. EPUB export is
   restricted to EPUB editions.
 - Configurable Codex/OpenAI-compatible chat and embedding providers, configurable
@@ -279,7 +279,7 @@ protected SQLite backup before transforming Figure presentation, page-layout
 chapters, cover scenes, page setup, authoring variants, and pending Outline
 changes. They verify semantic text and stable IDs, scene/image ownership and
 geometry, staged Picture Page hashes, active authoring layouts, protected row
-counts, foreign keys, artifacts, hashes, packages, audits, and proofs before
+counts, foreign keys, artifacts, hashes, packages, audits, and legacy proof rows before
 removing obsolete visual state. Every Picture Page retains its original 8.5 × 11
 inch leaf geometry (including 17 × 11 facing spreads) until the authoring
 migration materializes it as the active Designed Page layout, independently of

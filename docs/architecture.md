@@ -531,8 +531,11 @@ sparse override. Tagged structure, bookmarks, links, document language, and
 logical reading order remain mandatory output rather than optional switches.
 `IPublicationEditionService` owns optional paperback, EPUB ebook, and PDF ebook
 release aggregates. Releases retain destination, internal immutable profile,
-ISBN, product settings, status, artifacts, packages, proofs, sparse field and
-collection overrides, cloning, archival, comparison, and audit history.
+ISBN, product settings, status, artifacts, packages, sparse field and collection
+overrides, cloning, archival, comparison, and audit history. The current schema
+also retains proof-record artifacts from an earlier product scope. They do not
+establish readiness or conformance and are not a boundary for new publication
+features.
 `IPublicationEffectiveConfigurationResolver` combines Core with explicit
 overrides at read/render time. Absence means inherit, optional text can be
 explicitly empty, and reset removes the override. Core collection additions
@@ -540,6 +543,12 @@ flow into releases unless excluded. Core mutations stale only releases whose
 effective source fingerprint changes. Digital PDF defaults to uniform release
 geometry and can explicitly preserve wide or independent Designed Page boxes;
 paperback leaves are always uniform.
+Current release overlays vary publication metadata, inclusion, presentation,
+matter, placements, styles, and covers but do not own release-specific chapter
+manuscript documents. Edition-specific content and styling remain planned. When
+introduced, their authoring surface and owning services belong in Editor.
+Publish remains the consumer of the selected release and does not become a
+parallel manuscript editor.
 Core reading-copy fingerprints include Book Text Style definitions and the
 project font catalog, so typography changes stale an existing reading PDF just
 as they stale release artifacts.
@@ -550,7 +559,13 @@ Book Text Styles modal and manager. Publish-assistant tools expose the same
 revision-safe page-setup and style mutations with compact refresh notices.
 `IPublicationReleasePresetService` creates releases from only product type and,
 for paperback, destination. Application-owned profile versions and bleed policy
-are not normal UI or assistant inputs. `IPublicationPreparationService` owns
+are not normal UI or assistant inputs. Publication profiles have two durable
+classes. A Generic profile supplies safe configurable output for an unknown
+vendor or custom purpose and carries no named-vendor claim. A Specific profile
+is a built-in, versioned contract for a named vendor and product; KDP and Ingram
+are the current Specific paperback profiles, and future destinations such as
+Google Books follow the same source/review-date/profile-version boundary.
+`IPublicationPreparationService` owns
 persisted reconnectable one-action jobs: Core compiles/renders/validates its
 reading copy; paperback renders and packages interior/full-wrap files; EPUB
 exports, structurally validates, and packages; PDF ebook renders and packages
@@ -636,8 +651,7 @@ annotations, actions, or transparency, and image/page-paint colors capped at
 240% total ink. A separate production `lopdf` pass reparses completed bytes before
 atomic promotion. An independent black-box test harness parses raw PDF objects
 without calling that validator. This is the evidence behind the scoped
-“Lorekeeper validated” state; it is not evidence of vendor upload acceptance or
-a human proof attestation.
+“Lorekeeper validated” state; it is not evidence of vendor upload acceptance.
 
 Protocol v5 stages `input/request.json` plus declared PNG/JPEG assets and
 approved project TTF/OTF fonts in a bounded job root. Declarations carry media
@@ -773,26 +787,23 @@ PDF/UA certification claim. EPUB emits corresponding semantic XHTML plus
 metadata; EPUB validation remains structural rather than a certification claim.
 Every included ordered
 semantic-matter document is projected into TXT, Markdown, EPUB, and contained
-press output. The service persists SHA-256-addressed EPUB,
-front-cover, report, manifest, package, and
-exact-package proof records as edition artifacts. Package freshness combines
+press output. The service persists SHA-256-addressed EPUB, front-cover, report,
+manifest, package, and legacy exact-package proof records as edition artifacts.
+Those records are retained as existing data but are outside the
+artifact-creation requirements and do not change package readiness or
+validation. Package freshness combines
 the source fingerprint, stable applicable input hashes/runtime provenance,
 profile/rule version, assembler version, and the EPUB-exporter version only for
 EPUB packages; exact PDF row IDs remain
 an internal correlation snapshot and never leak into portable bytes. A short
-serializable transaction rechecks
-the source immediately before each package/proof write, so a concurrent
-fingerprint-affecting mutation cannot be mislabeled. Digital and
-physical proof confirmations are explicit user UI actions; assistant tools may
-read preflight/proof state and build an eligible package but cannot approve a
-proof. Physical-proof state and approval apply only to paperback editions; EPUB
-reports it as not applicable. Title, copyright, and visible contents pages are
+serializable transaction rechecks the source immediately before each package or
+legacy-record write, so a concurrent fingerprint-affecting mutation cannot be
+mislabeled. Title, copyright, and visible contents pages are
 generated exclusively from edition settings, so user-authored semantic matter
 cannot claim those reserved kinds and duplicate generated output. EPUB
 validation remains structural and internal; broader reader-matrix results are
-recorded separately. Vendor-upload results and digital/physical proof
-attestations are optional human evidence and never alter the renderer's scoped
-structural result.
+outside the current runtime. Vendor upload and physical review are external user
+activities and never alter the renderer's scoped structural result.
 
 Publish assistant matter tools expose a dedicated user-authored-kind contract
 that omits generated title, copyright, and contents pages. Expected matter
@@ -832,8 +843,8 @@ patches, sparse content/matter/placement/cover operations, readiness,
 preparation, cancellation, and artifact metadata. Tool results contain changed
 IDs/fields, revisions, prioritized diagnostic counts, and refresh notices rather
 than complete unchanged records. Raw profile selection and low-level
-render/preflight/package orchestration are not assistant capabilities. Proof
-approval and ISBN invention remain unavailable. Outline, Editor, Images, and
+render/preflight/package orchestration are not assistant capabilities. Legacy
+proof-record writes and ISBN invention remain unavailable. Outline, Editor, Images, and
 Publish share compact paginated reads and revision-aware mutations. Large scene
 payloads are persisted once as project/conversation-scoped, hashed, expiring,
 non-replayable stages; preview returns a stage ID and compact diagnostics, and
@@ -846,10 +857,10 @@ return compact recovery results instead of escaping the assistant turn. Cover
 scenes also normalize artwork beneath canonical cover copy at the shared service
 boundary, so manual and assistant placement cannot obscure title, subtitle,
 author, spine, or back-cover text through z-order changes. Runtime prompts
-describe only the current format-neutral chapter,
-Figure, Designed Page, cover, geometry, and proof boundaries. Artifact results
-include current/stale state and safe view/download URLs; proof-attestation
-writes remain unavailable to every assistant.
+describe only the current format-neutral chapter, Figure, Designed Page, cover,
+geometry, and publication-validation boundaries. Artifact results include
+current/stale state and safe view/download URLs; legacy proof records are not
+assistant capabilities.
 
 Preparation and cancellation tool results identify their nullable release
 target at the result root. Their mutation notices refresh and reconnect polling
