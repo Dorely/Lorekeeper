@@ -23,6 +23,7 @@
 
 <ChatSurface Title="Editor Chat"
              ProjectId="@ProjectId"
+             Surface="ChatTurnSurface.Editor"
              TokenText="@_conversationTokens.Text(ConversationTokenUnitLabel, ConversationTokenLimit)"
              TokenTitle="@_conversationTokens.Title(ConversationTokenTitleLabel, ConversationTokenLimit, ActiveModelId)"
              ShowTokenResetSuggestion="@_conversationTokens.ShouldSuggestReset(ConversationTokenLimit)"
@@ -136,7 +137,7 @@
     private CancellationTokenSource? _listenCts;
     private Guid? _listeningTurnId;
     private Guid? _loadedProjectId;
-    private Guid? _loadedChapterId;
+    private EditorContentTarget _loadedContentTarget = EditorContentTarget.Core;
     private int _loadedContextRefreshSignal;
     private int _loadedReviewRefreshSignal;
     private bool _deferredWorkPending;
@@ -180,13 +181,14 @@
         if (ProjectId == Guid.Empty) return;
         if (_loadedProjectId == ProjectId)
         {
-            if (_loadedChapterId != CurrentChapterId
+            var refreshChatState = _loadedContentTarget != ContentTarget
                 || _loadedContextRefreshSignal != ContextRefreshSignal
-                || _loadedReviewRefreshSignal != ReviewRefreshSignal)
+                || _loadedReviewRefreshSignal != ReviewRefreshSignal;
+            _loadedContentTarget = ContentTarget;
+            _loadedContextRefreshSignal = ContextRefreshSignal;
+            _loadedReviewRefreshSignal = ReviewRefreshSignal;
+            if (refreshChatState)
             {
-                _loadedChapterId = CurrentChapterId;
-                _loadedContextRefreshSignal = ContextRefreshSignal;
-                _loadedReviewRefreshSignal = ReviewRefreshSignal;
                 QueueDeferredWork(fullLoad: false);
             }
             return;
@@ -194,7 +196,7 @@
 
         PrepareForFullLoad();
         _loadedProjectId = ProjectId;
-        _loadedChapterId = CurrentChapterId;
+        _loadedContentTarget = ContentTarget;
         _loadedContextRefreshSignal = ContextRefreshSignal;
         _loadedReviewRefreshSignal = ReviewRefreshSignal;
         QueueDeferredWork(fullLoad: true);

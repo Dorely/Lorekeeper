@@ -60,7 +60,8 @@ else
                     @onclick="ToggleChatPane">
                 &lsaquo;
             </button>
-            <EditorChatPanel ProjectId="Project.Id"
+            <EditorChatPanel @key="Project.Id"
+                             ProjectId="Project.Id"
                              CurrentChapterId="_activeChapterId"
                              ContentTarget="_contentTarget"
                              ContextRefreshSignal="_contextRefreshSignal"

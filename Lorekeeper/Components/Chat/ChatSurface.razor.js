@@ -1,5 +1,6 @@
 const NEAR_BOTTOM_PX = 48;
 const USER_INTENT_MS = 700;
+const DRAFT_STORAGE_PREFIX = 'lorekeeper.chat-composer-draft.v1';
 
 export function scrollToBottom(element, force) {
     if (!element) return;
@@ -181,6 +182,78 @@ export function detachComposer(element) {
     element.removeEventListener('paste', state.onPaste);
     state.attached = false;
     state.dotNetRef = null;
+}
+
+export function attachDraftPersistence(element, projectId, surface) {
+    if (!element) return;
+
+    const key = `${DRAFT_STORAGE_PREFIX}:${projectId}:${surface}`;
+    const previous = element.__chatSurfaceDraftPersistence;
+    if (previous?.key === key) return;
+
+    if (previous?.onInput) {
+        element.removeEventListener('input', previous.onInput);
+    }
+
+    const state = {
+        key,
+        onInput: () => persistDraft(key, element.value),
+    };
+    element.__chatSurfaceDraftPersistence = state;
+    element.addEventListener('input', state.onInput);
+
+    const stored = readDraft(key);
+    if (previous) {
+        setComposerValue(element, stored ?? '');
+    } else if (stored !== null && element.value === '') {
+        setComposerValue(element, stored);
+    } else if (element.value !== '') {
+        persistDraft(key, element.value);
+    }
+    resize(element);
+}
+
+export function clearDraft(element) {
+    const key = element?.__chatSurfaceDraftPersistence?.key;
+    if (!key) return;
+    try {
+        window.localStorage.removeItem(key);
+    } catch {
+        // Browser storage can be unavailable without disabling the composer.
+    }
+}
+
+export function detachDraftPersistence(element) {
+    const state = element?.__chatSurfaceDraftPersistence;
+    if (!state) return;
+    element.removeEventListener('input', state.onInput);
+    delete element.__chatSurfaceDraftPersistence;
+}
+
+function readDraft(key) {
+    try {
+        return window.localStorage.getItem(key);
+    } catch {
+        return null;
+    }
+}
+
+function persistDraft(key, value) {
+    try {
+        if (value === '') {
+            window.localStorage.removeItem(key);
+        } else {
+            window.localStorage.setItem(key, value);
+        }
+    } catch {
+        // Browser storage can be unavailable without disabling the composer.
+    }
+}
+
+function setComposerValue(element, value) {
+    if (element.value === value) return;
+    element.value = value;
+    element.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 function findSendButton(element) {

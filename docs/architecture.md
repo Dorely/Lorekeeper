@@ -160,6 +160,19 @@ across component disposal, buffer updates for reopened panels, and preserve
 explicit Stop as the cancellation path. Do not move active-turn ownership into a
 single Razor component or circuit. Surface-scoped maintenance leases make
 conversation reset atomic against active or newly starting turns across windows.
+`ChatSurface` also stores unsent composer text in browser/Electron local storage,
+keyed by project and the six-value `ChatTurnSurface`. Drafts therefore survive
+surface remounts, project-tab navigation, and page/circuit reloads without leaking
+between projects or assistant roles, and are removed when the message is sent.
+This unencrypted browser-local text is outside SQLite, backup, and project export;
+clearing site data removes it. Temporary composer image selections are not part of
+the draft contract, although pasted/uploaded images remain normal project assets.
+
+Editor Chat is one project conversation, not a chapter conversation. Its component
+is keyed only by project and chapter-only navigation does not rehydrate the
+transcript or rebuild panel state. The next Editor turn always receives the selected
+chapter and rebuilds authoritative context in `EditorChatService`; explicit context,
+review, or edition-target changes may still refresh the panel's advisory token state.
 
 Assistant tool mutations that require review are stored as `AiChange` batches
 and applied through `IAiChangeApprovalService`. Editor Contest Mode captures a

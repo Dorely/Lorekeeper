@@ -15,7 +15,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   and chapter workspaces.
 - Six persistent assistant surfaces for outline collaboration, chapter editing,
   writing coaching, research, project images, and publishing, including streaming tools,
-  reviewable changes, visual context, and background revision agents.
+  reviewable changes, visual context, background revision agents, and project/surface-
+  scoped composer drafts that survive navigation and reloads until sent.
 - Long-running interactive chat turns automatically compact completed tool context at
   90% of the active model input limit, preserve an audit chip in the transcript, keep
   the live token counter aligned with the reduced in-progress context, and tell the
@@ -278,6 +279,14 @@ unencrypted local manuscript content outside SQLite. It survives a page/circuit
 reload, can be downloaded from the conflict banner, and is removed only when
 the user explicitly loads the current saved version. Clearing browser/site data
 removes it; it is not included in database backups or project exports.
+
+Unsent text in each of the six assistant composers is also stored in
+browser/Electron local storage, keyed by project and assistant surface. It is
+unencrypted local text outside SQLite, survives navigation and page/circuit
+reloads, and is removed when that message is sent. Clearing browser/site data
+removes these drafts; they are not included in database backups or project
+exports. Attached composer images remain project-library assets, but the
+temporary attachment selection itself is not restored with the text draft.
 
 The guarded manuscript/composition and authoring-page migrations create a
 protected SQLite backup before transforming Figure presentation, page-layout
