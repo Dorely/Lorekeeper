@@ -5,7 +5,12 @@
 <PageTitle>Editor</PageTitle>
 
 <ProjectLayout Slug="@Slug" Tab="editor">
-    <EditorContent ChapterId="@ChapterId" EditionId="@EditionId" RequestedMode="@Mode" RequestedCompositionId="@CompositionId" RequestedObjectId="@ObjectId" />
+    <EditorContent ChapterId="@ChapterId"
+                   EditionId="@EditionId"
+                   RequestedMode="@Mode"
+                   RequestedCompositionId="@CompositionId"
+                   RequestedObjectId="@ObjectId"
+                   ChapterChanged="SetChapterId" />
 </ProjectLayout>
 
 @code {
@@ -15,4 +20,6 @@
     [SupplyParameterFromQuery(Name = "mode")] public string? Mode { get; set; }
     [SupplyParameterFromQuery(Name = "composition")] public Guid? CompositionId { get; set; }
     [SupplyParameterFromQuery(Name = "object")] public Guid? ObjectId { get; set; }
+
+    private void SetChapterId(Guid chapterId) => ChapterId = chapterId;
 }

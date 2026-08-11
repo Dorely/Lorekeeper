@@ -141,7 +141,8 @@ else
                                 {
                                     <a class="chapter-menu-item @(c.Id == _current.Id ? "active" : "")"
                                        href="@EditorHref(c.Id)"
-                                       @onclick="CloseMenu">@c.Title</a>
+                                       @onclick="() => SelectChapterAsync(c.Id)"
+                                       @onclick:preventDefault="true">@c.Title</a>
                                 }
                             }
                         </div>
@@ -835,6 +836,7 @@ else
     [Parameter] public string? RequestedMode { get; set; }
     [Parameter] public Guid? RequestedCompositionId { get; set; }
     [Parameter] public Guid? RequestedObjectId { get; set; }
+    [Parameter] public EventCallback<Guid> ChapterChanged { get; set; }
 
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private readonly SemaphoreSlim _chapterRefreshGate = new(1, 1);
@@ -1052,19 +1054,36 @@ else
             return;
         }
 
+        await LoadChapterAsync(targetId, requestedTarget, applyRequestedRouteState: true);
+    }
+
+    private async Task SelectChapterAsync(Guid chapterId)
+    {
+        CloseMenu();
+        if (_activeChapterId == chapterId) return;
+        if (!await LoadChapterAsync(chapterId, _contentTarget, applyRequestedRouteState: false)) return;
+
+        await ChapterChanged.InvokeAsync(chapterId);
+        await UpdateEditorLocationAsync(EditorHref(chapterId));
+    }
+
+    private async Task<bool> LoadChapterAsync(
+        Guid targetId,
+        EditorContentTarget requestedTarget,
+        bool applyRequestedRouteState)
+    {
+        var project = Project;
+        if (project is null) return false;
+
         _restoreChapterAfterRender = false;
         if (_activeChapterId == targetId && _loadedContentTarget == requestedTarget)
         {
             _pendingRememberChapterId = targetId;
-            return;
+            return true;
         }
 
-        // Switching chapter: flush pending save for the previous chapter first.
-        if (_activeChapterId is not null)
-        {
-            if (!await FlushAsync())
-                return;
-        }
+        if (_activeChapterId is not null && !await FlushAsync())
+            return false;
 
         _contentTarget = requestedTarget;
         _loadedContentTarget = requestedTarget;
@@ -1073,7 +1092,7 @@ else
         if (fresh is null)
         {
             HandleMissingChapter(targetId);
-            return;
+            return false;
         }
 
         _activeChapterId = targetId;
@@ -1084,28 +1103,53 @@ else
         InstallEditorDocument(effective);
         UpdateChapterMetrics(effective.PlainText);
         _contentStatus = _contentTarget.EditionId is Guid statusEditionId
-            ? await EditionContent.GetChapterStatusAsync(Project.Id, statusEditionId, fresh.Id)
+            ? await EditionContent.GetChapterStatusAsync(project.Id, statusEditionId, fresh.Id)
             : null;
         _saveState = SaveState.Idle;
         _saveError = null;
         _pendingRememberChapterId = targetId;
 
-        if (!await ActivateCurrentContestReviewAsync())
+        if (await ActivateCurrentContestReviewAsync())
+            return true;
+
+        _contestReviewProjection = null;
+        SelectInitialModeForCurrentChapter();
+        if (applyRequestedRouteState
+            && Enum.TryParse<EditorMode>(RequestedMode, ignoreCase: true, out var requestedMode))
         {
-            _contestReviewProjection = null;
-            SelectInitialModeForCurrentChapter();
-            if (Enum.TryParse<EditorMode>(RequestedMode, ignoreCase: true, out var requestedMode))
-                _mode = requestedMode;
-            if (_mode == EditorMode.Pages
-                && RequestedCompositionId is Guid requestedCompositionId
-                && effective.Document.Content.Any(block => block.PageCompositionId == requestedCompositionId))
-            {
-                _openCompositionId = requestedCompositionId;
-                _pageWorkspaceSelectionId = RequestedObjectId;
-            }
-            if (_mode == EditorMode.Review)
-                await RefreshReviewChangesAsync();
+            _mode = requestedMode;
         }
+        if (applyRequestedRouteState
+            && _mode == EditorMode.Pages
+            && RequestedCompositionId is Guid requestedCompositionId
+            && effective.Document.Content.Any(block => block.PageCompositionId == requestedCompositionId))
+        {
+            _openCompositionId = requestedCompositionId;
+            _pageWorkspaceSelectionId = RequestedObjectId;
+        }
+        if (_mode == EditorMode.Review)
+            await RefreshReviewChangesAsync();
+        return true;
+    }
+
+    private async Task UpdateEditorLocationAsync(string href)
+    {
+        await EnsureEditorModuleAsync();
+        var editorModule = _editorModule;
+        if (_disposed || editorModule is null) return;
+
+        try
+        {
+            await editorModule.InvokeVoidAsync("pushEditorLocation", href);
+        }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException)
+        {
+            if (!_disposed && ReferenceEquals(_editorModule, editorModule))
+                _editorModule = null;
+        }
+        catch (JSException) { }
     }
 
     private void OpenImagesModal()

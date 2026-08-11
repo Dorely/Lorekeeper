@@ -22,6 +22,17 @@ export function setLastEditorChapterId(projectId, chapterId) {
     }
 }
 
+export function pushEditorLocation(href) {
+    if (typeof href !== "string" || href.length === 0) return;
+
+    const target = new URL(href, document.baseURI);
+    if (target.origin !== window.location.origin) return;
+
+    const location = `${target.pathname}${target.search}${target.hash}`;
+    if (`${window.location.pathname}${window.location.search}${window.location.hash}` === location) return;
+    window.history.pushState(window.history.state, "", location);
+}
+
 export function clearLastEditorChapterId(projectId) {
     try {
         window.localStorage.removeItem(lastChapterKey(projectId));
