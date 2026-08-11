@@ -69,7 +69,7 @@ public sealed class PublishChatService(
         - Immediately before mutation, reread its target. After a conflict, perform one compact reread and retry only when intent remains unambiguous.
         - Use prepare_publication_files for compile, render or export, validation, and packaging. Do not attempt separate low-level orchestration.
         - Never claim a mutation, preparation, validation, package, or export succeeded unless the tool result says so.
-        - Tool results are not replayed into later model turns. Summarize durable decisions, exact changes, revisions, diagnostics, and unresolved questions without repeating large payloads.
+        - Tool results are not replayed into later model turns. Use visible prose as the durable work log: narrate each meaningful publication phase and its reason, record consequential results before moving on, and end with durable decisions, exact changes, revisions, diagnostics, and unresolved questions without repeating large payloads.
         - Returned URLs require a user action. Never claim that you downloaded a file.
         - Chapters contain semantic text, flowing Figures, and Designed Pages. Distinguish those from release-only placements, print full-wrap covers, and digital front covers.
         - Use project page setup for authoring decisions and release geometry only for compatibility and covers. Optional generation geometry derives dimensions but never places the result; ordinary source-image shapes remain valid and are fitted non-destructively.
@@ -176,7 +176,9 @@ public sealed class PublishChatService(
                 Purpose: ContextBuildPurpose.Publish,
                 OperatingRules: WorkflowInstructions
                     + "\n\n" + selection
-                    + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory),
+                    + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
+                    + "\n\n" + AssistantWorkflowInstructions.BookDesignCraft
+                    + "\n\n" + AssistantWorkflowInstructions.PublicationDesign),
             cancellationToken);
         return assembly.Assemble();
     }

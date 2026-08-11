@@ -96,6 +96,9 @@ public sealed class PublishChatServiceTests
         Assert.Contains("## Project Guidance", prompt);
         Assert.Contains("Project Guidance fixture", prompt);
         Assert.Contains("## Book Brief", prompt);
+        Assert.Contains("Publication and cover design judgment", prompt);
+        Assert.Contains("thumbnail size", prompt);
+        Assert.Contains("durable cross-turn work log", prompt);
         Assert.DoesNotContain("Current Chapter", prompt, StringComparison.OrdinalIgnoreCase);
 
         await CollectAsync(fixture.Service.SendAsync(
@@ -185,6 +188,7 @@ public sealed class PublishChatServiceTests
         Assert.Contains("Title, copyright, and visible contents pages are generated", PublishChatService.WorkflowInstructions);
         Assert.Contains("preview_publication_cover_canvas", PublishChatService.WorkflowInstructions);
         Assert.Contains("clean mode before reporting completion", PublishChatService.WorkflowInstructions);
+        Assert.Contains("visible prose as the durable work log", PublishChatService.WorkflowInstructions);
 
         var editionId = Guid.NewGuid();
         var created = PublishChatService.TryMutationNotice(

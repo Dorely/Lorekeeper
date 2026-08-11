@@ -27,6 +27,11 @@ public sealed class LayoutImageWorkflowTests
         Assert.Contains("final clean preview", AssistantWorkflowInstructions.CompositionDesign);
         Assert.Contains("LAYOUT_IMAGE_GEOMETRY_MISMATCH", AssistantWorkflowInstructions.ImageGeneration);
         Assert.Contains("remains a usable unattached project image", AssistantWorkflowInstructions.ImageGeneration);
+        Assert.Contains("Treat copy, typography, illustration, and negative space as one composition", AssistantWorkflowInstructions.BookDesignCraft);
+        Assert.Contains("no more than two font families", AssistantWorkflowInstructions.BookDesignCraft);
+        Assert.Contains("4.5:1 contrast", AssistantWorkflowInstructions.BookDesignCraft);
+        Assert.Contains("durable cross-turn work log", AssistantWorkflowInstructions.NonReplayedToolHistory);
+        Assert.Contains("Before each meaningful inspection or change phase", AssistantWorkflowInstructions.NonReplayedToolHistory);
     }
 
     [Theory]

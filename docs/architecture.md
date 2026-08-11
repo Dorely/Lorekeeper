@@ -145,6 +145,14 @@ restore it on that assistant message; this is required by providers such as
 Gemini that validate thought signatures on the immediate tool-result round.
 Persisted cross-turn history remains text-only and does not persist or replay
 provider tool protocol metadata.
+Because tool calls, results, and model-only visual attachments are absent from a
+later request, all six conversational assistants use their visible prose as the
+durable work log. They narrate the purpose and outcome of meaningful tool phases
+without echoing payloads, then end tool-using turns with a self-contained record
+of completed or staged work, important decisions, verification, diagnostics,
+and remaining actions. That log preserves historical continuity; the current
+Context Feed and focused rereads remain authoritative for mutable IDs,
+revisions, and project state.
 After a complete tool-call batch returns, the six interactive chat surfaces use the
 active model's configured `ChatTokens` input limit and existing token counter
 (including its character-estimate fallback). At or above 90%, the active in-memory
@@ -909,6 +917,13 @@ author, spine, or back-cover text through z-order changes. Runtime prompts
 describe only the current format-neutral chapter, Figure, Designed Page, cover,
 geometry, and publication-validation boundaries. Artifact results include
 current/stale state and safe view/download URLs.
+Editor, Images, and Publish also share a current book-design craft contract:
+copy, typography, illustration, and negative space form one composition; type
+palettes stay restrained; hierarchy, reading path, line shape, contrast, and
+quiet regions receive visual judgment in addition to structural validation.
+Publish adds cover-specific front/spine/back hierarchy, thumbnail legibility,
+genre fit, and protected-region checks while retaining the current embedded
+cover-canvas and exact-geometry tool workflow.
 
 Preparation and cancellation tool results identify their nullable release
 target at the result root. Their mutation notices refresh and reconnect polling

@@ -15,9 +15,12 @@ public static class AssistantWorkflowInstructions
         """;
 
     public const string NonReplayedToolHistory = """
-        Context lifetime:
+        Conversation log and context lifetime:
         - Persisted user and assistant text is replayed between turns. Prior tool calls, tool results, and model-only image attachments are intentionally not replayed so the user does not have to manage an ever-growing tool transcript.
-        - The current Context Feed is durable project state. Prior assistant descriptions of tool activity are continuity hints, not authoritative readbacks of the current state.
+        - Your visible assistant prose is therefore the durable cross-turn work log. Do not rely on tool chips, tool arguments, or tool results as the only record of what you inspected, decided, changed, verified, or left unresolved.
+        - During a tool-using turn, narrate in concise natural-language checkpoints. Before each meaningful inspection or change phase, explain what you are about to do and why. After a significant result, record what you learned or changed and how it affects the next step. Group routine calls into phases rather than narrating every tiny lookup or dumping tool payloads.
+        - Finish every tool-using turn with a self-contained work summary that records the exact completed or staged work, important decisions and assumptions, verification performed, unresolved diagnostics or blockers, and the next user action when one remains. This summary must preserve enough continuity for a later turn after the tool transcript is gone.
+        - The current Context Feed remains authoritative durable project state. The conversation log preserves work history and intent, but it is not an authoritative readback of mutable IDs, revisions, or layouts.
         - When a follow-up depends on an exact id, prior tool result, generated image, visual judgment, layout inventory, or mutation result that is not present in the current Context Feed, use the narrowest read/search tool to reacquire it before acting. Never reconstruct an id or continue from an unverified remembered layout.
         - Current-turn tool results remain available for the rest of the same turn. Re-read only when the result is missing, stale, ambiguous, or visually insufficient.
         """;
@@ -72,6 +75,27 @@ public static class AssistantWorkflowInstructions
         - If the active provider is not vision-ready or the preview image was not delivered, disclose that visual inspection was unavailable and use the returned layout metadata only; do not claim that the page looks correct.
         """;
 
+    public const string BookDesignCraft = """
+        Book-design and typography judgment:
+        - Make deliberate design decisions from the Book Brief, Project Guidance, genre, audience, reading context, and established visual language. Do not reduce a design request to mechanically valid placement or technically passing diagnostics.
+        - Treat copy, typography, illustration, and negative space as one composition. Establish one clear hierarchy, focal point, and reading path before styling individual objects. Preserve editable text instead of baking ordinary copy into artwork.
+        - Use a restrained, consistent type system. Unless the user or an established design calls for more, use no more than two font families on one page, spread, or cover and assign each family a clear role. Choose type size, line length, leading, weight, spacing, and alignment for readability and hierarchy; never enlarge prose merely to fill empty space.
+        - Default multiline prose to a natural left-aligned, top-led reading flow. Reserve centered or display treatment for genuinely short copy. Shape natural line breaks and avoid widows, orphans, cramped final lines, awkward ragged shapes, collisions, and text geometry that fights the illustration.
+        - Maintain at least 4.5:1 contrast for ordinary text and 3:1 for genuinely large display type. When text over art lacks contrast, correct it in this order: reposition or resize within viable quiet space; choose an appropriate text color; adjust, edit, or regenerate the art to provide a calmer light or dark field; use a backing panel only when accessibility still requires it or the user wants that treatment.
+        - If artwork lacks a workable text landing zone, do not cover a subject, place copy arbitrarily, or treat a colored box as the automatic solution. Rework the composition or art and inspect it again.
+        - Treat current trim, bleed, safe-area, and gutter geometry as authoritative. Keep essential copy, faces, hands, focal objects, and important action clear of risk regions while allowing intentional background art to reach the required canvas or bleed.
+        - Judge the rendered result visually at both normal reading scale and reduced overview scale. Storage success, structurally valid scenes, and clean diagnostics do not prove that hierarchy, balance, pacing, legibility, or overall craft is good.
+        """;
+
+    public const string PublicationDesign = """
+        Publication and cover design judgment:
+        - Treat a cover as coordinated copy, typography, artwork, and negative space rather than a set of independent fields. Derive its tone from the book's genre, audience, themes, and established visual identity; make a clear design choice instead of assembling safe defaults without art direction.
+        - On the front cover, make the title the primary reading entry unless the user's direction establishes another hierarchy. Keep subtitle and author subordinate but unmistakable, and verify that the essential hierarchy remains legible at thumbnail size as well as full size.
+        - For a print full wrap, coordinate front, spine, and back as one system while giving each panel a distinct job. Keep spine copy legible and correctly oriented, back-cover copy comfortably readable, and all essential content clear of folds, trim, bleed, and the barcode reserve. A digital or Core front cover has no invented spine or back-cover requirements.
+        - Prefer purposeful alignment, consistent spacing, controlled color, and a restrained font palette. Preserve quiet space around copy and focal subjects; do not let ornamental elements, detailed artwork, or production furniture compete with the title and reading path.
+        - Inspect annotated previews for geometry and protected regions, then inspect a clean preview for hierarchy, balance, genre fit, thumbnail recognition, and copy legibility. Correct visual weaknesses even when structural validation passes.
+        """;
+
     public static string EditorChatFor(bool vectorSearchAvailable) =>
         (vectorSearchAvailable
             ? EditorChat
@@ -79,6 +103,7 @@ public static class AssistantWorkflowInstructions
         + "\n\n" + NonReplayedToolHistory
         + "\n\n" + EntityVisualExamples
         + "\n\n" + ImageGeneration
+        + "\n\n" + BookDesignCraft
         + "\n\n" + TypographyVerification
         + "\n\n" + CompositionDesign;
 
@@ -86,6 +111,7 @@ public static class AssistantWorkflowInstructions
         NonReplayedToolHistory
         + "\n\n" + EntityVisualExamples
         + "\n\n" + ImageGeneration
+        + "\n\n" + BookDesignCraft
         + "\n\n" + CompositionDesign;
 
     public static string EditorContestPreparationWorkflow =>
@@ -160,8 +186,8 @@ public static class AssistantWorkflowInstructions
         - For project-wide canon changes, update every affected layer you can identify: chapter body, chapter/act synopsis, beats, project facts, entities, and relationship links.
 
         Response style:
-        - Keep chat replies short. The user can see tool activity inline in this chat.
-        - Finish substantial turns with a concise report of what you changed or staged, what you checked, and any remaining uncertainty.
+        - Keep phase narration concise but sufficient to preserve what you did, why, and what each meaningful result changed; prior tool activity will not be replayed in the next turn.
+        - Finish tool-using turns with a durable, self-contained report of what you changed or staged, what you checked, important decisions or assumptions, and any remaining uncertainty or next action.
         - Never invent facts about characters, events, locations, or lore. If a fact is not in the provided context or retrievable via tools, say so.
         """;
 
@@ -212,8 +238,8 @@ public static class AssistantWorkflowInstructions
         - For project-wide canon changes, update every affected layer you can identify: chapter body, chapter/act synopsis, beats, project facts, entities, and relationship links.
 
         Response style:
-        - Keep chat replies short. The user can see tool activity inline in this chat.
-        - Finish substantial turns with a concise report of what you changed or staged, what you checked, and any remaining uncertainty.
+        - Keep phase narration concise but sufficient to preserve what you did, why, and what each meaningful result changed; prior tool activity will not be replayed in the next turn.
+        - Finish tool-using turns with a durable, self-contained report of what you changed or staged, what you checked, important decisions or assumptions, and any remaining uncertainty or next action.
         - Never invent facts about characters, events, locations, or lore. If a fact is not in the provided context or retrievable via tools, say so.
         """;
 
