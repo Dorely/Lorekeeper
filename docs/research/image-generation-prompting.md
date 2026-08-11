@@ -127,10 +127,10 @@ pictorial—for example a hand-lettered sign—and explicitly requested.
 
 - `allowRenderedText` defaults to false and the compiler adds “no text, logos, or watermarks.”
 - A true value requires explicit desired text; otherwise validation fails.
-- Layout-bound Figure, page-frame/surface, and cover-frame/surface targets derive aspect, provider canvas, and valid raster size from the selected edition and exact geometry fingerprint.
+- Layout-bound Figure, page-frame/surface, and cover-frame/surface targets derive the exact aspect and a deterministic moderate raster near 1.57 MP from the active authoring or release-cover geometry. A provider dimension mismatch is retained as an unattached project image and returned visually with a warning; it is not silently resized, cropped, or rejected.
 - Full-page prompts add bleed-aware edges, trim safety, gutter avoidance for spreads, focal-detail safety, and buffered reserved-text rectangles.
 - Alt text is stored separately and describes the resulting image's relevant subject, action, setting, and composition. It is never baked into the image.
-- The final composed page or cover is validated and rendered after scene mutations.
+- The assistant inspects the direct complete canvas in annotated mode during layout work and in clean mode after final scene mutations. These transient previews do not create project-image assets; Press page preview remains a separate pagination/output check.
 
 ## Reusable Lorekeeper examples
 

@@ -44,6 +44,7 @@ public sealed class EditorChatTools(
     ICompositionService compositions,
     IProjectPageSetupService pageSetups,
     IChapterPreviewService chapterPreviews,
+    ICompositionCanvasPreviewService canvasPreviews,
     IChapterSemanticProjectionService semanticProjection,
     EditorManuscriptPreviewService manuscriptPreviews,
     IOptions<EditorChatOptions> editorOptions,
@@ -159,6 +160,15 @@ public sealed class EditorChatTools(
                     "Render one Press-typeset chapter page as a PNG for visual inspection. Provide exactly one of blockId or pageNumber. " +
                     "blockId is a stable semantic manuscript block ID and selects the first typeset page containing that block; pageNumber is 1-based chapter-local typeset pagination, not read_chapter text pagination. " +
                     "The image is attached to the turn and, when vision is available, supplied to the model on the next iteration."),
+
+            AIFunctionFactory.Create(
+                method: (Guid compositionId, Guid variantId, string mode = "annotated") =>
+                    PreviewPageCanvasAsync(context, compositionId, variantId, mode),
+                name: "preview_page_canvas",
+                description:
+                    "Render one complete Designed Page authoring surface directly as a transient PNG, without chapter pagination or publication-edition context. " +
+                    "Use mode 'annotated' while arranging objects to see safe area, gutter, object IDs, clipping, and overflow; use mode 'clean' for final visual verification. " +
+                    "A facing spread is returned as one complete wide surface. The preview is attached to the turn and never creates a project-image asset."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, int startBlock = 0, int blockCount = 40) =>
@@ -387,7 +397,7 @@ public sealed class EditorChatTools(
                 method: (string targetKind, Guid targetId, Guid? variantId = null) =>
                     ReadLayoutGenerationTargetAsync(context, targetKind, targetId, variantId),
                 name: "read_layout_generation_target",
-                description: "Read project-authoring geometry for a project page, Figure placement, or Designed Page frame/surface. Use the project ID for project-page; composition targets require the active variantId. The descriptor chooses a provider canvas and protected regions but never restricts which source-image aspect ratio can be placed."),
+                description: "Read exact project-authoring geometry, moderate requested raster, print-DPI recommendation, and protected regions for a project page, Figure placement, or Designed Page frame/surface. Use the project ID for project-page; composition targets require the active variantId."),
             AIFunctionFactory.Create(
                 method: (Guid compositionId) =>
                     GetOrCreateCompositionVariantAsync(context, compositionId),
@@ -701,6 +711,106 @@ public sealed class EditorChatTools(
                 code = "CHAPTER_PREVIEW_FAILED",
                 summary = exception.Message,
                 recovery = "Correct the chapter, block ID, page number, font, image, or Press preview issue and retry.",
+            }, ManuscriptCodec.JsonOptions);
+        }
+    }
+
+    private async Task<string> PreviewPageCanvasAsync(
+        EditorChatContext ctx,
+        Guid compositionId,
+        Guid variantId,
+        string mode)
+    {
+        var previewMode = (mode ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "annotated" => CompositionCanvasPreviewMode.Annotated,
+            "clean" => CompositionCanvasPreviewMode.Clean,
+            _ => (CompositionCanvasPreviewMode?)null,
+        };
+        if (previewMode is null)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                code = "CANVAS_PREVIEW_MODE_INVALID",
+                summary = "mode must be annotated or clean.",
+            }, ManuscriptCodec.JsonOptions);
+        }
+
+        try
+        {
+            var preview = await canvasPreviews.RenderAsync(
+                ctx.ProjectId,
+                compositionId,
+                variantId,
+                previewMode.Value,
+                ctx.TurnCancellationToken);
+            var visualId = Guid.NewGuid();
+            var fileName = $"composition-{compositionId:N}-{previewMode.Value.ToString().ToLowerInvariant()}.png";
+            var contentUrl = $"/projects/{ctx.ProjectId:N}/editor-chat-visuals/{visualId:N}/content";
+            ctx.AddVisual(new EditorChatVisualAttachment(
+                visualId,
+                previewMode == CompositionCanvasPreviewMode.Annotated
+                    ? "Designed Page — annotated canvas"
+                    : "Designed Page — clean canvas",
+                "Direct authoring-canvas preview for page-design verification.",
+                $"{contentUrl}?maxEdge=640",
+                contentUrl,
+                preview.PixelWidth,
+                preview.PixelHeight,
+                ctx.CurrentToolCallId,
+                SourceKind: "compositionCanvasPreview",
+                SourceRefId: compositionId,
+                ContentType: "image/png",
+                FileName: fileName,
+                Data: preview.Data));
+            if (ctx.VisionReady)
+                ctx.AddModelOnlyImage(visualId, fileName, "image/png", preview.Data);
+
+            var prioritizedDiagnostics = preview.Diagnostics.Take(10).ToList();
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                targetId = compositionId,
+                currentRevision = preview.VariantRevision,
+                compositionId,
+                variantId,
+                compositionRevision = preview.CompositionRevision,
+                variantRevision = preview.VariantRevision,
+                mode = preview.Mode.ToString().ToLowerInvariant(),
+                surface = new
+                {
+                    widthPoints = preview.SurfaceWidthPoints,
+                    heightPoints = preview.SurfaceHeightPoints,
+                    widthInches = Math.Round(preview.SurfaceWidthPoints / 72, 4),
+                    heightInches = Math.Round(preview.SurfaceHeightPoints / 72, 4),
+                    widthPixels = preview.PixelWidth,
+                    heightPixels = preview.PixelHeight,
+                },
+                visualId,
+                objects = new { visible = preview.VisibleObjectCount, hidden = preview.HiddenObjectCount },
+                diagnosticCounts = new
+                {
+                    total = preview.Diagnostics.Count,
+                    errors = preview.Diagnostics.Count(item => item.Severity == "error"),
+                    warnings = preview.Diagnostics.Count(item => item.Severity == "warning"),
+                },
+                diagnostics = prioritizedDiagnostics,
+                hasMoreDiagnostics = preview.Diagnostics.Count > prioritizedDiagnostics.Count,
+                delivery = ctx.VisionReady
+                    ? "The complete canvas image is attached as model-only visual context for the next reasoning iteration."
+                    : "The complete canvas image is attached for the user, but the active provider is not vision-ready; do not claim visual verification.",
+            }, ManuscriptCodec.JsonOptions);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                code = "CANVAS_PREVIEW_FAILED",
+                targetId = compositionId,
+                summary = exception.Message,
+                recovery = "Read the composition and exact authoring variant, correct missing image or font data, then retry the canvas preview.",
             }, ManuscriptCodec.JsonOptions);
         }
     }
@@ -2456,8 +2566,9 @@ public sealed class EditorChatTools(
         string caption)
     {
         var payloads = new List<object>();
-        foreach (var image in result.Images)
+        foreach (var output in result.Outputs)
         {
+            var image = output.Image;
             var visual = await BuildVisualAsync(ctx, image, image.FileName, caption);
             ctx.AddVisual(visual);
             ctx.AddModelOnlyImage(image);
@@ -2465,8 +2576,11 @@ public sealed class EditorChatTools(
             {
                 image.Id,
                 image.PreviewUrl,
-                requestedCanvas = result.RequestedCanvas,
-                actualRaster = RasterMetadata(visual.Width, visual.Height),
+                targetAspect = result.TargetAspect,
+                requestedRaster = result.RequestedRaster,
+                actualRaster = output.ActualRaster,
+                geometryMatched = output.GeometryMatched,
+                effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null,
             });
         }
         if (result.Images.Count > 0)
@@ -2479,8 +2593,19 @@ public sealed class EditorChatTools(
             outputImageIds = result.Images.Select(image => image.Id),
             images = payloads,
             attached = false,
-            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = 0 },
+            diagnosticCounts = new
+            {
+                errors = result.Diagnostics.Count,
+                warnings = result.LayoutBound ? result.Outputs.Count(output => !output.GeometryMatched) : 0,
+            },
             diagnostics = result.Diagnostics.Take(3),
+            geometryWarnings = result.LayoutBound
+                ? result.Outputs.Where(output => !output.GeometryMatched).Select(output => new
+                {
+                    code = "LAYOUT_IMAGE_GEOMETRY_MISMATCH",
+                    message = $"Provider returned {output.ActualRaster} instead of requested {result.RequestedRaster}. Inspect the image before deciding whether to place or regenerate it.",
+                })
+                : [],
             summary = result.Summary,
             nextAction = result.Succeeded
                 ? "Inspect a returned image, then place its project-image ID with a separate Figure or Designed Page tool before completing an authoring request."

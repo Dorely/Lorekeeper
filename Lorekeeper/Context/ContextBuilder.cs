@@ -30,6 +30,7 @@ public sealed class ContextBuilder(
     IChapterSemanticProjectionService semanticProjection,
     IManuscriptStyleService manuscriptStyles,
     ICompositionService compositions,
+    IProjectPageSetupService pageSetups,
     IEmbeddingService embeddings,
     IBookBriefService bookBriefs,
     ISystemPromptComposer systemPrompts,
@@ -83,6 +84,17 @@ public sealed class ContextBuilder(
             && request.Purpose is ContextBuildPurpose.Editor or ContextBuildPurpose.EditorRevision)
         {
             var manuscriptSnapshot = await manuscripts.GetManuscriptAsync(currentChapter.Id, cancellationToken);
+            var pageSetup = await pageSetups.GetOrCreateAsync(project.Id, cancellationToken);
+            items.Add(new ContextItem(
+                Key: EditorContextKeys.ProjectPageSetup,
+                Kind: ContextItemKind.ProjectPageSetup,
+                Label: "Project Page Setup",
+                Body: $"Revision: {pageSetup.Revision}\nPage: {pageSetup.PageWidthInches:0.####} × {pageSetup.PageHeightInches:0.####} in\nAspect: {pageSetup.PageWidthInches / pageSetup.PageHeightInches:0.######}\nMargin: {pageSetup.PageMarginInches:0.####} in\nBody type: {pageSetup.BodyFontSizePoints:0.##} pt at {pageSetup.BodyLineHeight:0.###} line height",
+                IsEnabled: true,
+                IsRemovable: false,
+                Badge: "Geometry",
+                Reason: "Authoring geometry for Figures and Designed Pages",
+                IsProtected: true));
             items.Add(await BuildManuscriptStylesItemAsync(
                 project.Id,
                 manuscriptSnapshot,
@@ -508,6 +520,26 @@ public sealed class ContextBuilder(
                     .Append(" variants=").Append(composition?.Variants.Count ?? 0);
                 if (composition is not null)
                 {
+                    manifest.Append(" compositionRevision=").Append(composition.Revision)
+                        .Append(" activeAuthoringVariant=").Append(composition.ActiveAuthoringVariantId?.ToString() ?? "none");
+                    if (composition.ActiveAuthoringVariantId is Guid activeVariantId)
+                    {
+                        var activeVariant = await compositions.ReadVariantAsync(projectId, activeVariantId, cancellationToken);
+                        var scene = System.Text.Json.JsonSerializer.Deserialize<CompositionScene>(
+                            activeVariant.SceneJson,
+                            ManuscriptCodec.JsonOptions);
+                        if (scene is not null)
+                        {
+                            manifest.AppendLine()
+                                .Append("  active geometry: variant=").Append(activeVariant.Id)
+                                .Append(" revision=").Append(activeVariant.Revision)
+                                .Append(" mode=").Append(scene.Surface.Kind)
+                                .Append(" surface=").Append((scene.Surface.WidthPoints / 72).ToString("0.####"))
+                                .Append("×").Append((scene.Surface.HeightPoints / 72).ToString("0.####"))
+                                .Append(" in aspect=").Append((scene.Surface.WidthPoints / scene.Surface.HeightPoints).ToString("0.######"))
+                                .Append(" geometryKey=").Append(activeVariant.GeometryKey);
+                        }
+                    }
                     var semanticText = ManuscriptCodec.ProjectPlainText(
                         ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision));
                     if (!string.IsNullOrWhiteSpace(semanticText))

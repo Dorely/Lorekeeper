@@ -1228,17 +1228,13 @@ public sealed class CompositionService(
         var gcd = GreatestCommonDivisor((int)Math.Round(width * 1000), (int)Math.Round(height * 1000));
         var pixelsPerInch = edition.Format == PublicationEditionFormat.Paperback ? 300 : 180;
         var aspect = $"{(int)Math.Round(width * 1000) / gcd}:{(int)Math.Round(height * 1000) / gcd}";
-        var providerCanvas = ProviderCanvas(width, height);
+        var requestedRaster = LayoutImageSizeResolver.Resolve(width, height);
         var descriptorDiagnostics = diagnostics.ToList();
-        var (canvasWidth, canvasHeight) = providerCanvas switch
-        {
-            "landscape" => (1536d, 1024d),
-            "portrait" => (1024d, 1536d),
-            _ => (1024d, 1024d),
-        };
-        var providerDpi = Math.Min(canvasWidth / Math.Max(.01, width), canvasHeight / Math.Max(.01, height));
+        var providerDpi = Math.Min(
+            requestedRaster.Width / Math.Max(.01, width),
+            requestedRaster.Height / Math.Max(.01, height));
         if (providerDpi + .5 < pixelsPerInch)
-            descriptorDiagnostics.Add($"The provider canvas supplies approximately {providerDpi:0} effective DPI for this target; publication validation expects {pixelsPerInch} DPI. Generate panels or frames separately, or provide a higher-resolution source.");
+            descriptorDiagnostics.Add($"The authoring raster supplies approximately {providerDpi:0} effective DPI for this target; publication validation expects {pixelsPerInch} DPI. This is suitable for layout work, while final publication may require a higher-resolution source.");
         var geometryFingerprint = TargetGeometryFingerprint(
             edition,
             normalizedKind,
@@ -1259,7 +1255,9 @@ public sealed class CompositionService(
             aspect,
             (int)Math.Ceiling(width * pixelsPerInch),
             (int)Math.Ceiling(height * pixelsPerInch),
-            providerCanvas,
+            requestedRaster.Width,
+            requestedRaster.Height,
+            requestedRaster.Size,
             pixelsPerInch,
             regions,
             descriptorDiagnostics);
@@ -1296,7 +1294,7 @@ public sealed class CompositionService(
         };
         var gcd = GreatestCommonDivisor((int)Math.Round(width * 1000), (int)Math.Round(height * 1000));
         var aspect = $"{(int)Math.Round(width * 1000) / gcd}:{(int)Math.Round(height * 1000) / gcd}";
-        var providerCanvas = ProviderCanvas(width, height);
+        var requestedRaster = LayoutImageSizeResolver.Resolve(width, height);
         var fingerprint = TargetGeometryFingerprint(
             $"project:{setup.Revision}:{setup.PageWidthInches:F4}:{setup.PageHeightInches:F4}:{setup.PageMarginInches:F4}",
             normalizedKind,
@@ -1317,7 +1315,9 @@ public sealed class CompositionService(
             aspect,
             (int)Math.Ceiling(width * 300),
             (int)Math.Ceiling(height * 300),
-            providerCanvas,
+            requestedRaster.Width,
+            requestedRaster.Height,
+            requestedRaster.Size,
             300,
             regions,
             diagnostics);
@@ -2069,12 +2069,6 @@ public sealed class CompositionService(
         while (right != 0)
             (left, right) = (right, left % right);
         return Math.Max(left, 1);
-    }
-
-    private static string ProviderCanvas(double width, double height)
-    {
-        var ratio = width / height;
-        return ratio >= 1.35 ? "landscape" : ratio <= .74 ? "portrait" : "square";
     }
 
     private static string TargetGeometryFingerprint(

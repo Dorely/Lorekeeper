@@ -622,6 +622,7 @@ public sealed class PublicationPackageTests
             "reorder_publication_release_placements",
             "delete_publication_release_placement",
             "read_publication_cover_design",
+            "preview_publication_cover_canvas",
             "place_project_image_on_core_cover",
             "add_project_image_to_core_cover",
             "place_project_image_on_release_cover",

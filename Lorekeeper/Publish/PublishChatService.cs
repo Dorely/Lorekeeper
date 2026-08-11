@@ -74,6 +74,9 @@ public sealed class PublishChatService(
         - Use project page setup for authoring decisions and release geometry only for compatibility and covers. Optional generation geometry derives dimensions but never places the result; ordinary source-image shapes remain valid and are fitted non-destructively.
         - generate_project_image and edit_project_image wait for completion and always return unattached project images. Inspect the visible output, then use its ID with the focused place/add Core cover, release cover, or publication-page tools in this same turn when placement is requested. Never stop after asset generation or imply geometry guidance attached it.
         - Cover artwork always remains beneath canonical title, subtitle, author, spine, and back-cover copy. Adjust the artwork crop, opacity, and framing instead of trying to raise it above cover text.
+        - For existing cover design work, call preview_publication_cover_canvas in annotated mode before mutating. After placing or arranging artwork, inspect another annotated whole-cover preview and correct clipping, hierarchy, protected regions, copy legibility, and collisions. Call the clean mode before reporting completion. You may skip only the initial preview for a genuinely empty cover.
+        - Cover generation targets provide an exact moderate-resolution requested raster matching the selected cover surface or frame. If the provider returns different dimensions, the project image remains usable but geometryMatched is false and the mismatch is a warning. Inspect it and deliberately regenerate or fit it; never report it as exact-geometry output.
+        - A cover-canvas preview is transient visual context, not an image-library asset. If visual delivery is unavailable, report that you could not visually verify the cover instead of inferring appearance from scene JSON.
         - Require alt text or an explicit decorative decision for publication releases and preserve logical reading order. A Core reading PDF may complete with unresolved image accessibility decisions as explicit warnings; report those warnings and do not describe the copy as publication-ready.
         - Submit large composition payloads once to staging, then apply only the stage ID and expected revision.
         - Release format is fixed. Create another release for another product type.
@@ -452,6 +455,20 @@ public sealed class PublishChatService(
                             cancellationToken);
                         if (visualMessage is not null)
                             messages.Add(ChatTurnEngine.MarkToolContextMessage(visualMessage));
+                    }
+                    var transientVisuals = assistantContext.DrainTransientVisuals();
+                    if (visionReady && transientVisuals.Count > 0)
+                    {
+                        var contents = new List<AIContent>
+                        {
+                            new TextContent("Direct cover-canvas previews from the preceding tool. Inspect the complete surface before choosing further cover mutations."),
+                        };
+                        foreach (var visual in transientVisuals)
+                        {
+                            contents.Add(new TextContent($"\n{visual.Caption}; visualId={visual.Id:N}; file={visual.FileName}"));
+                            contents.Add(new DataContent(visual.Data, visual.ContentType) { Name = visual.FileName });
+                        }
+                        messages.Add(ChatTurnEngine.MarkToolContextMessage(new ChatMessage(ChatRole.User, contents)));
                     }
                 }
 

@@ -183,6 +183,8 @@ public sealed class PublishChatServiceTests
         Assert.Contains("application-managed", PublishChatService.WorkflowInstructions);
         Assert.Contains("vendor acceptance", PublishChatService.WorkflowInstructions);
         Assert.Contains("Title, copyright, and visible contents pages are generated", PublishChatService.WorkflowInstructions);
+        Assert.Contains("preview_publication_cover_canvas", PublishChatService.WorkflowInstructions);
+        Assert.Contains("clean mode before reporting completion", PublishChatService.WorkflowInstructions);
 
         var editionId = Guid.NewGuid();
         var created = PublishChatService.TryMutationNotice(

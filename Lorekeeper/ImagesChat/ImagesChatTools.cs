@@ -245,7 +245,7 @@ public sealed class ImagesChatTools(
             AIFunctionFactory.Create(
                 method: (string targetKind, Guid targetId, Guid? variantId = null, Guid? editionId = null) => ReadLayoutGenerationTargetAsync(context, targetKind, targetId, variantId, editionId),
                 name: "read_layout_generation_target",
-                description: "Read server-owned dimensions, aspect ratio, provider canvas, and reserved regions. project-page, Figure, and page frame/surface targets use project authoring geometry and omit editionId; use the project ID for project-page. Cover targets require editionId. Composition page targets require the active variantId."),
+                description: "Read server-owned dimensions, exact target aspect, moderate requested raster, print-DPI recommendation, and reserved regions. project-page, Figure, and page frame/surface targets use project authoring geometry and omit editionId; use the project ID for project-page. Cover targets require editionId. Composition page targets require the active variantId."),
 
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, ProjectImageCropRegion crop, string? fileName = null, string? altText = null, EntityVisualTarget? entityTarget = null) =>
@@ -1125,12 +1125,13 @@ public sealed class ImagesChatTools(
         string caption)
     {
         var outputs = new List<object>();
-        foreach (var image in result.Images)
+        foreach (var output in result.Outputs)
         {
+            var image = output.Image;
             var visual = await BuildVisualAsync(ctx, image, image.FileName, caption);
             ctx.AddVisual(visual);
             ctx.AddModelOnlyImage(image);
-            outputs.Add(ImageOutputPayload(image, result.RequestedCanvas, visual.Width, visual.Height));
+            outputs.Add(ImageOutputPayload(output, result.TargetAspect, result.RequestedRaster));
         }
         if (result.Images.Count > 0)
             ctx.MarkMutated();
@@ -1139,12 +1140,16 @@ public sealed class ImagesChatTools(
             ok = result.Succeeded,
             jobId = result.JobId,
             status = result.Status,
-            requestedCanvas = result.RequestedCanvas,
+            targetAspect = result.TargetAspect,
+            requestedRaster = result.RequestedRaster,
             outputImageIds = result.Images.Select(image => image.Id),
             images = outputs,
             attached = false,
-            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = 0 },
+            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.LayoutBound ? result.Outputs.Count(output => !output.GeometryMatched) : 0 },
             diagnostics = result.Diagnostics.Take(3),
+            geometryWarnings = result.LayoutBound
+                ? result.Outputs.Where(output => !output.GeometryMatched).Select(output => new { code = "LAYOUT_IMAGE_GEOMETRY_MISMATCH", message = $"Provider returned {output.ActualRaster} instead of requested {result.RequestedRaster}. Inspect before placement or regeneration." })
+                : [],
             summary = result.Summary,
         }, JsonOptions);
     }
@@ -1256,23 +1261,25 @@ public sealed class ImagesChatTools(
         image.SizeBytes,
     };
 
-    private static object ImageOutputPayload(ProjectImageView image, string requestedSize, int? width, int? height) => new
+    private static object ImageOutputPayload(AgentProjectImageOutput output, string targetAspect, string requestedRaster) => new
     {
-        image.Id,
-        image.FileName,
-        image.ContentType,
-        image.PreviewUrl,
-        FullUrl = image.PreviewUrl.Replace("?maxEdge=640", string.Empty, StringComparison.Ordinal),
-        image.AltText,
-        image.Source,
-        image.Prompt,
-        image.GenerationModel,
-        image.SourceMetadataJson,
-        requestedSize,
-        actualRaster = RasterMetadata(width, height),
-        image.CreatedAt,
-        image.UpdatedAt,
-        image.SizeBytes,
+        output.Image.Id,
+        output.Image.FileName,
+        output.Image.ContentType,
+        output.Image.PreviewUrl,
+        FullUrl = output.Image.PreviewUrl.Replace("?maxEdge=640", string.Empty, StringComparison.Ordinal),
+        output.Image.AltText,
+        output.Image.Source,
+        output.Image.Prompt,
+        output.Image.GenerationModel,
+        targetAspect,
+        requestedRaster,
+        output.ActualRaster,
+        output.GeometryMatched,
+        effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null,
+        output.Image.CreatedAt,
+        output.Image.UpdatedAt,
+        output.Image.SizeBytes,
     };
 
     private static object JobPayload(ProjectImageJobView job) => new

@@ -261,8 +261,14 @@ details remain behind `IProjectImageProvider`.
 boundary for Outline, Editor, Images, and Publish. It creates one unattached
 project-image job, registers its durable job ID, waits to a readable terminal
 state, cancels timed-out or interrupted work, and returns compact status,
-project-image IDs, diagnostics, and temporary visual context. Geometry
-descriptors guide prompt composition and provider-canvas choice only. Outline
+project-image IDs, diagnostics, and temporary visual context. Layout-bound
+descriptors select a deterministic, moderate raster that matches the exact
+target aspect (about 1.57 MP within GPT Image 2's flexible-size limits) and add
+physical/protected-region prompt guidance. Returned pixels are stored without
+cropping, resizing, or rejection: a provider dimension mismatch is returned
+visually with `geometryMatched=false` and a
+`LAYOUT_IMAGE_GEOMETRY_MISMATCH` warning so the assistant can inspect,
+regenerate, or deliberately fit it. Outline
 requests omit geometry and are restricted by prompt and tool contract to
 explicit canonical entity-appearance work. Focused Figure, Designed Page,
 cover, and canonical-reference tools consume a completed
@@ -419,6 +425,21 @@ defaults to 1600 pixels. Missing fonts/assets, invalid targets, Press failures,
 and unavailable vision are returned as recoverable tool state rather than
 being treated as successful visual verification.
 
+`ICompositionCanvasPreviewService` is the direct authoring-canvas inspection
+boundary shared by Designed Pages and publication covers. It renders the exact
+selected scene revision as one transient PNG surface, including both leaves of
+a facing spread, using the visual editor's visibility, z-order, image
+fit/crop/stretch, text and inline formatting, fonts, wrapping, alignment,
+rotation, opacity, shapes, grouping, clipping, and page bounds. Annotated mode
+adds safe/trim/gutter/object identifiers plus overflow and clipping indicators;
+clean mode returns only the composed artwork. Cache keys include scene and
+semantic revisions plus referenced image and font bytes. Editor's
+`preview_page_canvas` and Publish's `preview_publication_cover_canvas` deliver
+temporary vision context and never create project images. Assistants use
+annotated previews during mutation and clean previews for final verification;
+`preview_chapter_page` remains the Press pagination/typesetting inspection tool
+for flowing manuscript output.
+
 Advanced controls are bounded and positioned below the complete sticky header
 and within the editor viewport, so they neither cover Figure controls nor create
 horizontal overflow.
@@ -457,7 +478,8 @@ resize/rotate handles are unavailable, and the mode remains active until the
 author finishes it or selects another object.
 Image frames retain the loaded raster's physical aspect ratio by default. The
 shared pointer bridge reports native image geometry at transform start, so both
-Pages and Cover constrain drag resizing without guessing from a provider canvas.
+Pages and Cover constrain drag resizing without guessing from a generation
+request.
 Disabling the constraint stores an explicit stretched fit. `Fill canvas` either
 centers the largest proportional frame or occupies the complete surface when
 stretching is enabled. Rulers sit outside the page and selected handles remain
@@ -474,15 +496,16 @@ be hidden by an older variant already tracked in the Blazor circuit.
 
 `LayoutGenerationTargetDescriptor` is the server-owned geometry boundary for a
 project page, Figure, page surface/frame, or publication cover surface/frame.
-Only cover targets are edition-owned. It carries
-the exact physical aspect, recommended raster, provider canvas, effective-DPI
-expectation, geometry fingerprint, and named trim, bleed, safe, gutter, cover,
+Only release-cover targets are edition-owned. It carries
+the exact physical aspect, final-output raster recommendation, deterministic
+moderate authoring raster, effective-DPI expectation, geometry fingerprint,
+and named trim, bleed, safe, gutter, cover,
 barcode, and reserved-text regions. It is optional composition guidance rather
 than an image-acceptance constraint: free-standing generation is the default for
 reusable art and flowing Figures, while a concrete target is used when the art
 must honor physical regions. UI and assistants provide only stable target IDs
-for that mode. Provider raster geometry and pixels are stored without
-layout cropping or resizing (supported format normalization may convert WebP to
+for that mode. Provider raster geometry and pixels are stored without layout
+cropping, resizing, or mismatch rejection (supported format normalization may convert WebP to
 lossless PNG); Figure and scene contain/cover/crop-position settings fit any source
 aspect ratio non-destructively at layout and render time. Free-standing
 image-library generation remains manually sized, and its size/aspect audit

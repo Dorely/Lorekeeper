@@ -130,13 +130,7 @@ public sealed class ImagePromptComposer(
     IProjectImageService images,
     IOptions<ProjectImageGenerationOptions> options) : IImagePromptComposer
 {
-    private const int SizeMultiple = 16;
-    private const int MinImagePixels = 655_360;
-    private const int MaxImagePixels = 8_294_400;
-    private const int MaxImageEdge = 3840;
-    private const double MaxImageAspectRatio = 3d;
     private const double AspectTolerance = 0.025d;
-    private const int TargetAreaPixels = 1_572_864;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -304,15 +298,9 @@ public sealed class ImagePromptComposer(
                 descriptor = await compositions.DescribeAuthoringGenerationTargetAsync(
                     projectId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken);
             }
-            var resolvedTargetSize = descriptor.ProviderCanvas switch
-            {
-                "portrait" => "1024x1536",
-                "landscape" => "1536x1024",
-                _ => "1024x1024",
-            };
             var appendix = BuildLayoutTargetAppendix(descriptor);
             return new(
-                resolvedTargetSize,
+                descriptor.RequestedRaster,
                 descriptor.AspectRatio,
                 appendix,
                 JsonSerializer.Serialize(descriptor, JsonOptions));
@@ -353,8 +341,8 @@ public sealed class ImagePromptComposer(
             .Append(descriptor.WidthInches.ToString("0.####", CultureInfo.InvariantCulture)).Append(" x ")
             .Append(descriptor.HeightInches.ToString("0.####", CultureInfo.InvariantCulture)).Append(" inches; target ")
             .Append(descriptor.EffectiveDpiExpectation.ToString("0", CultureInfo.InvariantCulture)).AppendLine(" effective DPI.");
-        prompt.Append("Lorekeeper selected the provider's ").Append(descriptor.ProviderCanvas)
-            .Append(" canvas. Compose for the target aspect and keep important content within its usable regions. Lorekeeper preserves the returned raster; proportional placement keeps its native shape, while an explicitly unconstrained frame may stretch it. Crop position can be adjusted directly when a cropped legacy placement is used.").AppendLine();
+        prompt.Append("Generate at the exact requested raster ").Append(descriptor.RequestedRaster)
+            .Append(" so the output matches this target aspect. Compose edge-to-edge for the complete surface, keep important content within its usable regions, and do not draw a simulated page border, binding, fold, gutter line, or book mockup. The 300-DPI publication recommendation is a separate final-output check; this moderate raster is the authoring target.").AppendLine();
         foreach (var region in descriptor.Regions)
         {
             prompt.Append(region.KeepClear ? "Keep clear" : "Layout boundary").Append(": ").Append(region.Label)
@@ -387,18 +375,7 @@ public sealed class ImagePromptComposer(
 
     private static string DeriveSize(double aspect)
     {
-        if (Approximately(aspect, 1d)) return "1024x1024";
-        if (Approximately(aspect, 2d / 3d)) return "1024x1536";
-        if (Approximately(aspect, 3d / 2d)) return "1536x1024";
-
-        var height = Math.Sqrt(TargetAreaPixels / aspect);
-        var width = height * aspect;
-        var roundedWidth = Math.Clamp(RoundToMultiple(width), SizeMultiple, MaxImageEdge);
-        var roundedHeight = Math.Clamp(RoundToMultiple(height), SizeMultiple, MaxImageEdge);
-        var pixels = roundedWidth * roundedHeight;
-        if (pixels < MinImagePixels || pixels > MaxImagePixels)
-            throw new ArgumentException("Could not derive a valid gpt-image-2 raster size for the requested aspect ratio.");
-        return $"{roundedWidth}x{roundedHeight}";
+        return LayoutImageSizeResolver.ResolveAspect(aspect).Size;
     }
 
     private static (int Width, int Height) ParseAndValidateSize(string size)
@@ -410,16 +387,7 @@ public sealed class ImagePromptComposer(
         {
             throw new ArgumentException("Image size must be WIDTHxHEIGHT.", nameof(size));
         }
-        if (width % SizeMultiple != 0 || height % SizeMultiple != 0)
-            throw new ArgumentException($"Image width and height must be divisible by {SizeMultiple}.", nameof(size));
-        if (width > MaxImageEdge || height > MaxImageEdge)
-            throw new ArgumentException($"Image edges cannot exceed {MaxImageEdge} pixels.", nameof(size));
-        var pixels = (long)width * height;
-        if (pixels is < MinImagePixels or > MaxImagePixels)
-            throw new ArgumentException($"Image size must contain {MinImagePixels:N0}-{MaxImagePixels:N0} pixels.", nameof(size));
-        var aspect = (double)width / height;
-        if (aspect is < (1d / MaxImageAspectRatio) or > MaxImageAspectRatio)
-            throw new ArgumentException("Image aspect ratio must be between 1:3 and 3:1.", nameof(size));
+        LayoutImageSizeResolver.Validate(width, height);
         return (width, height);
     }
 
@@ -444,7 +412,7 @@ public sealed class ImagePromptComposer(
 
     private static double ValidateAspect(double aspect)
     {
-        if (aspect is < (1d / MaxImageAspectRatio) or > MaxImageAspectRatio)
+        if (aspect is < (1d / LayoutImageSizeResolver.MaximumAspectRatio) or > LayoutImageSizeResolver.MaximumAspectRatio)
             throw new ArgumentException("Image aspect ratio must be between 1:3 and 3:1.");
         return aspect;
     }
@@ -527,9 +495,6 @@ public sealed class ImagePromptComposer(
 
     private static bool Approximately(double left, double right) =>
         Math.Abs(left - right) / Math.Max(Math.Abs(right), double.Epsilon) <= AspectTolerance;
-
-    private static int RoundToMultiple(double value) =>
-        Math.Max(SizeMultiple, (int)Math.Round(value / SizeMultiple) * SizeMultiple);
 
     private static string AspectLabel(int width, int height)
     {

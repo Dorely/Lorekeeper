@@ -17,6 +17,7 @@ public sealed class PublishAssistantContext(
     CancellationToken turnCancellationToken = default)
 {
     private readonly List<EntityVisualContextReference> _visuals = [];
+    private readonly List<PublishAssistantTransientVisual> _transientVisuals = [];
     private readonly HashSet<Guid> _imageJobIds = [];
 
     public Guid ProjectId { get; } = projectId;
@@ -25,13 +26,27 @@ public sealed class PublishAssistantContext(
     public IReadOnlyList<Guid> ImageJobIds => _imageJobIds.ToList();
     public void TrackImageJob(Guid jobId) => _imageJobIds.Add(jobId);
     public void AddVisual(EntityVisualContextReference visual) => _visuals.Add(visual);
+    public void AddTransientVisual(PublishAssistantTransientVisual visual) => _transientVisuals.Add(visual);
     public IReadOnlyList<EntityVisualContextReference> DrainVisuals()
     {
         var result = _visuals.ToList();
         _visuals.Clear();
         return result;
     }
+    public IReadOnlyList<PublishAssistantTransientVisual> DrainTransientVisuals()
+    {
+        var result = _transientVisuals.ToList();
+        _transientVisuals.Clear();
+        return result;
+    }
 }
+
+public sealed record PublishAssistantTransientVisual(
+    Guid Id,
+    string FileName,
+    string ContentType,
+    byte[] Data,
+    string Caption);
 
 public interface IPublishAssistantTools
 {
@@ -50,6 +65,7 @@ public sealed class PublishAssistantTools(
     IManuscriptStyleService manuscriptStyles,
     IProjectPageSetupService pageSetups,
     IProjectImageService projectImages,
+    ICompositionCanvasPreviewService? canvasPreviews = null,
     ICompositionService? compositions = null,
     AppDbContext? db = null,
     IAgentProjectImageWorkflow? imageWorkflow = null,
@@ -343,6 +359,10 @@ public sealed class PublishAssistantTools(
                 name: "read_publication_cover_design",
                 description: "Read the Core front cover when releaseId is omitted, or one release cover when supplied. Returns compact copy, inheritance state, geometry, diagnostics, layers, and one bounded page of scene objects."),
             AIFunctionFactory.Create(
+                method: (Guid? releaseId = null, string mode = "annotated") => PreviewCoverCanvasAsync(context, releaseId, mode),
+                name: "preview_publication_cover_canvas",
+                description: "Render the complete Core or release cover authoring canvas directly as a transient image. Omit releaseId for Core. Use annotated while designing and clean for final visual verification. The preview is model-visible when vision is available and never creates a project-image asset."),
+            AIFunctionFactory.Create(
                 method: (Guid? releaseId = null) => ValidateCoverAsync(context, releaseId),
                 name: "validate_publication_cover_composition",
                 description: "Validate the Core front cover or a supplied release cover for geometry, accessibility, reading order, images, and product-specific regions. Returns compact prioritized diagnostics."),
@@ -425,7 +445,7 @@ public sealed class PublishAssistantTools(
             "patch_publication_release_content", "reorder_publication_release_content", "read_publication_release_matter", "upsert_publication_release_matter", "delete_publication_release_matter",
             "upsert_publication_release_style_override", "delete_publication_release_style_override", "add_publication_release_placement",
             "update_publication_release_placement", "reorder_publication_release_placements", "delete_publication_release_placement",
-            "read_publication_cover_design", "validate_publication_cover_composition", "update_publication_cover_design",
+            "read_publication_cover_design", "preview_publication_cover_canvas", "validate_publication_cover_composition", "update_publication_cover_design",
             "patch_publication_core_cover_element", "place_project_image_on_core_cover", "add_project_image_to_core_cover", "customize_publication_release_cover", "use_core_publication_cover",
             "stage_publication_core_cover_composition", "apply_publication_core_cover_composition_stage",
             "patch_publication_cover_element", "place_project_image_on_release_cover", "add_project_image_to_release_cover", "stage_publication_cover_composition", "apply_publication_cover_composition_stage",
@@ -937,12 +957,16 @@ public sealed class PublishAssistantTools(
             ok = result.Succeeded,
             jobId = result.JobId,
             status = result.Status,
-            requestedCanvas = result.RequestedCanvas,
+            targetAspect = result.TargetAspect,
+            requestedRaster = result.RequestedRaster,
             outputImageIds = result.Images.Select(image => image.Id),
-            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.Image.PreviewUrl }),
+            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.GeometryMatched, effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null, output.Image.PreviewUrl }),
             attached = false,
-            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = 0 },
+            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.LayoutBound ? result.Outputs.Count(output => !output.GeometryMatched) : 0 },
             diagnostics = result.Diagnostics.Take(3),
+            geometryWarnings = result.LayoutBound
+                ? result.Outputs.Where(output => !output.GeometryMatched).Select(output => new { code = "LAYOUT_IMAGE_GEOMETRY_MISMATCH", message = $"Provider returned {output.ActualRaster} instead of requested {result.RequestedRaster}. Inspect before placement or regeneration." })
+                : [],
             summary = result.Summary,
             nextAction = result.Succeeded
                 ? "Inspect the returned project image, then place its ID with a separate cover or publication tool before completing the request."
@@ -1309,7 +1333,9 @@ public sealed class PublishAssistantTools(
                     descriptor.AspectRatio,
                     descriptor.RecommendedWidthPixels,
                     descriptor.RecommendedHeightPixels,
-                    descriptor.ProviderCanvas,
+                    descriptor.RequestedWidthPixels,
+                    descriptor.RequestedHeightPixels,
+                    descriptor.RequestedRaster,
                     descriptor.EffectiveDpiExpectation,
                     descriptor.Regions,
                     descriptor.Diagnostics,
@@ -1584,6 +1610,90 @@ public sealed class PublishAssistantTools(
             objects,
             continuation = new { objects = new { start, returned = objects.Count, total = scene.Objects.Count, hasMore = start + objects.Count < scene.Objects.Count, nextObjectStart = start + objects.Count < scene.Objects.Count ? start + objects.Count : (int?)null }, structure = new { start = structureStart, count = structureCount, layerTotal = scene.Layers.Count, styleTotal = scene.Styles.Count, guideTotal = scene.Guides.Count } },
         });
+    }
+
+    private async Task<string> PreviewCoverCanvasAsync(
+        PublishAssistantContext context,
+        Guid? releaseId,
+        string mode)
+    {
+        if (canvasPreviews is null)
+            return Serialize(new { ok = false, code = "CANVAS_PREVIEW_UNAVAILABLE", summary = "Cover canvas preview is unavailable." });
+        var previewMode = (mode ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "annotated" => CompositionCanvasPreviewMode.Annotated,
+            "clean" => CompositionCanvasPreviewMode.Clean,
+            _ => (CompositionCanvasPreviewMode?)null,
+        };
+        if (previewMode is null)
+            return Serialize(new { ok = false, code = "CANVAS_PREVIEW_MODE_INVALID", summary = "mode must be annotated or clean." });
+
+        try
+        {
+            var cover = releaseId is Guid editionId
+                ? await covers.GetAsync(context.ProjectId, editionId, context.TurnCancellationToken)
+                : await books.GetCoverAsync(context.ProjectId, context.TurnCancellationToken);
+            var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
+                ?? throw new InvalidDataException("The cover composition is empty.");
+            var targetId = releaseId ?? context.ProjectId;
+            var preview = await canvasPreviews.RenderSceneAsync(
+                context.ProjectId,
+                targetId,
+                cover.Revision,
+                scene,
+                previewMode.Value,
+                context.TurnCancellationToken);
+            var visualId = Guid.NewGuid();
+            var fileName = $"cover-{targetId:N}-{previewMode.Value.ToString().ToLowerInvariant()}.png";
+            context.AddTransientVisual(new(
+                visualId,
+                fileName,
+                "image/png",
+                preview.Data,
+                previewMode == CompositionCanvasPreviewMode.Annotated
+                    ? "Annotated direct cover-canvas preview."
+                    : "Clean direct cover-canvas preview."));
+            var diagnostics = preview.Diagnostics.Take(10).ToList();
+            return Serialize(new
+            {
+                ok = true,
+                target = releaseId is null ? "core" : "release",
+                targetId,
+                currentRevision = cover.Revision,
+                mode = preview.Mode.ToString().ToLowerInvariant(),
+                visualId,
+                surface = new
+                {
+                    widthPoints = preview.SurfaceWidthPoints,
+                    heightPoints = preview.SurfaceHeightPoints,
+                    widthInches = Math.Round(preview.SurfaceWidthPoints / 72, 4),
+                    heightInches = Math.Round(preview.SurfaceHeightPoints / 72, 4),
+                    widthPixels = preview.PixelWidth,
+                    heightPixels = preview.PixelHeight,
+                },
+                objects = new { visible = preview.VisibleObjectCount, hidden = preview.HiddenObjectCount },
+                diagnosticCounts = new
+                {
+                    total = preview.Diagnostics.Count,
+                    errors = preview.Diagnostics.Count(item => item.Severity == "error"),
+                    warnings = preview.Diagnostics.Count(item => item.Severity == "warning"),
+                },
+                diagnostics,
+                hasMoreDiagnostics = preview.Diagnostics.Count > diagnostics.Count,
+                delivery = "The complete cover canvas is attached as transient visual context when the active provider supports vision.",
+            });
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return Serialize(new
+            {
+                ok = false,
+                code = "COVER_CANVAS_PREVIEW_FAILED",
+                targetId = releaseId ?? context.ProjectId,
+                summary = exception.Message,
+                recovery = "Reread the current cover, correct missing image or font data, and retry.",
+            });
+        }
     }
 
     private async Task<string> PatchCoreCoverElementAsync(

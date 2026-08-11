@@ -81,6 +81,7 @@
 | `DatabaseMigrationRecoveryTests.cs` | Shared migration-recovery pruning fixture proving protected failed/running backup references survive automatic retention. |
 | `OpenAIChatToolMetadataClientTests.cs` | OpenAI-compatible streaming fixture proving Gemini tool-call extension metadata survives the assistant/tool-result round trip. |
 | `CodexAuthServiceTests.cs` | OAuth refresh fixtures for reconnect rejection, cross-scope serialization/cache replacement, rotation preservation, and fail-loud server errors. |
+| `LayoutImageWorkflowTests.cs` | Exact-aspect moderate-raster fixtures plus direct single-surface composition preview coverage proving annotated/clean views do not create project images. |
 
 ## tools/semantic-editor/
 
@@ -492,7 +493,7 @@
 
 | File | Description |
 |------|-------------|
-| `IContextBuilder.cs` / `ContextBuilder.cs` | Turn-aware one-system-message assembly with protected authorial direction, complete active-manuscript/style editing context, canonical visual references, full previous chapter, bounded retrieval, exclusion honoring, token estimates, and provenance snapshots. |
+| `IContextBuilder.cs` / `ContextBuilder.cs` | Turn-aware one-system-message assembly with protected authorial direction, complete active-manuscript/style state, project page setup and active Designed Page geometry, canonical visuals, bounded retrieval, exclusions, token estimates, and provenance snapshots. |
 | `AgentPayloadPaginator.cs` | Shared soft-target model payload paginator with an opt-in compact-object page shape; repeats identity fields, packs logical JSON records, and segments only individually oversized text fields with explicit continuation metadata. |
 | `ContextPayloadJson.cs` | Shared compact JSON serializer settings for model-facing automatic context projections. |
 | `ContextManuscriptFormatter.cs` | Compact complete active-manuscript and Book Text Style context projections with revisions, stable block IDs, inline marks, roles, and sparse formatting metadata. |
@@ -564,12 +565,12 @@
 | File | Description |
 |------|-------------|
 | `ProjectImageModels.cs` | Image, normalized crop, and entity-target requests/views plus persisted jobs, output state, masks, provider progress, and runtime snapshots. |
-| `ImagePromptComposer.cs` | Shared structured generation/edit brief compiler with canonical-character reference schema guidance, stable provider-order labels, optional layout guidance/reserved regions, rendered-text policy, and safe provider-size defaults. |
+| `ImagePromptComposer.cs` | Shared structured generation/edit brief compiler with canonical-character reference schema guidance, stable provider-order labels, exact-aspect moderate layout rasters, reserved regions, rendered-text policy, and safe free-generation defaults. |
 | `IProjectImageService.cs` / `ProjectImageService.cs` | Shared project image-library facade over stored image assets: metadata-only listing with endpoint URLs, byte reads, upload, deterministic local crop/reuse, legacy blocking generation, metadata, delete, thumbnail, and reference scrubbing. |
-| `IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Image job persistence for structured prompt audits, free-standing/layout-target classification, bounded uncropped provider-raster output saving, revised prompts/output IDs, lifecycle/state/errors, and PNG/shape-mask validation. |
+| `IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Image job persistence for structured prompt audits, free-standing/layout-target classification, bounded uncropped provider-raster saving with non-blocking geometry warnings, revised prompts/output IDs, lifecycle/state/errors, and PNG/shape-mask validation. |
 | `IProjectImageGenerationRuntime.cs` / `ProjectImageGenerationRuntime.cs` | Singleton FIFO image queue with one active job per project, per-job cancellation propagated to providers/retries, partial previews, completion waiters, and state notifications. |
 | `ProjectImageGenerationStartupWorker.cs` | Hosted startup worker that marks interrupted running image jobs failed and resumes queued project work. |
-| `AgentProjectImageWorkflow.cs` | Canonical assistant generation/edit boundary: creates unattached project images, registers durable job IDs, waits/cancels to readable terminal states, and supports compact read/wait/cancel reconnection without prompt replay. |
+| `AgentProjectImageWorkflow.cs` | Canonical assistant generation/edit boundary: creates unattached project images, waits/cancels to readable terminal states, reports requested/actual geometry and effective DPI, returns mismatches visually as warnings, and reconnects without prompt replay. |
 | `IProjectImageProvider.cs` / `CodexProjectImageProvider.cs` | Responses image provider for Codex/OpenAI account generation and masked edits with streamed partials, explicit generate/edit actions, continuity-reference generation semantics, and source-canvas edit semantics. |
 | `ProjectImageGenerationOptions.cs` | Configurable image model defaults, count/reference and provider-output limits, retry/timeout settings, partial image count, and agent wait timeout. |
 | `DataUrl.cs` | Shared data URL parse/format helper for mask and provider payloads. |
@@ -592,9 +593,11 @@
 | File | Description |
 |------|-------------|
 | `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service with setup-normalized active authoring geometry, atomic image/fit placement, scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
+| `LayoutImageSizeResolver.cs` | Deterministic GPT Image 2 flexible-size resolver targeting about 1.57 MP while preferring exact target aspect and enforcing provider bounds. |
 | `CompositionImageLayout.cs` | Shared proportional image-layout rules for canvas filling, frame coverage inspection, and consistent Pages/Cover/assistant behavior. |
 | `ProjectPageSetupService.cs` | Revision-aware project authoring page setup used by Read preview, Core Book, Designed Pages, Figures, and generation targets; geometry changes transactionally reflow the reusable Core cover and active Designed Page layouts. |
 | `ChapterPreviewService.cs` | Cached, cancellable Press layout adapter that accepts staged manuscript/style sources, exposes chapter/block page maps, and rasterizes bounded PNG page-inspection images from compact Press paint and text-run traces. |
+| `CompositionCanvasPreviewService.cs` | Shared cached direct scene rasterizer for complete Designed Page and cover surfaces, with clean and annotated transient visual modes and no image-library persistence. |
 | `CompositionAgentPayloads.cs` | Lossless bounded assistant reads and compact revision-safe patch envelopes for semantic fragments, scene objects, layers, and styles. |
 | `CompositionSceneResolver.cs` | Shared deterministic group flattener and PDF/X overlap validator used by export and geometry-target consumers so group transforms, opacity, visibility, locks, and z-order have runtime meaning. |
 | `CoverCompositionFactory.cs` | Seeds and reflows shared structured cover scenes across front-only digital and page-count-derived print-wrap geometry while keeping artwork beneath canonical cover copy. |
@@ -622,8 +625,8 @@
 | `PublicationMigrationLock.cs` | Database-scoped process and crash-releasing file lease shared by edition recovery and Press schema advancement so the v14 rebuild/history window has one migration owner. |
 | `PublicationPressMigrationService.cs` | Guarded v15 Press cutover/reconciliation owner with protected backup, atomic marker, integrity and byte/hash invariants, journal evidence, and recovery-shell fallback. |
 | `PublicationActorContext.cs` | Scoped UI/assistant actor attribution carried into immutable publication-edition audit entries. |
-| `PublishAssistantTools.cs` | Compact Core/release read/patch, bounded project search/image inspection, user-authored matter contracts with non-throwing recovery, sparse placement/cover operations with safe reading-order normalization, terminal unattached image generation, focused placement, readiness, one-action preparation/cancellation, and artifact tools; raw profiles and proof approval are absent. |
-| `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration with full outline context, temporary generated-image vision, shared active-turn streaming/reconnection, proactive prompt policy, tool activity, and Core/release-targeted workspace and preparation mutation notices. |
+| `PublishAssistantTools.cs` | Compact Core/release read/patch, bounded project search/image inspection, user-authored matter contracts, sparse placement/cover operations, terminal unattached image generation, direct transient cover-canvas previews, readiness, preparation/cancellation, and artifact tools; raw profiles and proof approval are absent. |
+| `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration with full outline context, temporary generated-image and direct cover-canvas vision, active-turn streaming/reconnection, proactive prompt policy, tool activity, and Core/release-targeted mutation notices. |
 | `PublicationPressRuntime.cs` | Fail-closed exact-manifest resolver for the packaged native renderer, dynamic capabilities, integrity evidence, and empty controlled child environment with no machine-tool fallback. |
 | `PublicationRenderService.cs` | Persisted/recoverable queue, metadata-only artifact listings, purpose-bound protocol-v5 declared image/font staging from effective manuscript/page/cover scenes, display-ready title handoff, native lifecycle, hash-verified paperback/Book PDF artifacts, semantic page maps, renderer-version staleness, and comparison. |
 | `PublicationCoverService.cs` | Revisioned format-aware structured cover aggregate with copy-safe artwork stacking, canonical bindings, draft-tolerant structural persistence, save-time print-wrap/digital-front geometry reflow, publication-readiness diagnostics, and acknowledgement invalidation. |
@@ -648,7 +651,7 @@
 | `IEditorChatService.cs` | Project-wide editor chat contract plus per-turn context for compact tools, opaque one-use manuscript previews, composition stages, persisted/model-visible visuals, and generation jobs. |
 | `EditorChatService.cs` | Editor adapter using current semantic Figure/Designed Page prompt guidance, persisted turn context, shape-safe post-tool mutation projection, complete composition mutation identities, Review edits, contests, cancellation-safe worker progress, and image-job progress. |
 | `EditorChatOptions.cs` | Configuration for editor-chat-specific paginated chapter reads and prose-only revision worker concurrency/iteration limits. |
-| `EditorChatTools.cs` | Editor tools for grounded reads, shared outline/entity mutations, Press-backed visual page previews, compact font/style reads and application, one-payload manuscript preview/apply, review-aware focused Figures and Designed Page insertion, compact/staged composition, target-bound generation, canonical visuals/crops, Book Brief updates, revision agents, and Contest preparation. |
+| `EditorChatTools.cs` | Editor tools for grounded reads, shared outline/entity mutations, Press page preview plus direct complete-canvas inspection, compact font/style application, manuscript preview/apply, focused Figures/Designed Pages, composition, exact-target generation, canonical visuals/crops, Book Brief updates, revision agents, and Contest preparation. |
 | `EditorManuscriptPreviewService.cs` | Turn-local manuscript preview/apply protocol: validates once, returns compact opaque IDs, rejects stale/reused previews, and persists or review-stages the exact projected document. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
 | `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates with visuals, image-generation progress, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |

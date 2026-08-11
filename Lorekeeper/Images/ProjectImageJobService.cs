@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Lorekeeper.Models;
+using Lorekeeper.Composition;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -304,6 +305,12 @@ public sealed class ProjectImageJobService(
             image.ContentType,
             $"provider-output.{image.OutputFormat}",
             ResolveProviderOutputLimit());
+        var layoutBound = HasLayoutTargetGeometry(job.TargetGeometryJson);
+        var hasRequestedRaster = LayoutImageSizeResolver.TryParse(job.Size, out var requestedRaster);
+        if (layoutBound && !hasRequestedRaster)
+            throw new InvalidDataException("Layout-bound image jobs require an explicit requested raster.");
+        var geometryMatched = !layoutBound
+            || storedImage.Width == requestedRaster.Width && storedImage.Height == requestedRaster.Height;
         var now = DateTime.UtcNow;
         var asset = new PublishAsset
         {
@@ -337,6 +344,14 @@ public sealed class ProjectImageJobService(
                     storedImage.Width,
                     storedImage.Height,
                     LayoutTransform = "none",
+                },
+                GeometryValidation = new
+                {
+                    LayoutBound = layoutBound,
+                    RequestedRaster = hasRequestedRaster ? requestedRaster.Size : job.Size,
+                    ActualRaster = $"{storedImage.Width}x{storedImage.Height}",
+                    GeometryMatched = geometryMatched,
+                    WarningCode = layoutBound && !geometryMatched ? "LAYOUT_IMAGE_GEOMETRY_MISMATCH" : null,
                 },
                 SourceImage = source is null ? null : new { source.Id, source.FileName, source.ContentType },
                 Mask = mask is null ? null : new { mask.Id, mask.Label, mask.ContentType, mask.Width, mask.Height },

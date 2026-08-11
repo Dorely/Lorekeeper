@@ -207,7 +207,9 @@ public sealed record LayoutGenerationTargetDescriptor(
     string AspectRatio,
     int RecommendedWidthPixels,
     int RecommendedHeightPixels,
-    string ProviderCanvas,
+    int RequestedWidthPixels,
+    int RequestedHeightPixels,
+    string RequestedRaster,
     double EffectiveDpiExpectation,
     IReadOnlyList<LayoutGenerationRegionDescriptor> Regions,
     IReadOnlyList<string> Diagnostics);

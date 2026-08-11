@@ -1,4 +1,5 @@
 using Lorekeeper.Models;
+using Lorekeeper.Composition;
 using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Images;
@@ -52,7 +53,9 @@ public sealed record AgentProjectImageResult(
     string Status,
     bool IsTerminal,
     bool Succeeded,
-    string RequestedCanvas,
+    string RequestedRaster,
+    string TargetAspect,
+    bool LayoutBound,
     IReadOnlyList<AgentProjectImageOutput> Outputs,
     IReadOnlyList<ProjectImageOutputErrorView> Diagnostics,
     string Summary)
@@ -60,7 +63,13 @@ public sealed record AgentProjectImageResult(
     public IReadOnlyList<ProjectImageView> Images => Outputs.Select(output => output.Image).ToList();
 }
 
-public sealed record AgentProjectImageOutput(ProjectImageView Image, int Width, int Height);
+public sealed record AgentProjectImageOutput(
+    ProjectImageView Image,
+    int Width,
+    int Height,
+    string ActualRaster,
+    bool GeometryMatched,
+    double? EffectiveDpi);
 
 public sealed class AgentProjectImageWorkflow(
     IImagePromptComposer prompts,
@@ -211,6 +220,10 @@ public sealed class AgentProjectImageWorkflow(
         bool timedOut,
         CancellationToken cancellationToken)
     {
+        var geometry = ReadGeometry(job);
+        var hasRequestedRaster = LayoutImageSizeResolver.TryParse(job.Size, out var requested);
+        if (geometry is not null && !hasRequestedRaster)
+            throw new InvalidDataException("Layout-bound image jobs require an explicit requested raster.");
         var outputImages = new List<AgentProjectImageOutput>();
         foreach (var imageId in job.OutputImageIds)
         {
@@ -219,7 +232,18 @@ public sealed class AgentProjectImageWorkflow(
                 var data = await images.GetDataAsync(projectId, imageId, cancellationToken: cancellationToken)
                     ?? throw new InvalidOperationException($"Completed project image {imageId:N} has no readable data.");
                 var normalized = ProjectImageBinary.Normalize(data.Data, data.ContentType, data.FileName, int.MaxValue);
-                outputImages.Add(new AgentProjectImageOutput(image, normalized.Width, normalized.Height));
+                var matched = geometry is null
+                    || hasRequestedRaster && normalized.Width == requested.Width && normalized.Height == requested.Height;
+                double? effectiveDpi = geometry is { WidthInches: > 0, HeightInches: > 0 }
+                    ? Math.Min(normalized.Width / geometry.WidthInches, normalized.Height / geometry.HeightInches)
+                    : null;
+                outputImages.Add(new AgentProjectImageOutput(
+                    image,
+                    normalized.Width,
+                    normalized.Height,
+                    $"{normalized.Width}x{normalized.Height}",
+                    matched,
+                    effectiveDpi));
             }
         }
 
@@ -241,6 +265,13 @@ public sealed class AgentProjectImageWorkflow(
             IsTerminal(job.Status) || timedOut,
             succeeded,
             job.Size,
+            geometry?.AspectRatio
+                ?? (hasRequestedRaster
+                    ? AspectLabel(requested.Width, requested.Height)
+                    : outputImages.FirstOrDefault() is { } output
+                        ? AspectLabel(output.Width, output.Height)
+                        : "unknown"),
+            geometry is not null,
             outputImages,
             job.OutputErrors,
             summary);
@@ -260,4 +291,49 @@ public sealed class AgentProjectImageWorkflow(
 
     private static string CleanOr(string? value, string fallback) =>
         string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+
+    private static LayoutGeometry? ReadGeometry(ProjectImageJobView job)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(job.TargetGeometryJson);
+            var root = document.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !root.TryGetProperty("targetKind", out var targetKind)
+                || targetKind.ValueKind != System.Text.Json.JsonValueKind.String
+                || string.IsNullOrWhiteSpace(targetKind.GetString())
+                || !root.TryGetProperty("widthInches", out var width)
+                || !width.TryGetDouble(out var widthInches)
+                || !root.TryGetProperty("heightInches", out var height)
+                || !height.TryGetDouble(out var heightInches))
+            {
+                return null;
+            }
+
+            var aspect = root.TryGetProperty("aspectRatio", out var aspectValue)
+                && aspectValue.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? aspectValue.GetString() ?? string.Empty
+                    : string.Empty;
+            return new LayoutGeometry(widthInches, heightInches, aspect);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string AspectLabel(int width, int height)
+    {
+        var divisor = GreatestCommonDivisor(width, height);
+        return $"{width / divisor}:{height / divisor}";
+    }
+
+    private static int GreatestCommonDivisor(int left, int right)
+    {
+        while (right != 0)
+            (left, right) = (right, left % right);
+        return Math.Abs(left);
+    }
+
+    private sealed record LayoutGeometry(double WidthInches, double HeightInches, string AspectRatio);
 }
