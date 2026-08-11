@@ -173,10 +173,12 @@ is keyed only by project. The Editor chapter picker flushes the outgoing manuscr
 loads the selected chapter inside the mounted `EditorContent`, synchronizes the page
 parameter through a non-rendering delegate, and pushes the canonical chapter URL
 through its browser module without starting routed/enhanced navigation or scheduling
-a parent render. The chat subtree and JavaScript-sized Editor grid therefore stay
-mounted without transcript hydration or default-width flashes for an ordinary
-chapter switch. Direct chapter URLs remain routable entry points. The next Editor
-turn always receives the selected chapter and rebuilds authoritative context in
+a parent render. Chapter choices are buttons rather than route-capable anchors, so
+the app-level enhanced-navigation handler cannot race the in-place transition. The
+chat subtree and JavaScript-sized Editor grid therefore stay mounted without
+transcript hydration or default-width flashes for an ordinary chapter switch.
+Direct chapter URLs remain routable entry points. The next Editor turn always
+receives the selected chapter and rebuilds authoritative context in
 `EditorChatService`; explicit context, review, or edition-target changes may still
 refresh the panel's advisory token state.
 

@@ -139,10 +139,9 @@ else
                                 <div class="chapter-menu-group-label">@grp.label</div>
                                 @foreach (var c in grp.chapters)
                                 {
-                                    <a class="chapter-menu-item @(c.Id == _current.Id ? "active" : "")"
-                                       href="@EditorHref(c.Id)"
-                                       @onclick="() => SelectChapterAsync(c.Id)"
-                                       @onclick:preventDefault="true">@c.Title</a>
+                                    <button type="button"
+                                            class="chapter-menu-item @(c.Id == _current.Id ? "active" : "")"
+                                            @onclick="() => SelectChapterAsync(c.Id)">@c.Title</button>
                                 }
                             }
                         </div>
