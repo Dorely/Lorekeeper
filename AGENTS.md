@@ -85,6 +85,20 @@
   and resolve ownership before implementation. Never use a destructive reset or
   checkout to simplify the task.
 
+## Application-Owned Dialogs
+
+- Product confirmations, alerts, prompts, pickers, and modal workflows must be
+  rendered by Lorekeeper's Razor/HTML/CSS components. Never invoke browser
+  `alert`, `confirm`, or `prompt`, Electron dialog APIs, operating-system message
+  boxes, or another native product dialog as application UI.
+- Use the shared application confirmation component for destructive decisions
+  and keep validation and operation failures inside the owning Lorekeeper
+  surface. Do not let browser or Electron chrome replace application context.
+- Browser-mediated local-file selection is permitted only at explicit
+  import/upload boundaries where the web security model requires it. Opening an
+  external browser is permitted only for an intentional, documented handoff such
+  as OAuth, vendor documentation, or application updates.
+
 ## Code Style
 
 - Follow `.editorconfig` as the code-style and naming authority.

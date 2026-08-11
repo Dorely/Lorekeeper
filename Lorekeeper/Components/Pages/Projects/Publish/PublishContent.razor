@@ -135,6 +135,15 @@ else
                          OnClose="CloseBookTextStylesModal" />
 }
 
+<ConfirmationDialog IsOpen="_disableEditionContentConfirmationOpen"
+                    Title="Disable edition-specific content?"
+                    Message="This permanently discards every edition chapter copy, edition-only Designed Page, and pending edition review. Saved Book Text Styles and project images are kept."
+                    ConfirmLabel="Disable and discard"
+                    Destructive="true"
+                    Busy="_editionContentBusy"
+                    OnConfirm="ConfirmDisableEditionContentAsync"
+                    OnCancel="CancelDisableEditionContent" />
+
 @code {
     [CascadingParameter] public Project? Project { get; set; }
 
@@ -187,6 +196,8 @@ else
     private bool _releaseDesignOpen;
     private IReadOnlyList<EditionChapterDifference> _editionDifferences = [];
     private bool _editionContentBusy;
+    private bool _disableEditionContentConfirmationOpen;
+    private Guid? _pendingDisableEditionContentId;
     private Guid? _editingCoreMatterId;
     private string _coreMatterTitle = string.Empty;
     private string _coreMatterJson = string.Empty;
@@ -919,13 +930,40 @@ else
         if (Project is null || _workspace is null || _selectedReleaseId is not Guid editionId)
             return;
         var enabled = args.Value is bool value && value;
-        var confirmDiscard = false;
         if (!enabled && _editionDifferences.Count > 0)
         {
-            confirmDiscard = await JS.InvokeAsync<bool>("confirm", "Disable edition-specific content? This permanently discards every edition chapter copy, edition-only Designed Page, and pending edition review. Saved Book Text Styles and project images are kept.");
-            if (!confirmDiscard)
-                return;
+            _pendingDisableEditionContentId = editionId;
+            _disableEditionContentConfirmationOpen = true;
+            return;
         }
+
+        await SetEditionContentEnabledAsync(editionId, enabled, confirmDiscard: false);
+    }
+
+    private async Task ConfirmDisableEditionContentAsync()
+    {
+        if (_pendingDisableEditionContentId is not Guid editionId
+            || _selectedReleaseId != editionId)
+        {
+            CancelDisableEditionContent();
+            return;
+        }
+
+        await SetEditionContentEnabledAsync(editionId, enabled: false, confirmDiscard: true);
+        _disableEditionContentConfirmationOpen = false;
+        _pendingDisableEditionContentId = null;
+    }
+
+    private void CancelDisableEditionContent()
+    {
+        _disableEditionContentConfirmationOpen = false;
+        _pendingDisableEditionContentId = null;
+    }
+
+    private async Task SetEditionContentEnabledAsync(Guid editionId, bool enabled, bool confirmDiscard)
+    {
+        if (Project is null || _workspace is null || _selectedReleaseId != editionId)
+            return;
         _editionContentBusy = true;
         _error = null;
         try

@@ -128,6 +128,7 @@
 | `App.razor` | Root component: `<html>` shell, responsive browser/app icon metadata, head outlet, and scripts. |
 | `Routes.razor` | `<Router>` wiring `MainLayout` and `NotFound`. |
 | `_Imports.razor` | Shared `@using` directives for all components. |
+| `ConfirmationDialog.razor` (+ `.razor.css`) | Shared application-owned confirmation dialog for destructive and consequential choices; replaces browser, Electron, and operating-system product prompts. |
 | `EntityKnowledgeView.razor` (+ `.razor.css`) | Shared read-only entity knowledge renderer for structured wiki data and source-backed canon markdown used by graph, outline, and context entity detail surfaces. |
 | `EntityVisualExamples.razor` (+ `.razor.css`) | Reusable ordered entity visual gallery/editor with library attach, upload, non-destructive cropping, labels, ordering, shared full-size viewing, and detach. |
 | `ImageCropModal.razor` (+ `.razor.css`, `.razor.js`) | Shared freeform rectangular crop modal with zoom/pan, canvas selection and preview, crop-specific metadata, and optional entity targets. |

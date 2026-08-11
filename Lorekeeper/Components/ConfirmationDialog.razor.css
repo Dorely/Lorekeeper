@@ -1,0 +1,55 @@
+.lk-confirmation-backdrop {
+    position: fixed;
+    z-index: 1500;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgb(15 23 42 / 58%);
+    backdrop-filter: blur(2px);
+}
+
+.lk-confirmation-dialog {
+    width: min(31rem, 100%);
+    overflow: hidden;
+    border: 1px solid var(--lk-line, var(--bs-border-color, #dee2e6));
+    border-radius: var(--lk-radius-lg, .75rem);
+    background: var(--lk-surface, var(--bs-body-bg, #fff));
+    box-shadow: var(--lk-shadow-md, 0 1.25rem 3rem rgb(0 0 0 / 24%));
+}
+
+.lk-confirmation-dialog > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .8rem 1rem;
+    border-bottom: 1px solid var(--lk-line, var(--bs-border-color, #dee2e6));
+}
+
+.lk-confirmation-dialog h2 {
+    margin: 0;
+    color: var(--lk-ink, var(--bs-body-color, #212529));
+    font: 700 1.08rem/1.25 Georgia, "Times New Roman", serif;
+}
+
+.lk-confirmation-dialog p {
+    margin: 0;
+    padding: 1rem;
+    color: var(--lk-muted, var(--bs-secondary-color, #6c757d));
+    font-size: .84rem;
+    line-height: 1.5;
+}
+
+.lk-confirmation-dialog > footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: .5rem;
+    padding: .75rem 1rem;
+    border-top: 1px solid var(--lk-line, var(--bs-border-color, #dee2e6));
+    background: var(--lk-soft, #f8f9fa);
+}
+
+.lk-confirmation-dialog .spinner-border {
+    margin-right: .35rem;
+}

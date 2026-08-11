@@ -1,0 +1,58 @@
+@if (IsOpen)
+{
+    <div class="lk-confirmation-backdrop" role="presentation" @onclick="CancelAsync">
+        <section class="lk-confirmation-dialog"
+                 role="alertdialog"
+                 aria-modal="true"
+                 aria-labelledby="@_titleId"
+                 aria-describedby="@_messageId"
+                 @onclick:stopPropagation="true">
+            <header>
+                <h2 id="@_titleId">@Title</h2>
+                <button type="button"
+                        class="btn-close"
+                        aria-label="Cancel and close"
+                        disabled="@Busy"
+                        @onclick="CancelAsync"></button>
+            </header>
+            <p id="@_messageId">@Message</p>
+            <footer>
+                <button type="button"
+                        class="btn btn-sm btn-outline-secondary"
+                        disabled="@Busy"
+                        autofocus
+                        @onclick="CancelAsync">
+                    @CancelLabel
+                </button>
+                <button type="button"
+                        class="btn btn-sm @(Destructive ? "btn-danger" : "btn-primary")"
+                        disabled="@Busy"
+                        @onclick="ConfirmAsync">
+                    @if (Busy)
+                    {
+                        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                    }
+                    @ConfirmLabel
+                </button>
+            </footer>
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Message { get; set; } = string.Empty;
+    [Parameter] public string ConfirmLabel { get; set; } = "Continue";
+    [Parameter] public string CancelLabel { get; set; } = "Cancel";
+    [Parameter] public bool Destructive { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private readonly string _titleId = $"confirmation-title-{Guid.NewGuid():N}";
+    private readonly string _messageId = $"confirmation-message-{Guid.NewGuid():N}";
+
+    private Task ConfirmAsync() => Busy ? Task.CompletedTask : OnConfirm.InvokeAsync();
+    private Task CancelAsync() => Busy ? Task.CompletedTask : OnCancel.InvokeAsync();
+}

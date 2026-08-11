@@ -3,7 +3,6 @@
 @using Lorekeeper.Fonts
 @inject IManuscriptStyleService Styles
 @inject IProjectFontService Fonts
-@inject IJSRuntime JS
 
 <div class="manuscript-styles-panel">
     @if (!string.IsNullOrWhiteSpace(_error))
@@ -98,13 +97,30 @@
                 <div><strong>@style.Name</strong><span>@StyleSummary(style) · @UsageLabel(style)</span></div>
                 <div class="manuscript-style-actions">
                     <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => Edit(style)">Edit</button>
-                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(style)">Delete</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RequestDelete(style)">Delete</button>
                 </div>
             </article>
         }
         </div>
     }
 </div>
+
+<ConfirmationDialog IsOpen="@(_pendingStyleSave is not null)"
+                    Title="Update this shared Book Text Style?"
+                    Message="@SharedStyleUpdateMessage"
+                    ConfirmLabel="Update everywhere"
+                    Busy="_confirmationBusy"
+                    OnConfirm="ConfirmStyleSaveAsync"
+                    OnCancel="CancelStyleSave" />
+
+<ConfirmationDialog IsOpen="@(_pendingStyleDelete is not null)"
+                    Title="Delete this Book Text Style?"
+                    Message="@SharedStyleDeleteMessage"
+                    ConfirmLabel="Delete style"
+                    Destructive="true"
+                    Busy="_confirmationBusy"
+                    OnConfirm="ConfirmStyleDeleteAsync"
+                    OnCancel="CancelStyleDelete" />
 
 @code {
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
@@ -136,6 +152,19 @@
     private bool _startOnNewPage;
     private string? _error;
     private bool _showForm;
+    private ManuscriptStyleInput? _pendingStyleSave;
+    private ManuscriptStyleView? _pendingStyleDelete;
+    private bool _confirmationBusy;
+
+    private string SharedStyleUpdateMessage => _pendingStyleSave?.Id is Guid styleId
+        ? $"This style is used {_usageCounts.GetValueOrDefault(styleId)} time(s) across Core Book and release content. Saving changes updates every use."
+        : string.Empty;
+
+    private string SharedStyleDeleteMessage => _pendingStyleDelete is { } style
+        ? _usageCounts.GetValueOrDefault(style.Id) > 0
+            ? $"'{style.Name}' is used {_usageCounts[style.Id]} time(s) across Core Book and release content. Deleting it removes the reusable style definition."
+            : $"Delete the reusable style '{style.Name}'?"
+        : string.Empty;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -156,44 +185,19 @@
                 _error = "Save the current manuscript draft before changing book styles.";
                 return;
             }
+            var input = BuildStyleInput();
             if (_editingId is Guid editingId
-                && _usageCounts.GetValueOrDefault(editingId) > 0
-                && !await JS.InvokeAsync<bool>(
-                    "confirm",
-                    $"This shared Book Text Style is used {_usageCounts[editingId]} time(s) across Core Book and release content. Save changes everywhere it is used?"))
+                && _usageCounts.GetValueOrDefault(editingId) > 0)
             {
+                _pendingStyleSave = input;
                 return;
             }
-            await Styles.UpsertAsync(
-                ProjectId,
-                new ManuscriptStyleInput(
-                    _editingId,
-                    _name,
-                    _kind,
-                    string.IsNullOrWhiteSpace(_semanticRole) ? ManuscriptStyleService.RoleFromName(_name) : _semanticRole,
-                    new ManuscriptStyleProperties(
-                        _fontFamilyKey,
-                        _fontSizePoints,
-                        _fontWeight,
-                        _italic,
-                        _smallCaps,
-                        _lineHeight,
-                        _kind == ManuscriptStyleKind.Paragraph ? _spaceBeforePoints : null,
-                        _kind == ManuscriptStyleKind.Paragraph ? _spaceAfterPoints : null,
-                        _kind == ManuscriptStyleKind.Paragraph ? _keepWithNext : null,
-                        _kind == ManuscriptStyleKind.Paragraph ? _textAlign : null,
-                        _kind == ManuscriptStyleKind.Paragraph ? _leftIndentEm : null,
-                        _kind == ManuscriptStyleKind.Paragraph ? _rightIndentEm : null,
-                        _kind == ManuscriptStyleKind.Paragraph ? _firstLineIndentEm : null,
-                        _kind == ManuscriptStyleKind.Paragraph ? _startOnNewPage : null),
-                    _expectedRevision));
-            ResetForm();
-            await ReloadAsync();
-            await Changed.InvokeAsync();
+            await PersistStyleAsync(input);
         }
         catch (Exception exception)
         {
             _error = exception.Message;
+            _pendingStyleSave = null;
         }
     }
 
@@ -221,32 +225,96 @@
         _startOnNewPage = style.Definition.StartOnNewPage ?? false;
     }
 
-    private async Task DeleteAsync(ManuscriptStyleView style)
+    private void RequestDelete(ManuscriptStyleView style)
     {
+        _error = null;
+        _pendingStyleDelete = style;
+    }
+
+    private async Task ConfirmStyleSaveAsync()
+    {
+        if (_pendingStyleSave is not { } input)
+            return;
+        _confirmationBusy = true;
+        _error = null;
+        try
+        {
+            await PersistStyleAsync(input);
+            _pendingStyleSave = null;
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+            _pendingStyleSave = null;
+        }
+        finally
+        {
+            _confirmationBusy = false;
+        }
+    }
+
+    private void CancelStyleSave() => _pendingStyleSave = null;
+
+    private async Task ConfirmStyleDeleteAsync()
+    {
+        if (_pendingStyleDelete is not { } style)
+            return;
+        _confirmationBusy = true;
         try
         {
             _error = null;
-            if (!await JS.InvokeAsync<bool>(
-                "confirm",
-                _usageCounts.GetValueOrDefault(style.Id) > 0
-                    ? $"Book Text Style '{style.Name}' is used {_usageCounts[style.Id]} time(s) across Core Book and release content. Delete it?"
-                    : $"Delete book text style '{style.Name}'?"))
-            {
-                return;
-            }
             if (BeforeChange is not null && !await BeforeChange())
             {
                 _error = "Save the current manuscript draft before deleting a book style.";
+                _pendingStyleDelete = null;
                 return;
             }
             await Styles.DeleteAsync(ProjectId, style.Id, style.Revision);
             await ReloadAsync();
             await Changed.InvokeAsync();
+            _pendingStyleDelete = null;
         }
         catch (Exception exception)
         {
             _error = exception.Message;
+            _pendingStyleDelete = null;
         }
+        finally
+        {
+            _confirmationBusy = false;
+        }
+    }
+
+    private void CancelStyleDelete() => _pendingStyleDelete = null;
+
+    private ManuscriptStyleInput BuildStyleInput() => new(
+        _editingId,
+        _name,
+        _kind,
+        string.IsNullOrWhiteSpace(_semanticRole) ? ManuscriptStyleService.RoleFromName(_name) : _semanticRole,
+        new ManuscriptStyleProperties(
+            _fontFamilyKey,
+            _fontSizePoints,
+            _fontWeight,
+            _italic,
+            _smallCaps,
+            _lineHeight,
+            _kind == ManuscriptStyleKind.Paragraph ? _spaceBeforePoints : null,
+            _kind == ManuscriptStyleKind.Paragraph ? _spaceAfterPoints : null,
+            _kind == ManuscriptStyleKind.Paragraph ? _keepWithNext : null,
+            _kind == ManuscriptStyleKind.Paragraph ? _textAlign : null,
+            _kind == ManuscriptStyleKind.Paragraph ? _leftIndentEm : null,
+            _kind == ManuscriptStyleKind.Paragraph ? _rightIndentEm : null,
+            _kind == ManuscriptStyleKind.Paragraph ? _firstLineIndentEm : null,
+            _kind == ManuscriptStyleKind.Paragraph ? _startOnNewPage : null),
+        _expectedRevision);
+
+    private async Task PersistStyleAsync(ManuscriptStyleInput input)
+    {
+        await Styles.UpsertAsync(ProjectId, input);
+        ResetForm();
+        await ReloadAsync();
+        await Changed.InvokeAsync();
     }
 
     private async Task ReloadAsync()

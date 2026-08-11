@@ -66,6 +66,15 @@ behavior belongs in injected services so manual UI actions, assistant tools,
 background workers, and import workflows apply the same validation, persistence,
 graph synchronization, and indexing rules.
 
+All product dialogs are application-owned Razor/HTML/CSS. Destructive actions use
+the shared `ConfirmationDialog`; validation, choices, and failures remain inside
+the owning Lorekeeper surface. Runtime code must not invoke browser
+`alert`/`confirm`/`prompt`, Electron dialog APIs, or operating-system message
+boxes. The only native chooser exception is explicit local-file import/upload,
+where the browser security model owns selection. External-browser navigation is
+reserved for deliberate handoffs such as OAuth, vendor documentation, and
+application updates.
+
 The main application flow is:
 
 1. A Razor component, assistant tool, endpoint, or background processor requests

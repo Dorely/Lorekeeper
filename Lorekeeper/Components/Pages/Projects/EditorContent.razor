@@ -177,7 +177,7 @@ else
                         }
                         @if (contentStatus.IsDivergent)
                         {
-                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="ConfirmResetEditionChapterAsync">Reset chapter to Core</button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="RequestResetEditionChapter">Reset chapter to Core</button>
                         }
                     }
                 }
@@ -826,6 +826,15 @@ else
                          Changed="OnManuscriptStylesChangedAsync"
                          OnClose="CloseBookTextStylesModal" />
 
+    <ConfirmationDialog IsOpen="_resetEditionChapterConfirmationOpen"
+                        Title="Reset chapter to Core Book?"
+                        Message="This permanently discards the edition manuscript and its edition-only page layouts. Saved Book Text Styles and project images are kept."
+                        ConfirmLabel="Reset chapter"
+                        Destructive="true"
+                        Busy="_resetEditionChapterBusy"
+                        OnConfirm="ResetEditionChapterAsync"
+                        OnCancel="CancelResetEditionChapter" />
+
 }
 
 @code {
@@ -897,6 +906,8 @@ else
     private bool _imagesModalOpen;
     private bool _manuscriptImageModalOpen;
     private bool _bookTextStylesModalOpen;
+    private bool _resetEditionChapterConfirmationOpen;
+    private bool _resetEditionChapterBusy;
     private int _chapterWordCount;
     private int _chapterTokenCount;
     private bool _chapterTokenIsExact = true;
@@ -1190,26 +1201,51 @@ else
         Nav.NavigateTo(EditorHref(chapterId, editionId));
     }
 
-    private async Task ConfirmResetEditionChapterAsync()
+    private void RequestResetEditionChapter()
+    {
+        if (Project is null || _activeChapterId is null || _contentTarget.EditionId is null)
+            return;
+        _resetEditionChapterConfirmationOpen = true;
+    }
+
+    private void CancelResetEditionChapter() => _resetEditionChapterConfirmationOpen = false;
+
+    private async Task ResetEditionChapterAsync()
     {
         if (Project is null || _activeChapterId is not Guid chapterId || _contentTarget.EditionId is not Guid editionId)
             return;
-        if (!await JS.InvokeAsync<bool>("confirm", "Reset this chapter to Core Book? This permanently discards the edition manuscript and its edition-only page layouts. Saved Book Text Styles and project images are kept."))
-            return;
-        if (!await FlushAsync())
-            return;
-        await EditionContent.ResetChapterAsync(Project.Id, editionId, chapterId, confirmed: true);
-        var effective = await Manuscripts.GetManuscriptAsync(_contentTarget, chapterId)
-            ?? throw new InvalidOperationException("The Core chapter manuscript was not found after reset.");
-        SynchronizeExternalEditorDocument(effective);
-        UpdateChapterMetrics(effective.PlainText);
-        var designedPages = DesignedPageIds;
-        if (_openCompositionId is Guid openCompositionId && !designedPages.Contains(openCompositionId))
-            _openCompositionId = designedPages.Count > 0 ? designedPages[0] : null;
-        _contentStatus = await EditionContent.GetChapterStatusAsync(Project.Id, editionId, chapterId);
-        _previewRefreshSignal++;
-        _pageWorkspaceRefreshSignal++;
-        StateHasChanged();
+        _resetEditionChapterBusy = true;
+        _saveError = null;
+        try
+        {
+            if (!await FlushAsync())
+            {
+                _resetEditionChapterConfirmationOpen = false;
+                return;
+            }
+            await EditionContent.ResetChapterAsync(Project.Id, editionId, chapterId, confirmed: true);
+            var effective = await Manuscripts.GetManuscriptAsync(_contentTarget, chapterId)
+                ?? throw new InvalidOperationException("The Core chapter manuscript was not found after reset.");
+            SynchronizeExternalEditorDocument(effective);
+            UpdateChapterMetrics(effective.PlainText);
+            var designedPages = DesignedPageIds;
+            if (_openCompositionId is Guid openCompositionId && !designedPages.Contains(openCompositionId))
+                _openCompositionId = designedPages.Count > 0 ? designedPages[0] : null;
+            _contentStatus = await EditionContent.GetChapterStatusAsync(Project.Id, editionId, chapterId);
+            _previewRefreshSignal++;
+            _pageWorkspaceRefreshSignal++;
+            _resetEditionChapterConfirmationOpen = false;
+        }
+        catch (Exception exception)
+        {
+            _saveError = exception.Message;
+            _resetEditionChapterConfirmationOpen = false;
+        }
+        finally
+        {
+            _resetEditionChapterBusy = false;
+            StateHasChanged();
+        }
     }
 
     private string EditorHref(Guid chapterId) => EditorHref(chapterId, _contentTarget.EditionId);
