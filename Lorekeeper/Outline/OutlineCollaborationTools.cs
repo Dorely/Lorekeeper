@@ -909,7 +909,7 @@ public sealed class OutlineCollaborationTools(
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
 
-        var plainText = (await manuscripts.GetManuscriptAsync(chapter.Id))?.PlainText ?? chapter.PlainText;
+        var plainText = (await manuscripts.GetManuscriptAsync(EditorContentTarget.Core, chapter.Id))?.PlainText ?? chapter.PlainText;
         var rangeError = FormatLineRange(plainText, startLine, endLine, out var numbered, out var rangeLabel);
         if (rangeError is not null)
             return rangeError;

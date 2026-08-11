@@ -19,7 +19,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 17;
+    public const int CurrentFormatVersion = 18;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -201,6 +201,8 @@ public sealed record ProjectExportPublicationEdition(
 {
     public List<PublicationEditionOverrideField> OverrideFields { get; init; } = [];
     public bool InheritsCoreCover { get; init; }
+    public bool EditionSpecificContentEnabled { get; init; }
+    public List<ProjectExportEditionChapterOverride> ChapterOverrides { get; init; } = [];
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public PrintPicturePageSpreadMode PrintPicturePageSpreadMode { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
@@ -208,6 +210,16 @@ public sealed record ProjectExportPublicationEdition(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? SelectedCoverChapterId { get; init; }
 }
+
+public sealed record ProjectExportEditionChapterOverride(
+    Guid Id,
+    Guid ChapterId,
+    string ManuscriptJson,
+    long Revision,
+    long BaseCoreRevision,
+    string BaseCoreHash,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
 
 public sealed record ProjectExportPublicationBook(
     long Revision,
@@ -366,7 +378,11 @@ public sealed record ProjectExportPageComposition(
     string SemanticManuscriptJson,
     long Revision,
     List<ProjectExportPageCompositionVariant> Variants,
-    Guid? ActiveAuthoringVariantId = null);
+    Guid? ActiveAuthoringVariantId = null)
+{
+    public Guid? EditionId { get; init; }
+    public Guid? SourceCompositionId { get; init; }
+}
 
 public sealed record ProjectExportPageCompositionVariant(
     Guid Id,

@@ -107,15 +107,42 @@ public sealed class PublicationEditionService(
 
         await db.Entry(source).Collection(edition => edition.OutlineItems).LoadAsync(cancellationToken);
         await db.Entry(source).Collection(edition => edition.Matter).LoadAsync(cancellationToken);
-        await db.Entry(source).Collection(edition => edition.StyleMappings).LoadAsync(cancellationToken);
+        await db.Entry(source).Collection(edition => edition.ChapterOverrides).LoadAsync(cancellationToken);
         await db.Entry(source).Collection(edition => edition.ImagePlacements).LoadAsync(cancellationToken);
         await db.Entry(source).Reference(edition => edition.CoverDesign).LoadAsync(cancellationToken);
         var clone = CopyEdition(source, cleanName);
         clone.Isbn = string.Empty;
         clone.OutlineItems = source.OutlineItems.Select(CopyOutlineItem).ToList();
         clone.Matter = source.Matter.Select(CopyMatter).ToList();
-        clone.StyleMappings = source.StyleMappings.Select(CopyStyleMapping).ToList();
         clone.ImagePlacements = source.ImagePlacements.Select(CopyPlacement).ToList();
+        var sourceCompositions = await db.PageCompositions.AsNoTracking()
+            .Include(item => item.Variants)
+            .Where(item => item.EditionId == source.Id)
+            .ToListAsync(cancellationToken);
+        var compositionMap = sourceCompositions.ToDictionary(item => item.Id, _ => Guid.NewGuid());
+        clone.PageCompositions = sourceCompositions.Select(item => CopyEditionComposition(item, clone.Id, compositionMap[item.Id])).ToList();
+        clone.ChapterOverrides = source.ChapterOverrides.Select(item =>
+        {
+            var document = ManuscriptCodec.Deserialize(item.ManuscriptJson, item.ChapterId, item.Revision);
+            var remapped = document with
+            {
+                Content = document.Content.Select(block =>
+                    block.PageCompositionId is Guid compositionId && compositionMap.TryGetValue(compositionId, out var cloneCompositionId)
+                        ? block with { PageCompositionId = cloneCompositionId }
+                        : block).ToList(),
+            };
+            return new PublicationEditionChapterOverride
+            {
+                EditionId = clone.Id,
+                ChapterId = item.ChapterId,
+                ManuscriptJson = ManuscriptCodec.Serialize(remapped),
+                Revision = item.Revision,
+                BaseCoreRevision = item.BaseCoreRevision,
+                BaseCoreHash = item.BaseCoreHash,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+        }).ToList();
         if (source.CoverDesign is not null)
             clone.CoverDesign = new PublicationCoverDesign
             {
@@ -134,99 +161,6 @@ public sealed class PublicationEditionService(
         db.PublicationEditions.Add(clone);
         await SaveWithAuditAsync(clone, "clone", string.Empty, new { sourceEditionId = source.Id }, cancellationToken);
         return View(project, clone);
-    }
-
-    public async Task<PublicationEditionView> UpdateAsync(
-        Guid projectId,
-        Guid editionId,
-        PublicationEditionUpdate input,
-        CancellationToken cancellationToken = default)
-    {
-        ValidateUpdate(input);
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var project = await GetProjectAsync(projectId, cancellationToken);
-        var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
-        EnsureRevision(edition, input.ExpectedRevision);
-        EnsureDraft(edition);
-        if (edition.Format != input.Format)
-            throw new InvalidOperationException("An edition's product format cannot be changed after creation because its cover and page compositions are format-aware. Create a new edition for the other format.");
-        ValidateProductCombination(input, edition);
-        var before = await FingerprintAsync(projectId, editionId, cancellationToken);
-        var name = input.Name.Trim();
-        var normalizedIsbn = PublicationIsbn.NormalizeValidOrEmpty(input.Isbn);
-        if (!string.Equals(name, edition.Name, StringComparison.Ordinal)
-            && await db.PublicationEditions.AnyAsync(
-                candidate => candidate.ProjectId == projectId
-                    && candidate.Id != editionId
-                    && candidate.Name == name,
-                cancellationToken))
-        {
-            throw new InvalidOperationException($"A publication release named '{name}' already exists.");
-        }
-        var sharedIsbnEditions = normalizedIsbn.Length == 0
-            ? []
-            : await db.PublicationEditions.AsNoTracking()
-                .Where(candidate => candidate.ProjectId == projectId
-                    && candidate.Id != editionId
-                    && candidate.Isbn == normalizedIsbn)
-                .ToListAsync(cancellationToken);
-        if (sharedIsbnEditions.Any(candidate =>
-            candidate.Format != input.Format
-            || !BibliographicProductSettingsMatch(candidate, input)))
-        {
-            throw new InvalidOperationException(
-                "An ISBN-13 can be shared only by vendor editions with matching bibliographic content and product-form settings.");
-        }
-        if (sharedIsbnEditions.Count > 0)
-        {
-            var contentHash = await BibliographicContentHashAsync(editionId, cancellationToken);
-            foreach (var candidate in sharedIsbnEditions)
-            {
-                if (!string.Equals(
-                    contentHash,
-                    await BibliographicContentHashAsync(candidate.Id, cancellationToken),
-                    StringComparison.Ordinal))
-                {
-                    throw new InvalidOperationException(
-                        "Vendor editions sharing an ISBN-13 must contain the same ordered manuscript and publication matter.");
-                }
-            }
-        }
-
-        edition.Name = name;
-        edition.Format = input.Format;
-        edition.Vendor = input.Vendor;
-        edition.VendorProfileVersion = Clean(input.VendorProfileVersion);
-        edition.Binding = input.Binding;
-        edition.Paper = input.Paper;
-        edition.Ink = input.Ink;
-        edition.Bleed = input.Bleed;
-        edition.AllowDesignedPageOverrides = input.Format == PublicationEditionFormat.DigitalPdf
-            && input.AllowDesignedPageOverrides;
-        edition.TitleOverride = Clean(input.TitleOverride);
-        edition.Subtitle = Clean(input.Subtitle);
-        edition.Author = Clean(input.Author);
-        edition.Language = PublicationLanguage.Normalize(input.Language);
-        edition.Publisher = Clean(input.Publisher);
-        edition.Copyright = Clean(input.Copyright);
-        edition.Isbn = normalizedIsbn;
-        edition.Description = Clean(input.Description);
-        edition.IncludeTableOfContents = input.IncludeTableOfContents;
-        edition.IncludeVisibleTableOfContents = input.IncludeVisibleTableOfContents;
-        edition.IncludeActSynopses = input.IncludeActSynopses;
-        edition.IncludeChapterSynopses = input.IncludeChapterSynopses;
-        edition.IncludeActHeadings = input.IncludeActHeadings;
-        edition.IncludeChapterHeadings = input.IncludeChapterHeadings;
-        edition.NumberActs = input.NumberActs;
-        edition.NumberChapters = input.NumberChapters;
-        edition.TitlePageMode = input.TitlePageMode;
-        edition.PageWidthInches = input.PageWidthInches;
-        edition.PageHeightInches = input.PageHeightInches;
-        edition.PageMarginInches = input.PageMarginInches;
-        edition.BodyFontSizePoints = input.BodyFontSizePoints;
-        edition.BodyLineHeight = input.BodyLineHeight;
-        await SaveWithAuditAsync(edition, "update", before, new { }, cancellationToken);
-        return View(project, edition);
     }
 
     public async Task<PublicationEditionView> PatchOverridesAsync(
@@ -279,8 +213,6 @@ public sealed class PublicationEditionService(
         Override(fields, PublicationEditionOverrideField.PageWidthInches, patch.PageWidthInches, value => edition.PageWidthInches = value);
         Override(fields, PublicationEditionOverrideField.PageHeightInches, patch.PageHeightInches, value => edition.PageHeightInches = value);
         Override(fields, PublicationEditionOverrideField.PageMarginInches, patch.PageMarginInches, value => edition.PageMarginInches = value);
-        Override(fields, PublicationEditionOverrideField.BodyFontSizePoints, patch.BodyFontSizePoints, value => edition.BodyFontSizePoints = value);
-        Override(fields, PublicationEditionOverrideField.BodyLineHeight, patch.BodyLineHeight, value => edition.BodyLineHeight = value);
         ValidateReleaseState(edition);
         if (await db.PublicationEditions.AnyAsync(candidate => candidate.ProjectId == projectId
             && candidate.Id != editionId && candidate.Name == edition.Name, cancellationToken))
@@ -395,11 +327,11 @@ public sealed class PublicationEditionService(
             .Where(act => act.ProjectId == projectId)
             .Select(act => act.Id)
             .ToListAsync(cancellationToken);
-        var chapters = await db.Chapters.AsNoTracking()
+        var coreChapters = await db.Chapters.AsNoTracking()
             .Where(chapter => chapter.ProjectId == projectId)
             .Select(chapter => new { chapter.Id, chapter.ActId })
             .ToListAsync(cancellationToken);
-        var chapterParents = chapters.ToDictionary(chapter => chapter.Id, chapter => chapter.ActId);
+        var chapterParents = coreChapters.ToDictionary(chapter => chapter.Id, chapter => chapter.ActId);
         ValidateOutlineOrder(orderedItems, acts, chapterParents);
         var before = await FingerprintAsync(projectId, editionId, cancellationToken);
         var existing = await db.PublicationEditionOutlineItems
@@ -635,72 +567,6 @@ public sealed class PublicationEditionService(
             db.PublicationMatter.Remove(matter!);
         }
         await SaveWithAuditAsync(edition, "delete-matter", before, new { matterId }, cancellationToken);
-    }
-
-    public async Task<PublicationEditionStyleMappingView> UpsertStyleMappingAsync(
-        Guid projectId,
-        Guid editionId,
-        PublicationEditionStyleMappingInput input,
-        long expectedEditionRevision,
-        CancellationToken cancellationToken = default)
-    {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
-        EnsureRevision(edition, expectedEditionRevision);
-        EnsureDraft(edition);
-        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
-        var style = await db.ManuscriptStyleDefinitions.FirstOrDefaultAsync(
-            candidate => candidate.ProjectId == projectId
-                && candidate.Id == input.ManuscriptStyleDefinitionId,
-            cancellationToken)
-            ?? throw new InvalidOperationException("Book Text Style was not found.");
-        var normalized = ManuscriptStyleService.NormalizeOverride(style.Kind, input.Override);
-        var before = await FingerprintAsync(projectId, editionId, cancellationToken);
-        var mapping = await db.PublicationEditionStyleMappings.FirstOrDefaultAsync(
-            candidate => candidate.EditionId == editionId
-                && candidate.ManuscriptStyleDefinitionId == style.Id,
-            cancellationToken);
-        if (mapping is null)
-        {
-            mapping = new PublicationEditionStyleMapping
-            {
-                EditionId = editionId,
-                ManuscriptStyleDefinitionId = style.Id,
-                SemanticRole = style.SemanticRole,
-            };
-            db.PublicationEditionStyleMappings.Add(mapping);
-        }
-        else
-        {
-            if (input.ExpectedRevision != mapping.Revision)
-                throw new DbUpdateConcurrencyException("Edition style mapping changed in another editor.");
-            mapping.Revision++;
-        }
-        mapping.OverrideJson = JsonSerializer.Serialize(normalized, ManuscriptCodec.JsonOptions);
-        mapping.UpdatedAt = DateTime.UtcNow;
-        await SaveWithAuditAsync(edition, "upsert-style-mapping", before, new { style.Id }, cancellationToken);
-        return StyleMappingView(mapping, style.Name);
-    }
-
-    public async Task DeleteStyleMappingAsync(
-        Guid projectId,
-        Guid editionId,
-        Guid mappingId,
-        long expectedEditionRevision,
-        CancellationToken cancellationToken = default)
-    {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
-        EnsureRevision(edition, expectedEditionRevision);
-        EnsureDraft(edition);
-        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
-        var mapping = await db.PublicationEditionStyleMappings.FirstOrDefaultAsync(
-            candidate => candidate.EditionId == editionId && candidate.Id == mappingId,
-            cancellationToken);
-        if (mapping is null) return;
-        var before = await FingerprintAsync(projectId, editionId, cancellationToken);
-        db.PublicationEditionStyleMappings.Remove(mapping);
-        await SaveWithAuditAsync(edition, "delete-style-mapping", before, new { mappingId }, cancellationToken);
     }
 
     public async Task<PublicationImagePlacementView> AddImagePlacementAsync(
@@ -1101,7 +967,7 @@ public sealed class PublicationEditionService(
             .OrderBy(act => act.Order)
             .Select(act => new { act.Id, act.Title, act.Synopsis, act.Order })
             .ToListAsync(cancellationToken);
-        var chapters = await db.Chapters.AsNoTracking()
+        var coreChapters = await db.Chapters.AsNoTracking()
             .Where(chapter => chapter.ProjectId == projectId && !excludedChapterIds.Contains(chapter.Id))
             .OrderBy(chapter => chapter.Id)
             .Select(chapter => new
@@ -1115,6 +981,25 @@ public sealed class PublicationEditionService(
                 chapter.ManuscriptJson,
             })
             .ToListAsync(cancellationToken);
+        var chapterOverrides = edition.EditionSpecificContentEnabled
+            ? await db.PublicationEditionChapterOverrides.AsNoTracking()
+                .Where(item => item.EditionId == editionId)
+                .ToDictionaryAsync(item => item.ChapterId, cancellationToken)
+            : [];
+        var chapters = coreChapters.Select(chapter =>
+        {
+            chapterOverrides.TryGetValue(chapter.Id, out var chapterOverride);
+            return new
+            {
+                chapter.Id,
+                chapter.ActId,
+                chapter.Title,
+                chapter.Synopsis,
+                chapter.Order,
+                ManuscriptRevision = chapterOverride?.Revision ?? chapter.ManuscriptRevision,
+                ManuscriptJson = chapterOverride?.ManuscriptJson ?? chapter.ManuscriptJson,
+            };
+        }).ToList();
         var compositionIds = chapters
             .SelectMany(chapter => ManuscriptCodec.Deserialize(
                 chapter.ManuscriptJson,
@@ -1151,11 +1036,6 @@ public sealed class PublicationEditionService(
             .OrderBy(item => item.Location).ThenBy(item => item.SortOrder).ThenBy(item => item.Id)
             .Select(item => new { item.Id, item.Kind, item.Location, item.Title, item.ManuscriptJson, item.Revision, item.IsIncluded, item.SortOrder })
             .ToList();
-        var mappings = await db.PublicationEditionStyleMappings.AsNoTracking()
-            .Where(mapping => mapping.EditionId == editionId)
-            .OrderBy(mapping => mapping.SemanticRole)
-            .Select(mapping => new { mapping.ManuscriptStyleDefinitionId, mapping.SemanticRole, mapping.OverrideJson, mapping.Revision })
-            .ToListAsync(cancellationToken);
         var placements = effective.ImagePlacements
             .OrderBy(placement => placement.TargetKind).ThenBy(placement => placement.TargetId)
             .ThenBy(placement => placement.PlacementKind).ThenBy(placement => placement.SortOrder)
@@ -1175,8 +1055,23 @@ public sealed class PublicationEditionService(
                 placement.SortOrder,
             })
             .ToList();
+        var referencedStyleRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var document in chapters.Select(chapter => ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision))
+            .Concat(compositions.Select(composition => ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision)))
+            .Concat(matter.Select(item => ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision))))
+        {
+            foreach (var block in document.Content)
+            {
+                if (!string.IsNullOrWhiteSpace(block.StyleRole))
+                    referencedStyleRoles.Add(block.StyleRole);
+                foreach (var role in block.Content.SelectMany(inline => inline.Marks)
+                    .Where(mark => mark.Type == ManuscriptMarkType.CharacterStyle && !string.IsNullOrWhiteSpace(mark.Value))
+                    .Select(mark => mark.Value!))
+                    referencedStyleRoles.Add(role);
+            }
+        }
         var styles = await db.ManuscriptStyleDefinitions.AsNoTracking()
-            .Where(style => style.ProjectId == projectId)
+            .Where(style => style.ProjectId == projectId && referencedStyleRoles.Contains(style.SemanticRole))
             .OrderBy(style => style.Id)
             .Select(style => new
             {
@@ -1356,7 +1251,6 @@ public sealed class PublicationEditionService(
             Chapters = chapters,
             Compositions = compositions,
             Matter = matter,
-            Mappings = mappings,
             Placements = placements,
             Assets = assets,
             Styles = styles,
@@ -1419,16 +1313,6 @@ public sealed class PublicationEditionService(
         var outline = effective.OutlineItems.OrderBy(item => item.SortOrder)
             .Select(item => new { item.TargetKind, item.TargetId, item.IsIncluded, item.SortOrder }).ToList();
         var matter = effective.Matter.OrderBy(item => item.Location).ThenBy(item => item.SortOrder).ThenBy(item => item.Id).ToList();
-        var mappings = await db.PublicationEditionStyleMappings.AsNoTracking()
-            .Where(mapping => mapping.EditionId == editionId)
-            .OrderBy(mapping => mapping.ManuscriptStyleDefinitionId)
-            .Select(mapping => new
-            {
-                mapping.ManuscriptStyleDefinitionId,
-                mapping.SemanticRole,
-                mapping.OverrideJson,
-            })
-            .ToListAsync(cancellationToken);
         var placements = effective.ImagePlacements
             .OrderBy(placement => placement.TargetKind)
             .ThenBy(placement => placement.TargetId)
@@ -1455,7 +1339,7 @@ public sealed class PublicationEditionService(
             item.SortOrder,
         });
         var canonical = JsonSerializer.Serialize(
-            new { Outline = outline, Matter = canonicalMatter, Mappings = mappings, Placements = placements },
+            new { Outline = outline, Matter = canonicalMatter, Placements = placements },
             ManuscriptCodec.JsonOptions);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
@@ -1477,36 +1361,6 @@ public sealed class PublicationEditionService(
                 "This edition shares an ISBN-13 with another vendor edition. Clear the shared ISBN before changing ordered content or publication matter, then synchronize the vendor editions before reassigning it.");
         }
     }
-
-    private static bool BibliographicProductSettingsMatch(
-        PublicationEdition edition,
-        PublicationEditionUpdate input) =>
-        string.Equals(edition.TitleOverride, Clean(input.TitleOverride), StringComparison.Ordinal)
-        && string.Equals(edition.Subtitle, Clean(input.Subtitle), StringComparison.Ordinal)
-        && string.Equals(edition.Author, Clean(input.Author), StringComparison.Ordinal)
-        && string.Equals(edition.Language, PublicationLanguage.Normalize(input.Language), StringComparison.OrdinalIgnoreCase)
-        && string.Equals(edition.Publisher, Clean(input.Publisher), StringComparison.Ordinal)
-        && string.Equals(edition.Copyright, Clean(input.Copyright), StringComparison.Ordinal)
-        && string.Equals(edition.Description, Clean(input.Description), StringComparison.Ordinal)
-        && edition.IncludeTableOfContents == input.IncludeTableOfContents
-        && edition.IncludeVisibleTableOfContents == input.IncludeVisibleTableOfContents
-        && edition.IncludeActSynopses == input.IncludeActSynopses
-        && edition.IncludeChapterSynopses == input.IncludeChapterSynopses
-        && edition.IncludeActHeadings == input.IncludeActHeadings
-        && edition.IncludeChapterHeadings == input.IncludeChapterHeadings
-        && edition.NumberActs == input.NumberActs
-        && edition.NumberChapters == input.NumberChapters
-        && edition.TitlePageMode == input.TitlePageMode
-        && edition.Binding == input.Binding
-        && edition.Paper == input.Paper
-        && edition.Ink == input.Ink
-        && edition.Bleed == input.Bleed
-        && edition.AllowDesignedPageOverrides == input.AllowDesignedPageOverrides
-        && edition.PageWidthInches.Equals(input.PageWidthInches)
-        && edition.PageHeightInches.Equals(input.PageHeightInches)
-        && edition.PageMarginInches.Equals(input.PageMarginInches)
-        && edition.BodyFontSizePoints.Equals(input.BodyFontSizePoints)
-        && edition.BodyLineHeight.Equals(input.BodyLineHeight);
 
     internal static IReadOnlyList<ManuscriptBlock> CanonicalManuscriptContent(ManuscriptDocument document) =>
         document.Content.Select(block => block with { Id = string.Empty }).ToList();
@@ -1651,75 +1505,14 @@ public sealed class PublicationEditionService(
         if (!double.IsFinite(edition.PageWidthInches) || edition.PageWidthInches is < 3 or > 24
             || !double.IsFinite(edition.PageHeightInches) || edition.PageHeightInches is < 3 or > 24
             || !double.IsFinite(edition.PageMarginInches) || edition.PageMarginInches < .125
-            || edition.PageMarginInches > Math.Min(edition.PageWidthInches, edition.PageHeightInches) / 3
-            || !double.IsFinite(edition.BodyFontSizePoints) || edition.BodyFontSizePoints is < 7 or > 72
-            || !double.IsFinite(edition.BodyLineHeight) || edition.BodyLineHeight is < 1 or > 2.4)
-            throw new InvalidOperationException("Release page or text settings are outside supported limits.");
+            || edition.PageMarginInches > Math.Min(edition.PageWidthInches, edition.PageHeightInches) / 3)
+            throw new InvalidOperationException("Release page settings are outside supported limits.");
         if (edition.TitleOverride.Length > 500 || edition.Subtitle.Length > 500 || edition.Author.Length > 500
             || edition.Language.Length > 40 || edition.Publisher.Length > 500
             || edition.Copyright.Length > 100_000 || edition.Description.Length > 100_000)
             throw new InvalidOperationException("One or more release overrides exceed supported limits.");
         if (!PublicationLanguage.IsPressSupported(edition.Language))
             throw new InvalidOperationException("Choose English, English (United States), or English (United Kingdom) as the release language.");
-    }
-
-    private static void ValidateUpdate(PublicationEditionUpdate input)
-    {
-        ValidateIdentity(input.Name, input.Format, input.Vendor);
-        if (!Enum.IsDefined(input.Binding) || !Enum.IsDefined(input.Paper) || !Enum.IsDefined(input.Ink)
-            || !Enum.IsDefined(input.TitlePageMode))
-            throw new InvalidOperationException("One or more release settings are invalid.");
-        var boundedFields = new (string Label, string? Value, int Maximum)[]
-        {
-            ("Vendor profile version", input.VendorProfileVersion, 120),
-            ("Title", input.TitleOverride, 500),
-            ("Subtitle", input.Subtitle, 500),
-            ("Author", input.Author, 500),
-            ("Language", input.Language, 40),
-            ("Publisher", input.Publisher, 500),
-            ("Copyright", input.Copyright, 100_000),
-            ("Description", input.Description, 100_000),
-        };
-        foreach (var (label, value, maximum) in boundedFields)
-        {
-            if ((value?.Trim().Length ?? 0) > maximum)
-                throw new InvalidOperationException($"{label} cannot exceed {maximum:N0} characters.");
-        }
-        _ = PublicationIsbn.NormalizeValidOrEmpty(input.Isbn);
-        if (!double.IsFinite(input.PageWidthInches)
-            || !double.IsFinite(input.PageHeightInches)
-            || !double.IsFinite(input.PageMarginInches)
-            || !double.IsFinite(input.BodyFontSizePoints)
-            || !double.IsFinite(input.BodyLineHeight)
-            || input.PageWidthInches is < 3 or > 24
-            || input.PageHeightInches is < 3 or > 24
-            || input.PageMarginInches < 0.125
-            || input.PageMarginInches > Math.Min(input.PageWidthInches, input.PageHeightInches) / 3
-            || input.BodyFontSizePoints is < 7 or > 72
-            || input.BodyLineHeight is < 1 or > 2.4)
-            throw new InvalidOperationException("Edition geometry or body typography is outside supported limits.");
-    }
-
-    private static void ValidateProductCombination(PublicationEditionUpdate input, PublicationEdition current)
-    {
-        var digital = input.Format is PublicationEditionFormat.Epub or PublicationEditionFormat.DigitalPdf;
-        if (digital && (input.Vendor != PublicationVendor.Generic
-            || input.Binding != PublicationBinding.Digital
-            || input.Paper != PublicationPaper.Digital
-            || input.Ink != PublicationInk.Digital
-            || input.Bleed))
-            throw new InvalidOperationException("EPUB and Digital PDF editions require the Generic vendor, digital binding/paper/ink, and no print bleed.");
-        if (input.Format == PublicationEditionFormat.Paperback
-            && (input.Binding == PublicationBinding.Digital
-                || input.Paper == PublicationPaper.Digital
-                || input.Ink == PublicationInk.Digital))
-            throw new InvalidOperationException("Paperback editions require physical binding, paper, and print ink settings.");
-        var expectedProfile = DefaultProfile(input.Format, input.Vendor);
-        var productIdentityChanged = input.Format != current.Format || input.Vendor != current.Vendor;
-        if (!string.Equals(input.VendorProfileVersion.Trim(), expectedProfile, StringComparison.Ordinal)
-            && (productIdentityChanged
-                || !string.Equals(input.VendorProfileVersion.Trim(), current.VendorProfileVersion, StringComparison.Ordinal)))
-            throw new InvalidOperationException($"The selected format and vendor require profile '{expectedProfile}'.");
     }
 
     private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken cancellationToken) =>
@@ -1806,6 +1599,7 @@ public sealed class PublicationEditionService(
             edition.AllowDesignedPageOverrides)
         {
             InheritsCoreCover = edition.InheritsCoreCover,
+            EditionSpecificContentEnabled = edition.EditionSpecificContentEnabled,
         };
 
     internal static PublicationMatterView MatterView(PublicationMatter matter) =>
@@ -1818,19 +1612,6 @@ public sealed class PublicationEditionService(
             matter.IsIncluded,
             matter.SortOrder,
             matter.Revision);
-
-    internal static PublicationEditionStyleMappingView StyleMappingView(
-        PublicationEditionStyleMapping mapping,
-        string styleName) =>
-        new(
-            mapping.Id,
-            mapping.ManuscriptStyleDefinitionId,
-            styleName,
-            mapping.SemanticRole,
-            JsonSerializer.Deserialize<ManuscriptStyleProperties>(
-                mapping.OverrideJson,
-                ManuscriptCodec.JsonOptions) ?? new ManuscriptStyleProperties(),
-            mapping.Revision);
 
     private static PublicationImagePlacementView PlacementView(
         Guid projectId,
@@ -1894,15 +1675,6 @@ public sealed class PublicationEditionService(
         return copy;
     }
 
-    private static PublicationEditionStyleMapping CopyStyleMapping(PublicationEditionStyleMapping source) =>
-        new()
-        {
-            ManuscriptStyleDefinitionId = source.ManuscriptStyleDefinitionId,
-            SemanticRole = source.SemanticRole,
-            OverrideJson = source.OverrideJson,
-            Revision = source.Revision,
-        };
-
     private static PublicationImagePlacement CopyPlacement(PublicationImagePlacement source) =>
         new()
         {
@@ -1922,6 +1694,38 @@ public sealed class PublicationEditionService(
             AccessibilityRole = source.AccessibilityRole,
             IsExcluded = source.IsExcluded,
         };
+
+    private static PageComposition CopyEditionComposition(PageComposition source, Guid editionId, Guid id)
+    {
+        var clone = new PageComposition
+        {
+            Id = id,
+            ProjectId = source.ProjectId,
+            ChapterId = source.ChapterId,
+            EditionId = editionId,
+            SourceCompositionId = source.SourceCompositionId,
+            Name = source.Name,
+            SemanticManuscriptJson = source.SemanticManuscriptJson,
+            Revision = source.Revision,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var variantMap = source.Variants.ToDictionary(item => item.Id, _ => Guid.NewGuid());
+        clone.Variants = source.Variants.Select(item => new PageCompositionVariant
+        {
+            Id = variantMap[item.Id],
+            CompositionId = id,
+            Composition = clone,
+            GeometryKey = item.GeometryKey,
+            SceneJson = item.SceneJson,
+            Revision = item.Revision,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        }).ToList();
+        if (source.ActiveAuthoringVariantId is Guid activeId && variantMap.TryGetValue(activeId, out var cloneActiveId))
+            clone.ActiveAuthoringVariantId = cloneActiveId;
+        return clone;
+    }
 
     private static PublicationEdition CopyEdition(PublicationEdition source, string name) =>
         new()

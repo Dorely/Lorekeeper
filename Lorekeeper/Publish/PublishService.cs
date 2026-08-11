@@ -97,12 +97,6 @@ public sealed class PublishService(
             .ThenBy(item => item.SortOrder)
             .Select(PublicationEditionService.MatterView)
             .ToList();
-        var mappings = await db.PublicationEditionStyleMappings
-            .AsNoTracking()
-            .Where(mapping => mapping.EditionId == editionId)
-            .Include(mapping => mapping.ManuscriptStyleDefinition)
-            .OrderBy(mapping => mapping.SemanticRole)
-            .ToListAsync(cancellationToken);
         var fingerprint = includeSourceFingerprint
             ? await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken)
             : string.Empty;
@@ -112,16 +106,12 @@ public sealed class PublishService(
             SectionViews(acts, chapters, selections),
             placementViews,
             matter,
-            mappings.Select(mapping => PublicationEditionService.StyleMappingView(
-                mapping,
-                mapping.ManuscriptStyleDefinition.Name)).ToList(),
             fingerprint)
         {
             OverrideFields = effective.OverrideFields,
             HasContentOverrides = await db.PublicationEditionOutlineItems.AnyAsync(item => item.EditionId == editionId, cancellationToken),
             HasMatterOverrides = await db.PublicationMatter.AnyAsync(item => item.EditionId == editionId, cancellationToken),
             HasPlacementOverrides = await db.PublicationImagePlacements.AnyAsync(item => item.EditionId == editionId, cancellationToken),
-            HasStyleOverrides = mappings.Count > 0,
         };
     }
 
@@ -226,9 +216,22 @@ public sealed class PublishService(
             .Where(chapter => chapter.ProjectId == projectId)
             .OrderBy(chapter => chapter.Order)
             .ToListAsync(cancellationToken);
+        var chapterOverrides = coreTarget || !profile.EditionSpecificContentEnabled
+            ? new Dictionary<Guid, PublicationEditionChapterOverride>()
+            : await db.PublicationEditionChapterOverrides.AsNoTracking()
+                .Where(item => item.EditionId == editionId)
+                .ToDictionaryAsync(item => item.ChapterId, cancellationToken);
+        foreach (var chapter in chapters)
+        {
+            if (!chapterOverrides.TryGetValue(chapter.Id, out var chapterOverride))
+                continue;
+            chapter.ManuscriptJson = chapterOverride.ManuscriptJson;
+            chapter.ManuscriptRevision = chapterOverride.Revision;
+        }
         var compositions = await db.PageCompositions
             .AsNoTracking()
-            .Where(composition => composition.ProjectId == projectId)
+            .Where(composition => composition.ProjectId == projectId
+                && (composition.EditionId == null || composition.EditionId == editionId))
             .Include(composition => composition.Variants)
             .ToListAsync(cancellationToken);
         var sections = new List<PublishSectionDocument>();
@@ -275,7 +278,10 @@ public sealed class PublishService(
                     chapter,
                     profile,
                     chapterNumber,
-                    compositions.Where(composition => composition.ChapterId == chapter.Id).ToList()));
+                    compositions.Where(composition => composition.ChapterId == chapter.Id
+                        && (chapterOverrides.ContainsKey(chapter.Id)
+                            ? composition.EditionId == editionId
+                            : composition.EditionId == null)).ToList()));
             }
 
             if (source.Act is null)
@@ -379,21 +385,6 @@ public sealed class PublishService(
             && assets.TryGetValue(selectedCoverImageId, out var selectedCoverImage)
                 ? AssetDocument(selectedCoverImage)
                 : null;
-        var editionStyleMappings = coreTarget
-            ? []
-            : await db.PublicationEditionStyleMappings
-            .AsNoTracking()
-            .Where(mapping => mapping.EditionId == editionId)
-            .ToDictionaryAsync(
-                mapping => mapping.ManuscriptStyleDefinitionId,
-                mapping => new
-                {
-                    mapping.SemanticRole,
-                    Override = JsonSerializer.Deserialize<ManuscriptStyleProperties>(
-                        mapping.OverrideJson,
-                        ManuscriptCodec.JsonOptions) ?? new ManuscriptStyleProperties(),
-                },
-                cancellationToken);
         var namedStyles = (await db.ManuscriptStyleDefinitions
             .AsNoTracking()
             .Where(style => style.ProjectId == projectId)
@@ -406,13 +397,7 @@ public sealed class PublishService(
                     JsonSerializer.Deserialize<ManuscriptStyleProperties>(
                         style.DefinitionJson,
                         ManuscriptCodec.JsonOptions) ?? new ManuscriptStyleProperties());
-                if (!editionStyleMappings.TryGetValue(style.Id, out var mapping))
-                    return new PublishManuscriptStyleDocument(style.Name, style.Kind, style.SemanticRole, definition);
-                return new PublishManuscriptStyleDocument(
-                    style.Name,
-                    style.Kind,
-                    mapping.SemanticRole,
-                    MergeStyleDefinition(definition, mapping.Override));
+                return new PublishManuscriptStyleDocument(style.Name, style.Kind, style.SemanticRole, definition);
             })
             .ToList();
         var fontFamilies = await db.ProjectFontFamilies.AsNoTracking()

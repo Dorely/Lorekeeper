@@ -18,7 +18,7 @@ public sealed class EditorManuscriptPreviewService(
         var chapter = await chapters.GetAsync(chapterId, context.TurnCancellationToken);
         if (chapter is null || chapter.ProjectId != context.ProjectId)
             return $"Error: chapter {chapterId:N} was not found in this project.";
-        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, context.TurnCancellationToken);
+        var snapshot = await manuscripts.GetManuscriptAsync(context.ContentTarget, chapterId, context.TurnCancellationToken);
         if (snapshot is null)
             return $"Error: manuscript {chapterId:N} was not found.";
         var source = context.ReviewEdits
@@ -38,6 +38,7 @@ public sealed class EditorManuscriptPreviewService(
                     context.TurnCancellationToken)
                 : null;
             await manuscripts.ValidateDocumentReferencesAsync(
+                context.ContentTarget,
                 chapterId,
                 document,
                 styleCatalog,
@@ -82,7 +83,7 @@ public sealed class EditorManuscriptPreviewService(
             return $"Error: chapter {chapterId:N} was not found in this project.";
         try
         {
-            var snapshot = await manuscripts.GetManuscriptAsync(chapterId, context.TurnCancellationToken)
+            var snapshot = await manuscripts.GetManuscriptAsync(context.ContentTarget, chapterId, context.TurnCancellationToken)
                 ?? throw new InvalidOperationException($"Manuscript {chapterId:N} was not found.");
             var source = context.ReviewEdits
                 && context.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
@@ -100,6 +101,7 @@ public sealed class EditorManuscriptPreviewService(
                     manuscriptStyles,
                     context.TurnCancellationToken);
                 await manuscripts.ValidateDocumentReferencesAsync(
+                    context.ContentTarget,
                     chapterId,
                     preview.ProjectedDocument,
                     styleCatalog,
@@ -124,6 +126,7 @@ public sealed class EditorManuscriptPreviewService(
             }
 
             var result = await manuscripts.ReplaceDocumentAsync(
+                context.ContentTarget,
                 chapterId,
                 preview.SourceDocument.Revision,
                 preview.ProjectedDocument,

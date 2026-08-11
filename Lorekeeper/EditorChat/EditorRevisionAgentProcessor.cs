@@ -38,6 +38,9 @@ public sealed class EditorRevisionAgentProcessor(
     IEditorRevisionJobNotifier notifier,
     ILogger<EditorRevisionAgentProcessor> logger)
 {
+    private static EditorContentTarget JobTarget(EditorRevisionJob job) => EditorContentTarget.From(
+        Enum.TryParse<EditorContentTargetKind>(job.ContentTargetKind, out var kind) ? kind : EditorContentTargetKind.Core,
+        job.ContentTargetEditionId);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
@@ -124,7 +127,7 @@ public sealed class EditorRevisionAgentProcessor(
             {
                 messages.Add(visualMessage);
             }
-            var tools = await BuildToolsAsync(job.ProjectId, job.ConversationId, session.ChapterId, edit, cancellationToken);
+            var tools = await BuildToolsAsync(job.ProjectId, job.ConversationId, session.ChapterId, JobTarget(job), edit, cancellationToken);
             var chatOptions = new ChatOptions
             {
                 Tools = tools,
@@ -291,6 +294,7 @@ public sealed class EditorRevisionAgentProcessor(
         Guid projectId,
         Guid parentConversationId,
         Guid assignedChapterId,
+        EditorContentTarget contentTarget,
         CapturedChapterEdit edit,
         CancellationToken cancellationToken)
     {
@@ -358,13 +362,13 @@ public sealed class EditorRevisionAgentProcessor(
 
             AIFunctionFactory.Create(
                 method: (int startBlock = 0, int blockCount = 40) =>
-                    ReadAssignedManuscriptAsync(assignedChapterId, startBlock, blockCount),
+                    ReadAssignedManuscriptAsync(contentTarget, assignedChapterId, startBlock, blockCount),
                 name: "read_assigned_manuscript",
                 description: "Read at most 40 assigned semantic manuscript blocks with stable IDs, inline marks, style roles, total/hasMore metadata, source hash, and required revision token. The complete assigned snapshot is normally already in the Context Feed; use this only when it is missing, stale, or insufficient."),
 
             AIFunctionFactory.Create(
                 method: (string? query = null, string? blockType = null, string? styleRole = null, int start = 0, int count = 40) =>
-                    InspectAssignedManuscriptAsync(assignedChapterId, query, blockType, styleRole, start, count),
+                    InspectAssignedManuscriptAsync(contentTarget, assignedChapterId, query, blockType, styleRole, start, count),
                 name: "inspect_assigned_manuscript",
                 description:
                     "Validate and structurally search the assigned manuscript by optional text, blockType, and semantic styleRole. " +
@@ -734,13 +738,14 @@ public sealed class EditorRevisionAgentProcessor(
     }
 
     private async Task<string> ReadAssignedManuscriptAsync(
+        EditorContentTarget contentTarget,
         Guid chapterId,
         int startBlock,
         int blockCount)
     {
         startBlock = Math.Max(0, startBlock);
         blockCount = Math.Clamp(blockCount, 1, 40);
-        var snapshot = await manuscripts.GetManuscriptAsync(chapterId)
+        var snapshot = await manuscripts.GetManuscriptAsync(contentTarget, chapterId)
             ?? throw new InvalidOperationException($"Assigned manuscript {chapterId:N} was not found.");
         var blocks = snapshot.Document.Content.Skip(startBlock).Take(blockCount).ToList();
         return JsonSerializer.Serialize(new
@@ -756,6 +761,7 @@ public sealed class EditorRevisionAgentProcessor(
     }
 
     private async Task<string> InspectAssignedManuscriptAsync(
+        EditorContentTarget contentTarget,
         Guid chapterId,
         string? query,
         string? blockType,
@@ -763,7 +769,7 @@ public sealed class EditorRevisionAgentProcessor(
         int start,
         int count)
     {
-        var snapshot = await manuscripts.GetManuscriptAsync(chapterId)
+        var snapshot = await manuscripts.GetManuscriptAsync(contentTarget, chapterId)
             ?? throw new InvalidOperationException($"Assigned manuscript {chapterId:N} was not found.");
         return JsonSerializer.Serialize(
             new
@@ -832,6 +838,7 @@ public sealed class EditorRevisionAgentProcessor(
         var operations = ManuscriptOperationInput.ToOperations(edit.Operations);
         var (proposedDocument, changedBlockIds) = ManuscriptOperations.Apply(source, operations);
         await manuscripts.ValidateDocumentReferencesAsync(
+            JobTarget(session.Job),
             chapter.Id,
             proposedDocument,
             cancellationToken: cancellationToken);
@@ -847,7 +854,7 @@ public sealed class EditorRevisionAgentProcessor(
         }
         else
         {
-            await manuscripts.ApplyAsync(session.ChapterId, edit.ExpectedRevision, operations, cancellationToken);
+            await manuscripts.ApplyAsync(JobTarget(session.Job), session.ChapterId, edit.ExpectedRevision, operations, cancellationToken);
             edit.Notes = AppendNote(edit.Notes, $"Applied directly to {changedBlockIds.Count} manuscript block(s).");
             result = AppendResultLine(result, $"Applied directly to {changedBlockIds.Count} manuscript block(s).");
         }
@@ -883,6 +890,8 @@ public sealed class EditorRevisionAgentProcessor(
             ConversationKind = AiChangeConversationKind.Editor,
             ConversationId = session.Job.ConversationId,
             AssistantMessageId = session.Job.AssistantMessageId,
+            ContentTargetKind = session.Job.ContentTargetKind,
+            ContentTargetEditionId = session.Job.ContentTargetEditionId,
         };
         await changes.AddBatchAsync(batch, cancellationToken);
         await changes.SaveChangesAsync(cancellationToken);

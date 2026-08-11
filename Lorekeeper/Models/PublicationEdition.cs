@@ -2,6 +2,8 @@ using System.Text.Json.Serialization;
 
 namespace Lorekeeper.Models;
 
+using System.ComponentModel.DataAnnotations.Schema;
+
 [JsonConverter(typeof(JsonStringEnumConverter<PublishTitlePageMode>))]
 public enum PublishTitlePageMode
 {
@@ -94,6 +96,7 @@ public class PublicationEdition
     public bool Bleed { get; set; }
     public bool AllowDesignedPageOverrides { get; set; }
     public bool InheritsCoreCover { get; set; } = true;
+    public bool EditionSpecificContentEnabled { get; set; }
 
     public double PageWidthInches { get; set; } = 8.5;
 
@@ -101,8 +104,10 @@ public class PublicationEdition
 
     public double PageMarginInches { get; set; } = 0.75;
 
+    [NotMapped]
     public double BodyFontSizePoints { get; set; } = 12;
 
+    [NotMapped]
     public double BodyLineHeight { get; set; } = 1.55;
 
     public Guid? SelectedCoverImageId { get; set; }
@@ -110,11 +115,12 @@ public class PublicationEdition
 
     public ICollection<PublicationEditionOutlineItem> OutlineItems { get; set; } = [];
     public ICollection<PublicationMatter> Matter { get; set; } = [];
-    public ICollection<PublicationEditionStyleMapping> StyleMappings { get; set; } = [];
     public ICollection<PublicationImagePlacement> ImagePlacements { get; set; } = [];
     public ICollection<PublicationEditionAuditEntry> AuditEntries { get; set; } = [];
     public ICollection<PublicationRenderJob> RenderJobs { get; set; } = [];
     public ICollection<PublicationArtifact> Artifacts { get; set; } = [];
+    public ICollection<PublicationEditionChapterOverride> ChapterOverrides { get; set; } = [];
+    public ICollection<PageComposition> PageCompositions { get; set; } = [];
     public PublicationCoverDesign? CoverDesign { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

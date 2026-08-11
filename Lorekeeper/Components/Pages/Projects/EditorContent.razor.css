@@ -1126,3 +1126,32 @@
 .chapter-pages-selector { display: flex; gap: .45rem; align-items: center; padding: .45rem .65rem; border-bottom: 1px solid var(--lk-line); background: var(--lk-soft); }
 .chapter-pages-selector select { width: min(22rem, 50vw); }
 .chapter-pages-mode ::deep .composition-workspace { flex: 1; border: 0; border-radius: 0; }
+.editor-content-target {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    margin-left: .35rem;
+}
+
+.editor-content-target label {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: .72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.editor-content-target select { width: auto; min-width: 9.5rem; }
+
+.edition-content-state {
+    border-radius: 999px;
+    padding: .22rem .55rem;
+    font-size: .72rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.edition-content-state.inherited { background: #eef3ff; color: #405577; }
+.edition-content-state.divergent { background: #fff0d6; color: #784e08; }
+.edition-content-state.warning { background: #ffe6e1; color: #8c2e20; }

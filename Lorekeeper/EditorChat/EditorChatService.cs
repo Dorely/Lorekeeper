@@ -9,14 +9,18 @@ using Lorekeeper.EntityVisuals;
 using Lorekeeper.Images;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorChatService(
+    AppDbContext db,
     IProjectRepository projects,
     IChapterService chapters,
     IEditorConversationRepository conversations,
@@ -127,6 +131,7 @@ public sealed class EditorChatService(
     public async IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(
         Guid projectId,
         Guid? currentChapterId,
+        EditorContentTarget contentTarget,
         string userText,
         IReadOnlyList<Guid> imageIds,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -179,6 +184,8 @@ public sealed class EditorChatService(
             Role = EditorMessageRole.User,
             Content = userText.Trim(),
             Status = EditorMessageStatus.Completed,
+            ContentTargetKind = contentTarget.Kind.ToString(),
+            ContentTargetEditionId = contentTarget.EditionId,
         };
         conversation.UpdatedAt = DateTime.UtcNow;
         await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
@@ -205,11 +212,18 @@ public sealed class EditorChatService(
             }
 
             var assembly = await contextBuilder.BuildAsync(
-                new ContextBuildRequest(project, currentChapter, userText, ContextBuildPurpose.Editor),
+                new ContextBuildRequest(project, currentChapter, userText, ContextBuildPurpose.Editor, ContentTarget: contentTarget),
                 cancellationToken);
             initialEntityVisuals = assembly.Visuals;
             contestModeEnabled = project.ContestModeEnabled;
             systemPrompt = assembly.Assemble();
+            if (!contentTarget.IsCore)
+            {
+                var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
+                    item => item.Id == contentTarget.EditionId && item.ProjectId == projectId && item.EditionSpecificContentEnabled,
+                    cancellationToken) ?? throw new InvalidOperationException("The selected edition content target is unavailable.");
+                systemPrompt += $"\n\n## Selected Editor content target\nYou are editing the publication release '{edition.Name}' ({edition.Id:D}). All manuscript, Figure, Designed Page, review, contest, and revision operations apply only to this selected release. Do not mutate the shared outline, Book Brief, canon, entities, links, or project facts. Saved Book Text Styles are shared project resources: you may create and apply a new style, but never update or delete an existing shared style from this edition turn. The release ID is protected context and must not be requested from the user or supplied as a tool argument.";
+            }
             userMessage.ContextSnapshotJson = assembly.SnapshotJson();
             await turnEngine.UpdateMessageAsync(conversations, userMessage, cancellationToken);
 
@@ -224,13 +238,14 @@ public sealed class EditorChatService(
                     conversation.Id,
                     AiChangeConversationKind.Editor,
                     OnToolMutated);
-                editorStaging = new EditorChatChangeStagingContext(projectId, conversation.Id, changes);
+                editorStaging = new EditorChatChangeStagingContext(projectId, conversation.Id, contentTarget, changes);
             }
 
             editorContext = new EditorChatContext(
                 projectId,
                 conversation.Id,
                 currentChapterId,
+                contentTarget,
                 providerAvailability.Provider.Id,
                 visionReady,
                 OnToolMutated,

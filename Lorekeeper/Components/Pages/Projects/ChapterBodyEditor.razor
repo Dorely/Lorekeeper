@@ -40,6 +40,7 @@
 
 @code {
     [Parameter, EditorRequired] public Guid ChapterId { get; set; }
+    [Parameter] public EditorContentTarget ContentTarget { get; set; } = EditorContentTarget.Core;
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter, EditorRequired] public string InitialManuscriptJson { get; set; } = string.Empty;
     [Parameter] public bool IsVisible { get; set; } = true;
@@ -150,6 +151,7 @@
         if (!Enum.TryParse<DesignedPageLayoutMode>(layoutMode, ignoreCase: true, out var parsedLayoutMode))
             throw new ArgumentException("Choose a supported Designed Page layout.", nameof(layoutMode));
         var result = await Compositions.CreateDesignedPageAsync(
+            ContentTarget,
             ProjectId,
             ChapterId,
             blockIndex,
@@ -194,7 +196,7 @@
         string blockId,
         long expectedRevision)
     {
-        var snapshot = await Manuscripts.GetManuscriptAsync(ChapterId)
+        var snapshot = await Manuscripts.GetManuscriptAsync(ContentTarget, ChapterId)
             ?? throw new InvalidOperationException("The chapter manuscript was not found.");
         if (snapshot.Revision != expectedRevision)
             throw new ManuscriptRevisionConflictException(expectedRevision, snapshot.Revision);

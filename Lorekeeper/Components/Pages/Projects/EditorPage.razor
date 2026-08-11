@@ -5,10 +5,14 @@
 <PageTitle>Editor</PageTitle>
 
 <ProjectLayout Slug="@Slug" Tab="editor">
-    <EditorContent ChapterId="@ChapterId" />
+    <EditorContent ChapterId="@ChapterId" EditionId="@EditionId" RequestedMode="@Mode" RequestedCompositionId="@CompositionId" RequestedObjectId="@ObjectId" />
 </ProjectLayout>
 
 @code {
     [Parameter] public string Slug { get; set; } = string.Empty;
     [Parameter] public Guid? ChapterId { get; set; }
+    [SupplyParameterFromQuery(Name = "edition")] public Guid? EditionId { get; set; }
+    [SupplyParameterFromQuery(Name = "mode")] public string? Mode { get; set; }
+    [SupplyParameterFromQuery(Name = "composition")] public Guid? CompositionId { get; set; }
+    [SupplyParameterFromQuery(Name = "object")] public Guid? ObjectId { get; set; }
 }

@@ -10,6 +10,7 @@ namespace Lorekeeper.EditorChat;
 public sealed class EditorRevisionAgentService(
     IProjectRepository projects,
     IChapterService chapters,
+    IManuscriptService manuscripts,
     IEditorRevisionRepository revisions,
     IAiChangeRepository changes,
     IOptions<EditorChatOptions> options,
@@ -54,6 +55,8 @@ public sealed class EditorRevisionAgentService(
             AssistantMessageId = request.AssistantMessageId,
             ToolCallId = request.ToolCallId,
             ArgumentsJson = request.ArgumentsJson,
+            ContentTargetKind = request.ContentTarget.Kind.ToString(),
+            ContentTargetEditionId = request.ContentTarget.EditionId,
             Status = EditorRevisionJobStatus.Running,
         };
         await revisions.AddJobAsync(job, cancellationToken);
@@ -62,6 +65,8 @@ public sealed class EditorRevisionAgentService(
         {
             var assignment = assignments[i];
             var chapter = chaptersById[assignment.ChapterId];
+            var source = await manuscripts.GetManuscriptAsync(request.ContentTarget, chapter.Id, cancellationToken)
+                ?? throw new InvalidOperationException($"Chapter {chapter.Id} manuscript was not found.");
             await revisions.AddSessionAsync(new EditorRevisionSession
             {
                 JobId = job.Id,
@@ -70,7 +75,7 @@ public sealed class EditorRevisionAgentService(
                 ChapterTitle = chapter.Title,
                 Reason = assignment.Reason,
                 Instructions = assignment.Instructions,
-                OriginalManuscriptJson = chapter.ManuscriptJson,
+                OriginalManuscriptJson = ManuscriptCodec.Serialize(source.Document),
                 Status = EditorRevisionSessionStatus.Queued,
             }, cancellationToken);
         }

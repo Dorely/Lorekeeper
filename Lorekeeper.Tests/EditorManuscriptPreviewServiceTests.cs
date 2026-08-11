@@ -151,6 +151,7 @@ public sealed class EditorManuscriptPreviewServiceTests
             projectId,
             Guid.NewGuid(),
             currentChapterId: null,
+            contentTarget: EditorContentTarget.Core,
             providerId: 1,
             visionReady: false,
             onMutated ?? (() => { }),
@@ -195,6 +196,9 @@ public sealed class EditorManuscriptPreviewServiceTests
         public Task<ManuscriptSnapshot?> GetManuscriptAsync(Guid chapterId, CancellationToken cancellationToken = default) =>
             Task.FromResult<ManuscriptSnapshot?>(Snapshot(CurrentDocument));
 
+        public Task<ManuscriptSnapshot?> GetManuscriptAsync(EditorContentTarget target, Guid chapterId, CancellationToken cancellationToken = default) =>
+            GetManuscriptAsync(chapterId, cancellationToken);
+
         public Task<ManuscriptMutationResult> ReplaceDocumentAsync(Guid chapterId, long expectedRevision, ManuscriptDocument replacement, CancellationToken cancellationToken = default)
         {
             if (CurrentDocument.Revision != expectedRevision)
@@ -206,14 +210,26 @@ public sealed class EditorManuscriptPreviewServiceTests
                 CurrentDocument.Content.Select(block => block.Id).ToList()));
         }
 
+        public Task<ManuscriptMutationResult> ReplaceDocumentAsync(EditorContentTarget target, Guid chapterId, long expectedRevision, ManuscriptDocument replacement, CancellationToken cancellationToken = default) =>
+            ReplaceDocumentAsync(chapterId, expectedRevision, replacement, cancellationToken);
+
         public Task<ManuscriptMutationResult> ApplyAsync(Guid chapterId, long expectedRevision, IReadOnlyList<ManuscriptOperation> operations, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public Task<ManuscriptMutationResult> ApplyAsync(EditorContentTarget target, Guid chapterId, long expectedRevision, IReadOnlyList<ManuscriptOperation> operations, CancellationToken cancellationToken = default) =>
+            ApplyAsync(chapterId, expectedRevision, operations, cancellationToken);
 
         public Task<ManuscriptMutationResult> ApplyUnderProjectMutationLeaseAsync(Guid chapterId, long expectedRevision, IReadOnlyList<ManuscriptOperation> operations, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task<ManuscriptMutationResult> ApplyUnderProjectMutationLeaseAsync(EditorContentTarget target, Guid chapterId, long expectedRevision, IReadOnlyList<ManuscriptOperation> operations, CancellationToken cancellationToken = default) =>
+            ApplyUnderProjectMutationLeaseAsync(chapterId, expectedRevision, operations, cancellationToken);
+
         public Task ValidateDocumentReferencesAsync(Guid chapterId, ManuscriptDocument document, IReadOnlyList<ManuscriptStyleView>? styleCatalog = null, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+
+        public Task ValidateDocumentReferencesAsync(EditorContentTarget target, Guid chapterId, ManuscriptDocument document, IReadOnlyList<ManuscriptStyleView>? styleCatalog = null, CancellationToken cancellationToken = default) =>
+            ValidateDocumentReferencesAsync(chapterId, document, styleCatalog, cancellationToken);
 
         private static ManuscriptSnapshot Snapshot(ManuscriptDocument current) => new(
             current.ManuscriptId,
@@ -227,6 +243,9 @@ public sealed class EditorManuscriptPreviewServiceTests
     {
         public Task<IReadOnlyList<ManuscriptStyleView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<ManuscriptStyleView>>([]);
+
+        public Task<IReadOnlyDictionary<Guid, int>> GetUsageCountsAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<Guid, int>>(new Dictionary<Guid, int>());
 
         public Task<ManuscriptStyleView> UpsertAsync(Guid projectId, ManuscriptStyleInput input, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

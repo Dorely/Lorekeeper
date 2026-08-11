@@ -54,7 +54,8 @@ public sealed class LorekeeperPressMigrationTests
             var hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
             var now = DateTime.UtcNow;
             var emptyJson = "{}";
-            var legacyManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(chapterId, revision: 7))
+            var legacyManuscriptJson = ManuscriptCodec.Serialize(
+                    ManuscriptCodec.FromPlainText(chapterId, "Existing chapter text.", revision: 7))
                 .Replace($"\"schemaVersion\":{ManuscriptDocument.CurrentSchemaVersion}", "\"schemaVersion\":2", StringComparison.Ordinal);
             var pictureManuscriptJson = ManuscriptCodec.Serialize(new ManuscriptDocument
             {
@@ -155,6 +156,7 @@ public sealed class LorekeeperPressMigrationTests
                     DefinitionJson = "{\"font\":\"Lora\"}",
                 });
                 await db.SaveChangesAsync();
+                var styleOverrideJson = """{"fontSizePoints":11}""";
                 await db.Database.ExecuteSqlInterpolatedAsync(
                     $"""
                     INSERT INTO Chapters (
@@ -262,14 +264,6 @@ public sealed class LorekeeperPressMigrationTests
                     ChapterId = chapterId,
                     SortOrder = 2,
                 });
-                db.PublicationEditionStyleMappings.Add(new PublicationEditionStyleMapping
-                {
-                    EditionId = editionId,
-                    ManuscriptStyleDefinitionId = styleId,
-                    SemanticRole = "body",
-                    OverrideJson = "{\"size\":11}",
-                    Revision = 3,
-                });
                 db.PublicationEditionAuditEntries.Add(new PublicationEditionAuditEntry
                 {
                     EditionId = editionId,
@@ -297,11 +291,19 @@ public sealed class LorekeeperPressMigrationTests
                 await db.SaveChangesAsync();
                 await db.Database.ExecuteSqlInterpolatedAsync(
                     $"""
+                    INSERT INTO PublicationEditionStyleMappings (
+                        Id, EditionId, SemanticRole, ManuscriptStyleDefinitionId, OverrideJson,
+                        Revision, CreatedAt, UpdatedAt)
+                    VALUES ({Guid.NewGuid()}, {editionId}, 'body', {styleId},
+                        {styleOverrideJson}, 3, {now}, {now});
+                    """);
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
                     INSERT INTO PublicationMatter (
                         Id, EditionId, Location, Kind, Title, ManuscriptJson, Revision,
                         IsIncluded, SortOrder, CreatedAt, UpdatedAt)
                     VALUES ({matterId}, {editionId}, 'Front', 'Dedication', 'Existing dedication',
-                        '{legacyManuscriptJson}', 4, 1, 1, {now}, {now});
+                        {legacyManuscriptJson}, 4, 1, 1, {now}, {now});
                     """);
                 await db.Database.ExecuteSqlInterpolatedAsync(
                     $"""
@@ -357,6 +359,10 @@ public sealed class LorekeeperPressMigrationTests
                     new PublicationCoreMigrationService(
                         recovery,
                         NullLogger<PublicationCoreMigrationService>.Instance),
+                    new EditionContentMigrationService(
+                        recovery,
+                        new MigrationManuscriptService(db),
+                        NullLogger<EditionContentMigrationService>.Instance),
                     recovery);
                 Assert.True(await startupMigration.ApplyAsync(), (await recovery.GetStateAsync()).Error);
                 var picturePdfPresentation = await db.PublicationBookPdfPresentations
@@ -383,7 +389,8 @@ public sealed class LorekeeperPressMigrationTests
                 var artifact = await db.PublicationArtifacts.AsNoTracking().SingleAsync();
 
                 Assert.Equal("kdp-paperback-v1", edition.VendorProfileVersion);
-                Assert.Equal(9, edition.Revision);
+                Assert.Equal(10, edition.Revision);
+                Assert.True(edition.EditionSpecificContentEnabled);
                 Assert.Equal("custom-profile-v9", unknownEdition.VendorProfileVersion);
                 Assert.Equal(3, unknownEdition.Revision);
                 Assert.True(completed.IsLegacy);
@@ -411,7 +418,15 @@ public sealed class LorekeeperPressMigrationTests
                 var releaseMatter = Assert.Single(await db.PublicationMatter.AsNoTracking().ToListAsync());
                 Assert.Equal(unknownEditionId, releaseMatter.EditionId);
                 Assert.True(releaseMatter.IsExcluded);
-                Assert.Single(await db.PublicationEditionStyleMappings.AsNoTracking().ToListAsync());
+                Assert.True(edition.EditionSpecificContentEnabled);
+                Assert.Single(await db.PublicationEditionChapterOverrides.AsNoTracking()
+                    .Where(item => item.EditionId == editionId)
+                    .ToListAsync());
+                Assert.Contains(await db.ManuscriptStyleDefinitions.AsNoTracking().ToListAsync(),
+                    item => item.ProjectId == projectId && item.Name.Contains("Paperback", StringComparison.Ordinal));
+                Assert.False(await db.Database.SqlQueryRaw<int>(
+                    "SELECT COUNT(*) AS Value FROM sqlite_master WHERE type = 'table' AND name = 'PublicationEditionStyleMappings'")
+                    .AnyAsync(value => value > 0));
                 var releasePlacement = Assert.Single(await db.PublicationImagePlacements.AsNoTracking().ToListAsync());
                 Assert.Equal(unknownEditionId, releasePlacement.EditionId);
                 Assert.True(releasePlacement.IsExcluded);
@@ -646,6 +661,81 @@ public sealed class LorekeeperPressMigrationTests
             if (Directory.Exists(directory))
                 Directory.Delete(directory, recursive: true);
         }
+    }
+
+    private sealed class MigrationManuscriptService(AppDbContext db) : IManuscriptService
+    {
+        public async Task<ManuscriptSnapshot?> GetManuscriptAsync(
+            EditorContentTarget target,
+            Guid chapterId,
+            CancellationToken cancellationToken = default)
+        {
+            var chapter = await db.Chapters.AsNoTracking().SingleOrDefaultAsync(
+                item => item.Id == chapterId, cancellationToken);
+            if (chapter is null)
+                return null;
+            var chapterOverride = !target.IsCore
+                ? await db.PublicationEditionChapterOverrides.AsNoTracking().SingleOrDefaultAsync(
+                    item => item.EditionId == target.EditionId && item.ChapterId == chapterId,
+                    cancellationToken)
+                : null;
+            var json = chapterOverride?.ManuscriptJson ?? chapter.ManuscriptJson;
+            var revision = chapterOverride?.Revision ?? chapter.ManuscriptRevision;
+            var document = ManuscriptCodec.Deserialize(json, chapterId, revision);
+            var plainText = ManuscriptCodec.ProjectPlainText(document);
+            return new ManuscriptSnapshot(chapterId, revision, ManuscriptCodec.HashPlainText(plainText), plainText, document);
+        }
+
+        public async Task<ManuscriptMutationResult> ReplaceDocumentAsync(
+            EditorContentTarget target,
+            Guid chapterId,
+            long expectedRevision,
+            ManuscriptDocument document,
+            CancellationToken cancellationToken = default)
+        {
+            var chapter = await db.Chapters.SingleAsync(item => item.Id == chapterId, cancellationToken);
+            if (target.IsCore)
+            {
+                chapter.ManuscriptJson = ManuscriptCodec.Serialize(document);
+                chapter.ManuscriptRevision = document.Revision;
+            }
+            else
+            {
+                var edition = await db.PublicationEditions.SingleAsync(
+                    item => item.Id == target.EditionId, cancellationToken);
+                var chapterOverride = await db.PublicationEditionChapterOverrides.SingleOrDefaultAsync(
+                    item => item.EditionId == edition.Id && item.ChapterId == chapterId,
+                    cancellationToken);
+                chapterOverride ??= new PublicationEditionChapterOverride
+                {
+                    EditionId = edition.Id,
+                    ChapterId = chapterId,
+                    BaseCoreRevision = chapter.ManuscriptRevision,
+                    BaseCoreHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(chapter.Manuscript)),
+                };
+                if (db.Entry(chapterOverride).State == EntityState.Detached)
+                    db.PublicationEditionChapterOverrides.Add(chapterOverride);
+                chapterOverride.ManuscriptJson = ManuscriptCodec.Serialize(document);
+                chapterOverride.Revision = document.Revision;
+                chapterOverride.UpdatedAt = DateTime.UtcNow;
+            }
+            await db.SaveChangesAsync(cancellationToken);
+            var snapshot = await GetManuscriptAsync(target, chapterId, cancellationToken)
+                ?? throw new InvalidOperationException("The migrated chapter could not be reloaded.");
+            return new ManuscriptMutationResult(snapshot, document.Content.Select(item => item.Id).ToList());
+        }
+
+        public Task<ManuscriptMutationResult> ApplyAsync(EditorContentTarget target, Guid chapterId, long expectedRevision,
+            IReadOnlyList<ManuscriptOperation> operations, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<ManuscriptMutationResult> ApplyUnderProjectMutationLeaseAsync(EditorContentTarget target, Guid chapterId,
+            long expectedRevision, IReadOnlyList<ManuscriptOperation> operations, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task ValidateDocumentReferencesAsync(EditorContentTarget target, Guid chapterId, ManuscriptDocument document,
+            IReadOnlyList<ManuscriptStyleView>? styleCatalog = null, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
     private static IConfiguration TestConfiguration(string databasePath) =>

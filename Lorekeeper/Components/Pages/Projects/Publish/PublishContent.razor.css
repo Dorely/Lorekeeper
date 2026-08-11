@@ -8,3 +8,14 @@
 .release-presentation-options{display:grid;gap:.35rem;margin-top:.65rem}.inherited-toggle{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.4rem;align-items:center}.inherited-toggle .check-row{padding:.4rem}.inherited-toggle .customize{white-space:nowrap}
 .pdf-presentation-options .check-row span{display:grid;gap:.12rem}.pdf-presentation-options .check-row small{color:var(--lk-muted);font-size:.66rem;font-weight:400;line-height:1.35}
 @media(max-width:1050px){.publish-layout{grid-template-columns:minmax(17rem,22rem) minmax(0,1fr)}.option-grid{grid-template-columns:repeat(2,1fr)}.page-setup-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:800px){.publish-layout{grid-template-columns:1fr;grid-template-rows:minmax(16rem,38%) minmax(0,1fr)}.readiness-card,.workspace-card.split,.core-book-design-grid{grid-template-columns:1fr}.primary-action{text-align:left}.workspace-card.split>div+div,.core-design-pane+.core-design-pane{border-left:0;border-top:1px solid var(--lk-line);padding-left:0;padding-top:1rem}.form-grid,.inherit-grid,.release-cards,.content-choice-list,.page-setup-grid{grid-template-columns:1fr}.option-grid{grid-template-columns:1fr}.core-design-heading{align-items:stretch;flex-direction:column}}
+.edition-content-switch { display: inline-flex; align-items: center; gap: .45rem; font-weight: 700; margin: 0; }
+.edition-content-summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-radius: .65rem; padding: .75rem .9rem; }
+.edition-content-summary.inherited { background: #f3f6fb; }
+.edition-content-summary.divergent { background: #fff3df; color: #6c470b; }
+.edition-difference-list { display: grid; gap: .45rem; margin-top: .65rem; }
+.edition-difference-item { display: grid; border: 1px solid var(--border-color); border-radius: .55rem; overflow: hidden; }
+.edition-difference-list a { display: flex; justify-content: space-between; gap: 1rem; padding: .65rem .75rem; text-decoration: none; color: inherit; }
+.edition-difference-list a:hover { border-color: var(--accent); background: var(--surface-soft); }
+.edition-difference-list span { color: var(--text-muted); font-size: .84rem; text-align: right; }
+.edition-layout-issue { border-top: 1px solid var(--border-color); background: #fff8e9; }
+.edition-layout-issue strong { color: var(--accent); white-space: nowrap; }

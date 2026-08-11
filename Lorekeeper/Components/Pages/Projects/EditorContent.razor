@@ -9,6 +9,7 @@
 @using Lorekeeper.Images
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
+@using Lorekeeper.Publish
 @using Lorekeeper.Tokens
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.JSInterop
@@ -17,6 +18,7 @@
 @inject IManuscriptService Manuscripts
 @inject IProjectImageService Images
 @inject ICompositionService Compositions
+@inject IEditionContentService EditionContent
 @inject IEditorContextService EditorContext
 @inject IActService Acts
 @inject IEditorChatService Chat
@@ -60,6 +62,7 @@ else
             </button>
             <EditorChatPanel ProjectId="Project.Id"
                              CurrentChapterId="_activeChapterId"
+                             ContentTarget="_contentTarget"
                              ContextRefreshSignal="_contextRefreshSignal"
                              ReviewRefreshSignal="_reviewRefreshSignal"
                              OnAiTurnStarting="OnAiTurnStartingAsync"
@@ -105,6 +108,10 @@ else
              title="Drag to resize Editor Chat. Use arrow keys for precise resizing, or double-click to reset."></div>
 
         <section class="@EditorPanelClass()">
+            @if (!string.IsNullOrWhiteSpace(_contentTargetNotice))
+            {
+                <div class="alert alert-warning editor-target-notice" role="status">@_contentTargetNotice</div>
+            }
             <div class="chapter-header">
                 @if (_editingTitle)
                 {
@@ -132,11 +139,45 @@ else
                                 @foreach (var c in grp.chapters)
                                 {
                                     <a class="chapter-menu-item @(c.Id == _current.Id ? "active" : "")"
-                                       href="/projects/@Project.Slug/editor/@c.Id"
+                                       href="@EditorHref(c.Id)"
                                        @onclick="CloseMenu">@c.Title</a>
                                 }
                             }
                         </div>
+                    }
+                }
+
+                @if (_enabledEditions.Count > 0)
+                {
+                    <div class="editor-content-target">
+                        <label for="editor-content-target-select">Content</label>
+                        <select id="editor-content-target-select"
+                                class="form-select form-select-sm"
+                                value="@_contentTarget.StorageKey"
+                                disabled="@(_saveState == SaveState.Saving || _chapterLocked || _reviewPendingBatches.Count > 0)"
+                                @onchange="ChangeContentTargetAsync">
+                            <option value="core">Core Book</option>
+                            @foreach (var release in _enabledEditions)
+                            {
+                                <option value="@($"edition:{release.EditionId:N}")">@release.Name</option>
+                            }
+                        </select>
+                    </div>
+                    @if (!_contentTarget.IsCore && _contentStatus is { } contentStatus)
+                    {
+                        <span class="edition-content-state @(contentStatus.IsDivergent ? "divergent" : "inherited")">
+                            @(contentStatus.IsDivergent
+                                ? $"Edition copy · based on Core r{contentStatus.BaseCoreRevision}"
+                                : "From Core")
+                        </span>
+                        @if (contentStatus.CoreChangedSinceDivergence)
+                        {
+                            <span class="edition-content-state warning" title="Core Book changed after this edition chapter was created. The edition copy remains frozen until reset.">Core changed</span>
+                        }
+                        @if (contentStatus.IsDivergent)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="ConfirmResetEditionChapterAsync">Reset chapter to Core</button>
+                        }
                     }
                 }
 
@@ -185,6 +226,7 @@ else
                                        @ref="_bodyEditor"
                                        ProjectId="Project.Id"
                                        ChapterId="@editorDocument.ChapterId"
+                                       ContentTarget="_contentTarget"
                                        InitialManuscriptJson="@editorDocument.ManuscriptJson"
                                        IsVisible="@(_mode == EditorMode.Edit)"
                                        IsReadOnly="EditorReadOnly"
@@ -199,6 +241,7 @@ else
                 {
                     <ChapterReadPreview ProjectId="Project.Id"
                                         ChapterId="_current.Id"
+                                        ContentTarget="_contentTarget"
                                         FacingPages="_readFacing"
                                         FacingPagesChanged="SetReadFacingAsync"
                                         RefreshSignal="_previewRefreshSignal" />
@@ -225,9 +268,11 @@ else
                             <DesignedPageWorkspace @key="selectedCompositionId"
                                                    @ref="_designedPageWorkspace"
                                                    ProjectId="Project.Id"
+                                                   ContentTarget="_contentTarget"
                                                    CompositionId="selectedCompositionId"
                                                    RefreshSignal="_pageWorkspaceRefreshSignal"
-                                                   RequestedSelectionId="_pageWorkspaceSelectionId" />
+                                                   RequestedSelectionId="_pageWorkspaceSelectionId"
+                                                   CompositionForked="HandleCompositionForkedAsync" />
                         }
                     </div>
                 }
@@ -785,6 +830,10 @@ else
 @code {
     [CascadingParameter] public Project? Project { get; set; }
     [Parameter] public Guid? ChapterId { get; set; }
+    [Parameter] public Guid? EditionId { get; set; }
+    [Parameter] public string? RequestedMode { get; set; }
+    [Parameter] public Guid? RequestedCompositionId { get; set; }
+    [Parameter] public Guid? RequestedObjectId { get; set; }
 
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private readonly SemaphoreSlim _chapterRefreshGate = new(1, 1);
@@ -795,6 +844,11 @@ else
     private bool _loading = true;
     private Guid? _loadedProjectId;
     private Guid? _activeChapterId;
+    private EditorContentTarget _contentTarget = EditorContentTarget.Core;
+    private string? _contentTargetNotice;
+    private EditorContentTarget _loadedContentTarget = EditorContentTarget.Core;
+    private IReadOnlyList<EditionContentReleaseView> _enabledEditions = [];
+    private EditionChapterContentStatus? _contentStatus;
     private bool _restoreChapterAfterRender;
     private Guid? _pendingRememberChapterId;
 
@@ -901,6 +955,13 @@ else
         _openCompositionId = compositionId;
         await SetModeAsync(EditorMode.Pages);
     }
+    private async Task HandleCompositionForkedAsync(Guid compositionId)
+    {
+        _openCompositionId = compositionId;
+        await ReconcileCurrentChapterAsync(refreshContextSurfaces: true);
+        _openCompositionId = compositionId;
+        StateHasChanged();
+    }
     private bool EffectiveChatPaneCollapsed => ContestReviewActive || _chatPaneCollapsed;
     private bool EffectiveRightPaneCollapsed => ContestReviewActive || _rightPaneCollapsed;
     private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
@@ -938,8 +999,19 @@ else
             ResetInlineReviewState();
             _chapters = (await Chapters.ListAsync(Project.Id)).ToList();
             _acts = (await Acts.ListAsync(Project.Id)).ToList();
+            _enabledEditions = (await EditionContent.ListReleasesAsync(Project.Id))
+                .Where(item => item.Enabled && !item.Archived)
+                .ToList();
             _loading = false;
         }
+
+        var requestedTarget = EditionId is Guid requestedEditionId
+            && _enabledEditions.Any(item => item.EditionId == requestedEditionId)
+                ? EditorContentTarget.ForEdition(requestedEditionId)
+                : EditorContentTarget.Core;
+        _contentTargetNotice = EditionId.HasValue && requestedTarget.IsCore
+            ? "That edition is unavailable for content editing, so Lorekeeper opened Core Book instead."
+            : null;
 
         if (_chapters.Count == 0)
         {
@@ -963,7 +1035,7 @@ else
         {
             if (_activeChapterId is { } activeId && _chapters.Any(c => c.Id == activeId))
             {
-                Nav.NavigateTo($"/projects/{Project.Slug}/editor/{activeId}", replace: true);
+                Nav.NavigateTo(EditorHref(activeId, requestedTarget.EditionId), replace: true);
                 return;
             }
 
@@ -975,12 +1047,12 @@ else
         else
         {
             var first = _chapters[0];
-            Nav.NavigateTo($"/projects/{Project.Slug}/editor/{first.Id}", replace: true);
+            Nav.NavigateTo(EditorHref(first.Id, requestedTarget.EditionId), replace: true);
             return;
         }
 
         _restoreChapterAfterRender = false;
-        if (_activeChapterId == targetId)
+        if (_activeChapterId == targetId && _loadedContentTarget == requestedTarget)
         {
             _pendingRememberChapterId = targetId;
             return;
@@ -993,6 +1065,9 @@ else
                 return;
         }
 
+        _contentTarget = requestedTarget;
+        _loadedContentTarget = requestedTarget;
+
         var fresh = await Chapters.ReloadFromStoreAsync(targetId);
         if (fresh is null)
         {
@@ -1003,8 +1078,13 @@ else
         _activeChapterId = targetId;
         _current = fresh;
         ReplaceCachedChapter(fresh);
-        InstallEditorDocument(fresh);
-        UpdateChapterMetrics(_current.PlainText);
+        var effective = await Manuscripts.GetManuscriptAsync(_contentTarget, fresh.Id)
+            ?? throw new InvalidOperationException("The selected chapter manuscript was not found.");
+        InstallEditorDocument(effective);
+        UpdateChapterMetrics(effective.PlainText);
+        _contentStatus = _contentTarget.EditionId is Guid statusEditionId
+            ? await EditionContent.GetChapterStatusAsync(Project.Id, statusEditionId, fresh.Id)
+            : null;
         _saveState = SaveState.Idle;
         _saveError = null;
         _pendingRememberChapterId = targetId;
@@ -1013,6 +1093,15 @@ else
         {
             _contestReviewProjection = null;
             SelectInitialModeForCurrentChapter();
+            if (Enum.TryParse<EditorMode>(RequestedMode, ignoreCase: true, out var requestedMode))
+                _mode = requestedMode;
+            if (_mode == EditorMode.Pages
+                && RequestedCompositionId is Guid requestedCompositionId
+                && effective.Document.Content.Any(block => block.PageCompositionId == requestedCompositionId))
+            {
+                _openCompositionId = requestedCompositionId;
+                _pageWorkspaceSelectionId = RequestedObjectId;
+            }
             if (_mode == EditorMode.Review)
                 await RefreshReviewChangesAsync();
         }
@@ -1030,6 +1119,63 @@ else
     {
         if (LayoutControlsLocked || _bodyEditor is null) return;
         _manuscriptImageModalOpen = true;
+    }
+
+    private async Task ChangeContentTargetAsync(ChangeEventArgs args)
+    {
+        if (Project is null || _activeChapterId is not Guid chapterId || !await FlushAsync())
+            return;
+        var value = args.Value?.ToString() ?? "core";
+        Guid? editionId = null;
+        if (value.StartsWith("edition:", StringComparison.Ordinal)
+            && Guid.TryParse(value["edition:".Length..], out var parsed)
+            && _enabledEditions.Any(item => item.EditionId == parsed))
+            editionId = parsed;
+        if (_editorModule is not null)
+        {
+            try
+            {
+                await _editorModule.InvokeVoidAsync(
+                    "setEditorContentTarget",
+                    Project.Id.ToString("N"),
+                    editionId is Guid selected ? $"Edition:{selected:D}" : "Core");
+            }
+            catch (JSException) { }
+            catch (JSDisconnectedException) { }
+        }
+        Nav.NavigateTo(EditorHref(chapterId, editionId));
+    }
+
+    private async Task ConfirmResetEditionChapterAsync()
+    {
+        if (Project is null || _activeChapterId is not Guid chapterId || _contentTarget.EditionId is not Guid editionId)
+            return;
+        if (!await JS.InvokeAsync<bool>("confirm", "Reset this chapter to Core Book? This permanently discards the edition manuscript and its edition-only page layouts. Saved Book Text Styles and project images are kept."))
+            return;
+        if (!await FlushAsync())
+            return;
+        await EditionContent.ResetChapterAsync(Project.Id, editionId, chapterId, confirmed: true);
+        var effective = await Manuscripts.GetManuscriptAsync(_contentTarget, chapterId)
+            ?? throw new InvalidOperationException("The Core chapter manuscript was not found after reset.");
+        SynchronizeExternalEditorDocument(effective);
+        UpdateChapterMetrics(effective.PlainText);
+        var designedPages = DesignedPageIds;
+        if (_openCompositionId is Guid openCompositionId && !designedPages.Contains(openCompositionId))
+            _openCompositionId = designedPages.Count > 0 ? designedPages[0] : null;
+        _contentStatus = await EditionContent.GetChapterStatusAsync(Project.Id, editionId, chapterId);
+        _previewRefreshSignal++;
+        _pageWorkspaceRefreshSignal++;
+        StateHasChanged();
+    }
+
+    private string EditorHref(Guid chapterId) => EditorHref(chapterId, _contentTarget.EditionId);
+
+    private string EditorHref(Guid chapterId, Guid? editionId)
+    {
+        if (Project is null)
+            return string.Empty;
+        var path = $"/projects/{Project.Slug}/editor/{chapterId}";
+        return editionId is Guid id ? $"{path}?edition={id:D}" : path;
     }
 
     private void CloseManuscriptImageModal() => _manuscriptImageModalOpen = false;
@@ -1322,6 +1468,7 @@ else
                 chapterId,
                 expectedRevision);
             var result = await Manuscripts.ReplaceDocumentAsync(
+                _contentTarget,
                 chapterId,
                 expectedRevision,
                 document);
@@ -1333,8 +1480,10 @@ else
                 {
                     _current = updated;
                     ReplaceCachedChapter(updated);
-                    RecordEditorSave(updated);
-                    UpdateChapterMetrics(updated.PlainText);
+                    RecordEditorSave(result.Snapshot);
+                    UpdateChapterMetrics(result.Snapshot.PlainText);
+                    if (_contentTarget.EditionId is Guid statusEditionId && Project is not null)
+                        _contentStatus = await EditionContent.GetChapterStatusAsync(Project.Id, statusEditionId, chapterId);
                     _previewRefreshSignal++;
                 }
             }
@@ -1368,7 +1517,7 @@ else
         }
         catch (ManuscriptRevisionConflictException ex)
         {
-            var current = await Manuscripts.GetManuscriptAsync(chapterId)
+            var current = await Manuscripts.GetManuscriptAsync(_contentTarget, chapterId)
                 ?? throw new InvalidOperationException(
                     "The chapter was deleted while resolving an editing conflict.");
             _saveState = SaveState.SaveFailed;
@@ -1465,7 +1614,7 @@ else
     }
 
     private EditorDocumentKey EditorKey(EditorDocumentState document) =>
-        new(document.ChapterId, document.RenderVersion, _styleCatalogVersion);
+        new(document.ChapterId, _contentTarget.StorageKey, document.RenderVersion, _styleCatalogVersion);
 
     private async Task OnManuscriptStylesChangedAsync()
     {
@@ -1514,6 +1663,15 @@ else
         _chatPaneCollapsed = preferences.ChatCollapsed;
         _rightPaneCollapsed = preferences.MemoryCollapsed;
         _workspacePreferencesProjectId = projectId;
+        if (EditionId is null
+            && preferences.ContentTarget.StartsWith("Edition:", StringComparison.OrdinalIgnoreCase)
+            && Guid.TryParse(preferences.ContentTarget["Edition:".Length..], out var rememberedEditionId)
+            && _enabledEditions.Any(item => item.EditionId == rememberedEditionId)
+            && _activeChapterId is Guid activeChapterId)
+        {
+            Nav.NavigateTo(EditorHref(activeChapterId, rememberedEditionId), replace: true);
+            return;
+        }
         SelectInitialModeForCurrentChapter();
         await ApplyEditorReadOnlyAsync(EditorReadOnly);
         if (_mode == EditorMode.Review && !ContestReviewActive)
@@ -3297,8 +3455,12 @@ else
 
             _current = fresh;
             ReplaceCachedChapter(fresh);
-            SynchronizeExternalEditorDocument(fresh);
-            UpdateChapterMetrics(fresh.PlainText);
+            var effective = await Manuscripts.GetManuscriptAsync(_contentTarget, chapterId)
+                ?? throw new InvalidOperationException("The selected chapter manuscript was not found.");
+            SynchronizeExternalEditorDocument(effective);
+            UpdateChapterMetrics(effective.PlainText);
+            if (_contentTarget.EditionId is Guid statusEditionId && Project is not null)
+                _contentStatus = await EditionContent.GetChapterStatusAsync(Project.Id, statusEditionId, chapterId);
 
         }
         finally
@@ -3312,13 +3474,13 @@ else
         return true;
     }
 
-    private void InstallEditorDocument(Chapter chapter)
+    private void InstallEditorDocument(ManuscriptSnapshot snapshot)
     {
         var renderVersion = _editorDocument?.RenderVersion ?? 0;
         _editorDocument = new EditorDocumentState(
-            chapter.Id,
-            chapter.ManuscriptJson,
-            chapter.ManuscriptRevision,
+            snapshot.ChapterId,
+            ManuscriptCodec.Serialize(snapshot.Document),
+            snapshot.Revision,
             renderVersion);
     }
 
@@ -3355,39 +3517,40 @@ else
         StateHasChanged();
     }
 
-    private void SynchronizeExternalEditorDocument(Chapter chapter)
+    private void SynchronizeExternalEditorDocument(ManuscriptSnapshot snapshot)
     {
-        if (_editorDocument is not { } document || document.ChapterId != chapter.Id)
+        if (_editorDocument is not { } document || document.ChapterId != snapshot.ChapterId)
         {
             var renderVersion = (_editorDocument?.RenderVersion ?? 0) + 1;
             _editorDocument = new EditorDocumentState(
-                chapter.Id,
-                chapter.ManuscriptJson,
-                chapter.ManuscriptRevision,
+                snapshot.ChapterId,
+                ManuscriptCodec.Serialize(snapshot.Document),
+                snapshot.Revision,
                 renderVersion);
             return;
         }
 
-        if (document.ManuscriptRevision == chapter.ManuscriptRevision
-            && string.Equals(document.ManuscriptJson, chapter.ManuscriptJson, StringComparison.Ordinal))
+        var manuscriptJson = ManuscriptCodec.Serialize(snapshot.Document);
+        if (document.ManuscriptRevision == snapshot.Revision
+            && string.Equals(document.ManuscriptJson, manuscriptJson, StringComparison.Ordinal))
             return;
 
         _editorDocument = document with
         {
-            ManuscriptJson = chapter.ManuscriptJson,
-            ManuscriptRevision = chapter.ManuscriptRevision,
+            ManuscriptJson = manuscriptJson,
+            ManuscriptRevision = snapshot.Revision,
             RenderVersion = document.RenderVersion + 1,
         };
     }
 
-    private void RecordEditorSave(Chapter chapter)
+    private void RecordEditorSave(ManuscriptSnapshot snapshot)
     {
-        if (_editorDocument is { } document && document.ChapterId == chapter.Id)
+        if (_editorDocument is { } document && document.ChapterId == snapshot.ChapterId)
         {
             _editorDocument = document with
             {
-                ManuscriptJson = chapter.ManuscriptJson,
-                ManuscriptRevision = chapter.ManuscriptRevision,
+                ManuscriptJson = ManuscriptCodec.Serialize(snapshot.Document),
+                ManuscriptRevision = snapshot.Revision,
             };
         }
     }
@@ -3474,7 +3637,7 @@ else
         long ManuscriptRevision,
         long RenderVersion);
 
-    private readonly record struct EditorDocumentKey(Guid ChapterId, long Revision, long StyleCatalogVersion);
+    private readonly record struct EditorDocumentKey(Guid ChapterId, string Target, long Revision, long StyleCatalogVersion);
 
     private sealed record EditorWorkspacePreferences
     {
@@ -3482,6 +3645,7 @@ else
         public bool ReadFacing { get; init; }
         public bool ChatCollapsed { get; init; }
         public bool MemoryCollapsed { get; init; }
+        public string ContentTarget { get; init; } = "Core";
     }
 
     private sealed record ReviewProjection(

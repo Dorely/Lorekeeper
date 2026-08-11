@@ -109,6 +109,9 @@ The current application provides:
 - project-owned page setup, flowing Figures, Designed Pages, and structured
   cover scenes;
 - Core Book plus sparse paperback, EPUB ebook, and PDF ebook releases;
+- opt-in, chapter-level edition content in Editor with live Core inheritance,
+  copy-on-write snapshots, edition-owned Designed Pages, shared reusable Book
+  Text Styles, reset-to-Core, and Publish difference/diagnostic links;
 - a Lorekeeper-owned Rust renderer with contained assets, deterministic PDF
   output, embedded fonts, page maps, and independent post-write inspection;
 - Generic and Amazon KDP PDF 1.7 paperback output;
@@ -119,8 +122,8 @@ The current application provides:
 - private Core reading-PDF generation and preview;
 - conversational Publish assistance and shared page/cover composition tools.
 
-This foundation is broad enough to keep. The remaining work is chiefly source
-variation, human UI completeness, artifact inspection, external-standard
+This foundation is broad enough to keep. The remaining work is chiefly human UI
+completeness, artifact inspection, external-standard
 validation integration, profile coverage, and native release verification—not
 a replacement renderer.
 
@@ -130,16 +133,18 @@ Status: `Planned`
 
 ### 1. Edition-specific authoring in Editor
 
-- Add an Editor target for Core manuscript versus a selected release.
-- Let authors make release-specific content and styling changes there with clear
-  inheritance and a way to return to Core content.
-- Ensure every export and preview uses the content selected for that release.
-- Keep the Publish workspace focused on product configuration, cover design,
-  diagnostics, and artifacts. Publish may navigate the user to the appropriate
-  Editor target but does not edit chapter content itself.
+Status: `Implemented`
 
-The detailed persistence, conflict, and composition contracts will be planned
-with this feature; this roadmap fixes only its product ownership and outcome.
+- Editor selects Core Book or one release whose edition content is enabled.
+- Chapters inherit Core until their first text/layout mutation, then keep a
+  frozen release snapshot and edition-owned Designed Pages.
+- Reset returns one chapter to Core without deleting project images or shared
+  Book Text Styles.
+- Editor assistant, Review Edits, contests, revision workers, previews, search,
+  Figures, and Pages carry the protected target; Publish reports bounded
+  differences and layout diagnostics with Editor deep links.
+- Exports, render preparation, and fingerprints consume effective release
+  content. Publish does not edit edition manuscript/page layouts.
 
 Gate: the same project can intentionally produce different paperback, EPUB, and
 PDF ebook content without copying the entire book or changing Core content.
@@ -149,8 +154,9 @@ PDF ebook content without copying the entire book or changing Core content.
 - Expose release matter additions, exclusions, replacements, and ordering.
 - Expose opening and ending image placement overrides.
 - Expose release content inclusion and reading order.
-- Make release-specific Book Text Style customization available from the
-  release-aware Editor workflow.
+- Keep project-wide Book Text Styles reusable from Core and every release;
+  release-specific appearance comes from edition manuscript references and
+  direct formatting in Editor.
 - Provide an explicit path to create and edit a release layout when its target
   geometry differs from the authoring layout.
 - Let every customized section return to its inherited Core value.

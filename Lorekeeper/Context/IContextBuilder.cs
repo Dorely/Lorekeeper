@@ -2,6 +2,7 @@ using System.Text.Json;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Manuscripts;
 
 namespace Lorekeeper.Context;
 
@@ -19,7 +20,8 @@ public sealed record ContextBuildRequest(
     Chapter? ActiveChapter = null,
     string UserMessage = "",
     ContextBuildPurpose Purpose = ContextBuildPurpose.Editor,
-    string? OperatingRules = null);
+    string? OperatingRules = null,
+    EditorContentTarget ContentTarget = default);
 
 /// <summary>
 /// Builds the visible Context Feed and the literal system-role message. The request is

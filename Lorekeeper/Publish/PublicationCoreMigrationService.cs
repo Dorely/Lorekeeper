@@ -102,6 +102,7 @@ public sealed class PublicationCoreMigrationService(
             .Include(item => item.CoverDesign)
             .OrderBy(item => item.CreatedAt).ThenBy(item => item.Id)
             .ToListAsync(cancellationToken);
+        await ApplyLegacyTypographyAsync(db, releases, cancellationToken);
         var source = releases.FirstOrDefault(item => item.Id == legacyDefaultId) ?? releases.FirstOrDefault();
         var briefLanguage = await db.BookBriefs.AsNoTracking().Where(item => item.ProjectId == project.Id)
             .Select(item => item.LanguageLocale).SingleOrDefaultAsync(cancellationToken);
@@ -345,8 +346,6 @@ public sealed class PublicationCoreMigrationService(
         Add(fields, PublicationEditionOverrideField.PageWidthInches, setup is not null && release.PageWidthInches != setup.PageWidthInches);
         Add(fields, PublicationEditionOverrideField.PageHeightInches, setup is not null && release.PageHeightInches != setup.PageHeightInches);
         Add(fields, PublicationEditionOverrideField.PageMarginInches, setup is not null && release.PageMarginInches != setup.PageMarginInches);
-        Add(fields, PublicationEditionOverrideField.BodyFontSizePoints, setup is not null && release.BodyFontSizePoints != setup.BodyFontSizePoints);
-        Add(fields, PublicationEditionOverrideField.BodyLineHeight, setup is not null && release.BodyLineHeight != setup.BodyLineHeight);
         return fields.ToArray();
     }
 
@@ -409,6 +408,7 @@ public sealed class PublicationCoreMigrationService(
         CancellationToken cancellationToken)
     {
         var releases = await db.PublicationEditions.AsNoTracking().OrderBy(item => item.Id).ToListAsync(cancellationToken);
+        await ApplyLegacyTypographyAsync(db, releases, cancellationToken);
         var resolver = new PublicationEffectiveConfigurationResolver(db, readPdfPresentation: false);
         var projections = new List<object>(releases.Count);
         foreach (var stored in releases)
@@ -448,4 +448,29 @@ public sealed class PublicationCoreMigrationService(
         var json = JsonSerializer.Serialize(projections, ManuscriptCodec.JsonOptions);
         return Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json)));
     }
+
+    private static async Task ApplyLegacyTypographyAsync(
+        AppDbContext db,
+        IReadOnlyCollection<PublicationEdition> releases,
+        CancellationToken cancellationToken)
+    {
+        if (releases.Count == 0)
+            return;
+        var connection = db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+            await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+        command.CommandText = "SELECT Id, BodyFontSizePoints, BodyLineHeight FROM PublicationEditions";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var byId = releases.ToDictionary(item => item.Id);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (!Guid.TryParse(reader.GetString(0), out var id) || !byId.TryGetValue(id, out var release))
+                continue;
+            release.BodyFontSizePoints = reader.GetDouble(1);
+            release.BodyLineHeight = reader.GetDouble(2);
+        }
+    }
+
 }

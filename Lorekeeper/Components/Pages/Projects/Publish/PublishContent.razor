@@ -6,6 +6,7 @@
 @inject IPublishService Publishing
 @inject IPublicationBookService Books
 @inject IPublicationEditionService Releases
+@inject IEditionContentService EditionContent
 @inject IPublicationCoverService Covers
 @inject IPublicationPreparationService Preparation
 @inject IPublicationRenderService Renders
@@ -184,6 +185,8 @@ else
     private bool _releaseContentDirty;
     private bool _releaseContentOpen;
     private bool _releaseDesignOpen;
+    private IReadOnlyList<EditionChapterDifference> _editionDifferences = [];
+    private bool _editionContentBusy;
     private Guid? _editingCoreMatterId;
     private string _coreMatterTitle = string.Empty;
     private string _coreMatterJson = string.Empty;
@@ -376,6 +379,9 @@ else
         _preparations = await Preparation.ListAsync(Project.Id, PublicationTargetKind.Release, releaseId, _dispose.Token);
         _artifacts = await Renders.ListArtifactsAsync(Project.Id, releaseId, _dispose.Token);
         _releases = await Releases.ListAsync(Project.Id, _dispose.Token);
+        _editionDifferences = _workspace.Edition.EditionSpecificContentEnabled
+            ? await EditionContent.ReadDifferencesAsync(Project.Id, releaseId, cancellationToken: _dispose.Token)
+            : [];
         if (generation != _targetLoadGeneration)
             return;
         _outputsLoaded = true;
@@ -484,6 +490,40 @@ else
             @ArtifactDownloads(ReleaseArtifactKinds(_workspace.Edition.Format))
         </section>
 
+        <section class="workspace-card edition-content-card">
+            <header>
+                <div><span class="step">02</span><div><h2>Edition-specific content</h2><p>Keep this release live with Core Book, or opt in to chapter-level edition copies edited in Editor.</p></div></div>
+                <label class="edition-content-switch"><input type="checkbox" checked="@_workspace!.Edition.EditionSpecificContentEnabled" disabled="@(_editionContentBusy || _workspace.Edition.Status == PublicationEditionStatus.Archived)" @onchange="ToggleEditionContentAsync" /><span>Enable</span></label>
+            </header>
+            @if (_workspace.Edition.EditionSpecificContentEnabled)
+            {
+                <div class="edition-content-summary @(_editionDifferences.Count > 0 ? "divergent" : "inherited")">
+                    <strong>@(_editionDifferences.Count > 0 ? $"{_editionDifferences.Count} chapter(s) differ from Core Book" : "All chapters currently inherit Core Book")</strong>
+                    <a class="btn btn-sm btn-outline-primary" href="@EditionEditorHref(_editionDifferences.FirstOrDefault()?.ChapterId)">Edit edition content</a>
+                </div>
+                @if (_editionDifferences.Count > 0)
+                {
+                    <div class="edition-difference-list">
+                        @foreach (var difference in _editionDifferences)
+                        {
+                            <div class="edition-difference-item">
+                                <a href="@DifferenceEditorHref(difference)">
+                                    <strong>@difference.ChapterTitle</strong>
+                                    <span>@DifferenceSummary(difference)</span>
+                                </a>
+                                @foreach (var issue in difference.LayoutIssues)
+                                {
+                                    <a class="edition-layout-issue" href="@EditionEditorHref(difference.ChapterId, "pages", issue.CompositionId, issue.ObjectId)">
+                                        <span>@issue.Message</span><strong>Fix in Pages</strong>
+                                    </a>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            }
+        </section>
+
         <section class="workspace-card"><header><div><span class="step">01</span><div><h2>Release setup</h2><p>Only settings that belong to this publication product.</p></div></div><button class="btn btn-sm btn-primary" disabled="@((!_releaseDirty && !_releaseContentDirty) || _busy)" @onclick="SaveReleaseAsync">Save release</button></header>
             <div class="form-grid">
                 <label class="field"><span>Release name</span><input class="form-control" @bind="_releaseDraft.Name" @bind:after="MarkReleaseDirty" /></label>
@@ -532,15 +572,13 @@ else
                     </div>
                 </section>
             }
-            <section class="workspace-card"><header><div><span class="step">@(_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf ? "04" : "03")</span><div><h2>Page and text design</h2><p>@(_releaseDesignOpen ? "Customized for this release." : "Uses Core Book page setup and Book Text Styles.")</p></div></div><button class="btn btn-sm btn-outline-primary" @onclick="ToggleReleaseDesign">@(_releaseDesignOpen ? "Use Core Book design" : "Customize for this release")</button></header>
+            <section class="workspace-card"><header><div><span class="step">@(_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf ? "04" : "03")</span><div><h2>Page geometry</h2><p>@(_releaseDesignOpen ? "Page size and margins are customized for this release." : "Uses Core Book page size and margins. Edition-specific typography is applied in Editor.")</p></div></div><button class="btn btn-sm btn-outline-primary" @onclick="ToggleReleaseDesign">@(_releaseDesignOpen ? "Use Core Book geometry" : "Customize geometry")</button></header>
                 @if (_releaseDesignOpen)
                 {
                     <div class="form-grid">
                         <label class="field"><span>Page width (in)</span><input class="form-control" type="number" min="3" max="18" step="0.01" @bind="_releaseDraft.PageWidthInches" @bind:after="MarkReleaseDirty" /></label>
                         <label class="field"><span>Page height (in)</span><input class="form-control" type="number" min="3" max="24" step="0.01" @bind="_releaseDraft.PageHeightInches" @bind:after="MarkReleaseDirty" /></label>
                         <label class="field"><span>Margin (in)</span><input class="form-control" type="number" min="0.25" max="3" step="0.01" @bind="_releaseDraft.PageMarginInches" @bind:after="MarkReleaseDirty" /></label>
-                        <label class="field"><span>Body text (pt)</span><input class="form-control" type="number" min="7" max="24" step="0.25" @bind="_releaseDraft.BodyFontSizePoints" @bind:after="MarkReleaseDirty" /></label>
-                        <label class="field"><span>Line spacing</span><input class="form-control" type="number" min="1" max="3" step="0.05" @bind="_releaseDraft.BodyLineHeight" @bind:after="MarkReleaseDirty" /></label>
                     </div>
                 }
             </section>
@@ -858,8 +896,6 @@ else
                     PageWidthInches: DesignValue(PublicationEditionOverrideField.PageWidthInches, _releaseDraft.PageWidthInches),
                     PageHeightInches: DesignValue(PublicationEditionOverrideField.PageHeightInches, _releaseDraft.PageHeightInches),
                     PageMarginInches: DesignValue(PublicationEditionOverrideField.PageMarginInches, _releaseDraft.PageMarginInches),
-                    BodyFontSizePoints: DesignValue(PublicationEditionOverrideField.BodyFontSizePoints, _releaseDraft.BodyFontSizePoints),
-                    BodyLineHeight: DesignValue(PublicationEditionOverrideField.BodyLineHeight, _releaseDraft.BodyLineHeight),
                     ResetFields: reset);
                 revision = (await Releases.PatchOverridesAsync(Project.Id, id, patch)).Revision;
             }
@@ -876,6 +912,77 @@ else
         }
         catch (Exception exception) { _error = exception.Message; }
         finally { _busy = false; }
+    }
+
+    private async Task ToggleEditionContentAsync(ChangeEventArgs args)
+    {
+        if (Project is null || _workspace is null || _selectedReleaseId is not Guid editionId)
+            return;
+        var enabled = args.Value is bool value && value;
+        var confirmDiscard = false;
+        if (!enabled && _editionDifferences.Count > 0)
+        {
+            confirmDiscard = await JS.InvokeAsync<bool>("confirm", "Disable edition-specific content? This permanently discards every edition chapter copy, edition-only Designed Page, and pending edition review. Saved Book Text Styles and project images are kept.");
+            if (!confirmDiscard)
+                return;
+        }
+        _editionContentBusy = true;
+        _error = null;
+        try
+        {
+            if (_releaseDirty || _releaseContentDirty)
+                await SaveReleaseAsync();
+            await EditionContent.SetEnabledAsync(Project.Id, editionId, _workspace.Edition.Revision, enabled, confirmDiscard, _dispose.Token);
+            await SelectReleaseAsync(editionId);
+            _notice = enabled
+                ? "Edition-specific content is ready in Editor. Chapters continue inheriting Core until their first real edit."
+                : "Edition-specific content was discarded. This release now inherits Core Book chapters.";
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+            await SelectReleaseAsync(editionId);
+        }
+        finally
+        {
+            _editionContentBusy = false;
+        }
+    }
+
+    private string EditionEditorHref(Guid? chapterId, string? mode = null, Guid? compositionId = null, Guid? objectId = null)
+    {
+        if (Project is null || _selectedReleaseId is not Guid editionId)
+            return string.Empty;
+        chapterId ??= _workspace?.Sections.SelectMany(section => section.Chapters).FirstOrDefault()?.Id;
+        var path = chapterId is Guid id
+            ? $"/projects/{Project.Slug}/editor/{id}"
+            : $"/projects/{Project.Slug}/editor";
+        var query = new List<string> { $"edition={editionId:D}" };
+        if (!string.IsNullOrWhiteSpace(mode)) query.Add($"mode={Uri.EscapeDataString(mode)}");
+        if (compositionId.HasValue) query.Add($"composition={compositionId:D}");
+        if (objectId.HasValue) query.Add($"object={objectId:D}");
+        return $"{path}?{string.Join('&', query)}";
+    }
+
+    private static string DifferenceSummary(EditionChapterDifference difference)
+    {
+        var parts = new List<string>();
+        if (difference.TextEdited > 0) parts.Add($"{difference.TextEdited} text edit(s)");
+        if (difference.Added > 0) parts.Add($"{difference.Added} added");
+        if (difference.Removed > 0) parts.Add($"{difference.Removed} removed");
+        if (difference.Moved > 0) parts.Add($"{difference.Moved} moved");
+        if (difference.Figures > 0) parts.Add($"{difference.Figures} Figure change(s)");
+        if (difference.DesignedPages > 0) parts.Add($"{difference.DesignedPages} Designed Page change(s)");
+        if (difference.StyleReferences + difference.DirectFormatting > 0) parts.Add("styling differs");
+        return parts.Count == 0 ? "Structured content differs" : string.Join(" · ", parts);
+    }
+
+    private string DifferenceEditorHref(EditionChapterDifference difference)
+    {
+        var compositionId = difference.ChangedCompositionIds.FirstOrDefault();
+        return compositionId != Guid.Empty
+            ? EditionEditorHref(difference.ChapterId, "pages", compositionId)
+            : EditionEditorHref(difference.ChapterId);
     }
 
     private string? Value(PublicationEditionOverrideField field, string value) => _releaseOverrides.Contains(field) ? value : null;
@@ -907,8 +1014,7 @@ else
 
     private static bool IsDesignOverride(PublicationEditionOverrideField field) => field is
         PublicationEditionOverrideField.PageWidthInches or PublicationEditionOverrideField.PageHeightInches
-        or PublicationEditionOverrideField.PageMarginInches or PublicationEditionOverrideField.BodyFontSizePoints
-        or PublicationEditionOverrideField.BodyLineHeight;
+        or PublicationEditionOverrideField.PageMarginInches;
 
     private async Task SavePendingAsync()
     {
@@ -1178,7 +1284,7 @@ else
         public string Name { get; set; } = ""; public PublicationVendor Vendor { get; set; } public string Isbn { get; set; } = ""; public PublicationPaper Paper { get; set; } public PublicationInk Ink { get; set; } public bool AllowDesignedPageOverrides { get; set; }
         public string Title { get; set; } = ""; public string Subtitle { get; set; } = ""; public string Author { get; set; } = ""; public string Language { get; set; } = ""; public string Publisher { get; set; } = ""; public string Copyright { get; set; } = ""; public string Description { get; set; } = "";
         public bool IncludeTableOfContents { get; set; } public bool IncludeVisibleTableOfContents { get; set; } public bool IncludeActSynopses { get; set; } public bool IncludeChapterSynopses { get; set; } public bool IncludeActHeadings { get; set; } public bool IncludeChapterHeadings { get; set; } public bool NumberActs { get; set; } public bool NumberChapters { get; set; }
-        public double PageWidthInches { get; set; } public double PageHeightInches { get; set; } public double PageMarginInches { get; set; } public double BodyFontSizePoints { get; set; } public double BodyLineHeight { get; set; }
-        public static ReleaseDraft From(PublicationEditionView item) => new() { Name = item.Name, Vendor = item.Vendor, Isbn = item.Isbn, Paper = item.Paper, Ink = item.Ink, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, Title = item.TitleOverride, Subtitle = item.Subtitle, Author = item.Author, Language = PublicationLanguage.Normalize(item.Language), Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, PageWidthInches = item.PageWidthInches, PageHeightInches = item.PageHeightInches, PageMarginInches = item.PageMarginInches, BodyFontSizePoints = item.BodyFontSizePoints, BodyLineHeight = item.BodyLineHeight };
+        public double PageWidthInches { get; set; } public double PageHeightInches { get; set; } public double PageMarginInches { get; set; }
+        public static ReleaseDraft From(PublicationEditionView item) => new() { Name = item.Name, Vendor = item.Vendor, Isbn = item.Isbn, Paper = item.Paper, Ink = item.Ink, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, Title = item.TitleOverride, Subtitle = item.Subtitle, Author = item.Author, Language = PublicationLanguage.Normalize(item.Language), Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, PageWidthInches = item.PageWidthInches, PageHeightInches = item.PageHeightInches, PageMarginInches = item.PageMarginInches };
     }
 }

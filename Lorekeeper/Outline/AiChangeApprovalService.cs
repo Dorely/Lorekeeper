@@ -156,6 +156,9 @@ public sealed class AiChangeApprovalService(
         var aggregate = chapterBodyChanges[0];
         if (aggregate.Id != request.ChangeId)
             throw new InvalidOperationException("The chapter-body review changed. Refresh Review mode and try again.");
+        if (aggregate.Batch.ContentTargetEditionId.HasValue)
+            throw new InvalidOperationException(
+                "Line-by-line review is unavailable for edition-specific content. Keep or reject the complete structured manuscript change.");
 
         var chapter = await chapters.GetAsync(chapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
@@ -192,6 +195,7 @@ public sealed class AiChangeApprovalService(
         if (!string.Equals(newCurrentBody, chapter.PlainText, StringComparison.Ordinal))
         {
             await manuscripts.ReplaceDocumentAsync(
+                EditorContentTarget.Core,
                 chapter.Id,
                 chapter.ManuscriptRevision,
                 ManuscriptCodec.ReparsePreservingBlockIds(chapter.Manuscript, newCurrentBody),
@@ -394,7 +398,10 @@ public sealed class AiChangeApprovalService(
 
         try
         {
-            await ApplyStoredToolChangeAsync(batch.ProjectId, change, cancellationToken);
+            var contentTarget = EditorContentTarget.From(
+                Enum.TryParse<EditorContentTargetKind>(batch.ContentTargetKind, out var kind) ? kind : EditorContentTargetKind.Core,
+                batch.ContentTargetEditionId);
+            await ApplyStoredToolChangeAsync(batch.ProjectId, contentTarget, change, cancellationToken);
             change.Status = AiChangeStatus.Applied;
             change.ErrorMessage = null;
             change.UpdatedAt = DateTime.UtcNow;
@@ -412,7 +419,7 @@ public sealed class AiChangeApprovalService(
         }
     }
 
-    private async Task ApplyStoredToolChangeAsync(Guid projectId, AiChange change, CancellationToken cancellationToken)
+    private async Task ApplyStoredToolChangeAsync(Guid projectId, EditorContentTarget contentTarget, AiChange change, CancellationToken cancellationToken)
     {
         var afterJson = AiChangeReviewDrafts.EffectiveAfterJson(change);
         switch (change.ToolName)
@@ -454,7 +461,7 @@ public sealed class AiChangeApprovalService(
             {
                 var before = ReadRequired<ChapterManuscriptChange>(change.BeforeJson);
                 var after = ReadRequired<ChapterManuscriptChange>(afterJson);
-                var current = await chapters.GetAsync(after.Id, cancellationToken)
+                var current = await manuscripts.GetManuscriptAsync(contentTarget, after.Id, cancellationToken)
                     ?? throw new InvalidOperationException($"Chapter {after.Id} not found.");
                 if (!CurrentManuscriptMatches(current, before))
                 {
@@ -495,6 +502,7 @@ public sealed class AiChangeApprovalService(
                 }
 
                 await compositions.CreateDesignedPageAsync(
+                    contentTarget,
                     projectId,
                     after.Id,
                     arguments.BlockIndex,
@@ -524,12 +532,13 @@ public sealed class AiChangeApprovalService(
                 var after = ReadRequired<ChapterManuscriptChange>(afterJson);
                 if (before is not null)
                 {
-                    var current = await chapters.GetAsync(after.Id, cancellationToken)
+                    var current = await manuscripts.GetManuscriptAsync(contentTarget, after.Id, cancellationToken)
                         ?? throw new InvalidOperationException($"Chapter {after.Id} not found.");
                     if (!CurrentManuscriptMatches(current, before))
                         throw new InvalidOperationException("The chapter body changed after this AI edit was staged. Reject this change and rerun the edit against the current chapter text.");
                 }
                 await manuscripts.ReplaceDocumentAsync(
+                    contentTarget,
                     after.Id,
                     before?.Revision ?? checked(after.Revision - 1),
                     after.Manuscript,
@@ -1193,9 +1202,9 @@ public sealed class AiChangeApprovalService(
         changes.UpdateBatch(batch);
     }
 
-    private static bool CurrentManuscriptMatches(Chapter current, ChapterManuscriptChange expected) =>
-        current.ManuscriptRevision == expected.Revision
-        && ManuscriptCodec.ContentEquals(current.Manuscript, expected.Manuscript);
+    private static bool CurrentManuscriptMatches(ManuscriptSnapshot current, ChapterManuscriptChange expected) =>
+        current.Revision == expected.Revision
+        && ManuscriptCodec.ContentEquals(current.Document, expected.Manuscript);
 
     private static bool IsUnresolvedReviewChange(AiChange change) =>
         change.Status is AiChangeStatus.Pending or AiChangeStatus.Conflict;

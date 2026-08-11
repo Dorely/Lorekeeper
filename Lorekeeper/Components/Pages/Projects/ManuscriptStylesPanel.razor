@@ -95,7 +95,7 @@
         @foreach (var style in _styles)
         {
             <article class="manuscript-style-card" @key="style.Id">
-                <div><strong>@style.Name</strong><span>@StyleSummary(style)</span></div>
+                <div><strong>@style.Name</strong><span>@StyleSummary(style) · @UsageLabel(style)</span></div>
                 <div class="manuscript-style-actions">
                     <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => Edit(style)">Edit</button>
                     <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(style)">Delete</button>
@@ -113,6 +113,7 @@
 
     private List<ManuscriptStyleView> _styles = [];
     private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = [];
+    private IReadOnlyDictionary<Guid, int> _usageCounts = new Dictionary<Guid, int>();
     private Guid? _loadedProjectId;
     private Guid? _editingId;
     private long? _expectedRevision;
@@ -153,6 +154,14 @@
             if (BeforeChange is not null && !await BeforeChange())
             {
                 _error = "Save the current manuscript draft before changing book styles.";
+                return;
+            }
+            if (_editingId is Guid editingId
+                && _usageCounts.GetValueOrDefault(editingId) > 0
+                && !await JS.InvokeAsync<bool>(
+                    "confirm",
+                    $"This shared Book Text Style is used {_usageCounts[editingId]} time(s) across Core Book and release content. Save changes everywhere it is used?"))
+            {
                 return;
             }
             await Styles.UpsertAsync(
@@ -219,7 +228,9 @@
             _error = null;
             if (!await JS.InvokeAsync<bool>(
                 "confirm",
-                $"Delete book text style '{style.Name}'?"))
+                _usageCounts.GetValueOrDefault(style.Id) > 0
+                    ? $"Book Text Style '{style.Name}' is used {_usageCounts[style.Id]} time(s) across Core Book and release content. Delete it?"
+                    : $"Delete book text style '{style.Name}'?"))
             {
                 return;
             }
@@ -238,8 +249,17 @@
         }
     }
 
-    private async Task ReloadAsync() =>
+    private async Task ReloadAsync()
+    {
         _styles = (await Styles.ListAsync(ProjectId)).ToList();
+        _usageCounts = await Styles.GetUsageCountsAsync(ProjectId);
+    }
+
+    private string UsageLabel(ManuscriptStyleView style)
+    {
+        var count = _usageCounts.GetValueOrDefault(style.Id);
+        return count == 1 ? "used once" : $"used {count} times";
+    }
 
     private void ResetForm()
     {

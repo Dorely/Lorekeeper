@@ -9,6 +9,7 @@ namespace Lorekeeper.Manuscripts;
 public interface IManuscriptStyleService
 {
     Task<IReadOnlyList<ManuscriptStyleView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyDictionary<Guid, int>> GetUsageCountsAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<ManuscriptStyleView> UpsertAsync(
         Guid projectId,
         ManuscriptStyleInput input,
@@ -74,6 +75,47 @@ public sealed class ManuscriptStyleService(
             .ToListAsync(cancellationToken))
         .Select(ToView)
         .ToList();
+
+    public async Task<IReadOnlyDictionary<Guid, int>> GetUsageCountsAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        var styles = await db.ManuscriptStyleDefinitions.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .Select(item => new { item.Id, item.SemanticRole })
+            .ToListAsync(cancellationToken);
+        var countsByRole = styles.ToDictionary(item => item.SemanticRole, _ => 0, StringComparer.OrdinalIgnoreCase);
+        var documents = new List<string>();
+        documents.AddRange(await db.Chapters.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .Select(item => item.ManuscriptJson)
+            .ToListAsync(cancellationToken));
+        documents.AddRange(await db.PublicationEditionChapterOverrides.AsNoTracking()
+            .Where(item => item.Edition.ProjectId == projectId)
+            .Select(item => item.ManuscriptJson)
+            .ToListAsync(cancellationToken));
+        documents.AddRange(await db.PageCompositions.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .Select(item => item.SemanticManuscriptJson)
+            .ToListAsync(cancellationToken));
+        documents.AddRange(await db.PublicationBookMatter.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .Select(item => item.ManuscriptJson)
+            .ToListAsync(cancellationToken));
+        documents.AddRange(await db.PublicationMatter.AsNoTracking()
+            .Where(item => item.Edition.ProjectId == projectId && !item.IsExcluded)
+            .Select(item => item.ManuscriptJson)
+            .ToListAsync(cancellationToken));
+        foreach (var json in documents.Where(item => !string.IsNullOrWhiteSpace(item)))
+        {
+            foreach (var block in ManuscriptCodec.Deserialize(json).Content)
+            {
+                if (countsByRole.ContainsKey(block.StyleRole))
+                    countsByRole[block.StyleRole]++;
+            }
+        }
+        return styles.ToDictionary(item => item.Id, item => countsByRole[item.SemanticRole]);
+    }
 
     public async Task<ManuscriptStyleView> UpsertAsync(
         Guid projectId,
@@ -362,6 +404,10 @@ public sealed class ManuscriptStyleService(
                 .AsNoTracking()
                 .Where(chapter => chapter.ProjectId == projectId)
                 .Select(chapter => chapter.ManuscriptJson)
+                .Concat(db.PublicationEditionChapterOverrides
+                    .AsNoTracking()
+                    .Where(item => item.Edition.ProjectId == projectId)
+                    .Select(item => item.ManuscriptJson))
                 .Concat(db.PublicationMatter
                     .AsNoTracking()
                     .Where(matter => matter.Edition.ProjectId == projectId)
@@ -379,20 +425,6 @@ public sealed class ManuscriptStyleService(
         }
         if (isUsed)
             throw new InvalidOperationException("The Book Text Style is still used by manuscript or publication-matter content.");
-        var mappedEditionNames = await db.PublicationEditionStyleMappings
-            .AsNoTracking()
-            .Where(mapping =>
-                mapping.ManuscriptStyleDefinitionId == styleId
-                && mapping.Edition.ProjectId == projectId)
-            .Select(mapping => mapping.Edition.Name)
-            .Distinct()
-            .OrderBy(name => name)
-            .ToListAsync(cancellationToken);
-        if (mappedEditionNames.Count > 0)
-        {
-            throw new InvalidOperationException(
-                $"Remove this Book Text Style's edition mappings before deleting it. Referenced by: {string.Join(", ", mappedEditionNames)}.");
-        }
         return style;
     }
 

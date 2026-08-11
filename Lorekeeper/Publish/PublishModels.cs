@@ -83,14 +83,12 @@ public sealed record PublishWorkspaceView(
     IReadOnlyList<PublishSectionView> Sections,
     IReadOnlyList<PublicationImagePlacementView> Placements,
     IReadOnlyList<PublicationMatterView> Matter,
-    IReadOnlyList<PublicationEditionStyleMappingView> StyleMappings,
     string SourceFingerprint)
 {
     public IReadOnlySet<PublicationEditionOverrideField> OverrideFields { get; init; } = new HashSet<PublicationEditionOverrideField>();
     public bool HasContentOverrides { get; init; }
     public bool HasMatterOverrides { get; init; }
     public bool HasPlacementOverrides { get; init; }
-    public bool HasStyleOverrides { get; init; }
 }
 
 public sealed record PublicationEditionSummary(
@@ -146,41 +144,8 @@ public sealed record PublicationEditionView(
     bool AllowDesignedPageOverrides)
 {
     public bool InheritsCoreCover { get; init; }
+    public bool EditionSpecificContentEnabled { get; init; }
 }
-
-public sealed record PublicationEditionUpdate(
-    string TitleOverride,
-    string Subtitle,
-    string Author,
-    string Language,
-    string Publisher,
-    string Copyright,
-    string Isbn,
-    string Description,
-    bool IncludeTableOfContents,
-    bool IncludeVisibleTableOfContents,
-    bool IncludeActSynopses,
-    bool IncludeChapterSynopses,
-    bool IncludeActHeadings,
-    bool IncludeChapterHeadings,
-    bool NumberActs,
-    bool NumberChapters,
-    PublishTitlePageMode TitlePageMode,
-    double PageWidthInches,
-    double PageHeightInches,
-    double PageMarginInches,
-    double BodyFontSizePoints,
-    double BodyLineHeight,
-    long ExpectedRevision,
-    string Name,
-    PublicationEditionFormat Format,
-    PublicationVendor Vendor,
-    string VendorProfileVersion,
-    PublicationBinding Binding,
-    PublicationPaper Paper,
-    PublicationInk Ink,
-    bool Bleed,
-    bool AllowDesignedPageOverrides);
 
 public sealed record PublicationEditionCreate(
     string Name,
@@ -214,8 +179,6 @@ public sealed record PublicationReleaseOverridePatch(
     double? PageWidthInches = null,
     double? PageHeightInches = null,
     double? PageMarginInches = null,
-    double? BodyFontSizePoints = null,
-    double? BodyLineHeight = null,
     IReadOnlyList<PublicationEditionOverrideField>? ResetFields = null);
 
 public sealed record PublicationEditionCompareView(
@@ -263,19 +226,6 @@ public sealed record PublicationUserMatterInput(
     string ManuscriptJson,
     bool IsIncluded,
     int SortOrder,
-    long? ExpectedRevision = null);
-
-public sealed record PublicationEditionStyleMappingView(
-    Guid Id,
-    Guid ManuscriptStyleDefinitionId,
-    string StyleName,
-    string SemanticRole,
-    ManuscriptStyleProperties Override,
-    long Revision);
-
-public sealed record PublicationEditionStyleMappingInput(
-    Guid ManuscriptStyleDefinitionId,
-    ManuscriptStyleProperties Override,
     long? ExpectedRevision = null);
 
 public sealed record PublicationEditionAuditView(

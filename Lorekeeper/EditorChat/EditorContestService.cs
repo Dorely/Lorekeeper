@@ -43,6 +43,10 @@ public sealed class EditorContestService(
     private static readonly TimeSpan CandidateRawResponseSaveInterval = TimeSpan.FromMilliseconds(750);
     private const int CandidateRawResponseSaveChars = 512;
 
+    private static EditorContentTarget BatchTarget(ContestBatch batch) => EditorContentTarget.From(
+        Enum.TryParse<EditorContentTargetKind>(batch.ContentTargetKind, out var kind) ? kind : EditorContentTargetKind.Core,
+        batch.ContentTargetEditionId);
+
     public async Task<EditorContestSettings> GetSettingsAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
@@ -124,15 +128,20 @@ public sealed class EditorContestService(
 
         await DiscardInactiveContestBatchesAsync(projectId, cancellationToken);
 
+        var source = await manuscripts.GetManuscriptAsync(request.ContentTarget, chapter.Id, cancellationToken)
+            ?? throw new InvalidOperationException("The selected chapter manuscript was not found.");
+
         var batch = new ContestBatch
         {
             ProjectId = projectId,
             ConversationId = conversationId,
             AssistantMessageId = assistantMessageId,
             ChapterId = chapter.Id,
+            ContentTargetKind = request.ContentTarget.Kind.ToString(),
+            ContentTargetEditionId = request.ContentTarget.EditionId,
             ChapterTitle = chapter.Title,
-            OriginalManuscriptJson = chapter.ManuscriptJson,
-            AcceptedManuscriptJson = chapter.ManuscriptJson,
+            OriginalManuscriptJson = ManuscriptCodec.Serialize(source.Document),
+            AcceptedManuscriptJson = ManuscriptCodec.Serialize(source.Document),
             ContextSnapshotJson = JsonSerializer.Serialize(snapshot, JsonOptions),
             Status = ContestBatchStatus.Running,
         };
@@ -307,7 +316,9 @@ public sealed class EditorContestService(
 
         var chapter = await chapters.GetAsync(batch.ChapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {batch.ChapterId} not found.");
-        if (!ManuscriptCodec.IsPlainTextOnly(chapter.Manuscript)
+        var current = await manuscripts.GetManuscriptAsync(BatchTarget(batch), chapter.Id, cancellationToken)
+            ?? throw new InvalidOperationException("The contest manuscript target no longer exists.");
+        if (!ManuscriptCodec.IsPlainTextOnly(current.Document)
             || !ManuscriptCodec.IsPlainTextOnly(
                 ManuscriptCodec.Deserialize(candidate.ProposedManuscriptJson)))
         {
@@ -315,7 +326,7 @@ public sealed class EditorContestService(
                 "Line-by-line contest review is unavailable for semantically formatted manuscripts. "
                 + "Keep or reject the complete structured candidate.");
         }
-        if (!ManuscriptCodec.ContentEquals(chapter.Manuscript, EffectiveAcceptedManuscript(batch)))
+        if (!ManuscriptCodec.ContentEquals(current.Document, EffectiveAcceptedManuscript(batch)))
             throw new InvalidOperationException("The chapter changed outside Contest Review. Finish or restart the contest before continuing.");
 
         if (!TryBuildCandidateDiff(batch, candidate, out var diff))
@@ -348,10 +359,11 @@ public sealed class EditorContestService(
         contests.UpdateBatch(batch);
 
         var acceptedDocument = ManuscriptCodec.Deserialize(batch.AcceptedManuscriptJson);
-        if (!ManuscriptCodec.ContentEquals(chapter.Manuscript, acceptedDocument))
+        if (!ManuscriptCodec.ContentEquals(current.Document, acceptedDocument))
             await manuscripts.ReplaceDocumentAsync(
+                BatchTarget(batch),
                 chapter.Id,
-                chapter.ManuscriptRevision,
+                current.Revision,
                 acceptedDocument,
                 cancellationToken);
 
@@ -373,7 +385,9 @@ public sealed class EditorContestService(
 
         var chapter = await chapters.GetAsync(batch.ChapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {batch.ChapterId} not found.");
-        if (!ManuscriptCodec.ContentEquals(chapter.Manuscript, EffectiveAcceptedManuscript(batch)))
+        var current = await manuscripts.GetManuscriptAsync(BatchTarget(batch), chapter.Id, cancellationToken)
+            ?? throw new InvalidOperationException("The contest manuscript target no longer exists.");
+        if (!ManuscriptCodec.ContentEquals(current.Document, EffectiveAcceptedManuscript(batch)))
             throw new InvalidOperationException("The chapter changed outside Contest Review. Finish or restart the contest before continuing.");
 
         foreach (var batchCandidate in batch.Candidates)
@@ -389,10 +403,11 @@ public sealed class EditorContestService(
         contests.UpdateBatch(batch);
 
         var proposedDocument = ManuscriptCodec.Deserialize(candidate.ProposedManuscriptJson);
-        if (!ManuscriptCodec.ContentEquals(chapter.Manuscript, proposedDocument))
+        if (!ManuscriptCodec.ContentEquals(current.Document, proposedDocument))
             await manuscripts.ReplaceDocumentAsync(
+                BatchTarget(batch),
                 chapter.Id,
-                chapter.ManuscriptRevision,
+                current.Revision,
                 proposedDocument,
                 cancellationToken);
 
@@ -881,6 +896,7 @@ public sealed class EditorContestService(
             source,
             ManuscriptOperationInput.ToOperations(response.Operations));
         await manuscripts.ValidateDocumentReferencesAsync(
+            BatchTarget(batch),
             batch.ChapterId,
             proposedDocument,
             cancellationToken: cancellationToken);

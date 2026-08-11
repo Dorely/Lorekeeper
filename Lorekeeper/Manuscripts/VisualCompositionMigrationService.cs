@@ -1133,47 +1133,12 @@ public sealed class VisualCompositionMigrationService(
     private static Task<List<PublicationEdition>> ReadEditionsBeforeCoreAsync(
         AppDbContext db,
         CancellationToken cancellationToken) =>
-        db.PublicationEditions.AsNoTracking().Select(item => new PublicationEdition
-        {
-            Id = item.Id,
-            ProjectId = item.ProjectId,
-            Name = item.Name,
-            Format = item.Format,
-            Vendor = item.Vendor,
-            VendorProfileVersion = item.VendorProfileVersion,
-            Status = item.Status,
-            Revision = item.Revision,
-            TitleOverride = item.TitleOverride,
-            Subtitle = item.Subtitle,
-            Author = item.Author,
-            Language = item.Language,
-            Publisher = item.Publisher,
-            Copyright = item.Copyright,
-            Isbn = item.Isbn,
-            Description = item.Description,
-            IncludeTableOfContents = item.IncludeTableOfContents,
-            IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents,
-            IncludeActSynopses = item.IncludeActSynopses,
-            IncludeChapterSynopses = item.IncludeChapterSynopses,
-            IncludeActHeadings = item.IncludeActHeadings,
-            IncludeChapterHeadings = item.IncludeChapterHeadings,
-            NumberActs = item.NumberActs,
-            NumberChapters = item.NumberChapters,
-            TitlePageMode = item.TitlePageMode,
-            Binding = item.Binding,
-            Paper = item.Paper,
-            Ink = item.Ink,
-            Bleed = item.Bleed,
-            AllowDesignedPageOverrides = item.AllowDesignedPageOverrides,
-            PageWidthInches = item.PageWidthInches,
-            PageHeightInches = item.PageHeightInches,
-            PageMarginInches = item.PageMarginInches,
-            BodyFontSizePoints = item.BodyFontSizePoints,
-            BodyLineHeight = item.BodyLineHeight,
-            SelectedCoverImageId = item.SelectedCoverImageId,
-            CreatedAt = item.CreatedAt,
-            UpdatedAt = item.UpdatedAt,
-        }).ToListAsync(cancellationToken);
+        db.PublicationEditions.FromSqlRaw("""
+            SELECT PublicationEditions.*,
+                   '[]' AS OverrideFieldsJson,
+                   0 AS InheritsCoreCover
+            FROM PublicationEditions
+            """).AsNoTracking().ToListAsync(cancellationToken);
 
     private static async Task<List<PublicationCoverDesign>> ReadCoversBeforeCoreAsync(
         AppDbContext db,

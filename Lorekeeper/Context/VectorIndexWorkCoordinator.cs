@@ -3,6 +3,7 @@ namespace Lorekeeper.Context;
 public enum VectorIndexWorkKind
 {
     ChapterBody,
+    EditionChapter,
     ContextChapter,
     ContextAct,
     ContextEntity,
@@ -128,6 +129,7 @@ public sealed class VectorIndexWorkCoordinator(ILogger<VectorIndexWorkCoordinato
     private static int WorkPriority(VectorIndexWorkKind kind) => kind switch
     {
         VectorIndexWorkKind.ChapterBody => 0,
+        VectorIndexWorkKind.EditionChapter => 0,
         VectorIndexWorkKind.ContextChapter => 1,
         VectorIndexWorkKind.ContextAct => 2,
         VectorIndexWorkKind.ContextEntity => 2,

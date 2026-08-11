@@ -125,11 +125,12 @@ public sealed record ChapterPreviewDiagnostic(string Severity, string Code, stri
 
 public interface IChapterPreviewService
 {
-    Task<ChapterPreviewResult> LayoutAsync(Guid projectId, Guid chapterId, CancellationToken cancellationToken = default);
+    Task<ChapterPreviewResult> LayoutAsync(Guid projectId, Guid chapterId, EditorContentTarget target, CancellationToken cancellationToken = default);
     Task<ChapterPreviewImageResult> RenderPageAsync(
         Guid projectId,
         Guid chapterId,
         ChapterPreviewSource? source,
+        EditorContentTarget contentTarget,
         ChapterPreviewPageTarget target,
         CancellationToken cancellationToken = default);
 }
@@ -151,13 +152,15 @@ public sealed class ChapterPreviewService(
     public async Task<ChapterPreviewResult> LayoutAsync(
         Guid projectId,
         Guid chapterId,
+        EditorContentTarget target,
         CancellationToken cancellationToken = default)
-        => await LayoutCoreAsync(projectId, chapterId, source: null, cancellationToken);
+        => await LayoutCoreAsync(projectId, chapterId, source: null, target, cancellationToken);
 
     public async Task<ChapterPreviewImageResult> RenderPageAsync(
         Guid projectId,
         Guid chapterId,
         ChapterPreviewSource? source,
+        EditorContentTarget contentTarget,
         ChapterPreviewPageTarget target,
         CancellationToken cancellationToken = default)
     {
@@ -166,7 +169,7 @@ public sealed class ChapterPreviewService(
         if (target.ChapterPageNumber is <= 0)
             throw new ArgumentOutOfRangeException(nameof(target), "Chapter page number must be greater than zero.");
 
-        var layout = await LayoutCoreAsync(projectId, chapterId, source, cancellationToken);
+        var layout = await LayoutCoreAsync(projectId, chapterId, source, contentTarget, cancellationToken);
         var orderedPages = layout.Pages.OrderBy(page => page.PhysicalPage).ToArray();
         if (orderedPages.Length == 0)
             throw new InvalidDataException("The chapter preview contains no typeset pages.");
@@ -218,12 +221,33 @@ public sealed class ChapterPreviewService(
         Guid projectId,
         Guid chapterId,
         ChapterPreviewSource? source,
+        EditorContentTarget target,
         CancellationToken cancellationToken)
     {
         var project = await db.Projects.AsNoTracking().SingleOrDefaultAsync(item => item.Id == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Project was not found.");
         var setup = await db.ProjectPageSetups.AsNoTracking().SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken)
             ?? new ProjectPageSetup { ProjectId = projectId };
+        PublicationEdition? targetEdition = null;
+        if (target.EditionId is Guid targetEditionId)
+        {
+            targetEdition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
+                item => item.Id == targetEditionId
+                    && item.ProjectId == projectId
+                    && item.EditionSpecificContentEnabled
+                    && item.Status == PublicationEditionStatus.Draft,
+                cancellationToken) ?? throw new InvalidOperationException("The selected edition content target is unavailable.");
+            setup = new ProjectPageSetup
+            {
+                ProjectId = projectId,
+                PageWidthInches = targetEdition.PageWidthInches,
+                PageHeightInches = targetEdition.PageHeightInches,
+                PageMarginInches = targetEdition.PageMarginInches,
+                BodyFontSizePoints = setup.BodyFontSizePoints,
+                BodyLineHeight = setup.BodyLineHeight,
+                Revision = targetEdition.Revision,
+            };
+        }
         var acts = await db.Acts.AsNoTracking().Where(item => item.ProjectId == projectId)
             .OrderBy(item => item.Order).ThenBy(item => item.Id).ToListAsync(cancellationToken);
         var chapter = await db.Chapters.AsNoTracking()
@@ -236,10 +260,14 @@ public sealed class ChapterPreviewService(
                 || source.Styles is null))
             throw new InvalidDataException("The chapter preview source does not match the requested chapter.");
 
+        var editionOverride = targetEdition is null ? null : await db.PublicationEditionChapterOverrides.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.EditionId == targetEdition.Id && item.ChapterId == chapterId, cancellationToken);
         var documents = new Dictionary<Guid, ManuscriptDocument>
         {
             [chapterId] = source?.Document
-                ?? ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision),
+                ?? (editionOverride is null
+                    ? ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision)
+                    : ManuscriptCodec.Deserialize(editionOverride.ManuscriptJson, chapter.Id, editionOverride.Revision)),
         };
         var compositionIds = documents.Values.SelectMany(document => document.Content)
             .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.PageCompositionId is not null)

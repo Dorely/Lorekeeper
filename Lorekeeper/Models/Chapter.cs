@@ -45,6 +45,7 @@ public class Chapter
     public ICollection<EditorContextPreference> EditorContextPreferences { get; set; } = [];
 
     public ICollection<PageComposition> PageCompositions { get; set; } = [];
+    public ICollection<PublicationEditionChapterOverride> PublicationEditionChapterOverrides { get; set; } = [];
 
     public VectorIndexState VectorIndexState { get; set; } = VectorIndexState.UpToDate;
 

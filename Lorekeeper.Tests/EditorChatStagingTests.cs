@@ -177,6 +177,7 @@ public sealed class EditorChatStagingTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             currentChapterId: null,
+            contentTarget: EditorContentTarget.Core,
             providerId: 1,
             visionReady: false,
             onMutated: () => { },

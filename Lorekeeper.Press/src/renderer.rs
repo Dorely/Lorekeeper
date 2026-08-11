@@ -52,6 +52,8 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     let validated_assets = validate_request(request, job_root)?;
     ensure_output_is_safe(job_root)?;
     ensure_not_cancelled(job_root)?;
+    let output = job_root.join("output");
+    let staging = StagingDirectory::create(job_root.join(".output-staging"))?;
 
     let tolerance = LayoutTolerance {
         allow_pending_accessibility: request.output_purpose == OutputPurpose::ReadingCopy,
@@ -99,8 +101,6 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     let fonts = subset_for_layout(&font_pages)
         .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
 
-    let output = job_root.join("output");
-    let staging = StagingDirectory::create(job_root.join(".output-staging"))?;
     ensure_not_cancelled(job_root)?;
 
     let is_pdfx = request.profile == "ingram-paperback-pdfx1a-v1";

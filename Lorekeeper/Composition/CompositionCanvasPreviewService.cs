@@ -57,6 +57,15 @@ public interface ICompositionCanvasPreviewService
         CompositionScene scene,
         CompositionCanvasPreviewMode mode,
         CancellationToken cancellationToken = default);
+
+    Task<CompositionCanvasPreviewResult> RenderSceneAsync(
+        Guid projectId,
+        Guid targetId,
+        long revision,
+        CompositionScene scene,
+        ManuscriptDocument semantic,
+        CompositionCanvasPreviewMode mode,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed partial class CompositionCanvasPreviewService(
@@ -121,10 +130,27 @@ public sealed partial class CompositionCanvasPreviewService(
         long revision,
         CompositionScene scene,
         CompositionCanvasPreviewMode mode,
+        CancellationToken cancellationToken = default) =>
+        await RenderSceneAsync(
+            projectId,
+            targetId,
+            revision,
+            scene,
+            ManuscriptCodec.CreateEmpty(targetId),
+            mode,
+            cancellationToken);
+
+    public async Task<CompositionCanvasPreviewResult> RenderSceneAsync(
+        Guid projectId,
+        Guid targetId,
+        long revision,
+        CompositionScene scene,
+        ManuscriptDocument semantic,
+        CompositionCanvasPreviewMode mode,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scene);
-        var semantic = ManuscriptCodec.CreateEmpty(targetId);
+        ArgumentNullException.ThrowIfNull(semantic);
         var imageIds = CompositionSceneResolver.Flatten(scene)
             .Where(item => item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
             .Select(item => item.ImageId!.Value)

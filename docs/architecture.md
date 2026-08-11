@@ -532,10 +532,8 @@ logical reading order remain mandatory output rather than optional switches.
 `IPublicationEditionService` owns optional paperback, EPUB ebook, and PDF ebook
 release aggregates. Releases retain destination, internal immutable profile,
 ISBN, product settings, status, artifacts, packages, sparse field and collection
-overrides, cloning, archival, comparison, and audit history. The current schema
-also retains proof-record artifacts from an earlier product scope. They do not
-establish readiness or conformance and are not a boundary for new publication
-features.
+overrides, cloning, archival, comparison, and audit history. Proof tracking,
+proof artifacts, and proof gates are not part of the publication runtime.
 `IPublicationEffectiveConfigurationResolver` combines Core with explicit
 overrides at read/render time. Absence means inherit, optional text can be
 explicitly empty, and reset removes the override. Core collection additions
@@ -543,12 +541,23 @@ flow into releases unless excluded. Core mutations stale only releases whose
 effective source fingerprint changes. Digital PDF defaults to uniform release
 geometry and can explicitly preserve wide or independent Designed Page boxes;
 paperback leaves are always uniform.
-Current release overlays vary publication metadata, inclusion, presentation,
-matter, placements, styles, and covers but do not own release-specific chapter
-manuscript documents. Edition-specific content and styling remain planned. When
-introduced, their authoring surface and owning services belong in Editor.
-Publish remains the consumer of the selected release and does not become a
-parallel manuscript editor.
+Releases may opt into edition-specific manuscript content. `EditorContentTarget`
+identifies either Core or one enabled release, and every manuscript, review,
+contest, revision-worker, Figure, composition, preview, search, and assistant
+mutation carries that protected target. Chapters use copy-on-write inheritance:
+an untouched edition chapter reads current Core live, while its first text or
+layout mutation snapshots the complete chapter, records the Core revision/hash,
+and clones referenced Designed Page compositions with source identities and
+stable scene relationships. Later Core edits do not alter that snapshot.
+Resetting a chapter removes only its edition manuscript/compositions and returns
+to live Core inheritance. Project images and Book Text Styles remain shared
+project resources and are never deleted by a reset, release discard, or release
+deletion. Shared-style edits report their Core/release usage count and affect
+every actual reference. The Editor assistant is locked to the selected target;
+edition mode omits outline/canon mutations and cannot update or delete an
+existing shared style, but may create and apply a reusable copy. Publish reads
+bounded stable-block differences and layout diagnostics and links into the exact
+Editor target; it cannot mutate edition manuscript or page layout.
 Core reading-copy fingerprints include Book Text Style definitions and the
 project font catalog, so typography changes stale an existing reading PDF just
 as they stale release artifacts.
@@ -583,10 +592,11 @@ version changes.
 Archived releases are immutable at every owning mutation boundary; their
 existing artifacts remain readable and exportable, and cloning creates the
 editable continuation.
-Project export v17 writes manuscript-v4 documents, project page setup, page
+Project export v18 writes manuscript-v4 documents, project page setup, page
 compositions and exact geometry variants with active authoring variants, Core
 Book, sparse release overlays and cover scenes, Book Text Styles,
-visual references, and project-owned font families/faces with binary hashes.
+edition chapter snapshots and edition-owned compositions, visual references,
+and project-owned font families/faces with binary hashes.
 An isolated versioned transformer maps earlier visual structures into the
 current model; earlier structured and text adapters remain import-only
 boundaries.
@@ -788,16 +798,13 @@ metadata; EPUB validation remains structural rather than a certification claim.
 Every included ordered
 semantic-matter document is projected into TXT, Markdown, EPUB, and contained
 press output. The service persists SHA-256-addressed EPUB, front-cover, report,
-manifest, package, and legacy exact-package proof records as edition artifacts.
-Those records are retained as existing data but are outside the
-artifact-creation requirements and do not change package readiness or
-validation. Package freshness combines
+manifest, and package artifacts. Package freshness combines
 the source fingerprint, stable applicable input hashes/runtime provenance,
 profile/rule version, assembler version, and the EPUB-exporter version only for
 EPUB packages; exact PDF row IDs remain
 an internal correlation snapshot and never leak into portable bytes. A short
-serializable transaction rechecks the source immediately before each package or
-legacy-record write, so a concurrent fingerprint-affecting mutation cannot be
+serializable transaction rechecks the source immediately before each package
+write, so a concurrent fingerprint-affecting mutation cannot be
 mislabeled. Title, copyright, and visible contents pages are
 generated exclusively from edition settings, so user-authored semantic matter
 cannot claim those reserved kinds and duplicate generated output. EPUB
@@ -814,7 +821,8 @@ settings.
 ISBN values are strict, checksum-validated, and stored in canonical ISBN-13
 form. The same ISBN may be shared only by same-format vendor editions whose
 bibliographic metadata, visible content settings, physical product settings,
-ordered outline, semantic matter, style mappings, and image placements match.
+ordered outline, semantic matter, effective chapter content, referenced shared
+styles, and image placements match.
 Vendor/profile production settings may differ. Once shared, content-affecting
 edition mutations fail closed until the ISBN is cleared and the editions are
 synchronized.
@@ -843,8 +851,8 @@ patches, sparse content/matter/placement/cover operations, readiness,
 preparation, cancellation, and artifact metadata. Tool results contain changed
 IDs/fields, revisions, prioritized diagnostic counts, and refresh notices rather
 than complete unchanged records. Raw profile selection and low-level
-render/preflight/package orchestration are not assistant capabilities. Legacy
-proof-record writes and ISBN invention remain unavailable. Outline, Editor, Images, and
+render/preflight/package orchestration are not assistant capabilities. ISBN
+invention remains unavailable. Outline, Editor, Images, and
 Publish share compact paginated reads and revision-aware mutations. Large scene
 payloads are persisted once as project/conversation-scoped, hashed, expiring,
 non-replayable stages; preview returns a stage ID and compact diagnostics, and
@@ -859,8 +867,7 @@ boundary, so manual and assistant placement cannot obscure title, subtitle,
 author, spine, or back-cover text through z-order changes. Runtime prompts
 describe only the current format-neutral chapter, Figure, Designed Page, cover,
 geometry, and publication-validation boundaries. Artifact results include
-current/stale state and safe view/download URLs; legacy proof records are not
-assistant capabilities.
+current/stale state and safe view/download URLs.
 
 Preparation and cancellation tool results identify their nullable release
 target at the result root. Their mutation notices refresh and reconnect polling
@@ -967,7 +974,7 @@ including its SHA-256, semantic bindings, image ownership, and scene structure;
 legacy text frames that contain neither literal nor semantic content are omitted.
 It checks foreign keys and compares a
 canonical hash of protected project, edition, asset, font, artifact, package,
-proof, audit, and page-map data while excluding only the explicitly transformed
+audit, and page-map data while excluding only the explicitly transformed
 fields. Any failed
 validation enters the projectless recovery shell with the original protected
 backup. Every converted Picture Page retains its original 8.5 × 11 inch leaf
@@ -983,7 +990,7 @@ appearance from an existing composition surface, then a default publication
 geometry, then 6 x 9 in. Its protected migration validates semantic text and
 hashes, restored scene hashes, scene/image ownership, mandatory active Designed
 Page references, protected row-count deltas, artifacts,
-packages, proofs, and foreign keys before journaling success. Existing artifact
+packages and foreign keys before journaling success. Existing artifact
 bytes and hashes stay unchanged and become Legacy. The same guarded service also
 repairs a valid database from an interrupted/pre-release cutover when a completed
 authoring journal still has orphaned Picture Page seeds; it never overwrites a
@@ -998,13 +1005,26 @@ overrides while comparing its complete effective projection, and retains every
 existing release cover as an explicit override. It generalizes jobs, artifacts,
 page maps, and covers to Core or release target references and marks existing
 artifacts Legacy without changing their bytes or hashes. The protected journal
-also validates packages, audits, proofs, chat rows, row ownership, and foreign
+also validates packages, audits, chat rows, row ownership, and foreign
 keys. Only after successful validation does the cleanup remove the obsolete
 default-release flag and duplicated-field runtime dependency. A mismatch opens
 the projectless recovery shell with the original backup protected.
 
-Project export v17 contains only the current v4/page-setup/composition model,
-Core Book, sparse release overlays, and target-aware publication records; older
+The edition-content cutover adds target metadata, release chapter snapshots,
+and edition composition ownership before its protected application transform.
+Legacy release typography and style mappings are materialized as reusable
+project Book Text Styles referenced by edition snapshots, with equal effective
+publication projections before and after conversion. It preserves non-proof
+artifact bytes/hashes, covers, packages, audits, images, fonts, chats, and
+settings; obsolete proof rows are intentionally removed. The cleanup migration
+then removes proof tables/contracts, release typography columns, and publication
+style mappings. Existing rendered artifacts become Legacy because effective
+source fingerprinting now hashes inherited Core chapters or divergent edition
+chapters and only the shared styles actually referenced by effective content.
+
+Project export v18 contains only the current v4/page-setup/composition model,
+Core Book, sparse release overlays, edition chapter snapshots, edition-owned
+compositions, and target-aware publication records; older
 formats remain importable only through isolated versioned transformers.
 Human-readable language names from Book Briefs and publication inputs are
 canonicalized to culture tags when new Core/release values are persisted and at

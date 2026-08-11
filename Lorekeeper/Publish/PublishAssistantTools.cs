@@ -65,6 +65,7 @@ public sealed class PublishAssistantTools(
     IManuscriptStyleService manuscriptStyles,
     IProjectPageSetupService pageSetups,
     IProjectImageService projectImages,
+    IEditionContentService? editionContent = null,
     ICompositionCanvasPreviewService? canvasPreviews = null,
     ICompositionService? compositions = null,
     AppDbContext? db = null,
@@ -122,6 +123,16 @@ public sealed class PublishAssistantTools(
                 method: (Guid releaseId, PublicationReleaseOverridePatch patch) => PatchReleaseAsync(context, releaseId, patch),
                 name: "patch_publication_release_overrides",
                 description: "Revision-check sparse release product settings and field overrides. ResetFields restores live Core inheritance. Language accepts en, en-US, or en-GB. Vendor profile versions are application-managed and cannot be supplied."),
+            AIFunctionFactory.Create(
+                method: (Guid releaseId, bool enabled, long expectedRevision, bool confirmDiscard = false) =>
+                    SetEditionContentEnabledAsync(context, releaseId, enabled, expectedRevision, confirmDiscard),
+                name: "set_edition_specific_content",
+                description: "Enable edition-specific manuscript editing, or disable it with confirmDiscard=true after reading differences. Disabling discards release chapter snapshots and layouts but never deletes project images or Book Text Styles."),
+            AIFunctionFactory.Create(
+                method: (Guid releaseId, int offset = 0, int limit = 20) =>
+                    ReadEditionContentDifferencesAsync(context, releaseId, offset, limit),
+                name: "read_edition_content_differences",
+                description: "Read a bounded compact list of chapters whose effective manuscript differs from Core, including comparison counts, Core-change warnings, and exact Editor links. This tool cannot mutate manuscript content or page layouts."),
             AIFunctionFactory.Create(
                 method: (Guid? releaseId = null) => PrepareFilesAsync(context, releaseId),
                 name: "prepare_publication_files",
@@ -261,46 +272,6 @@ public sealed class PublishAssistantTools(
                 name: "cancel_project_image_job",
                 description: "Cancel one queued or running project-image job. No image is placed."),
             AIFunctionFactory.Create(
-                method: (Guid compositionId, Guid releaseId) => GetOrCreateCompositionVariantAsync(context, compositionId, releaseId),
-                name: "get_or_create_publication_composition_variant",
-                description: "Create layout for this release when no exact Designed Page geometry exists. Copies the authoring layout into an independent release geometry variant for review without altering authoring state."),
-            AIFunctionFactory.Create(
-                method: (Guid releaseId, Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchCompositionElementAsync(context, releaseId, variantId, expectedRevision, targetKind, targetId, patch),
-                name: "patch_publication_composition_element",
-                description: "Revision-check patch one stable composition object, layer, or style using only changed fields. Page overlays are computed and cannot be authored. Preserve unrelated state and reserve full-scene staging for structural edits."),
-            AIFunctionFactory.Create(
-                method: (Guid releaseId, Guid variantId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlacePublicationPageImageAsync(context, releaseId, variantId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
-                name: "place_project_image_in_publication_page_frame",
-                description: "Place an existing project-image ID into an existing release-specific Designed Page frame. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an accessibility decision."),
-            AIFunctionFactory.Create(
-                method: (Guid releaseId, Guid variantId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddPublicationPageImageAsync(context, releaseId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
-                name: "add_project_image_to_publication_page",
-                description: "Add a new image object to a release-specific Designed Page from an existing project-image ID. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an accessibility decision."),
-            AIFunctionFactory.Create(
-                method: (Guid variantId, long expectedRevision, CompositionScene scene) => StageCompositionAsync(context, variantId, expectedRevision, scene),
-                name: "stage_publication_composition",
-                description: "Submit a complete large scene once. Returns an opaque one-use stage ID, compact summary, and diagnostics without echoing the scene."),
-            AIFunctionFactory.Create(
-                method: (Guid releaseId, Guid stageId, long expectedRevision) => ApplyCompositionStageAsync(context, releaseId, stageId, expectedRevision),
-                name: "apply_publication_composition_stage",
-                description: "Apply an already staged scene using only its one-use stage ID and expected revision. Never repeat the scene payload."),
-            AIFunctionFactory.Create(
-                method: (Guid compositionId, long expectedRevision, ManuscriptOperationInput[] operations) => StageCompositionSemanticAsync(context, compositionId, expectedRevision, operations),
-                name: "stage_publication_composition_semantic",
-                description: "Stage focused block or inline-mark operations against a Designed Page's sole semantic manuscript. Returns a compact one-use stage ID without repeating content."),
-            AIFunctionFactory.Create(
-                method: (Guid releaseId, Guid stageId, long expectedRevision) => ApplyCompositionSemanticStageAsync(context, releaseId, stageId, expectedRevision),
-                name: "apply_publication_composition_semantic_stage",
-                description: "Apply a staged Designed Page semantic edit by one-use stage ID and exact composition revision."),
-            AIFunctionFactory.Create(
-                method: (Guid compositionId, long expectedCompositionRevision, Guid variantId, long expectedVariantRevision, ManuscriptOperationInput[] semanticOperations, CompositionScene scene) => StageCompositionWorkspaceAsync(context, compositionId, expectedCompositionRevision, variantId, expectedVariantRevision, semanticOperations, scene),
-                name: "stage_publication_composition_workspace",
-                description: "Atomically stage coupled Designed Page content and scene changes. Semantic fragments contain paragraph, heading, sceneBreak, blockQuote, or listItem blocks only; scene images carry visual content. Submit the complete payload once."),
-            AIFunctionFactory.Create(
-                method: (Guid releaseId, Guid stageId, long expectedCompositionRevision) => ApplyCompositionWorkspaceStageAsync(context, releaseId, stageId, expectedCompositionRevision),
-                name: "apply_publication_composition_workspace_stage",
-                description: "Apply a coupled content-and-scene stage by one-use stage ID; both stored revisions are checked without repeating the payload."),
-            AIFunctionFactory.Create(
                 method: (Guid releaseId, PublicationEditionOutlineItemUpdate[] updates, long expectedRevision) =>
                     SetContentAsync(context, releaseId, updates, expectedRevision),
                 name: "patch_publication_release_content",
@@ -324,16 +295,6 @@ public sealed class PublishAssistantTools(
                     DeleteMatterAsync(context, releaseId, matterId, expectedRevision),
                 name: "delete_publication_release_matter",
                 description: "Delete a release-only matter item or explicitly exclude inherited Core matter at an expected release revision."),
-            AIFunctionFactory.Create(
-                method: (Guid releaseId, PublicationEditionStyleMappingInput input, long expectedRevision) =>
-                    UpsertStyleMappingAsync(context, releaseId, input, expectedRevision),
-                name: "upsert_publication_release_style_override",
-                description: "Override a project Book Text Style for one release."),
-            AIFunctionFactory.Create(
-                method: (Guid releaseId, Guid mappingId, long expectedRevision) =>
-                    DeleteStyleMappingAsync(context, releaseId, mappingId, expectedRevision),
-                name: "delete_publication_release_style_override",
-                description: "Delete a release style override and restore the project Book Text Style."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, PublicationImagePlacementCreate input, long expectedRevision) =>
                     AddPlacementAsync(context, releaseId, input, expectedRevision),
@@ -432,18 +393,16 @@ public sealed class PublishAssistantTools(
             "list_search_sources", "read_project_source", "search_project", "list_project_images", "read_project_image",
             "read_publication_book", "patch_publication_book", "list_publication_releases",
             "create_publication_release", "read_publication_release", "patch_publication_release_overrides",
+            "set_edition_specific_content", "read_edition_content_differences",
             "prepare_publication_files", "cancel_publication_preparation", "read_publication_readiness",
             "read_publication_book_content", "patch_publication_book_content", "read_publication_book_matter",
             "upsert_publication_book_matter", "delete_publication_book_matter", "read_publication_book_placements",
             "add_publication_book_placement", "update_publication_book_placement", "reorder_publication_book_placements", "delete_publication_book_placement",
             "list_publication_book_text_styles", "patch_publication_book_page_setup", "upsert_publication_book_text_style", "delete_publication_book_text_style", "list_publication_manuscript_visuals",
             "read_publication_page_composition", "read_publication_generation_target", "validate_publication_page_composition",
-            "generate_project_image", "edit_project_image", "read_project_image_job", "wait_project_image_job", "cancel_project_image_job", "get_or_create_publication_composition_variant",
-            "patch_publication_composition_element", "place_project_image_in_publication_page_frame", "add_project_image_to_publication_page", "stage_publication_composition", "apply_publication_composition_stage",
-            "stage_publication_composition_semantic", "apply_publication_composition_semantic_stage",
-            "stage_publication_composition_workspace", "apply_publication_composition_workspace_stage",
+            "generate_project_image", "edit_project_image", "read_project_image_job", "wait_project_image_job", "cancel_project_image_job",
             "patch_publication_release_content", "reorder_publication_release_content", "read_publication_release_matter", "upsert_publication_release_matter", "delete_publication_release_matter",
-            "upsert_publication_release_style_override", "delete_publication_release_style_override", "add_publication_release_placement",
+            "add_publication_release_placement",
             "update_publication_release_placement", "reorder_publication_release_placements", "delete_publication_release_placement",
             "read_publication_cover_design", "preview_publication_cover_canvas", "validate_publication_cover_composition", "update_publication_cover_design",
             "patch_publication_core_cover_element", "place_project_image_on_core_cover", "add_project_image_to_core_cover", "customize_publication_release_cover", "use_core_publication_cover",
@@ -735,6 +694,96 @@ public sealed class PublishAssistantTools(
             summary = "Release overrides updated.", mutation = new { kind = "release", releaseId = release.Id, selectRelease = true, refresh = new[] { "release", "readiness", "artifacts" } } });
     }
 
+    private async Task<string> SetEditionContentEnabledAsync(
+        PublishAssistantContext context,
+        Guid releaseId,
+        bool enabled,
+        long expectedRevision,
+        bool confirmDiscard)
+    {
+        try
+        {
+            var result = await RequireEditionContent().SetEnabledAsync(
+                context.ProjectId,
+                releaseId,
+                expectedRevision,
+                enabled,
+                confirmDiscard,
+                context.TurnCancellationToken);
+            return Serialize(new
+            {
+                ok = true,
+                targetId = releaseId,
+                result.Enabled,
+                result.DivergentChapterCount,
+                summary = enabled
+                    ? "Edition-specific manuscript editing enabled."
+                    : "Edition-specific manuscript content discarded; shared Book Text Styles and project images were preserved.",
+                mutation = new { kind = "edition-content", releaseId, refresh = new[] { "release", "readiness", "artifacts" } },
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Serialize(new { ok = false, code = "EDITION_CONTENT_REJECTED", targetId = releaseId, summary = ex.Message });
+        }
+    }
+
+    private async Task<string> ReadEditionContentDifferencesAsync(
+        PublishAssistantContext context,
+        Guid releaseId,
+        int offset,
+        int limit)
+    {
+        offset = Math.Max(0, offset);
+        limit = Math.Clamp(limit, 1, 50);
+        var projectSlug = await (db ?? throw new InvalidOperationException("Project lookup is unavailable.")).Projects.AsNoTracking()
+            .Where(item => item.Id == context.ProjectId)
+            .Select(item => item.Slug)
+            .SingleAsync(context.TurnCancellationToken);
+        var releases = await RequireEditionContent().ListReleasesAsync(context.ProjectId, context.TurnCancellationToken);
+        var release = releases.SingleOrDefault(item => item.EditionId == releaseId)
+            ?? throw new KeyNotFoundException("Publication release not found.");
+        var differences = await RequireEditionContent().ReadDifferencesAsync(
+            context.ProjectId, releaseId, offset, limit, context.TurnCancellationToken);
+        return Serialize(new
+        {
+            ok = true,
+            targetId = releaseId,
+            release.Enabled,
+            total = release.DivergentChapterCount,
+            offset,
+            returned = differences.Count,
+            hasMore = offset + differences.Count < release.DivergentChapterCount,
+            differences = differences.Select(item => new
+            {
+                item.ChapterId,
+                item.ChapterTitle,
+                item.Added,
+                item.Removed,
+                item.Moved,
+                item.TextEdited,
+                item.Figures,
+                item.StyleReferences,
+                item.DirectFormatting,
+                item.DesignedPages,
+                item.ChangedBlockIds,
+                editorUrl = $"/projects/{projectSlug}/editor/{item.ChapterId:N}?edition={releaseId:N}",
+                layoutIssues = item.LayoutIssues.Select(issue => new
+                {
+                    issue.Code,
+                    issue.Message,
+                    issue.CompositionId,
+                    issue.ObjectId,
+                    editorUrl = $"/projects/{projectSlug}/editor/{item.ChapterId:N}?edition={releaseId:N}&mode=pages&composition={issue.CompositionId:N}"
+                        + (issue.ObjectId is Guid objectId ? $"&object={objectId:N}" : string.Empty),
+                }),
+            }),
+        });
+    }
+
+    private IEditionContentService RequireEditionContent() =>
+        editionContent ?? throw new InvalidOperationException("Edition-content services are unavailable.");
+
     private async Task<string> PrepareFilesAsync(PublishAssistantContext context, Guid? releaseId)
     {
         var job = releaseId is Guid id
@@ -790,7 +839,7 @@ public sealed class PublishAssistantTools(
             ok = true,
             targetId = workspace.Edition.Id,
             revision = workspace.Edition.Revision,
-            summary = $"{workspace.Sections.Sum(section => section.Chapters.Count)} chapter(s), {workspace.Matter.Count} matter item(s), {workspace.Placements.Count} release illustration(s), and {workspace.StyleMappings.Count} style override(s).",
+            summary = $"{workspace.Sections.Sum(section => section.Chapters.Count)} chapter(s), {workspace.Matter.Count} matter item(s), and {workspace.Placements.Count} release illustration(s).",
             release = new
             {
                 workspace.Edition.Id,
@@ -837,7 +886,6 @@ public sealed class PublishAssistantTools(
             counts = new
             {
                 matter = workspace.Matter.Count,
-                styleMappings = workspace.StyleMappings.Count,
                 placements = workspace.Placements.Count,
                 availableReleases = workspace.Editions.Count,
             },
@@ -1265,57 +1313,13 @@ public sealed class PublishAssistantTools(
         catch (Exception ex) when (ex is InvalidDataException or KeyNotFoundException) { return Serialize(new { ok = false, code = "NOT_FOUND", targetId = variantId, summary = ex.Message }); }
     }
 
-    private async Task<string> PatchCompositionElementAsync(PublishAssistantContext context, Guid editionId, Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) =>
-        await CompositionAgentPayloads.PatchElementAsync(
-            compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."),
-            context.ProjectId,
-            variantId,
-            expectedRevision,
-            targetKind,
-            targetId,
-            patch,
-            context.TurnCancellationToken);
-
-    private async Task<string> PlacePublicationPageImageAsync(PublishAssistantContext context, Guid editionId, Guid variantId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder)
-    {
-        if (!decorative && string.IsNullOrWhiteSpace(altText))
-            return Serialize(new { ok = false, code = "ALT_DECISION_REQUIRED", targetId, summary = "Provide alternative text or explicitly mark the artwork decorative." });
-        if (await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken) is null)
-            return Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId, imageId, summary = "Project image was not found." });
-        return await PatchCompositionElementAsync(context, editionId, variantId, expectedRevision, "object", targetId, new CompositionElementPatch(
-            ImageId: imageId,
-            ImageFit: fit,
-            AltText: decorative ? string.Empty : altText?.Trim(),
-            Decorative: decorative,
-            AccessibilityDecisionPending: false,
-            SemanticRole: decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure,
-            ReadingOrder: decorative ? null : readingOrder,
-            ClearReadingOrder: decorative));
-    }
-
-    private async Task<string> AddPublicationPageImageAsync(PublishAssistantContext context, Guid editionId, Guid variantId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds, int? readingOrder)
-    {
-        try
-        {
-            if (await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken) is null)
-                return Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId = variantId, imageId, summary = "Project image was not found." });
-            var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable.");
-            var placed = await service.AddImageObjectAsync(context.ProjectId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder, context.TurnCancellationToken);
-            return Serialize(new { ok = true, targetId = variantId, releaseId = editionId, variantId = placed.Variant.Id, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the release layout.", mutation = new { kind = "pageComposition", id = placed.Variant.CompositionId, variantId = placed.Variant.Id, selectId = placed.ObjectId } });
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException or CompositionRevisionConflictException)
-        {
-            return Serialize(new { ok = false, code = ex is CompositionRevisionConflictException ? "REVISION_CONFLICT" : "PLACEMENT_REJECTED", targetId = variantId, summary = ex.Message, recovery = "Reread the compact release layout and retry with the same project-image ID." });
-        }
-    }
-
     private async Task<string> ReadLayoutGenerationTargetAsync(PublishAssistantContext context, string targetKind, Guid targetId, Guid? variantId, Guid? editionId)
     {
         try
         {
             var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable.");
-            var descriptor = targetKind.StartsWith("cover", StringComparison.OrdinalIgnoreCase)
-                ? await service.DescribeGenerationTargetAsync(context.ProjectId, editionId ?? throw new ArgumentException("Publication cover generation targets require releaseId."), targetKind, targetId, variantId, context.TurnCancellationToken)
+            var descriptor = editionId is Guid releaseId
+                ? await service.DescribeGenerationTargetAsync(context.ProjectId, releaseId, targetKind, targetId, variantId, context.TurnCancellationToken)
                 : await service.DescribeAuthoringGenerationTargetAsync(context.ProjectId, targetKind, targetId, variantId, context.TurnCancellationToken);
             return Serialize(new
             {
@@ -1353,54 +1357,6 @@ public sealed class PublishAssistantTools(
             return Serialize(new { ok = result.ErrorCount == 0, targetId = result.TargetId, revision = result.Revision, summary = $"Validation found {result.ErrorCount} error(s) and {result.WarningCount} warning(s).", diagnosticCounts = new { errors = result.ErrorCount, warnings = result.WarningCount }, diagnostics = result.Diagnostics });
         }
         catch (Exception ex) { return Serialize(new { ok = false, code = "VALIDATION_FAILED", targetId = variantId, summary = ex.Message }); }
-    }
-
-    private async Task<string> GetOrCreateCompositionVariantAsync(PublishAssistantContext context, Guid compositionId, Guid editionId)
-    {
-        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var variant = await service.GetOrCreateVariantAsync(context.ProjectId, compositionId, editionId, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = variant.Id, variantId = variant.Id, revision = variant.Revision, summary = "Release layout copied from the authoring layout and is ready for review.", mutation = new { kind = "pageComposition", id = compositionId, variantId = variant.Id } }); }
-        catch (Exception ex) { return Serialize(new { ok = false, code = "INVALID_TARGET", targetId = compositionId, summary = ex.Message }); }
-    }
-
-    private async Task<string> StageCompositionAsync(PublishAssistantContext context, Guid variantId, long expectedRevision, CompositionScene scene)
-    {
-        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var stage = await service.StageVariantAsync(context.ProjectId, context.ConversationId, variantId, expectedRevision, scene, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = variantId, revision = expectedRevision, summary = $"Validated {scene.Objects.Count} composition object(s).", stageId = stage.Id, stage.ExpiresAt, diagnosticCounts = new { errors = 0, warnings = 0 } }); }
-        catch (CompositionRevisionConflictException ex) { return Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = variantId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact composition, preserve unrelated objects, and stage a new scene once." }); }
-        catch (Exception ex) { return Serialize(new { ok = false, code = "INVALID_SCENE", targetId = variantId, summary = ex.Message }); }
-    }
-
-    private async Task<string> ApplyCompositionStageAsync(PublishAssistantContext context, Guid editionId, Guid stageId, long expectedRevision)
-    {
-        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var variant = await service.ApplyStageAsync(context.ProjectId, context.ConversationId, stageId, expectedRevision, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = variant.Id, releaseId = editionId, variantId = variant.Id, revision = variant.Revision, summary = "Staged composition applied.", changedIds = new[] { variant.Id }, mutation = new { kind = "pageComposition", id = variant.CompositionId, variantId = variant.Id } }); }
-        catch (CompositionRevisionConflictException ex) { return Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread and submit a replacement stage." }); }
-        catch (Exception ex) { return Serialize(new { ok = false, code = "STAGE_REJECTED", targetId = stageId, summary = ex.Message }); }
-    }
-
-    private async Task<string> StageCompositionSemanticAsync(PublishAssistantContext context, Guid compositionId, long expectedRevision, ManuscriptOperationInput[] operations)
-    {
-        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var stage = await service.StageSemanticOperationsAsync(context.ProjectId, context.ConversationId, compositionId, expectedRevision, operations, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = compositionId, revision = expectedRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {operations.Length} semantic operation(s)." }); }
-        catch (CompositionRevisionConflictException ex) { return Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = compositionId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the bounded composition and submit a replacement stage." }); }
-        catch (Exception ex) { return Serialize(new { ok = false, code = "SEMANTIC_STAGE_REJECTED", targetId = compositionId, summary = ex.Message }); }
-    }
-
-    private async Task<string> ApplyCompositionSemanticStageAsync(PublishAssistantContext context, Guid editionId, Guid stageId, long expectedRevision)
-    {
-        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var result = await service.ApplySemanticStageAsync(context.ProjectId, context.ConversationId, stageId, expectedRevision, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = result.Composition.Id, releaseId = editionId, revision = result.Composition.Revision, changedIds = result.ChangedBlockIds, summary = "Staged Designed Page content applied.", mutation = new { kind = "pageComposition", id = result.Composition.Id } }); }
-        catch (CompositionRevisionConflictException ex) { return Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread and submit a new non-replayed stage." }); }
-        catch (Exception ex) { return Serialize(new { ok = false, code = "STAGE_REJECTED", targetId = stageId, summary = ex.Message }); }
-    }
-
-    private async Task<string> StageCompositionWorkspaceAsync(PublishAssistantContext context, Guid compositionId, long expectedCompositionRevision, Guid variantId, long expectedVariantRevision, ManuscriptOperationInput[] semanticOperations, CompositionScene scene)
-    {
-        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var stage = await service.StageWorkspaceAsync(context.ProjectId, context.ConversationId, compositionId, expectedCompositionRevision, variantId, expectedVariantRevision, semanticOperations, scene, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = compositionId, revision = expectedCompositionRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {semanticOperations.Length} semantic operation(s) with {scene.Objects.Count} scene object(s)." }); }
-        catch (CompositionRevisionConflictException ex) { return Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = compositionId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact workspace and submit one replacement stage." }); }
-        catch (Exception ex) { return Serialize(new { ok = false, code = "WORKSPACE_STAGE_REJECTED", targetId = compositionId, summary = ex.Message }); }
-    }
-
-    private async Task<string> ApplyCompositionWorkspaceStageAsync(PublishAssistantContext context, Guid editionId, Guid stageId, long expectedCompositionRevision)
-    {
-        try { var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable."); var result = await service.ApplyWorkspaceStageAsync(context.ProjectId, context.ConversationId, stageId, expectedCompositionRevision, context.TurnCancellationToken); return Serialize(new { ok = true, targetId = result.Composition.Id, releaseId = editionId, revision = result.Composition.Revision, variantId = result.Variant.Id, variantRevision = result.Variant.Revision, changedIds = result.ChangedBlockIds, summary = "Designed Page content and layout applied atomically.", mutation = new { kind = "pageComposition", id = result.Composition.Id, variantId = result.Variant.Id } }); }
-        catch (CompositionRevisionConflictException ex) { return Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact workspace and submit a new non-replayed stage." }); }
-        catch (Exception ex) { return Serialize(new { ok = false, code = "WORKSPACE_STAGE_REJECTED", targetId = stageId, summary = ex.Message }); }
     }
 
     private async Task<string> CreateReleaseCoreAsync(
@@ -1505,23 +1461,6 @@ public sealed class PublishAssistantTools(
         long expectedRevision)
     {
         await editions.DeleteMatterAsync(context.ProjectId, editionId, matterId, expectedRevision);
-        return """{"status":"deleted"}""";
-    }
-
-    private async Task<string> UpsertStyleMappingAsync(
-        PublishAssistantContext context,
-        Guid editionId,
-        PublicationEditionStyleMappingInput input,
-        long expectedRevision) =>
-        Serialize(await editions.UpsertStyleMappingAsync(context.ProjectId, editionId, input, expectedRevision));
-
-    private async Task<string> DeleteStyleMappingAsync(
-        PublishAssistantContext context,
-        Guid editionId,
-        Guid mappingId,
-        long expectedRevision)
-    {
-        await editions.DeleteStyleMappingAsync(context.ProjectId, editionId, mappingId, expectedRevision);
         return """{"status":"deleted"}""";
     }
 

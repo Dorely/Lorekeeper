@@ -71,10 +71,10 @@
 | `SemanticPublishFormattingTests.cs` | Verifies semantic headings, marks, named roles, Figures, Designed Page reading-order text, ordered matter, and accessible EPUB rendering. |
 | `ManuscriptStyleServiceTests.cs` | Named-style revision, stable-role, uniqueness, content-use, and edition-mapping deletion guards. |
 | `ProjectMutationCoordinatorTests.cs` | Cross-instance file-lock fixture for project-scoped mutation serialization against one SQLite data store. |
-| `PublicationPackageTests.cs` | Fail-closed EPUB structure, deterministic/product-specific packages, current/legacy render provenance, language/ISBN/profile/color rejection, retained legacy-proof isolation, and assistant-authorization fixtures. |
+| `PublicationPackageTests.cs` | Fail-closed EPUB structure, deterministic/product-specific packages, current/legacy render provenance, language/ISBN/profile/color rejection, and assistant-authorization fixtures. |
 | `PublicationEditionServiceTests.cs` | Core live inheritance/reset/explicit-empty behavior, sparse overlays, release presets, one-action preparation persistence/cancellation, archive guards, and ISBN/matter ownership fixtures. |
 | `PublicationRenderTests.cs` | Native-runtime integrity, artifact-integrity/staleness, BOM-free staged-request, and clean publication-worker cancellation fixtures. |
-| `PublishChatServiceTests.cs` | Publish conversation persistence/reset, streaming completion/failure/cancellation, Core/release targeting, compact tools, mutation notices, exclusion of legacy proof writes, and active-turn reconnection fixtures. |
+| `PublishChatServiceTests.cs` | Publish conversation persistence/reset, streaming completion/failure/cancellation, Core/release targeting, compact tools, mutation notices, edition-content boundaries, and active-turn reconnection fixtures. |
 | `PublishConversationMigrationTests.cs` | Populated pre-v13 upgrade fixture proving manuscript, edition, render, artifact hash/bytes, and new Publish transcript persistence survive unchanged. |
 | `LorekeeperPressMigrationTests.cs` | Fully populated installed-schema fixture run through the real startup migrator, including no-release Picture Page scene/asset/binding preservation, Press/Core projection equality, recovery cases, and whole-database byte/hash checks. |
 | `LorekeeperPressProcessIntegrationTests.cs` | Real C#-to-packaged-Rust protocol-v5 render of interior and cover with a cleared machine environment. |
@@ -306,9 +306,9 @@
 | `ResearchConversation.cs` | EF entity — one persistent project research chat per `Project` (unique on `ProjectId`). Owns ordered `ResearchMessage`s; cascade-deleted with the project. |
 | `ResearchMessage.cs` | EF entity for a single Research chat row with monotonic `Order`, role (`System`/`User`/`Assistant`/`Tool`), text content, assistant tool-call JSON, tool result metadata, status, optional error, and creation timestamp. |
 | `PublishConversation.cs` / `PublishMessage.cs` | One project-scoped persistent Publish conversation and ordered role/status/content/tool/error transcript rows, cascade-owned by the project. |
-| `AiChangeBatch.cs` | EF entity grouping AI-proposed tool mutations from one assistant turn while they await approval/resolution. Tracks whether the owning transcript is Outline, Editor, or Research chat. |
+| `AiChangeBatch.cs` | EF entity grouping AI-proposed tool mutations from one assistant turn while they await approval/resolution, including the protected Core/release Editor target. |
 | `AiChange.cs` | EF entity for one queued AI tool mutation: tool metadata, before/after/result JSON, dependency metadata, status, rejection/error notes, timestamps. |
-| `ContestBatch.cs` | EF entity for one Editor Contest Mode run: captured turn/context snapshot, target chapter/body snapshot, operation metadata, status, and model candidates. |
+| `ContestBatch.cs` | EF entity for one Editor Contest Mode run: captured Core/release target and chapter/body snapshot, operation metadata, status, and model candidates. |
 | `ContestCandidate.cs` | EF entity for one model's contest proposal: provider/model labels, validated semantic operations, proposed manuscript, raw response, status, timing, and errors. |
 | `IngestSource.cs` | EF entity for one ingested source: full source text, rolling synopsis, source metadata/instructions, content hash, source page/block locators, optional webpage URL/fetch provenance, and independent vector-index state/source id. |
 | `IngestSourcePage.cs` | EF entity for PDF page-level provenance: page text, char bounds, extraction method, render/image hash metadata, vision provider/model, and diagnostics. |
@@ -324,9 +324,10 @@
 | `ProjectImportReportItem.cs` | EF entity for import job report rows covering validation, structural appends, type/entity/relationship merges, indexing warnings, and failures. |
 | `WebIngestCandidate.cs` | EF entity for cached webpage/search-result sources used by Research and manual webpage ingest. Stores search/fetch provenance, extracted text/excerpt, cached links JSON, content hash, staging rationale, and queued ingest job id. |
 | `PublicationBook.cs` | One revisioned Core Book per project with shared metadata, structure/PDF-presentation defaults, ordered content, matter, placements, and reusable front-cover scene. |
-| `PublicationEdition.cs` | Optional paperback/EPUB/PDF ebook release aggregate with destination/profile, product settings, identifier, status, and sparse Core override markers. |
+| `PublicationEdition.cs` | Optional paperback/EPUB/PDF ebook release aggregate with destination/profile, product settings, identifier, status, sparse Core override markers, and opt-in edition-content state. |
+| `PublicationEditionChapterOverride.cs` | Copy-on-write release chapter snapshot with Core base revision/hash and edition-owned manuscript revision. |
 | `PublicationEditionOutlineItem.cs` | Sparse release chapter-inclusion and structural act/chapter-order overlays with typed foreign keys; act presentation is controlled by release settings. |
-| `PublicationMatter.cs` | Core-linked replace/exclude/add release matter, sparse Book Text Style mappings, immutable audit entries, and migration journals. |
+| `PublicationMatter.cs` | Core-linked replace/exclude/add release matter plus immutable publication audit entries and migration journals. |
 | `PublicationImagePlacement.cs` | Core-linked replace/exclude/add release image placements around acts and chapters. |
 | `PublishAsset.cs` | EF entity for uploaded/generated/edited/cropped project images with bytes, crop lineage/coordinates, alt text, prompt/source metadata, masks, and placement navigation. |
 | `PublicationRender.cs` | Core/release-targeted render jobs, immutable artifact bytes/provenance including private Reading PDFs, statuses, and stable manuscript-block page maps. |
@@ -354,7 +355,7 @@
 | `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
-| `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, publication-release, Publish-chat, Press, authoring-page, and additive/cleanup Core Book forward migrations with the current model snapshot. |
+| `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, publication-release, Publish-chat, Press, authoring-page, Core Book, edition-content, and obsolete-proof/style cleanup migrations with the current model snapshot. |
 
 ### Persistence/Repositories/
 
@@ -552,13 +553,13 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | Current v17 portable DTOs with v4 manuscripts, page setup, authoring variants, Core Book PDF presentation, sparse release overlays/covers, accessibility data, and complete custom-font binaries; retains isolated older input adapters. |
+| `ProjectExportModels.cs` | Current v18 portable DTOs with v4 manuscripts, page setup, authoring/edition variants, Core Book PDF presentation, sparse releases, edition chapter snapshots/covers, accessibility data, and complete custom-font binaries; retains isolated older input adapters. |
 | `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON including visual/image data for Full exports, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
-| `ProjectImportJobProcessor.cs` | Runs one import job, importing v17 manuscripts/page setup/compositions/Core Book/releases/covers/fonts, adapting older data only at the versioned boundary, then refreshing projections and indexes. |
+| `ProjectImportJobProcessor.cs` | Runs one import job, importing v18 manuscripts/page setup/Core and edition compositions/Core Book/releases/covers/fonts, adapting older data only at the versioned boundary, then refreshing projections and indexes. |
 
 ### Images/
 
@@ -617,7 +618,9 @@
 |------|-------------|
 | `PublishModels.cs` | Core/release targets, effective workspace/readiness, revision-aware sparse mutations, matter/style/placement, projection, cover, preparation, and artifact contracts. |
 | `PublicationBookService.cs` | Owning Core Book boundary for seeding, metadata/presentation patches, consolidated workspace-detail reads, chapter-only content selection, structural order, matter, placements, page-setup-normalized reusable covers, revisions, and style/font-aware source fingerprint invalidation. |
-| `IPublicationEditionService.cs` / `PublicationEditionService.cs` | Owning release lifecycle and sparse-override boundary for presets, content/matter/style/placement overlays, archive/clone/compare/audit, and effective fingerprints. |
+| `IPublicationEditionService.cs` / `PublicationEditionService.cs` | Owning release lifecycle and sparse-override boundary for presets, content/matter/placement overlays, edition-content-aware cloning, archive/compare/audit, and effective fingerprints. |
+| `EditionContentService.cs` | Enables/discards release content, resets individual chapters, reports stable-block differences/Core drift, and diagnoses release Designed Page geometry with Editor deep-link targets. |
+| `EditionContentMigrationService.cs` | Protected style/typography materialization into edition snapshots and shared Book Text Styles, proof-row removal, effective-projection validation, artifact Legacy marking, and cleanup handoff. |
 | `PublicationReleasePresetService.cs` | Centralized safe paperback destination, EPUB ebook, and PDF ebook release defaults with internal immutable profiles. |
 | `PublicationPreparationService.cs` | Persisted/recoverable one-action Core reading-copy and release render/validation/package coordinator with cancellation, blockers, and retained Core accessibility warnings. |
 | `PublicationCoreMigrationService.cs` | Guarded v16 Core Book/sparse-release cutover with protected backup, effective-projection and artifact-byte/hash invariants, journaling, and cleanup handoff. |
@@ -625,12 +628,12 @@
 | `PublicationMigrationLock.cs` | Database-scoped process and crash-releasing file lease shared by edition recovery and Press schema advancement so the v14 rebuild/history window has one migration owner. |
 | `PublicationPressMigrationService.cs` | Guarded v15 Press cutover/reconciliation owner with protected backup, atomic marker, integrity and byte/hash invariants, journal evidence, and recovery-shell fallback. |
 | `PublicationActorContext.cs` | Scoped UI/assistant actor attribution carried into immutable publication-edition audit entries. |
-| `PublishAssistantTools.cs` | Compact Core/release read/patch, bounded project search/image inspection, user-authored matter contracts, sparse placement/cover operations, terminal unattached image generation, direct transient cover-canvas previews, readiness, preparation/cancellation, and artifact tools; raw profiles and legacy proof writes are absent. |
+| `PublishAssistantTools.cs` | Compact Core/release read/patch, bounded project search/image inspection, edition difference/diagnostic links, user-authored matter, sparse placement/cover operations, terminal unattached image generation, cover previews, readiness, preparation/cancellation, and artifacts; manuscript/page-layout mutations and raw profiles are absent. |
 | `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration with full outline context, temporary generated-image and direct cover-canvas vision, active-turn streaming/reconnection, proactive prompt policy, tool activity, and Core/release-targeted mutation notices. |
 | `PublicationPressRuntime.cs` | Fail-closed exact-manifest resolver for the packaged native renderer, dynamic capabilities, integrity evidence, and empty controlled child environment with no machine-tool fallback. |
 | `PublicationRenderService.cs` | Persisted/recoverable queue, metadata-only artifact listings, purpose-bound protocol-v5 declared image/font staging from effective manuscript/page/cover scenes, display-ready title handoff, native lifecycle, hash-verified paperback/Book PDF artifacts, semantic page maps, renderer-version staleness, and comparison. |
 | `PublicationCoverService.cs` | Revisioned format-aware structured cover aggregate with copy-safe artwork stacking, canonical bindings, draft-tolerant structural persistence, save-time print-wrap/digital-front geometry reflow, publication-readiness diagnostics, and acknowledgement invalidation. |
-| `PublicationPackageService.cs` | Versioned fail-closed Lorekeeper validation preflight, product-form-specific deterministic package assembly, manifests, reports, provenance, legacy guards, and retained non-gating legacy proof records. |
+| `PublicationPackageService.cs` | Versioned fail-closed Lorekeeper validation preflight, product-form-specific deterministic package assembly, manifests, reports, provenance, and legacy-artifact guards. |
 | `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying effective Core/release content into Core TXT/Markdown/Reading PDF and release EPUB/PDF/print output with product-form guards. |
 | `PublishEndpoints.cs` | Cacheable/range project-scoped immutable publication artifact viewing/download endpoints. |
 | `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown plus semantic EPUB writer for flowing Figures, real-text fixed-layout Designed Pages/covers, reading order, captions, and alternatives. |
@@ -688,7 +691,7 @@
 
 | File | Description |
 |------|-------------|
-| `IChapterService.cs` / `ChapterService.cs` | Chapter CRUD plus shared `IManuscriptService` implementation for revision-aware document/operation writes and all graph, search, vector, auto-mention, visual-reference, and delete side effects. |
+| `IChapterService.cs` / `ChapterService.cs` | Chapter CRUD plus target-aware `IManuscriptService`: Core/release copy-on-write chapters and composition cloning, revision writes, search/vector projection, and graph/auto-mention side effects. |
 
 ### Manuscripts/
 
@@ -702,9 +705,10 @@
 | `ManuscriptOperations.cs` / `ManuscriptOperationInput.cs` | Transactional insert/replace/delete/move/split/merge/type/style/mark transformations with GUID-format-independent stable-ID lookup and assistant-safe DTO conversion. |
 | `ManuscriptInspection.cs` | Shared schema validation, normalization diagnostics, and structural block search used by Editor and revision-worker assistants. |
 | `ManuscriptSchemaUpgrade.cs` | Strict lossless older-to-v4 document and nested historical-payload upgrader used by startup migration and isolated import adapters. |
-| `ManuscriptStyleService.cs` | Revision-checked Book Text Style ownership, built-in/imported font validation, immutable generated semantic keys, and usage-safe deletion. |
+| `ManuscriptStyleService.cs` | Revision-checked project-wide Book Text Style ownership, built-in/imported font validation, immutable generated semantic keys, Core/release usage counts, and usage-safe deletion. |
+| `EditorContentTarget.cs` | Protected Editor target value identifying Core Book or one enabled publication release. |
 | `ManuscriptStyleTemplateExtractor.cs` | Shared paragraph-style capture and compact style-application policy used by the manual editor and Editor assistant. |
-| `IManuscriptService.cs` | Canonical revision-aware chapter manuscript read, replace, and semantic-operation service contract. |
+| `IManuscriptService.cs` | Canonical target-aware chapter manuscript read/replace/operation contract plus explicit edition Designed Page snapshot creation. |
 | `ManuscriptMigrationService.cs` | Cross-process-serialized, WAL-safe Online Backup API migration/recovery owner for resumable schema/data transformation, atomic validation journaling, retention, confirmed restore, and non-downgrading later-migration orchestration. |
 | `VisualCompositionMigrationService.cs` | Guarded protected-backup v3/composition cutover and geometry-policy rekey that preserve semantic IDs/text, original Picture Page geometry, visual styles, Figures/pages/covers/pending Outline state, artifacts/hashes, and foreign keys before cleanup. |
 | `AuthoringPageMigrationService.cs` | Guarded protected-backup v4 authoring cutover that materializes staged Picture Page scenes into active exact-geometry variants, seeds page setup, normalizes Figure/scene fit and crop state, preserves artifacts/hashes, and validates scene hashes, ownership, counts, references, and foreign keys. |

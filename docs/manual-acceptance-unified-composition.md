@@ -44,8 +44,36 @@ the live test project; terminate the browser host after the run.
 - Ask the Publish assistant to patch Core, create a release, customize and reset
   an override, inspect readiness, and prepare files. Confirm compact results
   refresh the correct target without overwriting a dirty manual field. Confirm
-  it cannot select a raw profile, invent an ISBN, approve proof, or describe the
+  it cannot select a raw profile, invent an ISBN, mutate edition manuscript/page
+  layouts, or describe the
   Core reading copy as publication files.
+
+## Edition-specific content
+
+- Enable edition-specific content for a draft release in Publish. Follow **Edit
+  edition content** and confirm Editor opens the selected release target; reload
+  and navigate chapters and confirm that target is remembered.
+- Edit text in one release chapter and confirm only that chapter diverges while
+  untouched chapters continue reflecting later Core edits. Confirm the frozen
+  chapter reports when Core changes after its snapshot.
+- Make a Figure and Designed Page change as the first release mutation. Confirm
+  the chapter and referenced composition fork atomically, Pages uses release
+  geometry, and Core remains unchanged.
+- Create a Book Text Style in release mode, then apply it from Core and another
+  release. Edit an existing shared style manually and confirm the usage-count
+  warning names its global effect. Reset the release chapter and confirm the
+  saved style remains available.
+- Exercise Review Edits, a contest/revision job, and one Editor-assistant change
+  in release mode. Attempt to switch targets mid-operation and confirm it is
+  blocked; confirm accepted changes cannot land in another target.
+- In Publish, verify the difference banner counts text, movement, Figures,
+  formatting, styles, and Designed Pages without treating cloned IDs alone as a
+  change. Follow chapter/block/composition/object warning links back to the exact
+  release target. Disable edition content with confirmation and verify all
+  snapshots disappear without deleting styles or project images.
+- Prepare the release and confirm its artifact contains effective edition
+  content. Reset one chapter and confirm only the affected release becomes stale
+  and its next artifact returns to Core for that chapter.
 
 ## Outline and assistants
 
@@ -53,8 +81,9 @@ the live test project; terminate the browser host after the run.
   Pages without offering chapter visual types.
 - Check fiction, nonfiction, picture-book, illustrated-book, poetry, and hybrid
   briefs receive concise relevant guidance subordinate to explicit direction.
-- Ask Outline, Editor, Images, and Publish to read and mutate a Figure and a
-  composition; verify compact IDs/revisions/diagnostics and conflict recovery.
+- Ask Editor and Images to read and mutate a Figure/composition; ask Publish to
+  read edition differences and layout diagnostics. Verify compact
+  IDs/revisions/diagnostics and conflict recovery.
 - On each assistant surface, generate or edit an image and confirm the tool
   remains active until it returns a readable terminal result and an unattached
   project-image ID. Confirm no numeric job status or queued-success result is
@@ -73,8 +102,7 @@ the live test project; terminate the browser host after the run.
   free-standing generation, and uses a geometry-bound target only when artwork
   must honor a concrete page, frame, Figure placement, or cover region. Verify
   bound guidance does not crop or resize the stored raster, and confirm no
-  assistant can approve a proof, claim vendor acceptance, or claim a URL was
-  downloaded.
+  assistant claims vendor acceptance or that a URL was downloaded.
 
 ## Manuscript Figures
 
@@ -216,9 +244,8 @@ the live test project; terminate the browser host after the run.
 - Confirm full-wrap generation requires current interior page count while
   front-panel work remains available independently.
 - In Publish, choose a release whose geometry lacks an exact page layout and
-  confirm compatibility is reported there. Use **Create layout for this
-  release** and verify it copies the authoring scene into a reviewable release
-  variant without altering the active authoring layout.
+  confirm compatibility is reported there. Follow **Fix in Pages** and verify
+  Editor creates/reuses the release-owned layout without altering Core.
 
 ## Outputs and accessibility
 

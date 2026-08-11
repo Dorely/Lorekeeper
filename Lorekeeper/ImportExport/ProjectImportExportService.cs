@@ -161,8 +161,7 @@ public sealed class ProjectImportExportService(
                     .AsNoTracking()
                     .Include(edition => edition.OutlineItems)
                     .Include(edition => edition.Matter)
-                    .Include(edition => edition.StyleMappings)
-                        .ThenInclude(mapping => mapping.ManuscriptStyleDefinition)
+                    .Include(edition => edition.ChapterOverrides)
                     .Include(edition => edition.ImagePlacements)
                     .Include(edition => edition.CoverDesign)
                     .Where(profile => profile.ProjectId == projectId)
@@ -193,7 +192,11 @@ public sealed class ProjectImportExportService(
                                 variant.SceneJson,
                                 variant.Revision))
                             .ToList(),
-                        composition.ActiveAuthoringVariantId))
+                        composition.ActiveAuthoringVariantId)
+                    {
+                        EditionId = composition.EditionId,
+                        SourceCompositionId = composition.SourceCompositionId,
+                    })
                     .ToList()
                 : [],
             ManuscriptStyles = kind == ProjectExportKind.Full
@@ -455,19 +458,7 @@ public sealed class ProjectImportExportService(
                     IsExcluded = item.IsExcluded,
                 })
                 .ToList(),
-            profile.StyleMappings
-                .OrderBy(item => item.SemanticRole)
-                .Select(item => new ProjectExportEditionStyleMapping(
-                    item.Id,
-                    item.ManuscriptStyleDefinitionId,
-                    item.SemanticRole,
-                    ManuscriptStyleService.NormalizeOverride(
-                        item.ManuscriptStyleDefinition.Kind,
-                        JsonSerializer.Deserialize<ManuscriptStyleProperties>(
-                            item.OverrideJson,
-                            ManuscriptCodec.JsonOptions) ?? new ManuscriptStyleProperties()),
-                    item.Revision))
-                .ToList(),
+            [],
             profile.ImagePlacements
                 .OrderBy(item => item.SortOrder)
                 .Select(item => new ProjectExportPublicationImagePlacement(
@@ -503,6 +494,19 @@ public sealed class ProjectImportExportService(
         {
             OverrideFields = ParseOverrideFields(profile.OverrideFieldsJson),
             InheritsCoreCover = profile.InheritsCoreCover,
+            EditionSpecificContentEnabled = profile.EditionSpecificContentEnabled,
+            ChapterOverrides = profile.ChapterOverrides
+                .OrderBy(item => item.ChapterId)
+                .Select(item => new ProjectExportEditionChapterOverride(
+                    item.Id,
+                    item.ChapterId,
+                    item.ManuscriptJson,
+                    item.Revision,
+                    item.BaseCoreRevision,
+                    item.BaseCoreHash,
+                    item.CreatedAt,
+                    item.UpdatedAt))
+                .ToList(),
         };
 
     private static ProjectExportPublicationBook? ProjectPublicationBook(PublicationBook? book) => book is null ? null : new(

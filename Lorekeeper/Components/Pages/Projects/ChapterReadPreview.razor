@@ -113,6 +113,7 @@
 @code {
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter, EditorRequired] public Guid ChapterId { get; set; }
+    [Parameter] public EditorContentTarget ContentTarget { get; set; } = EditorContentTarget.Core;
     [Parameter] public long RefreshSignal { get; set; }
     [Parameter] public bool FacingPages { get; set; }
     [Parameter] public EventCallback<bool> FacingPagesChanged { get; set; }
@@ -167,6 +168,7 @@
     private ProjectPageSetup? _setup;
     private Guid _loadedProject;
     private Guid _loadedChapter;
+    private EditorContentTarget _loadedTarget = EditorContentTarget.Core;
     private long _loadedSignal = -1;
     private bool _loading;
     private bool _showFacingSeam;
@@ -184,10 +186,11 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        if (_loadedProject == ProjectId && _loadedChapter == ChapterId && _loadedSignal == RefreshSignal)
+        if (_loadedProject == ProjectId && _loadedChapter == ChapterId && _loadedTarget == ContentTarget && _loadedSignal == RefreshSignal)
             return;
         _loadedProject = ProjectId;
         _loadedChapter = ChapterId;
+        _loadedTarget = ContentTarget;
         _loadedSignal = RefreshSignal;
         _setup = await PageSetups.GetOrCreateAsync(ProjectId);
         CopySetup();
@@ -205,7 +208,7 @@
         _error = null;
         try
         {
-            _result = await Preview.LayoutAsync(ProjectId, ChapterId, cancellation.Token);
+            _result = await Preview.LayoutAsync(ProjectId, ChapterId, ContentTarget, cancellation.Token);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {

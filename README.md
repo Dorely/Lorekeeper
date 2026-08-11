@@ -75,6 +75,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   releases inherit Core values live and store only explicit field or collection
   overrides; ISBN, destination, package, and product settings remain
   release-specific. No release or ISBN is created automatically.
+- Opt-in edition-specific manuscript editing in Editor. Untouched chapters
+  inherit Core live; the first release edit freezes a chapter snapshot and its
+  Designed Pages, while reset returns that chapter to Core. Saved Book Text
+  Styles and project images remain reusable across Core and every release.
 - An in-app preview and immutable download for the Core reading PDF used for
   private review and sharing, plus one-action preparation
   jobs that compile, render, validate, and store or package the selected Core or
@@ -114,8 +118,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   content, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded subset fonts, ToUnicode maps, and a
   240% total-ink ceiling. These checks establish only the exact named
   Lorekeeper profile; they do not claim that a vendor accepted an upload.
-- Versioned project import/export (current v17 manuscript-v4/page-setup/
-  composition model, Core Book, sparse release overlays, covers, custom-font binaries,
+- Versioned project import/export (current v18 manuscript-v4/page-setup/
+  composition model, Core Book, sparse release overlays, edition chapter
+  snapshots/compositions, covers, custom-font binaries,
   and isolated older structured/text adapters) plus TXT, Markdown,
   semantic mixed-layout EPUB, artifact-backed Generate/Regenerate, separate
   paperback interior/cover saves, and one Digital PDF Book save. EPUB export is
@@ -279,7 +284,7 @@ protected SQLite backup before transforming Figure presentation, page-layout
 chapters, cover scenes, page setup, authoring variants, and pending Outline
 changes. They verify semantic text and stable IDs, scene/image ownership and
 geometry, staged Picture Page hashes, active authoring layouts, protected row
-counts, foreign keys, artifacts, hashes, packages, audits, and legacy proof rows before
+counts, foreign keys, artifacts, hashes, packages, and audits before
 removing obsolete visual state. Every Picture Page retains its original 8.5 × 11
 inch leaf geometry (including 17 × 11 facing spreads) until the authoring
 migration materializes it as the active Designed Page layout, independently of

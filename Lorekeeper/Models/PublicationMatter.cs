@@ -43,20 +43,6 @@ public class PublicationMatter
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 
-public class PublicationEditionStyleMapping
-{
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid EditionId { get; set; }
-    public PublicationEdition Edition { get; set; } = null!;
-    public Guid ManuscriptStyleDefinitionId { get; set; }
-    public ManuscriptStyleDefinition ManuscriptStyleDefinition { get; set; } = null!;
-    public required string SemanticRole { get; set; }
-    public string OverrideJson { get; set; } = "{}";
-    public long Revision { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
-}
-
 public class PublicationEditionAuditEntry
 {
     public Guid Id { get; set; } = Guid.NewGuid();

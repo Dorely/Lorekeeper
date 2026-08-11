@@ -130,7 +130,9 @@ public sealed class ManuscriptMigrationIntegrationTests
             Assert.Equal("legacy_line_edit_audit", sessions[1].OperationFormat);
             Assert.Contains("legacy-line-edit-v7", sessions[1].OperationsJson);
             Assert.Contains("replacement text", sessions[1].OperationsJson);
-            var job = await db.EditorRevisionJobs.AsNoTracking().SingleAsync();
+            var job = await db.EditorRevisionJobs.AsNoTracking()
+                .Select(item => new { item.Status, item.ErrorMessage })
+                .SingleAsync();
             Assert.Equal(EditorRevisionJobStatus.Failed, job.Status);
             Assert.Contains("cannot be resumed", job.ErrorMessage);
         }
@@ -160,7 +162,9 @@ public sealed class ManuscriptMigrationIntegrationTests
             await service.ApplyPendingAsync(db);
 
         await using var migrated = fixture.CreateDbContext();
-        var batch = await migrated.ContestBatches.AsNoTracking().SingleAsync();
+        var batch = await migrated.ContestBatches.AsNoTracking()
+            .Select(item => new { item.Status, item.ErrorMessage, item.CompletedAt })
+            .SingleAsync();
         var candidates = await migrated.ContestCandidates.AsNoTracking()
             .OrderBy(candidate => candidate.Order)
             .ToListAsync();

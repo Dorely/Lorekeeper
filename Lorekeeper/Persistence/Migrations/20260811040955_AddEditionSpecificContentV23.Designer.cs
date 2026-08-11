@@ -3,6 +3,7 @@ using System;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Lorekeeper.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260811040955_AddEditionSpecificContentV23")]
+    partial class AddEditionSpecificContentV23
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.5");
@@ -3404,6 +3407,12 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<bool>("Bleed")
                         .HasColumnType("INTEGER");
 
+                    b.Property<double>("BodyFontSizePoints")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("BodyLineHeight")
+                        .HasColumnType("REAL");
+
                     b.Property<string>("Copyright")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -3725,6 +3734,49 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("PublicationEditionOutlineItems");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.PublicationEditionStyleMapping", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("EditionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ManuscriptStyleDefinitionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OverrideJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SemanticRole")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ManuscriptStyleDefinitionId");
+
+                    b.HasIndex("EditionId", "ManuscriptStyleDefinitionId")
+                        .IsUnique();
+
+                    b.HasIndex("EditionId", "SemanticRole")
+                        .IsUnique();
+
+                    b.ToTable("PublicationEditionStyleMappings");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationImagePlacement", b =>
@@ -5503,6 +5555,25 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Edition");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.PublicationEditionStyleMapping", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.PublicationEdition", "Edition")
+                        .WithMany("StyleMappings")
+                        .HasForeignKey("EditionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Lorekeeper.Models.ManuscriptStyleDefinition", "ManuscriptStyleDefinition")
+                        .WithMany()
+                        .HasForeignKey("ManuscriptStyleDefinitionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Edition");
+
+                    b.Navigation("ManuscriptStyleDefinition");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.PublicationImagePlacement", b =>
                 {
                     b.HasOne("Lorekeeper.Models.Act", "Act")
@@ -5992,6 +6063,8 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("PageCompositions");
 
                     b.Navigation("RenderJobs");
+
+                    b.Navigation("StyleMappings");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationRenderJob", b =>

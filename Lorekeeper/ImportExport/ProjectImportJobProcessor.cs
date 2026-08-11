@@ -124,7 +124,6 @@ public sealed class ProjectImportJobProcessor(
                     foreach (var edition in document.PublicationEditions)
                         state.EditionMap[edition.Id] = Guid.NewGuid();
                     await AppendStructuralItemsAsync(job, document, state, cancellationToken);
-                    await ImportPageCompositionsAsync(job, document, state, cancellationToken);
                     if (document.FormatVersion >= 16 && document.PublicationBook is not null)
                         await ImportPublicationBookAsync(job.ProjectId, document.PublicationBook, state, cancellationToken);
                     foreach (var importedEdition in document.PublicationEditions
@@ -139,12 +138,16 @@ public sealed class ProjectImportJobProcessor(
                             state.ImageMap,
                             state.FontFamilyMap,
                             state.EditionMap,
+                            state.CompositionMap,
                             state.CoreMatterMap,
                             state.CorePlacementMap,
                             document.FormatVersion,
                             document.Chapters,
                             cancellationToken);
                     }
+                    await ImportPageCompositionsAsync(job, document, state, cancellationToken);
+                    if (document.FormatVersion < 18)
+                        await MaterializeImportedLegacyEditionContentAsync(job.ProjectId, document, state, cancellationToken);
                     if (document.FormatVersion < 16)
                         await SeedImportedCoreBookAsync(job.ProjectId, document, state, cancellationToken);
                     await MaterializeImportedLegacyCompositionVariantsAsync(job.ProjectId, cancellationToken);
@@ -672,7 +675,8 @@ public sealed class ProjectImportJobProcessor(
                 || edition.ImagePlacements.GroupBy(item => item.Id).Any(group => group.Count() > 1))
                 throw new InvalidOperationException($"Publication edition {edition.Id:N} contains duplicate child records.");
             if (edition.OverrideFields.Distinct().Count() != edition.OverrideFields.Count
-                || edition.OverrideFields.Any(field => !Enum.IsDefined(field)))
+                || (document.FormatVersion >= 18 && edition.OverrideFields.Any(field => !Enum.IsDefined(field)))
+                || (document.FormatVersion < 18 && edition.OverrideFields.Any(field => (int)field is < 0 or > 21)))
                 throw new InvalidOperationException($"Publication release {edition.Id:N} contains invalid override markers.");
             if (edition.OutlineItems.Any(item => item.SortOrder < 0)
                 || edition.OutlineItems.GroupBy(item => item.SortOrder).Any(group => group.Count() > 1))
@@ -1473,6 +1477,16 @@ public sealed class ProjectImportJobProcessor(
                 Id = localId,
                 ProjectId = job.ProjectId,
                 ChapterId = localChapterId,
+                EditionId = document.FormatVersion >= 18 && imported.EditionId is Guid exportedEditionId
+                    ? state.EditionMap.GetValueOrDefault(exportedEditionId) is var localEditionId && localEditionId != Guid.Empty
+                        ? localEditionId
+                        : throw new InvalidDataException($"Page composition {imported.Id:N} references an edition that was not imported.")
+                    : null,
+                SourceCompositionId = document.FormatVersion >= 18 && imported.SourceCompositionId is Guid exportedSourceId
+                    ? state.CompositionMap.GetValueOrDefault(exportedSourceId) is var localSourceId && localSourceId != Guid.Empty
+                        ? localSourceId
+                        : null
+                    : null,
                 Name = string.IsNullOrWhiteSpace(imported.Name) ? "Designed page" : imported.Name.Trim(),
                 SemanticManuscriptJson = ManuscriptCodec.Serialize(remappedSemantic),
                 Revision = imported.Revision,
@@ -1704,6 +1718,7 @@ public sealed class ProjectImportJobProcessor(
         IReadOnlyDictionary<Guid, Guid> imageMap,
         IReadOnlyDictionary<Guid, Guid> fontFamilyMap,
         IReadOnlyDictionary<Guid, Guid> editionMap,
+        IReadOnlyDictionary<Guid, Guid> compositionMap,
         IReadOnlyDictionary<Guid, Guid> coreMatterMap,
         IReadOnlyDictionary<Guid, Guid> corePlacementMap,
         int formatVersion,
@@ -1795,9 +1810,10 @@ public sealed class ProjectImportJobProcessor(
             Bleed = importedEdition.Bleed,
             AllowDesignedPageOverrides = importedEdition.AllowDesignedPageOverrides,
             OverrideFieldsJson = formatVersion >= 16
-                ? JsonSerializer.Serialize(importedEdition.OverrideFields)
+                ? JsonSerializer.Serialize(importedEdition.OverrideFields.Where(Enum.IsDefined))
                 : "[]",
             InheritsCoreCover = formatVersion >= 16 && importedEdition.InheritsCoreCover,
+            EditionSpecificContentEnabled = formatVersion >= 18 && importedEdition.EditionSpecificContentEnabled,
         };
         var exportedCoverImageId = importedEdition.SelectedCoverImageId;
         Guid? exportedLegacyCoverChapterId = null;
@@ -1895,25 +1911,6 @@ public sealed class ProjectImportJobProcessor(
             matter.ManuscriptJson = ManuscriptCodec.Serialize(remapped);
             edition.Matter.Add(matter);
         }
-        var localStyles = await db.ManuscriptStyleDefinitions
-            .Where(style => style.ProjectId == projectId)
-            .ToListAsync(cancellationToken);
-        foreach (var imported in importedEdition.StyleMappings)
-        {
-            var localStyle = localStyles.FirstOrDefault(style =>
-                style.Id == imported.ManuscriptStyleDefinitionId
-                || string.Equals(style.SemanticRole, imported.SemanticRole, StringComparison.OrdinalIgnoreCase));
-            if (localStyle is null) continue;
-            edition.StyleMappings.Add(new PublicationEditionStyleMapping
-            {
-                ManuscriptStyleDefinitionId = localStyle.Id,
-                SemanticRole = localStyle.SemanticRole,
-                OverrideJson = JsonSerializer.Serialize(
-                    ManuscriptStyleService.NormalizeOverride(localStyle.Kind, imported.Override),
-                    ManuscriptCodec.JsonOptions),
-                Revision = imported.Revision,
-            });
-        }
         var placementAssetIds = importedEdition.ImagePlacements
             .Select(imported => imageMap.GetValueOrDefault(imported.AssetId))
             .Where(id => id != Guid.Empty)
@@ -1956,6 +1953,33 @@ public sealed class ProjectImportJobProcessor(
                 SortOrder = imported.SortOrder,
             });
         }
+        if (formatVersion >= 18)
+        {
+            foreach (var imported in importedEdition.ChapterOverrides)
+            {
+                if (!chapterMap.TryGetValue(imported.ChapterId, out var localChapterId))
+                    throw new InvalidDataException($"Edition chapter override {imported.Id:N} references a chapter that was not imported.");
+                var document = ManuscriptCodec.Deserialize(imported.ManuscriptJson, imported.ChapterId, imported.Revision);
+                var remapped = RemapManuscriptFigures(
+                    document with { ManuscriptId = localChapterId },
+                    localChapterId,
+                    imageMap,
+                    compositionMap,
+                    editionMap);
+                edition.ChapterOverrides.Add(new PublicationEditionChapterOverride
+                {
+                    Id = Guid.NewGuid(),
+                    EditionId = edition.Id,
+                    ChapterId = localChapterId,
+                    ManuscriptJson = ManuscriptCodec.Serialize(remapped),
+                    Revision = imported.Revision,
+                    BaseCoreRevision = imported.BaseCoreRevision,
+                    BaseCoreHash = imported.BaseCoreHash,
+                    CreatedAt = imported.CreatedAt,
+                    UpdatedAt = imported.UpdatedAt,
+                });
+            }
+        }
         await db.PublicationEditions.AddAsync(edition, cancellationToken);
         try
         {
@@ -1968,6 +1992,233 @@ public sealed class ProjectImportJobProcessor(
             throw new InvalidOperationException($"Publication edition import encountered an unexpected state transition ({entries}).", exception);
         }
     }
+
+    private async Task MaterializeImportedLegacyEditionContentAsync(
+        Guid projectId,
+        ProjectExportDocument document,
+        ImportState state,
+        CancellationToken cancellationToken)
+    {
+        var setup = await db.ProjectPageSetups.AsNoTracking().SingleAsync(
+            item => item.ProjectId == projectId, cancellationToken);
+        foreach (var importedEdition in document.PublicationEditions)
+        {
+            var typographyDiffers = Math.Abs(importedEdition.BodyFontSizePoints - setup.BodyFontSizePoints) > 0.0001
+                || Math.Abs(importedEdition.BodyLineHeight - setup.BodyLineHeight) > 0.0001
+                || importedEdition.OverrideFields.Any(field => (int)field is 19 or 20);
+            if (importedEdition.StyleMappings.Count == 0 && !typographyDiffers)
+                continue;
+            if (!state.EditionMap.TryGetValue(importedEdition.Id, out var editionId))
+                throw new InvalidDataException($"Legacy publication release {importedEdition.Id:N} has no imported identity.");
+            var edition = await db.PublicationEditions.SingleAsync(item => item.Id == editionId, cancellationToken);
+            var projectStyles = await db.ManuscriptStyleDefinitions
+                .Where(item => item.ProjectId == projectId)
+                .ToListAsync(cancellationToken);
+            var roleMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var mapping in importedEdition.StyleMappings)
+            {
+                var source = projectStyles.FirstOrDefault(item =>
+                    string.Equals(item.SemanticRole, mapping.SemanticRole, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new InvalidDataException($"Legacy release style '{mapping.SemanticRole}' was not imported.");
+                var definition = JsonSerializer.Deserialize<ManuscriptStyleProperties>(
+                    source.DefinitionJson, ManuscriptCodec.JsonOptions) ?? new ManuscriptStyleProperties();
+                var merged = MergeImportedStyle(definition, mapping.Override);
+                if (string.Equals(mapping.SemanticRole, ManuscriptStyleRoles.Body, StringComparison.OrdinalIgnoreCase)
+                    && typographyDiffers)
+                    merged = merged with { FontSizePoints = importedEdition.BodyFontSizePoints, LineHeight = importedEdition.BodyLineHeight };
+                roleMap[mapping.SemanticRole] = AddImportedEditionStyle(projectId, edition, source, merged, projectStyles);
+            }
+            if (typographyDiffers && !roleMap.ContainsKey(ManuscriptStyleRoles.Body))
+            {
+                var merged = new ManuscriptStyleProperties(
+                    FontSizePoints: importedEdition.BodyFontSizePoints,
+                    LineHeight: importedEdition.BodyLineHeight);
+                var source = projectStyles.FirstOrDefault(item =>
+                    item.Kind == ManuscriptStyleKind.Paragraph
+                    && string.Equals(item.SemanticRole, ManuscriptStyleRoles.Body, StringComparison.OrdinalIgnoreCase));
+                roleMap[ManuscriptStyleRoles.Body] = AddImportedEditionStyle(
+                    projectId,
+                    edition,
+                    source,
+                    source is null
+                        ? merged
+                        : MergeImportedStyle(
+                            JsonSerializer.Deserialize<ManuscriptStyleProperties>(source.DefinitionJson, ManuscriptCodec.JsonOptions)
+                                ?? new ManuscriptStyleProperties(),
+                            merged),
+                    projectStyles);
+            }
+            await db.SaveChangesAsync(cancellationToken);
+
+            var chapters = await db.Chapters.Where(item => item.ProjectId == projectId).ToListAsync(cancellationToken);
+            foreach (var chapter in chapters)
+            {
+                var transformed = ReplaceImportedStyleRoles(chapter.Manuscript, roleMap);
+                if (ManuscriptCodec.ContentEquals(chapter.Manuscript, transformed))
+                    continue;
+                var remap = await CloneImportedEditionCompositionsAsync(projectId, chapter.Id, edition.Id, transformed, roleMap, cancellationToken);
+                transformed = transformed with
+                {
+                    Content = transformed.Content.Select(block =>
+                        block.PageCompositionId is Guid sourceId && remap.TryGetValue(sourceId, out var cloneId)
+                            ? block with { PageCompositionId = cloneId }
+                            : block).ToList(),
+                };
+                edition.ChapterOverrides.Add(new PublicationEditionChapterOverride
+                {
+                    EditionId = edition.Id,
+                    ChapterId = chapter.Id,
+                    ManuscriptJson = ManuscriptCodec.Serialize(transformed),
+                    Revision = transformed.Revision,
+                    BaseCoreRevision = chapter.ManuscriptRevision,
+                    BaseCoreHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(chapter.Manuscript)),
+                });
+            }
+            foreach (var matter in await db.PublicationMatter.Where(item => item.EditionId == edition.Id).ToListAsync(cancellationToken))
+            {
+                var semantic = ManuscriptCodec.Deserialize(matter.ManuscriptJson, matter.Id, matter.Revision);
+                var transformed = ReplaceImportedStyleRoles(semantic, roleMap);
+                if (!ManuscriptCodec.ContentEquals(semantic, transformed))
+                    matter.ManuscriptJson = ManuscriptCodec.Serialize(transformed);
+            }
+            edition.EditionSpecificContentEnabled = true;
+            edition.Revision = checked(edition.Revision + 1);
+            edition.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    private string AddImportedEditionStyle(
+        Guid projectId,
+        PublicationEdition edition,
+        ManuscriptStyleDefinition? source,
+        ManuscriptStyleProperties definition,
+        ICollection<ManuscriptStyleDefinition> styles)
+    {
+        var sourceRole = source?.SemanticRole ?? ManuscriptStyleRoles.Body;
+        var roleStem = $"{sourceRole}-edition-{edition.Id:N}";
+        var role = roleStem[..Math.Min(72, roleStem.Length)];
+        for (var suffix = 2; styles.Any(item => string.Equals(item.SemanticRole, role, StringComparison.OrdinalIgnoreCase)); suffix++)
+            role = $"{roleStem[..Math.Min(65, roleStem.Length)]}-{suffix}";
+        var nameStem = $"{source?.Name ?? "Body text"} — {edition.Name}";
+        var name = nameStem[..Math.Min(72, nameStem.Length)];
+        for (var suffix = 2; styles.Any(item => item.Kind == (source?.Kind ?? ManuscriptStyleKind.Paragraph)
+            && string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)); suffix++)
+            name = $"{nameStem[..Math.Min(66, nameStem.Length)]} {suffix}";
+        var created = new ManuscriptStyleDefinition
+        {
+            ProjectId = projectId,
+            Name = name,
+            NameKey = name.ToUpperInvariant(),
+            Kind = source?.Kind ?? ManuscriptStyleKind.Paragraph,
+            SemanticRole = role,
+            SemanticRoleKey = role.ToUpperInvariant(),
+            DefinitionJson = JsonSerializer.Serialize(definition, ManuscriptCodec.JsonOptions),
+            Revision = 1,
+        };
+        db.ManuscriptStyleDefinitions.Add(created);
+        styles.Add(created);
+        return role;
+    }
+
+    private async Task<Dictionary<Guid, Guid>> CloneImportedEditionCompositionsAsync(
+        Guid projectId,
+        Guid chapterId,
+        Guid editionId,
+        ManuscriptDocument document,
+        IReadOnlyDictionary<string, string> roles,
+        CancellationToken cancellationToken)
+    {
+        var sourceIds = document.Content.Where(item => item.Type == ManuscriptBlockType.DesignedPage && item.PageCompositionId.HasValue)
+            .Select(item => item.PageCompositionId!.Value).Distinct().ToList();
+        if (sourceIds.Count == 0)
+            return [];
+        var sources = await db.PageCompositions.AsNoTracking().Include(item => item.Variants)
+            .Where(item => item.ProjectId == projectId && item.ChapterId == chapterId && item.EditionId == null && sourceIds.Contains(item.Id))
+            .ToListAsync(cancellationToken);
+        var map = new Dictionary<Guid, Guid>();
+        foreach (var source in sources)
+        {
+            var clone = new PageComposition
+            {
+                ProjectId = projectId,
+                ChapterId = chapterId,
+                EditionId = editionId,
+                SourceCompositionId = source.SourceCompositionId ?? source.Id,
+                Name = source.Name,
+                SemanticManuscriptJson = ManuscriptCodec.Serialize(ReplaceImportedStyleRoles(
+                    ManuscriptCodec.Deserialize(source.SemanticManuscriptJson, source.Id, source.Revision),
+                    roles)),
+                Revision = source.Revision,
+            };
+            var variantMap = new Dictionary<Guid, Guid>();
+            foreach (var sourceVariant in source.Variants)
+            {
+                var cloneVariant = new PageCompositionVariant
+                {
+                    Composition = clone,
+                    GeometryKey = sourceVariant.GeometryKey,
+                    SceneJson = sourceVariant.SceneJson,
+                    Revision = sourceVariant.Revision,
+                };
+                variantMap[sourceVariant.Id] = cloneVariant.Id;
+                clone.Variants.Add(cloneVariant);
+            }
+            if (source.ActiveAuthoringVariantId is Guid activeId && variantMap.TryGetValue(activeId, out var cloneActiveId))
+                clone.ActiveAuthoringVariantId = cloneActiveId;
+            db.PageCompositions.Add(clone);
+            map[source.Id] = clone.Id;
+        }
+        return map;
+    }
+
+    private static ManuscriptDocument ReplaceImportedStyleRoles(
+        ManuscriptDocument document,
+        IReadOnlyDictionary<string, string> roles) => document with
+    {
+        Content = document.Content.Select(block => block with
+        {
+            StyleRole = ReplacementImportedRole(block, roles),
+            Content = block.Content.Select(inline => inline with
+            {
+                Marks = inline.Marks.Select(mark => mark.Type == ManuscriptMarkType.CharacterStyle
+                    && mark.Value is { } value && roles.TryGetValue(value, out var replacement)
+                        ? mark with { Value = replacement }
+                        : mark).ToList(),
+            }).ToList(),
+        }).ToList(),
+    };
+
+    private static string ReplacementImportedRole(
+        ManuscriptBlock block,
+        IReadOnlyDictionary<string, string> roles)
+    {
+        if (!string.IsNullOrWhiteSpace(block.StyleRole))
+            return roles.GetValueOrDefault(block.StyleRole, block.StyleRole);
+        return block.Type == ManuscriptBlockType.Paragraph
+            ? roles.GetValueOrDefault(ManuscriptStyleRoles.Body, block.StyleRole ?? string.Empty)
+            : block.StyleRole ?? string.Empty;
+    }
+
+    private static ManuscriptStyleProperties MergeImportedStyle(
+        ManuscriptStyleProperties inherited,
+        ManuscriptStyleProperties value) => inherited with
+    {
+        FontFamilyKey = value.FontFamilyKey ?? inherited.FontFamilyKey,
+        FontSizePoints = value.FontSizePoints ?? inherited.FontSizePoints,
+        FontWeight = value.FontWeight ?? inherited.FontWeight,
+        Italic = value.Italic ?? inherited.Italic,
+        SmallCaps = value.SmallCaps ?? inherited.SmallCaps,
+        LineHeight = value.LineHeight ?? inherited.LineHeight,
+        SpaceBeforePoints = value.SpaceBeforePoints ?? inherited.SpaceBeforePoints,
+        SpaceAfterPoints = value.SpaceAfterPoints ?? inherited.SpaceAfterPoints,
+        KeepWithNext = value.KeepWithNext ?? inherited.KeepWithNext,
+        TextAlign = value.TextAlign ?? inherited.TextAlign,
+        LeftIndentEm = value.LeftIndentEm ?? inherited.LeftIndentEm,
+        RightIndentEm = value.RightIndentEm ?? inherited.RightIndentEm,
+        FirstLineIndentEm = value.FirstLineIndentEm ?? inherited.FirstLineIndentEm,
+        StartOnNewPage = value.StartOnNewPage ?? inherited.StartOnNewPage,
+    };
 
     private async Task ImportPublicationBookAsync(
         Guid projectId,
@@ -2985,30 +3236,6 @@ public sealed class ProjectImportJobProcessor(
         if (!string.Equals(
             JsonSerializer.Serialize(existingSignature, JsonOptions),
             JsonSerializer.Serialize(importedSignature, JsonOptions),
-            StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var existingMappings = await db.PublicationEditionStyleMappings.AsNoTracking()
-            .Where(mapping => mapping.EditionId == existingEditionId)
-            .Join(
-                db.ManuscriptStyleDefinitions.AsNoTracking(),
-                mapping => mapping.ManuscriptStyleDefinitionId,
-                style => style.Id,
-                (mapping, style) => new { style.SemanticRole, mapping.OverrideJson })
-            .OrderBy(item => item.SemanticRole)
-            .ToListAsync(cancellationToken);
-        var importedMappings = imported.StyleMappings
-            .OrderBy(mapping => mapping.SemanticRole, StringComparer.Ordinal)
-            .Select(mapping => new
-            {
-                mapping.SemanticRole,
-                OverrideJson = JsonSerializer.Serialize(mapping.Override, JsonOptions),
-            });
-        if (!string.Equals(
-            JsonSerializer.Serialize(existingMappings, JsonOptions),
-            JsonSerializer.Serialize(importedMappings, JsonOptions),
             StringComparison.Ordinal))
         {
             return false;

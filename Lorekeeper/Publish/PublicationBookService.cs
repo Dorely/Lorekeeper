@@ -1118,8 +1118,8 @@ public sealed class PublicationEffectiveConfigurationResolver(
         effective.PageWidthInches = Pick(fields, PublicationEditionOverrideField.PageWidthInches, stored.PageWidthInches, setup.PageWidthInches);
         effective.PageHeightInches = Pick(fields, PublicationEditionOverrideField.PageHeightInches, stored.PageHeightInches, setup.PageHeightInches);
         effective.PageMarginInches = Pick(fields, PublicationEditionOverrideField.PageMarginInches, stored.PageMarginInches, setup.PageMarginInches);
-        effective.BodyFontSizePoints = Pick(fields, PublicationEditionOverrideField.BodyFontSizePoints, stored.BodyFontSizePoints, setup.BodyFontSizePoints);
-        effective.BodyLineHeight = Pick(fields, PublicationEditionOverrideField.BodyLineHeight, stored.BodyLineHeight, setup.BodyLineHeight);
+        effective.BodyFontSizePoints = setup.BodyFontSizePoints;
+        effective.BodyLineHeight = setup.BodyLineHeight;
 
         return new EffectivePublicationRelease(
             book,
@@ -1222,6 +1222,7 @@ public sealed class PublicationEffectiveConfigurationResolver(
         PageMarginInches = source.PageMarginInches, BodyFontSizePoints = source.BodyFontSizePoints,
         BodyLineHeight = source.BodyLineHeight, SelectedCoverImageId = source.SelectedCoverImageId,
         AllowDesignedPageOverrides = source.AllowDesignedPageOverrides, InheritsCoreCover = source.InheritsCoreCover,
+        EditionSpecificContentEnabled = source.EditionSpecificContentEnabled,
         CreatedAt = source.CreatedAt, UpdatedAt = source.UpdatedAt,
     };
 }

@@ -402,7 +402,7 @@ public sealed class EditorChatTools(
                 method: (Guid compositionId) =>
                     GetOrCreateCompositionVariantAsync(context, compositionId),
                 name: "get_or_create_page_composition_variant",
-                description: "Get or create the active project-authoring layout variant for a Designed Page. Publication edition variants are created and reviewed in Publish."),
+                description: "Get or create the exact layout variant for the selected Editor target. Core uses project authoring geometry; release mode uses that release's geometry."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) =>
                     PatchCompositionElementAsync(context, variantId, expectedRevision, targetKind, targetId, patch),
@@ -469,20 +469,39 @@ public sealed class EditorChatTools(
                 "Run prose-only revision workers only for substantial prose work distributed across multiple chapters or a clearly book-wide affected set. " +
                 "Do not use this for a single chapter, local scene, isolated rewrite, or style pass; use the direct manuscript tools for those requests. " +
                 "Each item must include chapterId, reason, and chapter-specific instructions. " +
-                "Workers can only alter chapter body text; this coordinator reviews their completed/staged changes and takes follow-up action only if needed. " +
-                "Before calling this, make any broader canon, outline, entity, beat, relationship, fact, or synopsis updates yourself. " +
+                $"Workers can alter only the {(context.ContentTarget.IsCore ? "Core" : "selected release")} chapter body; this coordinator reviews their completed/staged changes and takes follow-up action only if needed. " +
+                (context.ContentTarget.IsCore
+                    ? "Before calling this, make any broader canon, outline, entity, beat, relationship, fact, or synopsis updates yourself. "
+                    : "Do not change shared outline, canon, entities, beats, relationships, facts, or synopses from this release target. ") +
                 "A successful worker result is already applied or staged; do not rerun it merely because persisted reads still show the pre-review manuscript."));
 
-        var existingNames = tools.OfType<AIFunction>().Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var outlineTool in await outlineTools.BuildEditorSharedAsync(new OutlineCollaborationContext(
-            context.ProjectId,
-            context.OnMutated,
-            context.OutlineStaging,
-            bookBriefUpdatePolicy: BookBriefUpdatePolicy.ExplicitUserRequestOnly,
-            surface: OutlineToolSurface.Editor)))
+        if (context.ContentTarget.IsCore)
         {
-            if (outlineTool is AIFunction function && existingNames.Add(function.Name))
-                tools.Add(outlineTool);
+            var existingNames = tools.OfType<AIFunction>().Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
+            foreach (var outlineTool in await outlineTools.BuildEditorSharedAsync(new OutlineCollaborationContext(
+                context.ProjectId,
+                context.OnMutated,
+                context.OutlineStaging,
+                bookBriefUpdatePolicy: BookBriefUpdatePolicy.ExplicitUserRequestOnly,
+                surface: OutlineToolSurface.Editor)))
+            {
+                if (outlineTool is AIFunction function && existingNames.Add(function.Name))
+                    tools.Add(outlineTool);
+            }
+        }
+        else
+        {
+            var unavailable = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "update_project_page_setup",
+                "delete_manuscript_style",
+                "attach_entity_canonical_reference",
+                "update_entity_canonical_reference",
+                "detach_entity_canonical_reference",
+                "add_project_image_to_context",
+                "remove_project_image_from_context",
+            };
+            tools.RemoveAll(tool => tool is AIFunction function && unavailable.Contains(function.Name));
         }
 
         return tools;
@@ -536,6 +555,8 @@ public sealed class EditorChatTools(
     {
         try
         {
+            if (!ctx.ContentTarget.IsCore && styleId is not null)
+                throw new InvalidOperationException("Existing Book Text Styles are shared across Core and every release. Create a new style with a distinct name and apply that copy to this edition instead of updating the shared definition.");
             if (!Enum.TryParse<ManuscriptStyleKind>(kind, ignoreCase: true, out var parsedKind))
                 throw new InvalidOperationException("Style kind must be Paragraph or Character.");
             var styles = await CurrentManuscriptStylesAsync(ctx);
@@ -635,7 +656,7 @@ public sealed class EditorChatTools(
                     summary = $"Chapter {chapterId:N} was not found in this project.",
                 }, ManuscriptCodec.JsonOptions);
 
-            var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken)
+            var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken)
                 ?? throw new InvalidDataException("The chapter manuscript was not found.");
             var sourceIsStaged = false;
             ManuscriptDocument document;
@@ -659,6 +680,7 @@ public sealed class EditorChatTools(
                 ctx.ProjectId,
                 chapterId,
                 new ChapterPreviewSource(document, styles),
+                ctx.ContentTarget,
                 new ChapterPreviewPageTarget(blockId, pageNumber),
                 ctx.TurnCancellationToken);
 
@@ -739,12 +761,50 @@ public sealed class EditorChatTools(
 
         try
         {
-            var preview = await canvasPreviews.RenderAsync(
-                ctx.ProjectId,
-                compositionId,
-                variantId,
-                previewMode.Value,
-                ctx.TurnCancellationToken);
+            var composition = await compositions.GetAsync(ctx.ProjectId, compositionId)
+                ?? throw new KeyNotFoundException("Page composition was not found.");
+            CompositionCanvasPreviewResult preview;
+            if (ctx.ContentTarget.EditionId is Guid editionId && composition.EditionId is null)
+            {
+                await EnsureCompositionReadableAsync(ctx, composition);
+                var sourceVariant = await compositions.ReadVariantAsync(
+                    ctx.ProjectId,
+                    variantId,
+                    ctx.TurnCancellationToken);
+                if (sourceVariant.CompositionId != compositionId)
+                    throw new InvalidOperationException("The selected layout does not belong to this Designed Page.");
+                var effectiveVariant = await compositions.PreviewEditionVariantAsync(
+                    ctx.ProjectId,
+                    compositionId,
+                    editionId,
+                    ctx.TurnCancellationToken);
+                var scene = JsonSerializer.Deserialize<CompositionScene>(
+                    effectiveVariant.SceneJson,
+                    ManuscriptCodec.JsonOptions)
+                    ?? throw new InvalidDataException("The composition scene is empty.");
+                var semantic = ManuscriptCodec.Deserialize(
+                    composition.SemanticManuscriptJson,
+                    composition.Id,
+                    composition.Revision);
+                preview = await canvasPreviews.RenderSceneAsync(
+                    ctx.ProjectId,
+                    compositionId,
+                    composition.Revision,
+                    scene,
+                    semantic,
+                    previewMode.Value,
+                    ctx.TurnCancellationToken);
+            }
+            else
+            {
+                await RequireVariantTargetAsync(ctx, variantId);
+                preview = await canvasPreviews.RenderAsync(
+                    ctx.ProjectId,
+                    compositionId,
+                    variantId,
+                    previewMode.Value,
+                    ctx.TurnCancellationToken);
+            }
             var visualId = Guid.NewGuid();
             var fileName = $"composition-{compositionId:N}-{previewMode.Value.ToString().ToLowerInvariant()}.png";
             var contentUrl = $"/projects/{ctx.ProjectId:N}/editor-chat-visuals/{visualId:N}/content";
@@ -826,7 +886,7 @@ public sealed class EditorChatTools(
             ?? throw new InvalidOperationException("The chapter was not found.");
         if (chapter.ProjectId != ctx.ProjectId)
             throw new InvalidOperationException("The chapter was not found in this project.");
-        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken)
+        var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken)
             ?? throw new InvalidOperationException("The chapter manuscript was not found.");
         var source = ctx.ReviewEdits
             && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
@@ -866,7 +926,7 @@ public sealed class EditorChatTools(
                 ?? throw new InvalidOperationException("The Book Text Style was not found.");
             if (style.Kind != ManuscriptStyleKind.Paragraph)
                 throw new InvalidOperationException("Choose a paragraph Book Text Style for manuscript blocks.");
-            var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken)
+            var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken)
                 ?? throw new InvalidOperationException("The chapter manuscript was not found.");
             var source = ctx.ReviewEdits
                 && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
@@ -1247,6 +1307,7 @@ public sealed class EditorChatTools(
             ctx.CurrentAssistantMessageId,
             ctx.CurrentToolCallId,
             ctx.CurrentArgumentsJson,
+            ctx.ContentTarget,
             assignments);
         var result = await revisionAgents.RunAsync(request, ctx.TurnCancellationToken);
         if (ctx.ReviewEdits && ctx.EditorStaging is not null)
@@ -1665,7 +1726,7 @@ public sealed class EditorChatTools(
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
 
-        var body = (await manuscripts.GetManuscriptAsync(chapter.Id))?.PlainText ?? chapter.PlainText;
+        var body = (await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapter.Id, ctx.TurnCancellationToken))?.PlainText ?? chapter.PlainText;
         var source = "persisted";
         if (ctx.ReviewEdits && ctx.EditorStaging?.TryGetChapterBodyDraft(chapter.Id, out var draftBody) == true)
         {
@@ -1790,7 +1851,7 @@ public sealed class EditorChatTools(
         var chapter = await chapters.GetAsync(chapterId, ctx.TurnCancellationToken);
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId:N} was not found in this project.";
-        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken);
+        var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken);
         if (snapshot is null)
             return $"Error: manuscript {chapterId:N} was not found.";
         var document = ctx.ReviewEdits
@@ -1830,7 +1891,7 @@ public sealed class EditorChatTools(
         var chapter = await chapters.GetAsync(chapterId, ctx.TurnCancellationToken);
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId:N} was not found in this project.";
-        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken);
+        var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken);
         if (snapshot is null)
             return $"Error: manuscript {chapterId:N} was not found.";
         var document = ctx.ReviewEdits
@@ -1946,7 +2007,7 @@ public sealed class EditorChatTools(
         var chapter = await chapters.GetAsync(chapterId);
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return JsonSerializer.Serialize(new { ok = false, code = "NOT_FOUND", summary = "Chapter was not found." });
-        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken);
+        var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken);
         if (snapshot is null)
             return JsonSerializer.Serialize(new { ok = false, code = "NOT_FOUND", summary = "Manuscript was not found." });
         var document = ctx.ReviewEdits
@@ -1985,6 +2046,9 @@ public sealed class EditorChatTools(
 
     private async Task<string> ReadPageCompositionAsync(EditorChatContext ctx, Guid compositionId, Guid variantId, int semanticStart, int semanticCount, int objectStart, int objectCount, int structureStart, int structureCount)
     {
+        var composition = await compositions.GetAsync(ctx.ProjectId, compositionId)
+            ?? throw new KeyNotFoundException("Page composition was not found.");
+        await EnsureCompositionReadableAsync(ctx, composition);
         try
         {
             return await CompositionAgentPayloads.ReadVariantAsync(
@@ -2101,7 +2165,7 @@ public sealed class EditorChatTools(
             var initialContent = new DesignedPageInitialContent { LayoutMode = layoutMode };
             if (ctx.ReviewEdits && ctx.EditorStaging is not null)
             {
-                var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken)
+                var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken)
                     ?? throw new KeyNotFoundException("Manuscript was not found.");
                 var source = ctx.EditorStaging.TryGetChapterManuscriptDraft(chapterId, out var staged)
                     ? staged
@@ -2142,6 +2206,7 @@ public sealed class EditorChatTools(
             }
 
             var result = await compositions.CreateDesignedPageAsync(
+                ctx.ContentTarget,
                 ctx.ProjectId,
                 chapterId,
                 blockIndex,
@@ -2193,7 +2258,7 @@ public sealed class EditorChatTools(
         if (chapter.ProjectId != ctx.ProjectId)
             throw new KeyNotFoundException("Chapter was not found in this project.");
 
-        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken)
+        var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken)
             ?? throw new KeyNotFoundException("Manuscript was not found.");
         var source = ctx.ReviewEdits
             && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
@@ -2212,6 +2277,7 @@ public sealed class EditorChatTools(
                 ctx.TurnCancellationToken)
             : null;
         await manuscripts.ValidateDocumentReferencesAsync(
+            ctx.ContentTarget,
             chapterId,
             applied.Document,
             styleCatalog,
@@ -2241,6 +2307,7 @@ public sealed class EditorChatTools(
         }
 
         var result = await manuscripts.ReplaceDocumentAsync(
+            ctx.ContentTarget,
             chapterId,
             expectedRevision,
             applied.Document,
@@ -2261,8 +2328,9 @@ public sealed class EditorChatTools(
 
     private async Task<string> PatchCompositionElementAsync(EditorChatContext ctx, Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch)
     {
+        await RequireVariantTargetAsync(ctx, variantId);
         var result = await CompositionAgentPayloads.PatchElementAsync(
-            compositions, ctx.ProjectId, variantId, expectedRevision, targetKind, targetId, patch, ctx.TurnCancellationToken);
+            compositions, ctx.ContentTarget, ctx.ProjectId, variantId, expectedRevision, targetKind, targetId, patch, ctx.TurnCancellationToken);
         if (JsonDocument.Parse(result).RootElement.GetProperty("ok").GetBoolean()) ctx.OnMutated();
         return result;
     }
@@ -2277,6 +2345,7 @@ public sealed class EditorChatTools(
         try
         {
             var variant = await compositions.ReadVariantAsync(ctx.ProjectId, variantId, ctx.TurnCancellationToken);
+            EnsureCompositionTarget(ctx, variant.Composition);
             var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
                 ?? throw new InvalidDataException("The composition scene is empty.");
             var item = scene.Objects.FirstOrDefault(candidate => candidate.Id == targetId)
@@ -2347,10 +2416,11 @@ public sealed class EditorChatTools(
     {
         try
         {
+            await RequireVariantTargetAsync(ctx, variantId);
             if (await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken) is null)
                 return JsonSerializer.Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId = variantId, imageId, summary = "Project image was not found." });
             var placed = await compositions.AddImageObjectAsync(
-                ctx.ProjectId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder, ctx.TurnCancellationToken);
+                ctx.ContentTarget, ctx.ProjectId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder, ctx.TurnCancellationToken);
             ctx.OnMutated();
             return JsonSerializer.Serialize(new { ok = true, targetId = variantId, variantId = placed.Variant.Id, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the Designed Page.", mutation = new { kind = "pageComposition", id = placed.Variant.CompositionId, variantId = placed.Variant.Id, selectId = placed.ObjectId } });
         }
@@ -2364,7 +2434,11 @@ public sealed class EditorChatTools(
     {
         try
         {
-            var descriptor = await compositions.DescribeAuthoringGenerationTargetAsync(ctx.ProjectId, targetKind, targetId, variantId, ctx.TurnCancellationToken);
+            if (variantId is Guid selectedVariantId)
+                await RequireVariantTargetAsync(ctx, selectedVariantId);
+            var descriptor = ctx.ContentTarget.EditionId is Guid editionId
+                ? await compositions.DescribeGenerationTargetAsync(ctx.ProjectId, editionId, targetKind, targetId, variantId, ctx.TurnCancellationToken)
+                : await compositions.DescribeAuthoringGenerationTargetAsync(ctx.ProjectId, targetKind, targetId, variantId, ctx.TurnCancellationToken);
             return JsonSerializer.Serialize(new { ok = true, targetId, summary = $"{descriptor.TargetKind} target {descriptor.AspectRatio}, {descriptor.RecommendedWidthPixels}x{descriptor.RecommendedHeightPixels}px.", descriptor }, ManuscriptCodec.JsonOptions);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
@@ -2377,9 +2451,24 @@ public sealed class EditorChatTools(
     {
         try
         {
-            var variant = await compositions.GetOrCreateAuthoringVariantAsync(ctx.ProjectId, compositionId, ctx.TurnCancellationToken);
+            var composition = await compositions.GetAsync(ctx.ProjectId, compositionId)
+                ?? throw new KeyNotFoundException("Page composition was not found.");
+            if (ctx.ContentTarget.EditionId is not null && composition.EditionId is null)
+            {
+                compositionId = await manuscripts.EnsureEditionCompositionAsync(
+                    ctx.ContentTarget,
+                    composition.ChapterId,
+                    composition.Id,
+                    ctx.TurnCancellationToken);
+                composition = await compositions.GetAsync(ctx.ProjectId, compositionId)
+                    ?? throw new KeyNotFoundException("The release Designed Page could not be loaded.");
+            }
+            EnsureCompositionTarget(ctx, composition);
+            var variant = ctx.ContentTarget.EditionId is Guid editionId
+                ? await compositions.GetOrCreateVariantAsync(ctx.ProjectId, compositionId, editionId, ctx.TurnCancellationToken)
+                : await compositions.GetOrCreateAuthoringVariantAsync(ctx.ProjectId, compositionId, ctx.TurnCancellationToken);
             ctx.OnMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, revision = variant.Revision, summary = "Authoring layout is ready.", changedIds = new[] { variant.Id }, mutation = new { kind = "pageComposition", id = compositionId, selectId = variant.Id } });
+            return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, revision = variant.Revision, summary = "The selected Editor target layout is ready.", changedIds = new[] { variant.Id }, mutation = new { kind = "pageComposition", id = compositionId, selectId = variant.Id } });
         }
         catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException)
         {
@@ -2391,7 +2480,8 @@ public sealed class EditorChatTools(
     {
         try
         {
-            var stage = await compositions.StageVariantAsync(ctx.ProjectId, ctx.ConversationId, variantId, expectedRevision, scene, ctx.TurnCancellationToken);
+            await RequireVariantTargetAsync(ctx, variantId);
+            var stage = await compositions.StageVariantAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, variantId, expectedRevision, scene, ctx.TurnCancellationToken);
             return JsonSerializer.Serialize(new { ok = true, targetId = variantId, revision = expectedRevision, summary = $"Validated {scene.Objects.Count} composition object(s).", stageId = stage.Id, expiresAt = stage.ExpiresAt, diagnosticCounts = new { errors = 0, warnings = 0 } });
         }
         catch (CompositionRevisionConflictException ex)
@@ -2408,7 +2498,7 @@ public sealed class EditorChatTools(
     {
         try
         {
-            var variant = await compositions.ApplyStageAsync(ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken);
+            var variant = await compositions.ApplyStageAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken);
             ctx.OnMutated();
             return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, variantId = variant.Id, revision = variant.Revision, summary = "Staged composition applied.", changedIds = new[] { variant.Id }, mutation = new { kind = "pageComposition", id = variant.CompositionId, variantId = variant.Id } });
         }
@@ -2424,30 +2514,60 @@ public sealed class EditorChatTools(
 
     private async Task<string> StageCompositionSemanticAsync(EditorChatContext ctx, Guid compositionId, long expectedRevision, ManuscriptOperationInput[] operations)
     {
-        try { var stage = await compositions.StageSemanticOperationsAsync(ctx.ProjectId, ctx.ConversationId, compositionId, expectedRevision, operations, ctx.TurnCancellationToken); return JsonSerializer.Serialize(new { ok = true, targetId = compositionId, revision = expectedRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {operations.Length} semantic operation(s)." }); }
+        try { var composition = await compositions.GetAsync(ctx.ProjectId, compositionId) ?? throw new KeyNotFoundException("Page composition was not found."); EnsureCompositionTarget(ctx, composition); var stage = await compositions.StageSemanticOperationsAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, compositionId, expectedRevision, operations, ctx.TurnCancellationToken); return JsonSerializer.Serialize(new { ok = true, targetId = compositionId, revision = expectedRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {operations.Length} semantic operation(s)." }); }
         catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = compositionId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the bounded composition and submit a replacement stage." }); }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "SEMANTIC_STAGE_REJECTED", targetId = compositionId, summary = ex.Message }); }
     }
 
     private async Task<string> ApplyCompositionSemanticStageAsync(EditorChatContext ctx, Guid stageId, long expectedRevision)
     {
-        try { var result = await compositions.ApplySemanticStageAsync(ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken); ctx.OnMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Composition.Revision, changedIds = result.ChangedBlockIds, summary = "Staged Designed Page content applied.", mutation = new { kind = "pageComposition", id = result.Composition.Id } }); }
+        try { var result = await compositions.ApplySemanticStageAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken); ctx.OnMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Composition.Revision, changedIds = result.ChangedBlockIds, summary = "Staged Designed Page content applied.", mutation = new { kind = "pageComposition", id = result.Composition.Id } }); }
         catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread and submit a new non-replayed stage." }); }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "STAGE_REJECTED", targetId = stageId, summary = ex.Message }); }
     }
 
     private async Task<string> StageCompositionWorkspaceAsync(EditorChatContext ctx, Guid compositionId, long expectedCompositionRevision, Guid variantId, long expectedVariantRevision, ManuscriptOperationInput[] semanticOperations, CompositionScene scene)
     {
-        try { var stage = await compositions.StageWorkspaceAsync(ctx.ProjectId, ctx.ConversationId, compositionId, expectedCompositionRevision, variantId, expectedVariantRevision, semanticOperations, scene, ctx.TurnCancellationToken); return JsonSerializer.Serialize(new { ok = true, targetId = compositionId, revision = expectedCompositionRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {semanticOperations.Length} semantic operation(s) with {scene.Objects.Count} scene object(s)." }); }
+        try { await RequireVariantTargetAsync(ctx, variantId); var stage = await compositions.StageWorkspaceAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, compositionId, expectedCompositionRevision, variantId, expectedVariantRevision, semanticOperations, scene, ctx.TurnCancellationToken); return JsonSerializer.Serialize(new { ok = true, targetId = compositionId, revision = expectedCompositionRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {semanticOperations.Length} semantic operation(s) with {scene.Objects.Count} scene object(s)." }); }
         catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = compositionId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact workspace and submit one replacement stage." }); }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "WORKSPACE_STAGE_REJECTED", targetId = compositionId, summary = ex.Message }); }
     }
 
     private async Task<string> ApplyCompositionWorkspaceStageAsync(EditorChatContext ctx, Guid stageId, long expectedCompositionRevision)
     {
-        try { var result = await compositions.ApplyWorkspaceStageAsync(ctx.ProjectId, ctx.ConversationId, stageId, expectedCompositionRevision, ctx.TurnCancellationToken); ctx.OnMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Composition.Revision, variantId = result.Variant.Id, variantRevision = result.Variant.Revision, changedIds = result.ChangedBlockIds, summary = "Designed Page content and layout applied atomically.", mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant.Id } }); }
+        try { var result = await compositions.ApplyWorkspaceStageAsync(ctx.ContentTarget, ctx.ProjectId, ctx.ConversationId, stageId, expectedCompositionRevision, ctx.TurnCancellationToken); ctx.OnMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Composition.Revision, variantId = result.Variant.Id, variantRevision = result.Variant.Revision, changedIds = result.ChangedBlockIds, summary = "Designed Page content and layout applied atomically.", mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant.Id } }); }
         catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact workspace and submit a new non-replayed stage." }); }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "WORKSPACE_STAGE_REJECTED", targetId = stageId, summary = ex.Message }); }
+    }
+
+    private async Task RequireVariantTargetAsync(EditorChatContext context, Guid variantId)
+    {
+        var variant = await compositions.ReadVariantAsync(context.ProjectId, variantId, context.TurnCancellationToken);
+        EnsureCompositionTarget(context, variant.Composition);
+    }
+
+    private static void EnsureCompositionTarget(EditorChatContext context, PageComposition composition)
+    {
+        if (composition.EditionId != context.ContentTarget.EditionId)
+            throw new InvalidOperationException("The page composition belongs to a different Editor content target.");
+    }
+
+    private async Task EnsureCompositionReadableAsync(EditorChatContext context, PageComposition composition)
+    {
+        if (composition.EditionId == context.ContentTarget.EditionId)
+            return;
+        if (context.ContentTarget.EditionId is not null
+            && composition.EditionId is null
+            && context.CurrentChapterId == composition.ChapterId)
+        {
+            var effective = await manuscripts.GetManuscriptAsync(
+                context.ContentTarget,
+                composition.ChapterId,
+                context.TurnCancellationToken);
+            if (effective?.Document.Content.Any(block => block.PageCompositionId == composition.Id) == true)
+                return;
+        }
+        throw new InvalidOperationException("The page composition belongs to a different Editor content target.");
     }
 
     private async Task<string> GenerateProjectImageAsync(
@@ -2790,7 +2910,7 @@ public sealed class EditorChatTools(
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
 
-        ctx.RequestContest(new EditorContestStartRequest(chapterId));
+        ctx.RequestContest(new EditorContestStartRequest(chapterId, ctx.ContentTarget));
 
         return "Contest started. Candidate status will stream into the Contest Review workspace.";
     }

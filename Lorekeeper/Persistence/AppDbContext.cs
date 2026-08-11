@@ -62,6 +62,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<ProjectImportJob> ProjectImportJobs => Set<ProjectImportJob>();
     public DbSet<ProjectImportReportItem> ProjectImportReportItems => Set<ProjectImportReportItem>();
     public DbSet<PublicationEdition> PublicationEditions => Set<PublicationEdition>();
+    public DbSet<PublicationEditionChapterOverride> PublicationEditionChapterOverrides => Set<PublicationEditionChapterOverride>();
     public DbSet<PublicationBook> PublicationBooks => Set<PublicationBook>();
     public DbSet<PublicationBookPdfPresentation> PublicationBookPdfPresentations => Set<PublicationBookPdfPresentation>();
     public DbSet<PublicationBookOutlineItem> PublicationBookOutlineItems => Set<PublicationBookOutlineItem>();
@@ -70,7 +71,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<PublicationBookCoverDesign> PublicationBookCoverDesigns => Set<PublicationBookCoverDesign>();
     public DbSet<PublicationEditionOutlineItem> PublicationEditionOutlineItems => Set<PublicationEditionOutlineItem>();
     public DbSet<PublicationMatter> PublicationMatter => Set<PublicationMatter>();
-    public DbSet<PublicationEditionStyleMapping> PublicationEditionStyleMappings => Set<PublicationEditionStyleMapping>();
     public DbSet<PublicationImagePlacement> PublicationImagePlacements => Set<PublicationImagePlacement>();
     public DbSet<PublicationEditionAuditEntry> PublicationEditionAuditEntries => Set<PublicationEditionAuditEntry>();
     public DbSet<PublicationEditionMigrationJournal> PublicationEditionMigrationJournals => Set<PublicationEditionMigrationJournal>();
@@ -252,7 +252,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
 
         modelBuilder.Entity<PageComposition>(entity =>
         {
-            entity.HasIndex(e => new { e.ProjectId, e.ChapterId, e.UpdatedAt });
+            entity.HasIndex(e => new { e.ProjectId, e.ChapterId, e.EditionId, e.UpdatedAt });
+            entity.HasIndex(e => new { e.EditionId, e.SourceCompositionId });
             entity.HasIndex(e => e.ActiveAuthoringVariantId);
             entity.Property(e => e.Revision).IsConcurrencyToken();
             entity.HasOne(e => e.Project)
@@ -262,6 +263,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Chapter)
                 .WithMany(e => e.PageCompositions)
                 .HasForeignKey(e => e.ChapterId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Edition)
+                .WithMany(e => e.PageCompositions)
+                .HasForeignKey(e => e.EditionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -849,6 +854,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
+        modelBuilder.Entity<PublicationEditionChapterOverride>(entity =>
+        {
+            entity.HasIndex(e => new { e.EditionId, e.ChapterId }).IsUnique();
+            entity.HasIndex(e => new { e.ChapterId, e.UpdatedAt });
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.Edition)
+                .WithMany(e => e.ChapterOverrides)
+                .HasForeignKey(e => e.EditionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Chapter)
+                .WithMany(e => e.PublicationEditionChapterOverrides)
+                .HasForeignKey(e => e.ChapterId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<PublicationBook>(entity =>
         {
             entity.HasKey(e => e.ProjectId);
@@ -1123,21 +1143,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.CoreMatter)
                 .WithMany()
                 .HasForeignKey(e => e.CoreMatterId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<PublicationEditionStyleMapping>(entity =>
-        {
-            entity.HasIndex(e => new { e.EditionId, e.ManuscriptStyleDefinitionId }).IsUnique();
-            entity.HasIndex(e => new { e.EditionId, e.SemanticRole }).IsUnique();
-            entity.Property(e => e.Revision).IsConcurrencyToken();
-            entity.HasOne(e => e.Edition)
-                .WithMany(e => e.StyleMappings)
-                .HasForeignKey(e => e.EditionId)
-                .OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne(e => e.ManuscriptStyleDefinition)
-                .WithMany()
-                .HasForeignKey(e => e.ManuscriptStyleDefinitionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

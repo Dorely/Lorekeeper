@@ -186,6 +186,7 @@ builder.Services.AddScoped<IDatabaseStartupMigrationService, DatabaseStartupMigr
 builder.Services.AddScoped<IVisualCompositionMigrationService, VisualCompositionMigrationService>();
 builder.Services.AddScoped<IAuthoringPageMigrationService, AuthoringPageMigrationService>();
 builder.Services.AddScoped<IPublicationCoreMigrationService, PublicationCoreMigrationService>();
+builder.Services.AddScoped<IEditionContentMigrationService, EditionContentMigrationService>();
 builder.Services.AddScoped<IProjectImageService, ProjectImageService>();
 builder.Services.AddScoped<IProjectFontService, ProjectFontService>();
 builder.Services.AddScoped<IManuscriptStyleService, ManuscriptStyleService>();
@@ -269,6 +270,7 @@ builder.Services.AddScoped<IPublicationBookService, PublicationBookService>();
 builder.Services.AddScoped<IPublicationReleasePresetService, PublicationReleasePresetService>();
 builder.Services.AddScoped<IPublicationEffectiveConfigurationResolver, PublicationEffectiveConfigurationResolver>();
 builder.Services.AddScoped<IPublicationEditionService, PublicationEditionService>();
+builder.Services.AddScoped<IEditionContentService, EditionContentService>();
 builder.Services.AddScoped<IPublicationActorContext, PublicationActorContext>();
 builder.Services.Configure<PublicationPressOptions>(
     builder.Configuration.GetSection(PublicationPressOptions.SectionName));

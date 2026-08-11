@@ -15,6 +15,8 @@ public class ContestBatch
     public Guid? AssistantMessageId { get; set; }
 
     public Guid ChapterId { get; set; }
+    public string ContentTargetKind { get; set; } = "Core";
+    public Guid? ContentTargetEditionId { get; set; }
 
     public string ChapterTitle { get; set; } = string.Empty;
 

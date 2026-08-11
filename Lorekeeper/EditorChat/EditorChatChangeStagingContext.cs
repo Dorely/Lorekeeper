@@ -10,8 +10,14 @@ namespace Lorekeeper.EditorChat;
 public sealed class EditorChatChangeStagingContext(
     Guid projectId,
     Guid conversationId,
+    EditorContentTarget contentTarget,
     IAiChangeRepository changes)
 {
+    public EditorChatChangeStagingContext(Guid projectId, Guid conversationId, IAiChangeRepository changes)
+        : this(projectId, conversationId, EditorContentTarget.Core, changes)
+    {
+    }
+
     private static readonly JsonSerializerOptions ChangeJsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
@@ -264,6 +270,8 @@ public sealed class EditorChatChangeStagingContext(
             ConversationKind = AiChangeConversationKind.Editor,
             ConversationId = conversationId,
             AssistantMessageId = _assistantMessageId,
+            ContentTargetKind = contentTarget.Kind.ToString(),
+            ContentTargetEditionId = contentTarget.EditionId,
         };
         await changes.AddBatchAsync(_batch, cancellationToken);
         await changes.SaveChangesAsync(cancellationToken);

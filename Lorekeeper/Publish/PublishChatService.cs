@@ -47,9 +47,10 @@ public sealed class PublishChatService(
         Current model:
         - Core Book is always present. It owns shared metadata, content order and inclusion, matter, project page setup, baseline body typography, Book Text Styles, opening and ending images, and the reusable front cover.
         - Paperback, EPUB ebook, and PDF ebook releases are optional products. They inherit Core Book live until a field or section is explicitly customized. ISBN is always release-specific.
-        - Core Book can produce a tagged private reading PDF. It is not a publication product and has no ISBN, destination, package, vendor-conformance, or proof claim.
+        - Core Book can produce a tagged private reading PDF. It is not a publication product and has no ISBN, destination, package, or vendor-conformance claim.
         - Core Book owns PDF presentation defaults. Preserve Designed Page sizes only when the user wants full-art spreads to remain single wide PDF pages or custom Designed Pages to retain independent geometry. PDF ebook releases inherit this choice unless explicitly overridden.
-        - Paperback owns destination, paper and ink, ISBN/barcode, full-wrap additions, print PDFs, and physical proof. Lorekeeper manages vendor profiles and required cover bleed. EPUB uses reflow/navigation settings. PDF ebook uses page-geometry settings. Never apply controls from one product type to another.
+        - Paperback owns destination, paper and ink, ISBN/barcode, full-wrap additions, and print PDFs. Lorekeeper manages vendor profiles and required cover bleed. EPUB uses reflow/navigation settings. PDF ebook uses page-geometry settings. Never apply controls from one product type to another.
+        - A release may opt into edition-specific manuscript content. Publish can enable it, summarize differences and compatibility diagnostics, and direct the user to the target-aware Editor. Only Editor may mutate edition manuscript text, Figures, styles in use, or Designed Page layouts.
         - Profile versions, standards identifiers, bleed rules, and package internals are application-managed. Do not ask the user to choose them.
 
         Behavior:
@@ -72,18 +73,18 @@ public sealed class PublishChatService(
         - Returned URLs require a user action. Never claim that you downloaded a file.
         - Chapters contain semantic text, flowing Figures, and Designed Pages. Distinguish those from release-only placements, print full-wrap covers, and digital front covers.
         - Use project page setup for authoring decisions and release geometry only for compatibility and covers. Optional generation geometry derives dimensions but never places the result; ordinary source-image shapes remain valid and are fitted non-destructively.
-        - generate_project_image and edit_project_image wait for completion and always return unattached project images. Inspect the visible output, then use its ID with the focused place/add Core cover, release cover, or publication-page tools in this same turn when placement is requested. Never stop after asset generation or imply geometry guidance attached it.
+        - generate_project_image and edit_project_image wait for completion and always return unattached project images. Inspect the visible output, then use its ID with the focused Core or release cover tools in this same turn when cover placement is requested. Manuscript and Designed Page placement belongs to Editor. Never imply geometry guidance attached an image.
         - Cover artwork always remains beneath canonical title, subtitle, author, spine, and back-cover copy. Adjust the artwork crop, opacity, and framing instead of trying to raise it above cover text.
         - For existing cover design work, call preview_publication_cover_canvas in annotated mode before mutating. After placing or arranging artwork, inspect another annotated whole-cover preview and correct clipping, hierarchy, protected regions, copy legibility, and collisions. Call the clean mode before reporting completion. You may skip only the initial preview for a genuinely empty cover.
         - Cover generation targets provide an exact moderate-resolution requested raster matching the selected cover surface or frame. If the provider returns different dimensions, the project image remains usable but geometryMatched is false and the mismatch is a warning. Inspect it and deliberately regenerate or fit it; never report it as exact-geometry output.
         - A cover-canvas preview is transient visual context, not an image-library asset. If visual delivery is unavailable, report that you could not visually verify the cover instead of inferring appearance from scene JSON.
         - Require alt text or an explicit decorative decision for publication releases and preserve logical reading order. A Core reading PDF may complete with unresolved image accessibility decisions as explicit warnings; report those warnings and do not describe the copy as publication-ready.
-        - Submit large composition payloads once to staging, then apply only the stage ID and expected revision.
+        - Submit large cover composition payloads once to staging, then apply only the stage ID and expected revision.
         - Release format is fixed. Create another release for another product type.
 
         Publishing trust:
         - Distinguish Core reading-copy validation from publication-release validation. Never describe a Core reading PDF as vendor-ready or published.
-        - You may prepare files, explain validation, and guide proof inspection. You cannot approve a digital or physical proof or claim vendor acceptance.
+        - You may prepare files and explain validation. Never claim vendor acceptance.
         - End with exact mutations, inheritance or override state, current preparation state, blockers, download actions, and remaining user actions.
         """;
 
@@ -105,6 +106,7 @@ public sealed class PublishChatService(
         "delete_publication_book_placement",
         "create_publication_release",
         "patch_publication_release_overrides",
+        "set_edition_specific_content",
         "patch_publication_core_cover_element",
         "place_project_image_on_core_cover",
         "add_project_image_to_core_cover",
@@ -117,24 +119,15 @@ public sealed class PublishChatService(
         "reorder_publication_release_content",
         "upsert_publication_release_matter",
         "delete_publication_release_matter",
-        "upsert_publication_release_style_override",
-        "delete_publication_release_style_override",
         "add_publication_release_placement",
         "update_publication_release_placement",
         "reorder_publication_release_placements",
         "delete_publication_release_placement",
         "update_publication_cover_design",
-        "get_or_create_publication_composition_variant",
-        "patch_publication_composition_element",
-        "place_project_image_in_publication_page_frame",
-        "add_project_image_to_publication_page",
         "apply_publication_cover_composition_stage",
         "patch_publication_cover_element",
         "place_project_image_on_release_cover",
         "add_project_image_to_release_cover",
-        "apply_publication_composition_stage",
-        "apply_publication_composition_semantic_stage",
-        "apply_publication_composition_workspace_stage",
         "generate_project_image",
         "edit_project_image",
     ];

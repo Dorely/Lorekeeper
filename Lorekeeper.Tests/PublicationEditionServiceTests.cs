@@ -142,27 +142,16 @@ public sealed class PublicationEditionServiceTests
             var original = await service.CreateAsync(
                 project.Id,
                 new PublicationEditionCreate("Paperback", PublicationEditionFormat.Paperback));
-            var firstUpdate = Update(original, string.Empty, original.Vendor, original.VendorProfileVersion) with
-            {
-                Author = "First author",
-            };
-            var current = await service.UpdateAsync(project.Id, original.Id, firstUpdate);
+            var current = await service.PatchOverridesAsync(project.Id, original.Id,
+                new PublicationReleaseOverridePatch(original.Revision, Author: "First author"));
 
-            var staleUpdate = Update(original, string.Empty, original.Vendor, original.VendorProfileVersion) with
-            {
-                Publisher = "Intended publisher",
-            };
             var conflict = await Assert.ThrowsAsync<DbUpdateConcurrencyException>(
-                () => service.UpdateAsync(project.Id, original.Id, staleUpdate));
+                () => service.PatchOverridesAsync(project.Id, original.Id,
+                    new PublicationReleaseOverridePatch(original.Revision, Publisher: "Intended publisher")));
             Assert.Contains("revision", conflict.Message, StringComparison.OrdinalIgnoreCase);
 
-            var retried = await service.UpdateAsync(
-                project.Id,
-                original.Id,
-                Update(current, current.Isbn, current.Vendor, current.VendorProfileVersion) with
-                {
-                    Publisher = "Intended publisher",
-                });
+            var retried = await service.PatchOverridesAsync(project.Id, original.Id,
+                new PublicationReleaseOverridePatch(current.Revision, Publisher: "Intended publisher"));
             Assert.Equal("First author", retried.Author);
             Assert.Equal("Intended publisher", retried.Publisher);
             Assert.True(retried.Revision > current.Revision);
@@ -179,18 +168,9 @@ public sealed class PublicationEditionServiceTests
                 new PublicationEditionCreate("Paperback", PublicationEditionFormat.Paperback));
             await service.ArchiveAsync(project.Id, edition.Id, edition.Revision);
             var archivedRevision = edition.Revision + 1;
-            var update = Update(
-                edition,
-                string.Empty,
-                edition.Vendor,
-                edition.VendorProfileVersion) with
-            {
-                ExpectedRevision = archivedRevision,
-                Author = "Changed",
-            };
-
             await Assert.ThrowsAsync<InvalidOperationException>(
-                () => service.UpdateAsync(project.Id, edition.Id, update));
+                () => service.PatchOverridesAsync(project.Id, edition.Id,
+                    new PublicationReleaseOverridePatch(archivedRevision, Author: "Changed")));
             await Assert.ThrowsAsync<InvalidOperationException>(
                 () => service.UpsertMatterAsync(
                     project.Id,
@@ -259,33 +239,35 @@ public sealed class PublicationEditionServiceTests
                     "KDP paperback",
                     PublicationEditionFormat.Paperback,
                     PublicationVendor.AmazonKdp));
-            first = await service.UpdateAsync(
-                project.Id,
-                first.Id,
-                Update(first, isbn: "9780306406157", PublicationVendor.AmazonKdp, "kdp-paperback-v1"));
+            first = await service.PatchOverridesAsync(project.Id, first.Id,
+                new PublicationReleaseOverridePatch(first.Revision, Isbn: "9780306406157"));
             var clone = await service.CloneAsync(
                 project.Id,
                 first.Id,
                 "Ingram paperback",
                 first.Revision);
 
-            clone = await service.UpdateAsync(
-                project.Id,
-                clone.Id,
-                Update(clone, isbn: "978-0-306-40615-7", PublicationVendor.IngramSpark, "ingram-paperback-pdfx1a-v1"));
+            clone = await service.PatchOverridesAsync(project.Id, clone.Id,
+                new PublicationReleaseOverridePatch(
+                    clone.Revision,
+                    Destination: PublicationVendor.IngramSpark,
+                    Isbn: "978-0-306-40615-7"));
 
             Assert.Equal("9780306406157", clone.Isbn);
-            var drifting = Update(
-                clone,
-                clone.Isbn,
-                PublicationVendor.IngramSpark,
-                "ingram-paperback-pdfx1a-v1") with
-            {
-                IncludeVisibleTableOfContents = !clone.IncludeVisibleTableOfContents,
-            };
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                service.UpdateAsync(project.Id, clone.Id, drifting));
-            Assert.Contains("product-form settings", exception.Message, StringComparison.Ordinal);
+                service.UpsertMatterAsync(
+                    project.Id,
+                    clone.Id,
+                    new PublicationMatterInput(
+                        null,
+                        PublicationMatterLocation.Front,
+                        PublicationMatterKind.Dedication,
+                        "Dedication",
+                        ManuscriptCodec.Serialize(ManuscriptCodec.FromPlainText(Guid.Empty, "For everyone.", 0)),
+                        true,
+                        0),
+                    clone.Revision));
+            Assert.Contains("shares an ISBN-13", exception.Message, StringComparison.Ordinal);
         });
     }
 
@@ -411,45 +393,6 @@ public sealed class PublicationEditionServiceTests
                 await service.GetSourceFingerprintAsync(project.Id, edition.Id));
         });
     }
-
-    private static PublicationEditionUpdate Update(
-        PublicationEditionView edition,
-        string isbn,
-        PublicationVendor vendor,
-        string vendorProfileVersion) =>
-        new(
-            edition.TitleOverride,
-            edition.Subtitle,
-            edition.Author,
-            edition.Language,
-            edition.Publisher,
-            edition.Copyright,
-            isbn,
-            edition.Description,
-            edition.IncludeTableOfContents,
-            edition.IncludeVisibleTableOfContents,
-            edition.IncludeActSynopses,
-            edition.IncludeChapterSynopses,
-            edition.IncludeActHeadings,
-            edition.IncludeChapterHeadings,
-            edition.NumberActs,
-            edition.NumberChapters,
-            edition.TitlePageMode,
-            edition.PageWidthInches,
-            edition.PageHeightInches,
-            edition.PageMarginInches,
-            edition.BodyFontSizePoints,
-            edition.BodyLineHeight,
-            edition.Revision,
-            edition.Name,
-            edition.Format,
-            vendor,
-            vendorProfileVersion,
-            edition.Binding,
-            edition.Paper,
-            edition.Ink,
-            edition.Bleed,
-            edition.AllowDesignedPageOverrides);
 
     private static PublicationCoverDesignUpdate CoverUpdate(
         PublicationCoverDesignView cover,

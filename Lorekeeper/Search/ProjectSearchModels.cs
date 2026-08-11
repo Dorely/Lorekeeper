@@ -5,6 +5,7 @@ namespace Lorekeeper.Search;
 public static class ProjectSearchSourceTypes
 {
     public const string Chapter = "chapter";
+    public const string EditionChapter = "edition_chapter";
     public const string RawIngestSource = "ingest_source";
     public const string Entity = Context.ContextVectorSourceTypes.Entity;
     public const string ContextChapter = Context.ContextVectorSourceTypes.Chapter;
@@ -15,6 +16,7 @@ public static class ProjectSearchSourceTypes
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         Chapter,
+        EditionChapter,
         RawIngestSource,
         Entity,
         ContextChapter,
@@ -32,6 +34,7 @@ public static class ProjectSearchSourceTypes
         return value.ToLowerInvariant() switch
         {
             "chapter" or "chapters" => Chapter,
+            "edition_chapter" or "edition chapter" or "edition chapters" => EditionChapter,
             "context_chapter" => ContextChapter,
             "entity" or "entities" or "graph_entity" or "context_entity" => Entity,
             "act" or "acts" or "context_act" => Act,

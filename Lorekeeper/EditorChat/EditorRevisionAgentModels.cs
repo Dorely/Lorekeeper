@@ -1,4 +1,5 @@
 using Lorekeeper.Models;
+using Lorekeeper.Manuscripts;
 
 namespace Lorekeeper.EditorChat;
 
@@ -17,6 +18,7 @@ public sealed record EditorRevisionAgentRunRequest(
     Guid? AssistantMessageId,
     string ToolCallId,
     string ArgumentsJson,
+    EditorContentTarget ContentTarget,
     IReadOnlyList<EditorRevisionAgentAssignmentInput> Chapters);
 
 public sealed record EditorRevisionAgentRunResult(

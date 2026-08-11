@@ -18,6 +18,8 @@ public class AiChangeBatch
     public Guid? AssistantMessageId { get; set; }
 
     public AiChangeBatchStatus Status { get; set; } = AiChangeBatchStatus.Pending;
+    public string ContentTargetKind { get; set; } = "Core";
+    public Guid? ContentTargetEditionId { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

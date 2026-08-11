@@ -54,6 +54,12 @@ export function setEditorPaneCollapsed(projectId, pane, collapsed) {
     writeWorkspacePreferences(projectId, preferences);
 }
 
+export function setEditorContentTarget(projectId, target) {
+    const preferences = readWorkspacePreferences(projectId);
+    preferences.contentTarget = typeof target === "string" ? target : "Core";
+    writeWorkspacePreferences(projectId, preferences);
+}
+
 export function attachColumnLayout(elements, projectId) {
     const grid = elements?.grid;
     const chatSplitter = elements?.chatSplitter;
@@ -383,7 +389,8 @@ function readWorkspacePreferences(projectId) {
         chapterModes: {},
         readFacing: false,
         chatCollapsed: false,
-        memoryCollapsed: false
+        memoryCollapsed: false,
+        contentTarget: "Core"
     };
 
     try {
@@ -404,7 +411,8 @@ function readWorkspacePreferences(projectId) {
             chapterModes,
             readFacing: saved.readFacing === true,
             chatCollapsed: saved.chatCollapsed === true,
-            memoryCollapsed: saved.memoryCollapsed === true
+            memoryCollapsed: saved.memoryCollapsed === true,
+            contentTarget: typeof saved.contentTarget === "string" ? saved.contentTarget : "Core"
         };
     } catch (_) {
         return defaults;

@@ -179,7 +179,7 @@ public sealed class PublishChatServiceTests
         Assert.Contains("Ask only for a genuinely material unknown", PublishChatService.WorkflowInstructions);
         Assert.Contains("After a conflict", PublishChatService.WorkflowInstructions);
         Assert.Contains("reread", PublishChatService.WorkflowInstructions);
-        Assert.Contains("cannot approve", PublishChatService.WorkflowInstructions);
+        Assert.Contains("Only Editor may mutate edition manuscript", PublishChatService.WorkflowInstructions);
         Assert.Contains("application-managed", PublishChatService.WorkflowInstructions);
         Assert.Contains("vendor acceptance", PublishChatService.WorkflowInstructions);
         Assert.Contains("Title, copyright, and visible contents pages are generated", PublishChatService.WorkflowInstructions);

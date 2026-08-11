@@ -5,6 +5,7 @@
 @using Lorekeeper.EditorChat
 @using Lorekeeper.Llm
 @using Lorekeeper.Models
+@using Lorekeeper.Manuscripts
 @using Lorekeeper.Outline
 @using Lorekeeper.Persistence.Repositories
 @using Lorekeeper.Tokens
@@ -105,6 +106,7 @@
 
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public Guid? CurrentChapterId { get; set; }
+    [Parameter] public EditorContentTarget ContentTarget { get; set; } = EditorContentTarget.Core;
     [Parameter] public int ContextRefreshSignal { get; set; }
     [Parameter] public int ReviewRefreshSignal { get; set; }
     [Parameter] public EventCallback OnAiTurnStarting { get; set; }
@@ -402,7 +404,7 @@
                 await OnAiTurnStarting.InvokeAsync();
 
             phase = "starting editor chat turn";
-            if (!ChatTurns.TryStart(ProjectId, CurrentChapterId, text, submission.Images))
+            if (!ChatTurns.TryStart(ProjectId, CurrentChapterId, ContentTarget, text, submission.Images))
             {
                 _error = "Editor chat already has a running turn.";
                 if (ChatTurns.GetActiveTurn(ProjectId) is { } existingTurn)

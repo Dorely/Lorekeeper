@@ -12,7 +12,8 @@ public sealed record EditorContestSettings(
     int? ProviderSlot3Id);
 
 public sealed record EditorContestStartRequest(
-    Guid ChapterId);
+    Guid ChapterId,
+    EditorContentTarget ContentTarget);
 
 public sealed record ContestTurnSnapshot(
     IReadOnlyList<ContestChatMessageSnapshot> Messages,

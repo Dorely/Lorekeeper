@@ -277,12 +277,6 @@ public sealed class PublicationPackageTests
 
             var preflight = await packages.PreflightAsync(project.Id, edition.Id);
             Assert.True(preflight.CanPackage);
-            Assert.Equal("Not applicable", preflight.PhysicalProof.Status);
-            Assert.Empty(preflight.PhysicalProof.Checklist);
-            Assert.Contains(preflight.DigitalProof.Checklist, item =>
-                item.Contains("EPUB", StringComparison.Ordinal));
-            Assert.DoesNotContain(preflight.DigitalProof.Checklist, item =>
-                item.Contains("PDF", StringComparison.Ordinal));
             edition.Isbn = "not-an-isbn";
             await db.SaveChangesAsync();
             var invalidOptionalIsbn = await packages.PreflightAsync(project.Id, edition.Id);
@@ -497,31 +491,6 @@ public sealed class PublicationPackageTests
             Assert.Equal(packageBytes[0], packageBytes[1]);
             package = repeatedPackage;
 
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                packages.RecordProofAsync(
-                    project.Id,
-                    edition.Id,
-                    package.Id,
-                    PublicationProofKind.Physical,
-                    "Printed proof inspected."));
-
-            var digital = await packages.RecordProofAsync(
-                project.Id,
-                edition.Id,
-                package.Id,
-                PublicationProofKind.Digital,
-                string.Empty);
-            Assert.Equal("Recorded", digital.DigitalProof.Status);
-            Assert.Equal("Not applicable", digital.PhysicalProof.Status);
-
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                packages.RecordProofAsync(
-                    project.Id,
-                    edition.Id,
-                    package.Id,
-                    PublicationProofKind.Physical,
-                    "Printed proof inspected."));
-
             var replacementData = "different package"u8.ToArray();
             var replacement = new PublicationArtifact
             {
@@ -532,7 +501,7 @@ public sealed class PublicationPackageTests
                 Data = replacementData,
                 Sha256 = Convert.ToHexStringLower(SHA256.HashData(replacementData)),
                 ByteLength = replacementData.Length,
-                SourceFingerprint = digital.SourceFingerprint,
+                SourceFingerprint = built.Preflight.SourceFingerprint,
                 RendererVersion = package.RendererVersion,
                 ProfileId = package.ProfileId,
                 CreatedAt = DateTime.UtcNow.AddSeconds(1),
@@ -542,14 +511,11 @@ public sealed class PublicationPackageTests
 
             var replaced = await packages.PreflightAsync(project.Id, edition.Id);
             Assert.NotEqual(package.Id, replaced.CurrentPackage?.Id);
-            Assert.Equal("Pending", replaced.DigitalProof.Status);
-            Assert.Equal("Not applicable", replaced.PhysicalProof.Status);
 
             replacement.IsLegacy = true;
             await db.SaveChangesAsync();
             var legacyIgnored = await packages.PreflightAsync(project.Id, edition.Id);
             Assert.Equal(package.Id, legacyIgnored.CurrentPackage?.Id);
-            Assert.Equal("Recorded", legacyIgnored.DigitalProof.Status);
 
             edition.VendorProfileVersion = "preview-2";
             await db.SaveChangesAsync();
@@ -565,7 +531,7 @@ public sealed class PublicationPackageTests
     }
 
     [Fact]
-    public async Task PublishAssistantCannotApproveProofs()
+    public async Task PublishAssistantExposesCurrentPublicationTools()
     {
         var tools = new PublishAssistantTools(
             null!,
@@ -589,6 +555,8 @@ public sealed class PublicationPackageTests
             "read_publication_release",
             "create_publication_release",
             "patch_publication_release_overrides",
+            "set_edition_specific_content",
+            "read_edition_content_differences",
             "prepare_publication_files",
             "cancel_publication_preparation",
             "read_publication_readiness",
@@ -615,8 +583,6 @@ public sealed class PublicationPackageTests
             "reorder_publication_release_content",
             "upsert_publication_release_matter",
             "delete_publication_release_matter",
-            "upsert_publication_release_style_override",
-            "delete_publication_release_style_override",
             "add_publication_release_placement",
             "update_publication_release_placement",
             "reorder_publication_release_placements",
@@ -772,10 +738,6 @@ public sealed class PublicationPackageTests
             var preflight = await packages.PreflightAsync(project.Id, edition.Id);
             Assert.True(preflight.CanPackage);
             Assert.Equal(2, preflight.ValidatedArtifacts.Count);
-            Assert.Contains(preflight.DigitalProof.Checklist, item =>
-                item.Contains("PDF", StringComparison.Ordinal));
-            Assert.DoesNotContain(preflight.DigitalProof.Checklist, item =>
-                item.Contains("EPUB", StringComparison.Ordinal));
 
             var built = await packages.BuildAsync(project.Id, edition.Id);
             Assert.Equal(0, publishing.ExportCallCount);

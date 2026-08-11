@@ -6,6 +6,7 @@
 @using Lorekeeper.Images
 @implements IAsyncDisposable
 @inject ICompositionService Compositions
+@inject IManuscriptService Manuscripts
 @inject IProjectImageService Images
 @inject IProjectFontService ProjectFonts
 @inject IJSRuntime JS
@@ -281,6 +282,8 @@
     [Parameter] public Guid? RequestedSelectionId { get; set; }
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter, EditorRequired] public Guid CompositionId { get; set; }
+    [Parameter] public EditorContentTarget ContentTarget { get; set; } = EditorContentTarget.Core;
+    [Parameter] public EventCallback<Guid> CompositionForked { get; set; }
 
     private PageComposition? _composition;
     private PageCompositionVariant? _variant;
@@ -307,6 +310,7 @@
     private TextSelectionRestore? _textSelectionRestore;
     private Guid _loadedProjectId;
     private Guid _loadedCompositionId;
+    private EditorContentTarget _loadedContentTarget = EditorContentTarget.Core;
     private int _loadedRefreshSignal = -1;
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private CancellationTokenSource? _autosaveCancellation;
@@ -441,6 +445,7 @@
     {
         if (_loadedProjectId == ProjectId
             && _loadedCompositionId == CompositionId
+            && _loadedContentTarget == ContentTarget
             && _loadedRefreshSignal == RefreshSignal)
             return;
         if (_dirty)
@@ -454,6 +459,9 @@
         {
             _composition = await Compositions.GetAsync(ProjectId, CompositionId)
                 ?? throw new InvalidOperationException("Designed page was not found.");
+            if (_composition.EditionId != ContentTarget.EditionId
+                && !(ContentTarget.EditionId is not null && _composition.EditionId is null))
+                throw new InvalidOperationException("This Designed Page belongs to a different Editor content target.");
             _semanticBlocks = ManuscriptCodec.Deserialize(
                 _composition.SemanticManuscriptJson,
                 _composition.Id,
@@ -468,6 +476,7 @@
             }
             _loadedProjectId = ProjectId;
             _loadedCompositionId = CompositionId;
+            _loadedContentTarget = ContentTarget;
             _loadedRefreshSignal = RefreshSignal;
         }
         catch (Exception exception) { _error = exception.Message; }
@@ -475,8 +484,14 @@
 
     private async Task LoadVariantAsync()
     {
-        _authoringGeometry = await Compositions.GetAuthoringGeometryAsync(ProjectId);
-        _variant = await Compositions.GetOrCreateAuthoringVariantAsync(ProjectId, CompositionId);
+        _authoringGeometry = ContentTarget.EditionId is Guid editionId
+            ? await Compositions.GetEditionGeometryAsync(ProjectId, editionId)
+            : await Compositions.GetAuthoringGeometryAsync(ProjectId);
+        _variant = ContentTarget.EditionId is Guid targetEditionId
+            ? _composition!.EditionId is null
+                ? await Compositions.PreviewEditionVariantAsync(ProjectId, CompositionId, targetEditionId)
+                : await Compositions.GetOrCreateVariantAsync(ProjectId, CompositionId, targetEditionId)
+            : await Compositions.GetOrCreateAuthoringVariantAsync(ProjectId, CompositionId);
         _variants = await Compositions.ListVariantsAsync(ProjectId, CompositionId);
         _scene = JsonSerializer.Deserialize<CompositionScene>(_variant.SceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("Composition scene is empty.");
@@ -1028,7 +1043,23 @@
             var changeVersion = _changeVersion;
             var scene = _scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Guides = [], Objects = _objects.ToList() };
             var semanticBlocks = _semanticBlocks.ToList();
+            Guid? forkedCompositionId = null;
+            if (ContentTarget.EditionId is not null && _composition!.EditionId is null)
+            {
+                CompositionId = await Manuscripts.EnsureEditionCompositionAsync(
+                    ContentTarget,
+                    _composition.ChapterId,
+                    _composition.Id);
+                _composition = await Compositions.GetAsync(ProjectId, CompositionId)
+                    ?? throw new InvalidOperationException("The release Designed Page could not be loaded.");
+                _variant = await Compositions.GetOrCreateVariantAsync(
+                    ProjectId,
+                    CompositionId,
+                    ContentTarget.EditionId.Value);
+                forkedCompositionId = CompositionId;
+            }
             var saved = await Compositions.SaveWorkspaceAsync(
+                ContentTarget,
                 ProjectId,
                 _composition!.Id,
                 _composition.Revision,
@@ -1045,6 +1076,8 @@
                 _dirty = false;
             }
             _error = null;
+            if (forkedCompositionId is Guid forkedId)
+                await CompositionForked.InvokeAsync(forkedId);
         }
         catch (Exception exception) { _error = exception.Message; }
         finally { _saveGate.Release(); }

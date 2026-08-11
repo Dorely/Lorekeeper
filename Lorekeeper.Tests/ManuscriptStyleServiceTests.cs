@@ -163,45 +163,6 @@ public sealed class ManuscriptStyleServiceTests
     }
 
     [Fact]
-    public async Task EditionMappedStyleDeletionFailsWithoutLosingTheMapping()
-    {
-        await using var fixture = await StyleFixture.CreateAsync();
-        var service = new ManuscriptStyleService(fixture.Db, fixture.Mutations);
-        var created = await service.UpsertAsync(
-            fixture.ProjectId,
-            new ManuscriptStyleInput(
-                null,
-                "Paperback body",
-                ManuscriptStyleKind.Paragraph,
-                ManuscriptStyleRoles.Body,
-                new ManuscriptStyleProperties(FontSizePoints: 11)));
-        var edition = new PublicationEdition
-        {
-            ProjectId = fixture.ProjectId,
-            Name = "Paperback",
-        };
-        var mapping = new PublicationEditionStyleMapping
-        {
-            EditionId = edition.Id,
-            ManuscriptStyleDefinitionId = created.Id,
-            SemanticRole = created.SemanticRole,
-            OverrideJson = """{"fontSizePoints":10.5}""",
-        };
-        fixture.Db.PublicationEditions.Add(edition);
-        fixture.Db.PublicationEditionStyleMappings.Add(mapping);
-        await fixture.Db.SaveChangesAsync();
-
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => service.DeleteAsync(fixture.ProjectId, created.Id, created.Revision));
-
-        Assert.Contains("Paperback", exception.Message, StringComparison.Ordinal);
-        Assert.True(await fixture.Db.PublicationEditionStyleMappings.AnyAsync(
-            candidate => candidate.Id == mapping.Id));
-        Assert.True(await fixture.Db.ManuscriptStyleDefinitions.AnyAsync(
-            candidate => candidate.Id == created.Id));
-    }
-
-    [Fact]
     public async Task ProjectMutationBoundaryMakesConcurrentStyleDeleteObserveTheNewReference()
     {
         await using var fixture = await StyleFixture.CreateAsync();

@@ -455,7 +455,7 @@ public sealed class PublicationCoverService(
         if (template.SpineWidthInches < 0.24 && !string.IsNullOrWhiteSpace(design.SpineText))
             diagnostics.Add("Spine text is disabled below the initial 0.24-inch safety threshold.");
         if (!template.IsAcknowledged)
-            diagnostics.Add("Cover geometry changed; acknowledge the current template before proof approval.");
+            diagnostics.Add("Cover geometry changed; review and acknowledge the current template before preparing files.");
         var scene = string.IsNullOrWhiteSpace(design.CompositionSceneJson)
             ? CoverCompositionFactory.Create(edition, design, template.PageCount)
             : System.Text.Json.JsonSerializer.Deserialize<CompositionScene>(design.CompositionSceneJson, ManuscriptCodec.JsonOptions)

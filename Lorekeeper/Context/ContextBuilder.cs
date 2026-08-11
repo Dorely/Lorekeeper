@@ -83,7 +83,7 @@ public sealed class ContextBuilder(
         if (currentChapter is not null
             && request.Purpose is ContextBuildPurpose.Editor or ContextBuildPurpose.EditorRevision)
         {
-            var manuscriptSnapshot = await manuscripts.GetManuscriptAsync(currentChapter.Id, cancellationToken);
+            var manuscriptSnapshot = await manuscripts.GetManuscriptAsync(request.ContentTarget, currentChapter.Id, cancellationToken);
             var pageSetup = await pageSetups.GetOrCreateAsync(project.Id, cancellationToken);
             items.Add(new ContextItem(
                 Key: EditorContextKeys.ProjectPageSetup,
@@ -223,7 +223,7 @@ public sealed class ContextBuilder(
             ContextBuildPurpose.Research =>
                 "Use the supplied research tools to gather, attribute, compare, and synthesize evidence. Distinguish sourced facts from editorial inference and never fabricate a source.",
             ContextBuildPurpose.Publish =>
-                "Use the supplied publication tools to inspect and prepare editions while preserving human control over proof approval.",
+                "Use the supplied publication tools to inspect and prepare publication artifacts. Report validation results accurately and never claim vendor acceptance.",
             _ => throw new ArgumentOutOfRangeException(nameof(purpose)),
         };
     }

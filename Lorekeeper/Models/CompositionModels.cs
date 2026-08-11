@@ -10,6 +10,9 @@ public class PageComposition
     public Project Project { get; set; } = null!;
     public Guid ChapterId { get; set; }
     public Chapter Chapter { get; set; } = null!;
+    public Guid? EditionId { get; set; }
+    public PublicationEdition? Edition { get; set; }
+    public Guid? SourceCompositionId { get; set; }
     public string Name { get; set; } = "Designed page";
     public string SemanticManuscriptJson { get; set; } = string.Empty;
     public long Revision { get; set; }
@@ -39,6 +42,8 @@ public class CompositionMutationStage
     public Guid ConversationId { get; set; }
     public string TargetKind { get; set; } = string.Empty;
     public Guid TargetId { get; set; }
+    public string ContentTargetKind { get; set; } = "Core";
+    public Guid? ContentTargetEditionId { get; set; }
     public long ExpectedRevision { get; set; }
     public string OperationsJson { get; set; } = "[]";
     public string PayloadSha256 { get; set; } = string.Empty;

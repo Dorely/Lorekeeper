@@ -491,7 +491,7 @@ public sealed class ImagesChatTools(
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
 
-        var text = ChapterFormatting.WithLineNumbers((await manuscripts.GetManuscriptAsync(chapter.Id))?.PlainText ?? chapter.PlainText);
+        var text = ChapterFormatting.WithLineNumbers((await manuscripts.GetManuscriptAsync(EditorContentTarget.Core, chapter.Id))?.PlainText ?? chapter.PlainText);
         var pageMaxChars = EffectiveReadChapterPageMaxChars();
         var pageCount = CountTextPages(text, pageMaxChars);
         var requestedPage = Math.Clamp(pageNumber ?? 1, 1, pageCount);
@@ -556,7 +556,7 @@ public sealed class ImagesChatTools(
         var chapter = await chapters.GetAsync(chapterId);
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return JsonSerializer.Serialize(new { ok = false, code = "NOT_FOUND", summary = "Chapter was not found." }, JsonOptions);
-        var snapshot = await manuscripts.GetManuscriptAsync(chapterId, ctx.TurnCancellationToken);
+        var snapshot = await manuscripts.GetManuscriptAsync(EditorContentTarget.Core, chapterId, ctx.TurnCancellationToken);
         if (snapshot is null)
             return JsonSerializer.Serialize(new { ok = false, code = "NOT_FOUND", summary = "Manuscript was not found." }, JsonOptions);
         var visuals = snapshot.Document.Content.Where(block => block.Type is ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage).ToList();
@@ -592,7 +592,7 @@ public sealed class ImagesChatTools(
 
     private async Task<string> PatchCompositionElementAsync(ImagesChatToolContext ctx, Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch)
     {
-        var result = await CompositionAgentPayloads.PatchElementAsync(compositions, ctx.ProjectId, variantId, expectedRevision, targetKind, targetId, patch, ctx.TurnCancellationToken);
+        var result = await CompositionAgentPayloads.PatchElementAsync(compositions, EditorContentTarget.Core, ctx.ProjectId, variantId, expectedRevision, targetKind, targetId, patch, ctx.TurnCancellationToken);
         if (JsonDocument.Parse(result).RootElement.GetProperty("ok").GetBoolean()) ctx.MarkMutated();
         return result;
     }
@@ -645,7 +645,7 @@ public sealed class ImagesChatTools(
             if (await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken) is null)
                 return JsonSerializer.Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId = variantId, imageId, summary = "Project image was not found." }, JsonOptions);
             var placed = await compositions.AddImageObjectAsync(
-                ctx.ProjectId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder, ctx.TurnCancellationToken);
+                EditorContentTarget.Core, ctx.ProjectId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder, ctx.TurnCancellationToken);
             ctx.MarkMutated();
             return JsonSerializer.Serialize(new { ok = true, targetId = variantId, variantId = placed.Variant.Id, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the Designed Page.", mutation = new { kind = "pageComposition", id = placed.Variant.CompositionId, variantId = placed.Variant.Id, selectId = placed.ObjectId } }, JsonOptions);
         }
@@ -673,6 +673,7 @@ public sealed class ImagesChatTools(
             _ = await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken)
                 ?? throw new KeyNotFoundException("Project image was not found.");
             var result = await manuscripts.ApplyAsync(
+                EditorContentTarget.Core,
                 chapterId,
                 expectedRevision,
                 [new InsertManuscriptBlock(
@@ -724,6 +725,7 @@ public sealed class ImagesChatTools(
             if (caption is not null)
                 operations.Insert(0, new ReplaceManuscriptBlockText(blockId, caption));
             var result = await manuscripts.ApplyAsync(
+                EditorContentTarget.Core,
                 chapterId,
                 expectedRevision,
                 operations,
@@ -752,6 +754,7 @@ public sealed class ImagesChatTools(
         try
         {
             var result = await compositions.CreateDesignedPageAsync(
+                EditorContentTarget.Core,
                 ctx.ProjectId,
                 chapterId,
                 blockIndex,
@@ -793,7 +796,7 @@ public sealed class ImagesChatTools(
     {
         try
         {
-            var stage = await compositions.StageVariantAsync(ctx.ProjectId, ctx.ConversationId, variantId, expectedRevision, scene, ctx.TurnCancellationToken);
+            var stage = await compositions.StageVariantAsync(EditorContentTarget.Core, ctx.ProjectId, ctx.ConversationId, variantId, expectedRevision, scene, ctx.TurnCancellationToken);
             return JsonSerializer.Serialize(new { ok = true, targetId = variantId, revision = expectedRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {scene.Objects.Count} composition object(s).", diagnosticCounts = new { errors = 0, warnings = 0 } }, JsonOptions);
         }
         catch (CompositionRevisionConflictException ex)
@@ -810,7 +813,7 @@ public sealed class ImagesChatTools(
     {
         try
         {
-            var variant = await compositions.ApplyStageAsync(ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken);
+            var variant = await compositions.ApplyStageAsync(EditorContentTarget.Core, ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken);
             ctx.MarkMutated();
             return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, variantId = variant.Id, revision = variant.Revision, changedIds = new[] { variant.Id }, summary = "Staged composition applied.", mutation = new { kind = "pageComposition", id = variant.CompositionId, variantId = variant.Id } }, JsonOptions);
         }
@@ -826,28 +829,28 @@ public sealed class ImagesChatTools(
 
     private async Task<string> StageCompositionSemanticAsync(ImagesChatToolContext ctx, Guid compositionId, long expectedRevision, ManuscriptOperationInput[] operations)
     {
-        try { var stage = await compositions.StageSemanticOperationsAsync(ctx.ProjectId, ctx.ConversationId, compositionId, expectedRevision, operations, ctx.TurnCancellationToken); return JsonSerializer.Serialize(new { ok = true, targetId = compositionId, revision = expectedRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {operations.Length} semantic operation(s)." }, JsonOptions); }
+        try { var stage = await compositions.StageSemanticOperationsAsync(EditorContentTarget.Core, ctx.ProjectId, ctx.ConversationId, compositionId, expectedRevision, operations, ctx.TurnCancellationToken); return JsonSerializer.Serialize(new { ok = true, targetId = compositionId, revision = expectedRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {operations.Length} semantic operation(s)." }, JsonOptions); }
         catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = compositionId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the bounded composition and submit a replacement stage." }, JsonOptions); }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "SEMANTIC_STAGE_REJECTED", targetId = compositionId, summary = ex.Message }, JsonOptions); }
     }
 
     private async Task<string> ApplyCompositionSemanticStageAsync(ImagesChatToolContext ctx, Guid stageId, long expectedRevision)
     {
-        try { var result = await compositions.ApplySemanticStageAsync(ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken); ctx.MarkMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Composition.Revision, changedIds = result.ChangedBlockIds, summary = "Staged Designed Page content applied.", mutation = new { kind = "pageComposition", id = result.Composition.Id } }, JsonOptions); }
+        try { var result = await compositions.ApplySemanticStageAsync(EditorContentTarget.Core, ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken); ctx.MarkMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Composition.Revision, changedIds = result.ChangedBlockIds, summary = "Staged Designed Page content applied.", mutation = new { kind = "pageComposition", id = result.Composition.Id } }, JsonOptions); }
         catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread and submit a new non-replayed stage." }, JsonOptions); }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "STAGE_REJECTED", targetId = stageId, summary = ex.Message }, JsonOptions); }
     }
 
     private async Task<string> StageCompositionWorkspaceAsync(ImagesChatToolContext ctx, Guid compositionId, long expectedCompositionRevision, Guid variantId, long expectedVariantRevision, ManuscriptOperationInput[] semanticOperations, CompositionScene scene)
     {
-        try { var stage = await compositions.StageWorkspaceAsync(ctx.ProjectId, ctx.ConversationId, compositionId, expectedCompositionRevision, variantId, expectedVariantRevision, semanticOperations, scene, ctx.TurnCancellationToken); return JsonSerializer.Serialize(new { ok = true, targetId = compositionId, revision = expectedCompositionRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {semanticOperations.Length} semantic operation(s) with {scene.Objects.Count} scene object(s)." }, JsonOptions); }
+        try { var stage = await compositions.StageWorkspaceAsync(EditorContentTarget.Core, ctx.ProjectId, ctx.ConversationId, compositionId, expectedCompositionRevision, variantId, expectedVariantRevision, semanticOperations, scene, ctx.TurnCancellationToken); return JsonSerializer.Serialize(new { ok = true, targetId = compositionId, revision = expectedCompositionRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {semanticOperations.Length} semantic operation(s) with {scene.Objects.Count} scene object(s)." }, JsonOptions); }
         catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = compositionId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact workspace and submit one replacement stage." }, JsonOptions); }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "WORKSPACE_STAGE_REJECTED", targetId = compositionId, summary = ex.Message }, JsonOptions); }
     }
 
     private async Task<string> ApplyCompositionWorkspaceStageAsync(ImagesChatToolContext ctx, Guid stageId, long expectedCompositionRevision)
     {
-        try { var result = await compositions.ApplyWorkspaceStageAsync(ctx.ProjectId, ctx.ConversationId, stageId, expectedCompositionRevision, ctx.TurnCancellationToken); ctx.MarkMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Composition.Revision, variantId = result.Variant.Id, variantRevision = result.Variant.Revision, changedIds = result.ChangedBlockIds, summary = "Designed Page content and layout applied atomically.", mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant.Id } }, JsonOptions); }
+        try { var result = await compositions.ApplyWorkspaceStageAsync(EditorContentTarget.Core, ctx.ProjectId, ctx.ConversationId, stageId, expectedCompositionRevision, ctx.TurnCancellationToken); ctx.MarkMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Composition.Revision, variantId = result.Variant.Id, variantRevision = result.Variant.Revision, changedIds = result.ChangedBlockIds, summary = "Designed Page content and layout applied atomically.", mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant.Id } }, JsonOptions); }
         catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact workspace and submit a new non-replayed stage." }, JsonOptions); }
         catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "WORKSPACE_STAGE_REJECTED", targetId = stageId, summary = ex.Message }, JsonOptions); }
     }

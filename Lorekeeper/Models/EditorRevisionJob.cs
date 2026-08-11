@@ -14,6 +14,8 @@ public class EditorRevisionJob
     public string ToolCallId { get; set; } = string.Empty;
 
     public string ArgumentsJson { get; set; } = "{}";
+    public string ContentTargetKind { get; set; } = "Core";
+    public Guid? ContentTargetEditionId { get; set; }
 
     public EditorRevisionJobStatus Status { get; set; } = EditorRevisionJobStatus.Queued;
 

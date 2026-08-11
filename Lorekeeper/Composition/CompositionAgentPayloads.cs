@@ -80,6 +80,7 @@ public static class CompositionAgentPayloads
 
     public static async Task<string> PatchElementAsync(
         ICompositionService compositions,
+        EditorContentTarget target,
         Guid projectId,
         Guid variantId,
         long expectedRevision,
@@ -91,6 +92,7 @@ public static class CompositionAgentPayloads
         try
         {
             var variant = await compositions.PatchElementAsync(
+                target,
                 projectId,
                 variantId,
                 expectedRevision,
