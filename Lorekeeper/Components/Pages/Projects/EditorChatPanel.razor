@@ -105,6 +105,14 @@
     private const string ConversationTokenUnitLabel = "chat tokens";
     private const string ConversationTokenTitleLabel = "model input token count";
 
+    private enum DeferredEditorChatWork
+    {
+        None,
+        PromptTokens,
+        ChatState,
+        FullLoad,
+    }
+
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public Guid? CurrentChapterId { get; set; }
     [Parameter] public EditorContentTarget ContentTarget { get; set; } = EditorContentTarget.Core;
@@ -137,11 +145,12 @@
     private CancellationTokenSource? _listenCts;
     private Guid? _listeningTurnId;
     private Guid? _loadedProjectId;
+    private Guid? _loadedChapterId;
     private EditorContentTarget _loadedContentTarget = EditorContentTarget.Core;
     private int _loadedContextRefreshSignal;
     private int _loadedReviewRefreshSignal;
-    private bool _deferredWorkPending;
-    private bool _deferredFullLoadPending;
+    private DeferredEditorChatWork _deferredWork;
+    private DeferredEditorChatWork _activeDeferredWork;
     private bool _deferredWorkRunning;
     private int _deferredWorkVersion;
     private CancellationTokenSource? _deferredWorkCts;
@@ -181,54 +190,62 @@
         if (ProjectId == Guid.Empty) return;
         if (_loadedProjectId == ProjectId)
         {
+            var chapterChanged = _loadedChapterId != CurrentChapterId;
             var refreshChatState = _loadedContentTarget != ContentTarget
                 || _loadedContextRefreshSignal != ContextRefreshSignal
                 || _loadedReviewRefreshSignal != ReviewRefreshSignal;
+            _loadedChapterId = CurrentChapterId;
             _loadedContentTarget = ContentTarget;
             _loadedContextRefreshSignal = ContextRefreshSignal;
             _loadedReviewRefreshSignal = ReviewRefreshSignal;
             if (refreshChatState)
             {
-                QueueDeferredWork(fullLoad: false);
+                QueueDeferredWork(DeferredEditorChatWork.ChatState);
+            }
+            else if (chapterChanged)
+            {
+                QueueDeferredWork(DeferredEditorChatWork.PromptTokens);
             }
             return;
         }
 
         PrepareForFullLoad();
         _loadedProjectId = ProjectId;
+        _loadedChapterId = CurrentChapterId;
         _loadedContentTarget = ContentTarget;
         _loadedContextRefreshSignal = ContextRefreshSignal;
         _loadedReviewRefreshSignal = ReviewRefreshSignal;
-        QueueDeferredWork(fullLoad: true);
+        QueueDeferredWork(DeferredEditorChatWork.FullLoad);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!_deferredWorkPending || _deferredWorkRunning || _disposed)
+        if (_deferredWork == DeferredEditorChatWork.None || _deferredWorkRunning || _disposed)
             return;
 
         _deferredWorkRunning = true;
         try
         {
-            while (_deferredWorkPending && !_disposed)
+            while (_deferredWork != DeferredEditorChatWork.None && !_disposed)
             {
-                var fullLoad = _deferredFullLoadPending;
+                var work = _deferredWork;
                 var version = _deferredWorkVersion;
-                _deferredWorkPending = false;
-                _deferredFullLoadPending = false;
+                _deferredWork = DeferredEditorChatWork.None;
+                _activeDeferredWork = work;
 
                 _deferredWorkCts?.Dispose();
                 using var cts = new CancellationTokenSource();
                 _deferredWorkCts = cts;
                 try
                 {
-                    if (fullLoad)
+                    if (work == DeferredEditorChatWork.FullLoad)
                     {
                         await LoadAsync(cts.Token);
                     }
                     else
                     {
-                        await LoadPendingChangesAsync(openIfPending: false, cancellationToken: cts.Token);
+                        if (work == DeferredEditorChatWork.ChatState)
+                            await LoadPendingChangesAsync(openIfPending: false, cancellationToken: cts.Token);
                         await RefreshSystemPromptAsync(cts.Token);
                         UpdateConversationTokenCount();
                     }
@@ -237,7 +254,15 @@
                 catch (JSDisconnectedException) { }
                 catch (Exception ex)
                 {
-                    if (version == _deferredWorkVersion)
+                    if (work == DeferredEditorChatWork.PromptTokens)
+                    {
+                        Logger.LogWarning(
+                            ex,
+                            "Editor Chat token refresh failed. ProjectId={ProjectId}, ChapterId={ChapterId}",
+                            ProjectId,
+                            CurrentChapterId);
+                    }
+                    else if (version == _deferredWorkVersion)
                     {
                         Logger.LogError(
                             ex,
@@ -247,6 +272,12 @@
                         _error = "Editor Chat could not be loaded. Check server logs for details.";
                         _loading = false;
                     }
+                }
+                finally
+                {
+                    if (ReferenceEquals(_deferredWorkCts, cts))
+                        _deferredWorkCts = null;
+                    _activeDeferredWork = DeferredEditorChatWork.None;
                 }
             }
         }
@@ -278,10 +309,14 @@
         _error = null;
     }
 
-    private void QueueDeferredWork(bool fullLoad)
+    private void QueueDeferredWork(DeferredEditorChatWork work)
     {
-        _deferredWorkPending = true;
-        _deferredFullLoadPending |= fullLoad;
+        if (work == DeferredEditorChatWork.None) return;
+        if ((int)work > (int)_deferredWork)
+            _deferredWork = work;
+        if (_deferredWorkRunning && (int)work < (int)_activeDeferredWork)
+            return;
+
         _deferredWorkVersion++;
         _deferredWorkCts?.Cancel();
     }
@@ -698,7 +733,7 @@
         if (_running) return;
         await Chat.ResetAsync(ProjectId);
         PrepareForFullLoad();
-        QueueDeferredWork(fullLoad: true);
+        QueueDeferredWork(DeferredEditorChatWork.FullLoad);
     }
 
     private async Task ReloadFromDbAsync()

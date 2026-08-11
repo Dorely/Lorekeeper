@@ -17,8 +17,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   writing coaching, research, project images, and publishing, including streaming tools,
   reviewable changes, visual context, background revision agents, and project/surface-
   scoped composer drafts that survive navigation and reloads until sent.
-- Editor chapter selection loads the next manuscript in place and updates the address
-  bar without remounting or flashing the project-level Editor Chat.
+- Editor chapter selection loads the next manuscript in place, updates the address
+  bar without remounting or flashing the project-level Editor Chat, and refreshes
+  the chat token estimate for the newly assembled chapter context.
 - Long-running interactive chat turns automatically compact completed tool context at
   90% of the active model input limit, preserve an audit chip in the transcript, keep
   the live token counter aligned with the reduced in-progress context, and tell the

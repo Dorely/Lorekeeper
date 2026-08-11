@@ -177,10 +177,13 @@ a parent render. Chapter choices are buttons rather than route-capable anchors, 
 the app-level enhanced-navigation handler cannot race the in-place transition. The
 chat subtree and JavaScript-sized Editor grid therefore stay mounted without
 transcript hydration or default-width flashes for an ordinary chapter switch.
-Direct chapter URLs remain routable entry points. The next Editor turn always
-receives the selected chapter and rebuilds authoritative context in
-`EditorChatService`; explicit context, review, or edition-target changes may still
-refresh the panel's advisory token state.
+The mounted chat performs only a deferred system-prompt rebuild and token-count
+recalculation after that switch, so its advisory header reflects the selected
+chapter's assembled context without reloading conversation or layout state. Direct
+chapter URLs remain routable entry points. The next Editor turn always receives the
+selected chapter and rebuilds authoritative context in `EditorChatService`; explicit
+context, review, or edition-target changes may still refresh the panel's broader
+advisory chat state.
 
 Assistant tool mutations that require review are stored as `AiChange` batches
 and applied through `IAiChangeApprovalService`. Editor Contest Mode captures a
