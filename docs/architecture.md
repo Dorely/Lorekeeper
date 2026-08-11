@@ -525,7 +525,11 @@ created Designed Page opens Pages mode automatically, and each later placement
 or layout mutation reloads the mounted canvas and follows the affected object
 without replacing dirty manual state. Authoring-variant refreshes use fresh
 no-tracking reads so mutations performed by a background assistant scope cannot
-be hidden by an older variant already tracked in the Blazor circuit.
+be hidden by an older variant already tracked in the Blazor circuit. Before a
+revision-checked composition mutation loads its writable entity graph, it also
+detaches any locally tracked copy of that composition and its variants. The
+expected revisions are therefore compared with current persisted state rather
+than a stale long-lived circuit snapshot.
 
 `LayoutGenerationTargetDescriptor` is the server-owned geometry boundary for a
 project page, Figure, page surface/frame, or publication cover surface/frame.
