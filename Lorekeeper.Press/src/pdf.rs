@@ -732,8 +732,11 @@ where
                     (true, false) => {
                         content.fill_nonzero();
                     }
-                    (false, true) | (false, false) => {
+                    (false, true) => {
                         content.stroke();
+                    }
+                    (false, false) => {
+                        content.end_path();
                     }
                 }
                 content.restore_state();
@@ -1526,6 +1529,12 @@ fn flatten_pdfx_opacity(
         };
         for shape in &mut page.shapes {
             let alpha = shape.opacity.clamp(0.0, 1.0);
+            if opacity_key(alpha) == 0 {
+                shape.fill_rgb = None;
+                shape.stroke_rgb = None;
+                shape.opacity = 1.0;
+                continue;
+            }
             if alpha < 1.0 {
                 shape.fill_rgb = shape
                     .fill_rgb

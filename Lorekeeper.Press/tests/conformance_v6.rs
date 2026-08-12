@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 6);
-    assert_eq!(value["rendererVersion"], "2.0.7");
+    assert_eq!(value["rendererVersion"], "2.0.8");
     assert_eq!(
         value["profiles"],
         json!([
@@ -62,7 +62,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 6);
-    assert_eq!(response["rendererVersion"], "2.0.7");
+    assert_eq!(response["rendererVersion"], "2.0.8");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -259,6 +259,44 @@ fn kdp_flattens_translucent_text_background_into_lower_page_art() {
         "the translucent white text background must be baked into the red page artwork"
     );
     assert!(!inspect(&job.artifact(&rendered, "interior-pdf")).transparency);
+}
+
+#[test]
+fn kdp_omits_a_fully_transparent_text_background() {
+    let mut job = PreparedJob::new("kdp-paperback-v1");
+    job.request["ink"] = json!("Color");
+    let scene = &mut job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"][0]["variants"]
+        [0]["scene"];
+    scene["surface"] = json!({
+        "kind": "IndependentPage", "outputPageMode": "SingleSurface",
+        "widthPoints": 432, "heightPoints": 648, "bleedPoints": 0,
+        "safeInsetPoints": 36, "allowIndependentPdfPage": false
+    });
+    scene["objects"][0]["imageFit"] = json!("Contain");
+    let text = &mut scene["objects"][1];
+    text["fillColor"] = json!("#000000");
+    text["backgroundColor"] = json!("#ffffff");
+    text["backgroundOpacity"] = json!(0);
+    job.write_request();
+
+    let rendered = response(&job.render());
+    assert_eq!(rendered["status"], "completed");
+    assert_eq!(rendered["evidence"]["hasTransparency"], false);
+    let page_number = rendered["pageMap"]
+        .as_array()
+        .expect("page map")
+        .iter()
+        .find(|entry| entry["blockId"] == "60000000-0000-0000-0000-000000000005")
+        .and_then(|entry| entry["pageNumber"].as_u64())
+        .expect("designed page number") as u32;
+    let pdf = Document::load(job.artifact(&rendered, "interior-pdf")).expect("KDP PDF");
+    let page_id = pdf.get_pages()[&page_number];
+    let page_content = pdf.get_page_content(page_id);
+    let content = String::from_utf8_lossy(&page_content);
+    assert!(
+        !content.contains("1 1 1 rg"),
+        "a zero-opacity white background must not become an opaque white rectangle"
+    );
 }
 
 #[test]
