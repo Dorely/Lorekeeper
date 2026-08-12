@@ -151,8 +151,7 @@ public sealed class ProjectImportExportService(
             EntityVisualExamples = exportedVisualExamples,
             PublicationBook = kind == ProjectExportKind.Full
                 ? ProjectPublicationBook(await db.PublicationBooks.AsNoTracking()
-                    .Include(item => item.OutlineItems).Include(item => item.Matter)
-                    .Include(item => item.ImagePlacements).Include(item => item.CoverDesign)
+                    .Include(item => item.OutlineItems).Include(item => item.CoverDesign)
                     .Include(item => item.PdfPresentation)
                     .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken))
                 : null,
@@ -160,9 +159,7 @@ public sealed class ProjectImportExportService(
                 ? (await db.PublicationEditions
                     .AsNoTracking()
                     .Include(edition => edition.OutlineItems)
-                    .Include(edition => edition.Matter)
                     .Include(edition => edition.ChapterOverrides)
-                    .Include(edition => edition.ImagePlacements)
                     .Include(edition => edition.CoverDesign)
                     .Where(profile => profile.ProjectId == projectId)
                     .OrderBy(profile => profile.CreatedAt)
@@ -196,8 +193,34 @@ public sealed class ProjectImportExportService(
                     {
                         EditionId = composition.EditionId,
                         SourceCompositionId = composition.SourceCompositionId,
+                        PublicationSectionId = composition.PublicationSectionId,
                     })
                     .ToList()
+                : [],
+            PublicationSections = kind == ProjectExportKind.Full
+                ? await db.PublicationSections.AsNoTracking()
+                    .Where(section => section.ProjectId == projectId)
+                    .OrderBy(section => section.EditionId)
+                    .ThenBy(section => section.Anchor)
+                    .ThenBy(section => section.LocalOrder)
+                    .Select(section => new ProjectExportPublicationSection(
+                        section.Id,
+                        section.EditionId,
+                        section.CoreSectionId,
+                        section.Title,
+                        section.Kind,
+                        section.SystemRole,
+                        section.Anchor,
+                        section.TargetKind,
+                        section.TargetId,
+                        section.InclusionMode,
+                        section.IsExcluded,
+                        section.LocalOrder,
+                        section.ManuscriptJson,
+                        section.Revision,
+                        section.CreatedAt,
+                        section.UpdatedAt))
+                    .ToListAsync(cancellationToken)
                 : [],
             ManuscriptStyles = kind == ProjectExportKind.Full
                 ? (await db.ManuscriptStyleDefinitions
@@ -424,8 +447,6 @@ public sealed class ProjectImportExportService(
             profile.PageWidthInches,
             profile.PageHeightInches,
             profile.PageMarginInches,
-            profile.BodyFontSizePoints,
-            profile.BodyLineHeight,
             profile.SelectedCoverImageId,
             profile.Binding,
             profile.Paper,
@@ -440,44 +461,6 @@ public sealed class ProjectImportExportService(
                     item.TargetId,
                     item.IsIncluded,
                     item.SortOrder))
-                .ToList(),
-            profile.Matter
-                .OrderBy(item => item.Location)
-                .ThenBy(item => item.SortOrder)
-                .Select(item => new ProjectExportPublicationMatter(
-                    item.Id,
-                    item.Location,
-                    item.Kind,
-                    item.Title,
-                    item.ManuscriptJson,
-                    item.Revision,
-                    item.IsIncluded,
-                    item.SortOrder)
-                {
-                    CoreMatterId = item.CoreMatterId,
-                    IsExcluded = item.IsExcluded,
-                })
-                .ToList(),
-            [],
-            profile.ImagePlacements
-                .OrderBy(item => item.SortOrder)
-                .Select(item => new ProjectExportPublicationImagePlacement(
-                    item.Id,
-                    item.AssetId,
-                    item.TargetKind,
-                    item.TargetId,
-                    item.PlacementKind,
-                    item.Caption,
-                    item.SortOrder,
-                    JsonSerializer.Deserialize<FigurePresentation>(item.PresentationJson, ManuscriptCodec.JsonOptions) ?? new FigurePresentation(),
-                    item.AltText,
-                    item.Decorative,
-                    item.Language,
-                    item.AccessibilityRole)
-                {
-                    CorePlacementId = item.CorePlacementId,
-                    IsExcluded = item.IsExcluded,
-                })
                 .ToList(),
             profile.CoverDesign is null ? null : new ProjectExportCoverDesign(
                 profile.CoverDesign.Title,
@@ -516,12 +499,6 @@ public sealed class ProjectImportExportService(
         book.NumberChapters, book.TitlePageMode,
         book.OutlineItems.OrderBy(item => item.SortOrder).Select(item => new ProjectExportEditionOutlineItem(
             item.Id, item.TargetKind, item.TargetId, item.IsIncluded, item.SortOrder)).ToList(),
-        book.Matter.OrderBy(item => item.Location).ThenBy(item => item.SortOrder).Select(item => new ProjectExportPublicationMatter(
-            item.Id, item.Location, item.Kind, item.Title, item.ManuscriptJson, item.Revision, item.IsIncluded, item.SortOrder)).ToList(),
-        book.ImagePlacements.OrderBy(item => item.SortOrder).Select(item => new ProjectExportPublicationImagePlacement(
-            item.Id, item.AssetId, item.TargetKind, item.TargetId, item.PlacementKind, item.Caption, item.SortOrder,
-            JsonSerializer.Deserialize<FigurePresentation>(item.PresentationJson, ManuscriptCodec.JsonOptions) ?? new FigurePresentation(),
-            item.AltText, item.Decorative, item.Language, item.AccessibilityRole)).ToList(),
         book.CoverDesign is null ? null : new ProjectExportCoverDesign(
             book.Title, book.Subtitle, book.Author, string.Empty, string.Empty, book.CoverDesign.BackgroundColor,
             PublicationBarcodeMode.None, 50, 50, book.CoverDesign.CompositionSceneJson, book.CoverDesign.Revision))

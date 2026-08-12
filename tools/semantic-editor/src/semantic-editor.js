@@ -85,6 +85,7 @@ function validSemanticRole(value) {
 const blockAttrs = {
     id: {default: null},
     styleRole: {default: "body"},
+    publicationField: {default: null},
     imageId: {default: null},
     altText: {default: null},
     imageUrl: {default: null},
@@ -131,12 +132,24 @@ function editorFontFamily(key) {
 }
 
 function textBlockDom(tag, node, extra = {}) {
+    const publicationField = node.attrs.publicationField;
     return [tag, {
         ...extra,
+        class: [extra.class, publicationField ? "semantic-publication-field" : null].filter(Boolean).join(" ") || null,
         "data-block-id": node.attrs.id,
         "data-style-role": node.attrs.styleRole,
+        "data-publication-field": publicationField,
+        contenteditable: publicationField ? "false" : null,
         style: paragraphStyle(node.attrs.paragraphPresentation)
     }, 0];
+}
+
+function textBlockAttrs(element, defaultRole) {
+    return {
+        id: element.dataset.blockId,
+        styleRole: element.dataset.styleRole || defaultRole,
+        publicationField: element.dataset.publicationField || null
+    };
 }
 
 function figureDomStyle(presentation) {
@@ -196,7 +209,7 @@ const schema = new Schema({
             group: "block",
             content: "inline*",
             attrs: blockAttrs,
-            parseDOM: [{tag: "p", getAttrs: element => ({id: element.dataset.blockId, styleRole: element.dataset.styleRole || "body"})}],
+            parseDOM: [{tag: "p", getAttrs: element => textBlockAttrs(element, "body")}],
             toDOM: node => textBlockDom("p", node)
         },
         heading: {
@@ -206,8 +219,7 @@ const schema = new Schema({
             parseDOM: [1, 2, 3, 4, 5, 6].map(level => ({
                 tag: `h${level}`,
                 getAttrs: element => ({
-                    id: element.dataset.blockId,
-                    styleRole: element.dataset.styleRole || (level === 1 ? "chapter-heading" : "subheading"),
+                    ...textBlockAttrs(element, level === 1 ? "chapter-heading" : "subheading"),
                     level
                 })
             })),
@@ -217,7 +229,7 @@ const schema = new Schema({
             group: "block",
             content: "inline*",
             attrs: {...blockAttrs, styleRole: {default: "block-quote"}},
-            parseDOM: [{tag: "blockquote", getAttrs: element => ({id: element.dataset.blockId, styleRole: element.dataset.styleRole || "block-quote"})}],
+            parseDOM: [{tag: "blockquote", getAttrs: element => textBlockAttrs(element, "block-quote")}],
             toDOM: node => textBlockDom("blockquote", node)
         },
         list_item: {
@@ -225,8 +237,8 @@ const schema = new Schema({
             content: "inline*",
             attrs: {...blockAttrs, styleRole: {default: "list-item"}},
             parseDOM: [
-                {tag: "li", getAttrs: element => ({id: element.dataset.blockId, styleRole: element.dataset.styleRole || "list-item"})},
-                {tag: "div.semantic-list-item", getAttrs: element => ({id: element.dataset.blockId, styleRole: element.dataset.styleRole || "list-item"})}
+                {tag: "li", getAttrs: element => textBlockAttrs(element, "list-item")},
+                {tag: "div.semantic-list-item", getAttrs: element => textBlockAttrs(element, "list-item")}
             ],
             toDOM: node => textBlockDom("div", node, {class: "semantic-list-item"})
         },
@@ -394,6 +406,7 @@ function documentFromDomain(document) {
         const attrs = {
             id: block.id || newBlockId(),
             styleRole: block.styleRole || "body",
+            publicationField: block.publicationField || null,
             imageId: block.imageId || null,
             altText: block.altText || null,
             imageUrl: block.imageUrl || null
@@ -453,6 +466,7 @@ function domainFromDocument(doc, manuscriptId, revision) {
             id: node.attrs.id || newBlockId(),
             type: nodeToBlockType[node.type.name] || "paragraph",
             styleRole: node.attrs.styleRole || "body",
+            publicationField: node.attrs.publicationField || null,
             headingLevel: node.type.name === "heading" ? node.attrs.level : null,
             imageId: node.type.name === "figure" ? node.attrs.imageId : null,
             altText: node.type.name === "figure" ? node.attrs.altText : null,

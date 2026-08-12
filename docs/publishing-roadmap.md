@@ -25,8 +25,9 @@ decisions remain under [`research/`](research/README.md) and
 ### One source, Core Book, and publication releases
 
 - The semantic manuscript and project assets are authoritative.
-- Core Book owns shared metadata, content choices, matter, page setup, Book Text
-  Styles, opening and ending artwork, and the reusable front cover.
+- Core Book owns shared metadata, chapter inclusion, publication sections, page
+  setup, Book Text Styles, and the reusable front cover. Publication sections
+  combine prose, Figures, and Designed Pages around the fixed Core outline.
 - Optional publication releases inherit Core Book and override only what must
   differ for a product.
 - Core Book can produce a private reading PDF. That file is useful for review or
@@ -151,15 +152,22 @@ PDF ebook content without copying the entire book or changing Core content.
 
 ### 2. Complete release-configuration UI
 
-- Expose release matter additions, exclusions, replacements, and ordering.
-- Expose opening and ending image placement overrides.
-- Expose release content inclusion and reading order.
+Status: `Implemented`
+
+- Expose release publication-section additions, exclusions, replacements, and
+  ordering within a shared outline anchor.
+- Support prose, Figures, and Designed Pages in Core and release sections.
+- Expose release chapter inclusion while keeping reading order fixed to Core.
 - Keep project-wide Book Text Styles reusable from Core and every release;
   release-specific appearance comes from edition manuscript references and
   direct formatting in Editor.
 - Provide an explicit path to create and edit a release layout when its target
   geometry differs from the authoring layout.
 - Let every customized section return to its inherited Core value.
+
+Core and release publication sections now share the manuscript and composition
+editors used elsewhere in authoring. Release chapter controls are inclusion-only;
+the Core outline remains the single ordering authority.
 
 Gate: every artifact-affecting setting supported by the services and assistant
 has an understandable manual workflow.

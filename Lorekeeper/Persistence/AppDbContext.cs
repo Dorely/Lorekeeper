@@ -68,6 +68,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<PublicationBookOutlineItem> PublicationBookOutlineItems => Set<PublicationBookOutlineItem>();
     public DbSet<PublicationBookMatter> PublicationBookMatter => Set<PublicationBookMatter>();
     public DbSet<PublicationBookImagePlacement> PublicationBookImagePlacements => Set<PublicationBookImagePlacement>();
+    public DbSet<PublicationSection> PublicationSections => Set<PublicationSection>();
     public DbSet<PublicationBookCoverDesign> PublicationBookCoverDesigns => Set<PublicationBookCoverDesign>();
     public DbSet<PublicationEditionOutlineItem> PublicationEditionOutlineItems => Set<PublicationEditionOutlineItem>();
     public DbSet<PublicationMatter> PublicationMatter => Set<PublicationMatter>();
@@ -263,6 +264,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Chapter)
                 .WithMany(e => e.PageCompositions)
                 .HasForeignKey(e => e.ChapterId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.PublicationSection)
+                .WithMany(e => e.PageCompositions)
+                .HasForeignKey(e => e.PublicationSectionId)
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.Edition)
                 .WithMany(e => e.PageCompositions)
@@ -921,6 +926,30 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Asset).WithMany().HasForeignKey(e => e.AssetId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.Act).WithMany().HasForeignKey(e => e.ActId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.Chapter).WithMany().HasForeignKey(e => e.ChapterId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationSection>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.EditionId, e.Anchor, e.TargetId, e.LocalOrder });
+            entity.HasIndex(e => new { e.EditionId, e.CoreSectionId }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.SystemRole, e.EditionId }).IsUnique()
+                .HasFilter("\"SystemRole\" <> 'None' AND \"IsExcluded\" = 0");
+            entity.Property(e => e.Kind).HasConversion<string>();
+            entity.Property(e => e.SystemRole).HasConversion<string>();
+            entity.Property(e => e.Anchor).HasConversion<string>();
+            entity.Property(e => e.TargetKind).HasConversion<string>();
+            entity.Property(e => e.InclusionMode).HasConversion<string>();
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.Project).WithMany()
+                .HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Edition).WithMany(e => e.PublicationSections)
+                .HasForeignKey(e => e.EditionId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.CoreSection).WithMany()
+                .HasForeignKey(e => e.CoreSectionId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Act).WithMany()
+                .HasForeignKey(e => e.ActId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Chapter).WithMany()
+                .HasForeignKey(e => e.ChapterId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<PublicationBookCoverDesign>(entity =>

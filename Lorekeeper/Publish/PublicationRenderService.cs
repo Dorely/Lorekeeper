@@ -35,7 +35,9 @@ public sealed record PublicationRenderDiagnostic(
     string Code,
     string Message,
     string? ArtifactKind = null,
-    int? Page = null);
+    int? Page = null,
+    string? SourceKind = null,
+    string? SourceId = null);
 
 public sealed record PublicationArtifactView(
     Guid Id,
@@ -756,7 +758,7 @@ public sealed class PublicationRenderProcessor(
 
         Cleanup(job.Id);
         var result = await InvokeAsync(job.Id, request, cancellationToken);
-        if (result.ProtocolVersion != 5
+        if (result.ProtocolVersion != 6
             || !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a mismatched protocol or job identity.");
         if (!string.Equals(result.RendererVersion, job.RendererVersion, StringComparison.Ordinal))
@@ -963,6 +965,12 @@ public sealed class PublicationRenderProcessor(
                 .SelectMany(composition => composition.Variants)
                 .SelectMany(variant => variant.Scene.Objects.Select(item => item.FontFamilyKey)
                     .Concat(variant.Scene.Styles.Select(style => style.FontFamilyKey))))
+            .Concat(document.PublicationSections.SelectMany(section => section.Manuscript.Content)
+                .Select(block => block.ParagraphPresentation?.FontFamilyKey))
+            .Concat(document.PublicationSections.SelectMany(section => section.PageCompositions)
+                .SelectMany(composition => composition.Variants)
+                .SelectMany(variant => variant.Scene.Objects.Select(item => item.FontFamilyKey)
+                    .Concat(variant.Scene.Styles.Select(style => style.FontFamilyKey))))
             .Concat(coverScene?.Objects.Select(item => item.FontFamilyKey) ?? [])
             .Concat(coverScene?.Styles.Select(style => style.FontFamilyKey) ?? [])
             .Where(key => !string.IsNullOrWhiteSpace(key))
@@ -1047,32 +1055,56 @@ public sealed class PublicationRenderProcessor(
                 }).ToArray(),
             }).ToArray(),
         }).ToArray();
-        var matter = document.Matter
-            .OrderBy(item => item.Location)
-            .ThenBy(item => item.SortOrder)
+        var publicationSectionPayloads = document.PublicationSections
+            .OrderBy(item => item.Anchor)
+            .ThenBy(item => item.LocalOrder)
             .ThenBy(item => item.Id)
             .Select(item => new
             {
                 id = item.Id,
-                location = item.Location.ToString(),
+                coreSectionId = item.CoreSectionId,
+                item.Title,
                 kind = item.Kind.ToString(),
-                title = PublicationMatterFormatting.Title(item),
+                systemRole = item.SystemRole.ToString(),
+                anchor = item.Anchor.ToString(),
+                targetKind = item.TargetKind?.ToString(),
+                targetId = item.TargetId,
+                item.LocalOrder,
                 blocks = item.Manuscript.Content.Select(BlockPayload).ToArray(),
-            })
-            .ToArray();
-        if (sections.Sum(section => section.chapters.Length) == 0)
-            throw new InvalidOperationException("Include at least one non-empty chapter before rendering.");
+                pageCompositions = item.PageCompositions.Select(composition => new
+                {
+                    id = composition.Id,
+                    composition.Name,
+                    revision = composition.Revision,
+                    semanticBlocks = composition.SemanticManuscript.Content.Select(BlockPayload).ToArray(),
+                    variants = composition.Variants.Select(variant => new
+                    {
+                        id = variant.Id,
+                        variant.GeometryKey,
+                        variant.Revision,
+                        scene = NormalizeSceneLanguages(CompositionService.WithDerivedTextSemanticRoles(
+                            variant.Scene,
+                            composition.SemanticManuscript)),
+                    }).ToArray(),
+                }).ToArray(),
+            }).ToArray();
+        if (sections.Sum(section => section.chapters.Length) == 0 && publicationSectionPayloads.Length == 0)
+            throw new InvalidOperationException("Include at least one chapter or publication section before rendering.");
         var missingVariants = sections.SelectMany(section => section.chapters)
             .SelectMany(chapter => chapter.pageCompositions)
             .Where(composition => composition.variants.Length != 1)
             .Select(composition => composition.Name)
             .Distinct(StringComparer.Ordinal)
             .ToList();
+        missingVariants.AddRange(publicationSectionPayloads
+            .SelectMany(section => section.pageCompositions)
+            .Where(composition => composition.variants.Length != 1)
+            .Select(composition => composition.Name));
         if (missingVariants.Count > 0)
             throw new InvalidOperationException($"Create and review an exact layout variant for this edition geometry: {string.Join(", ", missingVariants)}.");
         var payload = new
         {
-            protocolVersion = 5,
+            protocolVersion = 6,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
             outputPurpose = job.TargetKind == PublicationTargetKind.CoreBook
@@ -1089,9 +1121,7 @@ public sealed class PublicationRenderProcessor(
                 language = PublicationLanguage.Normalize(document.Profile.Language),
                 publisher = document.Profile.Publisher,
                 copyright = document.Profile.Copyright,
-                matter,
-                includeTitlePage = document.Profile.IncludeTitlePage,
-                includeVisibleTableOfContents = document.Profile.IncludeVisibleTableOfContents,
+                publicationSections = publicationSectionPayloads,
                 includeActHeadings = document.Profile.IncludeActHeadings,
                 includeChapterHeadings = document.Profile.IncludeChapterHeadings,
                 // PublishDocument titles are already numbered consistently for every export format.
@@ -1106,23 +1136,6 @@ public sealed class PublicationRenderProcessor(
                     style.SemanticRole,
                     definition = style.Definition,
                 }).ToArray(),
-                placements = document.Placements
-                    .OrderBy(placement => placement.SortOrder)
-                    .Select(placement => new
-                    {
-                        placement.Id,
-                        assetId = placement.Asset.Id,
-                        targetKind = placement.TargetKind.ToString(),
-                        placement.TargetId,
-                        placementKind = placement.PlacementKind.ToString(),
-                        placement.Caption,
-                        presentation = placement.Presentation ?? new FigurePresentation { Placement = FigurePlacementIntent.DedicatedPage },
-                        placement.AltText,
-                        placement.Decorative,
-                        language = PublicationLanguage.NormalizeOptional(placement.Language),
-                        accessibilityRole = placement.AccessibilityRole.ToString(),
-                        placement.SortOrder,
-                    }).ToArray(),
                 outputMode = digitalOutput ? "DigitalPdf" : "Print",
                 allowDesignedPageOverrides = release?.AllowDesignedPageOverrides
                     ?? document.Profile.AllowDesignedPageOverrides,

@@ -140,7 +140,8 @@ public sealed class CompositionService(
                 BlockId: identity?.BlockId)],
             cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await manuscripts.RefreshDerivedStateAsync(target, chapterId, cancellationToken);
+        if (chapterId is Guid owningChapterId)
+            await manuscripts.RefreshDerivedStateAsync(target, owningChapterId, cancellationToken);
         return new DesignedPageCreationResult(composition, variant, manuscript.Snapshot, manuscript.ChangedBlockIds.Single());
     }
 
@@ -942,7 +943,8 @@ public sealed class CompositionService(
         await TouchProjectAsync(projectId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await manuscripts.RefreshDerivedStateAsync(target, composition.ChapterId, cancellationToken);
+        if (composition.ChapterId is Guid chapterId)
+            await manuscripts.RefreshDerivedStateAsync(target, chapterId, cancellationToken);
         return new CompositionWorkspaceSaveResult(composition, variant);
     }
 
@@ -1052,7 +1054,8 @@ public sealed class CompositionService(
         await TouchProjectAsync(projectId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await manuscripts.RefreshDerivedStateAsync(target, chapterId, cancellationToken);
+        if (chapterId is Guid owningChapterId)
+            await manuscripts.RefreshDerivedStateAsync(target, owningChapterId, cancellationToken);
         return variant;
     }
 
@@ -1157,7 +1160,8 @@ public sealed class CompositionService(
         await TouchProjectAsync(projectId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await manuscripts.RefreshDerivedStateAsync(target, chapterId, cancellationToken);
+        if (chapterId is Guid owningChapterId)
+            await manuscripts.RefreshDerivedStateAsync(target, owningChapterId, cancellationToken);
         return new CompositionSemanticMutationResult(composition, applied.ChangedBlockIds);
     }
 
@@ -1310,7 +1314,8 @@ public sealed class CompositionService(
         await TouchProjectAsync(projectId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        await manuscripts.RefreshDerivedStateAsync(target, variant.Composition.ChapterId, cancellationToken);
+        if (variant.Composition.ChapterId is Guid chapterId)
+            await manuscripts.RefreshDerivedStateAsync(target, chapterId, cancellationToken);
         return new CompositionWorkspaceMutationResult(variant.Composition, variant, applied.ChangedBlockIds);
     }
 

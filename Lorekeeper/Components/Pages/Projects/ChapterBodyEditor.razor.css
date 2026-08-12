@@ -395,6 +395,26 @@
     margin: 0 0 1em;
 }
 
+.semantic-editor ::deep .semantic-publication-field {
+    position: relative;
+    padding: 1.45rem 0.75rem 0.7rem;
+    border: 1px solid color-mix(in srgb, var(--accent, #4568dc) 32%, transparent);
+    border-radius: 0.55rem;
+    background: color-mix(in srgb, var(--accent, #4568dc) 5%, white);
+}
+
+.semantic-editor ::deep .semantic-publication-field::before {
+    content: "Linked to Core Book: " attr(data-publication-field);
+    position: absolute;
+    inset: 0.35rem auto auto 0.7rem;
+    color: var(--muted-text, #667085);
+    font-family: system-ui, sans-serif;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
 .semantic-editor ::deep .semantic-prosemirror figure img {
     display: block;
     max-width: 100%;

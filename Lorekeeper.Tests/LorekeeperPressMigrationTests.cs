@@ -363,6 +363,9 @@ public sealed class LorekeeperPressMigrationTests
                         recovery,
                         new MigrationManuscriptService(db),
                         NullLogger<EditionContentMigrationService>.Instance),
+                    new PublicationSectionMigrationService(
+                        recovery,
+                        NullLogger<PublicationSectionMigrationService>.Instance),
                     recovery);
                 Assert.True(await startupMigration.ApplyAsync(), (await recovery.GetStateAsync()).Error);
                 var picturePdfPresentation = await db.PublicationBookPdfPresentations
@@ -444,8 +447,16 @@ public sealed class LorekeeperPressMigrationTests
                 Assert.Equal(ManuscriptMigrationStatus.Completed, coreJournal.Status);
                 Assert.True(File.Exists(coreJournal.BackupPath));
                 var resolver = new PublicationEffectiveConfigurationResolver(db);
-                Assert.Single((await resolver.ResolveReleaseAsync(projectId, editionId)).Matter);
-                Assert.Empty((await resolver.ResolveReleaseAsync(projectId, unknownEditionId)).Matter);
+                Assert.Equal(5, (await resolver.ResolveReleaseAsync(projectId, editionId)).PublicationSections.Count);
+                Assert.Equal(3, (await resolver.ResolveReleaseAsync(projectId, unknownEditionId)).PublicationSections.Count);
+                Assert.Equal(7, await db.PublicationSections.AsNoTracking().CountAsync(item => item.ProjectId == projectId));
+                Assert.Equal(3, await db.PublicationSections.AsNoTracking().CountAsync(item =>
+                    item.ProjectId == projectId && item.EditionId == null
+                    && item.SystemRole != PublicationSectionSystemRole.None));
+                var publicationSectionJournal = await db.ManuscriptMigrationJournals.AsNoTracking()
+                    .SingleAsync(item => item.MigrationName == PublicationSectionMigrationService.MigrationName);
+                Assert.Equal(ManuscriptMigrationStatus.Completed, publicationSectionJournal.Status);
+                Assert.True(File.Exists(publicationSectionJournal.BackupPath));
 
                 var pictureChapter = await db.Chapters.AsNoTracking()
                     .SingleAsync(item => item.Id == pictureChapterId);

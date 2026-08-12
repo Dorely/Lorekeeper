@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Lorekeeper.Models;
 
 namespace Lorekeeper.Manuscripts;
 
@@ -35,6 +36,7 @@ public sealed record ManuscriptBlock
     public FigurePresentation? FigurePresentation { get; init; }
     public ParagraphPresentation? ParagraphPresentation { get; init; }
     public Guid? PageCompositionId { get; init; }
+    public PublicationBoundField? PublicationField { get; init; }
     [JsonRequired]
     public List<ManuscriptInline> Content { get; init; } = [];
 }

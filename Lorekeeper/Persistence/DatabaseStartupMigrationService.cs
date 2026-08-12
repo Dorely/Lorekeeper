@@ -20,6 +20,7 @@ public sealed class DatabaseStartupMigrationService(
     IAuthoringPageMigrationService authoringPageMigration,
     IPublicationCoreMigrationService publicationCoreMigration,
     IEditionContentMigrationService editionContentMigration,
+    IPublicationSectionMigrationService publicationSectionMigration,
     IDatabaseMigrationRecoveryService recovery) : IDatabaseStartupMigrationService
 {
     public async Task<bool> ApplyAsync(CancellationToken cancellationToken = default)
@@ -57,11 +58,14 @@ public sealed class DatabaseStartupMigrationService(
                 PublicationCoreMigrationService.SchemaMigrationId,
                 cancellationToken);
 
+        await EnsurePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await authoringPageMigration.ApplyPendingAsync(db, cancellationToken);
         await publicationCoreMigration.ApplyPendingAsync(db, cancellationToken);
 
         await RemoveEditionCompatibilityColumnsAsync(db, cancellationToken);
         await editionContentMigration.ApplyPendingAsync(db, cancellationToken);
+        await RemovePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
+        await publicationSectionMigration.ApplyPendingAsync(db, cancellationToken);
 
         if (await recovery.IsRecoveryRequiredAsync(cancellationToken))
             return false;
@@ -153,6 +157,40 @@ public sealed class DatabaseStartupMigrationService(
                 cancellationToken);
 #pragma warning restore EF1002
         }
+        db.ChangeTracker.Clear();
+    }
+
+    internal static async Task EnsurePublicationSectionCompatibilityColumnsAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(PublicationSectionMigrationService.AdditiveMigrationId)
+            || await HasColumnAsync(db, "PageCompositions", "PublicationSectionId", cancellationToken))
+            return;
+        await db.Database.ExecuteSqlRawAsync(
+            "ALTER TABLE \"PageCompositions\" ADD COLUMN \"PublicationSectionId\" TEXT NULL;",
+            cancellationToken);
+        db.ChangeTracker.Clear();
+    }
+
+    private static async Task RemovePublicationSectionCompatibilityColumnsAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(PublicationSectionMigrationService.AdditiveMigrationId)
+            || !await HasColumnAsync(db, "PageCompositions", "PublicationSectionId", cancellationToken))
+            return;
+        await db.Database.ExecuteSqlRawAsync(
+            "DROP TRIGGER IF EXISTS TR_PageCompositions_ActiveAuthoringVariant_Update;",
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            "DROP TRIGGER IF EXISTS TR_PageCompositionVariants_ClearAuthoringSelection;",
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            "ALTER TABLE \"PageCompositions\" DROP COLUMN \"PublicationSectionId\";",
+            cancellationToken);
         db.ChangeTracker.Clear();
     }
 

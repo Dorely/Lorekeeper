@@ -8,8 +8,10 @@ public class PageComposition
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ProjectId { get; set; }
     public Project Project { get; set; } = null!;
-    public Guid ChapterId { get; set; }
-    public Chapter Chapter { get; set; } = null!;
+    public Guid? ChapterId { get; set; }
+    public Chapter? Chapter { get; set; }
+    public Guid? PublicationSectionId { get; set; }
+    public PublicationSection? PublicationSection { get; set; }
     public Guid? EditionId { get; set; }
     public PublicationEdition? Edition { get; set; }
     public Guid? SourceCompositionId { get; set; }

@@ -187,6 +187,7 @@ builder.Services.AddScoped<IVisualCompositionMigrationService, VisualComposition
 builder.Services.AddScoped<IAuthoringPageMigrationService, AuthoringPageMigrationService>();
 builder.Services.AddScoped<IPublicationCoreMigrationService, PublicationCoreMigrationService>();
 builder.Services.AddScoped<IEditionContentMigrationService, EditionContentMigrationService>();
+builder.Services.AddScoped<IPublicationSectionMigrationService, PublicationSectionMigrationService>();
 builder.Services.AddScoped<IProjectImageService, ProjectImageService>();
 builder.Services.AddScoped<IProjectFontService, ProjectFontService>();
 builder.Services.AddScoped<IManuscriptStyleService, ManuscriptStyleService>();
@@ -267,6 +268,7 @@ builder.Services.AddScoped<IPublishExportFormatter, MarkdownPublishFormatter>();
 builder.Services.AddScoped<IPublishExportFormatter, EpubPublishFormatter>();
 builder.Services.AddScoped<IPublishService, PublishService>();
 builder.Services.AddScoped<IPublicationBookService, PublicationBookService>();
+builder.Services.AddScoped<IPublicationSectionService, PublicationSectionService>();
 builder.Services.AddScoped<IPublicationReleasePresetService, PublicationReleasePresetService>();
 builder.Services.AddScoped<IPublicationEffectiveConfigurationResolver, PublicationEffectiveConfigurationResolver>();
 builder.Services.AddScoped<IPublicationEditionService, PublicationEditionService>();

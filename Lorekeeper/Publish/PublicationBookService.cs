@@ -29,8 +29,7 @@ public sealed record PublicationBookView(
     bool AllowDesignedPageOverrides,
     ProjectPageSetupView PageSetup,
     int IncludedChapterCount,
-    int MatterCount,
-    int ImagePlacementCount,
+    int PublicationSectionCount,
     long CoverRevision);
 
 public sealed record ProjectPageSetupView(
@@ -49,9 +48,7 @@ public sealed record PublicationBookOutlineView(
     int SortOrder);
 
 public sealed record PublicationBookDetails(
-    IReadOnlyList<PublicationBookOutlineView> Outline,
-    IReadOnlyList<PublicationMatterView> Matter,
-    IReadOnlyList<PublicationImagePlacementView> ImagePlacements);
+    IReadOnlyList<PublicationBookOutlineView> Outline);
 
 public sealed record PublicationBookPatch(
     long ExpectedRevision,
@@ -81,14 +78,6 @@ public interface IPublicationBookService
     Task<PublicationBookView> UpdateAsync(Guid projectId, PublicationBookPatch patch, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PublicationBookOutlineView>> ListOutlineAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<PublicationBookView> SetOutlineSelectionsAsync(Guid projectId, IReadOnlyList<PublicationEditionOutlineItemUpdate> updates, long expectedRevision, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<PublicationMatterView>> ListMatterAsync(Guid projectId, CancellationToken cancellationToken = default);
-    Task<PublicationMatterView> UpsertMatterAsync(Guid projectId, PublicationMatterInput input, long expectedBookRevision, CancellationToken cancellationToken = default);
-    Task DeleteMatterAsync(Guid projectId, Guid matterId, long expectedBookRevision, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<PublicationImagePlacementView>> ListImagePlacementsAsync(Guid projectId, CancellationToken cancellationToken = default);
-    Task<PublicationImagePlacementView> AddImagePlacementAsync(Guid projectId, PublicationImagePlacementCreate input, long expectedBookRevision, CancellationToken cancellationToken = default);
-    Task<PublicationImagePlacementView> UpdateImagePlacementAsync(Guid projectId, Guid placementId, PublicationImagePlacementUpdate input, long expectedBookRevision, CancellationToken cancellationToken = default);
-    Task ReorderImagePlacementsAsync(Guid projectId, IReadOnlyList<Guid> orderedPlacementIds, long expectedBookRevision, CancellationToken cancellationToken = default);
-    Task DeleteImagePlacementAsync(Guid projectId, Guid placementId, long expectedBookRevision, CancellationToken cancellationToken = default);
     Task<PublicationCoverDesignView> GetCoverAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<PublicationCoverDesignView> SaveCoverAsync(Guid projectId, long expectedBookRevision, PublicationCoverDesignUpdate update, CompositionScene scene, CancellationToken cancellationToken = default);
     Task<CompositionMutationStage> StageCoverSceneAsync(Guid projectId, Guid conversationId, long expectedBookRevision, long expectedCoverRevision, CompositionScene scene, CancellationToken cancellationToken = default);
@@ -120,7 +109,15 @@ public sealed class PublicationBookService(
             .SingleOrDefaultAsync(cancellationToken);
         var chapters = await db.Chapters.AsNoTracking().Where(item => item.ProjectId == projectId)
             .OrderBy(item => item.Id).Select(item => new { item.Id, item.ActId, item.Order, item.Title, item.Synopsis, item.ManuscriptRevision, item.ManuscriptJson }).ToListAsync(cancellationToken);
-        var compositions = await db.PageCompositions.AsNoTracking().Where(item => item.ProjectId == projectId)
+        var publicationSections = await db.PublicationSections.AsNoTracking()
+            .Where(item => item.ProjectId == projectId && item.EditionId == null)
+            .OrderBy(item => item.Anchor).ThenBy(item => item.TargetId).ThenBy(item => item.LocalOrder).ThenBy(item => item.Id)
+            .Select(item => new
+            {
+                item.Id, item.Revision, item.Title, item.Kind, item.SystemRole, item.Anchor,
+                item.TargetKind, item.TargetId, item.InclusionMode, item.LocalOrder, item.ManuscriptJson,
+            }).ToListAsync(cancellationToken);
+        var compositions = await db.PageCompositions.AsNoTracking().Where(item => item.ProjectId == projectId && item.EditionId == null)
             .OrderBy(item => item.Id).Select(item => new { item.Id, item.Revision, item.SemanticManuscriptJson, Variants = item.Variants.OrderBy(v => v.Id).Select(v => new { v.Id, v.Revision, v.GeometryKey, v.SceneJson }) }).ToListAsync(cancellationToken);
         var assetRows = await db.PublishAssets.AsNoTracking().Where(item => item.ProjectId == projectId)
             .OrderBy(item => item.Id).Select(item => new { item.Id, item.UpdatedAt, item.FileName, item.Data }).ToListAsync(cancellationToken);
@@ -164,15 +161,11 @@ public sealed class PublicationBookService(
             .Select(item => new
             {
                 Outline = item.OutlineItems.OrderBy(row => row.SortOrder).Select(row => new { row.TargetKind, row.TargetId, row.IsIncluded, row.SortOrder }),
-                Matter = item.Matter.OrderBy(row => row.SortOrder).Select(row => new { row.Id, row.Revision, row.Location, row.Kind, row.Title, row.ManuscriptJson, row.IsIncluded, row.SortOrder }),
-                Placements = item.ImagePlacements.OrderBy(row => row.SortOrder).Select(row => new { row.Id, row.AssetId, row.TargetKind, row.TargetId, row.PlacementKind, row.Caption, row.PresentationJson, row.AltText, row.Decorative, row.Language, row.AccessibilityRole, row.SortOrder }),
                 Cover = item.CoverDesign == null ? null : new { item.CoverDesign.Revision, item.CoverDesign.BackgroundColor, item.CoverDesign.CompositionSceneJson },
             }).SingleAsync(cancellationToken);
         var normalizedBookRows = new
         {
             bookRows.Outline,
-            bookRows.Matter,
-            bookRows.Placements,
             Cover = bookRows.Cover is null
                 ? null
                 : new
@@ -183,7 +176,7 @@ public sealed class PublicationBookService(
                 },
         };
         var payload = JsonSerializer.Serialize(
-            new { core, pdfPresentation, setup, chapters, compositions, assets, styles, fonts, bookRows = normalizedBookRows },
+            new { core, pdfPresentation, setup, chapters, publicationSections, compositions, assets, styles, fonts, bookRows = normalizedBookRows },
             ManuscriptCodec.JsonOptions);
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
     }
@@ -341,9 +334,7 @@ public sealed class PublicationBookService(
     {
         _ = await GetOrCreateAsync(projectId, cancellationToken);
         return new PublicationBookDetails(
-            await ReadOutlineAsync(projectId, cancellationToken),
-            await ReadMatterAsync(projectId, cancellationToken),
-            await ReadImagePlacementsAsync(projectId, cancellationToken));
+            await ReadOutlineAsync(projectId, cancellationToken));
     }
 
     private async Task<IReadOnlyList<PublicationBookOutlineView>> ReadOutlineAsync(
@@ -387,247 +378,6 @@ public sealed class PublicationBookService(
         Touch(book);
         await db.SaveChangesAsync(cancellationToken);
         return (await ReadViewAsync(projectId, cancellationToken))!;
-    }
-
-    public async Task<IReadOnlyList<PublicationMatterView>> ListMatterAsync(
-        Guid projectId,
-        CancellationToken cancellationToken = default)
-    {
-        _ = await GetOrCreateAsync(projectId, cancellationToken);
-        return await ReadMatterAsync(projectId, cancellationToken);
-    }
-
-    private async Task<IReadOnlyList<PublicationMatterView>> ReadMatterAsync(
-        Guid projectId,
-        CancellationToken cancellationToken)
-    {
-        return (await db.PublicationBookMatter.AsNoTracking().Where(item => item.ProjectId == projectId)
-            .OrderBy(item => item.Location).ThenBy(item => item.SortOrder).ToListAsync(cancellationToken))
-            .Select(item => new PublicationMatterView(
-                item.Id, item.Location, item.Kind, item.Title,
-                ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision),
-                item.IsIncluded, item.SortOrder, item.Revision)).ToList();
-    }
-
-    public async Task<PublicationMatterView> UpsertMatterAsync(
-        Guid projectId,
-        PublicationMatterInput input,
-        long expectedBookRevision,
-        CancellationToken cancellationToken = default)
-    {
-        if (!Enum.IsDefined(input.Location) || !Enum.IsDefined(input.Kind))
-            throw new InvalidOperationException("Core matter kind or location is invalid.");
-        PublicationMatterFormatting.EnsureUserAuthoredKind(input.Kind);
-        var title = input.Title.Trim();
-        if (title.Length is < 1 or > 500 || title.Contains('\r') || title.Contains('\n') || input.SortOrder < 0)
-            throw new InvalidOperationException("Core matter requires a one-line title, valid content, and non-negative order.");
-        var document = ManuscriptCodec.Deserialize(input.ManuscriptJson, input.Id ?? Guid.Empty, input.ExpectedRevision ?? 0);
-        if (document.Content.Any(block => block.Type == ManuscriptBlockType.DesignedPage))
-            throw new InvalidOperationException("Front and back matter cannot own Designed Pages.");
-        var styleEntities = await db.ManuscriptStyleDefinitions.AsNoTracking()
-            .Where(style => style.ProjectId == projectId).ToListAsync(cancellationToken);
-        ManuscriptStyleService.ValidateDocumentReferences(document, styleEntities.Select(style => new ManuscriptStyleView(
-            style.Id, style.Name, style.Kind, style.SemanticRole,
-            ManuscriptStyleService.NormalizeDefinition(JsonSerializer.Deserialize<ManuscriptStyleProperties>(
-                style.DefinitionJson, ManuscriptCodec.JsonOptions) ?? new ManuscriptStyleProperties()), style.Revision)).ToList());
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var book = await GetTrackedBookAsync(projectId, expectedBookRevision, cancellationToken);
-        var figureIds = document.Content.Where(block => block.Type == ManuscriptBlockType.Figure && block.ImageId is not null)
-            .Select(block => block.ImageId!.Value).Distinct().ToList();
-        if (figureIds.Count != await db.PublishAssets.AsNoTracking().CountAsync(
-            item => item.ProjectId == projectId && figureIds.Contains(item.Id), cancellationToken))
-            throw new InvalidOperationException("Core matter figures must reference project-owned images.");
-        PublicationBookMatter matter;
-        if (input.Id is Guid matterId)
-        {
-            matter = await db.PublicationBookMatter.SingleOrDefaultAsync(
-                item => item.ProjectId == projectId && item.Id == matterId,
-                cancellationToken) ?? throw new KeyNotFoundException("Core matter item was not found.");
-            if (matter.Revision != input.ExpectedRevision)
-                throw new DbUpdateConcurrencyException("Core matter changed in another editor.");
-            matter.Revision = checked(matter.Revision + 1);
-        }
-        else
-        {
-            matter = new PublicationBookMatter { ProjectId = projectId, Title = title };
-            db.PublicationBookMatter.Add(matter);
-        }
-        matter.Location = input.Location;
-        matter.Kind = input.Kind;
-        matter.Title = title;
-        matter.ManuscriptJson = ManuscriptCodec.Serialize(document with { ManuscriptId = matter.Id, Revision = matter.Revision });
-        matter.IsIncluded = input.IsIncluded;
-        matter.SortOrder = input.SortOrder;
-        matter.UpdatedAt = DateTime.UtcNow;
-        Touch(book);
-        await db.SaveChangesAsync(cancellationToken);
-        return new PublicationMatterView(matter.Id, matter.Location, matter.Kind, matter.Title,
-            document with { ManuscriptId = matter.Id, Revision = matter.Revision }, matter.IsIncluded, matter.SortOrder, matter.Revision);
-    }
-
-    public async Task DeleteMatterAsync(
-        Guid projectId,
-        Guid matterId,
-        long expectedBookRevision,
-        CancellationToken cancellationToken = default)
-    {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var book = await GetTrackedBookAsync(projectId, expectedBookRevision, cancellationToken);
-        var matter = await db.PublicationBookMatter.SingleOrDefaultAsync(
-            item => item.ProjectId == projectId && item.Id == matterId,
-            cancellationToken);
-        if (matter is null) return;
-        db.PublicationBookMatter.Remove(matter);
-        Touch(book);
-        await db.SaveChangesAsync(cancellationToken);
-    }
-
-    public async Task<IReadOnlyList<PublicationImagePlacementView>> ListImagePlacementsAsync(
-        Guid projectId,
-        CancellationToken cancellationToken = default)
-    {
-        _ = await GetOrCreateAsync(projectId, cancellationToken);
-        return await ReadImagePlacementsAsync(projectId, cancellationToken);
-    }
-
-    private async Task<IReadOnlyList<PublicationImagePlacementView>> ReadImagePlacementsAsync(
-        Guid projectId,
-        CancellationToken cancellationToken)
-    {
-        var rows = await db.PublicationBookImagePlacements.AsNoTracking().Where(item => item.ProjectId == projectId)
-            .OrderBy(item => item.SortOrder).ToListAsync(cancellationToken);
-        var assets = await db.PublishAssets.AsNoTracking().Where(item => item.ProjectId == projectId)
-            .ToDictionaryAsync(item => item.Id, cancellationToken);
-        var acts = await db.Acts.AsNoTracking().Where(item => item.ProjectId == projectId).ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
-        var chapters = await db.Chapters.AsNoTracking().Where(item => item.ProjectId == projectId).ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
-        return rows.Select(item => PlacementView(projectId, item, assets.GetValueOrDefault(item.AssetId)?.FileName ?? "Missing image",
-            item.TargetKind == PublishOutlineTargetKind.Act ? acts.GetValueOrDefault(item.TargetId, "Missing act") : chapters.GetValueOrDefault(item.TargetId, "Missing chapter"))).ToList();
-    }
-
-    public async Task<PublicationImagePlacementView> AddImagePlacementAsync(
-        Guid projectId,
-        PublicationImagePlacementCreate input,
-        long expectedBookRevision,
-        CancellationToken cancellationToken = default)
-    {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var book = await GetTrackedBookAsync(projectId, expectedBookRevision, cancellationToken);
-        var asset = await db.PublishAssets.AsNoTracking().SingleOrDefaultAsync(
-            item => item.ProjectId == projectId && item.Id == input.AssetId,
-            cancellationToken) ?? throw new KeyNotFoundException("Project image was not found.");
-        var targetTitle = input.TargetKind == PublishOutlineTargetKind.Act
-            ? await db.Acts.AsNoTracking().Where(item => item.ProjectId == projectId && item.Id == input.TargetId).Select(item => item.Title).SingleOrDefaultAsync(cancellationToken)
-            : await db.Chapters.AsNoTracking().Where(item => item.ProjectId == projectId && item.Id == input.TargetId).Select(item => item.Title).SingleOrDefaultAsync(cancellationToken);
-        if (targetTitle is null)
-            throw new KeyNotFoundException("Core image-placement target was not found.");
-        var altText = input.Decorative ? string.Empty : string.IsNullOrWhiteSpace(input.AltText) ? asset.AltText : input.AltText.Trim();
-        if (!input.Decorative && string.IsNullOrWhiteSpace(altText))
-            throw new InvalidOperationException("Core image placements require alternative text or an explicit decorative decision.");
-        var sortOrder = (await db.PublicationBookImagePlacements.Where(item => item.ProjectId == projectId
-            && item.TargetKind == input.TargetKind && item.TargetId == input.TargetId && item.PlacementKind == input.PlacementKind)
-            .Select(item => (int?)item.SortOrder).MaxAsync(cancellationToken) ?? -1) + 1;
-        var placement = new PublicationBookImagePlacement
-        {
-            ProjectId = projectId, AssetId = input.AssetId, TargetKind = input.TargetKind, TargetId = input.TargetId,
-            ActId = input.TargetKind == PublishOutlineTargetKind.Act ? input.TargetId : null,
-            ChapterId = input.TargetKind == PublishOutlineTargetKind.Chapter ? input.TargetId : null,
-            PlacementKind = input.PlacementKind, Caption = input.Caption.Trim(), SortOrder = sortOrder,
-            PresentationJson = JsonSerializer.Serialize(input.Presentation ?? new FigurePresentation { Placement = FigurePlacementIntent.DedicatedPage }, ManuscriptCodec.JsonOptions),
-            AltText = altText, Decorative = input.Decorative,
-            Language = PublicationLanguage.Normalize(input.Language),
-            AccessibilityRole = input.AccessibilityRole,
-        };
-        db.PublicationBookImagePlacements.Add(placement);
-        Touch(book);
-        await db.SaveChangesAsync(cancellationToken);
-        return PlacementView(projectId, placement, asset.FileName, targetTitle);
-    }
-
-    public async Task DeleteImagePlacementAsync(
-        Guid projectId,
-        Guid placementId,
-        long expectedBookRevision,
-        CancellationToken cancellationToken = default)
-    {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var book = await GetTrackedBookAsync(projectId, expectedBookRevision, cancellationToken);
-        var placement = await db.PublicationBookImagePlacements.SingleOrDefaultAsync(
-            item => item.ProjectId == projectId && item.Id == placementId,
-            cancellationToken);
-        if (placement is null) return;
-        db.PublicationBookImagePlacements.Remove(placement);
-        Touch(book);
-        await db.SaveChangesAsync(cancellationToken);
-    }
-
-    public async Task<PublicationImagePlacementView> UpdateImagePlacementAsync(
-        Guid projectId,
-        Guid placementId,
-        PublicationImagePlacementUpdate input,
-        long expectedBookRevision,
-        CancellationToken cancellationToken = default)
-    {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var book = await GetTrackedBookAsync(projectId, expectedBookRevision, cancellationToken);
-        var placement = await db.PublicationBookImagePlacements.SingleOrDefaultAsync(
-            item => item.ProjectId == projectId && item.Id == placementId, cancellationToken)
-            ?? throw new KeyNotFoundException("Core Book image placement was not found.");
-        var asset = await db.PublishAssets.AsNoTracking().SingleOrDefaultAsync(
-            item => item.ProjectId == projectId && item.Id == input.AssetId, cancellationToken)
-            ?? throw new KeyNotFoundException("Project image was not found.");
-        var targetTitle = input.TargetKind == PublishOutlineTargetKind.Act
-            ? await db.Acts.AsNoTracking().Where(item => item.ProjectId == projectId && item.Id == input.TargetId).Select(item => item.Title).SingleOrDefaultAsync(cancellationToken)
-            : await db.Chapters.AsNoTracking().Where(item => item.ProjectId == projectId && item.Id == input.TargetId).Select(item => item.Title).SingleOrDefaultAsync(cancellationToken);
-        if (targetTitle is null)
-            throw new KeyNotFoundException("Core image-placement target was not found.");
-        var altText = input.Decorative ? string.Empty : string.IsNullOrWhiteSpace(input.AltText) ? asset.AltText : input.AltText.Trim();
-        if (!input.Decorative && string.IsNullOrWhiteSpace(altText))
-            throw new InvalidOperationException("Core image placements require alternative text or an explicit decorative decision.");
-        placement.AssetId = input.AssetId;
-        placement.TargetKind = input.TargetKind;
-        placement.TargetId = input.TargetId;
-        placement.ActId = input.TargetKind == PublishOutlineTargetKind.Act ? input.TargetId : null;
-        placement.ChapterId = input.TargetKind == PublishOutlineTargetKind.Chapter ? input.TargetId : null;
-        placement.PlacementKind = input.PlacementKind;
-        placement.Caption = input.Caption.Trim();
-        placement.PresentationJson = JsonSerializer.Serialize(input.Presentation ?? new FigurePresentation { Placement = FigurePlacementIntent.DedicatedPage }, ManuscriptCodec.JsonOptions);
-        placement.AltText = altText;
-        placement.Decorative = input.Decorative;
-        placement.Language = PublicationLanguage.Normalize(input.Language);
-        placement.AccessibilityRole = input.AccessibilityRole;
-        placement.UpdatedAt = DateTime.UtcNow;
-        Touch(book);
-        await db.SaveChangesAsync(cancellationToken);
-        return PlacementView(projectId, placement, asset.FileName, targetTitle);
-    }
-
-    public async Task ReorderImagePlacementsAsync(
-        Guid projectId,
-        IReadOnlyList<Guid> orderedPlacementIds,
-        long expectedBookRevision,
-        CancellationToken cancellationToken = default)
-    {
-        if (orderedPlacementIds.Count != orderedPlacementIds.Distinct().Count())
-            throw new InvalidOperationException("Core placement reorder contains duplicate IDs.");
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var book = await GetTrackedBookAsync(projectId, expectedBookRevision, cancellationToken);
-        var rows = await db.PublicationBookImagePlacements.Where(item => item.ProjectId == projectId
-            && orderedPlacementIds.Contains(item.Id)).ToListAsync(cancellationToken);
-        if (rows.Count != orderedPlacementIds.Count)
-            throw new InvalidOperationException("One or more Core Book image placements were not found.");
-        if (rows.Count > 0)
-        {
-            var first = rows[0];
-            if (rows.Any(item => item.TargetKind != first.TargetKind || item.TargetId != first.TargetId || item.PlacementKind != first.PlacementKind)
-                || await db.PublicationBookImagePlacements.CountAsync(item => item.ProjectId == projectId
-                    && item.TargetKind == first.TargetKind && item.TargetId == first.TargetId
-                    && item.PlacementKind == first.PlacementKind, cancellationToken) != rows.Count)
-                throw new InvalidOperationException("Reorder every Core Book image at one target and position together.");
-        }
-        var order = orderedPlacementIds.Select((id, index) => (id, index)).ToDictionary(item => item.id, item => item.index);
-        foreach (var row in rows) { row.SortOrder = order[row.Id]; row.UpdatedAt = DateTime.UtcNow; }
-        Touch(book);
-        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<PublicationCoverDesignView> GetCoverAsync(
@@ -998,27 +748,6 @@ public sealed class PublicationBookService(
         book.UpdatedAt = DateTime.UtcNow;
     }
 
-    private static PublicationImagePlacementView PlacementView(
-        Guid projectId,
-        PublicationBookImagePlacement placement,
-        string fileName,
-        string targetTitle) => new(
-            placement.Id,
-            placement.AssetId,
-            fileName,
-            $"/projects/{projectId:N}/publish/assets/{placement.AssetId:N}/content",
-            placement.TargetKind,
-            placement.TargetId,
-            targetTitle,
-            placement.PlacementKind,
-            placement.Caption,
-            JsonSerializer.Deserialize<FigurePresentation>(placement.PresentationJson, ManuscriptCodec.JsonOptions),
-            placement.AltText,
-            placement.Decorative,
-            placement.Language,
-            placement.AccessibilityRole,
-            placement.SortOrder);
-
     private async Task<PublicationBookView?> ReadViewAsync(Guid projectId, CancellationToken cancellationToken)
     {
         var book = await db.PublicationBooks.AsNoTracking().SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
@@ -1057,8 +786,8 @@ public sealed class PublicationBookService(
                 setup.BodyLineHeight,
                 setup.Revision),
             await db.PublicationBookOutlineItems.CountAsync(item => item.ProjectId == projectId && item.TargetKind == PublishOutlineTargetKind.Chapter && item.IsIncluded, cancellationToken),
-            await db.PublicationBookMatter.CountAsync(item => item.ProjectId == projectId && item.IsIncluded, cancellationToken),
-            await db.PublicationBookImagePlacements.CountAsync(item => item.ProjectId == projectId, cancellationToken),
+            await db.PublicationSections.CountAsync(item => item.ProjectId == projectId && item.EditionId == null
+                && !item.IsExcluded && item.InclusionMode != PublicationSectionInclusionMode.Omitted, cancellationToken),
             await db.PublicationBookCoverDesigns.Where(item => item.ProjectId == projectId).Select(item => (long?)item.Revision).SingleOrDefaultAsync(cancellationToken) ?? 0);
     }
 
@@ -1083,8 +812,7 @@ public sealed record EffectivePublicationRelease(
     PublicationEdition Edition,
     IReadOnlySet<PublicationEditionOverrideField> OverrideFields,
     IReadOnlyList<PublicationEditionOutlineItem> OutlineItems,
-    IReadOnlyList<PublicationMatter> Matter,
-    IReadOnlyList<PublicationImagePlacement> ImagePlacements);
+    IReadOnlyList<PublicationSection> PublicationSections);
 
 public interface IPublicationEffectiveConfigurationResolver
 {
@@ -1094,7 +822,8 @@ public interface IPublicationEffectiveConfigurationResolver
 
 public sealed class PublicationEffectiveConfigurationResolver(
     AppDbContext db,
-    bool readPdfPresentation = true) : IPublicationEffectiveConfigurationResolver
+    bool readPdfPresentation = true,
+    bool readPublicationSections = true) : IPublicationEffectiveConfigurationResolver
 {
     public async Task<EffectivePublicationRelease> ResolveReleaseAsync(
         Guid projectId,
@@ -1142,8 +871,26 @@ public sealed class PublicationEffectiveConfigurationResolver(
             effective,
             fields,
             await ResolveOutlineAsync(projectId, editionId, cancellationToken),
-            await ResolveMatterAsync(projectId, editionId, cancellationToken),
-            await ResolvePlacementsAsync(projectId, editionId, cancellationToken));
+            readPublicationSections
+                ? await ResolveSectionsAsync(projectId, editionId, cancellationToken)
+                : []);
+    }
+
+    private async Task<IReadOnlyList<PublicationSection>> ResolveSectionsAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken)
+    {
+        var core = await db.PublicationSections.AsNoTracking()
+            .Where(item => item.ProjectId == projectId && item.EditionId == null).ToListAsync(cancellationToken);
+        var local = await db.PublicationSections.AsNoTracking()
+            .Where(item => item.ProjectId == projectId && item.EditionId == editionId).ToListAsync(cancellationToken);
+        var overlays = local.Where(item => item.CoreSectionId.HasValue).ToDictionary(item => item.CoreSectionId!.Value);
+        return core.Where(item => !overlays.TryGetValue(item.Id, out var overlay) || !overlay.IsExcluded)
+            .Select(item => overlays.GetValueOrDefault(item.Id, item))
+            .Concat(local.Where(item => item.CoreSectionId == null && !item.IsExcluded))
+            .OrderBy(item => item.Anchor).ThenBy(item => item.LocalOrder).ThenBy(item => item.Id)
+            .ToList();
     }
 
     public IReadOnlySet<PublicationEditionOverrideField> ReadOverrideFields(PublicationEdition edition)
@@ -1169,54 +916,6 @@ public sealed class PublicationEffectiveConfigurationResolver(
                 Id = item.Id, EditionId = editionId, TargetKind = item.TargetKind, TargetId = item.TargetId,
                 ActId = item.ActId, ChapterId = item.ChapterId, IsIncluded = item.IsIncluded, SortOrder = item.SortOrder,
             }).OrderBy(item => item.SortOrder).ToList();
-    }
-
-    private async Task<IReadOnlyList<PublicationMatter>> ResolveMatterAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken)
-    {
-        var core = await db.PublicationBookMatter.AsNoTracking().Where(item => item.ProjectId == projectId).ToListAsync(cancellationToken);
-        var overrides = await db.PublicationMatter.AsNoTracking().Where(item => item.EditionId == editionId).ToListAsync(cancellationToken);
-        var byCore = overrides.Where(item => item.CoreMatterId is not null).ToDictionary(item => item.CoreMatterId!.Value);
-        var unlinkedBySlot = overrides.Where(item => item.CoreMatterId is null)
-            .GroupBy(item => (item.Location, item.Kind, item.SortOrder)).ToDictionary(group => group.Key, group => group.First());
-        var result = core.Where(item => !(byCore.TryGetValue(item.Id, out var linked) && linked.IsExcluded)
-                && !(unlinkedBySlot.TryGetValue((item.Location, item.Kind, item.SortOrder), out var local) && local.IsExcluded))
-            .Select(item => byCore.TryGetValue(item.Id, out var value) ? value
-                : unlinkedBySlot.TryGetValue((item.Location, item.Kind, item.SortOrder), out var local) ? local
-                : new PublicationMatter
-            {
-                Id = item.Id, EditionId = editionId, CoreMatterId = item.Id, Location = item.Location, Kind = item.Kind,
-                Title = item.Title, ManuscriptJson = item.ManuscriptJson, Revision = item.Revision,
-                IsIncluded = item.IsIncluded, SortOrder = item.SortOrder,
-            });
-        var coreSlots = core.Select(item => (item.Location, item.Kind, item.SortOrder)).ToHashSet();
-        return result.Concat(overrides.Where(item => item.CoreMatterId is null && !item.IsExcluded
-                && !coreSlots.Contains((item.Location, item.Kind, item.SortOrder))))
-            .OrderBy(item => item.Location).ThenBy(item => item.SortOrder).ToList();
-    }
-
-    private async Task<IReadOnlyList<PublicationImagePlacement>> ResolvePlacementsAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken)
-    {
-        var core = await db.PublicationBookImagePlacements.AsNoTracking().Where(item => item.ProjectId == projectId).ToListAsync(cancellationToken);
-        var overrides = await db.PublicationImagePlacements.AsNoTracking().Where(item => item.EditionId == editionId).ToListAsync(cancellationToken);
-        var byCore = overrides.Where(item => item.CorePlacementId is not null).ToDictionary(item => item.CorePlacementId!.Value);
-        var unlinkedBySlot = overrides.Where(item => item.CorePlacementId is null)
-            .GroupBy(item => (item.TargetKind, item.TargetId, item.PlacementKind, item.SortOrder)).ToDictionary(group => group.Key, group => group.First());
-        var result = core.Where(item => !(byCore.TryGetValue(item.Id, out var linked) && linked.IsExcluded)
-                && !(unlinkedBySlot.TryGetValue((item.TargetKind, item.TargetId, item.PlacementKind, item.SortOrder), out var local) && local.IsExcluded))
-            .Select(item => byCore.TryGetValue(item.Id, out var value) ? value
-                : unlinkedBySlot.TryGetValue((item.TargetKind, item.TargetId, item.PlacementKind, item.SortOrder), out var local) ? local
-                : new PublicationImagePlacement
-            {
-                Id = item.Id, EditionId = editionId, CorePlacementId = item.Id, AssetId = item.AssetId,
-                TargetKind = item.TargetKind, TargetId = item.TargetId, ActId = item.ActId, ChapterId = item.ChapterId,
-                PlacementKind = item.PlacementKind, SortOrder = item.SortOrder, Caption = item.Caption,
-                PresentationJson = item.PresentationJson, AltText = item.AltText, Decorative = item.Decorative,
-                Language = item.Language, AccessibilityRole = item.AccessibilityRole,
-            });
-        var coreSlots = core.Select(item => (item.TargetKind, item.TargetId, item.PlacementKind, item.SortOrder)).ToHashSet();
-        return result.Concat(overrides.Where(item => item.CorePlacementId is null && !item.IsExcluded
-                && !coreSlots.Contains((item.TargetKind, item.TargetId, item.PlacementKind, item.SortOrder))))
-            .OrderBy(item => item.SortOrder).ToList();
     }
 
     private static T Pick<T>(IReadOnlySet<PublicationEditionOverrideField> fields, PublicationEditionOverrideField field, T stored, T inherited) =>

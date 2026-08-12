@@ -106,21 +106,25 @@ public sealed class PublicationEditionService(
         }
 
         await db.Entry(source).Collection(edition => edition.OutlineItems).LoadAsync(cancellationToken);
-        await db.Entry(source).Collection(edition => edition.Matter).LoadAsync(cancellationToken);
         await db.Entry(source).Collection(edition => edition.ChapterOverrides).LoadAsync(cancellationToken);
-        await db.Entry(source).Collection(edition => edition.ImagePlacements).LoadAsync(cancellationToken);
+        await db.Entry(source).Collection(edition => edition.PublicationSections).LoadAsync(cancellationToken);
         await db.Entry(source).Reference(edition => edition.CoverDesign).LoadAsync(cancellationToken);
         var clone = CopyEdition(source, cleanName);
         clone.Isbn = string.Empty;
         clone.OutlineItems = source.OutlineItems.Select(CopyOutlineItem).ToList();
-        clone.Matter = source.Matter.Select(CopyMatter).ToList();
-        clone.ImagePlacements = source.ImagePlacements.Select(CopyPlacement).ToList();
         var sourceCompositions = await db.PageCompositions.AsNoTracking()
             .Include(item => item.Variants)
             .Where(item => item.EditionId == source.Id)
             .ToListAsync(cancellationToken);
         var compositionMap = sourceCompositions.ToDictionary(item => item.Id, _ => Guid.NewGuid());
-        clone.PageCompositions = sourceCompositions.Select(item => CopyEditionComposition(item, clone.Id, compositionMap[item.Id])).ToList();
+        var sectionMap = source.PublicationSections.ToDictionary(item => item.Id, _ => Guid.NewGuid());
+        clone.PageCompositions = sourceCompositions.Select(item => CopyEditionComposition(
+            item,
+            clone.Id,
+            compositionMap[item.Id],
+            item.PublicationSectionId is Guid sectionId ? sectionMap.GetValueOrDefault(sectionId) : null)).ToList();
+        clone.PublicationSections = source.PublicationSections.Select(item =>
+            CopyPublicationSection(item, clone.Id, sectionMap[item.Id], compositionMap)).ToList();
         clone.ChapterOverrides = source.ChapterOverrides.Select(item =>
         {
             var document = ManuscriptCodec.Deserialize(item.ManuscriptJson, item.ChapterId, item.Revision);
@@ -309,545 +313,6 @@ public sealed class PublicationEditionService(
         return View(project, edition);
     }
 
-    public async Task<PublicationEditionView> ReorderOutlineAsync(
-        Guid projectId,
-        Guid editionId,
-        IReadOnlyList<PublicationEditionOutlineItemOrder> orderedItems,
-        long expectedRevision,
-        CancellationToken cancellationToken = default)
-    {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var project = await GetProjectAsync(projectId, cancellationToken);
-        var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
-        EnsureRevision(edition, expectedRevision);
-        EnsureDraft(edition);
-        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
-
-        var acts = await db.Acts.AsNoTracking()
-            .Where(act => act.ProjectId == projectId)
-            .Select(act => act.Id)
-            .ToListAsync(cancellationToken);
-        var coreChapters = await db.Chapters.AsNoTracking()
-            .Where(chapter => chapter.ProjectId == projectId)
-            .Select(chapter => new { chapter.Id, chapter.ActId })
-            .ToListAsync(cancellationToken);
-        var chapterParents = coreChapters.ToDictionary(chapter => chapter.Id, chapter => chapter.ActId);
-        ValidateOutlineOrder(orderedItems, acts, chapterParents);
-        var before = await FingerprintAsync(projectId, editionId, cancellationToken);
-        var existing = await db.PublicationEditionOutlineItems
-            .Where(item => item.EditionId == editionId)
-            .ToListAsync(cancellationToken);
-        var inherited = await db.PublicationBookOutlineItems.AsNoTracking()
-            .Where(item => item.ProjectId == projectId)
-            .ToDictionaryAsync(item => (item.TargetKind, item.TargetId), cancellationToken);
-        for (var sortOrder = 0; sortOrder < orderedItems.Count; sortOrder++)
-        {
-            var ordered = orderedItems[sortOrder];
-            var item = existing.FirstOrDefault(candidate =>
-                candidate.TargetKind == ordered.TargetKind && candidate.TargetId == ordered.TargetId);
-            var coreItem = inherited.GetValueOrDefault((ordered.TargetKind, ordered.TargetId));
-            if (coreItem is not null && coreItem.SortOrder == sortOrder
-                && (item is null || item.IsIncluded == coreItem.IsIncluded))
-            {
-                if (item is not null)
-                {
-                    db.PublicationEditionOutlineItems.Remove(item);
-                    existing.Remove(item);
-                }
-                continue;
-            }
-            if (item is null)
-            {
-                item = NewOutlineItem(editionId, ordered.TargetKind, ordered.TargetId, sortOrder);
-                item.IsIncluded = coreItem?.IsIncluded ?? true;
-                db.PublicationEditionOutlineItems.Add(item);
-                existing.Add(item);
-            }
-            item.SortOrder = sortOrder;
-            item.UpdatedAt = DateTime.UtcNow;
-        }
-
-        await SaveWithAuditAsync(edition, "reorder-content", before, new { count = orderedItems.Count }, cancellationToken);
-        return View(project, edition);
-    }
-
-    internal static void ValidateOutlineOrder(
-        IReadOnlyList<PublicationEditionOutlineItemOrder> orderedItems,
-        IReadOnlyCollection<Guid> actIds,
-        IReadOnlyDictionary<Guid, Guid?> chapterParents)
-    {
-        var expected = actIds
-            .Select(id => new PublicationEditionOutlineItemOrder(PublishOutlineTargetKind.Act, id))
-            .Concat(chapterParents.Keys.Select(id =>
-                new PublicationEditionOutlineItemOrder(PublishOutlineTargetKind.Chapter, id)))
-            .ToHashSet();
-        if (orderedItems.Count != expected.Count
-            || orderedItems.Distinct().Count() != orderedItems.Count
-            || !orderedItems.All(expected.Contains))
-        {
-            throw new InvalidOperationException("Edition content order must contain every current act and chapter exactly once.");
-        }
-        Guid? currentActId = null;
-        var reachedUnassigned = false;
-        foreach (var ordered in orderedItems)
-        {
-            if (ordered.TargetKind == PublishOutlineTargetKind.Act)
-            {
-                if (reachedUnassigned)
-                    throw new InvalidOperationException("Act groups cannot appear after unassigned chapters.");
-                currentActId = ordered.TargetId;
-                continue;
-            }
-
-            var parentActId = chapterParents[ordered.TargetId];
-            if (parentActId is null)
-            {
-                reachedUnassigned = true;
-                currentActId = null;
-            }
-            else if (reachedUnassigned || currentActId != parentActId)
-            {
-                throw new InvalidOperationException("Every chapter must remain contiguous beneath its owning act.");
-            }
-        }
-    }
-
-    public async Task<PublicationMatterView> UpsertMatterAsync(
-        Guid projectId,
-        Guid editionId,
-        PublicationMatterInput input,
-        long expectedEditionRevision,
-        CancellationToken cancellationToken = default)
-    {
-        if (!Enum.IsDefined(input.Location) || !Enum.IsDefined(input.Kind))
-            throw new InvalidOperationException("Publication matter kind or location is invalid.");
-        PublicationMatterFormatting.EnsureUserAuthoredKind(input.Kind);
-        if (string.IsNullOrWhiteSpace(input.Title)
-            || input.Title.Trim().Length > 500
-            || input.Title.Contains('\r')
-            || input.Title.Contains('\n'))
-        {
-            throw new InvalidOperationException("Publication matter title must contain 1 to 500 characters on one line.");
-        }
-        if (input.SortOrder < 0)
-            throw new InvalidOperationException("Publication matter order cannot be negative.");
-        var document = ManuscriptCodec.Deserialize(
-            input.ManuscriptJson,
-            input.Id ?? Guid.Empty,
-            input.ExpectedRevision ?? 0);
-        if (document.Content.Any(block => block.Type == ManuscriptBlockType.DesignedPage))
-            throw new InvalidOperationException("Publication matter cannot own Designed Pages; insert them in a chapter where their composition has explicit semantic ownership.");
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
-        EnsureRevision(edition, expectedEditionRevision);
-        EnsureDraft(edition);
-        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
-        var styleEntities = await db.ManuscriptStyleDefinitions.AsNoTracking()
-            .Where(style => style.ProjectId == projectId)
-            .ToListAsync(cancellationToken);
-        ManuscriptStyleService.ValidateDocumentReferences(
-            document,
-            styleEntities.Select(style => new ManuscriptStyleView(
-                style.Id,
-                style.Name,
-                style.Kind,
-                style.SemanticRole,
-                ManuscriptStyleService.NormalizeDefinition(
-                    JsonSerializer.Deserialize<ManuscriptStyleProperties>(
-                        style.DefinitionJson,
-                        ManuscriptCodec.JsonOptions) ?? new ManuscriptStyleProperties()),
-                style.Revision)).ToList());
-        var figureImageIds = document.Content
-            .Where(block => block.Type == ManuscriptBlockType.Figure && block.ImageId is not null)
-            .Select(block => block.ImageId!.Value)
-            .Distinct()
-            .ToList();
-        if (figureImageIds.Count > 0
-            && await db.PublishAssets.AsNoTracking().CountAsync(
-                image => image.ProjectId == projectId && figureImageIds.Contains(image.Id),
-                cancellationToken) != figureImageIds.Count)
-        {
-            throw new InvalidOperationException(
-                "Publication matter figures must reference images owned by this project.");
-        }
-        var before = await FingerprintAsync(projectId, editionId, cancellationToken);
-        PublicationMatter matter;
-        if (input.Id is Guid id)
-        {
-            var storedMatter = await db.PublicationMatter.FirstOrDefaultAsync(
-                candidate => candidate.EditionId == editionId && candidate.Id == id,
-                cancellationToken);
-            if (storedMatter is null)
-            {
-                var inherited = await db.PublicationBookMatter.AsNoTracking().SingleOrDefaultAsync(
-                    candidate => candidate.ProjectId == projectId && candidate.Id == id,
-                    cancellationToken) ?? throw new InvalidOperationException("Publication matter was not found.");
-                if (input.ExpectedRevision != inherited.Revision)
-                    throw new DbUpdateConcurrencyException("Inherited Core Book matter changed in another editor.");
-                matter = new PublicationMatter
-                {
-                    EditionId = editionId,
-                    CoreMatterId = inherited.Id,
-                    Title = inherited.Title,
-                    Revision = checked(inherited.Revision + 1),
-                };
-                db.PublicationMatter.Add(matter);
-                document = document with { ManuscriptId = matter.Id };
-            }
-            else
-            {
-                matter = storedMatter;
-                if (input.ExpectedRevision != matter.Revision)
-                    throw new DbUpdateConcurrencyException("Publication matter changed in another editor.");
-                matter.Revision++;
-            }
-        }
-        else
-        {
-            matter = new PublicationMatter { EditionId = editionId, Title = string.Empty };
-            db.PublicationMatter.Add(matter);
-            document = document with { ManuscriptId = matter.Id };
-        }
-        matter.Location = input.Location;
-        matter.Kind = input.Kind;
-        matter.Title = Clean(input.Title);
-        matter.ManuscriptJson = ManuscriptCodec.Serialize(document with { ManuscriptId = matter.Id, Revision = matter.Revision });
-        matter.IsIncluded = input.IsIncluded;
-        matter.IsExcluded = false;
-        matter.SortOrder = input.SortOrder;
-        matter.UpdatedAt = DateTime.UtcNow;
-        await SaveWithAuditAsync(edition, "upsert-matter", before, new { matter.Id, matter.Kind }, cancellationToken);
-        return MatterView(matter);
-    }
-
-    public async Task DeleteMatterAsync(
-        Guid projectId,
-        Guid editionId,
-        Guid matterId,
-        long expectedEditionRevision,
-        CancellationToken cancellationToken = default)
-    {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
-        EnsureRevision(edition, expectedEditionRevision);
-        EnsureDraft(edition);
-        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
-        var matter = await db.PublicationMatter.FirstOrDefaultAsync(
-            candidate => candidate.EditionId == editionId && candidate.Id == matterId,
-            cancellationToken);
-        var inherited = matter is null
-            ? await db.PublicationBookMatter.AsNoTracking().SingleOrDefaultAsync(
-                candidate => candidate.ProjectId == projectId && candidate.Id == matterId, cancellationToken)
-            : matter.CoreMatterId is Guid coreId
-                ? await db.PublicationBookMatter.AsNoTracking().SingleOrDefaultAsync(candidate => candidate.Id == coreId, cancellationToken)
-                : null;
-        if (matter is null && inherited is null) return;
-        var before = await FingerprintAsync(projectId, editionId, cancellationToken);
-        if (inherited is not null)
-        {
-            matter ??= new PublicationMatter
-            {
-                EditionId = editionId,
-                CoreMatterId = inherited.Id,
-                Location = inherited.Location,
-                Kind = inherited.Kind,
-                Title = inherited.Title,
-                ManuscriptJson = inherited.ManuscriptJson,
-                Revision = inherited.Revision,
-                IsIncluded = inherited.IsIncluded,
-                SortOrder = inherited.SortOrder,
-            };
-            if (db.Entry(matter).State == EntityState.Detached)
-                db.PublicationMatter.Add(matter);
-            matter.IsExcluded = true;
-            matter.UpdatedAt = DateTime.UtcNow;
-        }
-        else
-        {
-            db.PublicationMatter.Remove(matter!);
-        }
-        await SaveWithAuditAsync(edition, "delete-matter", before, new { matterId }, cancellationToken);
-    }
-
-    public async Task<PublicationImagePlacementView> AddImagePlacementAsync(
-        Guid projectId,
-        Guid editionId,
-        PublicationImagePlacementCreate input,
-        long expectedEditionRevision,
-        CancellationToken cancellationToken = default)
-    {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
-        EnsureRevision(edition, expectedEditionRevision);
-        EnsureDraft(edition);
-        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
-        var metadata = await ValidatePlacementAsync(projectId, editionId, input.AssetId, input.TargetKind, input.TargetId, input.PlacementKind, cancellationToken);
-        var presentation = input.Presentation ?? new FigurePresentation { Placement = FigurePlacementIntent.DedicatedPage };
-        var altText = FirstNonEmpty(input.AltText, metadata.AssetAltText);
-        await ValidatePlacementPresentationAsync(projectId, presentation, altText, input.Decorative, input.Language, input.AccessibilityRole, cancellationToken);
-        var before = await FingerprintAsync(projectId, editionId, cancellationToken);
-        var order = await db.PublicationImagePlacements
-            .Where(placement => placement.EditionId == editionId
-                && placement.TargetKind == input.TargetKind
-                && placement.TargetId == input.TargetId
-                && placement.PlacementKind == input.PlacementKind)
-            .Select(placement => (int?)placement.SortOrder)
-            .MaxAsync(cancellationToken) ?? -1;
-        var placement = new PublicationImagePlacement
-        {
-            EditionId = editionId,
-            AssetId = input.AssetId,
-            TargetKind = input.TargetKind,
-            TargetId = input.TargetId,
-            ActId = input.TargetKind == PublishOutlineTargetKind.Act ? input.TargetId : null,
-            ChapterId = input.TargetKind == PublishOutlineTargetKind.Chapter ? input.TargetId : null,
-            PlacementKind = input.PlacementKind,
-            Caption = Clean(input.Caption),
-            PresentationJson = JsonSerializer.Serialize(presentation, ManuscriptCodec.JsonOptions),
-            AltText = input.Decorative ? string.Empty : altText,
-            Decorative = input.Decorative,
-            Language = PublicationLanguage.Normalize(input.Language),
-            AccessibilityRole = input.AccessibilityRole,
-            SortOrder = order + 1,
-        };
-        db.PublicationImagePlacements.Add(placement);
-        await SaveWithAuditAsync(edition, "add-image-placement", before, new { placement.Id }, cancellationToken);
-        return PlacementView(projectId, placement, metadata.AssetFileName, metadata.TargetTitle);
-    }
-
-    public async Task<PublicationImagePlacementView> UpdateImagePlacementAsync(
-        Guid projectId,
-        Guid editionId,
-        Guid placementId,
-        PublicationImagePlacementUpdate input,
-        long expectedEditionRevision,
-        CancellationToken cancellationToken = default)
-    {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
-        EnsureRevision(edition, expectedEditionRevision);
-        EnsureDraft(edition);
-        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
-        var placement = await db.PublicationImagePlacements.FirstOrDefaultAsync(
-            candidate => candidate.EditionId == editionId && candidate.Id == placementId,
-            cancellationToken);
-        if (placement is null)
-        {
-            var inherited = await db.PublicationBookImagePlacements.AsNoTracking().SingleOrDefaultAsync(
-                candidate => candidate.ProjectId == projectId && candidate.Id == placementId,
-                cancellationToken) ?? throw new InvalidOperationException("Image placement was not found.");
-            placement = new PublicationImagePlacement
-            {
-                EditionId = editionId,
-                CorePlacementId = inherited.Id,
-                AssetId = inherited.AssetId,
-                TargetKind = inherited.TargetKind,
-                TargetId = inherited.TargetId,
-                ActId = inherited.ActId,
-                ChapterId = inherited.ChapterId,
-                PlacementKind = inherited.PlacementKind,
-                Caption = inherited.Caption,
-                PresentationJson = inherited.PresentationJson,
-                AltText = inherited.AltText,
-                Decorative = inherited.Decorative,
-                Language = inherited.Language,
-                AccessibilityRole = inherited.AccessibilityRole,
-                SortOrder = inherited.SortOrder,
-            };
-            db.PublicationImagePlacements.Add(placement);
-        }
-        var metadata = await ValidatePlacementAsync(projectId, editionId, input.AssetId, input.TargetKind, input.TargetId, input.PlacementKind, cancellationToken);
-        var presentation = input.Presentation ?? new FigurePresentation { Placement = FigurePlacementIntent.DedicatedPage };
-        var altText = FirstNonEmpty(input.AltText, metadata.AssetAltText);
-        await ValidatePlacementPresentationAsync(projectId, presentation, altText, input.Decorative, input.Language, input.AccessibilityRole, cancellationToken);
-        var before = await FingerprintAsync(projectId, editionId, cancellationToken);
-        var oldGroup = (placement.TargetKind, placement.TargetId, placement.PlacementKind);
-        var moved = oldGroup != (input.TargetKind, input.TargetId, input.PlacementKind);
-        if (moved)
-        {
-            var nextOrder = await db.PublicationImagePlacements
-                .Where(candidate => candidate.EditionId == editionId
-                    && candidate.Id != placementId
-                    && candidate.TargetKind == input.TargetKind
-                    && candidate.TargetId == input.TargetId
-                    && candidate.PlacementKind == input.PlacementKind)
-                .Select(candidate => (int?)candidate.SortOrder)
-                .MaxAsync(cancellationToken) ?? -1;
-            placement.SortOrder = nextOrder + 1;
-            await CompactPlacementGroupAsync(
-                editionId,
-                oldGroup.TargetKind,
-                oldGroup.TargetId,
-                oldGroup.PlacementKind,
-                placementId,
-                cancellationToken);
-        }
-        placement.AssetId = input.AssetId;
-        placement.TargetKind = input.TargetKind;
-        placement.TargetId = input.TargetId;
-        placement.ActId = input.TargetKind == PublishOutlineTargetKind.Act ? input.TargetId : null;
-        placement.ChapterId = input.TargetKind == PublishOutlineTargetKind.Chapter ? input.TargetId : null;
-        placement.PlacementKind = input.PlacementKind;
-        placement.Caption = Clean(input.Caption);
-        placement.PresentationJson = JsonSerializer.Serialize(presentation, ManuscriptCodec.JsonOptions);
-        placement.AltText = input.Decorative ? string.Empty : altText;
-        placement.Decorative = input.Decorative;
-        placement.Language = PublicationLanguage.Normalize(input.Language);
-        placement.AccessibilityRole = input.AccessibilityRole;
-        placement.IsExcluded = false;
-        placement.UpdatedAt = DateTime.UtcNow;
-        await SaveWithAuditAsync(edition, "update-image-placement", before, new { placementId }, cancellationToken);
-        return PlacementView(projectId, placement, metadata.AssetFileName, metadata.TargetTitle);
-    }
-
-    public async Task ReorderImagePlacementsAsync(
-        Guid projectId,
-        Guid editionId,
-        IReadOnlyList<Guid> orderedPlacementIds,
-        long expectedEditionRevision,
-        CancellationToken cancellationToken = default)
-    {
-        if (orderedPlacementIds.Count != orderedPlacementIds.Distinct().Count())
-            throw new InvalidOperationException("Placement reorder contains duplicate IDs.");
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
-        EnsureRevision(edition, expectedEditionRevision);
-        EnsureDraft(edition);
-        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
-        var effective = await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken);
-        var effectivePlacements = effective.ImagePlacements.Where(placement => orderedPlacementIds.Contains(placement.Id)).ToList();
-        if (effectivePlacements.Count != orderedPlacementIds.Count)
-            throw new InvalidOperationException("One or more image placements were not found.");
-        if (effectivePlacements.Count > 0)
-        {
-            var first = effectivePlacements[0];
-            if (effectivePlacements.Any(placement => placement.TargetKind != first.TargetKind
-                || placement.TargetId != first.TargetId
-                || placement.PlacementKind != first.PlacementKind))
-            {
-                throw new InvalidOperationException("Only placements at the same target and position can be reordered together.");
-            }
-            var groupCount = effective.ImagePlacements.Count(placement => placement.TargetKind == first.TargetKind
-                && placement.TargetId == first.TargetId && placement.PlacementKind == first.PlacementKind);
-            if (groupCount != orderedPlacementIds.Count)
-                throw new InvalidOperationException("Placement reorder must include every image in the target group.");
-        }
-        var before = await FingerprintAsync(projectId, editionId, cancellationToken);
-        var order = orderedPlacementIds.Select((id, index) => (id, index)).ToDictionary(item => item.id, item => item.index);
-        var localRows = await db.PublicationImagePlacements.Where(item => item.EditionId == editionId).ToListAsync(cancellationToken);
-        var coreRows = await db.PublicationBookImagePlacements.AsNoTracking().Where(item => item.ProjectId == projectId).ToListAsync(cancellationToken);
-        foreach (var effectivePlacement in effectivePlacements)
-        {
-            var core = coreRows.FirstOrDefault(item => item.Id == effectivePlacement.Id)
-                ?? coreRows.FirstOrDefault(item => item.Id == effectivePlacement.CorePlacementId);
-            var placement = localRows.FirstOrDefault(item => item.Id == effectivePlacement.Id)
-                ?? localRows.FirstOrDefault(item => item.CorePlacementId == effectivePlacement.Id);
-            var desiredOrder = order[effectivePlacement.Id];
-            if (placement is null && core is not null && core.SortOrder != desiredOrder)
-            {
-                placement = new PublicationImagePlacement
-                {
-                    EditionId = editionId, CorePlacementId = core.Id, AssetId = core.AssetId,
-                    TargetKind = core.TargetKind, TargetId = core.TargetId, ActId = core.ActId, ChapterId = core.ChapterId,
-                    PlacementKind = core.PlacementKind, Caption = core.Caption, PresentationJson = core.PresentationJson,
-                    AltText = core.AltText, Decorative = core.Decorative, Language = core.Language,
-                    AccessibilityRole = core.AccessibilityRole, SortOrder = desiredOrder,
-                };
-                db.PublicationImagePlacements.Add(placement);
-                localRows.Add(placement);
-            }
-            else if (placement is not null)
-            {
-                placement.SortOrder = desiredOrder;
-                placement.UpdatedAt = DateTime.UtcNow;
-            }
-        }
-        await SaveWithAuditAsync(edition, "reorder-image-placements", before, new { orderedPlacementIds }, cancellationToken);
-    }
-
-    public async Task DeleteImagePlacementAsync(
-        Guid projectId,
-        Guid editionId,
-        Guid placementId,
-        long expectedEditionRevision,
-        CancellationToken cancellationToken = default)
-    {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
-        EnsureRevision(edition, expectedEditionRevision);
-        EnsureDraft(edition);
-        await EnsureSharedIsbnContentMutableAsync(edition, cancellationToken);
-        var placement = await db.PublicationImagePlacements.FirstOrDefaultAsync(
-            candidate => candidate.EditionId == editionId && candidate.Id == placementId,
-            cancellationToken);
-        var inherited = placement is null
-            ? await db.PublicationBookImagePlacements.AsNoTracking().SingleOrDefaultAsync(
-                candidate => candidate.ProjectId == projectId && candidate.Id == placementId, cancellationToken)
-            : placement.CorePlacementId is Guid coreId
-                ? await db.PublicationBookImagePlacements.AsNoTracking().SingleOrDefaultAsync(candidate => candidate.Id == coreId, cancellationToken)
-                : null;
-        if (placement is null && inherited is null) return;
-        var before = await FingerprintAsync(projectId, editionId, cancellationToken);
-        if (inherited is not null)
-        {
-            placement ??= new PublicationImagePlacement
-            {
-                EditionId = editionId,
-                CorePlacementId = inherited.Id,
-                AssetId = inherited.AssetId,
-                TargetKind = inherited.TargetKind,
-                TargetId = inherited.TargetId,
-                ActId = inherited.ActId,
-                ChapterId = inherited.ChapterId,
-                PlacementKind = inherited.PlacementKind,
-                Caption = inherited.Caption,
-                PresentationJson = inherited.PresentationJson,
-                AltText = inherited.AltText,
-                Decorative = inherited.Decorative,
-                Language = inherited.Language,
-                AccessibilityRole = inherited.AccessibilityRole,
-                SortOrder = inherited.SortOrder,
-            };
-            if (db.Entry(placement).State == EntityState.Detached)
-                db.PublicationImagePlacements.Add(placement);
-            placement.IsExcluded = true;
-            placement.UpdatedAt = DateTime.UtcNow;
-        }
-        else
-        {
-            await CompactPlacementGroupAsync(
-                editionId,
-                placement!.TargetKind,
-                placement.TargetId,
-                placement.PlacementKind,
-                placement.Id,
-                cancellationToken);
-            db.PublicationImagePlacements.Remove(placement);
-        }
-        await SaveWithAuditAsync(edition, "delete-image-placement", before, new { placementId }, cancellationToken);
-    }
-
-    private async Task CompactPlacementGroupAsync(
-        Guid editionId,
-        PublishOutlineTargetKind targetKind,
-        Guid targetId,
-        PublicationImagePlacementKind placementKind,
-        Guid excludedId,
-        CancellationToken cancellationToken)
-    {
-        var group = await db.PublicationImagePlacements
-            .Where(placement => placement.EditionId == editionId
-                && placement.Id != excludedId
-                && placement.TargetKind == targetKind
-                && placement.TargetId == targetId
-                && placement.PlacementKind == placementKind)
-            .OrderBy(placement => placement.SortOrder)
-            .ThenBy(placement => placement.Id)
-            .ToListAsync(cancellationToken);
-        for (var index = 0; index < group.Count; index++)
-            group[index].SortOrder = index;
-    }
-
     public async Task<PublicationEditionCompareView> CompareAsync(
         Guid projectId,
         Guid leftEditionId,
@@ -1011,6 +476,32 @@ public sealed class PublicationEditionService(
             .Distinct()
             .OrderBy(id => id)
             .ToList();
+        var publicationSections = effective.PublicationSections
+            .OrderBy(item => item.Anchor)
+            .ThenBy(item => item.TargetId)
+            .ThenBy(item => item.LocalOrder)
+            .ThenBy(item => item.Id)
+            .Select(item => new
+            {
+                item.Id,
+                item.CoreSectionId,
+                item.Title,
+                item.Kind,
+                item.SystemRole,
+                item.Anchor,
+                item.TargetKind,
+                item.TargetId,
+                item.InclusionMode,
+                item.LocalOrder,
+                item.ManuscriptJson,
+                item.Revision,
+            })
+            .ToList();
+        compositionIds.AddRange(publicationSections
+            .SelectMany(item => ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision).Content)
+            .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.PageCompositionId.HasValue)
+            .Select(block => block.PageCompositionId!.Value));
+        compositionIds = compositionIds.Distinct().OrderBy(id => id).ToList();
         var compositions = await db.PageCompositions.AsNoTracking()
             .Where(composition => compositionIds.Contains(composition.Id))
             .OrderBy(composition => composition.Id)
@@ -1032,33 +523,10 @@ public sealed class PublicationEditionService(
                     }),
             })
             .ToListAsync(cancellationToken);
-        var matter = effective.Matter
-            .OrderBy(item => item.Location).ThenBy(item => item.SortOrder).ThenBy(item => item.Id)
-            .Select(item => new { item.Id, item.Kind, item.Location, item.Title, item.ManuscriptJson, item.Revision, item.IsIncluded, item.SortOrder })
-            .ToList();
-        var placements = effective.ImagePlacements
-            .OrderBy(placement => placement.TargetKind).ThenBy(placement => placement.TargetId)
-            .ThenBy(placement => placement.PlacementKind).ThenBy(placement => placement.SortOrder)
-            .Select(placement => new
-            {
-                placement.Id,
-                placement.AssetId,
-                placement.TargetKind,
-                placement.TargetId,
-                placement.PlacementKind,
-                placement.Caption,
-                placement.PresentationJson,
-                placement.AltText,
-                placement.Decorative,
-                placement.Language,
-                placement.AccessibilityRole,
-                placement.SortOrder,
-            })
-            .ToList();
         var referencedStyleRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var document in chapters.Select(chapter => ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision))
             .Concat(compositions.Select(composition => ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision)))
-            .Concat(matter.Select(item => ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision))))
+            .Concat(publicationSections.Select(item => ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision))))
         {
             foreach (var block in document.Content)
             {
@@ -1173,10 +641,10 @@ public sealed class PublicationEditionService(
                 CompositionSceneJson = normalizedReleaseCoverScene,
             };
         }
-        var referencedAssetIds = new HashSet<Guid>(placements.Select(placement => placement.AssetId));
+        var referencedAssetIds = new HashSet<Guid>();
         foreach (var chapter in chapters)
             CollectReferencedImageIds(chapter.ManuscriptJson, referencedAssetIds);
-        foreach (var item in matter.Where(item => item.IsIncluded))
+        foreach (var item in publicationSections)
             CollectReferencedImageIds(item.ManuscriptJson, referencedAssetIds);
         foreach (var composition in compositions)
         {
@@ -1250,8 +718,7 @@ public sealed class PublicationEditionService(
             Acts = acts,
             Chapters = chapters,
             Compositions = compositions,
-            Matter = matter,
-            Placements = placements,
+            PublicationSections = publicationSections,
             Assets = assets,
             Styles = styles,
             Fonts = fonts,
@@ -1312,34 +779,16 @@ public sealed class PublicationEditionService(
         var effective = await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken);
         var outline = effective.OutlineItems.OrderBy(item => item.SortOrder)
             .Select(item => new { item.TargetKind, item.TargetId, item.IsIncluded, item.SortOrder }).ToList();
-        var matter = effective.Matter.OrderBy(item => item.Location).ThenBy(item => item.SortOrder).ThenBy(item => item.Id).ToList();
-        var placements = effective.ImagePlacements
-            .OrderBy(placement => placement.TargetKind)
-            .ThenBy(placement => placement.TargetId)
-            .ThenBy(placement => placement.PlacementKind)
-            .ThenBy(placement => placement.SortOrder)
-            .Select(placement => new
+        var publicationSections = effective.PublicationSections
+            .OrderBy(item => item.Anchor).ThenBy(item => item.TargetId).ThenBy(item => item.LocalOrder).ThenBy(item => item.Id)
+            .Select(item => new
             {
-                placement.AssetId,
-                placement.TargetKind,
-                placement.TargetId,
-                placement.PlacementKind,
-                placement.Caption,
-                placement.SortOrder,
-            })
-            .ToList();
-        var canonicalMatter = matter.Select(item => new
-        {
-            item.Location,
-            item.Kind,
-            item.Title,
-            Content = CanonicalManuscriptContent(
-                ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision)),
-            item.IsIncluded,
-            item.SortOrder,
-        });
+                item.CoreSectionId, item.Title, item.Kind, item.SystemRole, item.Anchor,
+                item.TargetKind, item.TargetId, item.InclusionMode, item.LocalOrder,
+                Content = CanonicalManuscriptContent(ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision)),
+            });
         var canonical = JsonSerializer.Serialize(
-            new { Outline = outline, Matter = canonicalMatter, Placements = placements },
+            new { Outline = outline, PublicationSections = publicationSections },
             ManuscriptCodec.JsonOptions);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
@@ -1365,27 +814,6 @@ public sealed class PublicationEditionService(
     internal static IReadOnlyList<ManuscriptBlock> CanonicalManuscriptContent(ManuscriptDocument document) =>
         document.Content.Select(block => block with { Id = string.Empty }).ToList();
 
-    private async Task MaterializeOutlineAsync(PublicationEdition edition, CancellationToken cancellationToken)
-    {
-        var order = 0;
-        var acts = await db.Acts.AsNoTracking()
-            .Where(act => act.ProjectId == edition.ProjectId)
-            .OrderBy(act => act.Order)
-            .ToListAsync(cancellationToken);
-        var chapters = await db.Chapters.AsNoTracking()
-            .Where(chapter => chapter.ProjectId == edition.ProjectId)
-            .OrderBy(chapter => chapter.Order)
-            .ToListAsync(cancellationToken);
-        foreach (var act in acts)
-        {
-            edition.OutlineItems.Add(NewOutlineItem(edition.Id, PublishOutlineTargetKind.Act, act.Id, order++));
-            foreach (var chapter in chapters.Where(chapter => chapter.ActId == act.Id).OrderBy(chapter => chapter.Order))
-                edition.OutlineItems.Add(NewOutlineItem(edition.Id, PublishOutlineTargetKind.Chapter, chapter.Id, order++));
-        }
-        foreach (var chapter in chapters.Where(chapter => chapter.ActId is null).OrderBy(chapter => chapter.Order))
-            edition.OutlineItems.Add(NewOutlineItem(edition.Id, PublishOutlineTargetKind.Chapter, chapter.Id, order++));
-    }
-
     private async Task EnsureTargetsAsync(
         Guid projectId,
         IReadOnlyList<PublicationEditionOutlineItemUpdate> updates,
@@ -1398,79 +826,6 @@ public sealed class PublicationEditionService(
         {
             throw new InvalidOperationException("One or more edition content targets were not found in this project.");
         }
-    }
-
-    private async Task<PlacementMetadata> ValidatePlacementAsync(
-        Guid projectId,
-        Guid editionId,
-        Guid assetId,
-        PublishOutlineTargetKind targetKind,
-        Guid targetId,
-        PublicationImagePlacementKind placementKind,
-        CancellationToken cancellationToken)
-    {
-        ValidatePlacementKind(targetKind, placementKind);
-        var asset = await db.PublishAssets
-            .Where(asset => asset.ProjectId == projectId && asset.Id == assetId)
-            .Select(asset => new { asset.FileName, asset.AltText, asset.ContentType })
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? throw new InvalidOperationException("Project image was not found.");
-        if (asset.ContentType is not ("image/png" or "image/jpeg"))
-            throw new InvalidOperationException("Edition illustrations must use publication-compatible PNG or JPEG assets.");
-        var targetTitle = targetKind switch
-        {
-            PublishOutlineTargetKind.Act => await db.Acts
-                .Where(act => act.ProjectId == projectId && act.Id == targetId)
-                .Select(act => act.Title).FirstOrDefaultAsync(cancellationToken),
-            PublishOutlineTargetKind.Chapter => await db.Chapters
-                .Where(chapter => chapter.ProjectId == projectId && chapter.Id == targetId)
-                .Select(chapter => chapter.Title).FirstOrDefaultAsync(cancellationToken),
-            _ => null,
-        } ?? throw new InvalidOperationException("Edition image-placement target was not found.");
-        var included = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken))
-            .OutlineItems.FirstOrDefault(item => item.TargetKind == targetKind && item.TargetId == targetId)?.IsIncluded ?? true;
-        if (!included)
-            throw new InvalidOperationException("Images can only be placed on included edition content.");
-        return new(asset.FileName, asset.AltText, targetTitle);
-    }
-
-    private async Task ValidatePlacementPresentationAsync(
-        Guid projectId,
-        FigurePresentation presentation,
-        string altText,
-        bool decorative,
-        string language,
-        FigureAccessibilityRole role,
-        CancellationToken cancellationToken)
-    {
-        if (!Enum.IsDefined(role)
-            || presentation.WidthPercent is <= 0 or > 100
-            || presentation.CropXPercent is < 0 or > 100
-            || presentation.CropYPercent is < 0 or > 100
-            || presentation.SpacingBeforePoints is < 0 or > 288
-            || presentation.SpacingAfterPoints is < 0 or > 288)
-        {
-            throw new InvalidOperationException("Edition illustration presentation is outside supported limits.");
-        }
-        if (decorative && !string.IsNullOrWhiteSpace(altText))
-            throw new InvalidOperationException("Decorative edition illustrations cannot carry alternative text.");
-        if (!decorative && string.IsNullOrWhiteSpace(altText))
-            throw new InvalidOperationException("Edition illustrations require alternative text or a decorative decision.");
-        if (string.IsNullOrWhiteSpace(language) || language.Trim().Length > 35)
-            throw new InvalidOperationException("Edition illustration language must be a compact BCP 47 tag.");
-    }
-
-    private static void ValidatePlacementKind(PublishOutlineTargetKind targetKind, PublicationImagePlacementKind placementKind)
-    {
-        var valid = targetKind == PublishOutlineTargetKind.Act
-            ? placementKind is PublicationImagePlacementKind.BeforeAct or PublicationImagePlacementKind.AfterAct
-            : targetKind == PublishOutlineTargetKind.Chapter
-                && placementKind is PublicationImagePlacementKind.BeforeChapter
-                    or PublicationImagePlacementKind.ChapterOpening
-                    or PublicationImagePlacementKind.ChapterEnding
-                    or PublicationImagePlacementKind.AfterChapter;
-        if (!valid)
-            throw new InvalidOperationException($"{placementKind} cannot be used with a {targetKind} target.");
     }
 
     private static void ValidateIdentity(string name, PublicationEditionFormat format, PublicationVendor vendor)
@@ -1610,39 +965,6 @@ public sealed class PublicationEditionService(
             EditionSpecificContentEnabled = edition.EditionSpecificContentEnabled,
         };
 
-    internal static PublicationMatterView MatterView(PublicationMatter matter) =>
-        new(
-            matter.Id,
-            matter.Location,
-            matter.Kind,
-            matter.Title,
-            ManuscriptCodec.Deserialize(matter.ManuscriptJson, matter.Id, matter.Revision),
-            matter.IsIncluded,
-            matter.SortOrder,
-            matter.Revision);
-
-    private static PublicationImagePlacementView PlacementView(
-        Guid projectId,
-        PublicationImagePlacement placement,
-        string assetFileName,
-        string targetTitle) =>
-        new(
-            placement.Id,
-            placement.AssetId,
-            assetFileName,
-            $"/projects/{projectId:N}/images/{placement.AssetId:N}/content?maxEdge=320",
-            placement.TargetKind,
-            placement.TargetId,
-            targetTitle,
-            placement.PlacementKind,
-            placement.Caption,
-            JsonSerializer.Deserialize<FigurePresentation>(placement.PresentationJson, ManuscriptCodec.JsonOptions) ?? new FigurePresentation(),
-            placement.AltText,
-            placement.Decorative,
-            placement.Language,
-            placement.AccessibilityRole,
-            placement.SortOrder);
-
     private static PublicationEditionOutlineItem NewOutlineItem(
         Guid editionId,
         PublishOutlineTargetKind kind,
@@ -1665,51 +987,57 @@ public sealed class PublicationEditionService(
         return copy;
     }
 
-    private static PublicationMatter CopyMatter(PublicationMatter source)
+    private static PublicationSection CopyPublicationSection(
+        PublicationSection source,
+        Guid editionId,
+        Guid id,
+        IReadOnlyDictionary<Guid, Guid> compositionMap)
     {
-        var copy = new PublicationMatter
-        {
-            CoreMatterId = source.CoreMatterId,
-            Title = source.Title,
-            Location = source.Location,
-            Kind = source.Kind,
-            IsIncluded = source.IsIncluded,
-            SortOrder = source.SortOrder,
-            Revision = source.Revision,
-            IsExcluded = source.IsExcluded,
-        };
         var document = ManuscriptCodec.Deserialize(source.ManuscriptJson, source.Id, source.Revision);
-        copy.ManuscriptJson = ManuscriptCodec.Serialize(document with { ManuscriptId = copy.Id });
-        return copy;
-    }
-
-    private static PublicationImagePlacement CopyPlacement(PublicationImagePlacement source) =>
-        new()
+        document = document with
         {
-            CorePlacementId = source.CorePlacementId,
-            AssetId = source.AssetId,
+            ManuscriptId = id,
+            Content = document.Content.Select(block =>
+                block.PageCompositionId is Guid compositionId && compositionMap.TryGetValue(compositionId, out var cloneCompositionId)
+                    ? block with { PageCompositionId = cloneCompositionId }
+                    : block).ToList(),
+        };
+        return new PublicationSection
+        {
+            Id = id,
+            ProjectId = source.ProjectId,
+            EditionId = editionId,
+            CoreSectionId = source.CoreSectionId,
+            IsExcluded = source.IsExcluded,
+            Title = source.Title,
+            Kind = source.Kind,
+            SystemRole = source.SystemRole,
+            Anchor = source.Anchor,
             TargetKind = source.TargetKind,
             TargetId = source.TargetId,
             ActId = source.ActId,
             ChapterId = source.ChapterId,
-            PlacementKind = source.PlacementKind,
-            SortOrder = source.SortOrder,
-            Caption = source.Caption,
-            PresentationJson = source.PresentationJson,
-            AltText = source.AltText,
-            Decorative = source.Decorative,
-            Language = source.Language,
-            AccessibilityRole = source.AccessibilityRole,
-            IsExcluded = source.IsExcluded,
+            InclusionMode = source.InclusionMode,
+            LocalOrder = source.LocalOrder,
+            ManuscriptJson = ManuscriptCodec.Serialize(document),
+            Revision = source.Revision,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
         };
+    }
 
-    private static PageComposition CopyEditionComposition(PageComposition source, Guid editionId, Guid id)
+    private static PageComposition CopyEditionComposition(
+        PageComposition source,
+        Guid editionId,
+        Guid id,
+        Guid? publicationSectionId)
     {
         var clone = new PageComposition
         {
             Id = id,
             ProjectId = source.ProjectId,
             ChapterId = source.ChapterId,
+            PublicationSectionId = publicationSectionId,
             EditionId = editionId,
             SourceCompositionId = source.SourceCompositionId,
             Name = source.Name,
@@ -1773,6 +1101,7 @@ public sealed class PublicationEditionService(
             SelectedCoverImageId = source.SelectedCoverImageId,
             AllowDesignedPageOverrides = source.AllowDesignedPageOverrides,
             InheritsCoreCover = source.InheritsCoreCover,
+            EditionSpecificContentEnabled = source.EditionSpecificContentEnabled,
         };
 
     private static string Clean(string? value) => value?.Trim() ?? string.Empty;
@@ -1786,5 +1115,4 @@ public sealed class PublicationEditionService(
     private static string FirstNonEmpty(params string[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
 
-    private sealed record PlacementMetadata(string AssetFileName, string AssetAltText, string TargetTitle);
 }

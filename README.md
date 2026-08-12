@@ -73,9 +73,11 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   Every assistant generation/edit waits for a terminal result and produces an
   unattached reusable project image; Figure, page, cover, and canonical-reference
   placement is a separate revision-safe step using that image ID.
-- An always-present Core Book for shared title/author/language metadata, content
-  order, presentation, semantic matter, image placements, project typography,
-  and reusable front-cover design. Optional paperback, EPUB ebook, and PDF ebook
+- An always-present Core Book for shared title/author/language metadata, fixed
+  outline order, presentation, mixed-content publication sections, project
+  typography, and reusable front-cover design. Publication sections can combine
+  prose, Figures, and Designed Pages before, after, or around the Core outline.
+  Optional paperback, EPUB ebook, and PDF ebook
   releases inherit Core values live and store only explicit field or collection
   overrides; ISBN, destination, package, and product settings remain
   release-specific. No release or ISBN is created automatically.
@@ -122,7 +124,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   content, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded subset fonts, ToUnicode maps, and a
   240% total-ink ceiling. These checks establish only the exact named
   Lorekeeper profile; they do not claim that a vendor accepted an upload.
-- Versioned project import/export (current v18 manuscript-v4/page-setup/
+- Versioned project import/export (current v19 manuscript-v4/page-setup/
   composition model, Core Book, sparse release overlays, edition chapter
   snapshots/compositions, covers, custom-font binaries,
   and isolated older structured/text adapters) plus TXT, Markdown,

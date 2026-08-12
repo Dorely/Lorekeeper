@@ -49,6 +49,8 @@
     [Parameter] public EventCallback OpenProjectImagePicker { get; set; }
     [Parameter] public EventCallback OpenBookTextStyles { get; set; }
     [Parameter] public EventCallback StyleCatalogChanged { get; set; }
+    [Parameter] public Func<string, string, int, long, Task<object>>? CreateDesignedPageOverrideAsync { get; set; }
+    [Parameter] public Func<long, Task<ManuscriptDocument>>? ReadDocumentOverrideAsync { get; set; }
     [Parameter, EditorRequired]
     public Func<Guid, long, string, Task<SemanticEditorSaveResult>> SaveAsync { get; set; } = null!;
 
@@ -150,6 +152,8 @@
     {
         if (!Enum.TryParse<DesignedPageLayoutMode>(layoutMode, ignoreCase: true, out var parsedLayoutMode))
             throw new ArgumentException("Choose a supported Designed Page layout.", nameof(layoutMode));
+        if (CreateDesignedPageOverrideAsync is not null)
+            return await CreateDesignedPageOverrideAsync(name, layoutMode, blockIndex, expectedRevision);
         var result = await Compositions.CreateDesignedPageAsync(
             ContentTarget,
             ProjectId,
@@ -196,11 +200,13 @@
         string blockId,
         long expectedRevision)
     {
-        var snapshot = await Manuscripts.GetManuscriptAsync(ContentTarget, ChapterId)
-            ?? throw new InvalidOperationException("The chapter manuscript was not found.");
-        if (snapshot.Revision != expectedRevision)
-            throw new ManuscriptRevisionConflictException(expectedRevision, snapshot.Revision);
-        var block = snapshot.Document.Content.FirstOrDefault(candidate =>
+        var document = ReadDocumentOverrideAsync is null
+            ? (await Manuscripts.GetManuscriptAsync(ContentTarget, ChapterId)
+                ?? throw new InvalidOperationException("The chapter manuscript was not found.")).Document
+            : await ReadDocumentOverrideAsync(expectedRevision);
+        if (document.Revision != expectedRevision)
+            throw new ManuscriptRevisionConflictException(expectedRevision, document.Revision);
+        var block = document.Content.FirstOrDefault(candidate =>
                 string.Equals(candidate.Id, blockId, StringComparison.Ordinal))
             ?? throw new InvalidOperationException("The selected paragraph was not found.");
         var definition = ManuscriptStyleTemplateExtractor.Extract(

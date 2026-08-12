@@ -9,7 +9,7 @@ pub struct Capabilities {
     pub digital_book_pdf: bool,
     pub tagged_pdf: bool,
     pub mixed_page_geometry: bool,
-    pub publication_placements: bool,
+    pub publication_sections: bool,
     pub dedicated_full_wrap_cover: bool,
     pub english_hyphenation: bool,
     pub font_shaping: bool,
@@ -25,7 +25,7 @@ impl Capabilities {
             digital_book_pdf: true,
             tagged_pdf: true,
             mixed_page_geometry: true,
-            publication_placements: true,
+            publication_sections: true,
             dedicated_full_wrap_cover: true,
             english_hyphenation: true,
             font_shaping: true,
@@ -163,7 +163,7 @@ pub struct RenderResponse {
 impl RenderResponse {
     pub fn failed(status: &str, diagnostic: Diagnostic) -> Self {
         Self {
-            protocol_version: 5,
+            protocol_version: 6,
             renderer_version: env!("CARGO_PKG_VERSION"),
             job_id: None,
             status: status.to_owned(),
@@ -201,6 +201,10 @@ pub struct Diagnostic {
     pub severity: String,
     pub code: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
 }
 
 impl Diagnostic {
@@ -209,6 +213,8 @@ impl Diagnostic {
             severity: "error".to_owned(),
             code: code.to_owned(),
             message: message.into(),
+            source_kind: None,
+            source_id: None,
         }
     }
 
@@ -217,7 +223,15 @@ impl Diagnostic {
             severity: "warning".to_owned(),
             code: code.to_owned(),
             message: message.into(),
+            source_kind: None,
+            source_id: None,
         }
+    }
+
+    pub fn with_source(mut self, kind: &str, id: impl Into<String>) -> Self {
+        self.source_kind = Some(kind.to_owned());
+        self.source_id = Some(id.into());
+        self
     }
 }
 

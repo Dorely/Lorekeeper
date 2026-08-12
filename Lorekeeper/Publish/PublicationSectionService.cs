@@ -1,0 +1,799 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using Lorekeeper.Composition;
+using Lorekeeper.Manuscripts;
+using Lorekeeper.Models;
+using Lorekeeper.Persistence;
+using Microsoft.EntityFrameworkCore;
+
+namespace Lorekeeper.Publish;
+
+public sealed record PublicationSectionTarget(Guid ProjectId, Guid? EditionId = null);
+
+public sealed record PublicationSectionView(
+    Guid Id,
+    Guid? CoreSectionId,
+    Guid? EditionId,
+    string Title,
+    PublicationSectionKind Kind,
+    PublicationSectionSystemRole SystemRole,
+    PublicationSectionAnchor Anchor,
+    PublishOutlineTargetKind? TargetKind,
+    Guid? TargetId,
+    string TargetTitle,
+    PublicationSectionInclusionMode InclusionMode,
+    bool IsIncluded,
+    bool IsInherited,
+    int LocalOrder,
+    ManuscriptDocument Manuscript,
+    long Revision,
+    int DesignedPageCount,
+    int FigureCount);
+
+public sealed record PublicationSectionInput(
+    Guid? Id,
+    string Title,
+    PublicationSectionKind Kind,
+    PublicationSectionAnchor Anchor,
+    PublishOutlineTargetKind? TargetKind,
+    Guid? TargetId,
+    PublicationSectionInclusionMode InclusionMode,
+    string ManuscriptJson,
+    long? ExpectedRevision = null);
+
+public sealed record PublicationSectionDesignedPageResult(
+    PublicationSectionView Section,
+    PageComposition Composition);
+
+public interface IPublicationSectionService
+{
+    Task EnsureSystemSectionsAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PublicationSectionView>> ListAsync(PublicationSectionTarget target, CancellationToken cancellationToken = default);
+    Task<PublicationSectionView> GetAsync(PublicationSectionTarget target, Guid sectionId, CancellationToken cancellationToken = default);
+    Task<PublicationSectionView> UpsertAsync(PublicationSectionTarget target, PublicationSectionInput input, CancellationToken cancellationToken = default);
+    Task<PublicationSectionView> PatchManuscriptAsync(PublicationSectionTarget target, Guid sectionId, long expectedRevision, IReadOnlyList<ManuscriptOperationInput> operations, CancellationToken cancellationToken = default);
+    Task<PublicationSectionView> CustomizeAsync(Guid projectId, Guid editionId, Guid coreSectionId, CancellationToken cancellationToken = default);
+    Task ResetAsync(Guid projectId, Guid editionId, Guid sectionId, CancellationToken cancellationToken = default);
+    Task DeleteAsync(PublicationSectionTarget target, Guid sectionId, CancellationToken cancellationToken = default);
+    Task ReorderWithinAnchorAsync(PublicationSectionTarget target, IReadOnlyList<Guid> orderedSectionIds, CancellationToken cancellationToken = default);
+    Task<PublicationSectionDesignedPageResult> CreateDesignedPageAsync(PublicationSectionTarget target, Guid sectionId, int blockIndex, string name, DesignedPageLayoutMode layoutMode, long expectedRevision, CancellationToken cancellationToken = default);
+    Task<string> ResolveBoundFieldAsync(PublicationSectionTarget target, PublicationBoundField field, CancellationToken cancellationToken = default);
+}
+
+public sealed class PublicationSectionService(
+    AppDbContext db,
+    IPublicationBookService books,
+    IPublicationEffectiveConfigurationResolver effectiveConfigurations,
+    IManuscriptStyleService manuscriptStyles,
+    IProjectMutationCoordinator projectMutations) : IPublicationSectionService
+{
+    public async Task EnsureSystemSectionsAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        _ = await books.GetOrCreateAsync(projectId, cancellationToken);
+        var existing = await db.PublicationSections.AsNoTracking()
+            .Where(item => item.ProjectId == projectId && item.EditionId == null && item.SystemRole != PublicationSectionSystemRole.None)
+            .Select(item => item.SystemRole)
+            .ToListAsync(cancellationToken);
+        if (existing.Count == 3)
+            return;
+
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        var roles = (await db.PublicationSections.AsNoTracking()
+            .Where(item => item.ProjectId == projectId && item.EditionId == null && item.SystemRole != PublicationSectionSystemRole.None)
+            .Select(item => item.SystemRole)
+            .ToListAsync(cancellationToken)).ToHashSet();
+        var now = DateTime.UtcNow;
+        foreach (var (role, kind, title, order) in SystemSectionDefinitions)
+        {
+            if (roles.Contains(role))
+                continue;
+            var id = Guid.NewGuid();
+            db.PublicationSections.Add(new PublicationSection
+            {
+                Id = id,
+                ProjectId = projectId,
+                Title = title,
+                Kind = kind,
+                SystemRole = role,
+                Anchor = PublicationSectionAnchor.Front,
+                InclusionMode = PublicationSectionInclusionMode.Automatic,
+                LocalOrder = order,
+                ManuscriptJson = ManuscriptCodec.Serialize(CreateSystemDocument(id, role)),
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+        await TouchBookAsync(projectId, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<PublicationSectionView>> ListAsync(
+        PublicationSectionTarget target,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureSystemSectionsAsync(target.ProjectId, cancellationToken);
+        var core = await db.PublicationSections.AsNoTracking()
+            .Where(item => item.ProjectId == target.ProjectId && item.EditionId == null)
+            .ToListAsync(cancellationToken);
+        if (target.EditionId is not Guid editionId)
+            return await ViewsAsync(target, core, inherited: false, cancellationToken);
+
+        await RequireEditionAsync(target.ProjectId, editionId, cancellationToken);
+        var local = await db.PublicationSections.AsNoTracking()
+            .Where(item => item.ProjectId == target.ProjectId && item.EditionId == editionId)
+            .ToListAsync(cancellationToken);
+        var overlays = local.Where(item => item.CoreSectionId.HasValue)
+            .ToDictionary(item => item.CoreSectionId!.Value);
+        var effective = new List<(PublicationSection Row, bool Inherited)>();
+        foreach (var section in core)
+        {
+            if (overlays.TryGetValue(section.Id, out var overlay))
+            {
+                if (!overlay.IsExcluded)
+                    effective.Add((overlay, false));
+            }
+            else
+                effective.Add((section, true));
+        }
+        effective.AddRange(local.Where(item => item.CoreSectionId == null && !item.IsExcluded).Select(item => (item, false)));
+        return await ViewsAsync(target, effective, cancellationToken);
+    }
+
+    public async Task<PublicationSectionView> GetAsync(
+        PublicationSectionTarget target,
+        Guid sectionId,
+        CancellationToken cancellationToken = default)
+    {
+        var section = (await ListAsync(target, cancellationToken)).SingleOrDefault(item => item.Id == sectionId)
+            ?? throw new KeyNotFoundException("Publication section was not found for this book target.");
+        return section;
+    }
+
+    public async Task<PublicationSectionView> UpsertAsync(
+        PublicationSectionTarget target,
+        PublicationSectionInput input,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureSystemSectionsAsync(target.ProjectId, cancellationToken);
+        ValidateAnchor(input.Anchor, input.TargetKind, input.TargetId);
+        if (input.Kind is PublicationSectionKind.TitlePage or PublicationSectionKind.Copyright or PublicationSectionKind.Contents
+            && input.Id is null)
+            throw new InvalidOperationException("Title, copyright, and contents use the existing generated publication sections.");
+        var documentId = input.Id ?? Guid.NewGuid();
+        var document = input.Id.HasValue
+            ? ManuscriptCodec.Deserialize(input.ManuscriptJson, documentId, input.ExpectedRevision ?? 0)
+            : ManuscriptCodec.Deserialize(input.ManuscriptJson) with { ManuscriptId = documentId, Revision = 0 };
+        await ValidateDocumentAsync(target, document, cancellationToken);
+
+        await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
+        PublicationSection row;
+        if (input.Id is Guid id)
+        {
+            row = await db.PublicationSections.SingleOrDefaultAsync(item => item.Id == id && item.ProjectId == target.ProjectId, cancellationToken)
+                ?? throw new KeyNotFoundException("Publication section was not found.");
+            if (row.EditionId != target.EditionId)
+            {
+                if (target.EditionId is Guid editionId && row.EditionId == null)
+                    return await CustomizeAndApplyUnderLeaseAsync(target.ProjectId, editionId, row, input, document, cancellationToken);
+                throw new InvalidOperationException("The publication section belongs to a different content target.");
+            }
+            if (input.ExpectedRevision is long expected && row.Revision != expected)
+                throw new DbUpdateConcurrencyException($"Publication section changed (expected revision {expected}, current {row.Revision}).");
+            if (row.SystemRole != PublicationSectionSystemRole.None && row.Kind != input.Kind)
+                throw new InvalidOperationException("A generated publication section cannot change its system role.");
+            if (row.SystemRole == PublicationSectionSystemRole.None
+                && input.Kind is PublicationSectionKind.TitlePage or PublicationSectionKind.Copyright or PublicationSectionKind.Contents)
+                throw new InvalidOperationException("Title, copyright, and contents use the existing generated publication sections.");
+            ValidateSystemDocument(row.SystemRole, input, document);
+        }
+        else
+        {
+            if (target.EditionId is Guid editionId)
+                await RequireEditionAsync(target.ProjectId, editionId, cancellationToken);
+            row = new PublicationSection
+            {
+                Id = documentId,
+                ProjectId = target.ProjectId,
+                EditionId = target.EditionId,
+                LocalOrder = await NextOrderAsync(target, input.Anchor, input.TargetId, cancellationToken),
+            };
+            db.PublicationSections.Add(row);
+        }
+
+        Apply(row, input, document);
+        await TouchTargetAsync(target, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return await GetStoredAsync(target, row.Id, cancellationToken);
+    }
+
+    public async Task<PublicationSectionView> PatchManuscriptAsync(
+        PublicationSectionTarget target,
+        Guid sectionId,
+        long expectedRevision,
+        IReadOnlyList<ManuscriptOperationInput> operations,
+        CancellationToken cancellationToken = default)
+    {
+        if (operations.Count is < 1 or > 200)
+            throw new InvalidOperationException("Apply between 1 and 200 focused manuscript operations at a time.");
+        var current = await GetAsync(target, sectionId, cancellationToken);
+        if (current.Revision != expectedRevision)
+            throw new DbUpdateConcurrencyException($"Publication section changed (expected revision {expectedRevision}, current {current.Revision}).");
+        var changed = ManuscriptOperations.Apply(current.Manuscript, ManuscriptOperationInput.ToOperations(operations)).Document;
+        return await UpsertAsync(target, new(
+            current.Id, current.Title, current.Kind, current.Anchor, current.TargetKind, current.TargetId,
+            current.InclusionMode, ManuscriptCodec.Serialize(changed), expectedRevision), cancellationToken);
+    }
+
+    public async Task<PublicationSectionView> CustomizeAsync(
+        Guid projectId,
+        Guid editionId,
+        Guid coreSectionId,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureSystemSectionsAsync(projectId, cancellationToken);
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        var core = await db.PublicationSections.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.ProjectId == projectId && item.EditionId == null && item.Id == coreSectionId, cancellationToken)
+            ?? throw new KeyNotFoundException("Core publication section was not found.");
+        var existing = await db.PublicationSections.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.EditionId == editionId && item.CoreSectionId == coreSectionId, cancellationToken);
+        if (existing is not null)
+            return await GetStoredAsync(new(projectId, editionId), existing.Id, cancellationToken);
+        await RequireEditionAsync(projectId, editionId, cancellationToken);
+        var clone = await CloneSectionAsync(core, editionId, cancellationToken);
+        db.PublicationSections.Add(clone);
+        await TouchEditionAsync(editionId, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return await GetStoredAsync(new(projectId, editionId), clone.Id, cancellationToken);
+    }
+
+    public async Task ResetAsync(Guid projectId, Guid editionId, Guid sectionId, CancellationToken cancellationToken = default)
+    {
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        var row = await db.PublicationSections.Include(item => item.PageCompositions)
+            .SingleOrDefaultAsync(item => item.ProjectId == projectId && item.EditionId == editionId && item.Id == sectionId, cancellationToken)
+            ?? throw new KeyNotFoundException("Release publication section was not found.");
+        if (row.CoreSectionId is null)
+            throw new InvalidOperationException("A release-only section cannot be reset to Core Book.");
+        db.PublicationSections.Remove(row);
+        await TouchEditionAsync(editionId, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeleteAsync(PublicationSectionTarget target, Guid sectionId, CancellationToken cancellationToken = default)
+    {
+        await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
+        var row = await db.PublicationSections.SingleOrDefaultAsync(item => item.ProjectId == target.ProjectId && item.Id == sectionId, cancellationToken);
+        if (row is null)
+            return;
+        if (target.EditionId is Guid editionId && row.EditionId == null)
+        {
+            var overlay = await db.PublicationSections.SingleOrDefaultAsync(item => item.EditionId == editionId && item.CoreSectionId == row.Id, cancellationToken);
+            if (overlay is null)
+            {
+                overlay = new PublicationSection
+                {
+                    ProjectId = target.ProjectId,
+                    EditionId = editionId,
+                    CoreSectionId = row.Id,
+                    IsExcluded = true,
+                    Title = row.Title,
+                    Kind = row.Kind,
+                    SystemRole = row.SystemRole,
+                    Anchor = row.Anchor,
+                    TargetKind = row.TargetKind,
+                    TargetId = row.TargetId,
+                    ActId = row.ActId,
+                    ChapterId = row.ChapterId,
+                    InclusionMode = PublicationSectionInclusionMode.Omitted,
+                    LocalOrder = row.LocalOrder,
+                    ManuscriptJson = row.ManuscriptJson,
+                    Revision = row.Revision,
+                };
+                db.PublicationSections.Add(overlay);
+            }
+            else
+                overlay.IsExcluded = true;
+            await TouchEditionAsync(editionId, cancellationToken);
+        }
+        else
+        {
+            if (row.EditionId != target.EditionId)
+                throw new InvalidOperationException("The publication section belongs to another target.");
+            if (row.SystemRole != PublicationSectionSystemRole.None)
+                throw new InvalidOperationException("Required publication sections can be omitted but not deleted.");
+            db.PublicationSections.Remove(row);
+            await TouchTargetAsync(target, cancellationToken);
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task ReorderWithinAnchorAsync(
+        PublicationSectionTarget target,
+        IReadOnlyList<Guid> orderedSectionIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (orderedSectionIds.Count == 0 || orderedSectionIds.Count != orderedSectionIds.Distinct().Count())
+            throw new InvalidOperationException("Section order must contain unique section IDs.");
+        var effective = await ListAsync(target, cancellationToken);
+        var selected = effective.Where(item => orderedSectionIds.Contains(item.Id)).ToList();
+        if (selected.Count != orderedSectionIds.Count)
+            throw new InvalidOperationException("One or more publication sections were not found.");
+        var first = selected[0];
+        if (selected.Any(item => item.Anchor != first.Anchor || item.TargetId != first.TargetId)
+            || effective.Count(item => item.Anchor == first.Anchor && item.TargetId == first.TargetId) != selected.Count)
+            throw new InvalidOperationException("Reorder every section at one anchor together.");
+
+        foreach (var (id, index) in orderedSectionIds.Select((id, index) => (id, index)))
+        {
+            var view = selected.Single(item => item.Id == id);
+            if (view.IsInherited && target.EditionId is Guid editionId)
+                _ = await CustomizeAsync(target.ProjectId, editionId, view.Id, cancellationToken);
+        }
+        await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
+        var ids = target.EditionId is null
+            ? orderedSectionIds
+            : await db.PublicationSections.AsNoTracking()
+                .Where(item => item.ProjectId == target.ProjectId
+                    && item.EditionId == target.EditionId
+                    && ((item.CoreSectionId.HasValue && orderedSectionIds.Contains(item.CoreSectionId.Value))
+                        || (!item.CoreSectionId.HasValue && orderedSectionIds.Contains(item.Id))))
+                .Select(item => item.Id)
+                .ToListAsync(cancellationToken);
+        var rows = await db.PublicationSections.Where(item => ids.Contains(item.Id)).ToListAsync(cancellationToken);
+        var orderMap = rows.Select((row, index) => (row.Id, index)).ToDictionary(item => item.Id, item => item.index);
+        var requested = orderedSectionIds.Select((id, index) => (id, index)).ToDictionary(item => item.id, item => item.index);
+        foreach (var row in rows)
+        {
+            var sourceId = row.CoreSectionId ?? row.Id;
+            row.LocalOrder = requested.GetValueOrDefault(sourceId, orderMap[row.Id]);
+            row.UpdatedAt = DateTime.UtcNow;
+        }
+        await TouchTargetAsync(target, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<string> ResolveBoundFieldAsync(
+        PublicationSectionTarget target,
+        PublicationBoundField field,
+        CancellationToken cancellationToken = default)
+    {
+        if (target.EditionId is null)
+        {
+            var book = await db.PublicationBooks.AsNoTracking()
+                .SingleAsync(item => item.ProjectId == target.ProjectId, cancellationToken);
+            return field switch
+            {
+                PublicationBoundField.Title => book.Title,
+                PublicationBoundField.Subtitle => book.Subtitle,
+                PublicationBoundField.Author => book.Author,
+                PublicationBoundField.Publisher => book.Publisher,
+                PublicationBoundField.Copyright => book.Copyright,
+                PublicationBoundField.Description => book.Description,
+                PublicationBoundField.Isbn => string.Empty,
+                _ => string.Empty,
+            };
+        }
+        var effective = await effectiveConfigurations.ResolveReleaseAsync(target.ProjectId, target.EditionId.Value, cancellationToken);
+        return field switch
+        {
+            PublicationBoundField.Title => effective.Edition.TitleOverride,
+            PublicationBoundField.Subtitle => effective.Edition.Subtitle,
+            PublicationBoundField.Author => effective.Edition.Author,
+            PublicationBoundField.Publisher => effective.Edition.Publisher,
+            PublicationBoundField.Copyright => effective.Edition.Copyright,
+            PublicationBoundField.Description => effective.Edition.Description,
+            PublicationBoundField.Isbn => effective.Edition.Isbn,
+            _ => string.Empty,
+        };
+    }
+
+    public async Task<PublicationSectionDesignedPageResult> CreateDesignedPageAsync(
+        PublicationSectionTarget target,
+        Guid sectionId,
+        int blockIndex,
+        string name,
+        DesignedPageLayoutMode layoutMode,
+        long expectedRevision,
+        CancellationToken cancellationToken = default)
+    {
+        await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
+        var section = await db.PublicationSections.SingleOrDefaultAsync(item => item.ProjectId == target.ProjectId && item.Id == sectionId, cancellationToken)
+            ?? throw new KeyNotFoundException("Publication section was not found.");
+        if (section.EditionId != target.EditionId)
+            throw new InvalidOperationException("Customize the inherited section before adding a release-specific Designed Page.");
+        if (section.Revision != expectedRevision)
+            throw new DbUpdateConcurrencyException($"Publication section changed (expected revision {expectedRevision}, current {section.Revision}).");
+        var document = ManuscriptCodec.Deserialize(section.ManuscriptJson, section.Id, section.Revision);
+        if (blockIndex < 0 || blockIndex > document.Content.Count)
+            throw new InvalidOperationException("The Designed Page insertion point is outside the section.");
+
+        CompositionScene scene;
+        if (target.EditionId is Guid editionId)
+        {
+            var effective = await effectiveConfigurations.ResolveReleaseAsync(target.ProjectId, editionId, cancellationToken);
+            scene = CompositionService.CreatePageScene(effective.Edition, layoutMode);
+        }
+        else
+        {
+            var setup = await db.ProjectPageSetups.AsNoTracking().SingleAsync(item => item.ProjectId == target.ProjectId, cancellationToken);
+            scene = CompositionService.CreatePageScene(setup, layoutMode);
+        }
+        var compositionId = Guid.NewGuid();
+        var variantId = Guid.NewGuid();
+        var composition = new PageComposition
+        {
+            Id = compositionId,
+            ProjectId = target.ProjectId,
+            PublicationSectionId = section.Id,
+            EditionId = target.EditionId,
+            Name = string.IsNullOrWhiteSpace(name) ? "Designed page" : name.Trim(),
+            SemanticManuscriptJson = ManuscriptCodec.Serialize(new ManuscriptDocument { ManuscriptId = compositionId }),
+            ActiveAuthoringVariantId = variantId,
+            Variants =
+            [
+                new PageCompositionVariant
+                {
+                    Id = variantId, CompositionId = compositionId,
+                    GeometryKey = CompositionService.SceneGeometryKey(scene),
+                    SceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions),
+                },
+            ],
+        };
+        db.PageCompositions.Add(composition);
+        var blocks = document.Content.ToList();
+        blocks.Insert(blockIndex, new ManuscriptBlock
+        {
+            Id = $"designed-page-{Guid.NewGuid():N}",
+            Type = ManuscriptBlockType.DesignedPage,
+            StyleRole = ManuscriptStyleRoles.DesignedPage,
+            PageCompositionId = compositionId,
+        });
+        section.Revision = checked(section.Revision + 1);
+        section.ManuscriptJson = ManuscriptCodec.Serialize(document with { Revision = section.Revision, Content = blocks });
+        section.UpdatedAt = DateTime.UtcNow;
+        await TouchTargetAsync(target, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return new(await GetStoredAsync(target, section.Id, cancellationToken), composition);
+    }
+
+    internal static ManuscriptDocument ResolveBindings(ManuscriptDocument document, IReadOnlyDictionary<PublicationBoundField, string> values) =>
+        document with
+        {
+            Content = document.Content.Select(block => block.PublicationField is { } field
+                ? block with
+                {
+                    Content = [new ManuscriptInline { Text = values.GetValueOrDefault(field, string.Empty) }],
+                }
+                : block).ToList(),
+        };
+
+    private async Task<IReadOnlyList<PublicationSectionView>> ViewsAsync(
+        PublicationSectionTarget target,
+        IReadOnlyList<PublicationSection> rows,
+        bool inherited,
+        CancellationToken cancellationToken) =>
+        await ViewsAsync(target, rows.Select(item => (item, inherited)).ToList(), cancellationToken);
+
+    private async Task<IReadOnlyList<PublicationSectionView>> ViewsAsync(
+        PublicationSectionTarget target,
+        IReadOnlyList<(PublicationSection Row, bool Inherited)> rows,
+        CancellationToken cancellationToken)
+    {
+        var actTitles = await db.Acts.AsNoTracking().Where(item => item.ProjectId == target.ProjectId)
+            .OrderBy(item => item.Order)
+            .ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
+        var chapterTitles = await db.Chapters.AsNoTracking().Where(item => item.ProjectId == target.ProjectId)
+            .OrderBy(item => item.Order)
+            .ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
+        var bindingValues = await BindingValuesAsync(target, cancellationToken);
+        return rows.OrderBy(item => AnchorOrder(item.Row.Anchor))
+            .ThenBy(item => item.Row.TargetId is Guid targetId
+                ? item.Row.TargetKind == PublishOutlineTargetKind.Act
+                    ? actTitles.Keys.ToList().IndexOf(targetId)
+                    : chapterTitles.Keys.ToList().IndexOf(targetId)
+                : -1)
+            .ThenBy(item => item.Row.LocalOrder)
+            .ThenBy(item => item.Row.Id)
+            .Select(item => View(item.Row, item.Inherited, actTitles, chapterTitles, bindingValues))
+            .ToList();
+    }
+
+    private async Task<IReadOnlyDictionary<PublicationBoundField, string>> BindingValuesAsync(
+        PublicationSectionTarget target,
+        CancellationToken cancellationToken)
+    {
+        if (target.EditionId is null)
+        {
+            var book = await books.GetOrCreateAsync(target.ProjectId, cancellationToken);
+            return new Dictionary<PublicationBoundField, string>
+            {
+                [PublicationBoundField.Title] = book.Title,
+                [PublicationBoundField.Subtitle] = book.Subtitle,
+                [PublicationBoundField.Author] = book.Author,
+                [PublicationBoundField.Publisher] = book.Publisher,
+                [PublicationBoundField.Copyright] = book.Copyright,
+                [PublicationBoundField.Description] = book.Description,
+                [PublicationBoundField.Isbn] = string.Empty,
+            };
+        }
+        var effective = await effectiveConfigurations.ResolveReleaseAsync(
+            target.ProjectId, target.EditionId.Value, cancellationToken);
+        return new Dictionary<PublicationBoundField, string>
+        {
+            [PublicationBoundField.Title] = effective.Edition.TitleOverride,
+            [PublicationBoundField.Subtitle] = effective.Edition.Subtitle,
+            [PublicationBoundField.Author] = effective.Edition.Author,
+            [PublicationBoundField.Publisher] = effective.Edition.Publisher,
+            [PublicationBoundField.Copyright] = effective.Edition.Copyright,
+            [PublicationBoundField.Description] = effective.Edition.Description,
+            [PublicationBoundField.Isbn] = effective.Edition.Isbn,
+        };
+    }
+
+    private static PublicationSectionView View(
+        PublicationSection row,
+        bool inherited,
+        IReadOnlyDictionary<Guid, string> acts,
+        IReadOnlyDictionary<Guid, string> chapters,
+        IReadOnlyDictionary<PublicationBoundField, string> bindingValues)
+    {
+        var document = ResolveBindings(
+            ManuscriptCodec.Deserialize(row.ManuscriptJson, row.Id, row.Revision), bindingValues);
+        var targetTitle = row.TargetId is not Guid targetId
+            ? string.Empty
+            : row.TargetKind == PublishOutlineTargetKind.Act
+                ? acts.GetValueOrDefault(targetId, "Missing act")
+                : chapters.GetValueOrDefault(targetId, "Missing chapter");
+        return new(
+            row.Id, row.CoreSectionId, row.EditionId, row.Title, row.Kind, row.SystemRole, row.Anchor,
+            row.TargetKind, row.TargetId, targetTitle, row.InclusionMode,
+            row.InclusionMode != PublicationSectionInclusionMode.Omitted && !row.IsExcluded,
+            inherited, row.LocalOrder, document, row.Revision,
+            document.Content.Count(block => block.Type == ManuscriptBlockType.DesignedPage),
+            document.Content.Count(block => block.Type == ManuscriptBlockType.Figure));
+    }
+
+    private async Task<PublicationSectionView> CustomizeAndApplyUnderLeaseAsync(
+        Guid projectId,
+        Guid editionId,
+        PublicationSection core,
+        PublicationSectionInput input,
+        ManuscriptDocument document,
+        CancellationToken cancellationToken)
+    {
+        var clone = await CloneSectionAsync(core, editionId, cancellationToken);
+        Apply(clone, input with { Id = clone.Id, ExpectedRevision = clone.Revision }, document with { ManuscriptId = clone.Id });
+        db.PublicationSections.Add(clone);
+        await TouchEditionAsync(editionId, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return await GetStoredAsync(new(projectId, editionId), clone.Id, cancellationToken);
+    }
+
+    private async Task<PublicationSectionView> GetStoredAsync(
+        PublicationSectionTarget target,
+        Guid sectionId,
+        CancellationToken cancellationToken)
+    {
+        var row = await db.PublicationSections.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.ProjectId == target.ProjectId
+                && item.EditionId == target.EditionId
+                && item.Id == sectionId, cancellationToken)
+            ?? throw new KeyNotFoundException("Publication section was not found for this book target.");
+        return (await ViewsAsync(target, [row], inherited: false, cancellationToken)).Single();
+    }
+
+    private async Task<PublicationSection> CloneSectionAsync(PublicationSection core, Guid editionId, CancellationToken cancellationToken)
+    {
+        var clone = new PublicationSection
+        {
+            Id = Guid.NewGuid(), ProjectId = core.ProjectId, EditionId = editionId, CoreSectionId = core.Id,
+            Title = core.Title, Kind = core.Kind, SystemRole = core.SystemRole, Anchor = core.Anchor,
+            TargetKind = core.TargetKind, TargetId = core.TargetId, ActId = core.ActId, ChapterId = core.ChapterId,
+            InclusionMode = core.InclusionMode, LocalOrder = core.LocalOrder, Revision = core.Revision,
+        };
+        var document = ManuscriptCodec.Deserialize(core.ManuscriptJson, core.Id, core.Revision);
+        var sourceIds = document.Content.Where(item => item.PageCompositionId.HasValue).Select(item => item.PageCompositionId!.Value).Distinct().ToList();
+        var sources = await db.PageCompositions.AsNoTracking().Include(item => item.Variants)
+            .Where(item => sourceIds.Contains(item.Id)).ToListAsync(cancellationToken);
+        var remap = new Dictionary<Guid, Guid>();
+        foreach (var source in sources)
+        {
+            var compositionId = Guid.NewGuid();
+            remap[source.Id] = compositionId;
+            var composition = new PageComposition
+            {
+                Id = compositionId, ProjectId = core.ProjectId, PublicationSectionId = clone.Id,
+                EditionId = editionId, SourceCompositionId = source.Id, Name = source.Name,
+                SemanticManuscriptJson = RemapDocumentId(source.SemanticManuscriptJson, compositionId),
+                Revision = source.Revision,
+            };
+            foreach (var variant in source.Variants)
+            {
+                var copy = new PageCompositionVariant
+                {
+                    Id = Guid.NewGuid(), CompositionId = compositionId, GeometryKey = variant.GeometryKey,
+                    SceneJson = variant.SceneJson, Revision = variant.Revision,
+                };
+                composition.Variants.Add(copy);
+                if (source.ActiveAuthoringVariantId == variant.Id)
+                    composition.ActiveAuthoringVariantId = copy.Id;
+            }
+            clone.PageCompositions.Add(composition);
+        }
+        clone.ManuscriptJson = ManuscriptCodec.Serialize(document with
+        {
+            ManuscriptId = clone.Id,
+            Content = document.Content.Select(block => block.PageCompositionId is Guid id && remap.TryGetValue(id, out var mapped)
+                ? block with { PageCompositionId = mapped }
+                : block).ToList(),
+        });
+        return clone;
+    }
+
+    private async Task ValidateDocumentAsync(PublicationSectionTarget target, ManuscriptDocument document, CancellationToken cancellationToken)
+    {
+        ManuscriptStyleService.ValidateDocumentReferences(
+            document, await manuscriptStyles.ListAsync(target.ProjectId, cancellationToken));
+        var imageIds = document.Content
+            .Where(item => item.Type == ManuscriptBlockType.Figure && item.ImageId.HasValue)
+            .Select(item => item.ImageId!.Value)
+            .Distinct()
+            .ToList();
+        if (imageIds.Count > 0 && await db.PublishAssets.AsNoTracking().CountAsync(
+            item => item.ProjectId == target.ProjectId && imageIds.Contains(item.Id), cancellationToken) != imageIds.Count)
+            throw new InvalidDataException("The publication section references an image outside this project.");
+        var compositionIds = document.Content.Where(item => item.PageCompositionId.HasValue)
+            .Select(item => item.PageCompositionId!.Value).Distinct().ToList();
+        if (compositionIds.Count == 0)
+            return;
+        var owned = await db.PageCompositions.AsNoTracking().CountAsync(item => compositionIds.Contains(item.Id)
+            && item.ProjectId == target.ProjectId
+            && item.EditionId == target.EditionId,
+            cancellationToken);
+        if (owned != compositionIds.Count)
+            throw new InvalidDataException("The publication section references a Designed Page outside its current book target.");
+    }
+
+    private static void Apply(PublicationSection row, PublicationSectionInput input, ManuscriptDocument document)
+    {
+        row.Title = string.IsNullOrWhiteSpace(input.Title) ? "Section" : input.Title.Trim();
+        row.Kind = input.Kind;
+        row.Anchor = input.Anchor;
+        row.TargetKind = input.TargetKind;
+        row.TargetId = input.TargetId;
+        row.ActId = input.TargetKind == PublishOutlineTargetKind.Act ? input.TargetId : null;
+        row.ChapterId = input.TargetKind == PublishOutlineTargetKind.Chapter ? input.TargetId : null;
+        row.InclusionMode = input.InclusionMode;
+        row.Revision = checked(row.Revision + 1);
+        row.ManuscriptJson = ManuscriptCodec.Serialize(document with
+        {
+            ManuscriptId = row.Id,
+            Revision = row.Revision,
+            Content = document.Content.Select(block => block.PublicationField is null
+                ? block
+                : block with { Content = [new ManuscriptInline { Text = string.Empty }] }).ToList(),
+        });
+        row.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private static void ValidateAnchor(PublicationSectionAnchor anchor, PublishOutlineTargetKind? kind, Guid? targetId)
+    {
+        var requiresTarget = anchor is not (PublicationSectionAnchor.Front or PublicationSectionAnchor.Back);
+        if (requiresTarget != targetId.HasValue || requiresTarget != kind.HasValue)
+            throw new InvalidOperationException(requiresTarget
+                ? "This section position requires an act or chapter target."
+                : "Front and back sections cannot have an outline target.");
+        if (anchor is PublicationSectionAnchor.BeforeAct or PublicationSectionAnchor.AfterAct && kind != PublishOutlineTargetKind.Act)
+            throw new InvalidOperationException("The selected section position requires an act target.");
+        if (anchor is PublicationSectionAnchor.BeforeChapter or PublicationSectionAnchor.AfterChapter && kind != PublishOutlineTargetKind.Chapter)
+            throw new InvalidOperationException("The selected section position requires a chapter target.");
+    }
+
+    private static void ValidateSystemDocument(
+        PublicationSectionSystemRole role,
+        PublicationSectionInput input,
+        ManuscriptDocument document)
+    {
+        if (role == PublicationSectionSystemRole.None)
+            return;
+        if (input.Anchor != PublicationSectionAnchor.Front || input.TargetId is not null || input.TargetKind is not null)
+            throw new InvalidOperationException("Generated title, copyright, and contents sections remain in the front of the book.");
+        var expected = role switch
+        {
+            PublicationSectionSystemRole.Title => new[] { PublicationBoundField.Title, PublicationBoundField.Subtitle, PublicationBoundField.Author },
+            PublicationSectionSystemRole.Copyright =>
+                [PublicationBoundField.Copyright, PublicationBoundField.Publisher, PublicationBoundField.Isbn],
+            PublicationSectionSystemRole.Contents => [],
+            _ => [],
+        };
+        var actual = document.Content.Where(block => block.PublicationField.HasValue)
+            .Select(block => block.PublicationField!.Value).ToArray();
+        if (!actual.SequenceEqual(expected))
+            throw new InvalidOperationException("Linked Core Book fields in a generated publication section cannot be removed or rebound.");
+    }
+
+    private async Task<int> NextOrderAsync(PublicationSectionTarget target, PublicationSectionAnchor anchor, Guid? targetId, CancellationToken cancellationToken) =>
+        (await db.PublicationSections.Where(item => item.ProjectId == target.ProjectId && item.EditionId == target.EditionId
+            && item.Anchor == anchor && item.TargetId == targetId).Select(item => (int?)item.LocalOrder).MaxAsync(cancellationToken) ?? -1) + 1;
+
+    private async Task RequireEditionAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken)
+    {
+        if (!await db.PublicationEditions.AsNoTracking().AnyAsync(item => item.Id == editionId && item.ProjectId == projectId && item.Status != PublicationEditionStatus.Archived, cancellationToken))
+            throw new KeyNotFoundException("Publication release was not found or is archived.");
+    }
+
+    private async Task TouchTargetAsync(PublicationSectionTarget target, CancellationToken cancellationToken)
+    {
+        if (target.EditionId is Guid editionId)
+            await TouchEditionAsync(editionId, cancellationToken);
+        else
+            await TouchBookAsync(target.ProjectId, cancellationToken);
+    }
+
+    private async Task TouchBookAsync(Guid projectId, CancellationToken cancellationToken) =>
+        await db.PublicationBooks.Where(item => item.ProjectId == projectId).ExecuteUpdateAsync(setters => setters
+            .SetProperty(item => item.Revision, item => item.Revision + 1)
+            .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), cancellationToken);
+
+    private async Task TouchEditionAsync(Guid editionId, CancellationToken cancellationToken) =>
+        await db.PublicationEditions.Where(item => item.Id == editionId).ExecuteUpdateAsync(setters => setters
+            .SetProperty(item => item.Revision, item => item.Revision + 1)
+            .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), cancellationToken);
+
+    private static string RemapDocumentId(string json, Guid id)
+    {
+        var document = ManuscriptCodec.Deserialize(json);
+        return ManuscriptCodec.Serialize(document with { ManuscriptId = id });
+    }
+
+    private static ManuscriptDocument CreateSystemDocument(Guid id, PublicationSectionSystemRole role)
+    {
+        List<ManuscriptBlock> blocks = role switch
+        {
+            PublicationSectionSystemRole.Title =>
+            [
+                BoundBlock(PublicationBoundField.Title, ManuscriptStyleRoles.ChapterHeading),
+                BoundBlock(PublicationBoundField.Subtitle, ManuscriptStyleRoles.Subheading),
+                BoundBlock(PublicationBoundField.Author, ManuscriptStyleRoles.Body),
+            ],
+            PublicationSectionSystemRole.Copyright =>
+            [
+                BoundBlock(PublicationBoundField.Copyright, ManuscriptStyleRoles.Body),
+                BoundBlock(PublicationBoundField.Publisher, ManuscriptStyleRoles.Body),
+                BoundBlock(PublicationBoundField.Isbn, ManuscriptStyleRoles.Body),
+            ],
+            PublicationSectionSystemRole.Contents => [],
+            _ => [],
+        };
+        return new ManuscriptDocument { ManuscriptId = id, Content = blocks };
+    }
+
+    private static ManuscriptBlock BoundBlock(PublicationBoundField field, string styleRole) => new()
+    {
+        Id = $"field-{field.ToString().ToLowerInvariant()}-{Guid.NewGuid():N}",
+        Type = ManuscriptBlockType.Paragraph,
+        StyleRole = styleRole,
+        PublicationField = field,
+        Content = [new ManuscriptInline { Text = string.Empty }],
+    };
+
+    private static int AnchorOrder(PublicationSectionAnchor anchor) => anchor switch
+    {
+        PublicationSectionAnchor.Front => 0,
+        PublicationSectionAnchor.BeforeAct => 1,
+        PublicationSectionAnchor.BeforeChapter => 2,
+        PublicationSectionAnchor.AfterChapter => 3,
+        PublicationSectionAnchor.AfterAct => 4,
+        PublicationSectionAnchor.Back => 5,
+        _ => 6,
+    };
+
+    private static readonly (PublicationSectionSystemRole Role, PublicationSectionKind Kind, string Title, int Order)[] SystemSectionDefinitions =
+    [
+        (PublicationSectionSystemRole.Title, PublicationSectionKind.TitlePage, "Title page", 0),
+        (PublicationSectionSystemRole.Copyright, PublicationSectionKind.Copyright, "Copyright", 1),
+        (PublicationSectionSystemRole.Contents, PublicationSectionKind.Contents, "Contents", 2),
+    ];
+}

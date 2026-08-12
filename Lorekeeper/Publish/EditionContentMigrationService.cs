@@ -30,6 +30,7 @@ public sealed class EditionContentMigrationService(
             return;
         if (!applied.Contains(AdditiveMigrationId))
             await db.GetService<IMigrator>().MigrateAsync(AdditiveMigrationId, cancellationToken);
+        await DatabaseStartupMigrationService.EnsurePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         if (await db.ManuscriptMigrationJournals.AsNoTracking().AnyAsync(
             item => item.MigrationName == MigrationName && item.Status == ManuscriptMigrationStatus.Completed,
             cancellationToken))

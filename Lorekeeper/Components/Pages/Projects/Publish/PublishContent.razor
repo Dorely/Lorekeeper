@@ -5,6 +5,7 @@
 @implements IAsyncDisposable
 @inject IPublishService Publishing
 @inject IPublicationBookService Books
+@inject IPublicationSectionService PublicationSections
 @inject IPublicationEditionService Releases
 @inject IEditionContentService EditionContent
 @inject IPublicationCoverService Covers
@@ -112,15 +113,22 @@ else
 @if (_previewArtifact is { } previewArtifact && Project is not null)
 {
     <div class="publish-modal-backdrop" role="presentation" @onclick="ClosePdfPreview">
-        <section class="publish-modal pdf-preview-modal" role="dialog" aria-modal="true" aria-labelledby="reading-pdf-preview-title" @onclick:stopPropagation="true">
+        <section class="publish-modal pdf-preview-modal" role="dialog" aria-modal="true" aria-labelledby="artifact-preview-title" @onclick:stopPropagation="true">
             <header>
-                <div><span class="eyebrow">Private review copy</span><h2 id="reading-pdf-preview-title">Reading PDF preview</h2></div>
+                <div><span class="eyebrow">Prepared artifact</span><h2 id="artifact-preview-title">@PreviewLabel(previewArtifact.Kind)</h2><small>@previewArtifact.FileName · @FormatBytes(previewArtifact.ByteLength)@if (previewArtifact.PageCount is int pages){<text> · @pages pages</text>}</small></div>
                 <div class="button-row">
-                    <a class="btn btn-sm btn-outline-primary" href="@DownloadUrl(previewArtifact.Id)" download="@previewArtifact.FileName">Save reading PDF</a>
-                    <button class="btn-close" aria-label="Close reading PDF preview" @onclick="ClosePdfPreview"></button>
+                    <a class="btn btn-sm btn-outline-primary" href="@DownloadUrl(previewArtifact.Id)" download="@previewArtifact.FileName">@DownloadLabel(previewArtifact.Kind)</a>
+                    <button class="btn-close" aria-label="Close artifact preview" @onclick="ClosePdfPreview"></button>
                 </div>
             </header>
-            <iframe src="@ViewUrl(previewArtifact.Id)" title="Core Book reading PDF preview"></iframe>
+            @if (previewArtifact.MediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                <div class="artifact-image-preview"><img src="@ViewUrl(previewArtifact.Id)" alt="@PreviewLabel(previewArtifact.Kind)" /></div>
+            }
+            else
+            {
+                <iframe src="@ViewUrl(previewArtifact.Id)" title="@PreviewLabel(previewArtifact.Kind)"></iframe>
+            }
         </section>
     </div>
 }
@@ -144,6 +152,15 @@ else
                     OnConfirm="ConfirmDisableEditionContentAsync"
                     OnCancel="CancelDisableEditionContent" />
 
+<ConfirmationDialog IsOpen="@(_pendingSectionRemoval is not null)"
+                    Title="@(_pendingSectionReset ? "Use the Core Book section?" : "Remove this publication section?")"
+                    Message="@SectionRemovalMessage()"
+                    ConfirmLabel="@(_pendingSectionReset ? "Use Core Book" : "Remove section")"
+                    Destructive="true"
+                    Busy="_sectionRemovalBusy"
+                    OnConfirm="ConfirmSectionRemovalAsync"
+                    OnCancel="CancelSectionRemoval" />
+
 @code {
     [CascadingParameter] public Project? Project { get; set; }
 
@@ -153,8 +170,19 @@ else
     private IReadOnlyList<PublicationPreparationJobView> _preparations = [];
     private IReadOnlyList<PublicationArtifactView> _artifacts = [];
     private IReadOnlyList<PublicationBookOutlineView> _coreOutline = [];
-    private IReadOnlyList<PublicationMatterView> _coreMatter = [];
-    private IReadOnlyList<PublicationImagePlacementView> _corePlacements = [];
+    private IReadOnlyList<PublicationSectionView> _publicationSections = [];
+    private PublicationSectionView? _editingSection;
+    private ChapterBodyEditor? _publicationSectionEditor;
+    private bool _sectionPagesMode;
+    private Guid? _selectedSectionCompositionId;
+    private int _sectionPageRefreshSignal;
+    private Guid? _sectionPageSelectionId;
+    private string _sectionTitle = string.Empty;
+    private PublicationSectionKind _sectionKind = PublicationSectionKind.Custom;
+    private PublicationSectionAnchor _sectionAnchor = PublicationSectionAnchor.Back;
+    private PublishOutlineTargetKind? _sectionTargetKind;
+    private Guid? _sectionTargetId;
+    private PublicationSectionInclusionMode _sectionInclusion = PublicationSectionInclusionMode.Automatic;
     private Dictionary<(PublishOutlineTargetKind Kind, Guid Id), bool> _coreSelections = [];
     private CoreDraft _coreDraft = new();
     private ReleaseDraft _releaseDraft = new();
@@ -198,15 +226,9 @@ else
     private bool _editionContentBusy;
     private bool _disableEditionContentConfirmationOpen;
     private Guid? _pendingDisableEditionContentId;
-    private Guid? _editingCoreMatterId;
-    private string _coreMatterTitle = string.Empty;
-    private string _coreMatterJson = string.Empty;
-    private long _editingCoreMatterRevision;
-    private PublicationMatterLocation _coreMatterLocation;
-    private PublicationMatterKind _coreMatterKind;
-    private int _coreMatterSortOrder;
-    private bool _coreMatterIncluded;
-    private ChapterBodyEditor? _coreMatterEditor;
+    private PublicationSectionView? _pendingSectionRemoval;
+    private bool _pendingSectionReset;
+    private bool _sectionRemovalBusy;
     private string? _error;
     private string? _notice;
     private PublicationEditionFormat _newFormat = PublicationEditionFormat.Paperback;
@@ -286,8 +308,8 @@ else
             _coreOutlineDirty = false;
             _pageSetupDirty = false;
             _coreOutline = [];
-            _coreMatter = [];
-            _corePlacements = [];
+            _publicationSections = [];
+            _editingSection = null;
             _coreSelections = [];
             _coreDetailsLoaded = false;
             _outputsLoaded = false;
@@ -353,8 +375,7 @@ else
         if (generation != _targetLoadGeneration)
             return;
         _coreOutline = details.Outline;
-        _coreMatter = details.Matter;
-        _corePlacements = details.ImagePlacements;
+        _publicationSections = await PublicationSections.ListAsync(new(Project.Id), _dispose.Token);
         _coreSelections = _coreOutline.ToDictionary(item => (item.TargetKind, item.TargetId), item => item.IsIncluded);
         _coreDetailsLoaded = true;
         await InvokeAsync(StateHasChanged);
@@ -385,6 +406,8 @@ else
         _releaseContentDirty = false;
         _releaseContentOpen = _workspace.HasContentOverrides;
         _releaseDesignOpen = _workspace.OverrideFields.Any(IsDesignOverride);
+        _publicationSections = await PublicationSections.ListAsync(new(Project.Id, releaseId), _dispose.Token);
+        _editingSection = null;
         await InvokeAsync(StateHasChanged);
 
         _preparations = await Preparation.ListAsync(Project.Id, PublicationTargetKind.Release, releaseId, _dispose.Token);
@@ -455,7 +478,7 @@ else
                 @Toggle("Number chapters", _coreDraft.NumberChapters, value => CoreToggle(nameof(CoreDraft.NumberChapters), value))
                 <label class="field"><span>Title page</span><select class="form-select" @bind="_coreDraft.TitlePageMode" @bind:after="() => _coreDirty = true"><option value="@PublishTitlePageMode.Automatic">Automatic</option><option value="@PublishTitlePageMode.Include">Always include</option><option value="@PublishTitlePageMode.Omit">Omit</option></select></label>
             </div>
-            <div class="summary-strip"><span><strong>@_core!.IncludedChapterCount</strong> chapters included</span><span><strong>@_core.MatterCount</strong> front/back matter items</span><span><strong>@_core.ImagePlacementCount</strong> opening/ending images</span></div>
+            <div class="summary-strip"><span><strong>@_core!.IncludedChapterCount</strong> chapters included</span><span><strong>@_publicationSections.Count(item => item.IsIncluded)</strong> publication sections</span><span><strong>@_publicationSections.Sum(item => item.DesignedPageCount)</strong> designed pages</span></div>
             <details class="content-choices"><summary>Choose included chapters</summary>
                 @if (!_coreDetailsLoaded){<div class="deferred-section-loading"><span class="spinner-border spinner-border-sm"></span> Loading chapter choices…</div>}else{<div class="content-choice-list">@foreach (var item in _coreOutline){<label class="check-row"><input type="checkbox" checked="@_coreSelections.GetValueOrDefault((item.TargetKind, item.TargetId))" @onchange="e => CoreOutlineChanged(item, (bool)e.Value!)" /><span><small>@item.TargetKind</small>@item.Title</span></label>}</div>}
             </details>
@@ -470,26 +493,7 @@ else
             </div>
         </section>
 
-        <section class="workspace-card"><header><div><span class="step">04</span><div><h2>Front and back matter</h2><p>Shared dedication, acknowledgements, notes, and other book material.</p></div></div><div class="button-row"><button class="btn btn-sm btn-outline-primary" @onclick="() => AddCoreMatterAsync(PublicationMatterKind.Dedication)">Add dedication</button><button class="btn btn-sm btn-outline-primary" @onclick="() => AddCoreMatterAsync(PublicationMatterKind.Acknowledgments)">Add acknowledgements</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => AddCoreMatterAsync(PublicationMatterKind.Custom)">Add page</button></div></header>
-            @if (!_coreDetailsLoaded){<div class="deferred-section-loading"><span class="spinner-border spinner-border-sm"></span> Loading front and back matter…</div>}else if (_coreMatter.Count == 0){<p class="muted">No custom matter has been added. Title, copyright, and contents pages are generated from Core Book settings.</p>}else{<div class="compact-list">@foreach (var item in _coreMatter){<div><div><strong>@item.Title</strong><span>@item.Location · @item.Kind · @(item.IsIncluded ? "Included" : "Excluded")</span></div><div class="button-row"><button class="btn btn-sm btn-outline-secondary" @onclick="() => BeginCoreMatterEdit(item)">Edit</button><button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteCoreMatterAsync(item)">Remove</button></div></div>}</div>}
-            @if (_editingCoreMatterId is not null)
-            {
-                <div class="matter-editor">
-                    <div class="form-grid">
-                        <label class="field"><span>Title</span><input class="form-control" @bind="_coreMatterTitle" /></label>
-                        <label class="field"><span>Location</span><select class="form-select" @bind="_coreMatterLocation"><option value="@PublicationMatterLocation.Front">Front</option><option value="@PublicationMatterLocation.Back">Back</option></select></label>
-                        <label class="field"><span>Page type</span><select class="form-select" @bind="_coreMatterKind">@foreach (var kind in Enum.GetValues<PublicationMatterKind>().Where(kind => !PublicationMatterFormatting.IsGeneratedPageKind(kind))){<option value="@kind">@kind</option>}</select></label>
-                        <label class="field"><span>Order</span><input class="form-control" type="number" min="0" @bind="_coreMatterSortOrder" /></label>
-                        <label class="check-row"><input type="checkbox" @bind="_coreMatterIncluded" /><span>Include this page</span></label>
-                    </div>
-                    <ChapterBodyEditor @ref="_coreMatterEditor" @key="_editingCoreMatterId.Value"
-                                       ChapterId="_editingCoreMatterId.Value" ProjectId="Project!.Id" ProjectSlug="Project.Slug"
-                                       InitialManuscriptJson="_coreMatterJson" SaveAsync="SaveCoreMatterDocumentAsync" />
-                    <div class="button-row"><button class="btn btn-sm btn-primary" @onclick="SaveCoreMatterAsync">Save page</button><button class="btn btn-sm btn-outline-secondary" @onclick="CancelCoreMatterEdit">Close</button></div>
-                </div>
-            }
-            @if (_corePlacements.Count > 0){<h3 class="subheading">Opening and ending images</h3><div class="compact-list">@foreach (var item in _corePlacements){<div><strong>@item.AssetFileName</strong><span>@item.PlacementKind · @item.TargetTitle</span></div>}</div>}
-        </section>
+        @PublicationSectionsCard()
 
     </div>;
 
@@ -535,6 +539,8 @@ else
             }
         </section>
 
+        @PublicationSectionsCard()
+
         <section class="workspace-card"><header><div><span class="step">01</span><div><h2>Release setup</h2><p>Only settings that belong to this publication product.</p></div></div><button class="btn btn-sm btn-primary" disabled="@((!_releaseDirty && !_releaseContentDirty) || _busy)" @onclick="SaveReleaseAsync">Save release</button></header>
             <div class="form-grid">
                 <label class="field"><span>Release name</span><input class="form-control" @bind="_releaseDraft.Name" @bind:after="MarkReleaseDirty" /></label>
@@ -569,7 +575,7 @@ else
             </div>
         </section>
 
-        <section class="workspace-card split"><div><span class="eyebrow">Content</span><h2>@(_workspace.HasContentOverrides ? "Release content customized" : "Uses Core Book")</h2><p>@_workspace.Sections.Sum(section => section.Chapters.Count(chapter => chapter.IsIncluded)) chapters · @_workspace.Matter.Count matter items · @_workspace.Placements.Count image placements</p><p class="muted">Customize only when this product deliberately differs from Core Book.</p><div class="button-row"><button class="btn btn-sm btn-outline-primary" @onclick="() => _releaseContentOpen = !_releaseContentOpen">@(_releaseContentOpen ? "Hide content choices" : "Customize content")</button>@if (_workspace.HasContentOverrides){<button class="btn btn-sm btn-outline-secondary" @onclick="UseCoreContentAsync">Use Core Book content</button>}</div>@if (_releaseContentOpen){<div class="release-presentation-options">@InheritedToggle("Navigation contents", PublicationEditionOverrideField.IncludeTableOfContents, _releaseDraft.IncludeTableOfContents, value => ReleaseToggle(nameof(ReleaseDraft.IncludeTableOfContents), value))@InheritedToggle("Visible contents page", PublicationEditionOverrideField.IncludeVisibleTableOfContents, _releaseDraft.IncludeVisibleTableOfContents, value => ReleaseToggle(nameof(ReleaseDraft.IncludeVisibleTableOfContents), value))@InheritedToggle("Act headings", PublicationEditionOverrideField.IncludeActHeadings, _releaseDraft.IncludeActHeadings, value => ReleaseToggle(nameof(ReleaseDraft.IncludeActHeadings), value))@InheritedToggle("Chapter headings", PublicationEditionOverrideField.IncludeChapterHeadings, _releaseDraft.IncludeChapterHeadings, value => ReleaseToggle(nameof(ReleaseDraft.IncludeChapterHeadings), value))@InheritedToggle("Number acts", PublicationEditionOverrideField.NumberActs, _releaseDraft.NumberActs, value => ReleaseToggle(nameof(ReleaseDraft.NumberActs), value))@InheritedToggle("Number chapters", PublicationEditionOverrideField.NumberChapters, _releaseDraft.NumberChapters, value => ReleaseToggle(nameof(ReleaseDraft.NumberChapters), value))</div><div class="content-choice-list release-content">@foreach (var chapter in _workspace.Sections.SelectMany(section => section.Chapters)){<label class="check-row"><input type="checkbox" checked="@_releaseSelections.GetValueOrDefault(chapter.Id)" @onchange="e => ReleaseContentChanged(chapter.Id, (bool)e.Value!)" /><span>@chapter.Title</span></label>}</div>}</div><div><span class="eyebrow">@(_workspace.Edition.Format == PublicationEditionFormat.Paperback ? "Full-wrap cover" : "Digital cover")</span><h2>@(_workspace.Edition.InheritsCoreCover ? "Front inherited from Core" : "Customized for this release")</h2><p>@CoverHelp(_workspace.Edition.Format)</p><div class="button-row">@if (_workspace.Edition.InheritsCoreCover){<button class="btn btn-sm btn-outline-primary" @onclick="CustomizeReleaseCoverAsync">Customize for this release</button>}else{<button class="btn btn-sm btn-outline-primary" @onclick="OpenReleaseCoverAsync">Edit release cover</button><button class="btn btn-sm btn-outline-secondary" @onclick="UseCoreCoverAsync">Use Core Book cover</button>}<span class="status-pill">@(_workspace.Edition.InheritsCoreCover ? "From Core Book" : "Release override")</span></div></div></section>
+        <section class="workspace-card split"><div><span class="eyebrow">Content</span><h2>@(_workspace.HasContentOverrides ? "Release content customized" : "Uses Core Book")</h2><p>@_workspace.Sections.Sum(section => section.Chapters.Count(chapter => chapter.IsIncluded)) chapters · @_workspace.PublicationSections.Count(item => item.IsIncluded) publication sections</p><p class="muted">A release may omit chapters, but reading order remains the Core outline order. Publication sections are customized above.</p><div class="button-row"><button class="btn btn-sm btn-outline-primary" @onclick="() => _releaseContentOpen = !_releaseContentOpen">@(_releaseContentOpen ? "Hide content choices" : "Customize content")</button>@if (_workspace.HasContentOverrides){<button class="btn btn-sm btn-outline-secondary" @onclick="UseCoreContentAsync">Use Core Book content</button>}</div>@if (_releaseContentOpen){<div class="release-presentation-options">@InheritedToggle("Navigation contents", PublicationEditionOverrideField.IncludeTableOfContents, _releaseDraft.IncludeTableOfContents, value => ReleaseToggle(nameof(ReleaseDraft.IncludeTableOfContents), value))@InheritedToggle("Visible contents page", PublicationEditionOverrideField.IncludeVisibleTableOfContents, _releaseDraft.IncludeVisibleTableOfContents, value => ReleaseToggle(nameof(ReleaseDraft.IncludeVisibleTableOfContents), value))@InheritedToggle("Act headings", PublicationEditionOverrideField.IncludeActHeadings, _releaseDraft.IncludeActHeadings, value => ReleaseToggle(nameof(ReleaseDraft.IncludeActHeadings), value))@InheritedToggle("Chapter headings", PublicationEditionOverrideField.IncludeChapterHeadings, _releaseDraft.IncludeChapterHeadings, value => ReleaseToggle(nameof(ReleaseDraft.IncludeChapterHeadings), value))@InheritedToggle("Number acts", PublicationEditionOverrideField.NumberActs, _releaseDraft.NumberActs, value => ReleaseToggle(nameof(ReleaseDraft.NumberActs), value))@InheritedToggle("Number chapters", PublicationEditionOverrideField.NumberChapters, _releaseDraft.NumberChapters, value => ReleaseToggle(nameof(ReleaseDraft.NumberChapters), value))</div><div class="content-choice-list release-content">@foreach (var chapter in _workspace.Sections.SelectMany(section => section.Chapters)){<label class="check-row"><input type="checkbox" checked="@_releaseSelections.GetValueOrDefault(chapter.Id)" @onchange="e => ReleaseContentChanged(chapter.Id, (bool)e.Value!)" /><span>@chapter.Title</span></label>}</div>}</div><div><span class="eyebrow">@(_workspace.Edition.Format == PublicationEditionFormat.Paperback ? "Full-wrap cover" : "Digital cover")</span><h2>@(_workspace.Edition.InheritsCoreCover ? "Front inherited from Core" : "Customized for this release")</h2><p>@CoverHelp(_workspace.Edition.Format)</p><div class="button-row">@if (_workspace.Edition.InheritsCoreCover){<button class="btn btn-sm btn-outline-primary" @onclick="CustomizeReleaseCoverAsync">Customize for this release</button>}else{<button class="btn btn-sm btn-outline-primary" @onclick="OpenReleaseCoverAsync">Edit release cover</button><button class="btn btn-sm btn-outline-secondary" @onclick="UseCoreCoverAsync">Use Core Book cover</button>}<span class="status-pill">@(_workspace.Edition.InheritsCoreCover ? "From Core Book" : "Release override")</span></div></div></section>
 
         @if (_workspace.Edition.Format != PublicationEditionFormat.Epub)
         {
@@ -597,6 +603,87 @@ else
 
         <details class="technical"><summary>Advanced and technical details</summary><dl><div><dt>Profile</dt><dd>Managed automatically for @_workspace.Edition.Vendor</dd></div><div><dt>Source state</dt><dd>Calculated when files are prepared</dd></div><div><dt>Release revision</dt><dd>@_workspace.Edition.Revision</dd></div></dl><div class="button-row"><button class="btn btn-sm btn-outline-secondary" @onclick="CloneReleaseAsync">Clone release</button><button class="btn btn-sm btn-outline-danger" @onclick="ArchiveReleaseAsync">Archive release</button></div></details>
     </div>;
+
+    private RenderFragment PublicationSectionsCard() => @<section class="workspace-card publication-sections-card">
+        @if (_editingSection is null)
+        {
+            <header>
+                <div><span class="step">04</span><div><h2>Publication sections</h2><p>Build title pages, copyright, acknowledgements, author notes, image pages, and other material around the Core outline.</p></div></div>
+                <div class="button-row">
+                    <button class="btn btn-sm btn-outline-primary" @onclick="() => AddPublicationSectionAsync(false)">Add prose section</button>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="() => AddPublicationSectionAsync(true)">Add designed page</button>
+                </div>
+            </header>
+            @if (!_coreDetailsLoaded && _selectedReleaseId is null)
+            {
+                <div class="deferred-section-loading"><span class="spinner-border spinner-border-sm"></span> Loading publication sections...</div>
+            }
+            else
+            {
+                <div class="publication-section-groups">
+                    @foreach (var group in _publicationSections.GroupBy(item => (item.Anchor, item.TargetId, item.TargetTitle)))
+                    {
+                        <div class="publication-section-group">
+                            <h3>@SectionPositionLabel(group.Key.Anchor, group.Key.TargetTitle)</h3>
+                            @foreach (var item in group)
+                            {
+                                <div class="publication-section-row @(!item.IsIncluded ? "omitted" : null)">
+                                    <div><strong>@item.Title</strong><span>@SectionTypeLabel(item) · @(item.IsInherited ? "From Core Book" : item.IsIncluded ? "Included" : "Omitted")</span></div>
+                                    <div class="button-row">
+                                        <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section earlier" aria-label="Move @item.Title earlier" disabled="@(group.First().Id == item.Id)" @onclick="() => MovePublicationSectionAsync(item, -1)">↑</button>
+                                        <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section later" aria-label="Move @item.Title later" disabled="@(group.Last().Id == item.Id)" @onclick="() => MovePublicationSectionAsync(item, 1)">↓</button>
+                                        <button class="btn btn-sm btn-outline-primary" @onclick="() => BeginPublicationSectionEditAsync(item)">@(item.IsInherited ? "Customize" : "Edit")</button>
+                                        @if (item.CoreSectionId is not null && !item.IsInherited)
+                                        {
+                                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => ResetPublicationSectionAsync(item)">Use Core Book</button>
+                                        }
+                                        @if (item.SystemRole == PublicationSectionSystemRole.None)
+                                        {
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePublicationSectionAsync(item)">Remove</button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        }
+        else
+        {
+            <div class="publication-section-workspace">
+                <header class="publication-section-toolbar">
+                    <div class="button-row"><button class="btn btn-sm btn-outline-secondary" @onclick="ClosePublicationSectionEditorAsync">← Back to sections</button><strong>@_editingSection.Title</strong><span class="status-pill">@(_editingSection.IsInherited ? "From Core Book" : _selectedReleaseId is null ? "Core Book" : "Release section")</span></div>
+                    <div class="button-row"><button class="btn btn-sm @(!_sectionPagesMode ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetSectionMode(false)">Write</button><button class="btn btn-sm @(_sectionPagesMode ? "btn-primary" : "btn-outline-primary")" disabled="@(!SectionCompositionIds().Any())" @onclick="() => SetSectionMode(true)">Pages</button></div>
+                </header>
+                <div class="publication-section-settings">
+                    <label class="field"><span>Section name</span><input class="form-control" value="@_sectionTitle" @onchange="SectionTitleChangedAsync" /></label>
+                    <label class="field"><span>Type</span><select class="form-select" value="@_sectionKind" disabled="@(_editingSection.SystemRole != PublicationSectionSystemRole.None)" @onchange="SectionKindChangedAsync">@foreach (var kind in EditableSectionKinds()){<option value="@kind">@SectionKindLabel(kind)</option>}</select></label>
+                    <label class="field"><span>Position</span><select class="form-select" value="@_sectionAnchor" disabled="@(_editingSection.SystemRole != PublicationSectionSystemRole.None)" @onchange="SectionAnchorChangedAsync">@foreach (var anchor in Enum.GetValues<PublicationSectionAnchor>()){<option value="@anchor">@SectionAnchorLabel(anchor)</option>}</select></label>
+                    @if (_sectionAnchor is not (PublicationSectionAnchor.Front or PublicationSectionAnchor.Back))
+                    {
+                        <label class="field"><span>Place near</span><select class="form-select" value="@SectionTargetValue()" @onchange="SectionTargetChangedAsync">@foreach (var item in SectionAnchorTargets()){<option value="@($"{item.TargetKind}|{item.TargetId}")">@item.Title</option>}</select></label>
+                    }
+                    <label class="field"><span>Include</span><select class="form-select" value="@_sectionInclusion" @onchange="SectionInclusionChangedAsync"><option value="@PublicationSectionInclusionMode.Automatic">Automatic</option><option value="@PublicationSectionInclusionMode.Included">Included</option><option value="@PublicationSectionInclusionMode.Omitted">Omitted</option></select></label>
+                </div>
+                @if (_sectionPagesMode && _selectedSectionCompositionId is Guid compositionId)
+                {
+                    <DesignedPageWorkspace @key="compositionId" ProjectId="Project!.Id" CompositionId="compositionId" ContentTarget="@SectionEditorContentTarget()"
+                                           RefreshSignal="_sectionPageRefreshSignal" RequestedSelectionId="_sectionPageSelectionId" />
+                }
+                else
+                {
+                    <ChapterBodyEditor @ref="_publicationSectionEditor" @key="_editingSection.Id"
+                                       ChapterId="_editingSection.Id" ProjectId="Project!.Id"
+                                       InitialManuscriptJson="@ManuscriptCodec.Serialize(_editingSection.Manuscript)"
+                                       SaveAsync="SavePublicationSectionDocumentAsync"
+                                       CreateDesignedPageOverrideAsync="CreateSectionDesignedPageAsync"
+                                       ReadDocumentOverrideAsync="ReadPublicationSectionDocumentAsync"
+                                       OpenDesignedPage="OpenPublicationSectionPageAsync" />
+                }
+            </div>
+        }
+    </section>;
 
     private RenderFragment Toggle(string Label, bool Value, Action<bool> Changed) => @<label class="check-row"><input type="checkbox" checked="@Value" @onchange="e => Changed((bool)e.Value!)" /><span>@Label</span></label>;
 
@@ -629,12 +716,12 @@ else
     }
     else if (_preparations.FirstOrDefault() is { } job)
     {
-        <div class="preparation @job.Status.ToString().ToLowerInvariant()"><strong>@job.Message</strong>@if (job.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing){<span>@job.ProgressPercent% · @job.Step</span><button class="btn btn-sm btn-outline-secondary" @onclick="() => CancelPreparationAsync(job.Id)">Cancel</button>}@foreach (var diagnostic in job.Diagnostics.Take(3)){<span>@diagnostic.Message</span>}</div>
+        <div class="preparation @job.Status.ToString().ToLowerInvariant()"><strong>@job.Message</strong>@if (job.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing){<span>@job.ProgressPercent% · @job.Step</span><button class="btn btn-sm btn-outline-secondary" @onclick="() => CancelPreparationAsync(job.Id)">Cancel</button>}@if (job.Diagnostics.Count > 0){<details class="preparation-diagnostics" open="@(job.Status is PublicationPreparationStatus.Blocked or PublicationPreparationStatus.Failed)"><summary>@job.Diagnostics.Count production note@(job.Diagnostics.Count == 1 ? "" : "s")</summary><div>@foreach (var diagnostic in job.Diagnostics){<span><strong>@diagnostic.Code</strong> @diagnostic.Message</span>}</div></details>}</div>
     }</text>;
 
     private RenderFragment ArtifactDownloads(IReadOnlyList<PublicationArtifactKind> Kinds) => @<text>@if (_artifacts.Any(item => Kinds.Contains(item.Kind) && !item.IsLegacy && !item.IsStale))
     {
-        <div class="downloads">@foreach (var artifact in _artifacts.Where(item => Kinds.Contains(item.Kind) && !item.IsLegacy && !item.IsStale).GroupBy(item => item.Kind).Select(group => group.First())){<a class="btn btn-sm btn-outline-primary" href="@DownloadUrl(artifact.Id)" download="@artifact.FileName">@DownloadLabel(artifact.Kind)</a>}</div>
+        <div class="downloads">@foreach (var artifact in _artifacts.Where(item => Kinds.Contains(item.Kind) && !item.IsLegacy && !item.IsStale).GroupBy(item => item.Kind).Select(group => group.First())){<a class="btn btn-sm btn-outline-primary" href="@DownloadUrl(artifact.Id)" download="@artifact.FileName">@DownloadLabel(artifact.Kind)</a>@if (CanPreview(artifact)){<button class="btn btn-sm btn-outline-secondary" @onclick="() => _previewArtifact = artifact">@PreviewLabel(artifact.Kind)</button>}}</div>
     }</text>;
 
     private RenderFragment CoreDownloads() => @<div class="downloads core-downloads">
@@ -647,110 +734,352 @@ else
         <button class="btn btn-sm btn-outline-primary" @onclick="() => ExportCoreAsync(PublishExportFormat.PlainText)">Download plain text</button>
     </div>;
 
-    private void BeginCoreMatterEdit(PublicationMatterView item)
-    {
-        _editingCoreMatterId = item.Id;
-        _coreMatterTitle = item.Title;
-        _coreMatterJson = ManuscriptCodec.Serialize(item.Manuscript);
-        _editingCoreMatterRevision = item.Revision;
-        _coreMatterLocation = item.Location;
-        _coreMatterKind = item.Kind;
-        _coreMatterSortOrder = item.SortOrder;
-        _coreMatterIncluded = item.IsIncluded;
-    }
+    private PublicationSectionTarget CurrentPublicationSectionTarget() =>
+        new(Project!.Id, _selectedReleaseId);
 
-    private void CancelCoreMatterEdit() => _editingCoreMatterId = null;
-
-    private async Task AddCoreMatterAsync(PublicationMatterKind kind)
+    private async Task AddPublicationSectionAsync(bool designedPage)
     {
-        if (Project is null || _core is null) return;
-        await SavePendingAsync();
+        if (Project is null) return;
         try
         {
-            var location = kind is PublicationMatterKind.Acknowledgments or PublicationMatterKind.AboutAuthor
-                or PublicationMatterKind.AlsoBy or PublicationMatterKind.References
-                ? PublicationMatterLocation.Back : PublicationMatterLocation.Front;
-            var title = kind == PublicationMatterKind.Custom ? "Custom page" : kind.ToString();
-            var saved = await Books.UpsertMatterAsync(Project.Id, new PublicationMatterInput(
-                null, location, kind, title, ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(Guid.Empty)),
-                true, _coreMatter.Count), _core.Revision);
-            await RefreshCoreDataAsync();
-            BeginCoreMatterEdit(saved);
+            var id = Guid.NewGuid();
+            var document = new ManuscriptDocument
+            {
+                ManuscriptId = id,
+                Content = designedPage ? [] :
+                [
+                    new ManuscriptBlock
+                    {
+                        Id = $"paragraph-{Guid.NewGuid():N}",
+                        Type = ManuscriptBlockType.Paragraph,
+                        StyleRole = ManuscriptStyleRoles.Body,
+                        Content = [new ManuscriptInline { Text = string.Empty }],
+                    },
+                ],
+            };
+            var saved = await PublicationSections.UpsertAsync(CurrentPublicationSectionTarget(), new(
+                null, designedPage ? "Designed page" : "New section", PublicationSectionKind.Custom,
+                PublicationSectionAnchor.Back, null, null, PublicationSectionInclusionMode.Included,
+                ManuscriptCodec.Serialize(document)));
+            if (designedPage)
+            {
+                var created = await PublicationSections.CreateDesignedPageAsync(
+                    CurrentPublicationSectionTarget(), saved.Id, 0, "Designed page",
+                    DesignedPageLayoutMode.SinglePage, saved.Revision);
+                saved = created.Section;
+                _selectedSectionCompositionId = created.Composition.Id;
+                _sectionPagesMode = true;
+            }
+            await RefreshPublicationSectionsAsync();
+            BeginPublicationSectionEdit(saved);
         }
         catch (Exception exception) { _error = exception.Message; }
     }
 
-    private async Task SaveCoreMatterAsync()
+    private async Task BeginPublicationSectionEditAsync(PublicationSectionView item)
     {
-        if (Project is null || _core is null || _editingCoreMatterId is not Guid matterId) return;
         try
         {
-            if (_coreMatterEditor is not null && !await _coreMatterEditor.FlushAsync())
-                throw new InvalidOperationException("The matter page could not be saved yet.");
-            var document = ManuscriptCodec.Deserialize(_coreMatterJson, matterId, _editingCoreMatterRevision);
-            var saved = await Books.UpsertMatterAsync(Project.Id, new PublicationMatterInput(
-                matterId, _coreMatterLocation, _coreMatterKind, _coreMatterTitle,
-                ManuscriptCodec.Serialize(document), _coreMatterIncluded, _coreMatterSortOrder,
-                _editingCoreMatterRevision), _core.Revision);
-            await RefreshCoreDataAsync();
-            BeginCoreMatterEdit(saved);
-            _notice = "Core Book matter saved.";
+            if (item.IsInherited && _selectedReleaseId is Guid releaseId)
+                item = await PublicationSections.CustomizeAsync(Project!.Id, releaseId, item.Id);
+            BeginPublicationSectionEdit(item);
+            await RefreshPublicationSectionsAsync();
         }
         catch (Exception exception) { _error = exception.Message; }
     }
 
-    private async Task<ChapterBodyEditor.SemanticEditorSaveResult> SaveCoreMatterDocumentAsync(
-        Guid matterId,
+    private void BeginPublicationSectionEdit(PublicationSectionView item)
+    {
+        _editingSection = item;
+        _sectionTitle = item.Title;
+        _sectionKind = item.Kind;
+        _sectionAnchor = item.Anchor;
+        _sectionTargetKind = item.TargetKind;
+        _sectionTargetId = item.TargetId;
+        _sectionInclusion = item.InclusionMode;
+        _selectedSectionCompositionId = item.Manuscript.Content.FirstOrDefault(block => block.PageCompositionId.HasValue)?.PageCompositionId;
+        _sectionPagesMode = item.Manuscript.Content.Count > 0
+            && item.Manuscript.Content.All(block => block.Type == ManuscriptBlockType.DesignedPage);
+    }
+
+    private async Task ClosePublicationSectionEditorAsync()
+    {
+        if (_publicationSectionEditor is not null)
+            await _publicationSectionEditor.FlushAsync();
+        _editingSection = null;
+        _publicationSectionEditor = null;
+        _selectedSectionCompositionId = null;
+        _sectionPagesMode = false;
+        await RefreshPublicationSectionsAsync();
+    }
+
+    private async Task SetSectionMode(bool pages)
+    {
+        if (_publicationSectionEditor is not null && !await _publicationSectionEditor.FlushAsync())
+            return;
+        _sectionPagesMode = pages;
+        if (pages && _selectedSectionCompositionId is null)
+            _selectedSectionCompositionId = SectionCompositionIds().FirstOrDefault();
+    }
+
+    private IEnumerable<Guid> SectionCompositionIds() => _editingSection?.Manuscript.Content
+        .Where(block => block.PageCompositionId.HasValue)
+        .Select(block => block.PageCompositionId!.Value)
+        .Distinct() ?? [];
+
+    private EditorContentTarget SectionEditorContentTarget() => _selectedReleaseId is Guid releaseId
+        ? EditorContentTarget.ForEdition(releaseId)
+        : EditorContentTarget.Core;
+
+    private async Task OpenPublicationSectionPageAsync(Guid compositionId)
+    {
+        if (_publicationSectionEditor is not null && !await _publicationSectionEditor.FlushAsync())
+            return;
+        _selectedSectionCompositionId = compositionId;
+        _sectionPagesMode = true;
+    }
+
+    private async Task<object> CreateSectionDesignedPageAsync(
+        string name,
+        string layoutMode,
+        int blockIndex,
+        long expectedRevision)
+    {
+        if (_editingSection is null || !Enum.TryParse<DesignedPageLayoutMode>(layoutMode, true, out var parsed))
+            throw new InvalidOperationException("Choose a valid publication Designed Page layout.");
+        var result = await PublicationSections.CreateDesignedPageAsync(
+            CurrentPublicationSectionTarget(), _editingSection.Id, blockIndex, name, parsed, expectedRevision);
+        _editingSection = result.Section;
+        _selectedSectionCompositionId = result.Composition.Id;
+        await RefreshPublicationSectionsAsync();
+        return new
+        {
+            id = result.Composition.Id,
+            result.Composition.Name,
+            manuscriptJson = ManuscriptCodec.Serialize(result.Section.Manuscript),
+            summary = new
+            {
+                id = result.Composition.Id,
+                result.Composition.Name,
+                surfaceLabel = parsed == DesignedPageLayoutMode.FacingSpread ? "Facing spread" : "Single page",
+                status = "Ready",
+            },
+        };
+    }
+
+    private Task<ManuscriptDocument> ReadPublicationSectionDocumentAsync(long expectedRevision)
+    {
+        if (_editingSection is null || _editingSection.Revision != expectedRevision)
+            throw new ManuscriptRevisionConflictException(expectedRevision, _editingSection?.Revision ?? 0);
+        return Task.FromResult(_editingSection.Manuscript);
+    }
+
+    private async Task<ChapterBodyEditor.SemanticEditorSaveResult> SavePublicationSectionDocumentAsync(
+        Guid sectionId,
         long expectedRevision,
         string manuscriptJson)
     {
-        if (Project is null || _core is null)
+        if (Project is null || _editingSection is null || _editingSection.Id != sectionId)
             return new(false, expectedRevision);
         try
         {
-            var saved = await Books.UpsertMatterAsync(Project.Id, new PublicationMatterInput(
-                matterId, _coreMatterLocation, _coreMatterKind, _coreMatterTitle, manuscriptJson,
-                _coreMatterIncluded, _coreMatterSortOrder, expectedRevision), _core.Revision);
-            _coreMatterJson = ManuscriptCodec.Serialize(saved.Manuscript);
-            _editingCoreMatterRevision = saved.Revision;
-            _core = await Books.GetOrCreateAsync(Project.Id);
-            _coreMatter = await Books.ListMatterAsync(Project.Id);
+            var saved = await PublicationSections.UpsertAsync(CurrentPublicationSectionTarget(), new(
+                sectionId, _sectionTitle, _sectionKind, _sectionAnchor, _sectionTargetKind, _sectionTargetId,
+                _sectionInclusion, manuscriptJson, expectedRevision));
+            _editingSection = saved;
+            await RefreshPublicationSectionsAsync(updateEditing: false);
             return new(true, saved.Revision);
         }
         catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
         {
-            await RefreshCoreDataAsync();
-            var current = _coreMatter.FirstOrDefault(item => item.Id == matterId);
+            await RefreshPublicationSectionsAsync();
+            var current = _publicationSections.FirstOrDefault(item => item.Id == sectionId);
             return new(false, expectedRevision, true, current is null ? null : ManuscriptCodec.Serialize(current.Manuscript));
         }
         catch (Exception exception)
         {
             _error = exception.Message;
-            await InvokeAsync(StateHasChanged);
             return new(false, expectedRevision);
         }
     }
 
-    private async Task DeleteCoreMatterAsync(PublicationMatterView item)
+    private async Task SavePublicationSectionMetadataAsync()
     {
-        if (Project is null || _core is null) return;
+        if (_editingSection is null) return;
+        if (_publicationSectionEditor is not null && !await _publicationSectionEditor.FlushAsync())
+            return;
         try
         {
-            await Books.DeleteMatterAsync(Project.Id, item.Id, _core.Revision);
-            if (_editingCoreMatterId == item.Id) _editingCoreMatterId = null;
-            await RefreshCoreDataAsync();
-            _notice = $"{item.Title} removed from Core Book.";
+            var saved = await PublicationSections.UpsertAsync(CurrentPublicationSectionTarget(), new(
+                _editingSection.Id, _sectionTitle, _sectionKind, _sectionAnchor, _sectionTargetKind, _sectionTargetId,
+                _sectionInclusion, ManuscriptCodec.Serialize(_editingSection.Manuscript), _editingSection.Revision));
+            BeginPublicationSectionEdit(saved);
+            await RefreshPublicationSectionsAsync(updateEditing: false);
         }
         catch (Exception exception) { _error = exception.Message; }
     }
+
+    private async Task SectionTitleChangedAsync(ChangeEventArgs args) { _sectionTitle = args.Value?.ToString() ?? string.Empty; await SavePublicationSectionMetadataAsync(); }
+    private async Task SectionKindChangedAsync(ChangeEventArgs args) { if (Enum.TryParse<PublicationSectionKind>(args.Value?.ToString(), out var value)) _sectionKind = value; await SavePublicationSectionMetadataAsync(); }
+    private async Task SectionInclusionChangedAsync(ChangeEventArgs args) { if (Enum.TryParse<PublicationSectionInclusionMode>(args.Value?.ToString(), out var value)) _sectionInclusion = value; await SavePublicationSectionMetadataAsync(); }
+    private async Task SectionAnchorChangedAsync(ChangeEventArgs args)
+    {
+        if (Enum.TryParse<PublicationSectionAnchor>(args.Value?.ToString(), out var value))
+            _sectionAnchor = value;
+        var target = SectionAnchorTargets().FirstOrDefault();
+        _sectionTargetKind = target?.TargetKind;
+        _sectionTargetId = target?.TargetId;
+        if (_sectionAnchor is PublicationSectionAnchor.Front or PublicationSectionAnchor.Back)
+        {
+            _sectionTargetKind = null;
+            _sectionTargetId = null;
+        }
+        await SavePublicationSectionMetadataAsync();
+    }
+
+    private async Task SectionTargetChangedAsync(ChangeEventArgs args)
+    {
+        var parts = (args.Value?.ToString() ?? string.Empty).Split('|');
+        if (parts.Length == 2 && Enum.TryParse<PublishOutlineTargetKind>(parts[0], out var kind) && Guid.TryParse(parts[1], out var id))
+        {
+            _sectionTargetKind = kind;
+            _sectionTargetId = id;
+            await SavePublicationSectionMetadataAsync();
+        }
+    }
+
+    private IEnumerable<PublicationBookOutlineView> SectionAnchorTargets() => _coreOutline.Where(item =>
+        _sectionAnchor is PublicationSectionAnchor.BeforeAct or PublicationSectionAnchor.AfterAct
+            ? item.TargetKind == PublishOutlineTargetKind.Act
+            : item.TargetKind == PublishOutlineTargetKind.Chapter);
+
+    private string SectionTargetValue() => _sectionTargetKind is { } kind && _sectionTargetId is Guid id ? $"{kind}|{id}" : string.Empty;
+
+    private IEnumerable<PublicationSectionKind> EditableSectionKinds() => _editingSection switch
+    {
+        null => [],
+        { SystemRole: PublicationSectionSystemRole.None } => Enum.GetValues<PublicationSectionKind>()
+            .Where(kind => kind is not (PublicationSectionKind.TitlePage or PublicationSectionKind.Copyright or PublicationSectionKind.Contents)),
+        _ => [_editingSection.Kind],
+    };
+
+    private Task ResetPublicationSectionAsync(PublicationSectionView item)
+    {
+        _pendingSectionRemoval = item;
+        _pendingSectionReset = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task MovePublicationSectionAsync(PublicationSectionView item, int delta)
+    {
+        var ordered = _publicationSections
+            .Where(candidate => candidate.Anchor == item.Anchor && candidate.TargetId == item.TargetId)
+            .OrderBy(candidate => candidate.LocalOrder)
+            .ThenBy(candidate => candidate.Id)
+            .ToList();
+        var index = ordered.FindIndex(candidate => candidate.Id == item.Id);
+        var destination = index + delta;
+        if (index < 0 || destination < 0 || destination >= ordered.Count)
+            return;
+        (ordered[index], ordered[destination]) = (ordered[destination], ordered[index]);
+        try
+        {
+            await PublicationSections.ReorderWithinAnchorAsync(
+                CurrentPublicationSectionTarget(), ordered.Select(candidate => candidate.Id).ToList(), _dispose.Token);
+            await RefreshPublicationSectionsAsync();
+        }
+        catch (Exception exception) { _error = exception.Message; }
+    }
+
+    private Task DeletePublicationSectionAsync(PublicationSectionView item)
+    {
+        _pendingSectionRemoval = item;
+        _pendingSectionReset = false;
+        return Task.CompletedTask;
+    }
+
+    private string SectionRemovalMessage() => _pendingSectionRemoval is not { } item
+        ? string.Empty
+        : _pendingSectionReset
+            ? $"This discards the release-specific copy of '{item.Title}' and resumes live inheritance from Core Book."
+            : _selectedReleaseId is null
+                ? $"This removes '{item.Title}' from Core Book and every release that inherits it. This cannot be undone."
+                : $"This removes '{item.Title}' from this release. Core Book content is not deleted.";
+
+    private async Task ConfirmSectionRemovalAsync()
+    {
+        if (Project is null || _pendingSectionRemoval is not { } item)
+            return;
+        _sectionRemovalBusy = true;
+        try
+        {
+            if (_pendingSectionReset && _selectedReleaseId is Guid releaseId)
+                await PublicationSections.ResetAsync(Project.Id, releaseId, item.Id);
+            else
+                await PublicationSections.DeleteAsync(CurrentPublicationSectionTarget(), item.Id);
+            if (_editingSection?.Id == item.Id) _editingSection = null;
+            CancelSectionRemoval();
+            await RefreshPublicationSectionsAsync();
+        }
+        catch (Exception exception) { _error = exception.Message; }
+        finally { _sectionRemovalBusy = false; }
+    }
+
+    private void CancelSectionRemoval()
+    {
+        _pendingSectionRemoval = null;
+        _pendingSectionReset = false;
+    }
+
+    private async Task RefreshPublicationSectionsAsync(bool updateEditing = true)
+    {
+        if (Project is null) return;
+        _publicationSections = await PublicationSections.ListAsync(CurrentPublicationSectionTarget(), _dispose.Token);
+        if (updateEditing && _editingSection is not null)
+            _editingSection = _publicationSections.FirstOrDefault(item => item.Id == _editingSection.Id);
+        _outputsLoaded = false;
+        _preparations = await Preparation.ListAsync(Project.Id,
+            _selectedReleaseId is null ? PublicationTargetKind.CoreBook : PublicationTargetKind.Release,
+            _selectedReleaseId, _dispose.Token);
+        _outputsLoaded = true;
+    }
+
+    private static string SectionPositionLabel(PublicationSectionAnchor anchor, string targetTitle) => anchor switch
+    {
+        PublicationSectionAnchor.Front => "Front of book",
+        PublicationSectionAnchor.Back => "Back of book",
+        PublicationSectionAnchor.BeforeAct => $"Before act: {targetTitle}",
+        PublicationSectionAnchor.AfterAct => $"After act: {targetTitle}",
+        PublicationSectionAnchor.BeforeChapter => $"Before chapter: {targetTitle}",
+        PublicationSectionAnchor.AfterChapter => $"After chapter: {targetTitle}",
+        _ => anchor.ToString(),
+    };
+    private static string SectionAnchorLabel(PublicationSectionAnchor anchor) => anchor switch
+    {
+        PublicationSectionAnchor.Front => "Front of book",
+        PublicationSectionAnchor.Back => "Back of book",
+        PublicationSectionAnchor.BeforeAct => "Before an act",
+        PublicationSectionAnchor.AfterAct => "After an act",
+        PublicationSectionAnchor.BeforeChapter => "Before a chapter",
+        PublicationSectionAnchor.AfterChapter => "After a chapter",
+        _ => anchor.ToString(),
+    };
+    private static string SectionKindLabel(PublicationSectionKind kind) => kind switch
+    {
+        PublicationSectionKind.TitlePage => "Title page",
+        PublicationSectionKind.AboutAuthor => "About the author",
+        PublicationSectionKind.AlsoBy => "Also by",
+        _ => System.Text.RegularExpressions.Regex.Replace(kind.ToString(), "([a-z])([A-Z])", "$1 $2"),
+    };
+    private static string SectionTypeLabel(PublicationSectionView item) => item.DesignedPageCount > 0 && item.Manuscript.Content.All(block => block.Type == ManuscriptBlockType.DesignedPage)
+        ? item.DesignedPageCount == 1 ? "Designed page" : $"{item.DesignedPageCount} designed pages"
+        : SectionKindLabel(item.Kind);
 
     private async Task RefreshCoreDataAsync()
     {
         if (Project is null) return;
         _core = await Books.GetOrCreateAsync(Project.Id);
         var details = await Books.GetDetailsAsync(Project.Id);
-        _coreMatter = details.Matter;
-        _corePlacements = details.ImagePlacements;
         _coreOutline = details.Outline;
         _coreSelections = _coreOutline.ToDictionary(item => (item.TargetKind, item.TargetId), item => item.IsIncluded);
         _coreDetailsLoaded = true;
@@ -1246,12 +1575,43 @@ else
         catch (Exception exception) { _error = exception.Message; }
     }
 
-    private Task HandleAssistantMutationAsync(PublishWorkspaceMutated mutation)
+    private async Task HandleAssistantMutationAsync(PublishWorkspaceMutated mutation)
     {
         if (_coreDirty || _coreOutlineDirty || _pageSetupDirty || _releaseDirty || _releaseContentDirty)
         {
             _notice = "The assistant changed publishing settings. Your unsaved form edits were kept; save or reload to reconcile them.";
-            return Task.CompletedTask;
+            return;
+        }
+        if (Project is not null && mutation.EditionId == _selectedReleaseId
+            && (mutation.SelectedSectionId is not null || mutation.SelectedCompositionId is not null))
+        {
+            _publicationSections = await PublicationSections.ListAsync(new(Project.Id, _selectedReleaseId), _dispose.Token);
+            if (mutation.SelectedSectionId is Guid sectionId)
+                _editingSection = _publicationSections.FirstOrDefault(item => item.Id == sectionId);
+            else if (_editingSection is not null)
+                _editingSection = _publicationSections.FirstOrDefault(item => item.Id == _editingSection.Id);
+            if (mutation.SelectedCompositionId is Guid compositionId)
+            {
+                _selectedSectionCompositionId = compositionId;
+                _sectionPagesMode = true;
+            }
+            _sectionPageSelectionId = mutation.SelectedObjectId;
+            _sectionPageRefreshSignal++;
+            if (_selectedReleaseId is Guid releaseId)
+            {
+                _workspace = await Publishing.GetWorkspaceForEditingAsync(Project.Id, releaseId, _dispose.Token);
+                _preparations = await Preparation.ListAsync(Project.Id, PublicationTargetKind.Release, releaseId, _dispose.Token);
+                _artifacts = await Renders.ListArtifactsAsync(Project.Id, releaseId, _dispose.Token);
+            }
+            else
+            {
+                _core = await Books.GetOrCreateAsync(Project.Id, _dispose.Token);
+                _preparations = await Preparation.ListAsync(Project.Id, PublicationTargetKind.CoreBook, cancellationToken: _dispose.Token);
+                _artifacts = (await Renders.ListCoreAsync(Project.Id, _dispose.Token)).SelectMany(item => item.Artifacts).OrderByDescending(item => item.CreatedAt).ToList();
+            }
+            _outputsLoaded = true;
+            StateHasChanged();
+            return;
         }
         var coverWasOpen = _coverEditorOpen;
         var targetReleaseId = mutation.SelectEdition && mutation.EditionId is Guid id
@@ -1264,7 +1624,6 @@ else
             _coverSelectionId = mutation.SelectedObjectId;
             _coverRefreshSignal++;
         }
-        return Task.CompletedTask;
     }
 
     private void QueueAssistantTargetRefresh(Guid? releaseId)
@@ -1303,7 +1662,10 @@ else
     private string ViewUrl(Guid artifactId) => $"/projects/{Project!.Id:N}/publish/artifacts/{artifactId:N}";
     private string DownloadUrl(Guid artifactId) => $"/projects/{Project!.Id:N}/publish/artifacts/{artifactId:N}/download";
     private static string DownloadLabel(PublicationArtifactKind kind) => kind switch { PublicationArtifactKind.ReadingPdf => "Save reading PDF", PublicationArtifactKind.InteriorPdf => "Save interior PDF", PublicationArtifactKind.CoverPdf => "Save cover PDF", PublicationArtifactKind.BookPdf => "Save book PDF", PublicationArtifactKind.Epub => "Save EPUB", PublicationArtifactKind.PublicationPackage => "Save package", _ => $"Save {kind}" };
-    private static IReadOnlyList<PublicationArtifactKind> ReleaseArtifactKinds(PublicationEditionFormat format) => format switch { PublicationEditionFormat.Paperback => [PublicationArtifactKind.InteriorPdf, PublicationArtifactKind.CoverPdf, PublicationArtifactKind.PublicationPackage], PublicationEditionFormat.Epub => [PublicationArtifactKind.Epub, PublicationArtifactKind.PublicationPackage], _ => [PublicationArtifactKind.BookPdf, PublicationArtifactKind.PublicationPackage] };
+    private static bool CanPreview(PublicationArtifactView artifact) => artifact.MediaType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase) || artifact.MediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+    private static string PreviewLabel(PublicationArtifactKind kind) => kind switch { PublicationArtifactKind.ReadingPdf => "Preview reading PDF", PublicationArtifactKind.InteriorPdf => "Preview interior PDF", PublicationArtifactKind.CoverPdf => "Preview cover PDF", PublicationArtifactKind.BookPdf => "Preview book PDF", PublicationArtifactKind.FrontCoverImage => "Preview cover image", _ => $"Preview {kind}" };
+    private static string FormatBytes(long bytes) => bytes >= 1024 * 1024 ? $"{bytes / 1024d / 1024d:0.0} MB" : $"{Math.Max(1, bytes / 1024d):0} KB";
+    private static IReadOnlyList<PublicationArtifactKind> ReleaseArtifactKinds(PublicationEditionFormat format) => format switch { PublicationEditionFormat.Paperback => [PublicationArtifactKind.InteriorPdf, PublicationArtifactKind.CoverPdf, PublicationArtifactKind.PublicationPackage], PublicationEditionFormat.Epub => [PublicationArtifactKind.Epub, PublicationArtifactKind.FrontCoverImage, PublicationArtifactKind.PublicationPackage], _ => [PublicationArtifactKind.BookPdf, PublicationArtifactKind.PublicationPackage] };
     private static string ReleaseTypeLabel(PublicationEditionFormat format) => format switch { PublicationEditionFormat.Paperback => "Paperback", PublicationEditionFormat.Epub => "EPUB ebook", _ => "PDF ebook" };
     private static string ReleaseSummary(PublicationEditionView edition) => edition.Format switch { PublicationEditionFormat.Paperback => $"{edition.Vendor switch { PublicationVendor.AmazonKdp => "Amazon KDP", PublicationVendor.IngramSpark => "IngramSpark", _ => "Other printer" }} paperback with printer-ready interior and full-wrap cover.", PublicationEditionFormat.Epub => "Accessible EPUB 3 ebook with reflowable text and navigation.", _ => "Tagged single-file PDF ebook with the front cover as page one." };
     private static string CoverHelp(PublicationEditionFormat format) => format == PublicationEditionFormat.Paperback ? "Core artwork supplies the front; this release adds back, spine, bleed, and barcode areas." : "Uses the reusable Core front cover until you customize this release.";

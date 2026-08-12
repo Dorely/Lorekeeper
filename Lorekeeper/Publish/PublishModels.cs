@@ -81,14 +81,11 @@ public sealed record PublishWorkspaceView(
     PublicationEditionView Edition,
     IReadOnlyList<PublicationEditionSummary> Editions,
     IReadOnlyList<PublishSectionView> Sections,
-    IReadOnlyList<PublicationImagePlacementView> Placements,
-    IReadOnlyList<PublicationMatterView> Matter,
     string SourceFingerprint)
 {
     public IReadOnlySet<PublicationEditionOverrideField> OverrideFields { get; init; } = new HashSet<PublicationEditionOverrideField>();
     public bool HasContentOverrides { get; init; }
-    public bool HasMatterOverrides { get; init; }
-    public bool HasPlacementOverrides { get; init; }
+    public IReadOnlyList<PublicationSectionView> PublicationSections { get; init; } = [];
 }
 
 public sealed record PublicationEditionSummary(
@@ -186,48 +183,6 @@ public sealed record PublicationEditionCompareView(
     PublicationEditionSummary Right,
     IReadOnlyList<string> Differences);
 
-public sealed record PublicationMatterView(
-    Guid Id,
-    PublicationMatterLocation Location,
-    PublicationMatterKind Kind,
-    string Title,
-    ManuscriptDocument Manuscript,
-    bool IsIncluded,
-    int SortOrder,
-    long Revision);
-
-public sealed record PublicationMatterInput(
-    Guid? Id,
-    PublicationMatterLocation Location,
-    PublicationMatterKind Kind,
-    string Title,
-    string ManuscriptJson,
-    bool IsIncluded,
-    int SortOrder,
-    long? ExpectedRevision = null);
-
-[JsonConverter(typeof(JsonStringEnumConverter<PublicationUserMatterKind>))]
-public enum PublicationUserMatterKind
-{
-    Dedication,
-    Epigraph,
-    Acknowledgments,
-    AboutAuthor,
-    AlsoBy,
-    References,
-    Custom,
-}
-
-public sealed record PublicationUserMatterInput(
-    Guid? Id,
-    PublicationMatterLocation Location,
-    PublicationUserMatterKind Kind,
-    string Title,
-    string ManuscriptJson,
-    bool IsIncluded,
-    int SortOrder,
-    long? ExpectedRevision = null);
-
 public sealed record PublicationEditionAuditView(
     Guid Id,
     string Action,
@@ -253,55 +208,10 @@ public sealed record PublishChapterView(
     int DesignedPageCount,
     int LayoutDiagnosticCount);
 
-public sealed record PublicationImagePlacementView(
-    Guid Id,
-    Guid AssetId,
-    string AssetFileName,
-    string AssetPreviewUrl,
-    PublishOutlineTargetKind TargetKind,
-    Guid TargetId,
-    string TargetTitle,
-    PublicationImagePlacementKind PlacementKind,
-    string Caption,
-    FigurePresentation? Presentation = null,
-    string AltText = "",
-    bool Decorative = false,
-    string Language = "en",
-    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure,
-    int SortOrder = 0);
-
 public sealed record PublicationEditionOutlineItemUpdate(
     PublishOutlineTargetKind TargetKind,
     Guid TargetId,
     bool IsIncluded);
-
-public sealed record PublicationEditionOutlineItemOrder(
-    PublishOutlineTargetKind TargetKind,
-    Guid TargetId);
-
-public sealed record PublicationImagePlacementCreate(
-    Guid AssetId,
-    PublishOutlineTargetKind TargetKind,
-    Guid TargetId,
-    PublicationImagePlacementKind PlacementKind,
-    string Caption,
-    FigurePresentation? Presentation = null,
-    string AltText = "",
-    bool Decorative = false,
-    string Language = "en",
-    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure);
-
-public sealed record PublicationImagePlacementUpdate(
-    Guid AssetId,
-    PublishOutlineTargetKind TargetKind,
-    Guid TargetId,
-    PublicationImagePlacementKind PlacementKind,
-    string Caption,
-    FigurePresentation? Presentation = null,
-    string AltText = "",
-    bool Decorative = false,
-    string Language = "en",
-    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure);
 
 public sealed record PublishDocument(
     Guid EditionId,
@@ -312,13 +222,12 @@ public sealed record PublishDocument(
     PublishDocumentProfile Profile,
     PublishAssetDocument? CoverAsset,
     IReadOnlyList<PublishSectionDocument> Sections,
-    IReadOnlyList<PublishAssetDocument> Assets,
-    IReadOnlyList<PublicationImagePlacementDocument> Placements)
+    IReadOnlyList<PublishAssetDocument> Assets)
 {
     public string SourceFingerprint { get; init; } = string.Empty;
     public IReadOnlyList<PublishManuscriptStyleDocument> NamedStyles { get; init; } = [];
     public IReadOnlyList<PublishFontDocument> Fonts { get; init; } = [];
-    public IReadOnlyList<PublishMatterDocument> Matter { get; init; } = [];
+    public IReadOnlyList<PublishPublicationSectionDocument> PublicationSections { get; init; } = [];
     public PublishCoverDocument? Cover { get; init; }
 
     public string DisplayTitle => string.IsNullOrWhiteSpace(Profile.TitleOverride)
@@ -346,13 +255,18 @@ public sealed record PublishCoverDocument(
     string BackgroundColor,
     CompositionScene Scene);
 
-public sealed record PublishMatterDocument(
+public sealed record PublishPublicationSectionDocument(
     Guid Id,
-    PublicationMatterLocation Location,
-    PublicationMatterKind Kind,
+    Guid? CoreSectionId,
     string Title,
-    int SortOrder,
-    ManuscriptDocument Manuscript);
+    PublicationSectionKind Kind,
+    PublicationSectionSystemRole SystemRole,
+    PublicationSectionAnchor Anchor,
+    PublishOutlineTargetKind? TargetKind,
+    Guid? TargetId,
+    int LocalOrder,
+    ManuscriptDocument Manuscript,
+    IReadOnlyList<PublishPageCompositionDocument> PageCompositions);
 
 public sealed record PublishManuscriptStyleDocument(
     string Name,
@@ -427,17 +341,3 @@ public sealed record PublishAssetDocument(
     string ContentType,
     byte[] Data,
     string AltText);
-
-public sealed record PublicationImagePlacementDocument(
-    Guid Id,
-    PublishAssetDocument Asset,
-    PublishOutlineTargetKind TargetKind,
-    Guid TargetId,
-    PublicationImagePlacementKind PlacementKind,
-    string Caption,
-    FigurePresentation? Presentation = null,
-    string AltText = "",
-    bool Decorative = false,
-    string Language = "en",
-    FigureAccessibilityRole AccessibilityRole = FigureAccessibilityRole.Figure,
-    int SortOrder = 0);

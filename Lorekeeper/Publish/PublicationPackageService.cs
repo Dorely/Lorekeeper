@@ -293,18 +293,7 @@ public sealed class PublicationPackageService(
         }
         var document = await publishing.GetDocumentAsync(projectId, editionId, cancellationToken);
         ValidateProfile(edition, profile, interior ?? bookArtifact, document, coverDesign, items);
-        var matter = await db.PublicationMatter.AsNoTracking()
-            .Where(item => item.EditionId == editionId && item.IsIncluded)
-            .OrderBy(item => item.Location)
-            .ThenBy(item => item.SortOrder)
-            .ToListAsync(cancellationToken);
-        foreach (var item in matter.Where(item => PublicationMatterFormatting.IsGeneratedPageKind(item.Kind)))
-        {
-            items.Add(Error(
-                "MATTER_GENERATED_PAGE_CONFLICT",
-                $"{item.Kind} is generated from the effective release settings and cannot also be included as publication matter."));
-        }
-        ValidateLanguageScope(document, coverDesign, matter, items);
+        ValidateLanguageScope(document, coverDesign, items);
         if (!string.Equals(edition.Language, "en", StringComparison.OrdinalIgnoreCase)
             && !edition.Language.StartsWith("en-", StringComparison.OrdinalIgnoreCase))
             items.Add(Error("LANGUAGE_SCOPE_UNSUPPORTED", "Lorekeeper Press currently supports English/Latin left-to-right publishing only."));
@@ -422,10 +411,14 @@ public sealed class PublicationPackageService(
             var normalizedEpub = NormalizeEpub(epub.Content);
             ValidateEpubStructure(normalizedEpub);
             files["book.epub"] = (PublicationArtifactKind.Epub, epub.ContentType, normalizedEpub);
+            if (TryReadEpubCover(normalizedEpub) is { } epubCover)
+                files[$"front-cover{ExtensionFor(epubCover.MediaType)}"] =
+                    (PublicationArtifactKind.FrontCoverImage, epubCover.MediaType, epubCover.Data);
         }
 
         var document = await publishing.GetDocumentAsync(projectId, editionId, cancellationToken);
-        if (document.Cover is null && document.CoverAsset is { } frontCover)
+        if (!files.Values.Any(item => item.Kind == PublicationArtifactKind.FrontCoverImage)
+            && document.Cover is null && document.CoverAsset is { } frontCover)
             files[$"front-cover{ExtensionFor(frontCover.ContentType)}"] =
                 (PublicationArtifactKind.FrontCoverImage, frontCover.ContentType, frontCover.Data);
         var packagedReport = report with { CurrentPackage = null };
@@ -880,6 +873,27 @@ public sealed class PublicationPackageService(
         return output.ToArray();
     }
 
+    private static EpubCoverArtifact? TryReadEpubCover(byte[] data)
+    {
+        using var archive = new ZipArchive(new MemoryStream(data, writable: false), ZipArchiveMode.Read);
+        var entry = archive.Entries.FirstOrDefault(candidate =>
+            candidate.FullName.StartsWith("EPUB/images/cover.", StringComparison.OrdinalIgnoreCase));
+        if (entry is null)
+            return null;
+        using var input = entry.Open();
+        using var output = new MemoryStream();
+        input.CopyTo(output);
+        var extension = Path.GetExtension(entry.FullName).ToLowerInvariant();
+        var mediaType = extension switch
+        {
+            ".svg" => "image/svg+xml",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            _ => string.Empty,
+        };
+        return string.IsNullOrEmpty(mediaType) ? null : new(mediaType, output.ToArray());
+    }
+
     private static void ValidateProfile(
         PublicationEdition edition,
         PublicationPreflightProfile profile,
@@ -914,7 +928,8 @@ public sealed class PublicationPackageService(
                 items.Add(Error("DIGITAL_PDF_COVER_REQUIRED", "Create the front cover for this Digital PDF edition."));
             var semanticManuscripts = chapters.Select(chapter => chapter.Manuscript)
                 .Concat(chapters.SelectMany(chapter => chapter.PageCompositions).Select(composition => composition.SemanticManuscript))
-                .Concat(document.Matter.Select(item => item.Manuscript));
+                .Concat(document.PublicationSections.Select(item => item.Manuscript))
+                .Concat(document.PublicationSections.SelectMany(item => item.PageCompositions).Select(composition => composition.SemanticManuscript));
             var missingFigureAlt = semanticManuscripts.Any(manuscript =>
                     manuscript.Content.Any(block =>
                         block.Type == ManuscriptBlockType.Figure
@@ -922,9 +937,8 @@ public sealed class PublicationPackageService(
                         && (string.IsNullOrWhiteSpace(block.AltText)
                             || block.ImageId is not Guid imageId
                             || document.Assets.All(asset => asset.Id != imageId))))
-                || document.Placements.Any(placement =>
-                    !placement.Decorative && string.IsNullOrWhiteSpace(placement.AltText))
                 || chapters.SelectMany(chapter => chapter.PageCompositions)
+                    .Concat(document.PublicationSections.SelectMany(section => section.PageCompositions))
                     .SelectMany(composition => composition.Variants)
                     .Any(variant =>
                     {
@@ -1034,7 +1048,6 @@ public sealed class PublicationPackageService(
     private static void ValidateLanguageScope(
         PublishDocument document,
         PublicationCoverDesignView? coverDesign,
-        IReadOnlyList<PublicationMatter> matter,
         List<PublicationPreflightItem> items)
     {
         var renderedText = new List<(string Label, string Text)>
@@ -1067,12 +1080,9 @@ public sealed class PublicationPackageService(
                     ($"composition object {item.Id:N} text binding", item.TextBinding),
                     ($"composition object {item.Id:N} alternative text", item.AltText),
                 })));
-        renderedText.AddRange(document.Placements.SelectMany(placement =>
-            new[]
-            {
-                ($"placement {placement.Id:N} caption", placement.Caption),
-                ($"asset {placement.Asset.Id:N} alternative text", placement.Asset.AltText),
-            }));
+        renderedText.AddRange(document.PublicationSections.SelectMany(section =>
+            section.Manuscript.Content.SelectMany(block => block.Content.Select(inline =>
+                ($"publication section {section.Id:N} block {block.Id}", inline.Text)))));
         renderedText.AddRange(document.Assets.Select(asset =>
             ($"asset {asset.Id:N} alternative text", asset.AltText)));
         if (document.CoverAsset is { } coverAsset)
@@ -1098,19 +1108,13 @@ public sealed class PublicationPackageService(
 
         foreach (var chapter in document.Sections.SelectMany(section => section.Chapters))
             ValidateManuscriptLanguage($"Chapter '{chapter.Title}'", chapter.Manuscript, items);
-        foreach (var item in matter)
+        foreach (var section in document.PublicationSections)
         {
-            try
-            {
-                var manuscript = ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision);
-                ValidateManuscriptLanguage($"Matter {item.Id:N} '{item.Title}'", manuscript, items);
-                if (item.Title.EnumerateRunes().Any(rune => !IsSupportedLatinRune(rune)))
-                    items.Add(Error("SCRIPT_SCOPE_UNSUPPORTED", $"Matter {item.Id:N} title is outside the tested Latin-script LTR scope."));
-            }
-            catch (JsonException)
-            {
-                items.Add(Error("MATTER_MANUSCRIPT_INVALID", $"Matter {item.Id:N} could not be validated."));
-            }
+            ValidateManuscriptLanguage($"Publication section '{section.Title}'", section.Manuscript, items);
+            foreach (var composition in section.PageCompositions)
+                ValidateManuscriptLanguage($"Publication section '{section.Title}' Designed Page '{composition.Name}'", composition.SemanticManuscript, items);
+            if (section.Title.EnumerateRunes().Any(rune => !IsSupportedLatinRune(rune)))
+                items.Add(Error("SCRIPT_SCOPE_UNSUPPORTED", $"Publication section {section.Id:N} title is outside the tested Latin-script LTR scope."));
         }
     }
 
@@ -1510,8 +1514,11 @@ public sealed class PublicationPackageService(
     {
         "image/jpeg" => ".jpg",
         "image/webp" => ".webp",
+        "image/svg+xml" => ".svg",
         _ => ".png",
     };
+
+    private sealed record EpubCoverArtifact(string MediaType, byte[] Data);
 
     private sealed record PublicationPreflightProfile(
         PublicationEditionFormat Format,

@@ -45,12 +45,12 @@ public sealed class PublishChatService(
         You are Lorekeeper's conversational Publish assistant. You maintain Core Book and prepare optional publication releases through the supplied tools.
 
         Current model:
-        - Core Book is always present. It owns shared metadata, content order and inclusion, matter, project page setup, baseline body typography, Book Text Styles, opening and ending images, and the reusable front cover.
+        - Core Book is always present. It owns shared metadata, chapter inclusion, publication sections, project page setup, baseline body typography, Book Text Styles, and the reusable front cover. Chapter order always comes from the Core outline and cannot be rearranged here.
         - Paperback, EPUB ebook, and PDF ebook releases are optional products. They inherit Core Book live until a field or section is explicitly customized. ISBN is always release-specific.
         - Core Book can produce a tagged private reading PDF. It is not a publication product and has no ISBN, destination, package, or vendor-conformance claim.
         - Core Book owns PDF presentation defaults. Preserve Designed Page sizes only when the user wants full-art spreads to remain single wide PDF pages or custom Designed Pages to retain independent geometry. PDF ebook releases inherit this choice unless explicitly overridden.
         - Paperback owns destination, paper and ink, ISBN/barcode, full-wrap additions, and print PDFs. Lorekeeper manages vendor profiles and required cover bleed. EPUB uses reflow/navigation settings. PDF ebook uses page-geometry settings. Never apply controls from one product type to another.
-        - A release may opt into edition-specific manuscript content. Publish can enable it, summarize differences and compatibility diagnostics, and direct the user to the target-aware Editor. Only Editor may mutate edition manuscript text, Figures, styles in use, or Designed Page layouts.
+        - A release may opt into edition-specific manuscript content. Publish can enable it, summarize differences and compatibility diagnostics, and direct the user to the target-aware Editor. Only Editor may mutate chapter manuscript text, Figures, styles in use, or chapter Designed Page layouts. Publication-section content and page layouts are edited here in Publish.
         - Profile versions, standards identifiers, bleed rules, and package internals are application-managed. Do not ask the user to choose them.
 
         Behavior:
@@ -61,7 +61,9 @@ public sealed class PublishChatService(
         - Recommend defaults from the Book Brief, Project Guidance, manuscript visuals, readers, and destination. Do not dump a production checklist.
         - Preserve unrelated values. Customize a release only where it differs; use ResetFields to restore live Core inheritance.
         - Create no release or ISBN unless requested. Never invent an ISBN.
-        - Title, copyright, and visible contents pages are generated from Core or effective release settings. Change those settings with Core/release patch tools. Matter tools are only for user-authored Dedication, Epigraph, Acknowledgments, About Author, Also By, References, or Custom content.
+        - Title, copyright, and contents are system publication sections. Their linked fields resolve live from Core or effective release metadata. Other publication sections may contain prose, Figures, and Designed Pages and may be placed at the front, back, or immediately before or after an act or chapter.
+        - Create user-authored material such as Dedication, Epigraph, Acknowledgments, About the Author, Also By, References, image pages, or arbitrary production pages with publication-section tools. Release sections inherit Core live until customized; do not create duplicate release content when inheritance is sufficient.
+        - While designing a publication-section page, read its selected variant, preview it in annotated mode, make focused changes or stage one large semantic-and-scene update, preview the result again, and finish with a clean preview. Customize an inherited release section before changing its page.
 
         Tool and state integrity:
         - Use tools for every publication read or mutation and honor Core or release revisions.
@@ -71,15 +73,15 @@ public sealed class PublishChatService(
         - Never claim a mutation, preparation, validation, package, or export succeeded unless the tool result says so.
         - Tool results are not replayed into later model turns. Use visible prose as the durable work log: narrate each meaningful publication phase and its reason, record consequential results before moving on, and end with durable decisions, exact changes, revisions, diagnostics, and unresolved questions without repeating large payloads.
         - Returned URLs require a user action. Never claim that you downloaded a file.
-        - Chapters contain semantic text, flowing Figures, and Designed Pages. Distinguish those from release-only placements, print full-wrap covers, and digital front covers.
+        - Chapters and publication sections may both contain semantic text, flowing Figures, and Designed Pages. Covers remain separate front-cover or full-wrap compositions.
         - Use project page setup for authoring decisions and release geometry only for compatibility and covers. Optional generation geometry derives dimensions but never places the result; ordinary source-image shapes remain valid and are fitted non-destructively.
-        - generate_project_image and edit_project_image wait for completion and always return unattached project images. Inspect the visible output, then use its ID with the focused Core or release cover tools in this same turn when cover placement is requested. Manuscript and Designed Page placement belongs to Editor. Never imply geometry guidance attached an image.
+        - generate_project_image and edit_project_image wait for completion and always return unattached project images. Inspect the visible output, then use its ID with the focused Core/release cover tool or publication-section page tool in this same turn. Chapter manuscript and chapter Designed Page placement belongs to Editor. Never imply geometry guidance attached an image.
         - Cover artwork always remains beneath canonical title, subtitle, author, spine, and back-cover copy. Adjust the artwork crop, opacity, and framing instead of trying to raise it above cover text.
         - For existing cover design work, call preview_publication_cover_canvas in annotated mode before mutating. After placing or arranging artwork, inspect another annotated whole-cover preview and correct clipping, hierarchy, protected regions, copy legibility, and collisions. Call the clean mode before reporting completion. You may skip only the initial preview for a genuinely empty cover.
         - Cover generation targets provide an exact moderate-resolution requested raster matching the selected cover surface or frame. If the provider returns different dimensions, the project image remains usable but geometryMatched is false and the mismatch is a warning. Inspect it and deliberately regenerate or fit it; never report it as exact-geometry output.
         - A cover-canvas preview is transient visual context, not an image-library asset. If visual delivery is unavailable, report that you could not visually verify the cover instead of inferring appearance from scene JSON.
         - Require alt text or an explicit decorative decision for publication releases and preserve logical reading order. A Core reading PDF may complete with unresolved image accessibility decisions as explicit warnings; report those warnings and do not describe the copy as publication-ready.
-        - Submit large cover composition payloads once to staging, then apply only the stage ID and expected revision.
+        - Submit large cover or publication-section page payloads once to staging, then apply only the stage ID and expected revision.
         - Release format is fixed. Create another release for another product type.
 
         Publishing trust:
@@ -98,12 +100,14 @@ public sealed class PublishChatService(
         "upsert_publication_book_text_style",
         "delete_publication_book_text_style",
         "patch_publication_book_content",
-        "upsert_publication_book_matter",
-        "delete_publication_book_matter",
-        "add_publication_book_placement",
-        "update_publication_book_placement",
-        "reorder_publication_book_placements",
-        "delete_publication_book_placement",
+        "upsert_publication_section",
+        "patch_publication_section_manuscript",
+        "reorder_publication_sections",
+        "create_publication_section_designed_page",
+        "remove_publication_section",
+        "patch_publication_section_page_element",
+        "add_project_image_to_publication_section_page",
+        "apply_publication_section_page_workspace_stage",
         "create_publication_release",
         "patch_publication_release_overrides",
         "set_edition_specific_content",
@@ -116,13 +120,6 @@ public sealed class PublishChatService(
         "prepare_publication_files",
         "cancel_publication_preparation",
         "patch_publication_release_content",
-        "reorder_publication_release_content",
-        "upsert_publication_release_matter",
-        "delete_publication_release_matter",
-        "add_publication_release_placement",
-        "update_publication_release_placement",
-        "reorder_publication_release_placements",
-        "delete_publication_release_placement",
         "update_publication_cover_design",
         "apply_publication_cover_composition_stage",
         "patch_publication_cover_element",
@@ -446,7 +443,7 @@ public sealed class PublishChatService(
                             projectId,
                             visuals,
                             visionReady,
-                            "Project-image outputs from the preceding tools. Inspect the visible result before choosing an image ID for a separate cover or publication placement tool.",
+                            "Project-image outputs from the preceding tools. Inspect the visible result before choosing an image ID for a separate cover tool. Publication-section Figures and Designed Pages are edited in the section workspace.",
                             cancellationToken);
                         if (visualMessage is not null)
                             messages.Add(ChatTurnEngine.MarkToolContextMessage(visualMessage));
@@ -538,12 +535,39 @@ public sealed class PublishChatService(
                 false,
                 PublishWorkspaceMutationKind.Package);
         }
+        if (toolName is "upsert_publication_section"
+            or "patch_publication_section_manuscript"
+            or "reorder_publication_sections"
+            or "create_publication_section_designed_page"
+            or "remove_publication_section")
+        {
+            var sectionReleaseId = ReadGuid(resultJson, "releaseId") ?? ReadGuid(argumentsJson, "releaseId");
+            return new PublishWorkspaceMutated(
+                sectionReleaseId,
+                false,
+                PublishWorkspaceMutationKind.Edition,
+                null,
+                toolName == "remove_publication_section" ? null : ReadGuid(resultJson, "sectionId") ?? ReadGuid(resultJson, "targetId"),
+                toolName == "create_publication_section_designed_page"
+                    ? ReadGuid(resultJson, "compositionId") ?? ReadGuid(resultJson, "targetId")
+                    : null);
+        }
+        if (toolName is "patch_publication_section_page_element"
+            or "add_project_image_to_publication_section_page"
+            or "apply_publication_section_page_workspace_stage")
+        {
+            var pageReleaseId = ReadGuid(resultJson, "releaseId") ?? ReadGuid(argumentsJson, "releaseId");
+            return new PublishWorkspaceMutated(
+                pageReleaseId,
+                false,
+                PublishWorkspaceMutationKind.Edition,
+                ReadGuid(resultJson, "selectId") ?? ReadGuid(argumentsJson, "targetId"),
+                ReadGuid(resultJson, "sectionId"),
+                ReadGuid(resultJson, "compositionId") ?? ReadGuid(argumentsJson, "compositionId"));
+        }
         if (toolName is "patch_publication_book" or "patch_publication_book_page_setup"
             or "upsert_publication_book_text_style" or "delete_publication_book_text_style"
             or "patch_publication_book_content"
-            or "upsert_publication_book_matter" or "delete_publication_book_matter"
-            or "add_publication_book_placement" or "update_publication_book_placement"
-            or "reorder_publication_book_placements" or "delete_publication_book_placement"
             or "patch_publication_core_cover_element" or "place_project_image_on_core_cover" or "add_project_image_to_core_cover"
             or "apply_publication_core_cover_composition_stage")
             return new PublishWorkspaceMutated(

@@ -29,7 +29,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
-    assert_eq!(value["protocolVersion"], 5);
+    assert_eq!(value["protocolVersion"], 6);
     assert_eq!(value["rendererVersion"], "2.0.6");
     assert_eq!(
         value["profiles"],
@@ -46,7 +46,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     assert_eq!(value["capabilities"]["digitalBookPdf"], true);
     assert_eq!(value["capabilities"]["taggedPdf"], true);
     assert_eq!(value["capabilities"]["mixedPageGeometry"], true);
-    assert_eq!(value["capabilities"]["publicationPlacements"], true);
+    assert_eq!(value["capabilities"]["publicationSections"], true);
     assert_eq!(value["capabilities"]["dedicatedFullWrapCover"], true);
 }
 
@@ -61,7 +61,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
         stderr(&output)
     );
     let response = response(&output);
-    assert_eq!(response["protocolVersion"], 5);
+    assert_eq!(response["protocolVersion"], 6);
     assert_eq!(response["rendererVersion"], "2.0.6");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
@@ -90,7 +90,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     for feature in [
         "flow-figure",
         "designed-page",
-        "publication-placement",
+        "publication-section",
         "dedicated-cover",
         "inline-marks",
     ] {
@@ -116,6 +116,80 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     assert_eq!(cover_inspection.page_count, 1);
     assert!(cover_inspection.page_width > 12.0 * 72.0);
     assert!(cover_inspection.all_fonts_embedded);
+}
+
+#[test]
+fn publication_sections_render_in_anchor_order_with_dynamic_contents() {
+    let mut job = PreparedJob::new("kdp-paperback-v1");
+    job.request["document"]["publicationSections"] = json!([
+        {
+            "id": "21000000-0000-0000-0000-000000000001",
+            "title": "Title page",
+            "kind": "TitlePage",
+            "systemRole": "Title",
+            "anchor": "Front",
+            "localOrder": 0,
+            "blocks": [{
+                "id": "31000000-0000-0000-0000-000000000001",
+                "type": "Heading",
+                "styleRole": "chapter-title",
+                "content": [{ "type": "Text", "text": "The Cartographer's Lantern", "marks": [] }]
+            }],
+            "pageCompositions": []
+        },
+        {
+            "id": "21000000-0000-0000-0000-000000000002",
+            "title": "Contents",
+            "kind": "Contents",
+            "systemRole": "Contents",
+            "anchor": "Front",
+            "localOrder": 1,
+            "blocks": [],
+            "pageCompositions": []
+        },
+        {
+            "id": "21000000-0000-0000-0000-000000000003",
+            "title": "About the author",
+            "kind": "AboutAuthor",
+            "systemRole": "None",
+            "anchor": "Back",
+            "localOrder": 0,
+            "blocks": [{
+                "id": "31000000-0000-0000-0000-000000000003",
+                "type": "Paragraph",
+                "styleRole": "body",
+                "content": [{ "type": "Text", "text": "Mara Vale charts imaginary borders.", "marks": [] }]
+            }],
+            "pageCompositions": []
+        }
+    ]);
+    job.write_request();
+
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let rendered = response(&output);
+    assert_eq!(rendered["status"], "completed");
+    let features = rendered["evidence"]["renderedFeatures"]
+        .as_array()
+        .expect("rendered features");
+    assert!(features.iter().any(|value| value == "publication-section"));
+    let page_map = rendered["pageMap"].as_array().expect("page map");
+    assert!(
+        page_map
+            .iter()
+            .any(|entry| entry["blockId"] == "31000000-0000-0000-0000-000000000001")
+    );
+    assert!(
+        page_map
+            .iter()
+            .any(|entry| entry["blockId"] == "31000000-0000-0000-0000-000000000003")
+    );
+    assert!(inspect(&job.artifact(&rendered, "interior-pdf")).page_count >= 4);
 }
 
 #[test]
@@ -227,10 +301,8 @@ fn digital_pdf_is_one_tagged_book_with_the_front_cover_as_page_one() {
 #[test]
 fn short_digital_pdf_does_not_receive_artificial_blank_pages() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
-    job.request["document"]["includeTitlePage"] = Value::Bool(false);
     job.request["document"]["includeTableOfContents"] = Value::Bool(false);
-    job.request["document"]["includeVisibleTableOfContents"] = Value::Bool(false);
-    job.request["document"]["matter"] = json!([]);
+    job.request["document"]["publicationSections"] = json!([]);
     job.request["document"]["sections"] = json!([{
         "id": "act", "title": "", "includePage": false, "includeHeading": false,
         "chapters": [{
@@ -578,7 +650,7 @@ fn declared_cff_otf_uses_cidfont_type0_and_an_opentype_fontfile3_stream() {
 }
 
 #[test]
-fn protocol_v5_renders_paragraph_presentation_and_structured_page_preview_data() {
+fn protocol_v6_renders_paragraph_presentation_and_structured_page_preview_data() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
     let chapter_id = "50000000-0000-0000-0000-000000000001";
     let figure_id = "60000000-0000-0000-0000-000000000001";
@@ -877,41 +949,51 @@ fn digital_layout_splits_facing_spreads_authored_as_edition_leaves_when_page_ove
 }
 
 #[test]
-fn edition_placements_honor_flow_caption_and_accessibility_presentation() {
+fn publication_sections_honor_flow_caption_and_accessibility_presentation() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
-    job.request["document"]["placements"] = json!([{
+    job.request["document"]["publicationSections"] = json!([{
         "id": "70000000-0000-0000-0000-000000000001",
-        "assetId": "90000000-0000-0000-0000-000000000001",
-        "targetKind": "Chapter",
+        "anchor": "BeforeChapter",
         "targetId": "50000000-0000-0000-0000-000000000001",
-        "placementKind": "ChapterOpening",
-        "caption": "This caption is intentionally hidden.",
-        "altText": "A navigational compass rose",
-        "decorative": false,
-        "language": "en-US",
-        "accessibilityRole": "Diagram",
-        "sortOrder": 0,
-        "presentation": {
-            "placement": "Float", "widthPercent": 42, "alignment": "End", "textWrap": "Start",
-            "fit": "Contain", "cropXPercent": 25, "cropYPercent": 70,
-            "spacingBeforePoints": 4, "spacingAfterPoints": 9, "startOnNewPage": false,
-            "keepWithCaption": true, "captionPlacement": "Hidden"
-        }
+        "kind": "ImagePage",
+        "systemRole": "None",
+        "localOrder": 0,
+        "title": "Compass rose",
+        "blocks": [{
+            "id": "71000000-0000-0000-0000-000000000001",
+            "type": "Figure",
+            "styleRole": "figure-caption",
+            "assetId": "90000000-0000-0000-0000-000000000001",
+            "caption": "This caption is intentionally hidden.",
+            "altText": "A navigational compass rose",
+            "decorative": false,
+            "language": "en-US",
+            "accessibilityRole": "Diagram",
+            "presentation": {
+                "placement": "Float", "widthPercent": 42, "alignment": "End", "textWrap": "Start",
+                "fit": "Contain", "cropXPercent": 25, "cropYPercent": 70,
+                "spacingBeforePoints": 4, "spacingAfterPoints": 9, "startOnNewPage": false,
+                "keepWithCaption": true, "captionPlacement": "Hidden"
+            },
+            "content": [{ "type": "Text", "text": "This caption is intentionally hidden.", "marks": [] }]
+        }],
+        "pageCompositions": []
     }]);
     job.write_request();
 
     let trace = job.layout_trace();
     let pages = trace["pages"].as_array().unwrap();
-    let placement_page = pages
+    let publication_page_index = pages
         .iter()
-        .find(|page| {
+        .position(|page| {
             page["images"].as_array().is_some_and(|images| {
                 images
                     .iter()
                     .any(|image| image["altText"] == "A navigational compass rose")
             })
         })
-        .expect("flowing edition placement page");
+        .expect("flowing publication section page");
+    let placement_page = &pages[publication_page_index];
     let image = placement_page["images"]
         .as_array()
         .unwrap()
@@ -922,16 +1004,21 @@ fn edition_placements_honor_flow_caption_and_accessibility_presentation() {
     assert_eq!(image["fit"], "Contain");
     assert_eq!(image["accessibilityRole"], "Diagram");
     assert_eq!(image["language"], "en-US");
-    let placement_page_text = placement_page["lines"]
-        .as_array()
-        .unwrap()
+    let chapter_page_index = pages
         .iter()
-        .filter_map(|line| line["text"].as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
+        .position(|page| {
+            page["lines"].as_array().is_some_and(|lines| {
+                lines.iter().any(|line| {
+                    line["text"]
+                        .as_str()
+                        .is_some_and(|text| text.contains("First Coordinate"))
+                })
+            })
+        })
+        .expect("target chapter page");
     assert!(
-        placement_page_text.contains("First Coordinate"),
-        "ChapterOpening placement must start inside its target chapter rather than on the prior page"
+        publication_page_index < chapter_page_index,
+        "BeforeChapter publication content must appear directly before its target chapter"
     );
     assert!(
         !pages
@@ -1086,20 +1173,21 @@ fn start_on_new_page_keeps_a_centered_figure_in_normal_flow() {
 }
 
 #[test]
-fn semantic_matter_figures_render_with_presentation_and_accessibility() {
+fn publication_section_figures_render_with_presentation_and_accessibility() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
-    job.request["document"]["matter"] = json!([{
-        "location": "Front", "title": "Illustrated preface", "blocks": [{
-            "id": "matter-figure", "type": "Figure", "styleRole": "figure-caption",
+    job.request["document"]["publicationSections"] = json!([{
+        "id": "figure-section", "anchor": "Front", "kind": "Preface", "systemRole": "None",
+        "localOrder": 0, "title": "Illustrated preface", "blocks": [{
+            "id": "section-figure", "type": "Figure", "styleRole": "figure-caption",
             "assetId": "90000000-0000-0000-0000-000000000001", "caption": "Matter caption",
-            "altText": "Accessible matter art", "decorative": false, "language": "en",
+            "altText": "Accessible section art", "decorative": false, "language": "en",
             "accessibilityRole": "Illustration",
             "presentation": { "placement": "Centered", "widthPercent": 52, "alignment": "Center",
                 "textWrap": "None", "fit": "Contain", "cropXPercent": 25, "cropYPercent": 75,
                 "spacingBeforePoints": 4, "spacingAfterPoints": 4, "startOnNewPage": false,
                 "keepWithCaption": true, "captionPlacement": "Above" },
             "content": [{ "type": "Text", "text": "Matter caption", "marks": [] }]
-        }]
+        }], "pageCompositions": []
     }]);
     job.write_request();
 
@@ -1109,8 +1197,8 @@ fn semantic_matter_figures_render_with_presentation_and_accessibility() {
         .unwrap()
         .iter()
         .flat_map(|page| page["images"].as_array().into_iter().flatten())
-        .find(|image| image["altText"] == "Accessible matter art")
-        .expect("matter figure image");
+        .find(|image| image["altText"] == "Accessible section art")
+        .expect("publication section figure image");
     assert_eq!(image["fit"], "Contain");
     assert!((image["cropX"].as_f64().unwrap() - 0.25).abs() < 0.001);
     assert!((image["cropY"].as_f64().unwrap() - 0.75).abs() < 0.001);
@@ -1783,6 +1871,25 @@ fn browser_preview_clips_overflowing_composition_text_without_weakening_render_v
 }
 
 #[test]
+fn composition_objects_may_extend_beyond_the_surface_and_are_clipped() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    let text = &mut job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"][0]["variants"]
+        [0]["scene"]["objects"][1];
+    text["bounds"]["xPercent"] = json!(-2);
+    text["bounds"]["widthPercent"] = json!(34);
+    job.write_request();
+
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "objects that overlap a page edge must be clipped, not rejected: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    assert_eq!(response(&output)["status"], "completed");
+}
+
+#[test]
 fn reading_copy_reports_pending_image_accessibility_without_blocking_the_pdf() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
     job.request["outputPurpose"] = json!("reading-copy");
@@ -1883,12 +1990,9 @@ fn browser_preview_layout_trace_omits_unused_glyph_payloads() {
 fn emitted_pdf_text_matrices_match_harfrust_layout_positions() {
     let mut job = PreparedJob::new("kdp-paperback-v1");
     job.request["cover"] = Value::Null;
-    job.request["document"]["includeTitlePage"] = Value::Bool(false);
-    job.request["document"]["includeVisibleTableOfContents"] = Value::Bool(false);
     job.request["document"]["includeActHeadings"] = Value::Bool(false);
     job.request["document"]["includeChapterHeadings"] = Value::Bool(false);
-    job.request["document"]["matter"] = json!([]);
-    job.request["document"]["placements"] = json!([]);
+    job.request["document"]["publicationSections"] = json!([]);
     job.request["document"]["sections"] = json!([{
         "id": "act", "title": "", "includePage": false, "includeHeading": false,
         "chapters": [{
@@ -2286,7 +2390,7 @@ impl PreparedJob {
         fs::create_dir_all(root.path().join("input/assets")).expect("input assets");
         fs::write(root.path().join("input/assets/pixel.png"), PIXEL_PNG).expect("pixel PNG");
         let mut request: Value =
-            serde_json::from_slice(include_bytes!("../fixtures/full-model-v5.json"))
+            serde_json::from_slice(include_bytes!("../fixtures/full-model-v6.json"))
                 .expect("canonical request");
         request["profile"] = Value::String(profile.to_owned());
         if profile == "generic-digital-pdf-v1" {

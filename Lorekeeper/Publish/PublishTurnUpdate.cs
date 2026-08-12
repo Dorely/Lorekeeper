@@ -44,7 +44,9 @@ public sealed record PublishWorkspaceMutated(
     Guid? EditionId,
     bool SelectEdition,
     PublishWorkspaceMutationKind Kind = PublishWorkspaceMutationKind.Edition,
-    Guid? SelectedObjectId = null) : PublishTurnUpdate;
+    Guid? SelectedObjectId = null,
+    Guid? SelectedSectionId = null,
+    Guid? SelectedCompositionId = null) : PublishTurnUpdate;
 
 public sealed record PublishAssistantMessageCompleted(Guid MessageId) : PublishTurnUpdate;
 

@@ -559,15 +559,21 @@ Provider output validation has a separate configurable 64 MiB default byte
 boundary rather than inheriting the smaller user-upload limit, so a valid
 high-detail generated raster is not rejected after provider completion.
 `IPublicationBookService` owns the one-to-one revisioned Core Book: shared
-metadata, content and reading order, title/contents and heading presentation,
-semantic front/back matter, opening/ending placements, and a reusable front
-cover. Project page setup and Book Text Styles remain the Core geometry and
+metadata, chapter inclusion, title/contents and heading presentation, and a
+reusable front cover. Core chapter order always follows the project outline.
+`IPublicationSectionService` owns publication material around that outline.
+Each section has a front/back or act/chapter-relative anchor and may combine
+ordinary semantic prose, flowing Figures, and section-owned Designed Pages.
+Title, copyright, and contents are system sections with live metadata bindings;
+other sections include dedications, acknowledgements, author notes, references,
+image pages, and arbitrary production material. Releases inherit Core sections
+live, then may replace, omit, add, or reset individual sections without gaining
+an independent chapter-order model. Project page setup and Book Text Styles remain the Core geometry and
 typography owners. Core Book exists even when the project has no publication
 release and can produce only a private `ReadingPdf`, never a publication package
 or ISBN claim. Chapter rows are the selectable publication content. Acts remain
 structural groups: the act-heading and act-summary settings alone determine
-whether their divider presentation is emitted, while act-targeted illustration
-placements remain valid independently of that presentation.
+whether their divider presentation is emitted.
 Core Book also owns Digital PDF presentation defaults. Preserving Designed Page
 sizes keeps a facing composition as one wide PDF page and retains intentional
 independent page geometry; otherwise facing compositions are emitted as two
@@ -637,10 +643,10 @@ version changes.
 Archived releases are immutable at every owning mutation boundary; their
 existing artifacts remain readable and exportable, and cloning creates the
 editable continuation.
-Project export v18 writes manuscript-v4 documents, project page setup, page
+Project export v19 writes manuscript-v4 documents, project page setup, page
 compositions and exact geometry variants with active authoring variants, Core
 Book, sparse release overlays and cover scenes, Book Text Styles,
-edition chapter snapshots and edition-owned compositions, visual references,
+edition chapter snapshots, publication sections and their compositions, visual references,
 and project-owned font families/faces with binary hashes.
 An isolated versioned transformer maps earlier visual structures into the
 current model; earlier structured and text adapters remain import-only
@@ -660,14 +666,14 @@ committed imported data as a failed import.
 PDF output exists only through the contained press runtime. Paperback jobs
 produce separate immutable interior and full-wrap cover PDFs; Digital PDF jobs
 produce one immutable Book PDF whose front cover is page one, followed by
-matter and manuscript content. The Publish workspace derives Generate,
+publication sections and manuscript content. The Publish workspace derives Generate,
 active/cancel, Retry, Regenerate, and applicable Save actions from render and
 artifact state. Save uses hash-verifying immutable endpoints and never invokes
 browser print. EPUB editions cannot request Press output, and non-EPUB editions
 cannot export EPUB, preventing product-form identifiers and metadata from
 crossing formats.
 Publish route initialization is progressive: Core metadata and the release
-navigator form the blocking shell, while outline/matter/placement details,
+navigator form the blocking shell, while outline/publication-section details,
 preparation state, artifact freshness, and the project-aware assistant mount
 after the first interactive render. Release selection follows the same staged
 path, exposing editable effective settings before output history finishes
@@ -679,7 +685,7 @@ only after that Core/release refresh completes, preserving the active stream and
 preventing overlapping reads on the circuit-scoped data boundary. The transcript
 remains visible during that refresh while the composer is temporarily disabled.
 
-`Lorekeeper.Press` owns protocol v5, deterministic layout, English/Latin shaping
+`Lorekeeper.Press` owns protocol v6, deterministic layout, English/Latin shaping
 and glyph diagnostics, custom project TTF/OTF staging and embedding, font
 subsetting and ToUnicode maps, inline typography, bounded pagination, TOC
 convergence, stable block/page maps, sparse paragraph presentation, flowing
@@ -708,7 +714,7 @@ atomic promotion. An independent black-box test harness parses raw PDF objects
 without calling that validator. This is the evidence behind the scoped
 “Lorekeeper validated” state; it is not evidence of vendor upload acceptance.
 
-Protocol v5 stages `input/request.json` plus declared PNG/JPEG assets and
+Protocol v6 stages `input/request.json` plus declared PNG/JPEG assets and
 approved project TTF/OTF fonts in a bounded job root. Declarations carry media
 type, byte length, dimensions where applicable, rights state, and SHA-256.
 Render requests explicitly identify `outputPurpose` as `publication` or
@@ -759,7 +765,7 @@ WeasyPrint, Chromium, machine PDF software, or repository fallback. Runtime
 readiness and the dynamic `describe` contract are checked by the
 UI, assistant, and service before a render can be queued. The processor captures
 bounded stdout/stderr, bounds its lifetime and paths,
-and verifies every returned length/hash before persistence. Protocol-v5
+and verifies every returned length/hash before persistence. Protocol-v6
 requests are serialized as BOM-free UTF-8 JSON; the owned renderer also
 tolerates an optional UTF-8 BOM for compatibility and binds every post-parse
 terminal response to the parsed job identity before the app accepts its
@@ -854,24 +860,24 @@ EPUB packages; exact PDF row IDs remain
 an internal correlation snapshot and never leak into portable bytes. A short
 serializable transaction rechecks the source immediately before each package
 write, so a concurrent fingerprint-affecting mutation cannot be
-mislabeled. Title, copyright, and visible contents pages are
-generated exclusively from edition settings, so user-authored semantic matter
-cannot claim those reserved kinds and duplicate generated output. EPUB
+mislabeled. Title, copyright, and visible contents pages are system publication
+sections with live bindings to effective Core/release fields. User-created
+sections cannot claim those reserved roles or duplicate generated output. EPUB
 validation remains structural and internal; broader reader-matrix results are
 outside the current runtime. Vendor upload and physical review are external user
 activities and never alter the renderer's scoped structural result.
 
-Publish assistant matter tools expose a dedicated user-authored-kind contract
-that omits generated title, copyright, and contents pages. Expected matter
-validation, missing-item, and revision failures return compact recovery results
-inside the assistant turn; generated-page changes route through Core or release
-settings.
+Publish assistant section tools expose bounded reads, focused manuscript patches,
+section-local Designed Page operations, live-inheritance customization/reset,
+and order changes only among sections sharing one fixed outline anchor. Large
+page changes use persisted non-replayable staging. The assistant cannot reorder
+chapters or mutate chapter manuscript content from Publish.
 
 ISBN values are strict, checksum-validated, and stored in canonical ISBN-13
 form. The same ISBN may be shared only by same-format vendor editions whose
 bibliographic metadata, visible content settings, physical product settings,
-ordered outline, semantic matter, effective chapter content, referenced shared
-styles, and image placements match.
+fixed Core outline, effective publication sections, effective chapter content,
+and referenced shared styles match.
 Vendor/profile production settings may differ. Once shared, content-affecting
 edition mutations fail closed until the ISBN is cleared and the editions are
 synchronized.
@@ -896,7 +902,7 @@ publishing mutations are locked for the duration of a Publish turn, render state
 is re-read after autosave, and assistant preparation changes reconnect polling
 and current artifact downloads.
 `PublishAssistantTools` exposes compact Core/release reads and revision-safe
-patches, sparse content/matter/placement/cover operations, readiness,
+patches, publication-section manuscript/page/cover operations, readiness,
 preparation, cancellation, and artifact metadata. Tool results contain changed
 IDs/fields, revisions, prioritized diagnostic counts, and refresh notices rather
 than complete unchanged records. Raw profile selection and low-level
@@ -1056,7 +1062,7 @@ The Core Book cutover uses an additive schema followed by the guarded
 `PublicationCoreMigrationService` and a cleanup migration. For each project it
 selects the former default release, then oldest release, then project/Book Brief
 defaults as its source. It creates exactly one Core Book, moves equal shared
-metadata/content/matter/placements into Core, converts every release to sparse
+metadata/content and historical matter/placement rows into Core, converts every release to sparse
 overrides while comparing its complete effective projection, and retains every
 existing release cover as an explicit override. It generalizes jobs, artifacts,
 page maps, and covers to Core or release target references and marks existing
@@ -1078,9 +1084,9 @@ style mappings. Existing rendered artifacts become Legacy because effective
 source fingerprinting now hashes inherited Core chapters or divergent edition
 chapters and only the shared styles actually referenced by effective content.
 
-Project export v18 contains only the current v4/page-setup/composition model,
+Project export v19 contains only the current v4/page-setup/composition model,
 Core Book, sparse release overlays, edition chapter snapshots, edition-owned
-compositions, and target-aware publication records; older
+compositions, publication sections, and target-aware publication records; older
 formats remain importable only through isolated versioned transformers.
 Human-readable language names from Book Briefs and publication inputs are
 canonicalized to culture tags when new Core/release values are persisted and at

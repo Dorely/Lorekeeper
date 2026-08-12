@@ -248,7 +248,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
 
     staging.promote(&output)?;
     let response = RenderResponse {
-        protocol_version: 5,
+        protocol_version: 6,
         renderer_version: env!("CARGO_PKG_VERSION"),
         job_id: Some(request.job_id.clone()),
         status: "completed".to_owned(),
@@ -453,7 +453,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
-            "protocolVersion": 5,
+            "protocolVersion": 6,
             "rendererVersion": env!("CARGO_PKG_VERSION"),
             "jobId": request.job_id,
             "pages": pages,
@@ -568,10 +568,10 @@ fn validate_request(
     request: &RenderRequest,
     job_root: &Path,
 ) -> RenderResult<std::collections::BTreeMap<String, Vec<u8>>> {
-    if request.protocol_version != 5 {
+    if request.protocol_version != 6 {
         return reject(
             "PRESS_PROTOCOL_INVALID",
-            "Lorekeeper Press requires protocol version 4.",
+            "Lorekeeper Press requires protocol version 6.",
         );
     }
     if request.job_id.len() != 32 || !request.job_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -1102,27 +1102,21 @@ fn paginate_with_cancellation(
     let mut page_map = Vec::new();
     let mut body_start_page = None;
     let document = &request.document;
-    let title = string(document, "title");
-    let author = string(document, "author");
-    if document
-        .get("includeTitlePage")
-        .and_then(Value::as_bool)
-        .unwrap_or(true)
-    {
-        pages.push(centered_page(&title, &author, trim));
-    }
-    let toc_index = document
-        .get("includeVisibleTableOfContents")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-        .then_some(pages.len());
-    if toc_index.is_some() {
-        pages.push(centered_page("Contents", "", trim));
-    }
     let mut chapter_entries = Vec::new();
     let mut chapter_ordinal = 0usize;
     let mut semantic_order = 0i32;
-    append_matter(&mut pages, document, "Front", trim);
+    let toc_index = append_publication_sections(
+        &mut pages,
+        document,
+        "Front",
+        None,
+        trim,
+        request.profile == "generic-digital-pdf-v1",
+        tolerance,
+        &mut diagnostics,
+        &mut page_map,
+        &mut semantic_order,
+    )?;
     let mut features = BTreeSet::new();
     if document
         .get("styles")
@@ -1132,23 +1126,27 @@ fn paginate_with_cancellation(
         features.insert("named-styles".to_owned());
     }
     if document
-        .get("placements")
+        .get("publicationSections")
         .and_then(Value::as_array)
-        .is_some_and(|values| !values.is_empty())
+        .is_some_and(|sections| !sections.is_empty())
     {
-        features.insert("publication-placement".to_owned());
+        features.insert("publication-section".to_owned());
     }
     if let Some(sections) = document.get("sections").and_then(Value::as_array) {
         for (section_index, section) in sections.iter().enumerate() {
             check_layout_cancellation(job_root)?;
-            append_placement_pages(
+            append_publication_sections(
                 &mut pages,
                 document,
-                &string(section, "id"),
-                &["BeforeAct"],
+                "BeforeAct",
+                Some(&string(section, "id")),
                 trim,
-                true,
-            );
+                request.profile == "generic-digital-pdf-v1",
+                tolerance,
+                &mut diagnostics,
+                &mut page_map,
+                &mut semantic_order,
+            )?;
             let section_title = numbered_title(
                 &string(section, "title"),
                 section_index + 1,
@@ -1208,14 +1206,18 @@ fn paginate_with_cancellation(
             {
                 check_layout_cancellation(job_root)?;
                 chapter_ordinal += 1;
-                append_placement_pages(
+                append_publication_sections(
                     &mut pages,
                     document,
-                    &string(chapter, "id"),
-                    &["BeforeChapter"],
+                    "BeforeChapter",
+                    Some(&string(chapter, "id")),
                     trim,
-                    true,
-                );
+                    request.profile == "generic-digital-pdf-v1",
+                    tolerance,
+                    &mut diagnostics,
+                    &mut page_map,
+                    &mut semantic_order,
+                )?;
                 if !is_designed_page_only_chapter(chapter) {
                     start_recto(&mut pages, trim);
                 }
@@ -1249,14 +1251,6 @@ fn paginate_with_cancellation(
                 if include_chapter_heading && !chapter_title.is_empty() {
                     pages.push(text_page(vec![(chapter_title.clone(), 22.0)], trim));
                 }
-                append_placement_pages(
-                    &mut pages,
-                    document,
-                    &string(chapter, "id"),
-                    &["ChapterOpening"],
-                    trim,
-                    false,
-                );
                 let chapter_synopsis = string(chapter, "synopsis");
                 if !chapter_synopsis.is_empty() {
                     let synopsis_style = BlockStyle {
@@ -1567,34 +1561,45 @@ fn paginate_with_cancellation(
                     page.bookmark = (!chapter_title.is_empty()).then_some(chapter_title.clone());
                 }
                 add_running_heads(&mut pages[chapter_page_index..], &chapter_title, trim);
-                append_placement_pages(
+                append_publication_sections(
                     &mut pages,
                     document,
-                    &string(chapter, "id"),
-                    &["ChapterEnding"],
+                    "AfterChapter",
+                    Some(&string(chapter, "id")),
                     trim,
-                    false,
-                );
-                append_placement_pages(
-                    &mut pages,
-                    document,
-                    &string(chapter, "id"),
-                    &["AfterChapter"],
-                    trim,
-                    true,
-                );
+                    request.profile == "generic-digital-pdf-v1",
+                    tolerance,
+                    &mut diagnostics,
+                    &mut page_map,
+                    &mut semantic_order,
+                )?;
             }
-            append_placement_pages(
+            append_publication_sections(
                 &mut pages,
                 document,
-                &string(section, "id"),
-                &["AfterAct"],
+                "AfterAct",
+                Some(&string(section, "id")),
                 trim,
-                true,
-            );
+                request.profile == "generic-digital-pdf-v1",
+                tolerance,
+                &mut diagnostics,
+                &mut page_map,
+                &mut semantic_order,
+            )?;
         }
     }
-    append_matter(&mut pages, document, "Back", trim);
+    append_publication_sections(
+        &mut pages,
+        document,
+        "Back",
+        None,
+        trim,
+        request.profile == "generic-digital-pdf-v1",
+        tolerance,
+        &mut diagnostics,
+        &mut page_map,
+        &mut semantic_order,
+    )?;
     let mut toc_converged = toc_index.is_none();
     if let Some(index) = toc_index {
         let (replacements, converged) =
@@ -2037,13 +2042,22 @@ fn designed_page(
             || height <= 0.0
             || width > 4.0
             || height > 4.0
-            || (kind != "Image"
-                && (x < 0.0 || y < 0.0 || x + width > 1.0001 || y + height > 1.0001))
+            || !(-4.0..=4.0).contains(&x)
+            || !(-4.0..=4.0).contains(&y)
         {
             return Err(Diagnostic::error(
                 "PRESS_COMPOSITION_BOUNDS_INVALID",
                 format!(
                     "Composition object '{}' lies outside its surface.",
+                    string(&item, "id")
+                ),
+            ));
+        }
+        if x < 0.0 || y < 0.0 || x + width > 1.0001 || y + height > 1.0001 {
+            diagnostics.push(Diagnostic::warning(
+                "PRESS_COMPOSITION_OBJECT_CLIPPED",
+                format!(
+                    "Composition object '{}' extends beyond its surface and will be clipped to the page.",
                     string(&item, "id")
                 ),
             ));
@@ -3084,33 +3098,122 @@ fn layout_image_fit(value: &str) -> LayoutImageFit {
     }
 }
 
-fn append_matter(
+#[allow(clippy::too_many_arguments)]
+fn append_publication_sections(
     pages: &mut Vec<LayoutPage>,
     document: &Value,
-    location: &str,
+    anchor: &str,
+    target_id: Option<&str>,
     trim: &crate::model::Trim,
-) {
-    for item in document
-        .get("matter")
+    is_digital_pdf: bool,
+    tolerance: LayoutTolerance,
+    diagnostics: &mut Vec<Diagnostic>,
+    page_map: &mut Vec<PageMapEntry>,
+    semantic_order: &mut i32,
+) -> RenderResult<Option<usize>> {
+    let mut toc_index = None;
+    for section in document
+        .get("publicationSections")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|item| string(item, "location").eq_ignore_ascii_case(location))
+        .filter(|section| {
+            string(section, "anchor").eq_ignore_ascii_case(anchor)
+                && target_id.is_none_or(|id| string(section, "targetId") == id)
+        })
     {
-        pages.push(text_page(vec![(string(item, "title"), 18.0)], trim));
-        for block in item
+        let section_id = string(section, "id");
+        if string(section, "systemRole").eq_ignore_ascii_case("Contents") {
+            toc_index = Some(pages.len());
+            pages.push(centered_page("Contents", "", trim));
+            continue;
+        }
+        let blocks = section
             .get("blocks")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-        {
-            if string(block, "type").eq_ignore_ascii_case("Figure") {
+            .collect::<Vec<_>>();
+        let begins_with_flowing_content = blocks
+            .first()
+            .is_some_and(|block| !string(block, "type").eq_ignore_ascii_case("DesignedPage"));
+        if begins_with_flowing_content && !pages.is_empty() {
+            pages.push(empty_body_page());
+        }
+        let mut previous_was_designed_page = false;
+        for block in blocks {
+            *semantic_order += 1;
+            let semantic_snapshot = pages
+                .iter()
+                .map(|page| (page.lines.len(), page.images.len()))
+                .collect::<Vec<_>>();
+            let first_page = pages.len() + 1;
+            let block_id = string(block, "id");
+            let block_type = string(block, "type");
+            if previous_was_designed_page && !block_type.eq_ignore_ascii_case("DesignedPage") {
+                pages.push(empty_body_page());
+            }
+            if block_type.eq_ignore_ascii_case("DesignedPage") {
+                let composition_id = string(block, "pageCompositionId");
+                let composition = section
+                    .get("pageCompositions")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .find(|item| string(item, "id") == composition_id)
+                    .ok_or_else(|| {
+                        Box::new(RenderResponse::failed(
+                            "rejected",
+                            Diagnostic::error(
+                                "PRESS_COMPOSITION_MISSING",
+                                format!(
+                                    "Publication section '{}' references a missing Designed Page composition.",
+                                    string(section, "title")
+                                ),
+                            )
+                            .with_source("publication-section", section_id.clone()),
+                        ))
+                    })?;
+                let rendered = designed_pages(
+                    composition,
+                    document,
+                    trim,
+                    is_digital_pdf,
+                    document
+                        .get("allowDesignedPageOverrides")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    tolerance,
+                    diagnostics,
+                )
+                .map_err(|diagnostic| {
+                    Box::new(RenderResponse::failed(
+                        "rejected",
+                        diagnostic.with_source("publication-section", section_id.clone()),
+                    ))
+                })?;
+                pages.extend(rendered);
+                assign_semantic_order_since(
+                    pages,
+                    &semantic_snapshot,
+                    *semantic_order,
+                    &block_id,
+                    None,
+                );
+                if !block_id.is_empty() {
+                    page_map.push(PageMapEntry {
+                        chapter_id: section_id.clone(),
+                        block_id,
+                        page_number: first_page,
+                    });
+                }
+                previous_was_designed_page = true;
+                continue;
+            }
+            previous_was_designed_page = false;
+            if block_type.eq_ignore_ascii_case("Figure") {
                 let presentation = block.get("presentation").unwrap_or(&Value::Null);
                 let placement = string(presentation, "placement");
-                let start_on_new_page = presentation
-                    .get("startOnNewPage")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
                 let width_percent = if matches!(placement.as_str(), "FullWidth" | "FullBleed") {
                     100.0
                 } else {
@@ -3133,24 +3236,13 @@ fn append_matter(
                     _ => "center",
                 };
                 let caption_placement = string(presentation, "captionPlacement");
-                let decorative = block
-                    .get("decorative")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false);
-                let alt_text = block
-                    .get("altText")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
-                let language = block
-                    .get("language")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
-                let accessibility_role = block
-                    .get("accessibilityRole")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
                 let dedicated = matches!(placement.as_str(), "DedicatedPage" | "FullBleed");
-                if start_on_new_page && !dedicated {
+                if presentation
+                    .get("startOnNewPage")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                    && !dedicated
+                {
                     pages.push(empty_body_page());
                 }
                 if dedicated {
@@ -3164,11 +3256,23 @@ fn append_matter(
                         alignment,
                     );
                     if let Some(image) = page.images.first_mut() {
-                        image.alt_text.clone_from(&alt_text);
-                        image.decorative = decorative;
-                        image.language.clone_from(&language);
+                        image.alt_text = block
+                            .get("altText")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
+                        image.decorative = block
+                            .get("decorative")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        image.language = block
+                            .get("language")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
                         image.fit = layout_image_fit(&string(presentation, "fit"));
-                        image.accessibility_role.clone_from(&accessibility_role);
+                        image.accessibility_role = block
+                            .get("accessibilityRole")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
                         if placement == "FullBleed" {
                             let bleed = trim.bleed_inches * 72.0;
                             image.x = -bleed;
@@ -3193,7 +3297,10 @@ fn append_matter(
                         }
                     }
                     for line in &mut page.lines {
-                        line.language.clone_from(&language);
+                        line.language = block
+                            .get("language")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
                         line.artifact = false;
                     }
                     pages.push(page);
@@ -3224,10 +3331,22 @@ fn append_matter(
                             .unwrap_or(true),
                     );
                     if let Some(image) = pages.last_mut().and_then(|page| page.images.last_mut()) {
-                        image.alt_text = alt_text;
-                        image.decorative = decorative;
-                        image.language = language.clone();
-                        image.accessibility_role = accessibility_role;
+                        image.alt_text = block
+                            .get("altText")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
+                        image.decorative = block
+                            .get("decorative")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                        image.language = block
+                            .get("language")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
+                        image.accessibility_role = block
+                            .get("accessibilityRole")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
                     }
                     if let Some(page) = pages.last_mut() {
                         for line in page
@@ -3235,17 +3354,37 @@ fn append_matter(
                             .iter_mut()
                             .filter(|line| line.semantic_role == LayoutSemanticRole::Caption)
                         {
-                            line.language.clone_from(&language);
+                            line.language = block
+                                .get("language")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned);
                             line.artifact = false;
                         }
                     }
                 }
+                assign_semantic_order_since(
+                    pages,
+                    &semantic_snapshot,
+                    *semantic_order,
+                    &block_id,
+                    None,
+                );
+                if !block_id.is_empty() {
+                    page_map.push(PageMapEntry {
+                        chapter_id: section_id.clone(),
+                        block_id,
+                        page_number: first_page,
+                    });
+                }
                 continue;
             }
             let text = display_block_text(block);
+            if text.trim().is_empty() && !block_type.eq_ignore_ascii_case("SceneBreak") {
+                continue;
+            }
             let style = block_style(document, block, trim);
-            let runs = if string(block, "type").eq_ignore_ascii_case("SceneBreak")
-                || string(block, "type").eq_ignore_ascii_case("ListItem")
+            let runs = if block_type.eq_ignore_ascii_case("SceneBreak")
+                || block_type.eq_ignore_ascii_case("ListItem")
             {
                 single_run(&text, style.face)
             } else {
@@ -3259,8 +3398,23 @@ fn append_matter(
                 &style,
                 block.get("language").and_then(Value::as_str),
             );
+            assign_semantic_order_since(
+                pages,
+                &semantic_snapshot,
+                *semantic_order,
+                &block_id,
+                None,
+            );
+            if !block_id.is_empty() {
+                page_map.push(PageMapEntry {
+                    chapter_id: section_id.clone(),
+                    block_id,
+                    page_number: first_page,
+                });
+            }
         }
     }
+    Ok(toc_index)
 }
 
 fn centered_page(title: &str, subtitle: &str, trim: &crate::model::Trim) -> LayoutPage {
@@ -3362,173 +3516,6 @@ fn add_running_heads(pages: &mut [LayoutPage], title: &str, trim: &crate::model:
             semantic_parent_id: None,
             link_page: None,
         });
-    }
-}
-
-fn append_placement_pages(
-    pages: &mut Vec<LayoutPage>,
-    document: &Value,
-    target_id: &str,
-    kinds: &[&str],
-    trim: &crate::model::Trim,
-    isolate_flowing_boundary: bool,
-) {
-    for placement in document
-        .get("placements")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|placement| {
-            string(placement, "targetId") == target_id
-                && kinds.contains(&string(placement, "placementKind").as_str())
-        })
-    {
-        let presentation = placement.get("presentation").unwrap_or(&Value::Null);
-        let placement_intent = match string(presentation, "placement") {
-            value if value.is_empty() => "DedicatedPage".to_owned(),
-            value => value,
-        };
-        let caption_placement = string(presentation, "captionPlacement");
-        let width_percent = if matches!(placement_intent.as_str(), "FullWidth" | "FullBleed") {
-            100.0
-        } else {
-            presentation
-                .get("widthPercent")
-                .and_then(Value::as_f64)
-                .unwrap_or(100.0) as f32
-        };
-        let alignment = match string(presentation, "alignment").as_str() {
-            "Start" => "left",
-            "End" => "right",
-            _ => "center",
-        };
-        let focal_x = presentation
-            .get("cropXPercent")
-            .and_then(Value::as_f64)
-            .unwrap_or(50.0) as f32;
-        let focal_y = presentation
-            .get("cropYPercent")
-            .and_then(Value::as_f64)
-            .unwrap_or(50.0) as f32;
-        let dedicated = matches!(placement_intent.as_str(), "DedicatedPage" | "FullBleed");
-        if dedicated {
-            let mut page = dedicated_figure_page_with_layout(
-                trim,
-                &string(placement, "caption"),
-                string(placement, "assetId"),
-                width_percent,
-                focal_x,
-                focal_y,
-                alignment,
-            );
-            if caption_placement == "Hidden" {
-                page.lines.clear();
-            } else if caption_placement == "Above" {
-                let top = trim.height_inches * 72.0 - trim.margin_inches * 72.0;
-                for (index, line) in page.lines.iter_mut().enumerate() {
-                    line.y = top - index as f32 * 9.0 * 1.6;
-                }
-            } else if caption_placement == "Overlay"
-                && let Some(image) = page.images.first()
-            {
-                for (index, line) in page.lines.iter_mut().enumerate() {
-                    line.y = image.y + 12.0 + index as f32 * 9.0 * 1.6;
-                    line.light_text = true;
-                }
-            }
-            if let Some(image) = page.images.first_mut() {
-                if placement_intent == "FullBleed" {
-                    let bleed = trim.bleed_inches * 72.0;
-                    image.x = -bleed;
-                    image.y = -bleed;
-                    image.width = trim.width_inches * 72.0 + bleed * 2.0;
-                    image.height = trim.height_inches * 72.0 + bleed * 2.0;
-                }
-                apply_placement_accessibility(image, placement);
-                image.fit = layout_image_fit(&string(presentation, "fit"));
-            }
-            apply_placement_caption_language(&mut page, placement);
-            pages.push(page);
-            continue;
-        }
-
-        if isolate_flowing_boundary {
-            pages.push(empty_body_page());
-        }
-        if presentation
-            .get("startOnNewPage")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            pages.push(empty_body_page());
-        }
-        append_inline_illustration(
-            pages,
-            trim,
-            &string(placement, "caption"),
-            string(placement, "assetId"),
-            width_percent,
-            focal_x,
-            focal_y,
-            alignment,
-            &string(presentation, "textWrap"),
-            layout_image_fit(&string(presentation, "fit")),
-            presentation
-                .get("spacingBeforePoints")
-                .and_then(Value::as_f64)
-                .unwrap_or(6.0) as f32,
-            presentation
-                .get("spacingAfterPoints")
-                .and_then(Value::as_f64)
-                .unwrap_or(6.0) as f32,
-            &caption_placement,
-            presentation
-                .get("keepWithCaption")
-                .and_then(Value::as_bool)
-                .unwrap_or(true),
-        );
-        if let Some(image) = pages.last_mut().and_then(|page| page.images.last_mut()) {
-            apply_placement_accessibility(image, placement);
-        }
-        if let Some(page) = pages.last_mut() {
-            apply_placement_caption_language(page, placement);
-        }
-    }
-}
-
-fn apply_placement_accessibility(image: &mut LayoutImage, placement: &Value) {
-    image.alt_text = placement
-        .get("altText")
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .map(str::to_owned);
-    image.decorative = placement
-        .get("decorative")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-    image.language = placement
-        .get("language")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    image.reading_order = (!image.decorative).then_some(1);
-    image.accessibility_role = placement
-        .get("accessibilityRole")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-}
-
-fn apply_placement_caption_language(page: &mut LayoutPage, placement: &Value) {
-    for line in page
-        .lines
-        .iter_mut()
-        .filter(|line| line.semantic_role == LayoutSemanticRole::Caption)
-    {
-        line.language = placement
-            .get("language")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        line.artifact = false;
-        line.reading_order = Some(2);
     }
 }
 
@@ -5665,7 +5652,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let request = RenderRequest {
-            protocol_version: 5,
+            protocol_version: 6,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v1".to_owned(),
             ink: "BlackAndWhite".to_owned(),
@@ -5675,7 +5662,12 @@ mod tests {
                 "title": "Long contents",
                 "author": "Author",
                 "language": "en",
-                "includeVisibleTableOfContents": true,
+                "publicationSections": [{
+                    "id": "contents",
+                    "anchor": "Front",
+                    "systemRole": "Contents",
+                    "blocks": []
+                }],
                 "sections": [{ "chapters": chapters }]
             }),
             trim: crate::model::Trim {
@@ -5977,15 +5969,18 @@ mod tests {
     }
 
     #[test]
-    fn front_and_back_matter_surround_the_body_in_reading_order() {
+    fn front_and_back_publication_sections_surround_the_body_in_reading_order() {
         let request = request_with_document(serde_json::json!({
-            "title": "Ordered matter",
+            "title": "Ordered publication sections",
             "author": "Author",
             "language": "en",
-            "includeTitlePage": false,
-            "matter": [
-                { "location": "Back", "title": "Acknowledgments", "blocks": [] },
-                { "location": "Front", "title": "Dedication", "blocks": [] }
+            "publicationSections": [
+                { "id": "back", "anchor": "Back", "title": "Acknowledgments", "blocks": [
+                    { "id": "back-copy", "type": "Heading", "content": [{ "text": "Acknowledgments" }] }
+                ] },
+                { "id": "front", "anchor": "Front", "title": "Dedication", "blocks": [
+                    { "id": "front-copy", "type": "Heading", "content": [{ "text": "Dedication" }] }
+                ] }
             ],
             "sections": [{
                 "chapters": [{
@@ -6011,7 +6006,6 @@ mod tests {
             "title": "Acts",
             "author": "Author",
             "language": "en",
-            "includeTitlePage": false,
             "includeActHeadings": true,
             "numberActs": true,
             "sections": [{
@@ -6045,7 +6039,6 @@ mod tests {
             "title": "Acts",
             "author": "Author",
             "language": "en",
-            "includeTitlePage": false,
             "includeActHeadings": false,
             "numberActs": true,
             "sections": [{
@@ -6300,7 +6293,7 @@ mod tests {
 
     fn request_with_document(document: Value) -> RenderRequest {
         RenderRequest {
-            protocol_version: 5,
+            protocol_version: 6,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v1".to_owned(),
             ink: "BlackAndWhite".to_owned(),

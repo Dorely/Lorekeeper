@@ -19,7 +19,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 18;
+    public const int CurrentFormatVersion = 19;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -34,6 +34,7 @@ public sealed record ProjectExportDocument
     public ProjectExportPublicationBook? PublicationBook { get; init; }
     public List<ProjectExportPublicationEdition> PublicationEditions { get; init; } = [];
     public List<ProjectExportPageComposition> PageCompositions { get; init; } = [];
+    public List<ProjectExportPublicationSection> PublicationSections { get; init; } = [];
     [JsonPropertyName("publishProfiles")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<ProjectExportLegacyPublishProfile>? LegacyPublishProfiles { get; init; }
@@ -185,8 +186,6 @@ public sealed record ProjectExportPublicationEdition(
     double PageWidthInches,
     double PageHeightInches,
     double PageMarginInches,
-    double BodyFontSizePoints,
-    double BodyLineHeight,
     Guid? SelectedCoverImageId,
     PublicationBinding Binding,
     PublicationPaper Paper,
@@ -194,11 +193,28 @@ public sealed record ProjectExportPublicationEdition(
     bool Bleed,
     bool AllowDesignedPageOverrides,
     List<ProjectExportEditionOutlineItem> OutlineItems,
-    List<ProjectExportPublicationMatter> Matter,
-    List<ProjectExportEditionStyleMapping> StyleMappings,
-    List<ProjectExportPublicationImagePlacement> ImagePlacements,
     ProjectExportCoverDesign? CoverDesign)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? BodyFontSizePoints { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? BodyLineHeight { get; init; }
+    [JsonIgnore]
+    public double ImportedBodyFontSizePoints => BodyFontSizePoints ?? 12;
+    [JsonIgnore]
+    public double ImportedBodyLineHeight => BodyLineHeight ?? 1.55;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ProjectExportPublicationMatter>? Matter { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ProjectExportEditionStyleMapping>? StyleMappings { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ProjectExportPublicationImagePlacement>? ImagePlacements { get; init; }
+    [JsonIgnore]
+    public IReadOnlyList<ProjectExportPublicationMatter> LegacyMatter => Matter ?? [];
+    [JsonIgnore]
+    public IReadOnlyList<ProjectExportEditionStyleMapping> LegacyStyleMappings => StyleMappings ?? [];
+    [JsonIgnore]
+    public IReadOnlyList<ProjectExportPublicationImagePlacement> LegacyImagePlacements => ImagePlacements ?? [];
     public List<PublicationEditionOverrideField> OverrideFields { get; init; } = [];
     public bool InheritsCoreCover { get; init; }
     public bool EditionSpecificContentEnabled { get; init; }
@@ -240,10 +256,16 @@ public sealed record ProjectExportPublicationBook(
     bool NumberChapters,
     PublishTitlePageMode TitlePageMode,
     List<ProjectExportEditionOutlineItem> OutlineItems,
-    List<ProjectExportPublicationMatter> Matter,
-    List<ProjectExportPublicationImagePlacement> ImagePlacements,
     ProjectExportCoverDesign? CoverDesign)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ProjectExportPublicationMatter>? Matter { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ProjectExportPublicationImagePlacement>? ImagePlacements { get; init; }
+    [JsonIgnore]
+    public IReadOnlyList<ProjectExportPublicationMatter> LegacyMatter => Matter ?? [];
+    [JsonIgnore]
+    public IReadOnlyList<ProjectExportPublicationImagePlacement> LegacyImagePlacements => ImagePlacements ?? [];
     public bool AllowDesignedPageOverrides { get; init; }
 }
 
@@ -310,6 +332,24 @@ public sealed record ProjectExportPublicationImagePlacement(
     public bool IsExcluded { get; init; }
 }
 
+public sealed record ProjectExportPublicationSection(
+    Guid Id,
+    Guid? EditionId,
+    Guid? CoreSectionId,
+    string Title,
+    PublicationSectionKind Kind,
+    PublicationSectionSystemRole SystemRole,
+    PublicationSectionAnchor Anchor,
+    PublishOutlineTargetKind? TargetKind,
+    Guid? TargetId,
+    PublicationSectionInclusionMode InclusionMode,
+    bool IsExcluded,
+    int LocalOrder,
+    string ManuscriptJson,
+    long Revision,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
 public sealed record ProjectExportLegacyPublishProfile(
     Guid Id,
     string TitleOverride,
@@ -373,7 +413,7 @@ public sealed record ProjectExportChapter
 
 public sealed record ProjectExportPageComposition(
     Guid Id,
-    Guid ChapterId,
+    Guid? ChapterId,
     string Name,
     string SemanticManuscriptJson,
     long Revision,
@@ -382,6 +422,7 @@ public sealed record ProjectExportPageComposition(
 {
     public Guid? EditionId { get; init; }
     public Guid? SourceCompositionId { get; init; }
+    public Guid? PublicationSectionId { get; init; }
 }
 
 public sealed record ProjectExportPageCompositionVariant(

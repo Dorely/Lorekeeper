@@ -475,7 +475,7 @@ public sealed class ChapterPreviewService(
                 }).ToArray();
             var payload = new
             {
-                protocolVersion = 5,
+                protocolVersion = 6,
                 jobId = jobId.ToString("N"),
                 profile = "generic-digital-pdf-v1",
                 ink = "Color",
@@ -557,7 +557,7 @@ public sealed class ChapterPreviewService(
                 throw new InvalidOperationException($"Press preview failed. {Limit(stderr)} {Limit(stdout)}".Trim());
             var response = JsonSerializer.Deserialize<LayoutResponse>(stdout, JsonOptions)
                 ?? throw new InvalidDataException("Lorekeeper Press returned an empty layout response.");
-            if (response.ProtocolVersion != 5 || response.JobId != jobId.ToString("N"))
+            if (response.ProtocolVersion != 6 || response.JobId != jobId.ToString("N"))
                 throw new InvalidDataException("Lorekeeper Press returned the wrong preview protocol or job identity.");
             var firstPage = response.PageMap.Where(item => Guid.TryParse(item.ChapterId, out var mapped) && mapped == chapterId)
                 .Select(item => item.PageNumber).DefaultIfEmpty(1).Min();

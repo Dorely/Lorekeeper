@@ -104,6 +104,7 @@ public static class CompositionAgentPayloads
             {
                 ok = true,
                 targetId,
+                compositionId = variant.CompositionId,
                 variantId = variant.Id,
                 revision = variant.Revision,
                 summary = $"Patched composition {targetKind} {targetId:N}.",

@@ -16,6 +16,7 @@ public sealed class PublishService(
     AppDbContext db,
     IPublicationEditionService editions,
     IPublicationBookService books,
+    IPublicationSectionService publicationSections,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IProjectFontService projectFonts,
     IEnumerable<IPublishExportFormatter> formatters) : IPublishService
@@ -64,39 +65,7 @@ public sealed class PublishService(
             .OrderBy(chapter => chapter.Order)
             .ToListAsync(cancellationToken);
         var selections = effective.OutlineItems;
-        var placementAssetIds = effective.ImagePlacements.Select(item => item.AssetId).Distinct().ToList();
-        var placementAssetNames = await db.PublishAssets.AsNoTracking()
-            .Where(item => item.ProjectId == projectId && placementAssetIds.Contains(item.Id))
-            .ToDictionaryAsync(item => item.Id, item => item.FileName, cancellationToken);
-        var placementRows = effective.ImagePlacements
-            .Select(placement => new PlacementRow(
-                placement.Id,
-                placement.AssetId,
-                placementAssetNames.GetValueOrDefault(placement.AssetId, "Missing image"),
-                placement.TargetKind,
-                placement.TargetId,
-                placement.PlacementKind,
-                placement.Caption,
-                placement.PresentationJson,
-                placement.AltText,
-                placement.Decorative,
-                PublicationLanguage.Normalize(placement.Language),
-                placement.AccessibilityRole,
-                placement.SortOrder))
-            .ToList();
-
-        var placementViews = placementRows
-            .Select(placement => PlacementView(projectId, placement, acts, chapters))
-            .OrderBy(placement => TargetReadingOrder(placement.TargetKind, placement.TargetId, acts, chapters))
-            .ThenBy(placement => PlacementKindOrder(placement.PlacementKind))
-            .ThenBy(placement => placement.SortOrder)
-            .ToList();
-
-        var matter = effective.Matter
-            .OrderBy(item => item.Location)
-            .ThenBy(item => item.SortOrder)
-            .Select(PublicationEditionService.MatterView)
-            .ToList();
+        var publicationSectionViews = await publicationSections.ListAsync(new(projectId, editionId), cancellationToken);
         var fingerprint = includeSourceFingerprint
             ? await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken)
             : string.Empty;
@@ -104,14 +73,11 @@ public sealed class PublishService(
             PublicationEditionService.View(project, profile),
             await editions.ListAsync(projectId, cancellationToken),
             SectionViews(acts, chapters, selections),
-            placementViews,
-            matter,
             fingerprint)
         {
             OverrideFields = effective.OverrideFields,
             HasContentOverrides = await db.PublicationEditionOutlineItems.AnyAsync(item => item.EditionId == editionId, cancellationToken),
-            HasMatterOverrides = await db.PublicationMatter.AnyAsync(item => item.EditionId == editionId, cancellationToken),
-            HasPlacementOverrides = await db.PublicationImagePlacements.AnyAsync(item => item.EditionId == editionId, cancellationToken),
+            PublicationSections = publicationSectionViews,
         };
     }
 
@@ -162,13 +128,13 @@ public sealed class PublishService(
         CancellationToken cancellationToken = default)
     {
         var effective = await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken);
+        var sectionViews = await publicationSections.ListAsync(new(projectId, editionId), cancellationToken);
         return await BuildDocumentAsync(
             projectId,
             editionId,
             effective.Edition,
             effective.OutlineItems,
-            effective.ImagePlacements,
-            effective.Matter.Where(item => item.IsIncluded).ToList(),
+            sectionViews.Where(item => ShouldIncludeSection(item, effective.Edition)).ToList(),
             coreTarget: false,
             cancellationToken);
     }
@@ -180,17 +146,15 @@ public sealed class PublishService(
         var core = await books.GetOrCreateAsync(projectId, cancellationToken);
         var book = await db.PublicationBooks.AsNoTracking()
             .Include(item => item.OutlineItems)
-            .Include(item => item.Matter)
-            .Include(item => item.ImagePlacements)
             .SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         var profile = CoreProfile(projectId, core);
+        var sectionViews = await publicationSections.ListAsync(new(projectId), cancellationToken);
         return await BuildDocumentAsync(
             projectId,
             Guid.Empty,
             profile,
             book.OutlineItems.Select(CoreOutline).ToList(),
-            book.ImagePlacements.Select(CorePlacement).ToList(),
-            book.Matter.Where(item => item.IsIncluded).Select(CoreMatter).ToList(),
+            sectionViews.Where(item => ShouldIncludeSection(item, profile)).ToList(),
             coreTarget: true,
             cancellationToken);
     }
@@ -200,8 +164,7 @@ public sealed class PublishService(
         Guid editionId,
         PublicationEdition profile,
         IReadOnlyList<PublicationEditionOutlineItem> selections,
-        IReadOnlyList<PublicationImagePlacement> placements,
-        IReadOnlyList<PublicationMatter> matter,
+        IReadOnlyList<PublicationSectionView> publicationSectionViews,
         bool coreTarget,
         CancellationToken cancellationToken)
     {
@@ -313,18 +276,24 @@ public sealed class PublishService(
                 chapterDocuments));
         }
 
-        var validPlacements = placements
-            .Where(placement => TargetIncluded(sections, placement.TargetKind, placement.TargetId))
-            .ToList();
-        var matterDocuments = matter
-            .Select(item => new PublishMatterDocument(
-                item.Id,
-                item.Location,
-                item.Kind,
-                item.Title,
-                item.SortOrder,
-                ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision)))
-            .ToList();
+        var boundValues = new Dictionary<PublicationBoundField, string>();
+        foreach (var field in Enum.GetValues<PublicationBoundField>())
+            boundValues[field] = await publicationSections.ResolveBoundFieldAsync(new(projectId, coreTarget ? null : editionId), field, cancellationToken);
+        var publicationSectionIds = publicationSectionViews.Select(item => item.Id).ToHashSet();
+        var sectionCompositions = compositions.Where(item => item.PublicationSectionId is Guid sectionId && publicationSectionIds.Contains(sectionId))
+            .GroupBy(item => item.PublicationSectionId!.Value).ToDictionary(group => group.Key, group => group.ToList());
+        var publicationSectionDocuments = publicationSectionViews.Select(item => new PublishPublicationSectionDocument(
+            item.Id,
+            item.CoreSectionId,
+            item.Title,
+            item.Kind,
+            item.SystemRole,
+            item.Anchor,
+            item.TargetKind,
+            item.TargetId,
+            item.LocalOrder,
+            PublicationSectionService.ResolveBindings(item.Manuscript, boundValues),
+            sectionCompositions.GetValueOrDefault(item.Id, []).Select(composition => CompositionDocument(composition, profile)).ToList())).ToList();
         var coverDesign = coreTarget || profile.InheritsCoreCover
             ? await CoreCoverAsync(projectId, cancellationToken)
             : await db.PublicationCoverDesigns.AsNoTracking()
@@ -350,11 +319,16 @@ public sealed class PublishService(
                     .SelectMany(variant => CompositionSceneResolver.Flatten(variant.Scene))
                     .Where(item => item.ImageId is not null)
                     .Select(item => item.ImageId!.Value)))
-            .Concat(matterDocuments
+            .Concat(publicationSectionDocuments
                 .SelectMany(item => item.Manuscript.Content)
-                .Where(block => block.Type == ManuscriptBlockType.Figure)
+                .Where(block => block.Type == ManuscriptBlockType.Figure && block.ImageId.HasValue)
                 .Select(block => block.ImageId!.Value))
-            .Concat(validPlacements.Select(placement => placement.AssetId))
+            .Concat(publicationSectionDocuments
+                .SelectMany(item => item.PageCompositions)
+                .SelectMany(item => item.Variants)
+                .SelectMany(item => CompositionSceneResolver.Flatten(item.Scene))
+                .Where(item => item.ImageId.HasValue)
+                .Select(item => item.ImageId!.Value))
             .Concat(coverSceneImageIds)
             .Concat(profile.SelectedCoverImageId is Guid coverImageId ? [coverImageId] : [])
             .ToHashSet();
@@ -365,22 +339,6 @@ public sealed class PublishService(
                 .Where(asset => asset.ProjectId == projectId && referencedAssetIds.Contains(asset.Id))
                 .ToDictionaryAsync(asset => asset.Id, cancellationToken);
 
-        var placementDocuments = validPlacements
-            .Where(placement => assets.ContainsKey(placement.AssetId))
-            .Select(placement => new PublicationImagePlacementDocument(
-                placement.Id,
-                AssetDocument(assets[placement.AssetId]),
-                placement.TargetKind,
-                placement.TargetId,
-                placement.PlacementKind,
-                placement.Caption,
-                JsonSerializer.Deserialize<FigurePresentation>(placement.PresentationJson, ManuscriptCodec.JsonOptions) ?? new FigurePresentation(),
-                placement.AltText,
-                placement.Decorative,
-                PublicationLanguage.Normalize(placement.Language),
-                placement.AccessibilityRole,
-                placement.SortOrder))
-            .ToList();
         var cover = profile.SelectedCoverImageId is Guid selectedCoverImageId
             && assets.TryGetValue(selectedCoverImageId, out var selectedCoverImage)
                 ? AssetDocument(selectedCoverImage)
@@ -483,12 +441,11 @@ public sealed class PublishService(
             ProfileDocument(profile),
             cover,
             sections,
-            assets.Values.Select(AssetDocument).ToList(),
-            placementDocuments)
+            assets.Values.Select(AssetDocument).ToList())
         {
             NamedStyles = namedStyles,
             Fonts = publishFonts,
-            Matter = matterDocuments,
+            PublicationSections = publicationSectionDocuments,
             Cover = coverDesign is null || coverScene is null
                 ? null
                 : new PublishCoverDocument(
@@ -563,33 +520,6 @@ public sealed class PublishService(
         SortOrder = item.SortOrder,
     };
 
-    private static PublicationMatter CoreMatter(PublicationBookMatter item) => new()
-    {
-        EditionId = Guid.Empty,
-        Location = item.Location,
-        Kind = item.Kind,
-        Title = item.Title,
-        ManuscriptJson = item.ManuscriptJson,
-        IsIncluded = item.IsIncluded,
-        SortOrder = item.SortOrder,
-    };
-
-    private static PublicationImagePlacement CorePlacement(PublicationBookImagePlacement item) => new()
-    {
-        EditionId = Guid.Empty,
-        AssetId = item.AssetId,
-        TargetKind = item.TargetKind,
-        TargetId = item.TargetId,
-        PlacementKind = item.PlacementKind,
-        Caption = item.Caption,
-        PresentationJson = item.PresentationJson,
-        AltText = item.AltText,
-        Decorative = item.Decorative,
-        Language = PublicationLanguage.Normalize(item.Language),
-        AccessibilityRole = item.AccessibilityRole,
-        SortOrder = item.SortOrder,
-    };
-
     private static Guid DeterministicFontId(string value) =>
         new(SHA256.HashData(Encoding.UTF8.GetBytes(value)).AsSpan(0, 16));
 
@@ -634,36 +564,27 @@ public sealed class PublishService(
             AllowDesignedPageOverrides = profile.AllowDesignedPageOverrides,
         };
 
-    private static ManuscriptStyleProperties MergeStyleDefinition(
-        ManuscriptStyleProperties inherited,
-        ManuscriptStyleProperties editionOverride)
-    {
-        var normalized = editionOverride;
-        return inherited with
-        {
-            FontFamilyKey = normalized.FontFamilyKey ?? inherited.FontFamilyKey,
-            FontSizePoints = normalized.FontSizePoints ?? inherited.FontSizePoints,
-            FontWeight = normalized.FontWeight ?? inherited.FontWeight,
-            Italic = normalized.Italic ?? inherited.Italic,
-            SmallCaps = normalized.SmallCaps ?? inherited.SmallCaps,
-            LineHeight = normalized.LineHeight ?? inherited.LineHeight,
-            SpaceBeforePoints = normalized.SpaceBeforePoints ?? inherited.SpaceBeforePoints,
-            SpaceAfterPoints = normalized.SpaceAfterPoints ?? inherited.SpaceAfterPoints,
-            KeepWithNext = normalized.KeepWithNext ?? inherited.KeepWithNext,
-            TextAlign = normalized.TextAlign ?? inherited.TextAlign,
-            LeftIndentEm = normalized.LeftIndentEm ?? inherited.LeftIndentEm,
-            RightIndentEm = normalized.RightIndentEm ?? inherited.RightIndentEm,
-            FirstLineIndentEm = normalized.FirstLineIndentEm ?? inherited.FirstLineIndentEm,
-            StartOnNewPage = normalized.StartOnNewPage ?? inherited.StartOnNewPage,
-        };
-    }
-
     private static bool IncludeTitlePage(PublicationEdition profile) => profile.TitlePageMode switch
     {
         PublishTitlePageMode.Include => true,
         PublishTitlePageMode.Omit => false,
         _ => true,
     };
+
+    private static bool ShouldIncludeSection(PublicationSectionView section, PublicationEdition profile)
+    {
+        if (!section.IsIncluded || section.InclusionMode == PublicationSectionInclusionMode.Omitted)
+            return false;
+        if (section.InclusionMode == PublicationSectionInclusionMode.Included)
+            return true;
+        return section.SystemRole switch
+        {
+            PublicationSectionSystemRole.Title => IncludeTitlePage(profile),
+            PublicationSectionSystemRole.Copyright => !string.IsNullOrWhiteSpace(profile.Copyright),
+            PublicationSectionSystemRole.Contents => profile.IncludeVisibleTableOfContents,
+            _ => true,
+        };
+    }
 
     private static List<PublishSectionView> SectionViews(
         IReadOnlyList<Act> acts,
@@ -724,77 +645,6 @@ public sealed class PublishService(
             0);
     }
 
-    private static PublicationImagePlacementView PlacementView(
-        Guid projectId,
-        PlacementRow placement,
-        IReadOnlyList<Act> acts,
-        IReadOnlyList<Chapter> chapters) =>
-        new(
-            placement.Id,
-            placement.AssetId,
-            placement.AssetFileName,
-            AssetPreviewUrl(projectId, placement.AssetId),
-            placement.TargetKind,
-            placement.TargetId,
-            TargetTitle(placement.TargetKind, placement.TargetId, acts, chapters),
-            placement.PlacementKind,
-            placement.Caption,
-            JsonSerializer.Deserialize<FigurePresentation>(placement.PresentationJson, ManuscriptCodec.JsonOptions) ?? new FigurePresentation(),
-            placement.AltText,
-            placement.Decorative,
-            PublicationLanguage.Normalize(placement.Language),
-            placement.AccessibilityRole,
-            placement.SortOrder);
-
-    private static string AssetPreviewUrl(Guid projectId, Guid assetId) =>
-        $"/projects/{projectId:N}/images/{assetId:N}/content?maxEdge=320";
-
-    private static string TargetTitle(
-        PublishOutlineTargetKind kind,
-        Guid targetId,
-        IReadOnlyList<Act> acts,
-        IReadOnlyList<Chapter> chapters) =>
-        kind == PublishOutlineTargetKind.Act
-            ? acts.FirstOrDefault(act => act.Id == targetId)?.Title ?? "Deleted act"
-            : chapters.FirstOrDefault(chapter => chapter.Id == targetId)?.Title ?? "Deleted chapter";
-
-    private static int TargetReadingOrder(
-        PublishOutlineTargetKind kind,
-        Guid targetId,
-        IReadOnlyList<Act> acts,
-        IReadOnlyList<Chapter> chapters)
-    {
-        var order = 0;
-        foreach (var act in acts.OrderBy(act => act.Order))
-        {
-            if (kind == PublishOutlineTargetKind.Act && targetId == act.Id) return order;
-            order++;
-            foreach (var chapter in chapters.Where(chapter => chapter.ActId == act.Id).OrderBy(chapter => chapter.Order))
-            {
-                if (kind == PublishOutlineTargetKind.Chapter && targetId == chapter.Id) return order;
-                order++;
-            }
-        }
-
-        foreach (var chapter in chapters.Where(chapter => chapter.ActId is null).OrderBy(chapter => chapter.Order))
-        {
-            if (kind == PublishOutlineTargetKind.Chapter && targetId == chapter.Id) return order;
-            order++;
-        }
-
-        return int.MaxValue;
-    }
-
-    private static int PlacementKindOrder(PublicationImagePlacementKind kind) =>
-        kind switch
-        {
-            PublicationImagePlacementKind.BeforeAct or PublicationImagePlacementKind.BeforeChapter => 0,
-            PublicationImagePlacementKind.ChapterOpening => 1,
-            PublicationImagePlacementKind.ChapterEnding => 2,
-            PublicationImagePlacementKind.AfterAct or PublicationImagePlacementKind.AfterChapter => 3,
-            _ => int.MaxValue,
-        };
-
     private static PublishChapterDocument ChapterDocument(
         Chapter chapter,
         PublicationEdition profile,
@@ -828,6 +678,29 @@ public sealed class PublishService(
                         profile)),
                     variant.Revision)).ToList())).ToList());
     }
+
+    private static PublishPageCompositionDocument CompositionDocument(
+        PageComposition composition,
+        PublicationEdition profile) => new(
+            composition.Id,
+            composition.Name,
+            ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision),
+            composition.Revision,
+            composition.Variants
+                .Where(variant => CompositionService.VariantMatchesEdition(variant, profile)
+                    || composition.ActiveAuthoringVariantId == variant.Id)
+                .OrderByDescending(variant => CompositionService.VariantMatchesEdition(variant, profile))
+                .ThenByDescending(variant => variant.UpdatedAt)
+                .Take(1)
+                .Select(variant => new PublishPageCompositionVariantDocument(
+                    variant.Id,
+                    variant.GeometryKey,
+                    NormalizeSceneLanguages(PdfPresentationScene(
+                        JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
+                            ?? throw new InvalidOperationException($"Page composition {composition.Id:N} has no scene."),
+                        profile)),
+                    variant.Revision))
+                .ToList());
 
     private static CompositionScene NormalizeSceneLanguages(CompositionScene scene) => scene with
     {
@@ -925,21 +798,6 @@ public sealed class PublishService(
 
         return builder.ToString().Trim('_', ' ', '.');
     }
-
-    private sealed record PlacementRow(
-        Guid Id,
-        Guid AssetId,
-        string AssetFileName,
-        PublishOutlineTargetKind TargetKind,
-        Guid TargetId,
-        PublicationImagePlacementKind PlacementKind,
-        string Caption,
-        string PresentationJson,
-        string AltText,
-        bool Decorative,
-        string Language,
-        FigureAccessibilityRole AccessibilityRole,
-        int SortOrder);
 
     private sealed record SectionSource(Act? Act, int SortOrder);
 }

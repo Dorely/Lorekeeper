@@ -1048,7 +1048,7 @@
             {
                 CompositionId = await Manuscripts.EnsureEditionCompositionAsync(
                     ContentTarget,
-                    _composition.ChapterId,
+                    _composition.ChapterId ?? throw new InvalidOperationException("This Designed Page belongs to a publication section."),
                     _composition.Id);
                 _composition = await Compositions.GetAsync(ProjectId, CompositionId)
                     ?? throw new InvalidOperationException("The release Designed Page could not be loaded.");

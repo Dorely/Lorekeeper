@@ -116,15 +116,8 @@ public sealed class ProjectImportJobIntegrationTests
         Assert.True(convertedOutline.Single(item => item.ChapterId == importedAmbiguousChapter.Id).IsIncluded);
         Assert.False(ambiguousOutline.Single(item => item.ChapterId == importedAmbiguousChapter.Id).IsIncluded);
         Assert.True(ambiguousOutline.Single(item => item.ChapterId == importedValidChapter.Id).IsIncluded);
-        var webRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..", "Lorekeeper", "wwwroot"));
-        var fonts = new ProjectFontService(db, new TestWebHostEnvironment(webRoot));
-        var rendered = await new PublishService(db, null!, null!, new PublicationEffectiveConfigurationResolver(db), fonts, [])
-            .GetDocumentAsync(project.Id, converted.Id);
-        Assert.DoesNotContain(
-            rendered.Sections.SelectMany(section => section.Chapters),
-            chapter => chapter.Id == importedValidChapter.Id);
+        Assert.DoesNotContain(convertedOutline, item =>
+            item.ChapterId == importedValidChapter.Id && item.IsIncluded);
     }
 
     [Fact]
@@ -337,8 +330,6 @@ public sealed class ProjectImportJobIntegrationTests
                     PageWidthInches: 8.5,
                     PageHeightInches: 11,
                     PageMarginInches: 0.75,
-                    BodyFontSizePoints: 12,
-                    BodyLineHeight: 1.55,
                     SelectedCoverImageId: null,
                     Binding: PublicationBinding.Digital,
                     Paper: PublicationPaper.Digital,
@@ -346,10 +337,11 @@ public sealed class ProjectImportJobIntegrationTests
                     Bleed: false,
                     AllowDesignedPageOverrides: false,
                     OutlineItems: [],
-                    Matter: [],
-                    StyleMappings: [],
-                    ImagePlacements: [],
-                    CoverDesign: null),
+                    CoverDesign: null)
+                {
+                    BodyFontSizePoints = 12,
+                    BodyLineHeight = 1.55,
+                },
             ],
         };
         var job = new ProjectImportJob
@@ -709,10 +701,12 @@ public sealed class ProjectImportJobIntegrationTests
             "preview-1", PublicationEditionStatus.Draft, false, 0, string.Empty, string.Empty,
             "Author", "en", string.Empty, string.Empty, string.Empty, string.Empty, true, true,
             false, false, true, true, false, false, PublishTitlePageMode.Automatic,
-            6, 9, 0.75, 11, 1.3, selectedCoverImageId,
+            6, 9, 0.75, selectedCoverImageId,
             PublicationBinding.PerfectBound, PublicationPaper.White, PublicationInk.BlackAndWhite,
-            false, false, outline, [], [], [], null)
+            false, false, outline, null)
         {
+            BodyFontSizePoints = 11,
+            BodyLineHeight = 1.3,
             PrintPicturePageSpreadMode = PrintPicturePageSpreadMode.WholeSpread,
             EpubPicturePageSpreadMode = EpubPicturePageSpreadMode.RequestLandscape,
             SelectedCoverChapterId = selectedCoverChapterId,

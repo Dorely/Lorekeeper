@@ -8,7 +8,7 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
-    public void V18WritesCoreBookAndEditionContentWithoutObsoleteDefaultReleaseState()
+    public void V19WritesPublicationSectionsWithoutObsoleteDefaultReleaseState()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
@@ -16,21 +16,35 @@ public sealed class ProjectExportCompatibilityTests
             PublicationBook = new ProjectExportPublicationBook(
                 1, "Book", "", "Author", "en", "", "", "", true, false,
                 false, false, true, true, false, false, PublishTitlePageMode.Automatic,
-                [], [], [], null) { AllowDesignedPageOverrides = true },
-            PublicationEditions = [Edition(coverImageId, null, []) with { IsDefault = false }],
+                [], null) { AllowDesignedPageOverrides = true },
+            PublicationEditions =
+            [
+                Edition(coverImageId, null, []) with
+                {
+                    IsDefault = false,
+                    BodyFontSizePoints = null,
+                    BodyLineHeight = null,
+                },
+            ],
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(18, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(19, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationBook\"", json, StringComparison.Ordinal);
         Assert.Contains("\"allowDesignedPageOverrides\":true", json, StringComparison.Ordinal);
         Assert.Contains($"\"selectedCoverImageId\":\"{coverImageId}\"", json, StringComparison.Ordinal);
         Assert.Contains("\"editionSpecificContentEnabled\":false", json, StringComparison.Ordinal);
         Assert.Contains("\"chapterOverrides\":[]", json, StringComparison.Ordinal);
+        Assert.Contains("\"publicationSections\":[]", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"isDefault\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("selectedCoverChapterId", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"publishProfiles\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"matter\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"styleMappings\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"imagePlacements\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"bodyFontSizePoints\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"bodyLineHeight\"", json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -104,8 +118,8 @@ public sealed class ProjectExportCompatibilityTests
         var edition = Assert.Single(adapted.PublicationEditions);
         Assert.Equal(legacyId, edition.Id);
         Assert.Equal(PublicationEditionFormat.Paperback, edition.Format);
-        Assert.Equal(2, edition.Matter.Count);
-        Assert.All(edition.Matter, item =>
+        Assert.Equal(2, edition.LegacyMatter.Count);
+        Assert.All(edition.LegacyMatter, item =>
             Assert.Equal(
                 item.Id,
                 ManuscriptCodec.Deserialize(item.ManuscriptJson).ManuscriptId));
@@ -682,8 +696,6 @@ public sealed class ProjectExportCompatibilityTests
             6,
             9,
             0.75,
-            11,
-            1.3,
             coverImageId,
             PublicationBinding.PerfectBound,
             PublicationPaper.White,
@@ -691,11 +703,10 @@ public sealed class ProjectExportCompatibilityTests
             false,
             false,
             outlineItems,
-            [],
-            [],
-            [],
             null)
         {
+            BodyFontSizePoints = 11,
+            BodyLineHeight = 1.3,
             PrintPicturePageSpreadMode = PrintPicturePageSpreadMode.WholeSpread,
             EpubPicturePageSpreadMode = EpubPicturePageSpreadMode.RequestLandscape,
             SelectedCoverChapterId = legacyCoverChapterId,

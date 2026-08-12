@@ -409,7 +409,10 @@ public sealed class PublicationCoreMigrationService(
     {
         var releases = await db.PublicationEditions.AsNoTracking().OrderBy(item => item.Id).ToListAsync(cancellationToken);
         await ApplyLegacyTypographyAsync(db, releases, cancellationToken);
-        var resolver = new PublicationEffectiveConfigurationResolver(db, readPdfPresentation: false);
+        var resolver = new PublicationEffectiveConfigurationResolver(
+            db,
+            readPdfPresentation: false,
+            readPublicationSections: false);
         var projections = new List<object>(releases.Count);
         foreach (var stored in releases)
         {
@@ -418,8 +421,13 @@ public sealed class PublicationCoreMigrationService(
                 : new EffectivePublicationRelease(
                     new PublicationBook(), stored, new HashSet<PublicationEditionOverrideField>(),
                     await db.PublicationEditionOutlineItems.AsNoTracking().Where(item => item.EditionId == stored.Id).ToListAsync(cancellationToken),
-                    await db.PublicationMatter.AsNoTracking().Where(item => item.EditionId == stored.Id).ToListAsync(cancellationToken),
-                    await db.PublicationImagePlacements.AsNoTracking().Where(item => item.EditionId == stored.Id).ToListAsync(cancellationToken));
+                    []);
+            var matter = useCoreInheritance
+                ? await ResolveLegacyMatterAsync(db, stored.ProjectId, stored.Id, cancellationToken)
+                : await db.PublicationMatter.AsNoTracking().Where(item => item.EditionId == stored.Id).ToListAsync(cancellationToken);
+            var placements = useCoreInheritance
+                ? await ResolveLegacyPlacementsAsync(db, stored.ProjectId, stored.Id, cancellationToken)
+                : await db.PublicationImagePlacements.AsNoTracking().Where(item => item.EditionId == stored.Id).ToListAsync(cancellationToken);
             var edition = resolved.Edition;
             var cover = await db.PublicationCoverDesigns.AsNoTracking().SingleOrDefaultAsync(item => item.EditionId == stored.Id, cancellationToken);
             projections.Add(new
@@ -435,9 +443,9 @@ public sealed class PublicationCoreMigrationService(
                 edition.BodyLineHeight, edition.SelectedCoverImageId, edition.AllowDesignedPageOverrides,
                 Outline = resolved.OutlineItems.Where(item => item.IsIncluded).OrderBy(item => item.SortOrder)
                     .Select(item => new { item.TargetKind, item.TargetId, item.IsIncluded, item.SortOrder }),
-                Matter = resolved.Matter.OrderBy(item => item.Location).ThenBy(item => item.SortOrder)
+                Matter = matter.OrderBy(item => item.Location).ThenBy(item => item.SortOrder)
                     .Select(item => new { item.Location, item.Kind, item.Title, item.ManuscriptJson, item.Revision, item.IsIncluded, item.SortOrder }),
-                Placements = resolved.ImagePlacements.OrderBy(item => item.SortOrder)
+                Placements = placements.OrderBy(item => item.SortOrder)
                     .Select(item => new { item.AssetId, item.TargetKind, item.TargetId, item.PlacementKind, item.SortOrder,
                         item.Caption, item.PresentationJson, item.AltText, item.Decorative, item.Language, item.AccessibilityRole }),
                 Cover = cover is null ? null : new { cover.Title, cover.Subtitle, cover.Author, cover.SpineText,
@@ -447,6 +455,74 @@ public sealed class PublicationCoreMigrationService(
         }
         var json = JsonSerializer.Serialize(projections, ManuscriptCodec.JsonOptions);
         return Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json)));
+    }
+
+    private static async Task<IReadOnlyList<PublicationMatter>> ResolveLegacyMatterAsync(
+        AppDbContext db,
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken)
+    {
+        var core = await db.PublicationBookMatter.AsNoTracking()
+            .Where(item => item.ProjectId == projectId).ToListAsync(cancellationToken);
+        var overrides = await db.PublicationMatter.AsNoTracking()
+            .Where(item => item.EditionId == editionId).ToListAsync(cancellationToken);
+        var byCore = overrides.Where(item => item.CoreMatterId is not null)
+            .ToDictionary(item => item.CoreMatterId!.Value);
+        var inherited = core
+            .Where(item => !(byCore.TryGetValue(item.Id, out var linked) && linked.IsExcluded))
+            .Select(item => byCore.TryGetValue(item.Id, out var value) ? value : new PublicationMatter
+            {
+                Id = item.Id,
+                EditionId = editionId,
+                CoreMatterId = item.Id,
+                Location = item.Location,
+                Kind = item.Kind,
+                Title = item.Title,
+                ManuscriptJson = item.ManuscriptJson,
+                Revision = item.Revision,
+                IsIncluded = item.IsIncluded,
+                SortOrder = item.SortOrder,
+            });
+        return inherited.Concat(overrides.Where(item => item.CoreMatterId is null && !item.IsExcluded))
+            .OrderBy(item => item.Location).ThenBy(item => item.SortOrder).ToList();
+    }
+
+    private static async Task<IReadOnlyList<PublicationImagePlacement>> ResolveLegacyPlacementsAsync(
+        AppDbContext db,
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken)
+    {
+        var core = await db.PublicationBookImagePlacements.AsNoTracking()
+            .Where(item => item.ProjectId == projectId).ToListAsync(cancellationToken);
+        var overrides = await db.PublicationImagePlacements.AsNoTracking()
+            .Where(item => item.EditionId == editionId).ToListAsync(cancellationToken);
+        var byCore = overrides.Where(item => item.CorePlacementId is not null)
+            .ToDictionary(item => item.CorePlacementId!.Value);
+        var inherited = core
+            .Where(item => !(byCore.TryGetValue(item.Id, out var linked) && linked.IsExcluded))
+            .Select(item => byCore.TryGetValue(item.Id, out var value) ? value : new PublicationImagePlacement
+            {
+                Id = item.Id,
+                EditionId = editionId,
+                CorePlacementId = item.Id,
+                AssetId = item.AssetId,
+                TargetKind = item.TargetKind,
+                TargetId = item.TargetId,
+                ActId = item.ActId,
+                ChapterId = item.ChapterId,
+                PlacementKind = item.PlacementKind,
+                SortOrder = item.SortOrder,
+                Caption = item.Caption,
+                PresentationJson = item.PresentationJson,
+                AltText = item.AltText,
+                Decorative = item.Decorative,
+                Language = item.Language,
+                AccessibilityRole = item.AccessibilityRole,
+            });
+        return inherited.Concat(overrides.Where(item => item.CorePlacementId is null && !item.IsExcluded))
+            .OrderBy(item => item.SortOrder).ToList();
     }
 
     private static async Task ApplyLegacyTypographyAsync(

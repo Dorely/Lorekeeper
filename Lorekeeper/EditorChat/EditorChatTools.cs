@@ -2457,7 +2457,7 @@ public sealed class EditorChatTools(
             {
                 compositionId = await manuscripts.EnsureEditionCompositionAsync(
                     ctx.ContentTarget,
-                    composition.ChapterId,
+                    composition.ChapterId ?? throw new InvalidOperationException("The selected Designed Page is owned by a publication section."),
                     composition.Id,
                     ctx.TurnCancellationToken);
                 composition = await compositions.GetAsync(ctx.ProjectId, compositionId)
@@ -2562,7 +2562,7 @@ public sealed class EditorChatTools(
         {
             var effective = await manuscripts.GetManuscriptAsync(
                 context.ContentTarget,
-                composition.ChapterId,
+                composition.ChapterId ?? throw new InvalidOperationException("The selected Designed Page is owned by a publication section."),
                 context.TurnCancellationToken);
             if (effective?.Document.Content.Any(block => block.PageCompositionId == composition.Id) == true)
                 return;

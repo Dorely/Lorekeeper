@@ -1,5 +1,5 @@
 {
-  "protocolVersion": 5,
+  "protocolVersion": 6,
   "jobId": "11111111111111111111111111111111",
   "profile": "kdp-paperback-v1",
   "ink": "BlackAndWhite",
@@ -10,13 +10,13 @@
     "language": "en",
     "publisher": "North Window Press",
     "copyright": "Copyright 2026 Mara Vale",
-    "includeTitlePage": true,
-    "includeVisibleTableOfContents": true,
-    "matter": [
+    "publicationSections": [
       {
         "id": "20000000-0000-0000-0000-000000000001",
-        "location": "Front",
+        "anchor": "Front",
         "kind": "Dedication",
+        "systemRole": "None",
+        "localOrder": 2,
         "title": "Dedication",
         "blocks": [
           {
@@ -26,15 +26,19 @@
             "headingLevel": 0,
             "content": [{ "type": "Text", "text": "For the mapmakers.", "marks": [] }]
           }
-        ]
+        ],
+        "pageCompositions": []
       },
-      { "id": "20000000-0000-0000-0000-000000000002", "location": "Back", "kind": "Acknowledgments", "title": "Acknowledgments", "blocks": [] },
-      { "id": "20000000-0000-0000-0000-000000000003", "location": "Back", "kind": "AboutAuthor", "title": "About the author", "blocks": [] },
-      { "id": "20000000-0000-0000-0000-000000000004", "location": "Back", "kind": "AlsoBy", "title": "Also by", "blocks": [] },
-      { "id": "20000000-0000-0000-0000-000000000005", "location": "Back", "kind": "References", "title": "References", "blocks": [] },
-      { "id": "20000000-0000-0000-0000-000000000006", "location": "Back", "kind": "Custom", "title": "Colophon", "blocks": [] },
-      { "id": "20000000-0000-0000-0000-000000000007", "location": "Front", "kind": "Copyright", "title": "Copyright", "blocks": [] },
-      { "id": "20000000-0000-0000-0000-000000000008", "location": "Front", "kind": "Epigraph", "title": "Epigraph", "blocks": [] }
+      { "id": "20000000-0000-0000-0000-000000000002", "anchor": "Back", "kind": "Acknowledgments", "systemRole": "None", "localOrder": 0, "title": "Acknowledgments", "blocks": [], "pageCompositions": [] },
+      { "id": "20000000-0000-0000-0000-000000000003", "anchor": "Back", "kind": "AboutAuthor", "systemRole": "None", "localOrder": 1, "title": "About the author", "blocks": [], "pageCompositions": [] },
+      { "id": "20000000-0000-0000-0000-000000000004", "anchor": "Back", "kind": "AlsoBy", "systemRole": "None", "localOrder": 2, "title": "Also by", "blocks": [], "pageCompositions": [] },
+      { "id": "20000000-0000-0000-0000-000000000005", "anchor": "Back", "kind": "References", "systemRole": "None", "localOrder": 3, "title": "References", "blocks": [], "pageCompositions": [] },
+      { "id": "20000000-0000-0000-0000-000000000006", "anchor": "Back", "kind": "Custom", "systemRole": "None", "localOrder": 4, "title": "Colophon", "blocks": [], "pageCompositions": [] },
+      { "id": "20000000-0000-0000-0000-000000000007", "anchor": "Front", "kind": "Copyright", "systemRole": "Copyright", "localOrder": 1, "title": "Copyright", "blocks": [{ "id": "30000000-0000-0000-0000-000000000007", "type": "Paragraph", "styleRole": "copyright", "content": [{ "type": "Text", "text": "Copyright 2026 Mara Vale", "marks": [] }] }], "pageCompositions": [] },
+      { "id": "20000000-0000-0000-0000-000000000008", "anchor": "Front", "kind": "Epigraph", "systemRole": "None", "localOrder": 3, "title": "Epigraph", "blocks": [], "pageCompositions": [] },
+      { "id": "20000000-0000-0000-0000-000000000009", "anchor": "Front", "kind": "TitlePage", "systemRole": "Title", "localOrder": 0, "title": "Title page", "blocks": [{ "id": "30000000-0000-0000-0000-000000000009", "type": "Heading", "styleRole": "chapter-title", "content": [{ "type": "Text", "text": "The Cartographer's Lantern", "marks": [] }] }], "pageCompositions": [] },
+      { "id": "20000000-0000-0000-0000-000000000010", "anchor": "Front", "kind": "Contents", "systemRole": "Contents", "localOrder": 4, "title": "Contents", "blocks": [], "pageCompositions": [] },
+      { "id": "70000000-0000-0000-0000-000000000001", "anchor": "BeforeChapter", "targetId": "50000000-0000-0000-0000-000000000001", "kind": "ImagePage", "systemRole": "None", "localOrder": 0, "title": "Compass rose", "blocks": [{ "id": "30000000-0000-0000-0000-000000000010", "type": "Figure", "styleRole": "figure-caption", "assetId": "90000000-0000-0000-0000-000000000001", "caption": "A compass rose.", "altText": "A canonical fixture image.", "decorative": false, "presentation": { "placement": "DedicatedPage", "widthPercent": 100, "alignment": "Center", "textWrap": "None", "fit": "Contain", "cropXPercent": 50, "cropYPercent": 50, "captionPlacement": "Below" }, "content": [{ "type": "Text", "text": "A compass rose.", "marks": [] }] }], "pageCompositions": [] }
     ],
     "includeActHeadings": true,
     "includeChapterHeadings": true,
@@ -189,17 +193,6 @@
         "kind": "Character",
         "semanticRole": "fixture-character",
         "definition": { "fontFamilyKey": "sans", "fontWeight": 700, "italic": true, "smallCaps": true, "fontSizePoints": 9.0 }
-      }
-    ],
-    "placements": [
-      {
-        "id": "70000000-0000-0000-0000-000000000001",
-        "assetId": "90000000-0000-0000-0000-000000000001",
-        "targetKind": "Chapter",
-        "targetId": "50000000-0000-0000-0000-000000000001",
-        "placementKind": "BeforeChapter",
-        "caption": "A compass rose.",
-        "sortOrder": 0
       }
     ]
   },
