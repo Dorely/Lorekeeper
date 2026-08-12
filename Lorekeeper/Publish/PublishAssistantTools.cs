@@ -172,11 +172,11 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid sectionId, Guid? releaseId = null, int blockStart = 0, int blockCount = 30) => ReadPublicationSectionAsync(context, releaseId, sectionId, blockStart, blockCount),
                 name: "read_publication_section",
-                description: "Read one Core or release publication section with a bounded page of semantic blocks and Designed Page IDs before editing."),
+                description: "Read one Core or release publication section with bounded semantic blocks. Designed-page blocks expose pageCompositionId; use it with read_publication_page_composition and preview_publication_section_page_canvas before editing."),
             AIFunctionFactory.Create(
                 method: (PublicationSectionToolInput input, Guid? releaseId = null) => UpsertPublicationSectionAsync(context, releaseId, input),
                 name: "upsert_publication_section",
-                description: "Create or revision-check a Core/release publication section and its metadata. Choose one content mode per section: a prose manuscript with optional Figures, or Designed Page canvases only. For existing prose, use patch_publication_section_manuscript instead of repeating the complete manuscript."),
+                description: "Create or revision-check a Core/release publication section and its metadata. Supplying a selected release ID materializes an inherited section as a release customization while preserving its content. Choose one content mode per section: prose with optional Figures, or Designed Page canvases only. For existing prose, use patch_publication_section_manuscript instead of repeating the complete manuscript."),
             AIFunctionFactory.Create(
                 method: (Guid sectionId, long expectedRevision, ManuscriptOperationInput[] operations, Guid? releaseId = null) => PatchPublicationSectionManuscriptAsync(context, releaseId, sectionId, expectedRevision, operations),
                 name: "patch_publication_section_manuscript",
@@ -561,7 +561,7 @@ public sealed class PublishAssistantTools(
             item.SystemRole,
             item.Anchor,
             item.TargetKind,
-            item.TargetId,
+            anchorTargetId = item.TargetId,
             item.TargetTitle,
             item.InclusionMode,
             item.IsIncluded,
@@ -598,6 +598,7 @@ public sealed class PublishAssistantTools(
         {
             ok = true,
             targetId = item.Id,
+            sectionId = item.Id,
             releaseId,
             item.CoreSectionId,
             item.Title,
@@ -605,7 +606,7 @@ public sealed class PublishAssistantTools(
             item.SystemRole,
             item.Anchor,
             item.TargetKind,
-            item.TargetId,
+            anchorTargetId = item.TargetId,
             item.InclusionMode,
             item.IsInherited,
             item.Revision,

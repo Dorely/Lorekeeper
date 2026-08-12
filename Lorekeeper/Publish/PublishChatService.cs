@@ -62,6 +62,7 @@ public sealed class PublishChatService(
         - Preserve unrelated values. Customize a release only where it differs; use ResetFields to restore live Core inheritance.
         - Create no release or ISBN unless requested. Never invent an ISBN.
         - Title and copyright are system Designed Pages: their linked copy resolves live from Core or effective release metadata while their placement and typography are edited on the page canvas. Contents is generated automatically from the effective book structure. Each other publication section has one content mode: either prose with optional flowing Figures, or Designed Page canvases. Use separate sections when both forms are needed. Sections may be placed at the front, back, or immediately before or after an act or chapter.
+        - To edit a title, copyright, or other designed publication section: list sections in the active target, read the section, take pageCompositionId from its Designed Page block, read and preview that composition, mutate it with the focused page tools, then preview again. An omitted section remains editable; do not change its inclusion merely to design it. For an inherited release section, materialize the release customization with upsert_publication_section while preserving every current field, then reread the returned section and composition IDs before page mutation.
         - Create user-authored material such as Dedication, Epigraph, Acknowledgments, About the Author, Also By, References, image pages, or arbitrary production pages with publication-section tools. Release sections inherit Core live until customized; do not create duplicate release content when inheritance is sufficient.
         - While designing a publication-section page, read its selected variant, preview it in annotated mode, make focused changes or stage one large semantic-and-scene update, preview the result again, and finish with a clean preview. Customize an inherited release section before changing its page.
 
@@ -165,7 +166,7 @@ public sealed class PublishChatService(
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         var selection = selectedEditionId is { } editionId
-            ? $"The Publish workspace currently has publication release {editionId:D} selected. Read that release before acting."
+            ? $"The Publish workspace currently has publication release {editionId:D} selected. Treat that release as the active target: pass this release ID to Core/release tools and preserve inherited values. Do not switch to Core or pass a null release ID unless the user explicitly asks for a shared Core change. Read the selected release before acting."
             : "The Publish workspace currently targets Core Book. Read Core Book before acting; do not assume a publication release is required.";
         var assembly = await contextBuilder.BuildAsync(
             new ContextBuildRequest(
