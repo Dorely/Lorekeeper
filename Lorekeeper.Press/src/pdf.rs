@@ -1507,9 +1507,17 @@ fn flatten_pdfx_opacity(
     reject_overlaps: bool,
 ) -> Result<(), Diagnostic> {
     let mut flattened_images = BTreeMap::<(String, u16, [u8; 3]), String>::new();
-    for page in pages {
+    for (page_index, page) in pages.iter_mut().enumerate() {
         if reject_overlaps {
             reject_overlapping_pdfx_transparency(page, fonts)?;
+        } else {
+            flatten_translucent_shapes_into_lower_art(
+                page,
+                images,
+                page_index,
+                options.width,
+                options.height,
+            );
         }
         let substrate = if page.kind == PageKind::Cover {
             options.background_rgb.unwrap_or([0.086, 0.196, 0.31])
@@ -1608,6 +1616,168 @@ fn flatten_pdfx_opacity(
         }
     }
     Ok(())
+}
+
+fn flatten_translucent_shapes_into_lower_art(
+    page: &mut LayoutPage,
+    images: &mut BTreeMap<String, EmbeddedImage>,
+    page_index: usize,
+    page_width: f32,
+    page_height: f32,
+) {
+    let paint_order = page.paint_order.clone();
+    let mut baked_shapes = std::collections::BTreeSet::new();
+    for (paint_position, paint) in paint_order.iter().enumerate() {
+        let LayoutPaint::Shape(shape_index) = *paint else {
+            continue;
+        };
+        let shape = &page.shapes[shape_index];
+        if opacity_key(shape.opacity) >= 1_000
+            || shape.fill_rgb.is_none()
+            || shape.stroke_rgb.is_some()
+            || shape.rotation_degrees.abs() > f32::EPSILON
+        {
+            continue;
+        }
+        let Some(image_index) = paint_order[..paint_position]
+            .iter()
+            .rev()
+            .find_map(|paint| match *paint {
+                LayoutPaint::Image(index) => Some(index),
+                _ => None,
+            })
+        else {
+            continue;
+        };
+        let image = &page.images[image_index];
+        let visible_shape_left = shape.x.max(0.0);
+        let visible_shape_bottom = shape.y.max(0.0);
+        let visible_shape_right = (shape.x + shape.width).min(page_width);
+        let visible_shape_top = (shape.y + shape.height).min(page_height);
+        if image.rotation_degrees.abs() > f32::EPSILON
+            || opacity_key(image.opacity) < 1_000
+            || !matches!(image.fit, LayoutImageFit::Cover | LayoutImageFit::Stretch)
+            || visible_shape_left < image.x - 0.01
+            || visible_shape_bottom < image.y - 0.01
+            || visible_shape_right > image.x + image.width + 0.01
+            || visible_shape_top > image.y + image.height + 0.01
+        {
+            continue;
+        }
+        let Some(source) = images.get(&image.asset_id).cloned() else {
+            continue;
+        };
+        let mut flattened = source;
+        if !blend_shape_into_image(&mut flattened, image, shape) {
+            continue;
+        }
+        flattened.id = format!(
+            "{}-page-{page_index}-shape-{shape_index}-flat",
+            flattened.id
+        );
+        page.images[image_index].asset_id.clone_from(&flattened.id);
+        images.insert(flattened.id.clone(), flattened);
+        baked_shapes.insert(shape_index);
+    }
+    page.paint_order.retain(
+        |paint| !matches!(paint, LayoutPaint::Shape(index) if baked_shapes.contains(index)),
+    );
+}
+
+fn blend_shape_into_image(
+    source: &mut EmbeddedImage,
+    image: &crate::model::LayoutImage,
+    shape: &crate::model::LayoutShape,
+) -> bool {
+    let source_fraction = image.source_width_fraction.clamp(0.01, 1.0);
+    let source_width = source.width as f32 * source_fraction;
+    let width_scale = image.width / source_width;
+    let height_scale = image.height / source.height as f32;
+    let (drawn_width, drawn_height) = match image.fit {
+        LayoutImageFit::Cover => {
+            let scale = width_scale.max(height_scale);
+            (source.width as f32 * scale, source.height as f32 * scale)
+        }
+        LayoutImageFit::Stretch => (image.width / source_fraction, image.height),
+        LayoutImageFit::Contain => return false,
+    };
+    let visible_width = source_width * drawn_width / source.width as f32;
+    let drawn_x = if source_fraction < 1.0 {
+        -image.width / 2.0 - drawn_width * image.source_left_fraction.clamp(0.0, 1.0)
+    } else {
+        -image.width / 2.0 + (image.width - visible_width) * image.focal_x.clamp(0.0, 1.0)
+    };
+    let drawn_y =
+        -image.height / 2.0 + (image.height - drawn_height) * (1.0 - image.focal_y.clamp(0.0, 1.0));
+    let origin_x = image.x + image.width / 2.0 + drawn_x;
+    let origin_y = image.y + image.height / 2.0 + drawn_y;
+    let fill = shape.fill_rgb.expect("validated shape fill");
+    let alpha = shape.opacity.clamp(0.0, 1.0);
+    let channels = if source.cmyk {
+        4
+    } else if source.grayscale {
+        1
+    } else {
+        3
+    };
+    let mut changed = false;
+    for row in 0..source.height {
+        let page_y = origin_y + (1.0 - (row as f32 + 0.5) / source.height as f32) * drawn_height;
+        if page_y < image.y
+            || page_y > image.y + image.height
+            || page_y < shape.y
+            || page_y > shape.y + shape.height
+        {
+            continue;
+        }
+        for column in 0..source.width {
+            let page_x = origin_x + (column as f32 + 0.5) / source.width as f32 * drawn_width;
+            if page_x < image.x
+                || page_x > image.x + image.width
+                || page_x < shape.x
+                || page_x > shape.x + shape.width
+            {
+                continue;
+            }
+            let offset = (row as usize * source.width as usize + column as usize) * channels;
+            if source.cmyk {
+                let foreground = rgb_to_bounded_cmyk(fill);
+                for (channel, foreground_channel) in foreground.iter().enumerate() {
+                    source.samples[offset + channel] = blend_sample(
+                        (*foreground_channel * 255.0).round() as u8,
+                        f32::from(source.samples[offset + channel]) / 255.0,
+                        alpha,
+                    );
+                }
+            } else if source.grayscale {
+                let foreground = fill[0] * 0.2126 + fill[1] * 0.7152 + fill[2] * 0.0722;
+                source.samples[offset] = blend_sample(
+                    (foreground * 255.0).round() as u8,
+                    f32::from(source.samples[offset]) / 255.0,
+                    alpha,
+                );
+            } else {
+                for (channel, fill_channel) in fill.iter().enumerate() {
+                    source.samples[offset + channel] = blend_sample(
+                        (*fill_channel * 255.0).round() as u8,
+                        f32::from(source.samples[offset + channel]) / 255.0,
+                        alpha,
+                    );
+                }
+            }
+            changed = true;
+        }
+    }
+    if source.cmyk {
+        source.maximum_total_ink_percent = source
+            .samples
+            .chunks_exact(4)
+            .map(|pixel| {
+                pixel.iter().map(|channel| u32::from(*channel)).sum::<u32>() as f32 * 100.0 / 255.0
+            })
+            .fold(0.0_f32, f32::max);
+    }
+    changed
 }
 
 fn reject_overlapping_pdfx_transparency(

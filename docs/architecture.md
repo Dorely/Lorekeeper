@@ -755,8 +755,8 @@ independently validates every PDF, and atomically renames it to `output` only
 after all checks succeed; it never overwrites prior output.
 
 Composition-object opacity is preserved with bounded graphics states in Digital
-PDF. KDP PDF 1.7 flattens opacity to avoid vendor transparency warnings, and Ingram PDF/X-1a deterministically flattens opacity against
-the page or cover substrate. A translucent object that overlaps lower page art
+PDF. KDP PDF 1.7 deterministically composites translucent backing shapes into immediately lower page artwork while retaining selectable opaque text, then flattens remaining non-overlapping opacity to avoid vendor transparency warnings. Ingram PDF/X-1a deterministically flattens opacity against
+the page or cover substrate. Under the PDF/X-1a profile, a translucent object that overlaps lower page art
 is rejected by shared profile validation with the exact object IDs because
 flattening that stack would otherwise change its appearance or rasterize
 selectable semantic text and vector content; the author can make it opaque or

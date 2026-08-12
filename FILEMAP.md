@@ -85,7 +85,7 @@
 | `src/renderer.rs` | Contained staging, validation, deterministic pagination, flowing Figures, structured page/cover composition with leaf-correct facing-spread splitting, warning-and-clipping authoring traces, warning-tolerant private reading copies, strict publication PDF rendering, barcodes, atomic promotion, and evidence. |
 | `src/font.rs` | Bundled/project TTF and TrueType/CFF OTF validation, shaping, subsetting, widths, embedding, and multi-codepoint ToUnicode mapping. |
 | `src/image.rs` | Bounded PNG/JPEG decoding, alpha flattening, grayscale/registered-profile CMYK conversion, crop-position handling, and total-ink enforcement. |
-| `src/pdf.rs` | Owned deterministic PDF 1.7/PDF 1.3 writer for mixed page boxes, collision-safe page-scoped tagged structure, bookmarks/links, ordered vector scenes, profile-specific opacity flattening, trim-to-bleed edge extension, fonts, images, output intent, and barcodes. |
+| `src/pdf.rs` | Owned deterministic PDF 1.7/PDF 1.3 writer for mixed page boxes, collision-safe page-scoped tagged structure, bookmarks/links, ordered vector scenes, KDP backing-shape compositing, profile-specific opacity flattening, trim-to-bleed edge extension, fonts, images, output intent, and barcodes. |
 | `src/inspect.rs` | Separate `lopdf` post-write inspection for geometry, fonts, XObject colors, output intent, transparency, encryption, annotations/actions, and tagged-PDF parent-tree/MCID integrity. |
 | `assets/` | Approved OFL font notices plus the registered CGATS21 CRPC1 CMYK profile, source, fingerprint, and redistribution record. |
 | `fixtures/negative-cases-v4.json` | Frozen adversarial protocol mutations and expected fail-closed diagnostic codes. |

@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 6);
-    assert_eq!(value["rendererVersion"], "2.0.6");
+    assert_eq!(value["rendererVersion"], "2.0.7");
     assert_eq!(
         value["profiles"],
         json!([
@@ -62,7 +62,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 6);
-    assert_eq!(response["rendererVersion"], "2.0.6");
+    assert_eq!(response["rendererVersion"], "2.0.7");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -210,6 +210,54 @@ fn kdp_pdf_17_flattens_composition_opacity_without_pdf_transparency() {
     assert_eq!(rendered["status"], "completed");
     assert_eq!(rendered["evidence"]["pdfVersion"], "1.7");
     assert_eq!(rendered["evidence"]["hasTransparency"], false);
+    assert!(!inspect(&job.artifact(&rendered, "interior-pdf")).transparency);
+}
+
+#[test]
+fn kdp_flattens_translucent_text_background_into_lower_page_art() {
+    let mut job = PreparedJob::new("kdp-paperback-v1");
+    job.request["ink"] = json!("Color");
+    let artwork = rgb_png(2, 1, &[255, 0, 0, 255, 0, 0]);
+    fs::write(job.root.path().join("input/assets/pixel.png"), &artwork).expect("page artwork");
+    job.request["assets"][0]["byteLength"] = json!(artwork.len());
+    job.request["assets"][0]["sha256"] = json!(hex_hash(&artwork));
+    job.request["assets"][0]["widthPixels"] = json!(2);
+    let scene = &mut job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"][0]["variants"]
+        [0]["scene"];
+    scene["surface"] = json!({
+        "kind": "IndependentPage", "outputPageMode": "SingleSurface",
+        "widthPoints": 432, "heightPoints": 648, "bleedPoints": 0,
+        "safeInsetPoints": 36, "allowIndependentPdfPage": false
+    });
+    scene["objects"][0]["imageFit"] = json!("Stretch");
+    let text = &mut job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"][0]["variants"]
+        [0]["scene"]["objects"][1];
+    text["bounds"] =
+        json!({ "xPercent": 0, "yPercent": 0, "widthPercent": 50, "heightPercent": 100 });
+    text["fillColor"] = json!("#000000");
+    text["backgroundColor"] = json!("#ffffff");
+    text["backgroundOpacity"] = json!(0.5);
+    job.write_request();
+
+    let rendered = response(&job.render());
+    assert_eq!(rendered["status"], "completed");
+    assert_eq!(rendered["evidence"]["hasTransparency"], false);
+    let pdf = Document::load(job.artifact(&rendered, "interior-pdf")).expect("KDP PDF");
+    let flattened_samples = pdf
+        .objects
+        .values()
+        .filter_map(|object| {
+            let stream = object.as_stream().ok()?;
+            matches!(stream.dict.get(b"Subtype"), Ok(Object::Name(name)) if name == b"Image")
+                .then(|| stream.decompressed_content().expect("image samples"))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        flattened_samples
+            .into_iter()
+            .any(|samples| samples == [255, 128, 128, 255, 0, 0]),
+        "the translucent white text background must be baked into the red page artwork"
+    );
     assert!(!inspect(&job.artifact(&rendered, "interior-pdf")).transparency);
 }
 
@@ -2490,6 +2538,18 @@ fn hex_hash(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn rgb_png(width: u32, height: u32, samples: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, width, height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().expect("PNG header");
+        writer.write_image_data(samples).expect("PNG samples");
+    }
+    bytes
 }
 
 struct PdfInspection {
