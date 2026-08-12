@@ -46,6 +46,7 @@ public sealed class CompositionService(
     AppDbContext db,
     IManuscriptService manuscripts,
     IPublicationCoverService covers,
+    IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IProjectMutationCoordinator projectMutations) : ICompositionService
 {
     private static readonly JsonSerializerOptions JsonOptions = ManuscriptCodec.JsonOptions;
@@ -112,7 +113,7 @@ public sealed class CompositionService(
         composition.SemanticManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(composition.Id));
         db.PageCompositions.Add(composition);
         var setup = target.EditionId is Guid editionId
-            ? await db.PublicationEditions.AsNoTracking().SingleAsync(item => item.Id == editionId && item.ProjectId == projectId, cancellationToken)
+            ? (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition
             : null;
         var scene = setup is null
             ? await CreateInitialPageSceneAsync(projectId, await RequirePageSetupUnderLeaseAsync(projectId, cancellationToken), initialContent, cancellationToken)
@@ -360,9 +361,8 @@ public sealed class CompositionService(
     {
         if (composition.EditionId is Guid editionId)
         {
-            var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
-                item => item.Id == editionId && item.ProjectId == composition.ProjectId,
-                cancellationToken) ?? throw new InvalidOperationException("The edition-owned Designed Page has no publication release.");
+            var edition = (await effectiveConfigurations.ResolveReleaseAsync(
+                composition.ProjectId, editionId, cancellationToken)).Edition;
             var core = await db.ProjectPageSetups.AsNoTracking().SingleOrDefaultAsync(
                 item => item.ProjectId == composition.ProjectId,
                 cancellationToken) ?? new ProjectPageSetup { ProjectId = composition.ProjectId };
@@ -410,12 +410,11 @@ public sealed class CompositionService(
         var composition = await db.PageCompositions.SingleOrDefaultAsync(
             item => item.Id == compositionId && item.ProjectId == projectId,
             cancellationToken) ?? throw new KeyNotFoundException("Page composition was not found in this project.");
-        var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
-            item => item.Id == editionId && item.ProjectId == projectId,
-            cancellationToken) ?? throw new KeyNotFoundException("Edition was not found in this project.");
+        var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
         if (composition.EditionId != edition.Id)
             throw new InvalidOperationException("The Designed Page does not belong to the selected release content.");
-        if (!edition.EditionSpecificContentEnabled || edition.Status == PublicationEditionStatus.Archived)
+        if (edition.Status == PublicationEditionStatus.Archived
+            || (!edition.EditionSpecificContentEnabled && composition.PublicationSectionId is null))
             throw new InvalidOperationException("Edition-specific content is not editable for this release.");
         var candidates = await db.PageCompositionVariants
             .Where(item => item.CompositionId == composition.Id)
@@ -464,12 +463,9 @@ public sealed class CompositionService(
             ?? throw new KeyNotFoundException("Page composition was not found in this project.");
         if (composition.EditionId is not null)
             throw new InvalidOperationException("Only an inherited Core Designed Page can use a transient release preview.");
-        var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
-            item => item.Id == editionId
-                && item.ProjectId == projectId
-                && item.EditionSpecificContentEnabled
-                && item.Status != PublicationEditionStatus.Archived,
-            cancellationToken) ?? throw new KeyNotFoundException("The editable publication release was not found.");
+        var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
+        if (edition.Status == PublicationEditionStatus.Archived)
+            throw new KeyNotFoundException("The editable publication release was not found.");
         var source = composition.Variants.SingleOrDefault(item => item.Id == composition.ActiveAuthoringVariantId)
             ?? composition.Variants.OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
         var scene = source is null
@@ -503,9 +499,7 @@ public sealed class CompositionService(
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
-        var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
-            item => item.Id == editionId && item.ProjectId == projectId, cancellationToken)
-            ?? throw new KeyNotFoundException("Edition was not found in this project.");
+        var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
         return (await db.PageCompositionVariants.AsNoTracking()
             .Where(item => item.CompositionId == compositionId && item.Composition.ProjectId == projectId)
             .OrderByDescending(item => item.UpdatedAt)
@@ -531,9 +525,7 @@ public sealed class CompositionService(
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         DetachTrackedComposition(compositionId);
-        var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
-            item => item.Id == editionId && item.ProjectId == projectId, cancellationToken)
-            ?? throw new KeyNotFoundException("Edition was not found in this project.");
+        var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
         var variant = await db.PageCompositionVariants.Include(item => item.Composition)
             .SingleOrDefaultAsync(item => item.Id == variantId && item.CompositionId == compositionId
                 && item.Composition.ProjectId == projectId, cancellationToken)
@@ -1327,9 +1319,7 @@ public sealed class CompositionService(
         Guid? variantId = null,
         CancellationToken cancellationToken = default)
     {
-        var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
-            item => item.Id == editionId && item.ProjectId == projectId,
-            cancellationToken) ?? throw new KeyNotFoundException("Edition was not found in this project.");
+        var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
         var normalizedKind = NormalizeGenerationTargetKind(targetKind);
         if (normalizedKind is not ("cover-surface" or "cover-frame" or "page-surface" or "page-frame"))
             throw new ArgumentException("Publication-edition generation targets are cover or Designed Page surfaces and frames.", nameof(targetKind));
@@ -1447,9 +1437,7 @@ public sealed class CompositionService(
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
-        var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
-            item => item.Id == editionId && item.ProjectId == projectId,
-            cancellationToken) ?? throw new KeyNotFoundException("Edition was not found in this project.");
+        var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
         return new CompositionEditionGeometry(
             edition.PageWidthInches * 72,
             edition.PageHeightInches * 72,

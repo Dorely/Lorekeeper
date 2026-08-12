@@ -180,7 +180,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid sectionId, long expectedRevision, ManuscriptOperationInput[] operations, Guid? releaseId = null) => PatchPublicationSectionManuscriptAsync(context, releaseId, sectionId, expectedRevision, operations),
                 name: "patch_publication_section_manuscript",
-                description: "Apply focused revision-checked manuscript operations to one Core/release publication section. Read the bounded section first. Preserve bound metadata blocks and unrelated content."),
+                description: "Apply focused revision-checked manuscript operations to one user-authored Core/release publication section. Read the bounded section first. Title and copyright use their Designed Page scene tools; contents is generated automatically."),
             AIFunctionFactory.Create(
                 method: (Guid[] orderedSectionIds, Guid? releaseId = null) => ReorderPublicationSectionsAsync(context, releaseId, orderedSectionIds),
                 name: "reorder_publication_sections",

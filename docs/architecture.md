@@ -617,6 +617,11 @@ front cover immediately after reading-copy readiness. Page defaults are edited
 inline through the shared page-setup service, while Editor and Publish reuse one
 Book Text Styles modal and manager. Publish-assistant tools expose the same
 revision-safe page-setup and style mutations with compact refresh notices.
+Core and release form edits use one serialized debounce queue: navigation,
+assistant turns, cover entry, and preparation flush that queue, while successful
+background saves remain silent and refresh artifact freshness. A revision race
+reloads the current target and retries the still-dirty patch instead of exposing
+an unhandled optimistic-concurrency exception.
 `IPublicationReleasePresetService` creates releases from only product type and,
 for paperback, destination. Application-owned profile versions and bleed policy
 are not normal UI or assistant inputs. Publication profiles have two durable
@@ -705,7 +710,9 @@ long tagged books cannot reuse an indirect object ID across pages.
 Group containers resolve into child geometry, rotation, opacity, visibility,
 locks, and z-order in canvases, export, generation targets, and Press rather
 than acting as editor-only metadata.
-KDP and generic paperback profiles emit PDF 1.7. The Ingram profile emits PDF 1.3 with
+KDP and generic paperback profiles emit PDF 1.7. Page-edge image and shape art
+extends through the vendor bleed box while the authored scene remains trim-sized.
+The Ingram profile emits PDF 1.3 with
 PDF/X-1a:2001 identification, the registered CGATS21 CRPC1 CMYK output intent,
 CMYK/gray-only resources, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded fonts, no encryption,
 annotations, actions, or transparency, and image/page-paint colors capped at
@@ -738,7 +745,7 @@ independently validates every PDF, and atomically renames it to `output` only
 after all checks succeed; it never overwrites prior output.
 
 Composition-object opacity is preserved with bounded graphics states in Digital
-PDF and KDP PDF 1.7. Ingram PDF/X-1a deterministically flattens opacity against
+PDF. KDP PDF 1.7 flattens opacity to avoid vendor transparency warnings, and Ingram PDF/X-1a deterministically flattens opacity against
 the page or cover substrate. A translucent object that overlaps lower page art
 is rejected by shared profile validation with the exact object IDs because
 flattening that stack would otherwise change its appearance or rasterize
@@ -860,9 +867,12 @@ EPUB packages; exact PDF row IDs remain
 an internal correlation snapshot and never leak into portable bytes. A short
 serializable transaction rechecks the source immediately before each package
 write, so a concurrent fingerprint-affecting mutation cannot be
-mislabeled. Title, copyright, and visible contents pages are system publication
-sections with live bindings to effective Core/release fields. User-created
-sections cannot claim those reserved roles or duplicate generated output. EPUB
+mislabeled. Title and copyright are system Designed Pages whose linked copy
+resolves from effective Core/release fields while their geometry, typography,
+and placement are edited through the shared Pages canvas. The visible contents
+section is generated from effective structure. Generated sections never enter
+the ordinary manuscript editor, and user-created sections cannot claim those
+reserved roles or duplicate generated output. EPUB
 validation remains structural and internal; broader reader-matrix results are
 outside the current runtime. Vendor upload and physical review are external user
 activities and never alter the renderer's scoped structural result.

@@ -236,6 +236,9 @@ else
     private string _newReleaseName = "Paperback";
     private IJSObjectReference? _downloads;
     private readonly CancellationTokenSource _dispose = new();
+    private CancellationTokenSource? _formAutosave;
+    private readonly SemaphoreSlim _formSaveGate = new(1, 1);
+    private long _formChangeVersion;
     private int _pollGeneration;
     private int _targetLoadGeneration;
 
@@ -335,16 +338,17 @@ else
 
     private async Task SelectCoreAsync()
     {
+        var keepCoverOpen = _coverEditorOpen;
         await SavePendingAsync();
-        _coverEditorOpen = false;
         await LoadCoreAsync();
+        _coverEditorOpen = keepCoverOpen;
     }
 
     private async Task SelectReleaseAsync(Guid id)
     {
         if (Project is null) return;
+        var keepCoverOpen = _coverEditorOpen;
         await SavePendingAsync();
-        _coverEditorOpen = false;
         _previewArtifact = null;
         _selectedReleaseId = id;
         _workspace = null;
@@ -355,6 +359,7 @@ else
         _targetLoadPending = true;
         _targetLoadGeneration++;
         _error = null;
+        _coverEditorOpen = keepCoverOpen;
     }
 
     private async Task LoadCoreTargetAsync(int generation)
@@ -433,7 +438,6 @@ else
         <section class="workspace-card core-book-design-card">
             <header>
                 <div><div><span class="eyebrow">Book design</span><h2>Page, text, and cover defaults</h2><p>These shared choices flow into the reading PDF and publication releases unless customized.</p></div></div>
-                <button class="btn btn-sm btn-primary" disabled="@(!_pageSetupDirty || _busy)" @onclick="SavePageSetupAsync">Save design</button>
             </header>
             <div class="core-book-design-grid">
                 <div class="core-design-pane">
@@ -454,7 +458,7 @@ else
             </div>
         </section>
 
-        <section class="workspace-card"><header><div><span class="step">01</span><div><h2>Book details</h2><p>Enter these once. Releases use them unless customized.</p></div></div><button class="btn btn-sm btn-primary" disabled="@((!_coreDirty && !_coreOutlineDirty) || _busy)" @onclick="SaveCoreAsync">Save changes</button></header>
+        <section class="workspace-card"><header><div><span class="step">01</span><div><h2>Book details</h2><p>Enter these once. Releases use them unless customized.</p></div></div></header>
             <div class="form-grid">
                 <label class="field wide"><span>Title</span><input class="form-control" value="@_coreDraft.Title" @oninput="e => CoreChanged(nameof(CoreDraft.Title), e.Value?.ToString())" /></label>
                 <label class="field wide"><span>Subtitle <small>optional</small></span><input class="form-control" value="@_coreDraft.Subtitle" @oninput="e => CoreChanged(nameof(CoreDraft.Subtitle), e.Value?.ToString())" /></label>
@@ -476,7 +480,7 @@ else
                 @Toggle("Include chapter summaries", _coreDraft.IncludeChapterSynopses, value => CoreToggle(nameof(CoreDraft.IncludeChapterSynopses), value))
                 @Toggle("Number acts", _coreDraft.NumberActs, value => CoreToggle(nameof(CoreDraft.NumberActs), value))
                 @Toggle("Number chapters", _coreDraft.NumberChapters, value => CoreToggle(nameof(CoreDraft.NumberChapters), value))
-                <label class="field"><span>Title page</span><select class="form-select" @bind="_coreDraft.TitlePageMode" @bind:after="() => _coreDirty = true"><option value="@PublishTitlePageMode.Automatic">Automatic</option><option value="@PublishTitlePageMode.Include">Always include</option><option value="@PublishTitlePageMode.Omit">Omit</option></select></label>
+                <label class="field"><span>Title page</span><select class="form-select" @bind="_coreDraft.TitlePageMode" @bind:after="MarkCoreDirty"><option value="@PublishTitlePageMode.Automatic">Automatic</option><option value="@PublishTitlePageMode.Include">Always include</option><option value="@PublishTitlePageMode.Omit">Omit</option></select></label>
             </div>
             <div class="summary-strip"><span><strong>@_core!.IncludedChapterCount</strong> chapters included</span><span><strong>@_publicationSections.Count(item => item.IsIncluded)</strong> publication sections</span><span><strong>@_publicationSections.Sum(item => item.DesignedPageCount)</strong> designed pages</span></div>
             <details class="content-choices"><summary>Choose included chapters</summary>
@@ -497,7 +501,7 @@ else
 
     </div>;
 
-    private RenderFragment ReleaseView() => @<div class="workspace-stack">
+    private RenderFragment ReleaseView() => @<div class="workspace-stack release-workspace-stack">
         <section class="readiness-card">
             <div><span class="eyebrow">@ReleaseTypeLabel(_workspace!.Edition.Format)</span><h1>@_workspace.Edition.Name</h1><p>@ReleaseSummary(_workspace.Edition)</p></div>
             <div class="primary-action"><button class="btn btn-primary" disabled="@(_busy || !_outputsLoaded || HasActivePreparation)" @onclick="PrepareReleaseAsync">@PreparationButton("Prepare files")</button><small>Renders, validates, and packages in one step.</small></div>
@@ -507,7 +511,7 @@ else
 
         <section class="workspace-card edition-content-card">
             <header>
-                <div><span class="step">02</span><div><h2>Edition-specific content</h2><p>Keep this release live with Core Book, or opt in to chapter-level edition copies edited in Editor.</p></div></div>
+                <div><span class="step">03</span><div><h2>Edition-specific content</h2><p>Keep this release live with Core Book, or opt in to chapter-level edition copies edited in Editor.</p></div></div>
                 <label class="edition-content-switch"><input type="checkbox" checked="@_workspace!.Edition.EditionSpecificContentEnabled" disabled="@(_editionContentBusy || _workspace.Edition.Status == PublicationEditionStatus.Archived)" @onchange="ToggleEditionContentAsync" /><span>Enable</span></label>
             </header>
             @if (_workspace.Edition.EditionSpecificContentEnabled)
@@ -541,7 +545,7 @@ else
 
         @PublicationSectionsCard()
 
-        <section class="workspace-card"><header><div><span class="step">01</span><div><h2>Release setup</h2><p>Only settings that belong to this publication product.</p></div></div><button class="btn btn-sm btn-primary" disabled="@((!_releaseDirty && !_releaseContentDirty) || _busy)" @onclick="SaveReleaseAsync">Save release</button></header>
+        <section class="workspace-card release-setup-card"><header><div><span class="step">04</span><div><h2>Release setup</h2><p>Only settings that belong to this publication product. Changes save automatically.</p></div></div></header>
             <div class="form-grid">
                 <label class="field"><span>Release name</span><input class="form-control" @bind="_releaseDraft.Name" @bind:after="MarkReleaseDirty" /></label>
                 @if (_workspace.Edition.Format == PublicationEditionFormat.Paperback)
@@ -563,7 +567,7 @@ else
             </div>
         </section>
 
-        <section class="workspace-card"><header><div><span class="step">02</span><div><h2>Book details</h2><p>Inherited from Core Book. Customize only the fields that differ for this release.</p></div></div></header>
+        <section class="workspace-card release-book-details-card"><header><div><span class="step">02</span><div><h2>Book details</h2><p>Inherited from Core Book. Customize only the fields that differ for this release.</p></div></div></header>
             <div class="inherit-grid">
                 @InheritedText("Title", PublicationEditionOverrideField.Title, _releaseDraft.Title, value => ReleaseText(nameof(ReleaseDraft.Title), value))
                 @InheritedText("Subtitle", PublicationEditionOverrideField.Subtitle, _releaseDraft.Subtitle, value => ReleaseText(nameof(ReleaseDraft.Subtitle), value))
@@ -575,13 +579,13 @@ else
             </div>
         </section>
 
-        <section class="workspace-card split"><div><span class="eyebrow">Content</span><h2>@(_workspace.HasContentOverrides ? "Release content customized" : "Uses Core Book")</h2><p>@_workspace.Sections.Sum(section => section.Chapters.Count(chapter => chapter.IsIncluded)) chapters · @_workspace.PublicationSections.Count(item => item.IsIncluded) publication sections</p><p class="muted">A release may omit chapters, but reading order remains the Core outline order. Publication sections are customized above.</p><div class="button-row"><button class="btn btn-sm btn-outline-primary" @onclick="() => _releaseContentOpen = !_releaseContentOpen">@(_releaseContentOpen ? "Hide content choices" : "Customize content")</button>@if (_workspace.HasContentOverrides){<button class="btn btn-sm btn-outline-secondary" @onclick="UseCoreContentAsync">Use Core Book content</button>}</div>@if (_releaseContentOpen){<div class="release-presentation-options">@InheritedToggle("Navigation contents", PublicationEditionOverrideField.IncludeTableOfContents, _releaseDraft.IncludeTableOfContents, value => ReleaseToggle(nameof(ReleaseDraft.IncludeTableOfContents), value))@InheritedToggle("Visible contents page", PublicationEditionOverrideField.IncludeVisibleTableOfContents, _releaseDraft.IncludeVisibleTableOfContents, value => ReleaseToggle(nameof(ReleaseDraft.IncludeVisibleTableOfContents), value))@InheritedToggle("Act headings", PublicationEditionOverrideField.IncludeActHeadings, _releaseDraft.IncludeActHeadings, value => ReleaseToggle(nameof(ReleaseDraft.IncludeActHeadings), value))@InheritedToggle("Chapter headings", PublicationEditionOverrideField.IncludeChapterHeadings, _releaseDraft.IncludeChapterHeadings, value => ReleaseToggle(nameof(ReleaseDraft.IncludeChapterHeadings), value))@InheritedToggle("Number acts", PublicationEditionOverrideField.NumberActs, _releaseDraft.NumberActs, value => ReleaseToggle(nameof(ReleaseDraft.NumberActs), value))@InheritedToggle("Number chapters", PublicationEditionOverrideField.NumberChapters, _releaseDraft.NumberChapters, value => ReleaseToggle(nameof(ReleaseDraft.NumberChapters), value))</div><div class="content-choice-list release-content">@foreach (var chapter in _workspace.Sections.SelectMany(section => section.Chapters)){<label class="check-row"><input type="checkbox" checked="@_releaseSelections.GetValueOrDefault(chapter.Id)" @onchange="e => ReleaseContentChanged(chapter.Id, (bool)e.Value!)" /><span>@chapter.Title</span></label>}</div>}</div><div><span class="eyebrow">@(_workspace.Edition.Format == PublicationEditionFormat.Paperback ? "Full-wrap cover" : "Digital cover")</span><h2>@(_workspace.Edition.InheritsCoreCover ? "Front inherited from Core" : "Customized for this release")</h2><p>@CoverHelp(_workspace.Edition.Format)</p><div class="button-row">@if (_workspace.Edition.InheritsCoreCover){<button class="btn btn-sm btn-outline-primary" @onclick="CustomizeReleaseCoverAsync">Customize for this release</button>}else{<button class="btn btn-sm btn-outline-primary" @onclick="OpenReleaseCoverAsync">Edit release cover</button><button class="btn btn-sm btn-outline-secondary" @onclick="UseCoreCoverAsync">Use Core Book cover</button>}<span class="status-pill">@(_workspace.Edition.InheritsCoreCover ? "From Core Book" : "Release override")</span></div></div></section>
+        <section class="workspace-card split release-content-cover-card"><div><span class="eyebrow">Content</span><h2>@(_workspace.HasContentOverrides ? "Release content customized" : "Uses Core Book")</h2><p>@_workspace.Sections.Sum(section => section.Chapters.Count(chapter => chapter.IsIncluded)) chapters · @_workspace.PublicationSections.Count(item => item.IsIncluded) publication sections</p><p class="muted">A release may omit chapters, but reading order remains the Core outline order. Publication sections are customized above.</p><div class="button-row"><button class="btn btn-sm btn-outline-primary" @onclick="() => _releaseContentOpen = !_releaseContentOpen">@(_releaseContentOpen ? "Hide content choices" : "Customize content")</button>@if (_workspace.HasContentOverrides){<button class="btn btn-sm btn-outline-secondary" @onclick="UseCoreContentAsync">Use Core Book content</button>}</div>@if (_releaseContentOpen){<div class="release-presentation-options">@InheritedToggle("Navigation contents", PublicationEditionOverrideField.IncludeTableOfContents, _releaseDraft.IncludeTableOfContents, value => ReleaseToggle(nameof(ReleaseDraft.IncludeTableOfContents), value))@InheritedToggle("Visible contents page", PublicationEditionOverrideField.IncludeVisibleTableOfContents, _releaseDraft.IncludeVisibleTableOfContents, value => ReleaseToggle(nameof(ReleaseDraft.IncludeVisibleTableOfContents), value))@InheritedToggle("Act headings", PublicationEditionOverrideField.IncludeActHeadings, _releaseDraft.IncludeActHeadings, value => ReleaseToggle(nameof(ReleaseDraft.IncludeActHeadings), value))@InheritedToggle("Chapter headings", PublicationEditionOverrideField.IncludeChapterHeadings, _releaseDraft.IncludeChapterHeadings, value => ReleaseToggle(nameof(ReleaseDraft.IncludeChapterHeadings), value))@InheritedToggle("Number acts", PublicationEditionOverrideField.NumberActs, _releaseDraft.NumberActs, value => ReleaseToggle(nameof(ReleaseDraft.NumberActs), value))@InheritedToggle("Number chapters", PublicationEditionOverrideField.NumberChapters, _releaseDraft.NumberChapters, value => ReleaseToggle(nameof(ReleaseDraft.NumberChapters), value))</div><div class="content-choice-list release-content">@foreach (var chapter in _workspace.Sections.SelectMany(section => section.Chapters)){<label class="check-row"><input type="checkbox" checked="@_releaseSelections.GetValueOrDefault(chapter.Id)" @onchange="e => ReleaseContentChanged(chapter.Id, (bool)e.Value!)" /><span>@chapter.Title</span></label>}</div>}</div><div><span class="eyebrow">@(_workspace.Edition.Format == PublicationEditionFormat.Paperback ? "Full-wrap cover" : "Digital cover")</span><h2>@(_workspace.Edition.InheritsCoreCover ? "Front inherited from Core" : "Customized for this release")</h2><p>@CoverHelp(_workspace.Edition.Format)</p><div class="button-row">@if (_workspace.Edition.InheritsCoreCover){<button class="btn btn-sm btn-outline-primary" @onclick="CustomizeReleaseCoverAsync">Customize for this release</button>}else{<button class="btn btn-sm btn-outline-primary" @onclick="OpenReleaseCoverAsync">Edit release cover</button><button class="btn btn-sm btn-outline-secondary" @onclick="UseCoreCoverAsync">Use Core Book cover</button>}<span class="status-pill">@(_workspace.Edition.InheritsCoreCover ? "From Core Book" : "Release override")</span></div></div></section>
 
         @if (_workspace.Edition.Format != PublicationEditionFormat.Epub)
         {
             @if (_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf)
             {
-                <section class="workspace-card"><header><div><span class="step">03</span><div><h2>PDF presentation</h2><p>Uses Core Book defaults until deliberately customized for this PDF release.</p></div></div></header>
+                <section class="workspace-card"><header><div><span class="step">05</span><div><h2>PDF presentation</h2><p>Uses Core Book defaults until deliberately customized for this PDF release.</p></div></div></header>
                     <div class="release-presentation-options">
                         @InheritedToggle("Preserve Designed Page sizes", PublicationEditionOverrideField.AllowDesignedPageOverrides, _releaseDraft.AllowDesignedPageOverrides, value => ReleaseToggle(nameof(ReleaseDraft.AllowDesignedPageOverrides), value))
                         <div class="plain-setting"><strong>Page behavior</strong><span>When enabled, full-art spreads remain one wide PDF page and custom Designed Pages retain their geometry. When disabled, spreads use regular book leaves.</span></div>
@@ -589,7 +593,7 @@ else
                     </div>
                 </section>
             }
-            <section class="workspace-card"><header><div><span class="step">@(_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf ? "04" : "03")</span><div><h2>Page geometry</h2><p>@(_releaseDesignOpen ? "Page size and margins are customized for this release." : "Uses Core Book page size and margins. Edition-specific typography is applied in Editor.")</p></div></div><button class="btn btn-sm btn-outline-primary" @onclick="ToggleReleaseDesign">@(_releaseDesignOpen ? "Use Core Book geometry" : "Customize geometry")</button></header>
+            <section class="workspace-card"><header><div><span class="step">@(_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf ? "06" : "05")</span><div><h2>Page geometry</h2><p>@(_releaseDesignOpen ? "Page size and margins are customized for this release." : "Uses Core Book page size and margins. Edition-specific typography is applied in Editor.")</p></div></div><button class="btn btn-sm btn-outline-primary" @onclick="ToggleReleaseDesign">@(_releaseDesignOpen ? "Use Core Book geometry" : "Customize geometry")</button></header>
                 @if (_releaseDesignOpen)
                 {
                     <div class="form-grid">
@@ -608,7 +612,7 @@ else
         @if (_editingSection is null)
         {
             <header>
-                <div><span class="step">04</span><div><h2>Publication sections</h2><p>Build title pages, copyright, acknowledgements, author notes, image pages, and other material around the Core outline.</p></div></div>
+                <div><span class="step">@PublicationSectionsStep()</span><div><h2>Publication sections</h2><p>Build title pages, copyright, acknowledgements, author notes, image pages, and other material around the Core outline.</p></div></div>
                 <div class="button-row">
                     <button class="btn btn-sm btn-outline-primary" @onclick="() => AddPublicationSectionAsync(false)">Add prose section</button>
                     <button class="btn btn-sm btn-outline-primary" @onclick="() => AddPublicationSectionAsync(true)">Add designed page</button>
@@ -632,7 +636,14 @@ else
                                     <div class="button-row">
                                         <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section earlier" aria-label="Move @item.Title earlier" disabled="@(group.First().Id == item.Id)" @onclick="() => MovePublicationSectionAsync(item, -1)">↑</button>
                                         <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section later" aria-label="Move @item.Title later" disabled="@(group.Last().Id == item.Id)" @onclick="() => MovePublicationSectionAsync(item, 1)">↓</button>
-                                        <button class="btn btn-sm btn-outline-primary" @onclick="() => BeginPublicationSectionEditAsync(item)">@(item.IsInherited ? "Customize" : "Edit")</button>
+                                        @if (item.SystemRole == PublicationSectionSystemRole.Contents)
+                                        {
+                                            <span class="status-pill">Generated automatically</span>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-outline-primary" @onclick="() => BeginPublicationSectionEditAsync(item)">@(item.IsInherited ? "Customize" : "Edit")</button>
+                                        }
                                         @if (item.CoreSectionId is not null && !item.IsInherited)
                                         {
                                             <button class="btn btn-sm btn-outline-secondary" @onclick="() => ResetPublicationSectionAsync(item)">Use Core Book</button>
@@ -654,7 +665,10 @@ else
             <div class="publication-section-workspace">
                 <header class="publication-section-toolbar">
                     <div class="button-row"><button class="btn btn-sm btn-outline-secondary" @onclick="ClosePublicationSectionEditorAsync">← Back to sections</button><strong>@_editingSection.Title</strong><span class="status-pill">@(_editingSection.IsInherited ? "From Core Book" : _selectedReleaseId is null ? "Core Book" : "Release section")</span></div>
-                    <div class="button-row"><button class="btn btn-sm @(!_sectionPagesMode ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetSectionMode(false)">Write</button><button class="btn btn-sm @(_sectionPagesMode ? "btn-primary" : "btn-outline-primary")" disabled="@(!SectionCompositionIds().Any())" @onclick="() => SetSectionMode(true)">Pages</button></div>
+                    @if (_editingSection.SystemRole == PublicationSectionSystemRole.None)
+                    {
+                        <div class="button-row"><button class="btn btn-sm @(!_sectionPagesMode ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetSectionMode(false)">Write</button><button class="btn btn-sm @(_sectionPagesMode ? "btn-primary" : "btn-outline-primary")" disabled="@(!SectionCompositionIds().Any())" @onclick="() => SetSectionMode(true)">Pages</button></div>
+                    }
                 </header>
                 <div class="publication-section-settings">
                     <label class="field"><span>Section name</span><input class="form-control" value="@_sectionTitle" @onchange="SectionTitleChangedAsync" /></label>
@@ -688,12 +702,12 @@ else
     private RenderFragment Toggle(string Label, bool Value, Action<bool> Changed) => @<label class="check-row"><input type="checkbox" checked="@Value" @onchange="e => Changed((bool)e.Value!)" /><span>@Label</span></label>;
 
     private RenderFragment InheritedText(string Label, PublicationEditionOverrideField Field, string Value, Action<string?> Changed) => @<div class="inherited-field">
-        <div class="inherited-heading"><label>@Label</label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>@(_releaseOverrides.Contains(Field) ? "Customized" : "From Core Book")</span></label></div>
+        <div class="inherited-heading"><label>@Label</label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>Customize</span></label></div>
         <input class="form-control" disabled="@(!_releaseOverrides.Contains(Field))" value="@Value" @oninput="e => Changed(e.Value?.ToString())" />
     </div>;
 
     private RenderFragment InheritedLanguage() => @<div class="inherited-field">
-        <div class="inherited-heading"><label>Language</label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(PublicationEditionOverrideField.Language)" @onchange="e => ToggleOverride(PublicationEditionOverrideField.Language, (bool)e.Value!)" /><span>@(_releaseOverrides.Contains(PublicationEditionOverrideField.Language) ? "Customized" : "From Core Book")</span></label></div>
+        <div class="inherited-heading"><label>Language</label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(PublicationEditionOverrideField.Language)" @onchange="e => ToggleOverride(PublicationEditionOverrideField.Language, (bool)e.Value!)" /><span>Customize</span></label></div>
         @LanguageSelect(_releaseDraft.Language, !_releaseOverrides.Contains(PublicationEditionOverrideField.Language), value => ReleaseText(nameof(ReleaseDraft.Language), value))
     </div>;
 
@@ -708,7 +722,7 @@ else
         }
     </select>;
 
-    private RenderFragment InheritedToggle(string Label, PublicationEditionOverrideField Field, bool Value, Action<bool> Changed) => @<div class="inherited-toggle"><label class="check-row"><input type="checkbox" disabled="@(!_releaseOverrides.Contains(Field))" checked="@Value" @onchange="e => Changed((bool)e.Value!)" /><span>@Label</span></label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>@(_releaseOverrides.Contains(Field) ? "Customized" : "From Core Book")</span></label></div>;
+    private RenderFragment InheritedToggle(string Label, PublicationEditionOverrideField Field, bool Value, Action<bool> Changed) => @<div class="inherited-toggle"><label class="check-row"><input type="checkbox" disabled="@(!_releaseOverrides.Contains(Field))" checked="@Value" @onchange="e => Changed((bool)e.Value!)" /><span>@Label</span></label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>Customize</span></label></div>;
 
     private RenderFragment PreparationStatus() => @<text>@if (!_outputsLoaded)
     {
@@ -780,8 +794,11 @@ else
     {
         try
         {
+            await SavePendingAsync();
             if (item.IsInherited && _selectedReleaseId is Guid releaseId)
                 item = await PublicationSections.CustomizeAsync(Project!.Id, releaseId, item.Id);
+            if (item.SystemRole is PublicationSectionSystemRole.Title or PublicationSectionSystemRole.Copyright)
+                item = await PublicationSections.EnsureSystemDesignedPageAsync(CurrentPublicationSectionTarget(), item.Id, _dispose.Token);
             BeginPublicationSectionEdit(item);
             await RefreshPublicationSectionsAsync();
         }
@@ -1035,6 +1052,10 @@ else
     {
         if (Project is null) return;
         _publicationSections = await PublicationSections.ListAsync(CurrentPublicationSectionTarget(), _dispose.Token);
+        if (_selectedReleaseId is Guid releaseId && !_releaseDirty && !_releaseContentDirty)
+            _workspace = await Publishing.GetWorkspaceForEditingAsync(Project.Id, releaseId, _dispose.Token);
+        else if (_selectedReleaseId is null && !_coreDirty && !_coreOutlineDirty)
+            _core = await Books.GetOrCreateAsync(Project.Id, _dispose.Token);
         if (updateEditing && _editingSection is not null)
             _editingSection = _publicationSections.FirstOrDefault(item => item.Id == _editingSection.Id);
         _outputsLoaded = false;
@@ -1074,6 +1095,12 @@ else
     private static string SectionTypeLabel(PublicationSectionView item) => item.DesignedPageCount > 0 && item.Manuscript.Content.All(block => block.Type == ManuscriptBlockType.DesignedPage)
         ? item.DesignedPageCount == 1 ? "Designed page" : $"{item.DesignedPageCount} designed pages"
         : SectionKindLabel(item.Kind);
+    private string PublicationSectionsStep() => _selectedReleaseId is null ? "04" : _workspace?.Edition.Format switch
+    {
+        PublicationEditionFormat.Epub => "05",
+        PublicationEditionFormat.Paperback => "06",
+        _ => "07",
+    };
 
     private async Task RefreshCoreDataAsync()
     {
@@ -1092,6 +1119,7 @@ else
     private async Task SaveCoreAsync()
     {
         if (Project is null || _core is null || (!_coreDirty && !_coreOutlineDirty)) return;
+        var saveVersion = _formChangeVersion;
         _busy = true; _error = null;
         try
         {
@@ -1099,7 +1127,17 @@ else
                 _core = await Books.UpdateAsync(Project.Id, new PublicationBookPatch(_core.Revision, _coreDraft.Title, _coreDraft.Subtitle, _coreDraft.Author, _coreDraft.Language, _coreDraft.Publisher, _coreDraft.Copyright, _coreDraft.Description, _coreDraft.IncludeTableOfContents, _coreDraft.IncludeVisibleTableOfContents, _coreDraft.IncludeActSynopses, _coreDraft.IncludeChapterSynopses, _coreDraft.IncludeActHeadings, _coreDraft.IncludeChapterHeadings, _coreDraft.NumberActs, _coreDraft.NumberChapters, _coreDraft.TitlePageMode, _coreDraft.AllowDesignedPageOverrides));
             if (_coreOutlineDirty)
                 _core = await Books.SetOutlineSelectionsAsync(Project.Id, _coreSelections.Select(item => new PublicationEditionOutlineItemUpdate(item.Key.Kind, item.Key.Id, item.Value)).ToList(), _core.Revision);
-            _coreDraft = CoreDraft.From(_core); _coreDirty = false; _coreOutlineDirty = false; _notice = "Core Book saved. Inheriting releases now use these values.";
+            if (saveVersion == _formChangeVersion)
+            {
+                _coreDraft = CoreDraft.From(_core);
+                _coreDirty = false;
+                _coreOutlineDirty = false;
+            }
+            _releases = await Releases.ListAsync(Project.Id, _dispose.Token);
+            _artifacts = (await Renders.ListCoreAsync(Project.Id, _dispose.Token))
+                .SelectMany(item => item.Artifacts)
+                .OrderByDescending(item => item.CreatedAt)
+                .ToList();
         }
         catch (Exception exception) { _error = exception.Message; }
         finally { _busy = false; }
@@ -1109,6 +1147,7 @@ else
     {
         if (Project is null || _core is null || !_pageSetupDirty)
             return;
+        var saveVersion = _formChangeVersion;
         _busy = true;
         _error = null;
         try
@@ -1123,14 +1162,16 @@ else
                     _bodyFontSizePoints,
                     _bodyLineHeight));
             _core = await Books.GetOrCreateAsync(Project.Id);
-            CopyPageSetupDraft();
-            _pageSetupDirty = false;
+            if (saveVersion == _formChangeVersion)
+            {
+                CopyPageSetupDraft();
+                _pageSetupDirty = false;
+            }
             _releases = await Releases.ListAsync(Project.Id);
             _artifacts = (await Renders.ListCoreAsync(Project.Id))
                 .SelectMany(item => item.Artifacts)
                 .OrderByDescending(item => item.CreatedAt)
                 .ToList();
-            _notice = "Core Book page and text defaults saved. Inheriting releases now use these values.";
         }
         catch (Exception exception)
         {
@@ -1153,7 +1194,7 @@ else
         _bodyLineHeight = _core.PageSetup.BodyLineHeight;
     }
 
-    private void MarkPageSetupDirty() => _pageSetupDirty = true;
+    private void MarkPageSetupDirty() { _pageSetupDirty = true; QueueFormAutosave(); }
 
     private string PageSetupPreset() => (_pageWidthInches, _pageHeightInches) switch
     {
@@ -1183,6 +1224,7 @@ else
                 return;
         }
         _pageSetupDirty = true;
+        QueueFormAutosave();
     }
 
     private void OpenBookTextStylesModal() => _bookTextStylesModalOpen = true;
@@ -1205,12 +1247,12 @@ else
             .SelectMany(item => item.Artifacts)
             .OrderByDescending(item => item.CreatedAt)
             .ToList();
-        _notice = "Book Text Styles saved. Existing reading and release files may need to be prepared again.";
     }
 
     private async Task SaveReleaseAsync()
     {
         if (Project is null || _workspace is null || _selectedReleaseId is not Guid id || (!_releaseDirty && !_releaseContentDirty)) return;
+        var saveVersion = _formChangeVersion;
         _busy = true; _error = null;
         try
         {
@@ -1246,9 +1288,27 @@ else
                 if (changes.Count > 0)
                     await Releases.SetOutlineSelectionsAsync(Project.Id, id, changes, revision);
             }
-            _releaseDirty = false;
-            _releaseContentDirty = false;
-            await SelectReleaseAsync(id); _notice = "Release saved.";
+            _workspace = await Publishing.GetWorkspaceForEditingAsync(Project.Id, id, _dispose.Token);
+            if (saveVersion == _formChangeVersion)
+            {
+                _releaseDirty = false;
+                _releaseContentDirty = false;
+                _releaseDraft = ReleaseDraft.From(_workspace.Edition);
+                _releaseOverrides = _workspace.OverrideFields.ToHashSet();
+                _loadedOverrides = _releaseOverrides.ToHashSet();
+                _loadedReleaseSelections = _releaseSelections.ToDictionary();
+            }
+            _releases = await Releases.ListAsync(Project.Id, _dispose.Token);
+            _preparations = await Preparation.ListAsync(
+                Project.Id, PublicationTargetKind.Release, id, _dispose.Token);
+            _artifacts = await Renders.ListArtifactsAsync(Project.Id, id, _dispose.Token);
+            _outputsLoaded = true;
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            _workspace = await Publishing.GetWorkspaceForEditingAsync(Project.Id, id, _dispose.Token);
+            _releaseDirty = true;
+            QueueFormAutosave();
         }
         catch (Exception exception) { _error = exception.Message; }
         finally { _busy = false; }
@@ -1365,6 +1425,7 @@ else
             else _releaseOverrides.Remove(field);
         }
         _releaseDirty = true;
+        QueueFormAutosave();
     }
 
     private async Task UseCoreContentAsync()
@@ -1377,6 +1438,7 @@ else
             if (chapters.TryGetValue(id, out var included)) _releaseSelections[id] = included;
         _releaseContentDirty = true;
         _releaseContentOpen = true;
+        QueueFormAutosave();
     }
 
     private static bool IsDesignOverride(PublicationEditionOverrideField field) => field is
@@ -1385,18 +1447,26 @@ else
 
     private async Task SavePendingAsync()
     {
-        if (_coverEditorOpen && _coverWorkspace is not null)
-            await _coverWorkspace.FlushAsync();
-        if (_coreDirty || _coreOutlineDirty)
-            await SaveCoreAsync();
-        if (_coreDirty || _coreOutlineDirty)
-            return;
-        if (_pageSetupDirty)
-            await SavePageSetupAsync();
-        if (_pageSetupDirty)
-            return;
-        if (_releaseDirty || _releaseContentDirty)
-            await SaveReleaseAsync();
+        await _formSaveGate.WaitAsync(_dispose.Token);
+        try
+        {
+            if (_coverEditorOpen && _coverWorkspace is not null)
+                await _coverWorkspace.FlushAsync();
+            if (_coreDirty || _coreOutlineDirty)
+                await SaveCoreAsync();
+            if (_coreDirty || _coreOutlineDirty)
+                return;
+            if (_pageSetupDirty)
+                await SavePageSetupAsync();
+            if (_pageSetupDirty)
+                return;
+            if (_releaseDirty || _releaseContentDirty)
+                await SaveReleaseAsync();
+        }
+        finally
+        {
+            _formSaveGate.Release();
+        }
     }
 
     private async Task PrepareCoreAsync()
@@ -1549,6 +1619,7 @@ else
         }
         else
         {
+            _workspace = await Publishing.GetWorkspaceForEditingAsync(Project.Id, _selectedReleaseId.Value, _dispose.Token);
             _releases = await Releases.ListAsync(Project.Id);
         }
     }
@@ -1579,7 +1650,8 @@ else
     {
         if (_coreDirty || _coreOutlineDirty || _pageSetupDirty || _releaseDirty || _releaseContentDirty)
         {
-            _notice = "The assistant changed publishing settings. Your unsaved form edits were kept; save or reload to reconcile them.";
+            _notice = "The assistant changed publishing settings while your form edits were pending. Your edits were kept and will continue saving automatically.";
+            QueueFormAutosave();
             return;
         }
         if (Project is not null && mutation.EditionId == _selectedReleaseId
@@ -1633,7 +1705,6 @@ else
         {
             _selectedReleaseId = releaseId;
             _workspace = null;
-            _coverEditorOpen = false;
         }
         _preparations = [];
         _artifacts = [];
@@ -1646,14 +1717,40 @@ else
         StateHasChanged();
     }
 
-    private void CoreChanged(string field, string? value) { typeof(CoreDraft).GetProperty(field)!.SetValue(_coreDraft, value ?? string.Empty); _coreDirty = true; }
-    private void CoreToggle(string field, bool value) { typeof(CoreDraft).GetProperty(field)!.SetValue(_coreDraft, value); _coreDirty = true; }
-    private void CoreOutlineChanged(PublicationBookOutlineView item, bool value) { _coreSelections[(item.TargetKind, item.TargetId)] = value; _coreOutlineDirty = true; }
-    private void ReleaseText(string field, string? value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value ?? string.Empty); _releaseDirty = true; }
-    private void ReleaseToggle(string field, bool value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value); _releaseDirty = true; }
-    private void MarkReleaseDirty() => _releaseDirty = true;
-    private void ReleaseContentChanged(Guid chapterId, bool value) { _releaseSelections[chapterId] = value; _releaseContentDirty = true; }
-    private void ToggleOverride(PublicationEditionOverrideField field, bool enabled) { if (enabled) _releaseOverrides.Add(field); else _releaseOverrides.Remove(field); _releaseDirty = true; }
+    private void CoreChanged(string field, string? value) { typeof(CoreDraft).GetProperty(field)!.SetValue(_coreDraft, value ?? string.Empty); _coreDirty = true; QueueFormAutosave(); }
+    private void MarkCoreDirty() { _coreDirty = true; QueueFormAutosave(); }
+    private void CoreToggle(string field, bool value) { typeof(CoreDraft).GetProperty(field)!.SetValue(_coreDraft, value); _coreDirty = true; QueueFormAutosave(); }
+    private void CoreOutlineChanged(PublicationBookOutlineView item, bool value) { _coreSelections[(item.TargetKind, item.TargetId)] = value; _coreOutlineDirty = true; QueueFormAutosave(); }
+    private void ReleaseText(string field, string? value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value ?? string.Empty); _releaseDirty = true; QueueFormAutosave(); }
+    private void ReleaseToggle(string field, bool value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value); _releaseDirty = true; QueueFormAutosave(); }
+    private void MarkReleaseDirty() { _releaseDirty = true; QueueFormAutosave(); }
+    private void ReleaseContentChanged(Guid chapterId, bool value) { _releaseSelections[chapterId] = value; _releaseContentDirty = true; QueueFormAutosave(); }
+    private void ToggleOverride(PublicationEditionOverrideField field, bool enabled) { if (enabled) _releaseOverrides.Add(field); else _releaseOverrides.Remove(field); _releaseDirty = true; QueueFormAutosave(); }
+
+    private void QueueFormAutosave()
+    {
+        var version = ++_formChangeVersion;
+        _formAutosave?.Cancel();
+        _formAutosave?.Dispose();
+        _formAutosave = CancellationTokenSource.CreateLinkedTokenSource(_dispose.Token);
+        _ = AutosaveFormsAsync(version, _formAutosave.Token);
+    }
+
+    private async Task AutosaveFormsAsync(long version, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(500, cancellationToken);
+            await InvokeAsync(async () =>
+            {
+                await SavePendingAsync();
+                if (version != _formChangeVersion && !_dispose.IsCancellationRequested)
+                    QueueFormAutosave();
+                StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+    }
     private void ChooseFormat(PublicationEditionFormat format) { _newFormat = format; _newReleaseName = ReleaseTypeLabel(format); if (format != PublicationEditionFormat.Paperback) _newVendor = PublicationVendor.Generic; }
     private string PreparationButton(string idle) => _preparations.FirstOrDefault()?.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing ? "Preparing…" : idle;
     private bool HasActivePreparation => _preparations.FirstOrDefault()?.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing;
@@ -1670,7 +1767,7 @@ else
     private static string ReleaseSummary(PublicationEditionView edition) => edition.Format switch { PublicationEditionFormat.Paperback => $"{edition.Vendor switch { PublicationVendor.AmazonKdp => "Amazon KDP", PublicationVendor.IngramSpark => "IngramSpark", _ => "Other printer" }} paperback with printer-ready interior and full-wrap cover.", PublicationEditionFormat.Epub => "Accessible EPUB 3 ebook with reflowable text and navigation.", _ => "Tagged single-file PDF ebook with the front cover as page one." };
     private static string CoverHelp(PublicationEditionFormat format) => format == PublicationEditionFormat.Paperback ? "Core artwork supplies the front; this release adds back, spine, bleed, and barcode areas." : "Uses the reusable Core front cover until you customize this release.";
 
-    public async ValueTask DisposeAsync() { _dispose.Cancel(); _dispose.Dispose(); if (_downloads is not null) await _downloads.DisposeAsync(); }
+    public async ValueTask DisposeAsync() { _dispose.Cancel(); _formAutosave?.Cancel(); _formAutosave?.Dispose(); _formSaveGate.Dispose(); _dispose.Dispose(); if (_downloads is not null) await _downloads.DisposeAsync(); }
 
     private sealed class CoreDraft
     {

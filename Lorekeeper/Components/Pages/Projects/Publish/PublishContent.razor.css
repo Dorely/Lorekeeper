@@ -24,3 +24,11 @@
     min-width: 2rem;
     padding-inline: .45rem;
 }
+.release-workspace-stack>* { order: 5; }
+.release-workspace-stack>.readiness-card { order: 0; }
+.release-workspace-stack>.release-content-cover-card { order: 1; }
+.release-workspace-stack>.release-book-details-card { order: 2; }
+.release-workspace-stack>.edition-content-card { order: 3; }
+.release-workspace-stack>.release-setup-card { order: 4; }
+.release-workspace-stack>.publication-sections-card { order: 6; }
+.release-workspace-stack>.technical { order: 7; }

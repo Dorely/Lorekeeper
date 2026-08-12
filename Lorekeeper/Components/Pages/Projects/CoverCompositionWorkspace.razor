@@ -531,6 +531,15 @@
             }
             await Saved.InvokeAsync();
         }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            var saveProjectId = _loadedProjectId == Guid.Empty ? ProjectId : _loadedProjectId;
+            _cover = _loadedCoreBook
+                ? await Books.GetCoverAsync(saveProjectId)
+                : await Covers.GetAsync(saveProjectId, _loadedEditionId);
+            _dirty = true;
+            ScheduleAutosave();
+        }
         catch (Exception ex) { _error = ex.Message; }
         finally { _saveGate.Release(); }
     }

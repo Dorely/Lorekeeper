@@ -85,7 +85,7 @@
 | `src/renderer.rs` | Contained staging, validation, deterministic pagination, flowing Figures, structured page/cover composition with leaf-correct facing-spread splitting, warning-and-clipping authoring traces, warning-tolerant private reading copies, strict publication PDF rendering, barcodes, atomic promotion, and evidence. |
 | `src/font.rs` | Bundled/project TTF and TrueType/CFF OTF validation, shaping, subsetting, widths, embedding, and multi-codepoint ToUnicode mapping. |
 | `src/image.rs` | Bounded PNG/JPEG decoding, alpha flattening, grayscale/registered-profile CMYK conversion, crop-position handling, and total-ink enforcement. |
-| `src/pdf.rs` | Owned deterministic PDF 1.7/PDF 1.3 writer for mixed page boxes, collision-safe page-scoped tagged structure, bookmarks/links, ordered vector scenes, PDF 1.7 opacity, bounded PDF/X opacity flattening, fonts, images, output intent, and barcodes. |
+| `src/pdf.rs` | Owned deterministic PDF 1.7/PDF 1.3 writer for mixed page boxes, collision-safe page-scoped tagged structure, bookmarks/links, ordered vector scenes, profile-specific opacity flattening, trim-to-bleed edge extension, fonts, images, output intent, and barcodes. |
 | `src/inspect.rs` | Separate `lopdf` post-write inspection for geometry, fonts, XObject colors, output intent, transparency, encryption, annotations/actions, and tagged-PDF parent-tree/MCID integrity. |
 | `assets/` | Approved OFL font notices plus the registered CGATS21 CRPC1 CMYK profile, source, fingerprint, and redistribution record. |
 | `fixtures/negative-cases-v4.json` | Frozen adversarial protocol mutations and expected fail-closed diagnostic codes. |
@@ -219,7 +219,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, editable Core page/text defaults, shared style management, target chips/add-release flow, live inheritance/override controls, embedded cover editing with refreshed return navigation, format-gated settings, in-app Core PDF preview, one-action preparation, blockers, and immutable downloads. |
+| `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, serialized form autosave, consistent content/cover-first release ordering, target-preserving embedded cover editing, generated-section page workspaces, shared style management, live inheritance/override controls, format-gated settings, previews, preparation, blockers, and downloads. |
 | `PublishChatPanel.razor` (+ `.razor.css`) | Refresh-safe Publish adapter over shared `ChatSurface` with persisted transcript/tool chips, streaming, Stop/Reset, provider/token state, image attachments, active-turn reconnection, and structured workspace mutation callbacks. |
 
 ### Components/Pages/Projects/Outline/
@@ -602,7 +602,7 @@
 | `PublishModels.cs` | Core/release targets, effective workspace/readiness, revision-aware sparse mutations, publication-section, projection, cover, preparation, and artifact contracts. |
 | `PublicationBookService.cs` | Owning Core Book boundary for seeding, metadata/presentation patches, consolidated workspace-detail reads, chapter inclusion, page-setup-normalized reusable covers, revisions, and style/font-aware source fingerprint invalidation. |
 | `IPublicationEditionService.cs` / `PublicationEditionService.cs` | Owning release lifecycle and sparse-override boundary for presets, chapter inclusion, edition-content-aware cloning, archive/compare/audit, and effective fingerprints. |
-| `PublicationSectionService.cs` | Revision-safe Core/release publication-section ownership, live inheritance/customization, mixed manuscript edits, Designed Page creation, metadata binding, order within fixed outline anchors, validation, and reset/delete behavior. |
+| `PublicationSectionService.cs` | Revision-safe Core/release publication-section ownership, live inheritance/customization, mixed user-authored manuscript edits, system title/copyright Designed Page materialization with effective metadata bindings, Designed Page creation, fixed-outline anchoring, validation, and reset/delete behavior. |
 | `PublicationSectionMigrationService.cs` | Protected, journaled startup conversion from historical matter/placement rows into publication sections with semantic/image/layout preservation and trigger restoration. |
 | `EditionContentService.cs` | Enables/discards release content, resets individual chapters, reports stable-block differences/Core drift, and diagnoses release Designed Page geometry with Editor deep-link targets. |
 | `EditionContentMigrationService.cs` | Protected style/typography materialization into edition snapshots and shared Book Text Styles, proof-row removal, effective-projection validation, artifact Legacy marking, and cleanup handoff. |

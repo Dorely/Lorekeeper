@@ -831,6 +831,7 @@ mod tests {
         let path = root.path().join("candidate.pdf");
         let options = PdfOptions {
             pdf_x,
+            flatten_transparency: pdf_x,
             width: 432.0,
             height: 648.0,
             trim: Rect::new(0.0, 0.0, 432.0, 648.0),

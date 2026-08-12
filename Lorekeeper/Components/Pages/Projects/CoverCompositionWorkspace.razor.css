@@ -34,7 +34,7 @@
 .cover-guide { position: absolute; z-index: 1001; pointer-events: none; }
 .cover-guide-x { top: 50%; left: 0; width: 100%; border-top: 1px solid #2f80ed88; }
 .cover-guide-y { top: 0; left: 50%; height: 100%; border-left: 1px solid #2f80ed88; }
-.cover-object { position: absolute; overflow: hidden; padding: .15rem; display: flex; flex-direction: column; color: inherit; cursor: move; touch-action: none; }
+.cover-object { position: absolute; overflow: hidden; padding: 0; display: flex; flex-direction: column; color: inherit; cursor: move; touch-action: none; }
 .cover-object.selected { overflow: visible; outline: 2px solid #4568d4; outline-offset: 1px; }
 .cover-object--image { display: grid; place-items: center; padding: 0; background: #aebbd0; }
 .cover-object--image > img { position: absolute; inset: 0; display: block; width: 100% !important; height: 100% !important; max-width: none; max-height: none; pointer-events: none; user-select: none; -webkit-user-drag: none; }

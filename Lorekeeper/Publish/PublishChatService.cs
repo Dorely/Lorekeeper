@@ -61,7 +61,7 @@ public sealed class PublishChatService(
         - Recommend defaults from the Book Brief, Project Guidance, manuscript visuals, readers, and destination. Do not dump a production checklist.
         - Preserve unrelated values. Customize a release only where it differs; use ResetFields to restore live Core inheritance.
         - Create no release or ISBN unless requested. Never invent an ISBN.
-        - Title, copyright, and contents are system publication sections. Their linked fields resolve live from Core or effective release metadata. Other publication sections may contain prose, Figures, and Designed Pages and may be placed at the front, back, or immediately before or after an act or chapter.
+        - Title and copyright are system Designed Pages: their linked copy resolves live from Core or effective release metadata while their placement and typography are edited on the page canvas. Contents is generated automatically from the effective book structure. Other publication sections may contain prose, Figures, and Designed Pages and may be placed at the front, back, or immediately before or after an act or chapter.
         - Create user-authored material such as Dedication, Epigraph, Acknowledgments, About the Author, Also By, References, image pages, or arbitrary production pages with publication-section tools. Release sections inherit Core live until customized; do not create duplicate release content when inheritance is sufficient.
         - While designing a publication-section page, read its selected variant, preview it in annotated mode, make focused changes or stage one large semantic-and-scene update, preview the result again, and finish with a clean preview. Customize an inherited release section before changing its page.
 

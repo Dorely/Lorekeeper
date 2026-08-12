@@ -293,7 +293,7 @@ public sealed class PublishService(
             item.TargetId,
             item.LocalOrder,
             PublicationSectionService.ResolveBindings(item.Manuscript, boundValues),
-            sectionCompositions.GetValueOrDefault(item.Id, []).Select(composition => CompositionDocument(composition, profile)).ToList())).ToList();
+            sectionCompositions.GetValueOrDefault(item.Id, []).Select(composition => CompositionDocument(composition, profile, boundValues)).ToList())).ToList();
         var coverDesign = coreTarget || profile.InheritsCoreCover
             ? await CoreCoverAsync(projectId, cancellationToken)
             : await db.PublicationCoverDesigns.AsNoTracking()
@@ -681,10 +681,13 @@ public sealed class PublishService(
 
     private static PublishPageCompositionDocument CompositionDocument(
         PageComposition composition,
-        PublicationEdition profile) => new(
+        PublicationEdition profile,
+        IReadOnlyDictionary<PublicationBoundField, string> boundValues) => new(
             composition.Id,
             composition.Name,
-            ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision),
+            PublicationSectionService.ResolveBindings(
+                ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision),
+                boundValues),
             composition.Revision,
             composition.Variants
                 .Where(variant => CompositionService.VariantMatchesEdition(variant, profile)

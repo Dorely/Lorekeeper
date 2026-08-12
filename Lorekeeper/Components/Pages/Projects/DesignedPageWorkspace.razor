@@ -129,12 +129,12 @@
                         else if (primarySelection.Kind == CompositionObjectKind.Text)
                         {
                             var primaryStyle = Resolved(primarySelection);
-                            <button type="button" class="@(_editingTextId == primarySelection.Id ? "selected" : null)" title="Edit the text directly in this frame" @onclick="() => BeginTextEdit(primarySelection)">@(_editingTextId == primarySelection.Id ? "Editing text" : "Edit text")</button>
+                            <button type="button" disabled="@IsBoundText(primarySelection)" class="@(_editingTextId == primarySelection.Id ? "selected" : null)" title="@(IsBoundText(primarySelection) ? "This copy comes from Core Book details" : "Edit the text directly in this frame")" @onclick="() => BeginTextEdit(primarySelection)">@(IsBoundText(primarySelection) ? "Linked book text" : _editingTextId == primarySelection.Id ? "Editing text" : "Edit text")</button>
                             <div class="composition-inline-formatting" aria-label="Inline text formatting">
-                                <button type="button" title="Bold selected text" aria-label="Bold selected text" @onpointerdown:preventDefault="true" @onclick="() => ToggleInlineMarkAsync(primarySelection, ManuscriptMarkType.Strong)"><strong>B</strong></button>
-                                <button type="button" title="Italicize selected text" aria-label="Italicize selected text" @onpointerdown:preventDefault="true" @onclick="() => ToggleInlineMarkAsync(primarySelection, ManuscriptMarkType.Emphasis)"><em>I</em></button>
-                                <button type="button" title="Underline selected text" aria-label="Underline selected text" @onpointerdown:preventDefault="true" @onclick="() => ToggleInlineMarkAsync(primarySelection, ManuscriptMarkType.Underline)"><u>U</u></button>
-                                <button type="button" title="Strike through selected text" aria-label="Strike through selected text" @onpointerdown:preventDefault="true" @onclick="() => ToggleInlineMarkAsync(primarySelection, ManuscriptMarkType.Strikethrough)"><s>S</s></button>
+                                <button type="button" disabled="@IsBoundText(primarySelection)" title="Bold selected text" aria-label="Bold selected text" @onpointerdown:preventDefault="true" @onclick="() => ToggleInlineMarkAsync(primarySelection, ManuscriptMarkType.Strong)"><strong>B</strong></button>
+                                <button type="button" disabled="@IsBoundText(primarySelection)" title="Italicize selected text" aria-label="Italicize selected text" @onpointerdown:preventDefault="true" @onclick="() => ToggleInlineMarkAsync(primarySelection, ManuscriptMarkType.Emphasis)"><em>I</em></button>
+                                <button type="button" disabled="@IsBoundText(primarySelection)" title="Underline selected text" aria-label="Underline selected text" @onpointerdown:preventDefault="true" @onclick="() => ToggleInlineMarkAsync(primarySelection, ManuscriptMarkType.Underline)"><u>U</u></button>
+                                <button type="button" disabled="@IsBoundText(primarySelection)" title="Strike through selected text" aria-label="Strike through selected text" @onpointerdown:preventDefault="true" @onclick="() => ToggleInlineMarkAsync(primarySelection, ManuscriptMarkType.Strikethrough)"><s>S</s></button>
                             </div>
                             <label>Font<select value="@primaryStyle.FontFamilyKey" @onchange="e => Patch(primarySelection with { StyleId = null, FontFamilyKey = e.Value?.ToString() ?? string.Empty })">@foreach (var family in _fontFamilies) { <option value="@family.Key">@family.Name</option> }</select></label>
                             <label>Size<input class="composition-number" type="number" min="4" max="240" value="@primaryStyle.FontSizePoints" @onchange="e => Patch(primarySelection with { StyleId = null, FontSizePoints = Number(e) })" /></label>
@@ -650,7 +650,7 @@
 
     private void BeginTextEdit(CompositionObject item, double? clientX = null, double? clientY = null)
     {
-        if (item.Kind != CompositionObjectKind.Text || IsLocked(item))
+        if (item.Kind != CompositionObjectKind.Text || IsLocked(item) || IsBoundText(item))
             return;
         try
         {
@@ -668,6 +668,10 @@
             _error = exception.Message;
         }
     }
+
+    private bool IsBoundText(CompositionObject item) => item.ContentReferences
+        .Select(reference => _semanticBlocks.FirstOrDefault(block => block.Id == reference.BlockId))
+        .Any(block => block?.PublicationField is not null);
 
     private ManuscriptBlock EnsureOwnedTextBlock(Guid objectId)
     {

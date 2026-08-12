@@ -193,7 +193,7 @@ fn publication_sections_render_in_anchor_order_with_dynamic_contents() {
 }
 
 #[test]
-fn kdp_pdf_17_preserves_composition_opacity_as_transparency() {
+fn kdp_pdf_17_flattens_composition_opacity_without_pdf_transparency() {
     let mut job = PreparedJob::new("kdp-paperback-v1");
     job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"][0]["variants"][0]["scene"]
         ["objects"][0]["opacity"] = json!(0.5);
@@ -209,8 +209,8 @@ fn kdp_pdf_17_preserves_composition_opacity_as_transparency() {
     let rendered = response(&output);
     assert_eq!(rendered["status"], "completed");
     assert_eq!(rendered["evidence"]["pdfVersion"], "1.7");
-    assert_eq!(rendered["evidence"]["hasTransparency"], true);
-    assert!(inspect(&job.artifact(&rendered, "interior-pdf")).transparency);
+    assert_eq!(rendered["evidence"]["hasTransparency"], false);
+    assert!(!inspect(&job.artifact(&rendered, "interior-pdf")).transparency);
 }
 
 #[test]

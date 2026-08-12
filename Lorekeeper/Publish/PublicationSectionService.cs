@@ -54,6 +54,7 @@ public interface IPublicationSectionService
     Task<PublicationSectionView> UpsertAsync(PublicationSectionTarget target, PublicationSectionInput input, CancellationToken cancellationToken = default);
     Task<PublicationSectionView> PatchManuscriptAsync(PublicationSectionTarget target, Guid sectionId, long expectedRevision, IReadOnlyList<ManuscriptOperationInput> operations, CancellationToken cancellationToken = default);
     Task<PublicationSectionView> CustomizeAsync(Guid projectId, Guid editionId, Guid coreSectionId, CancellationToken cancellationToken = default);
+    Task<PublicationSectionView> EnsureSystemDesignedPageAsync(PublicationSectionTarget target, Guid sectionId, CancellationToken cancellationToken = default);
     Task ResetAsync(Guid projectId, Guid editionId, Guid sectionId, CancellationToken cancellationToken = default);
     Task DeleteAsync(PublicationSectionTarget target, Guid sectionId, CancellationToken cancellationToken = default);
     Task ReorderWithinAnchorAsync(PublicationSectionTarget target, IReadOnlyList<Guid> orderedSectionIds, CancellationToken cancellationToken = default);
@@ -219,6 +220,8 @@ public sealed class PublicationSectionService(
         var current = await GetAsync(target, sectionId, cancellationToken);
         if (current.Revision != expectedRevision)
             throw new DbUpdateConcurrencyException($"Publication section changed (expected revision {expectedRevision}, current {current.Revision}).");
+        if (current.SystemRole != PublicationSectionSystemRole.None)
+            throw new InvalidOperationException("Generated publication sections use their page-layout controls; their manuscript structure is not directly editable.");
         var changed = ManuscriptOperations.Apply(current.Manuscript, ManuscriptOperationInput.ToOperations(operations)).Document;
         return await UpsertAsync(target, new(
             current.Id, current.Title, current.Kind, current.Anchor, current.TargetKind, current.TargetId,
@@ -247,6 +250,144 @@ public sealed class PublicationSectionService(
         await db.SaveChangesAsync(cancellationToken);
         return await GetStoredAsync(new(projectId, editionId), clone.Id, cancellationToken);
     }
+
+    public async Task<PublicationSectionView> EnsureSystemDesignedPageAsync(
+        PublicationSectionTarget target,
+        Guid sectionId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
+        var section = await db.PublicationSections.SingleOrDefaultAsync(item => item.ProjectId == target.ProjectId
+            && item.EditionId == target.EditionId && item.Id == sectionId, cancellationToken)
+            ?? throw new KeyNotFoundException("Publication section was not found for this book target.");
+        if (section.SystemRole is not (PublicationSectionSystemRole.Title or PublicationSectionSystemRole.Copyright))
+            return await GetStoredAsync(target, section.Id, cancellationToken);
+        var document = ManuscriptCodec.Deserialize(section.ManuscriptJson, section.Id, section.Revision);
+        if (document.Content.Count > 0 && document.Content.All(block => block.Type == ManuscriptBlockType.DesignedPage))
+        {
+            var currentValues = await BindingValuesAsync(target, cancellationToken);
+            var compositions = await db.PageCompositions
+                .Where(item => item.PublicationSectionId == section.Id)
+                .ToListAsync(cancellationToken);
+            var changed = false;
+            foreach (var composition in compositions)
+            {
+                var currentSemantic = ManuscriptCodec.Deserialize(
+                    composition.SemanticManuscriptJson, composition.Id, composition.Revision);
+                var resolved = ResolveBindings(currentSemantic, currentValues);
+                var resolvedJson = ManuscriptCodec.Serialize(resolved);
+                if (string.Equals(resolvedJson, composition.SemanticManuscriptJson, StringComparison.Ordinal))
+                    continue;
+                composition.SemanticManuscriptJson = resolvedJson;
+                composition.Revision = checked(composition.Revision + 1);
+                changed = true;
+            }
+            if (changed)
+                await db.SaveChangesAsync(cancellationToken);
+            return await GetStoredAsync(target, section.Id, cancellationToken);
+        }
+
+        var values = await BindingValuesAsync(target, cancellationToken);
+        var requiredFields = section.SystemRole == PublicationSectionSystemRole.Title
+            ? new[] { PublicationBoundField.Title, PublicationBoundField.Subtitle, PublicationBoundField.Author }
+            : new[] { PublicationBoundField.Copyright, PublicationBoundField.Publisher, PublicationBoundField.Isbn };
+        var sourceBlocks = requiredFields.Select(field =>
+            document.Content.FirstOrDefault(block => block.PublicationField == field)
+                ?? BoundBlock(field, field == PublicationBoundField.Title
+                    ? ManuscriptStyleRoles.ChapterHeading
+                    : ManuscriptStyleRoles.Body)).ToList();
+        var compositionId = Guid.NewGuid();
+        var semanticBlocks = sourceBlocks.Select((block, index) => block with
+        {
+            Id = $"section-text-{Guid.NewGuid():N}",
+            Content = [new ManuscriptInline { Text = values.GetValueOrDefault(block.PublicationField!.Value, string.Empty) }],
+            Type = index == 0 && section.SystemRole == PublicationSectionSystemRole.Title
+                ? ManuscriptBlockType.Heading
+                : ManuscriptBlockType.Paragraph,
+            HeadingLevel = index == 0 && section.SystemRole == PublicationSectionSystemRole.Title ? 1 : null,
+        }).ToList();
+        var semantic = new ManuscriptDocument { ManuscriptId = compositionId, Content = semanticBlocks };
+        CompositionScene scene;
+        if (target.EditionId is Guid editionId)
+            scene = CompositionService.CreatePageScene(
+                (await effectiveConfigurations.ResolveReleaseAsync(target.ProjectId, editionId, cancellationToken)).Edition);
+        else
+            scene = CompositionService.CreatePageScene(await db.ProjectPageSetups.AsNoTracking()
+                .SingleAsync(item => item.ProjectId == target.ProjectId, cancellationToken));
+        var layerId = scene.Layers[0].Id;
+        var objects = semanticBlocks.Select((block, index) => new CompositionObject
+        {
+            Id = Guid.NewGuid(),
+            LayerId = layerId,
+            Kind = CompositionObjectKind.Text,
+            Name = sourceBlocks[index].PublicationField!.Value.ToString(),
+            Bounds = SystemTextBounds(section.SystemRole, index),
+            ZIndex = index,
+            ContentReferences = [new ManuscriptRangeReference(block.Id)],
+            FontFamilyKey = "builtin:lora",
+            FontWeight = index == 0 && section.SystemRole == PublicationSectionSystemRole.Title ? 700 : 400,
+            FontSizePoints = SystemTextSize(section.SystemRole, index),
+            LineHeight = 1.2,
+            TextAlignment = section.SystemRole == PublicationSectionSystemRole.Title
+                ? CompositionTextAlignment.Center
+                : CompositionTextAlignment.Start,
+            SemanticRole = block.Type == ManuscriptBlockType.Heading
+                ? CompositionSemanticRole.Heading1
+                : CompositionSemanticRole.Paragraph,
+            ReadingOrder = index + 1,
+        }).ToList();
+        scene = scene with { Objects = objects };
+        CompositionService.Validate(scene, semantic);
+        var variant = new PageCompositionVariant
+        {
+            Id = Guid.NewGuid(),
+            CompositionId = compositionId,
+            GeometryKey = CompositionService.SceneGeometryKey(scene),
+            SceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions),
+        };
+        db.PageCompositions.Add(new PageComposition
+        {
+            Id = compositionId,
+            ProjectId = target.ProjectId,
+            PublicationSectionId = section.Id,
+            EditionId = target.EditionId,
+            Name = section.Title,
+            SemanticManuscriptJson = ManuscriptCodec.Serialize(semantic),
+            ActiveAuthoringVariantId = variant.Id,
+            Variants = [variant],
+        });
+        section.Revision = checked(section.Revision + 1);
+        section.ManuscriptJson = ManuscriptCodec.Serialize(new ManuscriptDocument
+        {
+            ManuscriptId = section.Id,
+            Revision = section.Revision,
+            Content =
+            [
+                new ManuscriptBlock
+                {
+                    Id = $"designed-page-{Guid.NewGuid():N}",
+                    Type = ManuscriptBlockType.DesignedPage,
+                    StyleRole = ManuscriptStyleRoles.DesignedPage,
+                    PageCompositionId = compositionId,
+                },
+            ],
+        });
+        section.UpdatedAt = DateTime.UtcNow;
+        await TouchTargetAsync(target, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return await GetStoredAsync(target, section.Id, cancellationToken);
+    }
+
+    private static CompositionBounds SystemTextBounds(PublicationSectionSystemRole role, int index) => role switch
+    {
+        PublicationSectionSystemRole.Title when index == 0 => new() { XPercent = 12, YPercent = 28, WidthPercent = 76, HeightPercent = 20 },
+        PublicationSectionSystemRole.Title when index == 1 => new() { XPercent = 16, YPercent = 49, WidthPercent = 68, HeightPercent = 10 },
+        PublicationSectionSystemRole.Title => new() { XPercent = 20, YPercent = 68, WidthPercent = 60, HeightPercent = 8 },
+        _ => new() { XPercent = 12, YPercent = 58 + index * 8, WidthPercent = 76, HeightPercent = 7 },
+    };
+
+    private static double SystemTextSize(PublicationSectionSystemRole role, int index) =>
+        role == PublicationSectionSystemRole.Title ? index == 0 ? 32 : index == 1 ? 18 : 14 : 10;
 
     public async Task ResetAsync(Guid projectId, Guid editionId, Guid sectionId, CancellationToken cancellationToken = default)
     {
@@ -700,6 +841,11 @@ public sealed class PublicationSectionService(
             return;
         if (input.Anchor != PublicationSectionAnchor.Front || input.TargetId is not null || input.TargetKind is not null)
             throw new InvalidOperationException("Generated title, copyright, and contents sections remain in the front of the book.");
+        if (role is PublicationSectionSystemRole.Title or PublicationSectionSystemRole.Copyright
+            && document.Content.Count > 0
+            && document.Content.All(block => block.Type == ManuscriptBlockType.DesignedPage
+                && block.PageCompositionId.HasValue))
+            return;
         var expected = role switch
         {
             PublicationSectionSystemRole.Title => new[] { PublicationBoundField.Title, PublicationBoundField.Subtitle, PublicationBoundField.Author },

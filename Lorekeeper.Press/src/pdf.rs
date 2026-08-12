@@ -49,6 +49,7 @@ const ANNOTATION_OFFSET: i32 = 3_000;
 #[derive(Debug, Clone)]
 pub struct PdfOptions {
     pub pdf_x: bool,
+    pub flatten_transparency: bool,
     pub width: f32,
     pub height: f32,
     pub trim: Rect,
@@ -81,6 +82,7 @@ impl PdfOptions {
         let height = trim_height + interior_bleed * 2.0;
         Self {
             pdf_x,
+            flatten_transparency: pdf_x || request.profile == "kdp-paperback-v1",
             width,
             height,
             trim: Rect::new(0.0, 0.0, width, height),
@@ -135,6 +137,7 @@ impl PdfOptions {
         let height = request.trim.height_inches * 72.0 + bleed_points * 2.0;
         Self {
             pdf_x,
+            flatten_transparency: pdf_x || request.profile == "kdp-paperback-v1",
             width,
             height,
             trim: Rect::new(
@@ -203,8 +206,9 @@ where
     }
     let mut pages = pages.to_vec();
     let mut images = images.clone();
-    if options.pdf_x {
-        flatten_pdfx_opacity(&mut pages, fonts, &mut images, options)?;
+    extend_edge_art_into_print_bleed(&mut pages, options);
+    if options.flatten_transparency {
+        flatten_pdfx_opacity(&mut pages, fonts, &mut images, options, options.pdf_x)?;
     }
     let pages = pages.as_slice();
     let images = &images;
@@ -1445,15 +1449,68 @@ fn apply_opacity(content: &mut Content, opacity: f32) {
     }
 }
 
+fn extend_edge_art_into_print_bleed(pages: &mut [LayoutPage], options: &PdfOptions) {
+    let bleed = options.interior_bleed;
+    if bleed <= f32::EPSILON {
+        return;
+    }
+    const EDGE_EPSILON: f32 = 0.25;
+    for (page_index, page) in pages.iter_mut().enumerate() {
+        if page.width_points.is_some() || page.kind == PageKind::Cover {
+            continue;
+        }
+        let outer_left = page_index % 2 == 1;
+        for image in &mut page.images {
+            if image.rotation_degrees.abs() > f32::EPSILON {
+                continue;
+            }
+            if outer_left && image.x <= EDGE_EPSILON {
+                image.x -= bleed;
+                image.width += bleed;
+            } else if !outer_left && image.x + image.width >= options.trim_width - EDGE_EPSILON {
+                image.width += bleed;
+            }
+            if image.y <= EDGE_EPSILON {
+                image.y -= bleed;
+                image.height += bleed;
+            }
+            if image.y + image.height >= options.trim_height - EDGE_EPSILON {
+                image.height += bleed;
+            }
+        }
+        for shape in &mut page.shapes {
+            if shape.rotation_degrees.abs() > f32::EPSILON {
+                continue;
+            }
+            if outer_left && shape.x <= EDGE_EPSILON {
+                shape.x -= bleed;
+                shape.width += bleed;
+            } else if !outer_left && shape.x + shape.width >= options.trim_width - EDGE_EPSILON {
+                shape.width += bleed;
+            }
+            if shape.y <= EDGE_EPSILON {
+                shape.y -= bleed;
+                shape.height += bleed;
+            }
+            if shape.y + shape.height >= options.trim_height - EDGE_EPSILON {
+                shape.height += bleed;
+            }
+        }
+    }
+}
+
 fn flatten_pdfx_opacity(
     pages: &mut [LayoutPage],
     fonts: &BTreeMap<FontFace, EmbeddedFont>,
     images: &mut BTreeMap<String, EmbeddedImage>,
     options: &PdfOptions,
+    reject_overlaps: bool,
 ) -> Result<(), Diagnostic> {
     let mut flattened_images = BTreeMap::<(String, u16, [u8; 3]), String>::new();
     for page in pages {
-        reject_overlapping_pdfx_transparency(page, fonts)?;
+        if reject_overlaps {
+            reject_overlapping_pdfx_transparency(page, fonts)?;
+        }
         let substrate = if page.kind == PageKind::Cover {
             options.background_rgb.unwrap_or([0.086, 0.196, 0.31])
         } else {

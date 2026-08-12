@@ -85,7 +85,6 @@ function validSemanticRole(value) {
 const blockAttrs = {
     id: {default: null},
     styleRole: {default: "body"},
-    publicationField: {default: null},
     imageId: {default: null},
     altText: {default: null},
     imageUrl: {default: null},
@@ -132,14 +131,11 @@ function editorFontFamily(key) {
 }
 
 function textBlockDom(tag, node, extra = {}) {
-    const publicationField = node.attrs.publicationField;
     return [tag, {
         ...extra,
-        class: [extra.class, publicationField ? "semantic-publication-field" : null].filter(Boolean).join(" ") || null,
+        class: extra.class || null,
         "data-block-id": node.attrs.id,
         "data-style-role": node.attrs.styleRole,
-        "data-publication-field": publicationField,
-        contenteditable: publicationField ? "false" : null,
         style: paragraphStyle(node.attrs.paragraphPresentation)
     }, 0];
 }
@@ -148,7 +144,6 @@ function textBlockAttrs(element, defaultRole) {
     return {
         id: element.dataset.blockId,
         styleRole: element.dataset.styleRole || defaultRole,
-        publicationField: element.dataset.publicationField || null
     };
 }
 
@@ -406,7 +401,6 @@ function documentFromDomain(document) {
         const attrs = {
             id: block.id || newBlockId(),
             styleRole: block.styleRole || "body",
-            publicationField: block.publicationField || null,
             imageId: block.imageId || null,
             altText: block.altText || null,
             imageUrl: block.imageUrl || null
@@ -466,7 +460,6 @@ function domainFromDocument(doc, manuscriptId, revision) {
             id: node.attrs.id || newBlockId(),
             type: nodeToBlockType[node.type.name] || "paragraph",
             styleRole: node.attrs.styleRole || "body",
-            publicationField: node.attrs.publicationField || null,
             headingLevel: node.type.name === "heading" ? node.attrs.level : null,
             imageId: node.type.name === "figure" ? node.attrs.imageId : null,
             altText: node.type.name === "figure" ? node.attrs.altText : null,
