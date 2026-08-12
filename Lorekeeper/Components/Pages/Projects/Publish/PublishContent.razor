@@ -51,7 +51,7 @@ else
                             <span>@release.Name</span><small>@ReleaseTypeLabel(release.Format)</small>
                         </button>
                     }
-                    <button class="target-chip add" disabled="@(_targetLoading || _assistantRunning)" @onclick="() => _addReleaseOpen = true"><span>＋ Add release</span><small>Paperback or ebook</small></button>
+                    <button class="target-chip add" disabled="@(_targetLoading || _assistantRunning)" @onclick="OpenAddRelease"><span>＋ Add release</span><small>Paperback or ebook</small></button>
                 </nav>
 
                 @if (!string.IsNullOrWhiteSpace(_error))
@@ -100,20 +100,24 @@ else
 
 @if (_addReleaseOpen)
 {
-    <div class="publish-modal-backdrop" role="presentation" @onclick="() => _addReleaseOpen = false">
+    <div class="publish-modal-backdrop" role="presentation" @onclick="CloseAddRelease">
         <section class="publish-modal" role="dialog" aria-modal="true" aria-labelledby="add-release-title" @onclick:stopPropagation="true">
-            <header><div><span class="eyebrow">Publication release</span><h2 id="add-release-title">What are you preparing?</h2></div><button class="btn-close" aria-label="Close" @onclick="() => _addReleaseOpen = false"></button></header>
+            <header><div><span class="eyebrow">Publication release</span><h2 id="add-release-title">What are you preparing?</h2></div><button class="btn-close" aria-label="Close" @onclick="CloseAddRelease"></button></header>
             <div class="release-cards">
                 <button class="release-card @(_newFormat == PublicationEditionFormat.Paperback ? "selected" : null)" @onclick="() => ChooseFormat(PublicationEditionFormat.Paperback)"><strong>Paperback</strong><span>Printer-ready interior, full-wrap cover, and package.</span></button>
                 <button class="release-card @(_newFormat == PublicationEditionFormat.Epub ? "selected" : null)" @onclick="() => ChooseFormat(PublicationEditionFormat.Epub)"><strong>EPUB ebook</strong><span>Accessible EPUB 3 for ebook stores and readers.</span></button>
                 <button class="release-card @(_newFormat == PublicationEditionFormat.DigitalPdf ? "selected" : null)" @onclick="() => ChooseFormat(PublicationEditionFormat.DigitalPdf)"><strong>PDF ebook</strong><span>Tagged cover-plus-book PDF for digital distribution.</span></button>
             </div>
-            <label class="field"><span>Release name</span><input class="form-control" @bind="_newReleaseName" @bind:event="oninput" /></label>
+            <label class="field"><span>Release name</span><input class="form-control" value="@_newReleaseName" @oninput="HandleNewReleaseNameInput" /><small>Defaults to the selected publishing profile. Matching names are numbered automatically.</small></label>
             @if (_newFormat == PublicationEditionFormat.Paperback)
             {
-                <label class="field"><span>Printer or service</span><select class="form-select" @bind="_newVendor"><option value="@PublicationVendor.AmazonKdp">Amazon KDP</option><option value="@PublicationVendor.IngramSpark">IngramSpark</option><option value="@PublicationVendor.Generic">Other printer</option></select></label>
+                <label class="field"><span>Printer or service</span><select class="form-select" @bind="_newVendor" @bind:after="HandleNewReleaseProfileChanged"><option value="@PublicationVendor.AmazonKdp">Amazon KDP</option><option value="@PublicationVendor.IngramSpark">IngramSpark</option><option value="@PublicationVendor.Generic">Other printer</option></select></label>
             }
-            <footer><button class="btn btn-outline-secondary" @onclick="() => _addReleaseOpen = false">Cancel</button><button class="btn btn-primary" disabled="@_busy" @onclick="CreateReleaseAsync">@(_busy ? "Creating…" : "Create release")</button></footer>
+            @if (!string.IsNullOrWhiteSpace(_addReleaseError))
+            {
+                <div class="alert alert-danger" role="alert">@_addReleaseError</div>
+            }
+            <footer><button class="btn btn-outline-secondary" disabled="@_busy" @onclick="CloseAddRelease">Cancel</button><button class="btn btn-primary" disabled="@_busy" @onclick="CreateReleaseAsync">@(_busy ? "Creating…" : "Create release")</button></footer>
         </section>
     </div>
 }
@@ -253,9 +257,13 @@ else
     private bool _sectionRemovalBusy;
     private string? _error;
     private string? _notice;
+    private string? _addReleaseError;
     private PublicationEditionFormat _newFormat = PublicationEditionFormat.Paperback;
     private PublicationVendor _newVendor = PublicationVendor.AmazonKdp;
-    private string _newReleaseName = "Paperback";
+    private string _newReleaseName = PublicationReleaseNaming.DefaultName(
+        PublicationEditionFormat.Paperback,
+        PublicationVendor.AmazonKdp);
+    private bool _newReleaseNameCustomized;
     private IJSObjectReference? _downloads;
     private readonly CancellationTokenSource _dispose = new();
     private CancellationTokenSource? _formAutosave;
@@ -1724,14 +1732,20 @@ else
 
     private async Task CreateReleaseAsync()
     {
-        if (Project is null) return; _busy = true; _error = null;
+        if (Project is null) return; _busy = true; _addReleaseError = null;
         try
         {
             var vendor = _newFormat == PublicationEditionFormat.Paperback ? _newVendor : PublicationVendor.Generic;
-            var created = await Releases.CreateAsync(Project.Id, new PublicationEditionCreate(string.IsNullOrWhiteSpace(_newReleaseName) ? ReleaseTypeLabel(_newFormat) : _newReleaseName.Trim(), _newFormat, vendor));
-            _addReleaseOpen = false; await SelectReleaseAsync(created.Id); _notice = "Release created with safe defaults from Core Book.";
+            var requestedName = string.IsNullOrWhiteSpace(_newReleaseName)
+                ? PublicationReleaseNaming.DefaultName(_newFormat, vendor)
+                : _newReleaseName.Trim();
+            var created = await Releases.CreateAsync(Project.Id, new PublicationEditionCreate(requestedName, _newFormat, vendor));
+            _addReleaseOpen = false;
+            _addReleaseError = null;
+            await SelectReleaseAsync(created.Id);
+            _notice = $"{created.Name} created with safe defaults from Core Book.";
         }
-        catch (Exception exception) { _error = exception.Message; }
+        catch (Exception exception) { _addReleaseError = exception.Message; }
         finally { _busy = false; }
     }
 
@@ -1995,7 +2009,60 @@ else
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
-    private void ChooseFormat(PublicationEditionFormat format) { _newFormat = format; _newReleaseName = ReleaseTypeLabel(format); if (format != PublicationEditionFormat.Paperback) _newVendor = PublicationVendor.Generic; }
+    private void OpenAddRelease()
+    {
+        _newFormat = PublicationEditionFormat.Paperback;
+        _newVendor = PublicationVendor.AmazonKdp;
+        _newReleaseName = AvailableReleaseName(PublicationReleaseNaming.DefaultName(_newFormat, _newVendor));
+        _newReleaseNameCustomized = false;
+        _addReleaseError = null;
+        _error = null;
+        _addReleaseOpen = true;
+    }
+
+    private void CloseAddRelease()
+    {
+        if (_busy)
+            return;
+        _addReleaseOpen = false;
+        _addReleaseError = null;
+    }
+
+    private void ChooseFormat(PublicationEditionFormat format)
+    {
+        _newFormat = format;
+        _newVendor = format == PublicationEditionFormat.Paperback
+            ? PublicationVendor.AmazonKdp
+            : PublicationVendor.Generic;
+        ApplyNewReleaseProfileName();
+    }
+
+    private void HandleNewReleaseProfileChanged()
+    {
+        ApplyNewReleaseProfileName();
+    }
+
+    private void ApplyNewReleaseProfileName()
+    {
+        _addReleaseError = null;
+        if (!_newReleaseNameCustomized)
+            _newReleaseName = AvailableReleaseName(PublicationReleaseNaming.DefaultName(_newFormat, _newVendor));
+    }
+
+    private void HandleNewReleaseNameInput(ChangeEventArgs args)
+    {
+        _newReleaseName = args.Value?.ToString() ?? string.Empty;
+        _newReleaseNameCustomized = !string.Equals(
+            _newReleaseName.Trim(),
+            AvailableReleaseName(PublicationReleaseNaming.DefaultName(_newFormat, _newVendor)),
+            StringComparison.Ordinal);
+        _addReleaseError = null;
+    }
+
+    private string AvailableReleaseName(string requestedName)
+    {
+        return PublicationReleaseNaming.AllocateUnique(requestedName, _releases.Select(item => item.Name));
+    }
     private string PreparationButton(string idle) => _preparations.FirstOrDefault()?.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing ? "Preparing…" : idle;
     private bool HasActivePreparation => _preparations.FirstOrDefault()?.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing;
     private PublicationArtifactView? CurrentArtifact(PublicationArtifactKind kind) => _artifacts.FirstOrDefault(item => item.Kind == kind && !item.IsLegacy && !item.IsStale);

@@ -47,13 +47,7 @@ public sealed class PublicationEditionService(
         var preset = await releasePresets.ResolveAsync(projectId, input.Format, input.Vendor, cancellationToken);
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var project = await GetProjectAsync(projectId, cancellationToken);
-        var name = input.Name.Trim();
-        if (await db.PublicationEditions.AnyAsync(
-            edition => edition.ProjectId == projectId && edition.Name == name,
-            cancellationToken))
-        {
-            throw new InvalidOperationException($"A publication release named '{name}' already exists.");
-        }
+        var name = await AllocateUniqueNameAsync(projectId, input.Name.Trim(), null, cancellationToken);
         var edition = new PublicationEdition
         {
             ProjectId = projectId,
@@ -96,14 +90,9 @@ public sealed class PublicationEditionService(
         var project = await GetProjectAsync(projectId, cancellationToken);
         var source = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(source, expectedRevision);
-        var cleanName = name.Trim();
-        ValidateIdentity(cleanName, source.Format, source.Vendor);
-        if (await db.PublicationEditions.AnyAsync(
-            edition => edition.ProjectId == projectId && edition.Name == cleanName,
-            cancellationToken))
-        {
-            throw new InvalidOperationException($"A publication release named '{cleanName}' already exists.");
-        }
+        var requestedName = name.Trim();
+        ValidateIdentity(requestedName, source.Format, source.Vendor);
+        var cleanName = await AllocateUniqueNameAsync(projectId, requestedName, null, cancellationToken);
 
         await db.Entry(source).Collection(edition => edition.OutlineItems).LoadAsync(cancellationToken);
         await db.Entry(source).Collection(edition => edition.ChapterOverrides).LoadAsync(cancellationToken);
@@ -185,7 +174,12 @@ public sealed class PublicationEditionService(
         var fields = effectiveConfigurations.ReadOverrideFields(edition).ToHashSet();
         foreach (var reset in patch.ResetFields ?? []) fields.Remove(reset);
 
-        if (patch.Name is not null) edition.Name = patch.Name.Trim();
+        if (patch.Name is not null)
+        {
+            var requestedName = patch.Name.Trim();
+            ValidateIdentity(requestedName, edition.Format, edition.Vendor);
+            edition.Name = await AllocateUniqueNameAsync(projectId, requestedName, editionId, cancellationToken);
+        }
         if (patch.Destination is { } destination)
         {
             edition.Vendor = destination;
@@ -218,9 +212,6 @@ public sealed class PublicationEditionService(
         Override(fields, PublicationEditionOverrideField.PageHeightInches, patch.PageHeightInches, value => edition.PageHeightInches = value);
         Override(fields, PublicationEditionOverrideField.PageMarginInches, patch.PageMarginInches, value => edition.PageMarginInches = value);
         ValidateReleaseState(edition);
-        if (await db.PublicationEditions.AnyAsync(candidate => candidate.ProjectId == projectId
-            && candidate.Id != editionId && candidate.Name == edition.Name, cancellationToken))
-            throw new InvalidOperationException($"A publication release named '{edition.Name}' already exists.");
         edition.OverrideFieldsJson = JsonSerializer.Serialize(fields.Order());
         await SaveWithAuditAsync(edition, "patch-overrides", before, new { changed = fields, reset = patch.ResetFields ?? [] }, cancellationToken);
         var effective = await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken);
@@ -834,6 +825,20 @@ public sealed class PublicationEditionService(
             throw new InvalidOperationException("Edition name is required and cannot exceed 120 characters.");
         if (!Enum.IsDefined(format) || !Enum.IsDefined(vendor))
             throw new InvalidOperationException("Edition format or vendor is invalid.");
+    }
+
+    private async Task<string> AllocateUniqueNameAsync(
+        Guid projectId,
+        string requestedName,
+        Guid? excludedEditionId,
+        CancellationToken cancellationToken)
+    {
+        var names = await db.PublicationEditions.AsNoTracking()
+                .Where(edition => edition.ProjectId == projectId
+                    && (!excludedEditionId.HasValue || edition.Id != excludedEditionId.Value))
+                .Select(edition => edition.Name)
+                .ToListAsync(cancellationToken);
+        return PublicationReleaseNaming.AllocateUnique(requestedName, names);
     }
 
     private static void ValidateReleaseState(PublicationEdition edition)

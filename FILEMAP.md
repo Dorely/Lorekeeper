@@ -219,7 +219,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, fail-closed pre-turn draft flushing, exact designed-section variant synchronization, control-only assistant locks, serialized form autosave, and target-preserving full-height cover, prose, and designed-section editors; also owns shared styles, inheritance/overrides, previews, preparation, blockers, and downloads. |
+| `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, profile-named recoverable add-release flow, fail-closed pre-turn draft flushing, exact designed-section variant synchronization, control-only assistant locks, serialized form autosave, and target-preserving full-height cover, prose, and designed-section editors; also owns shared styles, inheritance/overrides, previews, preparation, blockers, and downloads. |
 | `PublishChatPanel.razor` (+ `.razor.css`) | Refresh-safe Publish adapter over shared `ChatSurface` with a flush-returned exact turn context, persisted transcript/tool chips, streaming, Stop/Reset, provider/token state, image attachments, active-turn reconnection, and structured workspace mutation callbacks. |
 
 ### Components/Pages/Projects/Outline/
@@ -602,12 +602,13 @@
 |------|-------------|
 | `PublishModels.cs` | Core/release targets, effective workspace/readiness, revision-aware sparse mutations, publication-section, projection, cover, preparation, and artifact contracts. |
 | `PublicationBookService.cs` | Owning Core Book boundary for seeding, metadata/presentation patches, consolidated workspace-detail reads, chapter inclusion, page-setup-normalized reusable covers, revisions, and style/font-aware source fingerprint invalidation. |
-| `IPublicationEditionService.cs` / `PublicationEditionService.cs` | Owning release lifecycle and sparse-override boundary for presets, chapter inclusion, edition-content-aware cloning, archive/compare/audit, and effective fingerprints. |
+| `IPublicationEditionService.cs` / `PublicationEditionService.cs` | Owning release lifecycle and sparse-override boundary for presets, collision-safe numbered names, chapter inclusion, edition-content-aware cloning, archive/compare/audit, and effective fingerprints. |
 | `PublicationSectionService.cs` | Revision-safe Core/release publication-section ownership, live inheritance/customization, exclusive prose-or-designed authoring modes, system title/copyright Designed Page materialization with effective metadata bindings, fixed-outline anchoring, validation, and reset/delete behavior. |
 | `PublicationSectionMigrationService.cs` | Protected, journaled startup conversion from historical matter/placement rows into publication sections with semantic/image/layout preservation and trigger restoration. |
 | `EditionContentService.cs` | Enables/discards release content, resets individual chapters, reports stable-block differences/Core drift, and diagnoses release Designed Page geometry with Editor deep-link targets. |
 | `EditionContentMigrationService.cs` | Protected style/typography materialization into edition snapshots and shared Book Text Styles, proof-row removal, effective-projection validation, artifact Legacy marking, and cleanup handoff. |
 | `PublicationReleasePresetService.cs` | Centralized safe paperback destination, EPUB ebook, and PDF ebook release defaults with internal immutable profiles. |
+| `PublicationReleaseNaming.cs` | Shared profile-derived release defaults and collision-safe numbered-name allocation used by UI and persistence boundaries. |
 | `PublicationPreparationService.cs` | Persisted/recoverable one-action Core reading-copy and release render/validation/package coordinator with cancellation, blockers, and retained Core accessibility warnings. |
 | `PublicationDiagnosticPresentationService.cs` | Resolves preparation diagnostics within the prepared Core/release target to plain-language chapter/page, publication-section, or cover locations, exact editor selections, and GUID-free fallback messages. |
 | `PublicationCoreMigrationService.cs` | Guarded v16 Core Book/sparse-release cutover with protected backup, effective-projection and artifact-byte/hash invariants, journaling, and cleanup handoff. |

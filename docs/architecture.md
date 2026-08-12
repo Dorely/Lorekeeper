@@ -595,6 +595,10 @@ release aggregates. Releases retain destination, internal immutable profile,
 ISBN, product settings, status, artifacts, packages, sparse field and collection
 overrides, cloning, archival, comparison, and audit history. Proof tracking,
 proof artifacts, and proof gates are not part of the publication runtime.
+The add-release workflow derives its draft name from the selected product and
+Specific/Generic profile. Release creation, cloning, and renaming allocate the
+first available project-local name by appending a numeric suffix, so a common
+profile default never becomes a recoverable user error.
 `IPublicationEffectiveConfigurationResolver` combines Core with explicit
 overrides at read/render time. Absence means inherit, optional text can be
 explicitly empty, and reset removes the override. Core collection additions
