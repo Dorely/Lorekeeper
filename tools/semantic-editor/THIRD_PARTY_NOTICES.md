@@ -15,9 +15,7 @@ The checked-in browser bundle is built from the exact versions in
 - `w3c-keyname` 2.2.8
 
 `esbuild` 0.28.1 is an MIT-licensed build-time dependency and is not included
-as executable code in the shipped browser bundle. `jsdom` 26.1.0 and its
-integrity-locked transitive graph are test-only dependencies and are likewise
-not shipped in the browser bundle.
+as executable code in the shipped browser bundle.
 
 The package tarballs and their individual `LICENSE` files are resolved by
 `npm ci` from the integrity-pinned lock file. ProseMirror is copyright

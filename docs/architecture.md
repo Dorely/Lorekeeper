@@ -1175,7 +1175,7 @@ part of database backup/export, and is deleted only when the user explicitly
 loads the current saved manuscript. Clearing site data removes it.
 
 Windows and macOS release builders run the semantic-editor locked install,
-fixtures, audit, and deterministic rebuild, fail if the committed bundle is
+dependency audit, and deterministic rebuild, fail if the committed bundle is
 stale, and verify that exactly one matching bundle and shipped notice reached
 the release stage.
 
@@ -1260,19 +1260,20 @@ Documentation-only work must still validate every referenced path,
 configuration key, launch profile, and command, and should run broader checks
 when the documentation asserts that those checks work.
 
-The user explicitly authorized automated publishing fixtures on 2026-07-30.
-Run the application-level manuscript, migration, visual-anchor, and project
-export fixtures with:
+Lorekeeper's .NET tests are restricted to startup database migration and
+versioned project import/export migration safety. They prove data preservation,
+backup/recovery behavior, resumability, and fail-closed conversion boundaries:
 
 ```powershell
 dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj
 npm ci --prefix tools/semantic-editor
-npm test --prefix tools/semantic-editor
 npm run build --prefix tools/semantic-editor
 ```
 
-The owned Press project runs an independent black-box conformance suite plus
-unit and adversarial fixtures:
+The owned Press project runs the complete PDF-conformance evidence suite. Its
+unit, black-box, and adversarial fixtures collectively cover raw-PDF standards,
+typography and layout, protocol integrity, containment, cancellation, atomicity,
+and determinism:
 
 ```powershell
 cd Lorekeeper.Press
@@ -1282,9 +1283,9 @@ cargo test --locked
 ```
 
 `dotnet build Lorekeeper.sln` also builds and packages the same locked native
-runtime used by the app. `LorekeeperPressProcessIntegrationTests` stages a real
-protocol-v5 job through the C# runtime boundary with `PATH` removed and verifies
-the generated interior and cover bytes.
+runtime used by the app. Application publishing behavior outside migration
+safety is verified through compilation, static inspection, and explicitly
+authorized manual integration checks rather than automated Lorekeeper tests.
 
 Successful compilation does not validate OAuth, provider calls,
 embeddings, web search, image generation, publication output, packaging,

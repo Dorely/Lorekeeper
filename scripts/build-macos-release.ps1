@@ -175,7 +175,6 @@ try
     }
     $semanticEditorBundleHash = (Get-FileHash -LiteralPath $semanticEditorBundle -Algorithm SHA256).Hash
     Invoke-CheckedCommand npm @('ci') $semanticEditorDirectory
-    Invoke-CheckedCommand npm @('test') $semanticEditorDirectory
     Invoke-CheckedCommand npm @('audit', '--audit-level=high') $semanticEditorDirectory
     Invoke-CheckedCommand npm @('run', 'build') $semanticEditorDirectory
     $rebuiltSemanticEditorHash = (Get-FileHash -LiteralPath $semanticEditorBundle -Algorithm SHA256).Hash

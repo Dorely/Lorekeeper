@@ -177,30 +177,6 @@ public sealed class ManuscriptMigrationIntegrationTests
     }
 
     [Fact]
-    public async Task ManuscriptRevisionRejectsConcurrentOverwrites()
-    {
-        using var fixture = new MigrationFixture();
-        var chapterId = await fixture.CreateV7DatabaseAsync("Concurrent");
-        var service = fixture.CreateService();
-        await using (var migrationDb = fixture.CreateDbContext())
-            await service.ApplyPendingAsync(migrationDb);
-
-        await using var firstDb = fixture.CreateDbContext();
-        await using var secondDb = fixture.CreateDbContext();
-        var first = await firstDb.Chapters.SingleAsync();
-        var second = await secondDb.Chapters.SingleAsync();
-        var firstDocument = ManuscriptCodec.ReparsePreservingBlockIds(first.Manuscript, "First writer");
-        first.ManuscriptJson = ManuscriptCodec.Serialize(firstDocument);
-        first.ManuscriptRevision = firstDocument.Revision;
-        await firstDb.SaveChangesAsync();
-
-        var secondDocument = ManuscriptCodec.ReparsePreservingBlockIds(second.Manuscript, "Second writer");
-        second.ManuscriptJson = ManuscriptCodec.Serialize(secondDocument);
-        second.ManuscriptRevision = secondDocument.Revision;
-        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => secondDb.SaveChangesAsync());
-    }
-
-    [Fact]
     public async Task RestartAfterSchemaApplicationResumesTheDataTransform()
     {
         using var fixture = new MigrationFixture();

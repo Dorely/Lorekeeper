@@ -17,7 +17,7 @@
 | `docs/publishing-roadmap.md` | Artifact-focused route to complete paperback, EPUB, and PDF ebook production, with Generic/Specific profiles, Editor-owned release variations, eventual DOCX interchange, and hardcover goals. |
 | `docs/manual-acceptance-unified-composition.md` | Manual UI/output checklist for genre guidance, Figures, Designed Pages, covers, geometry-bound generation, accessibility, and assistants. |
 | `FILEMAP.md` | This file — concise map of every source file. |
-| `Lorekeeper.sln` | Solution file containing the application and authorized fixture-test projects. |
+| `Lorekeeper.sln` | Solution file containing the application and its migration-safety fixture project. |
 | `global.json` | Pins the .NET SDK version (`rollForward: latestFeature`). |
 | `.editorconfig` | C#/Razor formatting and naming rules. |
 | `.gitignore` | Standard .NET ignore patterns plus Lorekeeper local SQLite/temp data; publish output is scoped to the repo-root `/publish/` folder so source folders named `Publish` remain trackable. |
@@ -59,37 +59,20 @@
 
 | File | Description |
 |------|-------------|
-| `Lorekeeper.Tests.csproj` / `Usings.cs` | Authorized xUnit fixture project and shared test imports. |
-| `ManuscriptCodecTests.cs` | Codec, stable-ID, revision, inline-mark, split, and merge fixtures. |
+| `Lorekeeper.Tests.csproj` / `Usings.cs` | xUnit project restricted to startup database and versioned project import/export migration-safety fixtures. |
 | `ManuscriptMigrationIntegrationTests.cs` | Actual legacy-schema WAL migration with plain-text audit compatibility, backup/journal/hash validation, confirmation, and restore drills. |
-| `EditorChatStagingTests.cs` | Review-mode fixture proving sequential semantic operations share one staged manuscript overlay. |
-| `EditorManuscriptPreviewServiceTests.cs` | Direct and Review-edits fixtures for compact one-use previews, exact projected-document persistence, stale rejection, and approval payloads. |
-| `EditorRevisionAgentResultTests.cs` | Compact coordinator-result and pending progress-read disposal fixtures for revision-agent completion. |
-| `AiChangeReviewDiffBuilderTests.cs` | Approval-diff fixtures proving mark-only and style-only manuscript changes remain visible and truthful. |
-| `ProjectExportCompatibilityTests.cs` | Current v17 manuscript/page-setup/composition/Core Book/PDF-presentation/sparse-release/cover/font fixtures plus isolated older fail-closed import-boundary checks. |
+| `ProjectExportCompatibilityTests.cs` | Current v18 manuscript/page-setup/composition/Core Book/PDF-presentation/edition-content/cover/font fixtures plus isolated older fail-closed import-boundary checks. |
 | `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trips for manuscript/image remapping, current and legacy cover-image conversion, and whole-import rollback on late publication conflicts. |
-| `SemanticPublishFormattingTests.cs` | Verifies semantic headings, marks, named roles, Figures, Designed Page reading-order text, ordered matter, and accessible EPUB rendering. |
-| `ManuscriptStyleServiceTests.cs` | Named-style revision, stable-role, uniqueness, content-use, and edition-mapping deletion guards. |
-| `ProjectMutationCoordinatorTests.cs` | Cross-instance file-lock fixture for project-scoped mutation serialization against one SQLite data store. |
-| `PublicationPackageTests.cs` | Fail-closed EPUB structure, deterministic/product-specific packages, current/legacy render provenance, language/ISBN/profile/color rejection, and assistant-authorization fixtures. |
-| `PublicationEditionServiceTests.cs` | Core live inheritance/reset/explicit-empty behavior, sparse overlays, release presets, one-action preparation persistence/cancellation, archive guards, and ISBN/matter ownership fixtures. |
-| `PublicationRenderTests.cs` | Native-runtime integrity, artifact-integrity/staleness, BOM-free staged-request, and clean publication-worker cancellation fixtures. |
-| `PublishChatServiceTests.cs` | Publish conversation persistence/reset, streaming completion/failure/cancellation, Core/release targeting, compact tools, mutation notices, edition-content boundaries, and active-turn reconnection fixtures. |
 | `PublishConversationMigrationTests.cs` | Populated pre-v13 upgrade fixture proving manuscript, edition, render, artifact hash/bytes, and new Publish transcript persistence survive unchanged. |
 | `LorekeeperPressMigrationTests.cs` | Fully populated installed-schema fixture run through the real startup migrator, including no-release Picture Page scene/asset/binding preservation, Press/Core projection equality, recovery cases, and whole-database byte/hash checks. |
-| `LorekeeperPressProcessIntegrationTests.cs` | Real C#-to-packaged-Rust protocol-v5 render of interior and cover with a cleared machine environment. |
 | `DatabaseMigrationRecoveryTests.cs` | Shared migration-recovery pruning fixture proving protected failed/running backup references survive automatic retention. |
-| `OpenAIChatToolMetadataClientTests.cs` | OpenAI-compatible streaming fixture proving Gemini tool-call extension metadata survives the assistant/tool-result round trip. |
-| `CodexAuthServiceTests.cs` | OAuth refresh fixtures for reconnect rejection, cross-scope serialization/cache replacement, rotation preservation, and fail-loud server errors. |
-| `LayoutImageWorkflowTests.cs` | Exact-aspect moderate-raster fixtures plus direct single-surface composition preview coverage proving annotated/clean views do not create project images. |
 
 ## tools/semantic-editor/
 
 | File | Description |
 |------|-------------|
-| `package.json` / `package-lock.json` | Exact-pinned ProseMirror and esbuild dependency graph plus deterministic test/build commands. |
+| `package.json` / `package-lock.json` | Exact-pinned ProseMirror and esbuild dependency graph plus the deterministic editor build command. |
 | `src/semantic-editor.js` | Owned ProseMirror schema/adapter, disconnect-safe host attachment, direct Figure selection, compact always-visible grouped formatting controls, sticky Figure controls, autosave queue, paste diagnostics, outline, counts, and find/replace behavior. |
-| `test/semantic-editor.test.js` | Node/jsdom fixtures for round-trip fidelity, stable IDs, accessibility/read-only state, save draining, conflicts, paste, links, and marked-text find. |
 | `THIRD_PARTY_NOTICES.md` | Runtime/build dependency inventory and MIT notice for the semantic-editor bundle. |
 
 ## Lorekeeper.Press/ — Owned native publication renderer

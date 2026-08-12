@@ -133,8 +133,18 @@
 - Verify changes in proportion to their impact using the relevant builds,
   existing tests, static checks, runtime checks, and release checks documented in
   `docs/architecture.md`.
-- Do not add test projects or automated tests unless the user explicitly
-  requests them. Run and maintain relevant tests when they already exist.
+- Automated tests in `Lorekeeper.Press` may exist only when they map to a
+  requirement in the Press conformance evidence matrix. This includes the
+  protocol, containment, atomicity, cancellation, determinism, typography,
+  layout, raw-PDF, and adversarial evidence needed to trust the PDF result.
+- Automated tests in `Lorekeeper.Tests` may exist only to prove data
+  preservation and fail-closed behavior across application-startup database
+  migrations or versioned project import/export transformations.
+- Do not add automated UI, assistant, editor, provider, ordinary service,
+  packaging, authentication, or runtime-behavior tests. Validate those areas
+  through builds, static inspection, and user-authorized manual or browser
+  checks. A user request to add tests does not broaden this repository boundary
+  unless the user explicitly changes the two approved test purposes.
 - Verify normal source changes with `dotnet build Lorekeeper.sln`. After a
   successful build, start the browser-hosted app with
   `dotnet run --project Lorekeeper --launch-profile http`, confirm the local host
