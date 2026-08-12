@@ -429,10 +429,6 @@ public sealed class CompositionService(
             .Where(item => item.CompositionId == composition.Id)
             .OrderByDescending(item => item.UpdatedAt)
             .ToListAsync(cancellationToken);
-        var existing = candidates.FirstOrDefault(item => VariantMatchesEdition(item, edition));
-        if (existing is not null)
-            return existing;
-
         var seed = await db.CompositionMutationStages.SingleOrDefaultAsync(item =>
             item.ProjectId == projectId
             && item.ConversationId == Guid.Empty
@@ -441,18 +437,48 @@ public sealed class CompositionService(
             cancellationToken);
         var authoring = candidates.FirstOrDefault(item => item.Id == composition.ActiveAuthoringVariantId)
             ?? candidates.FirstOrDefault();
+        if (authoring is not null && VariantMatchesEdition(authoring, edition))
+        {
+            if (composition.ActiveAuthoringVariantId != authoring.Id || seed is not null)
+            {
+                composition.ActiveAuthoringVariantId = authoring.Id;
+                if (seed is not null)
+                    db.CompositionMutationStages.Remove(seed);
+                await TouchProjectAsync(projectId, cancellationToken);
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            return authoring;
+        }
+
         var scene = authoring is not null
             ? AdaptSeedScene(authoring.SceneJson, edition)
             : seed is not null
                 ? AdaptSeedScene(seed.OperationsJson, edition)
                 : CreatePageScene(edition);
-        var variant = new PageCompositionVariant
+        var geometryKey = GeometryKey(edition, scene);
+        var sceneJson = SerializeAndValidate(scene, composition.SemanticManuscriptJson);
+        var variant = candidates.FirstOrDefault(item =>
+            string.Equals(item.GeometryKey, geometryKey, StringComparison.Ordinal));
+        if (variant is null)
         {
-            CompositionId = composition.Id,
-            GeometryKey = GeometryKey(edition, scene),
-            SceneJson = SerializeAndValidate(scene, composition.SemanticManuscriptJson),
-        };
-        db.PageCompositionVariants.Add(variant);
+            variant = new PageCompositionVariant
+            {
+                CompositionId = composition.Id,
+                GeometryKey = geometryKey,
+                SceneJson = sceneJson,
+            };
+            db.PageCompositionVariants.Add(variant);
+        }
+        else if (!string.Equals(variant.SceneJson, sceneJson, StringComparison.Ordinal))
+        {
+            // A release customization can inherit historical layouts for several exact
+            // geometries. Materialize its release layout from the currently selected Core
+            // design instead of silently reviving an older matching-geometry scene.
+            variant.SceneJson = sceneJson;
+            variant.Revision = checked(variant.Revision + 1);
+            variant.UpdatedAt = DateTime.UtcNow;
+        }
+        composition.ActiveAuthoringVariantId = variant.Id;
         if (seed is not null)
             db.CompositionMutationStages.Remove(seed);
         await TouchProjectAsync(projectId, cancellationToken);

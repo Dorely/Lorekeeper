@@ -887,6 +887,9 @@ and placement are edited through the shared Pages canvas. Selecting Edit replace
 the Publish detail column with a dedicated full-height section surface: designed
 sections use the shared canvas workspace, while prose sections use the shared
 semantic manuscript editor wired to the section rather than a chapter. Section
+customization copies the currently selected Core canvas and adapts that complete
+scene to the release geometry; an older saved layout for the same geometry must
+never replace current typography, artwork, or object styling during that cutover.
 metadata remains available in a compact secondary panel; section content is never
 expanded inline in the publication-section list. The visible contents
 section is generated from effective structure. Generated sections never enter

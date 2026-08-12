@@ -577,7 +577,7 @@
 
 | File | Description |
 |------|-------------|
-| `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service with setup-normalized active authoring geometry, atomic image/fit placement, scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
+| `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service with setup-normalized active Core/release geometry, current-scene release materialization, atomic image/fit placement, scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
 | `LayoutImageSizeResolver.cs` | Deterministic GPT Image 2 flexible-size resolver targeting about 1.57 MP while preferring exact target aspect and enforcing provider bounds. |
 | `CompositionImageLayout.cs` | Shared proportional image-layout rules for canvas filling, frame coverage inspection, and consistent Pages/Cover/assistant behavior. |
 | `ProjectPageSetupService.cs` | Revision-aware project authoring page setup used by Read preview, Core Book, Designed Pages, Figures, and generation targets; geometry changes transactionally reflow the reusable Core cover and active Designed Page layouts. |
