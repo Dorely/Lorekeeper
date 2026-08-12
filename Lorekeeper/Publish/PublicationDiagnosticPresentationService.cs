@@ -104,39 +104,60 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
                 .Include(item => item.Composition).ThenInclude(item => item.Chapter)
                 .Include(item => item.Composition).ThenInclude(item => item.PublicationSection)
                 .Where(item => item.Composition.ProjectId == projectId
+                    && (selectedEditionId == null
+                        ? item.Composition.EditionId == null
+                        : item.Composition.EditionId == selectedEditionId
+                            || item.Composition.EditionId == null)
                     && item.SceneJson.Contains(candidateId.ToString()))
                 .ToListAsync(cancellationToken);
-            var variant = matchingVariants.FirstOrDefault(item => SceneContainsObject(item.SceneJson, candidateId));
+            var variant = matchingVariants
+                .Where(item => SceneContainsObject(item.SceneJson, candidateId))
+                .OrderByDescending(item => item.Composition.EditionId == selectedEditionId)
+                .FirstOrDefault();
             if (variant is not null)
                 return CompositionTarget(variant.Composition, candidateId, selectedEditionId, chapterOrdinals);
 
             var composition = await db.PageCompositions.AsNoTracking()
                 .Include(item => item.Chapter)
                 .Include(item => item.PublicationSection)
-                .FirstOrDefaultAsync(item => item.ProjectId == projectId && item.Id == candidateId, cancellationToken);
+                .Where(item => item.ProjectId == projectId
+                    && item.Id == candidateId
+                    && (selectedEditionId == null
+                        ? item.EditionId == null
+                        : item.EditionId == selectedEditionId || item.EditionId == null))
+                .OrderByDescending(item => item.EditionId == selectedEditionId)
+                .FirstOrDefaultAsync(cancellationToken);
             if (composition is not null)
                 return CompositionTarget(composition, null, selectedEditionId, chapterOrdinals);
 
-            var releaseCovers = await db.PublicationCoverDesigns.AsNoTracking()
-                .Include(item => item.Edition)
-                .Where(item => item.Edition.ProjectId == projectId
-                    && item.CompositionSceneJson.Contains(candidateId.ToString()))
-                .ToListAsync(cancellationToken);
-            var releaseCover = releaseCovers.FirstOrDefault(item => SceneContainsObject(item.CompositionSceneJson, candidateId));
-            if (releaseCover is not null)
-                return new(
-                    PublicationDiagnosticTargetKind.Cover,
-                    $"{releaseCover.Edition.Name} cover",
-                    EditionId: releaseCover.EditionId,
-                    ObjectId: candidateId);
-
-            var coreCovers = await db.PublicationBookCoverDesigns.AsNoTracking()
-                .Where(item => item.ProjectId == projectId
-                    && item.CompositionSceneJson.Contains(candidateId.ToString()))
-                .ToListAsync(cancellationToken);
-            var coreCover = coreCovers.FirstOrDefault(item => SceneContainsObject(item.CompositionSceneJson, candidateId));
-            if (coreCover is not null)
-                return new(PublicationDiagnosticTargetKind.Cover, "Core Book cover", ObjectId: candidateId);
+            if (selectedEditionId is Guid editionId)
+            {
+                var releaseCover = await db.PublicationCoverDesigns.AsNoTracking()
+                    .Include(item => item.Edition)
+                    .SingleOrDefaultAsync(item => item.EditionId == editionId
+                        && item.Edition.ProjectId == projectId
+                        && item.CompositionSceneJson.Contains(candidateId.ToString()), cancellationToken);
+                if (releaseCover is not null
+                    && SceneContainsObject(releaseCover.CompositionSceneJson, candidateId))
+                {
+                    return new(
+                        PublicationDiagnosticTargetKind.Cover,
+                        $"{releaseCover.Edition.Name} cover",
+                        EditionId: releaseCover.EditionId,
+                        ObjectId: candidateId);
+                }
+            }
+            else
+            {
+                var coreCover = await db.PublicationBookCoverDesigns.AsNoTracking()
+                    .SingleOrDefaultAsync(item => item.ProjectId == projectId
+                        && item.CompositionSceneJson.Contains(candidateId.ToString()), cancellationToken);
+                if (coreCover is not null
+                    && SceneContainsObject(coreCover.CompositionSceneJson, candidateId))
+                {
+                    return new(PublicationDiagnosticTargetKind.Cover, "Core Book cover", ObjectId: candidateId);
+                }
+            }
         }
 
         return null;

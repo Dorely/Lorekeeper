@@ -894,9 +894,9 @@ activities and never alter the renderer's scoped structural result.
 
 Preparation diagnostics are presented through
 `PublicationDiagnosticPresentationService`, not rendered as raw Press messages.
-The service resolves diagnostic object references to
-their owning chapter Designed Page, publication-section canvas, or Core/release
-cover. Publish shows plain-language titles and locations and links to the exact
+The service resolves diagnostic object references only within the prepared
+Core/release target, then identifies their owning chapter Designed Page,
+publication-section canvas, or cover. Publish shows plain-language titles and locations and links to the exact
 controlling editor surface and selected object. GUIDs and other internal object
 identifiers are sanitized from unresolved user-facing messages, including Read
 preview warnings and failures; persisted renderer evidence remains unchanged for

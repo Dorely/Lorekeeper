@@ -609,7 +609,7 @@
 | `EditionContentMigrationService.cs` | Protected style/typography materialization into edition snapshots and shared Book Text Styles, proof-row removal, effective-projection validation, artifact Legacy marking, and cleanup handoff. |
 | `PublicationReleasePresetService.cs` | Centralized safe paperback destination, EPUB ebook, and PDF ebook release defaults with internal immutable profiles. |
 | `PublicationPreparationService.cs` | Persisted/recoverable one-action Core reading-copy and release render/validation/package coordinator with cancellation, blockers, and retained Core accessibility warnings. |
-| `PublicationDiagnosticPresentationService.cs` | Resolves preparation diagnostics to plain-language chapter/page, publication-section, or cover targets, exact editor selections, and GUID-free fallback messages. |
+| `PublicationDiagnosticPresentationService.cs` | Resolves preparation diagnostics within the prepared Core/release target to plain-language chapter/page, publication-section, or cover locations, exact editor selections, and GUID-free fallback messages. |
 | `PublicationCoreMigrationService.cs` | Guarded v16 Core Book/sparse-release cutover with protected backup, effective-projection and artifact-byte/hash invariants, journaling, and cleanup handoff. |
 | `PublicationEditionMigrationService.cs` | Independent v10 backup/hash/journal cutover plus validated, resumable reconciliation of SQLite's split v14 cover-table rebuild and EF history write. |
 | `PublicationMigrationLock.cs` | Database-scoped process and crash-releasing file lease shared by edition recovery and Press schema advancement so the v14 rebuild/history window has one migration owner. |
