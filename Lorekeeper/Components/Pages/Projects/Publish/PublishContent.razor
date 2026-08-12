@@ -767,8 +767,14 @@ else
     }
     else if (_preparations.FirstOrDefault() is { } job)
     {
-        <div class="preparation @job.Status.ToString().ToLowerInvariant()"><strong>@job.Message</strong>@if (job.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing){<span>@job.ProgressPercent% · @job.Step</span><button class="btn btn-sm btn-outline-secondary" @onclick="() => CancelPreparationAsync(job.Id)">Cancel</button>}@if (job.Diagnostics.Count > 0){<details class="preparation-diagnostics" open="@(job.Status is PublicationPreparationStatus.Blocked or PublicationPreparationStatus.Failed)"><summary>@job.Diagnostics.Count production note@(job.Diagnostics.Count == 1 ? "" : "s")</summary><div>@foreach (var diagnostic in job.Diagnostics){<span><strong>@diagnostic.Code</strong> @diagnostic.Message</span>}</div></details>}</div>
+        <div class="preparation @PreparationCssClass(job)"><strong>@job.Message</strong>@if (job.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing){<span>@job.ProgressPercent% · @job.Step</span><button class="btn btn-sm btn-outline-secondary" @onclick="() => CancelPreparationAsync(job.Id)">Cancel</button>}@if (job.Diagnostics.Count > 0){<details class="preparation-diagnostics" open="@(job.Status is PublicationPreparationStatus.Blocked or PublicationPreparationStatus.Failed)"><summary>@job.Diagnostics.Count production note@(job.Diagnostics.Count == 1 ? "" : "s")</summary><div>@foreach (var diagnostic in job.Diagnostics){<span><strong>@diagnostic.Code</strong> @diagnostic.Message</span>}</div></details>}</div>
     }</text>;
+
+    private static string PreparationCssClass(PublicationPreparationJobView job) =>
+        job.Status == PublicationPreparationStatus.Ready
+        && job.Diagnostics.Any(item => string.Equals(item.Severity, "warning", StringComparison.OrdinalIgnoreCase))
+            ? "warning"
+            : job.Status.ToString().ToLowerInvariant();
 
     private RenderFragment ArtifactDownloads(IReadOnlyList<PublicationArtifactKind> Kinds) => @<text>@if (_artifacts.Any(item => Kinds.Contains(item.Kind) && !item.IsLegacy && !item.IsStale))
     {

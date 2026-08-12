@@ -47,6 +47,8 @@ public sealed class PublicationPreparationService(
     IPublicationRenderService renders,
     IProjectMutationCoordinator projectMutations) : IPublicationPreparationService
 {
+    internal static JsonSerializerOptions DiagnosticsJsonOptions { get; } = new(JsonSerializerDefaults.Web);
+
     public Task<PublicationPreparationJobView> PrepareCoreAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         CreateAsync(projectId, PublicationTargetKind.CoreBook, null, cancellationToken);
 
@@ -91,7 +93,9 @@ public sealed class PublicationPreparationService(
         PublicationTargetKind targetKind,
         Guid? editionId = null,
         CancellationToken cancellationToken = default) =>
-        (await db.PublicationPreparationJobs.AsNoTracking().Where(item => item.ProjectId == projectId
+        (await db.PublicationPreparationJobs.AsNoTracking()
+            .Include(item => item.RenderJob)
+            .Where(item => item.ProjectId == projectId
             && item.TargetKind == targetKind && item.EditionId == editionId)
             .OrderByDescending(item => item.CreatedAt).ToListAsync(cancellationToken)).Select(View).ToList();
 
@@ -116,15 +120,44 @@ public sealed class PublicationPreparationService(
         return View(job);
     }
 
-    internal static PublicationPreparationJobView View(PublicationPreparationJob job) => new(
-        job.Id, job.TargetKind, job.EditionId, job.Status, job.Step, job.ProgressPercent, job.Message,
-        DeserializeDiagnostics(job.DiagnosticsJson), job.CreatedAt, job.CompletedAt);
+    internal static PublicationPreparationJobView View(PublicationPreparationJob job)
+    {
+        var diagnostics = DeserializeDiagnostics(job.DiagnosticsJson);
+        if (diagnostics.Any(item => !IsUsable(item)) && job.RenderJob is not null)
+            diagnostics = DeserializeRenderDiagnostics(job.RenderJob.DiagnosticsJson);
+        return new(
+            job.Id, job.TargetKind, job.EditionId, job.Status, job.Step, job.ProgressPercent, job.Message,
+            diagnostics, job.CreatedAt, job.CompletedAt);
+    }
 
     internal static IReadOnlyList<PublicationPreflightItem> DeserializeDiagnostics(string json)
     {
-        try { return JsonSerializer.Deserialize<List<PublicationPreflightItem>>(json) ?? []; }
+        try
+        {
+            return JsonSerializer.Deserialize<List<PublicationPreflightItem>>(json, DiagnosticsJsonOptions) ?? [];
+        }
         catch (JsonException) { return [new("error", "PREPARATION_DIAGNOSTICS_INVALID", "Stored preparation diagnostics are invalid.")]; }
     }
+
+    private static IReadOnlyList<PublicationPreflightItem> DeserializeRenderDiagnostics(string json)
+    {
+        try
+        {
+            return (JsonSerializer.Deserialize<List<PublicationRenderDiagnostic>>(json, DiagnosticsJsonOptions) ?? [])
+                .Select(item => new PublicationPreflightItem(item.Severity, item.Code, item.Message))
+                .Where(IsUsable)
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [new("error", "PREPARATION_DIAGNOSTICS_INVALID", "Stored preparation diagnostics are invalid.")];
+        }
+    }
+
+    private static bool IsUsable(PublicationPreflightItem item) =>
+        !string.IsNullOrWhiteSpace(item.Severity)
+        && !string.IsNullOrWhiteSpace(item.Code)
+        && !string.IsNullOrWhiteSpace(item.Message);
 }
 
 public sealed class PublicationPreparationWorker(
@@ -169,7 +202,7 @@ public sealed class PublicationPreparationWorker(
         {
             job.Status = PublicationPreparationStatus.Blocked;
             job.Message = blockers[0].Message;
-            job.DiagnosticsJson = JsonSerializer.Serialize(blockers);
+            job.DiagnosticsJson = JsonSerializer.Serialize(blockers, PublicationPreparationService.DiagnosticsJsonOptions);
             job.CompletedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
             return;
@@ -227,7 +260,7 @@ public sealed class PublicationPreparationWorker(
         job.Message = job.TargetKind == PublicationTargetKind.CoreBook
             ? preparationDiagnostics.Count > 0 ? "Reading PDF ready with warnings" : "Reading PDF ready"
             : "Publication files ready";
-        job.DiagnosticsJson = JsonSerializer.Serialize(preparationDiagnostics);
+        job.DiagnosticsJson = JsonSerializer.Serialize(preparationDiagnostics, PublicationPreparationService.DiagnosticsJsonOptions);
         job.CompletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
     }
@@ -244,7 +277,7 @@ public sealed class PublicationPreparationWorker(
 
         job.Status = PublicationPreparationStatus.Blocked;
         job.Message = blockers[0].Message;
-        job.DiagnosticsJson = JsonSerializer.Serialize(blockers);
+        job.DiagnosticsJson = JsonSerializer.Serialize(blockers, PublicationPreparationService.DiagnosticsJsonOptions);
         job.CompletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         return true;
@@ -259,7 +292,9 @@ public sealed class PublicationPreparationWorker(
         {
             db.ChangeTracker.Clear();
             var state = await db.PublicationRenderJobs.AsNoTracking().SingleAsync(item => item.Id == preparation.RenderJobId, cancellationToken);
-            var diagnostics = JsonSerializer.Deserialize<List<PublicationRenderDiagnostic>>(state.DiagnosticsJson) ?? [];
+            var diagnostics = JsonSerializer.Deserialize<List<PublicationRenderDiagnostic>>(
+                state.DiagnosticsJson,
+                PublicationPreparationService.DiagnosticsJsonOptions) ?? [];
             if (state.Status == PublicationRenderStatus.Completed)
                 return diagnostics.Select(item => new PublicationPreflightItem(item.Severity, item.Code, item.Message)).ToList();
             if (state.Status is PublicationRenderStatus.Failed or PublicationRenderStatus.Cancelled)
@@ -309,7 +344,9 @@ public sealed class PublicationPreparationWorker(
         if (job is null || job.Status == PublicationPreparationStatus.Cancelled) return;
         job.Status = PublicationPreparationStatus.Blocked;
         job.Message = exception.Message;
-        job.DiagnosticsJson = JsonSerializer.Serialize(new[] { new PublicationPreflightItem("error", "PREPARATION_FAILED", exception.Message) });
+        job.DiagnosticsJson = JsonSerializer.Serialize(
+            new[] { new PublicationPreflightItem("error", "PREPARATION_FAILED", exception.Message) },
+            PublicationPreparationService.DiagnosticsJsonOptions);
         job.CompletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
     }
