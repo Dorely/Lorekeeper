@@ -739,11 +739,20 @@ public sealed class PublicationRenderProcessor(
             : await editions.GetSourceFingerprintAsync(job.ProjectId, edition!.Id, cancellationToken);
         if (!string.Equals(fingerprintBeforeRender, job.SourceFingerprint, StringComparison.Ordinal))
             throw new InvalidOperationException("The edition changed while this render was queued. Request a new render.");
-        var expectedPageMap = document.Sections
+        var expectedChapterPageMap = document.Sections
             .SelectMany(section => section.Chapters)
             .SelectMany(chapter => chapter.Manuscript.Content.Select(block => (
-                ChapterId: chapter.Id,
-                BlockId: Guid.Parse(block.Id))))
+                OwnerId: chapter.Id.ToString("D"),
+                BlockId: block.Id)))
+            .ToHashSet();
+        var expectedPublicationSectionPageMap = document.PublicationSections
+            .Where(section => section.SystemRole != PublicationSectionSystemRole.Contents)
+            .SelectMany(section => section.Manuscript.Content.Select(block => (
+                OwnerId: section.Id.ToString("D"),
+                BlockId: block.Id)))
+            .ToHashSet();
+        var expectedPageMap = expectedChapterPageMap
+            .Concat(expectedPublicationSectionPageMap)
             .ToHashSet();
         var coverDesign = coreTarget
             ? CoreCoverView(document)
@@ -843,19 +852,32 @@ public sealed class PublicationRenderProcessor(
             });
         }
 
-        var parsedPageMap = new List<(Guid ChapterId, Guid BlockId, int PageNumber)>();
+        var returnedPageMap = new List<(string OwnerId, string BlockId, int PageNumber)>();
         foreach (var entry in result.PageMap ?? [])
         {
-            if (!Guid.TryParse(entry.ChapterId, out var chapterId)
-                || !Guid.TryParse(entry.BlockId, out var blockId)
+            if (string.IsNullOrWhiteSpace(entry.ChapterId)
+                || string.IsNullOrWhiteSpace(entry.BlockId)
                 || entry.PageNumber < 1
                 || entry.PageNumber > interiorResult.PageCount)
                 throw new InvalidOperationException("The renderer returned an invalid page-map entry.");
-            parsedPageMap.Add((chapterId, blockId, entry.PageNumber));
+            returnedPageMap.Add((entry.ChapterId, entry.BlockId, entry.PageNumber));
         }
-        if (parsedPageMap.Select(entry => (entry.ChapterId, entry.BlockId)).Distinct().Count() != parsedPageMap.Count
-            || !parsedPageMap.Select(entry => (entry.ChapterId, entry.BlockId)).ToHashSet().SetEquals(expectedPageMap))
+        if (returnedPageMap.Select(entry => (entry.OwnerId, entry.BlockId)).Distinct().Count() != returnedPageMap.Count
+            || !returnedPageMap.Select(entry => (entry.OwnerId, entry.BlockId)).ToHashSet().SetEquals(expectedPageMap))
             throw new InvalidOperationException("The renderer returned an incomplete or duplicate semantic page map.");
+        // Publication-section block IDs are stable manuscript identifiers, but they are not
+        // necessarily GUIDs. Validate them above as part of the complete Press map; persist only
+        // chapter entries in the chapter-navigation table whose contract remains Guid-based.
+        var parsedPageMap = returnedPageMap
+            .Where(entry => expectedChapterPageMap.Contains((entry.OwnerId, entry.BlockId)))
+            .Select(entry =>
+            {
+                if (!Guid.TryParse(entry.OwnerId, out var chapterId)
+                    || !Guid.TryParse(entry.BlockId, out var blockId))
+                    throw new InvalidOperationException("The renderer returned an invalid chapter page-map entry.");
+                return (ChapterId: chapterId, BlockId: blockId, entry.PageNumber);
+            })
+            .ToList();
         var fingerprintAfterRender = coreTarget
             ? await books.GetSourceFingerprintAsync(job.ProjectId, cancellationToken)
             : await editions.GetSourceFingerprintAsync(job.ProjectId, edition!.Id, cancellationToken);
