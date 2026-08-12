@@ -60,8 +60,12 @@ else
                     <div class="publish-notice" role="status">@_notice</div>
                 }
 
-                <div class="publish-scroll">
-                    @if (_coverEditorOpen && Project is not null)
+                <div class="publish-scroll @((_coverEditorOpen || _editingSection is not null) ? "publish-scroll--editor" : null)">
+                    @if (_editingSection is not null && Project is not null)
+                    {
+                        @PublicationSectionEditorView()
+                    }
+                    else if (_coverEditorOpen && Project is not null)
                     {
                         <CoverCompositionWorkspace @ref="_coverWorkspace"
                                                    ProjectId="Project.Id"
@@ -141,6 +145,14 @@ else
                          BeforeChange="FlushBeforeBookStyleChangeAsync"
                          Changed="HandleBookTextStylesChangedAsync"
                          OnClose="CloseBookTextStylesModal" />
+
+    <ProjectImageLibraryPickerModal ProjectId="Project.Id"
+                                    IsOpen="_publicationSectionImageModalOpen"
+                                    Title="Choose a publication-section image"
+                                    PrimaryActionLabel="Use image"
+                                    PrimaryActionEnabled="@(_publicationSectionEditor is not null)"
+                                    OnClose="ClosePublicationSectionImageModal"
+                                    OnPrimaryAction="SelectPublicationSectionImageAsync" />
 }
 
 <ConfirmationDialog IsOpen="_disableEditionContentConfirmationOpen"
@@ -173,7 +185,8 @@ else
     private IReadOnlyList<PublicationSectionView> _publicationSections = [];
     private PublicationSectionView? _editingSection;
     private ChapterBodyEditor? _publicationSectionEditor;
-    private bool _sectionPagesMode;
+    private bool _sectionSettingsOpen;
+    private bool _publicationSectionImageModalOpen;
     private Guid? _selectedSectionCompositionId;
     private int _sectionPageRefreshSignal;
     private Guid? _sectionPageSelectionId;
@@ -609,16 +622,14 @@ else
     </div>;
 
     private RenderFragment PublicationSectionsCard() => @<section class="workspace-card publication-sections-card">
-        @if (_editingSection is null)
-        {
-            <header>
+        <header>
                 <div><span class="step">@PublicationSectionsStep()</span><div><h2>Publication sections</h2><p>Build title pages, copyright, acknowledgements, author notes, image pages, and other material around the Core outline.</p></div></div>
                 <div class="button-row">
                     <button class="btn btn-sm btn-outline-primary" @onclick="() => AddPublicationSectionAsync(false)">Add prose section</button>
                     <button class="btn btn-sm btn-outline-primary" @onclick="() => AddPublicationSectionAsync(true)">Add designed page</button>
                 </div>
-            </header>
-            @if (!_coreDetailsLoaded && _selectedReleaseId is null)
+        </header>
+        @if (!_coreDetailsLoaded && _selectedReleaseId is null)
             {
                 <div class="deferred-section-loading"><span class="spinner-border spinner-border-sm"></span> Loading publication sections...</div>
             }
@@ -658,45 +669,61 @@ else
                         </div>
                     }
                 </div>
-            }
         }
-        else
+    </section>;
+
+    private RenderFragment PublicationSectionEditorView() => @<section class="publication-section-editor" aria-label="Publication section editor">
+        <header class="publication-section-editor-header">
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ClosePublicationSectionEditorAsync">&#8592; Back to sections</button>
+            <div class="publication-section-editor-identity">
+                <strong>@_editingSection!.Title</strong>
+                <small>@(IsDesignedPublicationSection(_editingSection) ? "Designed page" : "Prose section") &middot; @(_selectedReleaseId is null ? "Core Book" : _workspace?.Edition.Name ?? "Release")</small>
+            </div>
+            @if (IsDesignedPublicationSection(_editingSection) && SectionCompositionIds().Count > 1)
+            {
+                <label class="publication-section-page-picker"><span>Page</span><select class="form-select form-select-sm" value="@_selectedSectionCompositionId" @onchange="SelectSectionCompositionAsync">@foreach (var compositionId in SectionCompositionIds()){<option value="@compositionId">@SectionCompositionLabel(compositionId)</option>}</select></label>
+            }
+            <button type="button" class="btn btn-sm @(_sectionSettingsOpen ? "btn-primary" : "btn-outline-primary")" aria-expanded="@_sectionSettingsOpen" @onclick="() => _sectionSettingsOpen = !_sectionSettingsOpen">Section settings</button>
+        </header>
+        @if (_sectionSettingsOpen)
         {
-            <div class="publication-section-workspace">
-                <header class="publication-section-toolbar">
-                    <div class="button-row"><button class="btn btn-sm btn-outline-secondary" @onclick="ClosePublicationSectionEditorAsync">← Back to sections</button><strong>@_editingSection.Title</strong><span class="status-pill">@(_editingSection.IsInherited ? "From Core Book" : _selectedReleaseId is null ? "Core Book" : "Release section")</span></div>
-                    @if (_editingSection.SystemRole == PublicationSectionSystemRole.None)
-                    {
-                        <div class="button-row"><button class="btn btn-sm @(!_sectionPagesMode ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetSectionMode(false)">Write</button><button class="btn btn-sm @(_sectionPagesMode ? "btn-primary" : "btn-outline-primary")" disabled="@(!SectionCompositionIds().Any())" @onclick="() => SetSectionMode(true)">Pages</button></div>
-                    }
-                </header>
-                <div class="publication-section-settings">
-                    <label class="field"><span>Section name</span><input class="form-control" value="@_sectionTitle" @onchange="SectionTitleChangedAsync" /></label>
-                    <label class="field"><span>Type</span><select class="form-select" value="@_sectionKind" disabled="@(_editingSection.SystemRole != PublicationSectionSystemRole.None)" @onchange="SectionKindChangedAsync">@foreach (var kind in EditableSectionKinds()){<option value="@kind">@SectionKindLabel(kind)</option>}</select></label>
-                    <label class="field"><span>Position</span><select class="form-select" value="@_sectionAnchor" disabled="@(_editingSection.SystemRole != PublicationSectionSystemRole.None)" @onchange="SectionAnchorChangedAsync">@foreach (var anchor in Enum.GetValues<PublicationSectionAnchor>()){<option value="@anchor">@SectionAnchorLabel(anchor)</option>}</select></label>
-                    @if (_sectionAnchor is not (PublicationSectionAnchor.Front or PublicationSectionAnchor.Back))
-                    {
-                        <label class="field"><span>Place near</span><select class="form-select" value="@SectionTargetValue()" @onchange="SectionTargetChangedAsync">@foreach (var item in SectionAnchorTargets()){<option value="@($"{item.TargetKind}|{item.TargetId}")">@item.Title</option>}</select></label>
-                    }
-                    <label class="field"><span>Include</span><select class="form-select" value="@_sectionInclusion" @onchange="SectionInclusionChangedAsync"><option value="@PublicationSectionInclusionMode.Automatic">Automatic</option><option value="@PublicationSectionInclusionMode.Included">Included</option><option value="@PublicationSectionInclusionMode.Omitted">Omitted</option></select></label>
-                </div>
-                @if (_sectionPagesMode && _selectedSectionCompositionId is Guid compositionId)
+            <div class="publication-section-settings publication-section-settings--dedicated">
+                <label class="field"><span>Section name</span><input class="form-control" value="@_sectionTitle" @onchange="SectionTitleChangedAsync" /></label>
+                <label class="field"><span>Type</span><select class="form-select" value="@_sectionKind" disabled="@(_editingSection.SystemRole != PublicationSectionSystemRole.None)" @onchange="SectionKindChangedAsync">@foreach (var kind in EditableSectionKinds()){<option value="@kind">@SectionKindLabel(kind)</option>}</select></label>
+                <label class="field"><span>Position</span><select class="form-select" value="@_sectionAnchor" disabled="@(_editingSection.SystemRole != PublicationSectionSystemRole.None)" @onchange="SectionAnchorChangedAsync">@foreach (var anchor in Enum.GetValues<PublicationSectionAnchor>()){<option value="@anchor">@SectionAnchorLabel(anchor)</option>}</select></label>
+                @if (_sectionAnchor is not (PublicationSectionAnchor.Front or PublicationSectionAnchor.Back))
+                {
+                    <label class="field"><span>Place near</span><select class="form-select" value="@SectionTargetValue()" @onchange="SectionTargetChangedAsync">@foreach (var item in SectionAnchorTargets()){<option value="@($"{item.TargetKind}|{item.TargetId}")">@item.Title</option>}</select></label>
+                }
+                <label class="field"><span>Include</span><select class="form-select" value="@_sectionInclusion" @onchange="SectionInclusionChangedAsync"><option value="@PublicationSectionInclusionMode.Automatic">Automatic</option><option value="@PublicationSectionInclusionMode.Included">Included</option><option value="@PublicationSectionInclusionMode.Omitted">Omitted</option></select></label>
+            </div>
+        }
+        <div class="publication-section-editor-body">
+            @if (IsDesignedPublicationSection(_editingSection))
+            {
+                @if (_selectedSectionCompositionId is Guid compositionId)
                 {
                     <DesignedPageWorkspace @key="compositionId" ProjectId="Project!.Id" CompositionId="compositionId" ContentTarget="@SectionEditorContentTarget()"
                                            RefreshSignal="_sectionPageRefreshSignal" RequestedSelectionId="_sectionPageSelectionId" />
                 }
                 else
                 {
-                    <ChapterBodyEditor @ref="_publicationSectionEditor" @key="_editingSection.Id"
-                                       ChapterId="_editingSection.Id" ProjectId="Project!.Id"
-                                       InitialManuscriptJson="@ManuscriptCodec.Serialize(_editingSection.Manuscript)"
-                                       SaveAsync="SavePublicationSectionDocumentAsync"
-                                       CreateDesignedPageOverrideAsync="CreateSectionDesignedPageAsync"
-                                       ReadDocumentOverrideAsync="ReadPublicationSectionDocumentAsync"
-                                       OpenDesignedPage="OpenPublicationSectionPageAsync" />
+                    <div class="publication-section-editor-error" role="alert">This designed section does not contain a page canvas.</div>
                 }
-            </div>
-        }
+            }
+            else
+            {
+                <ChapterBodyEditor @ref="_publicationSectionEditor" @key="_editingSection.Id"
+                                   ChapterId="_editingSection.Id" ProjectId="Project!.Id"
+                                   InitialManuscriptJson="@ManuscriptCodec.Serialize(_editingSection.Manuscript)"
+                                   SaveAsync="SavePublicationSectionDocumentAsync"
+                                   ReadDocumentOverrideAsync="ReadPublicationSectionDocumentAsync"
+                                   AllowDesignedPages="false"
+                                   OpenProjectImagePicker="OpenPublicationSectionImageModal"
+                                   OpenBookTextStyles="OpenBookTextStylesModal"
+                                   StyleCatalogChanged="HandleBookTextStylesChangedAsync" />
+            }
+        </div>
     </section>;
 
     private RenderFragment Toggle(string Label, bool Value, Action<bool> Changed) => @<label class="check-row"><input type="checkbox" checked="@Value" @onchange="e => Changed((bool)e.Value!)" /><span>@Label</span></label>;
@@ -782,7 +809,6 @@ else
                     DesignedPageLayoutMode.SinglePage, saved.Revision);
                 saved = created.Section;
                 _selectedSectionCompositionId = created.Composition.Id;
-                _sectionPagesMode = true;
             }
             await RefreshPublicationSectionsAsync();
             BeginPublicationSectionEdit(saved);
@@ -815,8 +841,7 @@ else
         _sectionTargetId = item.TargetId;
         _sectionInclusion = item.InclusionMode;
         _selectedSectionCompositionId = item.Manuscript.Content.FirstOrDefault(block => block.PageCompositionId.HasValue)?.PageCompositionId;
-        _sectionPagesMode = item.Manuscript.Content.Count > 0
-            && item.Manuscript.Content.All(block => block.Type == ManuscriptBlockType.DesignedPage);
+        _sectionSettingsOpen = false;
     }
 
     private async Task ClosePublicationSectionEditorAsync()
@@ -826,62 +851,49 @@ else
         _editingSection = null;
         _publicationSectionEditor = null;
         _selectedSectionCompositionId = null;
-        _sectionPagesMode = false;
+        _sectionSettingsOpen = false;
+        _publicationSectionImageModalOpen = false;
         await RefreshPublicationSectionsAsync();
     }
 
-    private async Task SetSectionMode(bool pages)
-    {
-        if (_publicationSectionEditor is not null && !await _publicationSectionEditor.FlushAsync())
-            return;
-        _sectionPagesMode = pages;
-        if (pages && _selectedSectionCompositionId is null)
-            _selectedSectionCompositionId = SectionCompositionIds().FirstOrDefault();
-    }
-
-    private IEnumerable<Guid> SectionCompositionIds() => _editingSection?.Manuscript.Content
+    private IReadOnlyList<Guid> SectionCompositionIds() => _editingSection?.Manuscript.Content
         .Where(block => block.PageCompositionId.HasValue)
         .Select(block => block.PageCompositionId!.Value)
-        .Distinct() ?? [];
+        .Distinct()
+        .ToList() ?? [];
+
+    private static bool IsDesignedPublicationSection(PublicationSectionView section) =>
+        section.SystemRole is PublicationSectionSystemRole.Title or PublicationSectionSystemRole.Copyright
+        || (section.Manuscript.Content.Count > 0
+            && section.Manuscript.Content.All(block => block.Type == ManuscriptBlockType.DesignedPage
+                && block.PageCompositionId.HasValue));
+
+    private string SectionCompositionLabel(Guid compositionId)
+    {
+        var index = SectionCompositionIds().ToList().IndexOf(compositionId);
+        return index < 0 ? "Designed page" : $"Page {index + 1}";
+    }
+
+    private Task SelectSectionCompositionAsync(ChangeEventArgs args)
+    {
+        if (Guid.TryParse(args.Value?.ToString(), out var compositionId)
+            && SectionCompositionIds().Contains(compositionId))
+            _selectedSectionCompositionId = compositionId;
+        return Task.CompletedTask;
+    }
 
     private EditorContentTarget SectionEditorContentTarget() => _selectedReleaseId is Guid releaseId
         ? EditorContentTarget.ForEdition(releaseId)
         : EditorContentTarget.Core;
 
-    private async Task OpenPublicationSectionPageAsync(Guid compositionId)
-    {
-        if (_publicationSectionEditor is not null && !await _publicationSectionEditor.FlushAsync())
-            return;
-        _selectedSectionCompositionId = compositionId;
-        _sectionPagesMode = true;
-    }
+    private void OpenPublicationSectionImageModal() => _publicationSectionImageModalOpen = true;
+    private void ClosePublicationSectionImageModal() => _publicationSectionImageModalOpen = false;
 
-    private async Task<object> CreateSectionDesignedPageAsync(
-        string name,
-        string layoutMode,
-        int blockIndex,
-        long expectedRevision)
+    private async Task SelectPublicationSectionImageAsync(Lorekeeper.Images.ProjectImageView image)
     {
-        if (_editingSection is null || !Enum.TryParse<DesignedPageLayoutMode>(layoutMode, true, out var parsed))
-            throw new InvalidOperationException("Choose a valid publication Designed Page layout.");
-        var result = await PublicationSections.CreateDesignedPageAsync(
-            CurrentPublicationSectionTarget(), _editingSection.Id, blockIndex, name, parsed, expectedRevision);
-        _editingSection = result.Section;
-        _selectedSectionCompositionId = result.Composition.Id;
-        await RefreshPublicationSectionsAsync();
-        return new
-        {
-            id = result.Composition.Id,
-            result.Composition.Name,
-            manuscriptJson = ManuscriptCodec.Serialize(result.Section.Manuscript),
-            summary = new
-            {
-                id = result.Composition.Id,
-                result.Composition.Name,
-                surfaceLabel = parsed == DesignedPageLayoutMode.FacingSpread ? "Facing spread" : "Single page",
-                status = "Ready",
-            },
-        };
+        if (_publicationSectionEditor is not null)
+            await _publicationSectionEditor.SelectProjectImageAsync(image);
+        _publicationSectionImageModalOpen = false;
     }
 
     private Task<ManuscriptDocument> ReadPublicationSectionDocumentAsync(long expectedRevision)
@@ -1450,6 +1462,8 @@ else
         await _formSaveGate.WaitAsync(_dispose.Token);
         try
         {
+            if (_publicationSectionEditor is not null && !await _publicationSectionEditor.FlushAsync())
+                return;
             if (_coverEditorOpen && _coverWorkspace is not null)
                 await _coverWorkspace.FlushAsync();
             if (_coreDirty || _coreOutlineDirty)
@@ -1658,15 +1672,15 @@ else
             && (mutation.SelectedSectionId is not null || mutation.SelectedCompositionId is not null))
         {
             _publicationSections = await PublicationSections.ListAsync(new(Project.Id, _selectedReleaseId), _dispose.Token);
-            if (mutation.SelectedSectionId is Guid sectionId)
-                _editingSection = _publicationSections.FirstOrDefault(item => item.Id == sectionId);
-            else if (_editingSection is not null)
-                _editingSection = _publicationSections.FirstOrDefault(item => item.Id == _editingSection.Id);
+            var selectedSection = mutation.SelectedSectionId is Guid sectionId
+                ? _publicationSections.FirstOrDefault(item => item.Id == sectionId)
+                : _editingSection is null
+                    ? null
+                    : _publicationSections.FirstOrDefault(item => item.Id == _editingSection.Id);
+            if (selectedSection is not null)
+                BeginPublicationSectionEdit(selectedSection);
             if (mutation.SelectedCompositionId is Guid compositionId)
-            {
                 _selectedSectionCompositionId = compositionId;
-                _sectionPagesMode = true;
-            }
             _sectionPageSelectionId = mutation.SelectedObjectId;
             _sectionPageRefreshSignal++;
             if (_selectedReleaseId is Guid releaseId)

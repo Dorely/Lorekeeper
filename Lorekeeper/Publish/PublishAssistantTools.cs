@@ -176,7 +176,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (PublicationSectionToolInput input, Guid? releaseId = null) => UpsertPublicationSectionAsync(context, releaseId, input),
                 name: "upsert_publication_section",
-                description: "Create or revision-check a Core/release publication section and its metadata. Sections may contain prose, Figures, and Designed Page blocks and are anchored around the fixed Core outline. For existing prose, use patch_publication_section_manuscript instead of repeating the complete manuscript."),
+                description: "Create or revision-check a Core/release publication section and its metadata. Choose one content mode per section: a prose manuscript with optional Figures, or Designed Page canvases only. For existing prose, use patch_publication_section_manuscript instead of repeating the complete manuscript."),
             AIFunctionFactory.Create(
                 method: (Guid sectionId, long expectedRevision, ManuscriptOperationInput[] operations, Guid? releaseId = null) => PatchPublicationSectionManuscriptAsync(context, releaseId, sectionId, expectedRevision, operations),
                 name: "patch_publication_section_manuscript",
@@ -189,7 +189,7 @@ public sealed class PublishAssistantTools(
                 method: (Guid sectionId, string name, DesignedPageLayoutMode layoutMode, int blockIndex, long expectedRevision, Guid? releaseId = null) =>
                     CreatePublicationSectionPageAsync(context, releaseId, sectionId, name, layoutMode, blockIndex, expectedRevision),
                 name: "create_publication_section_designed_page",
-                description: "Insert a Designed Page into one already-customized publication section using its current revision and the Core/release page geometry."),
+                description: "Add a canvas to an empty or already-designed publication section using its current revision and the Core/release page geometry. Never add a page canvas to a prose section; create a separate section instead."),
             AIFunctionFactory.Create(
                 method: (Guid sectionId, Guid? releaseId = null) => ResetOrDeletePublicationSectionAsync(context, releaseId, sectionId),
                 name: "remove_publication_section",

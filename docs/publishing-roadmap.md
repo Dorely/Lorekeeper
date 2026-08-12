@@ -27,7 +27,8 @@ decisions remain under [`research/`](research/README.md) and
 - The semantic manuscript and project assets are authoritative.
 - Core Book owns shared metadata, chapter inclusion, publication sections, page
   setup, Book Text Styles, and the reusable front cover. Publication sections
-  combine prose, Figures, and Designed Pages around the fixed Core outline.
+  use either prose with optional Figures or dedicated Designed Page canvases
+  around the fixed Core outline.
 - Optional publication releases inherit Core Book and override only what must
   differ for a product.
 - Core Book can produce a private reading PDF. That file is useful for review or
@@ -156,7 +157,8 @@ Status: `Implemented`
 
 - Expose release publication-section additions, exclusions, replacements, and
   ordering within a shared outline anchor.
-- Support prose, Figures, and Designed Pages in Core and release sections.
+- Support prose sections with Figures and separate Designed Page sections in
+  Core and releases; never mix both authoring forms inside one section.
 - Expose release chapter inclusion while keeping reading order fixed to Core.
 - Keep project-wide Book Text Styles reusable from Core and every release;
   release-specific appearance comes from edition manuscript references and
@@ -165,9 +167,10 @@ Status: `Implemented`
   geometry differs from the authoring layout.
 - Let every customized section return to its inherited Core value.
 
-Core and release publication sections now share the manuscript and composition
-editors used elsewhere in authoring. Release chapter controls are inclusion-only;
-the Core outline remains the single ordering authority.
+Core and release publication sections now open dedicated full-height manuscript
+or composition editors reused from authoring, rather than expanding content in
+the section list. Release chapter controls are inclusion-only; the Core outline
+remains the single ordering authority.
 
 Gate: every artifact-affecting setting supported by the services and assistant
 has an understandable manual workflow.

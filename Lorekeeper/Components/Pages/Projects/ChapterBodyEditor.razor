@@ -45,6 +45,7 @@
     [Parameter, EditorRequired] public string InitialManuscriptJson { get; set; } = string.Empty;
     [Parameter] public bool IsVisible { get; set; } = true;
     [Parameter] public bool IsReadOnly { get; set; }
+    [Parameter] public bool AllowDesignedPages { get; set; } = true;
     [Parameter] public EventCallback<Guid> OpenDesignedPage { get; set; }
     [Parameter] public EventCallback OpenProjectImagePicker { get; set; }
     [Parameter] public EventCallback OpenBookTextStyles { get; set; }
@@ -115,7 +116,8 @@
                     imagesJson,
                     "[]",
                     compositionsJson,
-                    fontFamiliesJson);
+                    fontFamiliesJson,
+                    AllowDesignedPages);
                 if (_disposed || _disposing)
                 {
                     if (handle is not null)

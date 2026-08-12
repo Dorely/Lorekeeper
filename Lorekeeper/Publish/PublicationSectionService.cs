@@ -165,6 +165,7 @@ public sealed class PublicationSectionService(
         var document = input.Id.HasValue
             ? ManuscriptCodec.Deserialize(input.ManuscriptJson, documentId, input.ExpectedRevision ?? 0)
             : ManuscriptCodec.Deserialize(input.ManuscriptJson) with { ManuscriptId = documentId, Revision = 0 };
+        ValidateSectionMode(document);
         await ValidateDocumentAsync(target, document, cancellationToken);
 
         await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
@@ -547,6 +548,8 @@ public sealed class PublicationSectionService(
         if (section.Revision != expectedRevision)
             throw new DbUpdateConcurrencyException($"Publication section changed (expected revision {expectedRevision}, current {section.Revision}).");
         var document = ManuscriptCodec.Deserialize(section.ManuscriptJson, section.Id, section.Revision);
+        if (document.Content.Any(block => block.Type != ManuscriptBlockType.DesignedPage))
+            throw new InvalidOperationException("A publication section is either a prose section or a designed-page section. Add a separate designed-page section instead of mixing page canvases into prose.");
         if (blockIndex < 0 || blockIndex > document.Content.Count)
             throw new InvalidOperationException("The Designed Page insertion point is outside the section.");
 
@@ -795,6 +798,15 @@ public sealed class PublicationSectionService(
             cancellationToken);
         if (owned != compositionIds.Count)
             throw new InvalidDataException("The publication section references a Designed Page outside its current book target.");
+    }
+
+    private static void ValidateSectionMode(ManuscriptDocument document)
+    {
+        var hasDesignedPages = document.Content.Any(block => block.Type == ManuscriptBlockType.DesignedPage);
+        if (hasDesignedPages && document.Content.Any(block => block.Type != ManuscriptBlockType.DesignedPage))
+            throw new InvalidOperationException("A publication section is either a prose section or a designed-page section. Put prose and page canvases in separate publication sections.");
+        if (hasDesignedPages && document.Content.Any(block => !block.PageCompositionId.HasValue))
+            throw new InvalidOperationException("Every block in a designed-page publication section must reference a page canvas.");
     }
 
     private static void Apply(PublicationSection row, PublicationSectionInput input, ManuscriptDocument document)

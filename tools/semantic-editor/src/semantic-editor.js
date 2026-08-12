@@ -1856,7 +1856,7 @@ function hydrateDesignedPageSummaries(document, compositionById) {
     return document;
 }
 
-export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]", fontFamiliesJson = "[]") {
+export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]", fontFamiliesJson = "[]", allowDesignedPages = true) {
     if (!root || typeof root.replaceChildren !== "function" || root.isConnected === false)
         return null;
 
@@ -2169,6 +2169,11 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             void dotNetRef.invokeMethodAsync("OnOpenBookTextStyles"))
     );
 
+    const designedPageControls = allowDesignedPages
+        ? [iconButton("▣", "Insert a designed page at the current manuscript position", () =>
+            void insertDesignedPage(view, dotNetRef, () => revision, saveNow, replaceDocument, root))]
+        : [];
+
     toolbar.append(
         selectControl("Block style", [
             ["", "Book text"],
@@ -2202,8 +2207,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         button("Alt", "Edit selected figure alternative text", () => void editFigureAltText(view, root)),
         iconButton("◩", "Edit selected figure placement, width, and crop behavior", () =>
             void editFigurePresentation(view, root)),
-        iconButton("▣", "Insert a designed page at the current manuscript position", () =>
-            void insertDesignedPage(view, dotNetRef, () => revision, saveNow, replaceDocument, root)),
+        ...designedPageControls,
         iconButton("¶", "Convert selected figure to a paragraph", () =>
             applyBlock(view, "paragraph", "body", 2)),
         iconButton("B", "Bold (Ctrl+B)", () => applyMark(view, "strong")),

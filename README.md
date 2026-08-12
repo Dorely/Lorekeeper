@@ -74,9 +74,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   unattached reusable project image; Figure, page, cover, and canonical-reference
   placement is a separate revision-safe step using that image ID.
 - An always-present Core Book for shared title/author/language metadata, fixed
-  outline order, presentation, mixed-content publication sections, project
-  typography, and reusable front-cover design. Publication sections can combine
-  prose, Figures, and Designed Pages before, after, or around the Core outline.
+  outline order, presentation, publication sections, project typography, and
+  reusable front-cover design. A publication section is either prose with
+  optional Figures or a dedicated Designed Page canvas, and opens in its own
+  full-height editor before, after, or around the Core outline.
   Optional paperback, EPUB ebook, and PDF ebook
   releases inherit Core values live and store only explicit field or collection
   overrides; ISBN, destination, package, and product settings remain

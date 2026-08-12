@@ -562,8 +562,10 @@ high-detail generated raster is not rejected after provider completion.
 metadata, chapter inclusion, title/contents and heading presentation, and a
 reusable front cover. Core chapter order always follows the project outline.
 `IPublicationSectionService` owns publication material around that outline.
-Each section has a front/back or act/chapter-relative anchor and may combine
-ordinary semantic prose, flowing Figures, and section-owned Designed Pages.
+Each section has a front/back or act/chapter-relative anchor and one explicit
+authoring form: a semantic prose document with optional flowing Figures, or one
+or more section-owned Designed Page canvases. The service rejects mixed prose
+and canvas blocks so both the UI and assistants use the same durable boundary.
 Title, copyright, and contents are system sections with live metadata bindings;
 other sections include dedications, acknowledgements, author notes, references,
 image pages, and arbitrary production material. Releases inherit Core sections
@@ -869,7 +871,12 @@ serializable transaction rechecks the source immediately before each package
 write, so a concurrent fingerprint-affecting mutation cannot be
 mislabeled. Title and copyright are system Designed Pages whose linked copy
 resolves from effective Core/release fields while their geometry, typography,
-and placement are edited through the shared Pages canvas. The visible contents
+and placement are edited through the shared Pages canvas. Selecting Edit replaces
+the Publish detail column with a dedicated full-height section surface: designed
+sections use the shared canvas workspace, while prose sections use the shared
+semantic manuscript editor wired to the section rather than a chapter. Section
+metadata remains available in a compact secondary panel; section content is never
+expanded inline in the publication-section list. The visible contents
 section is generated from effective structure. Generated sections never enter
 the ordinary manuscript editor, and user-created sections cannot claim those
 reserved roles or duplicate generated output. EPUB
@@ -877,8 +884,8 @@ validation remains structural and internal; broader reader-matrix results are
 outside the current runtime. Vendor upload and physical review are external user
 activities and never alter the renderer's scoped structural result.
 
-Publish assistant section tools expose bounded reads, focused manuscript patches,
-section-local Designed Page operations, live-inheritance customization/reset,
+Publish assistant section tools expose bounded reads, focused prose-section
+manuscript patches, designed-section page operations, live-inheritance customization/reset,
 and order changes only among sections sharing one fixed outline anchor. Large
 page changes use persisted non-replayable staging. The assistant cannot reorder
 chapters or mutate chapter manuscript content from Publish.
