@@ -18,7 +18,7 @@
     @if (!string.IsNullOrWhiteSpace(_error))
     {
         <div class="cover-editor-alert" role="alert">
-            <span>@_error</span>
+            <span>@PublicationDiagnosticText.SanitizeIdentifiers(_error)</span>
             <button type="button" title="Dismiss this message" aria-label="Dismiss cover editor error" @onclick="DismissError">&#215;</button>
         </div>
     }
@@ -199,7 +199,7 @@
                         <h3>Geometry</h3>
                         <p>@_cover.Template.FullWidthInches.ToString("0.###") × @_cover.Template.FullHeightInches.ToString("0.###") in</p>
                         @if (IsPrint) { <p>@_cover.Template.PageCount pages; @_cover.Template.SpineWidthInches.ToString("0.###") in spine.</p> }
-                        @foreach (var diagnostic in _cover.Diagnostics) { <p class="text-warning-emphasis">@diagnostic</p> }
+                        @foreach (var diagnostic in _cover.Diagnostics) { <p class="text-warning-emphasis">@PublicationDiagnosticText.SanitizeIdentifiers(diagnostic)</p> }
                     </div>
                     </details>
                 </div>

@@ -284,6 +284,7 @@ builder.Services.AddScoped<IPublicationCoverService, PublicationCoverService>();
 builder.Services.AddScoped<IPublicationPackageService, PublicationPackageService>();
 builder.Services.AddSingleton<IPublicationPreparationQueue, PublicationPreparationQueue>();
 builder.Services.AddScoped<IPublicationPreparationService, PublicationPreparationService>();
+builder.Services.AddScoped<IPublicationDiagnosticPresentationService, PublicationDiagnosticPresentationService>();
 builder.Services.AddHostedService<PublicationPreparationWorker>();
 builder.Services.AddScoped<PublicationRenderProcessor>();
 builder.Services.AddHostedService<PublicationRenderWorker>();

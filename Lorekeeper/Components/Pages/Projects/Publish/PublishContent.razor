@@ -10,6 +10,7 @@
 @inject IEditionContentService EditionContent
 @inject IPublicationCoverService Covers
 @inject IPublicationPreparationService Preparation
+@inject IPublicationDiagnosticPresentationService DiagnosticPresentation
 @inject IPublicationRenderService Renders
 @inject IProjectPageSetupService PageSetups
 @inject IJSRuntime JS
@@ -183,6 +184,7 @@ else
     private PublishWorkspaceView? _workspace;
     private IReadOnlyList<PublicationEditionSummary> _releases = [];
     private IReadOnlyList<PublicationPreparationJobView> _preparations = [];
+    private IReadOnlyList<PublicationDiagnosticPresentation> _preparationDiagnostics = [];
     private IReadOnlyList<PublicationArtifactView> _artifacts = [];
     private IReadOnlyList<PublicationBookOutlineView> _coreOutline = [];
     private IReadOnlyList<PublicationSectionView> _publicationSections = [];
@@ -337,6 +339,7 @@ else
             _coreDetailsLoaded = false;
             _outputsLoaded = false;
             _preparations = [];
+            _preparationDiagnostics = [];
             _artifacts = [];
             _selectedReleaseId = null;
             _workspace = null;
@@ -373,6 +376,7 @@ else
         _selectedReleaseId = id;
         _workspace = null;
         _preparations = [];
+        _preparationDiagnostics = [];
         _artifacts = [];
         _outputsLoaded = false;
         _targetLoading = true;
@@ -405,7 +409,7 @@ else
         _coreDetailsLoaded = true;
         await InvokeAsync(StateHasChanged);
 
-        _preparations = await Preparation.ListAsync(Project.Id, PublicationTargetKind.CoreBook, cancellationToken: _dispose.Token);
+        await ReloadPreparationsAsync(PublicationTargetKind.CoreBook, null);
         var jobs = await Renders.ListCoreAsync(Project.Id, _dispose.Token);
         if (generation != _targetLoadGeneration)
             return;
@@ -435,7 +439,7 @@ else
         _editingSection = null;
         await InvokeAsync(StateHasChanged);
 
-        _preparations = await Preparation.ListAsync(Project.Id, PublicationTargetKind.Release, releaseId, _dispose.Token);
+        await ReloadPreparationsAsync(PublicationTargetKind.Release, releaseId);
         _artifacts = await Renders.ListArtifactsAsync(Project.Id, releaseId, _dispose.Token);
         _releases = await Releases.ListAsync(Project.Id, _dispose.Token);
         _editionDifferences = _workspace.Edition.EditionSpecificContentEnabled
@@ -761,14 +765,44 @@ else
 
     private RenderFragment InheritedToggle(string Label, PublicationEditionOverrideField Field, bool Value, Action<bool> Changed) => @<div class="inherited-toggle"><label class="check-row"><input type="checkbox" disabled="@(!_releaseOverrides.Contains(Field))" checked="@Value" @onchange="e => Changed((bool)e.Value!)" /><span>@Label</span></label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>Customize</span></label></div>;
 
+    private async Task ReloadPreparationsAsync(PublicationTargetKind targetKind, Guid? editionId)
+    {
+        if (Project is null)
+            return;
+        _preparations = await Preparation.ListAsync(Project.Id, targetKind, editionId, _dispose.Token);
+        _preparationDiagnostics = _preparations.FirstOrDefault() is { } latest
+            ? await DiagnosticPresentation.ResolveAsync(
+                Project.Id,
+                editionId,
+                latest.Diagnostics,
+                _dispose.Token)
+            : [];
+    }
+
     private RenderFragment PreparationStatus() => @<text>@if (!_outputsLoaded)
     {
         <div class="preparation loading"><span class="spinner-border spinner-border-sm"></span><span>Checking prepared files…</span></div>
     }
     else if (_preparations.FirstOrDefault() is { } job)
     {
-        <div class="preparation @PreparationCssClass(job)"><strong>@job.Message</strong>@if (job.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing){<span>@job.ProgressPercent% · @job.Step</span><button class="btn btn-sm btn-outline-secondary" @onclick="() => CancelPreparationAsync(job.Id)">Cancel</button>}@if (job.Diagnostics.Count > 0){<details class="preparation-diagnostics" open="@(job.Status is PublicationPreparationStatus.Blocked or PublicationPreparationStatus.Failed)"><summary>@job.Diagnostics.Count production note@(job.Diagnostics.Count == 1 ? "" : "s")</summary><div>@foreach (var diagnostic in job.Diagnostics){<span><strong>@diagnostic.Code</strong> @diagnostic.Message</span>}</div></details>}</div>
+        <div class="preparation @PreparationCssClass(job)"><strong>@job.Message</strong>@if (job.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing){<span>@job.ProgressPercent% · @job.Step</span><button class="btn btn-sm btn-outline-secondary" @onclick="() => CancelPreparationAsync(job.Id)">Cancel</button>}@if (_preparationDiagnostics.Count > 0){<details class="preparation-diagnostics" open="@(job.Status is PublicationPreparationStatus.Blocked or PublicationPreparationStatus.Failed)"><summary>@_preparationDiagnostics.Count production note@(_preparationDiagnostics.Count == 1 ? "" : "s")</summary><div>@foreach (var diagnostic in _preparationDiagnostics){@PreparationDiagnostic(diagnostic)}</div></details>}</div>
     }</text>;
+
+    private RenderFragment PreparationDiagnostic(PublicationDiagnosticPresentation Diagnostic) => @<article class="preparation-diagnostic">
+        <div><strong>@Diagnostic.Title</strong><span>@Diagnostic.Message</span></div>
+        @if (Diagnostic.TargetKind != PublicationDiagnosticTargetKind.None
+            && !string.IsNullOrWhiteSpace(Diagnostic.TargetLabel))
+        {
+            @if (Diagnostic.TargetKind == PublicationDiagnosticTargetKind.ChapterPage && Diagnostic.ChapterId is Guid chapterId)
+            {
+                <a class="preparation-diagnostic-target" href="@DiagnosticEditorHref(Diagnostic, chapterId)">@Diagnostic.TargetLabel →</a>
+            }
+            else
+            {
+                <button type="button" class="preparation-diagnostic-target" @onclick="() => OpenDiagnosticTargetAsync(Diagnostic)">@Diagnostic.TargetLabel →</button>
+            }
+        }
+    </article>;
 
     private static string PreparationCssClass(PublicationPreparationJobView job) =>
         job.Status == PublicationPreparationStatus.Ready
@@ -1117,9 +1151,9 @@ else
         if (updateEditing && _editingSection is not null)
             _editingSection = _publicationSections.FirstOrDefault(item => item.Id == _editingSection.Id);
         _outputsLoaded = false;
-        _preparations = await Preparation.ListAsync(Project.Id,
+        await ReloadPreparationsAsync(
             _selectedReleaseId is null ? PublicationTargetKind.CoreBook : PublicationTargetKind.Release,
-            _selectedReleaseId, _dispose.Token);
+            _selectedReleaseId);
         _outputsLoaded = true;
     }
 
@@ -1357,8 +1391,7 @@ else
                 _loadedReleaseSelections = _releaseSelections.ToDictionary();
             }
             _releases = await Releases.ListAsync(Project.Id, _dispose.Token);
-            _preparations = await Preparation.ListAsync(
-                Project.Id, PublicationTargetKind.Release, id, _dispose.Token);
+            await ReloadPreparationsAsync(PublicationTargetKind.Release, id);
             _artifacts = await Renders.ListArtifactsAsync(Project.Id, id, _dispose.Token);
             _outputsLoaded = true;
         }
@@ -1447,6 +1480,84 @@ else
         if (compositionId.HasValue) query.Add($"composition={compositionId:D}");
         if (objectId.HasValue) query.Add($"object={objectId:D}");
         return $"{path}?{string.Join('&', query)}";
+    }
+
+    private string DiagnosticEditorHref(PublicationDiagnosticPresentation diagnostic, Guid chapterId)
+    {
+        if (Project is null)
+            return string.Empty;
+        var path = $"/projects/{Project.Slug}/editor/{chapterId}";
+        var query = new List<string>();
+        if (diagnostic.EditionId is Guid editionId)
+            query.Add($"edition={editionId:D}");
+        if (diagnostic.CompositionId is Guid compositionId)
+        {
+            query.Add("mode=pages");
+            query.Add($"composition={compositionId:D}");
+        }
+        if (diagnostic.ObjectId is Guid objectId)
+            query.Add($"object={objectId:D}");
+        return query.Count == 0 ? path : $"{path}?{string.Join('&', query)}";
+    }
+
+    private async Task OpenDiagnosticTargetAsync(PublicationDiagnosticPresentation diagnostic)
+    {
+        if (Project is null)
+            return;
+        switch (diagnostic.TargetKind)
+        {
+            case PublicationDiagnosticTargetKind.PublicationSectionPage
+                when diagnostic.PublicationSectionId is Guid sectionId:
+                if (_selectedReleaseId != diagnostic.EditionId)
+                {
+                    if (diagnostic.EditionId is Guid releaseId)
+                        await SelectReleaseAsync(releaseId);
+                    else
+                        await SelectCoreAsync();
+                    await LoadPendingTargetNowAsync();
+                }
+                var section = _publicationSections.FirstOrDefault(item => item.Id == sectionId);
+                if (section is null)
+                {
+                    _error = "The publication section for this note is no longer available.";
+                    return;
+                }
+                BeginPublicationSectionEdit(section);
+                if (diagnostic.CompositionId is Guid compositionId)
+                    _selectedSectionCompositionId = compositionId;
+                _sectionPageSelectionId = diagnostic.ObjectId;
+                _sectionPageRefreshSignal++;
+                break;
+            case PublicationDiagnosticTargetKind.Cover:
+                if (_selectedReleaseId != diagnostic.EditionId)
+                {
+                    if (diagnostic.EditionId is Guid releaseId)
+                        await SelectReleaseAsync(releaseId);
+                    else
+                        await SelectCoreAsync();
+                    await LoadPendingTargetNowAsync();
+                }
+                _coverSelectionId = diagnostic.ObjectId;
+                _coverEditorOpen = true;
+                _coverRefreshSignal++;
+                break;
+        }
+    }
+
+    private async Task LoadPendingTargetNowAsync()
+    {
+        var generation = _targetLoadGeneration;
+        if (_selectedReleaseId is Guid releaseId)
+            await LoadReleaseTargetAsync(releaseId, generation);
+        else
+            await LoadCoreTargetAsync(generation);
+        if (generation == _targetLoadGeneration)
+        {
+            _targetLoadPending = false;
+            _targetLoading = false;
+            _assistantSelectedReleaseId = _selectedReleaseId;
+            _assistantMounted = true;
+        }
     }
 
     private static string DifferenceSummary(EditionChapterDifference difference)
@@ -1565,7 +1676,7 @@ else
         try
         {
             await Preparation.CancelAsync(Project.Id, jobId);
-            _preparations = await Preparation.ListAsync(Project.Id,
+            await ReloadPreparationsAsync(
                 _selectedReleaseId is null ? PublicationTargetKind.CoreBook : PublicationTargetKind.Release,
                 _selectedReleaseId);
         }
@@ -1598,7 +1709,7 @@ else
         if (Project is null) return;
         while (!_dispose.IsCancellationRequested && generation == _pollGeneration)
         {
-            _preparations = await Preparation.ListAsync(Project.Id, kind, editionId, _dispose.Token);
+            await ReloadPreparationsAsync(kind, editionId);
             var job = _preparations.First(item => item.Id == jobId);
             await InvokeAsync(StateHasChanged);
             if (job.Status is not (PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing)) break;
@@ -1754,13 +1865,13 @@ else
             if (_selectedReleaseId is Guid releaseId)
             {
                 _workspace = await Publishing.GetWorkspaceForEditingAsync(Project.Id, releaseId, _dispose.Token);
-                _preparations = await Preparation.ListAsync(Project.Id, PublicationTargetKind.Release, releaseId, _dispose.Token);
+                await ReloadPreparationsAsync(PublicationTargetKind.Release, releaseId);
                 _artifacts = await Renders.ListArtifactsAsync(Project.Id, releaseId, _dispose.Token);
             }
             else
             {
                 _core = await Books.GetOrCreateAsync(Project.Id, _dispose.Token);
-                _preparations = await Preparation.ListAsync(Project.Id, PublicationTargetKind.CoreBook, cancellationToken: _dispose.Token);
+                await ReloadPreparationsAsync(PublicationTargetKind.CoreBook, null);
                 _artifacts = (await Renders.ListCoreAsync(Project.Id, _dispose.Token)).SelectMany(item => item.Artifacts).OrderByDescending(item => item.CreatedAt).ToList();
             }
             _outputsLoaded = true;
@@ -1789,6 +1900,7 @@ else
             _workspace = null;
         }
         _preparations = [];
+        _preparationDiagnostics = [];
         _artifacts = [];
         _outputsLoaded = false;
         _targetLoading = true;

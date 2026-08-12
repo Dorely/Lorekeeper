@@ -1,5 +1,6 @@
 @using Lorekeeper.Composition
 @using Lorekeeper.Models
+@using Lorekeeper.Publish
 @implements IAsyncDisposable
 @inject IChapterPreviewService Preview
 @inject IProjectPageSetupService PageSetups
@@ -75,7 +76,7 @@
             <div class="chapter-preview-diagnostics" role="status">
                 @foreach (var diagnostic in _result.Diagnostics)
                 {
-                    <p><strong>Preview note:</strong> @diagnostic.Message</p>
+                    <p><strong>Preview note:</strong> @PublicationDiagnosticText.SanitizeIdentifiers(diagnostic.Message)</p>
                 }
             </div>
         }
@@ -223,7 +224,7 @@
             if (!_disposed && generation == _loadGeneration)
             {
                 _result = null;
-                _error = exception.Message;
+                _error = PublicationDiagnosticText.SanitizeIdentifiers(exception.Message);
             }
         }
         finally
@@ -253,7 +254,7 @@
             _setup = await PageSetups.UpdateAsync(ProjectId, _setup.Revision, new(_setupWidth, _setupHeight, _setupMargin, _setupFontSize, _setupLineHeight));
             await LoadAsync();
         }
-        catch (Exception exception) { _error = exception.Message; }
+        catch (Exception exception) { _error = PublicationDiagnosticText.SanitizeIdentifiers(exception.Message); }
     }
 
     private void CopySetup()

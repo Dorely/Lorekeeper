@@ -892,6 +892,16 @@ validation remains structural and internal; broader reader-matrix results are
 outside the current runtime. Vendor upload and physical review are external user
 activities and never alter the renderer's scoped structural result.
 
+Preparation diagnostics are presented through
+`PublicationDiagnosticPresentationService`, not rendered as raw Press messages.
+The service resolves diagnostic object references to
+their owning chapter Designed Page, publication-section canvas, or Core/release
+cover. Publish shows plain-language titles and locations and links to the exact
+controlling editor surface and selected object. GUIDs and other internal object
+identifiers are sanitized from unresolved user-facing messages, including Read
+preview warnings and failures; persisted renderer evidence remains unchanged for
+technical inspection.
+
 Publish assistant section tools expose bounded reads, focused prose-section
 manuscript patches, and Editor-parity designed-section page operations. Section
 reads return exact active composition/variant revisions; a target-aware resolver
