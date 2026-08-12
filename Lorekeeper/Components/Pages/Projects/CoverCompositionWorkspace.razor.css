@@ -1,4 +1,5 @@
 .cover-composer { position: relative; min-height: 0; height: 100%; overflow: hidden; border: 1px solid #cbd2df; border-radius: .65rem; background: white; box-shadow: 0 .15rem .55rem #18203212; }
+.cover-composer--locked ::deep .visual-editor-shell { pointer-events: none; }
 .cover-editor-alert { position: absolute; z-index: 90; top: 3rem; right: .65rem; left: .65rem; display: flex; gap: .75rem; align-items: center; justify-content: space-between; max-height: 4.75rem; overflow: auto; padding: .48rem .6rem; border: 1px solid #e9a3ac; border-radius: .5rem; background: #fff1f2f5; box-shadow: 0 .4rem 1rem #59142124; color: #9d2235; font-size: .72rem; }
 .cover-editor-alert button { flex: 0 0 auto; width: 1.55rem; height: 1.55rem; padding: 0; border: 0; border-radius: .3rem; background: transparent; color: inherit; font-size: 1.15rem; line-height: 1; }
 .cover-editor-alert button:hover { background: #9d223512; }

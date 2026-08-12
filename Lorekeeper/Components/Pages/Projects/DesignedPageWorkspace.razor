@@ -11,7 +11,7 @@
 @inject IProjectFontService ProjectFonts
 @inject IJSRuntime JS
 
-<section class="composition-workspace" aria-label="Designed page workspace" tabindex="0" @onkeydown="HandleKeyDown">
+<section class="composition-workspace @(InteractionLocked ? "composition-workspace--locked" : null)" aria-label="Designed page workspace" aria-disabled="@InteractionLocked" inert="@(InteractionLocked ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
     <style>@((MarkupString)FontFaceCss())</style>
     @if (!string.IsNullOrWhiteSpace(_error)) { <div class="alert alert-danger">@_error</div> }
     else if (_scene is null) { <p class="text-muted">Loading composition...</p> }
@@ -280,10 +280,13 @@
 @code {
     [Parameter] public int RefreshSignal { get; set; }
     [Parameter] public Guid? RequestedSelectionId { get; set; }
+    [Parameter] public Guid? RequestedVariantId { get; set; }
+    [Parameter] public bool InteractionLocked { get; set; }
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter, EditorRequired] public Guid CompositionId { get; set; }
     [Parameter] public EditorContentTarget ContentTarget { get; set; } = EditorContentTarget.Core;
     [Parameter] public EventCallback<Guid> CompositionForked { get; set; }
+    [Parameter] public EventCallback<WorkspaceState> WorkspaceChanged { get; set; }
 
     private PageComposition? _composition;
     private PageCompositionVariant? _variant;
@@ -312,6 +315,7 @@
     private Guid _loadedCompositionId;
     private EditorContentTarget _loadedContentTarget = EditorContentTarget.Core;
     private int _loadedRefreshSignal = -1;
+    private Guid? _loadedRequestedVariantId;
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private CancellationTokenSource? _autosaveCancellation;
     private bool _dirty;
@@ -446,7 +450,8 @@
         if (_loadedProjectId == ProjectId
             && _loadedCompositionId == CompositionId
             && _loadedContentTarget == ContentTarget
-            && _loadedRefreshSignal == RefreshSignal)
+            && _loadedRefreshSignal == RefreshSignal
+            && _loadedRequestedVariantId == RequestedVariantId)
             return;
         if (_dirty)
         {
@@ -478,6 +483,8 @@
             _loadedCompositionId = CompositionId;
             _loadedContentTarget = ContentTarget;
             _loadedRefreshSignal = RefreshSignal;
+            _loadedRequestedVariantId = RequestedVariantId;
+            await NotifyWorkspaceChangedAsync();
         }
         catch (Exception exception) { _error = exception.Message; }
     }
@@ -487,11 +494,7 @@
         _authoringGeometry = ContentTarget.EditionId is Guid editionId
             ? await Compositions.GetEditionGeometryAsync(ProjectId, editionId)
             : await Compositions.GetAuthoringGeometryAsync(ProjectId);
-        _variant = ContentTarget.EditionId is Guid targetEditionId
-            ? _composition!.EditionId is null
-                ? await Compositions.PreviewEditionVariantAsync(ProjectId, CompositionId, targetEditionId)
-                : await Compositions.GetOrCreateVariantAsync(ProjectId, CompositionId, targetEditionId)
-            : await Compositions.GetOrCreateAuthoringVariantAsync(ProjectId, CompositionId);
+        _variant = await ResolveRequestedOrDefaultVariantAsync();
         _variants = await Compositions.ListVariantsAsync(ProjectId, CompositionId);
         _scene = JsonSerializer.Deserialize<CompositionScene>(_variant.SceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("Composition scene is empty.");
@@ -513,7 +516,9 @@
             await SaveAsync();
             if (_dirty) return;
         }
-        _variant = await Compositions.SelectAuthoringVariantAsync(ProjectId, CompositionId, variantId);
+        _variant = ContentTarget.EditionId is Guid editionId
+            ? await Compositions.SelectVariantAsync(ProjectId, CompositionId, editionId, variantId)
+            : await Compositions.SelectAuthoringVariantAsync(ProjectId, CompositionId, variantId);
         _scene = JsonSerializer.Deserialize<CompositionScene>(_variant.SceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("Composition scene is empty.");
         _objects = _scene.Objects.ToList();
@@ -522,6 +527,23 @@
         _selectedId = _objects.FirstOrDefault()?.Id;
         _undo.Clear();
         _redo.Clear();
+        await NotifyWorkspaceChangedAsync();
+    }
+
+    private async Task<PageCompositionVariant> ResolveRequestedOrDefaultVariantAsync()
+    {
+        if (RequestedVariantId is Guid requestedVariantId)
+        {
+            var requested = await Compositions.ReadVariantAsync(ProjectId, requestedVariantId);
+            if (requested.CompositionId == CompositionId)
+                return requested;
+        }
+
+        return ContentTarget.EditionId is Guid targetEditionId
+            ? _composition!.EditionId is null
+                ? await Compositions.PreviewEditionVariantAsync(ProjectId, CompositionId, targetEditionId)
+                : await Compositions.GetOrCreateVariantAsync(ProjectId, CompositionId, targetEditionId)
+            : await Compositions.GetOrCreateAuthoringVariantAsync(ProjectId, CompositionId);
     }
 
     private static string VariantLabel(PageCompositionVariant variant)
@@ -1082,6 +1104,7 @@
             _error = null;
             if (forkedCompositionId is Guid forkedId)
                 await CompositionForked.InvokeAsync(forkedId);
+            await NotifyWorkspaceChangedAsync();
         }
         catch (Exception exception) { _error = exception.Message; }
         finally { _saveGate.Release(); }
@@ -1246,11 +1269,22 @@
 
     private string SurfaceClass(CompositionSurfaceKind kind) => _scene?.Surface.Kind == kind ? "selected" : string.Empty;
 
-    private void SetSurfaceKind(CompositionSurfaceKind kind)
+    private async Task SetSurfaceKind(CompositionSurfaceKind kind)
     {
         if (_scene is null) return;
         if (_authoringGeometry is null) return;
         if (kind is not CompositionSurfaceKind.SinglePage and not CompositionSurfaceKind.FacingSpread) return;
+        if (_scene.Surface.Kind == kind) return;
+        var existing = _variants.FirstOrDefault(candidate =>
+        {
+            var candidateScene = JsonSerializer.Deserialize<CompositionScene>(candidate.SceneJson, ManuscriptCodec.JsonOptions);
+            return candidateScene?.Surface.Kind == kind;
+        });
+        if (existing is not null)
+        {
+            await SelectVariantAsync(existing.Id);
+            return;
+        }
         Snapshot();
         var current = _scene.Surface;
         var leafWidth = _authoringGeometry.LeafWidthPoints;
@@ -1271,6 +1305,24 @@
         };
         MarkDirty();
     }
+
+    private Task NotifyWorkspaceChangedAsync() => _composition is null || _variant is null || _scene is null
+        ? Task.CompletedTask
+        : WorkspaceChanged.InvokeAsync(new(
+            _composition.Id,
+            _composition.Revision,
+            _variant.Id,
+            _variant.Revision,
+            _scene.Surface.Kind,
+            _selectedId));
+
+    public sealed record WorkspaceState(
+        Guid CompositionId,
+        long CompositionRevision,
+        Guid VariantId,
+        long VariantRevision,
+        CompositionSurfaceKind SurfaceKind,
+        Guid? SelectedObjectId);
 
     private void RemapSurfaceContents(double sourceWidth, double sourceHeight, double targetWidth, double targetHeight)
     {
@@ -1460,6 +1512,7 @@
 
     private void HandleKeyDown(KeyboardEventArgs e)
     {
+        if (InteractionLocked) return;
         if (Selected is not { Locked: false } selected) return;
         var delta = e.ShiftKey ? 1d : .25;
         if (IsCropRepositioning(selected))

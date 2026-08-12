@@ -13,7 +13,7 @@
 @inject IProjectFontService ProjectFonts
 @inject IJSRuntime JS
 
-<div class="cover-composer" aria-label="Cover composition editor" tabindex="0" @onkeydown="HandleKeyDown">
+<div class="cover-composer @(InteractionLocked ? "cover-composer--locked" : null)" aria-label="Cover composition editor" aria-disabled="@InteractionLocked" inert="@(InteractionLocked ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
     <style>@((MarkupString)FontFaceCss())</style>
     @if (!string.IsNullOrWhiteSpace(_error))
     {
@@ -223,6 +223,7 @@
     [Parameter] public bool CoreBook { get; set; }
     [Parameter] public long RefreshSignal { get; set; }
     [Parameter] public Guid? RequestedSelectionId { get; set; }
+    [Parameter] public bool InteractionLocked { get; set; }
     [Parameter] public EventCallback Saved { get; set; }
     [Parameter] public EventCallback Back { get; set; }
     private PublicationCoverDesignView? _cover; private PublicationEditionSummary? _edition; private CompositionScene? _scene;
@@ -543,7 +544,7 @@
         catch (Exception ex) { _error = ex.Message; }
         finally { _saveGate.Release(); }
     }
-    public async Task FlushAsync()
+    public async Task<bool> FlushAsync()
     {
         _autosaveCancellation?.Cancel();
         while (_dirty)
@@ -553,8 +554,9 @@
             if (!string.IsNullOrWhiteSpace(_error) || (_dirty && _changeVersion == changeVersion))
                 break;
         }
+        return !_dirty;
     }
-    private void HandleKeyDown(KeyboardEventArgs e) { if (Selected is not { Locked: false } selected || LayerLocked(selected.LayerId)) return; var delta = e.ShiftKey ? 1d : .25; if (IsCropRepositioning(selected)) { switch (e.Key) { case "ArrowLeft": Patch(selected with { CropXPercent = Math.Clamp(selected.CropXPercent + delta, 0, 100) }); break; case "ArrowRight": Patch(selected with { CropXPercent = Math.Clamp(selected.CropXPercent - delta, 0, 100) }); break; case "ArrowUp": Patch(selected with { CropYPercent = Math.Clamp(selected.CropYPercent + delta, 0, 100) }); break; case "ArrowDown": Patch(selected with { CropYPercent = Math.Clamp(selected.CropYPercent - delta, 0, 100) }); break; } return; } switch (e.Key) { case "ArrowLeft": PatchBounds(selected, x: selected.Bounds.XPercent - delta); break; case "ArrowRight": PatchBounds(selected, x: selected.Bounds.XPercent + delta); break; case "ArrowUp": PatchBounds(selected, y: selected.Bounds.YPercent - delta); break; case "ArrowDown": PatchBounds(selected, y: selected.Bounds.YPercent + delta); break; } }
+    private void HandleKeyDown(KeyboardEventArgs e) { if (InteractionLocked || Selected is not { Locked: false } selected || LayerLocked(selected.LayerId)) return; var delta = e.ShiftKey ? 1d : .25; if (IsCropRepositioning(selected)) { switch (e.Key) { case "ArrowLeft": Patch(selected with { CropXPercent = Math.Clamp(selected.CropXPercent + delta, 0, 100) }); break; case "ArrowRight": Patch(selected with { CropXPercent = Math.Clamp(selected.CropXPercent - delta, 0, 100) }); break; case "ArrowUp": Patch(selected with { CropYPercent = Math.Clamp(selected.CropYPercent + delta, 0, 100) }); break; case "ArrowDown": Patch(selected with { CropYPercent = Math.Clamp(selected.CropYPercent - delta, 0, 100) }); break; } return; } switch (e.Key) { case "ArrowLeft": PatchBounds(selected, x: selected.Bounds.XPercent - delta); break; case "ArrowRight": PatchBounds(selected, x: selected.Bounds.XPercent + delta); break; case "ArrowUp": PatchBounds(selected, y: selected.Bounds.YPercent - delta); break; case "ArrowDown": PatchBounds(selected, y: selected.Bounds.YPercent + delta); break; } }
     private string StageStyle() => $"--cover-ratio:{_scene!.Surface.WidthPoints / _scene.Surface.HeightPoints:R};--cover-zoom:{_zoom:R};--cover-bg:{_background}";
     private string FrontStyle => RegionStyle(_cover!.Template.BleedInches + _cover.Template.TrimWidthInches + _cover.Template.SpineWidthInches, _cover.Template.BleedInches, _cover.Template.TrimWidthInches, _cover.Template.TrimHeightInches);
     private string BackStyle => RegionStyle(_cover!.Template.BleedInches, _cover.Template.BleedInches, _cover.Template.TrimWidthInches, _cover.Template.TrimHeightInches);

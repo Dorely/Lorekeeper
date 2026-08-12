@@ -517,7 +517,10 @@ compact secondary construction menu; custom guides and SVG/path tooling are not
   explicit Save or Back action, and saves are serialized per mounted workspace. Each save uses
 an immutable scene/semantic snapshot, adopts the returned revisions before the
 next queued save, and clears the dirty state only when no newer local mutation
-occurred while persistence was in flight.
+occurred while persistence was in flight. Selecting or creating another
+page/spread geometry persists that exact variant as the active authoring layout;
+parent workspaces retain its ID and revision across assistant refreshes instead
+of resolving back to another saved geometry.
 Crop repositioning is an explicit selected-image mode shared by Pages and Cover:
 dragging and arrow keys adjust only the image position inside its fixed frame,
 resize/rotate handles are unavailable, and the mode remains active until the
@@ -931,9 +934,15 @@ canvas as the active user focus without reconstructing it from chat history.
 Publish receives the same shared image-generation, book-design, typography, and
 page-composition judgment used by Editor, plus cover/publication-specific
 guidance. The two-column
-Publish workspace flushes pending manual autosaves before each turn and refreshes
-its selected Core/release target and artifact state from structured mutation notices. Manual
-publishing mutations are locked for the duration of a Publish turn, render state
+Publish workspace flushes pending form, prose, cover, and Designed Page
+autosaves before each turn and refuses to start when the visible draft cannot be
+persisted. The flush returns the newly persisted section/composition/variant
+context directly to the turn starter rather than waiting for a UI rerender. It
+refreshes its selected Core/release target and artifact state from
+structured mutation notices. Manual publishing mutations are locked for the
+duration of a Publish turn while the canvas remains fully visible and receives
+exact-variant updates; Editor uses the same control-only lock without dimming
+authored content. Render state
 is re-read after autosave, and assistant preparation changes reconnect polling
 and current artifact downloads.
 `PublishAssistantTools` exposes compact Core/release reads and revision-safe

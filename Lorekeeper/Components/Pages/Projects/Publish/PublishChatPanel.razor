@@ -62,7 +62,7 @@
     [Parameter] public Guid? SelectedEditionId { get; set; }
     [Parameter] public PublishAssistantWorkspaceContext? WorkspaceContext { get; set; }
     [Parameter] public bool WorkspaceRefreshing { get; set; }
-    [Parameter] public EventCallback OnBeforeSend { get; set; }
+    [Parameter] public Func<Task<PublishAssistantWorkspaceContext?>>? PrepareTurnAsync { get; set; }
     [Parameter] public EventCallback<PublishWorkspaceMutated> OnWorkspaceMutated { get; set; }
     [Parameter] public EventCallback<bool> OnRunningChanged { get; set; }
 
@@ -182,9 +182,11 @@
             return;
         }
 
+        var turnWorkspaceContext = WorkspaceContext;
         try
         {
-            await OnBeforeSend.InvokeAsync();
+            if (PrepareTurnAsync is not null)
+                turnWorkspaceContext = await PrepareTurnAsync();
         }
         catch (Exception exception)
         {
@@ -209,7 +211,7 @@
         RequestScroll(force: true);
         StateHasChanged();
 
-        if (!ChatTurns.TryStart(ProjectId, SelectedEditionId, WorkspaceContext, text, submission.Images))
+        if (!ChatTurns.TryStart(ProjectId, SelectedEditionId, turnWorkspaceContext, text, submission.Images))
         {
             _error = "Publish Assistant already has a running turn.";
             if (ChatTurns.GetActiveTurn(ProjectId) is { } existingTurn)

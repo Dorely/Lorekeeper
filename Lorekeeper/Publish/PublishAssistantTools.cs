@@ -1458,6 +1458,16 @@ public sealed class PublishAssistantTools(
         try
         {
             var releaseId = context.SelectedEditionId;
+            var visibleVariantId = context.WorkspaceContext is
+                {
+                    SectionId: var visibleSectionId,
+                    CompositionId: var visibleCompositionId,
+                    VariantId: Guid openVariantId,
+                }
+                && visibleSectionId == sectionId
+                && visibleCompositionId == compositionId
+                    ? openVariantId
+                    : (Guid?)null;
             var target = new PublicationSectionTarget(context.ProjectId, releaseId);
             var section = await publicationSections.GetAsync(target, sectionId, context.TurnCancellationToken);
             var effectiveCompositionId = compositionId;
@@ -1497,7 +1507,21 @@ public sealed class PublishAssistantTools(
                 ?? throw new KeyNotFoundException("Publication-section page composition was not found.");
             if (composition.PublicationSectionId != section.Id || composition.EditionId != releaseId)
                 throw new InvalidOperationException("The page composition does not belong to the active Publish target.");
-            var variant = releaseId is Guid editionId
+            PageCompositionVariant? variant = null;
+            if (visibleVariantId is Guid requestedVariantId)
+            {
+                var requested = await service.ReadVariantAsync(context.ProjectId, requestedVariantId, context.TurnCancellationToken);
+                if (requested.CompositionId == composition.Id)
+                {
+                    variant = requested;
+                }
+                else if (customized && requested.CompositionId == compositionId)
+                {
+                    variant = (await service.ListVariantsAsync(context.ProjectId, composition.Id, context.TurnCancellationToken))
+                        .FirstOrDefault(candidate => string.Equals(candidate.GeometryKey, requested.GeometryKey, StringComparison.Ordinal));
+                }
+            }
+            variant ??= releaseId is Guid editionId
                 ? await service.GetOrCreateVariantAsync(context.ProjectId, composition.Id, editionId, context.TurnCancellationToken)
                 : await service.GetOrCreateAuthoringVariantAsync(context.ProjectId, composition.Id, context.TurnCancellationToken);
             composition = await service.GetAsync(context.ProjectId, composition.Id, context.TurnCancellationToken)

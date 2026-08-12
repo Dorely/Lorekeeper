@@ -298,10 +298,6 @@
     overflow: hidden;
 }
 
-.chapter-editor--locked {
-    opacity: 0.6;
-}
-
 .chapter-review-surface {
     position: relative;
     height: 100%;

@@ -222,15 +222,17 @@ public sealed class PublishChatService(
             if (composition is not null)
             {
                 details.Add($"Composition revision: {composition.Revision}.");
-                var visibleVariant = selectedEditionId is Guid editionId && composition.EditionId == editionId
-                    ? (await compositions!.ListVariantsAsync(projectId, compositionId, editionId, cancellationToken)).FirstOrDefault()
-                    : composition.ActiveAuthoringVariantId is Guid activeId
-                        ? composition.Variants.FirstOrDefault(item => item.Id == activeId)
-                        : composition.Variants.OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
+                var visibleVariant = workspaceContext.VariantId is Guid visibleVariantId
+                    ? composition.Variants.FirstOrDefault(item => item.Id == visibleVariantId)
+                    : selectedEditionId is Guid editionId && composition.EditionId == editionId
+                        ? (await compositions!.ListVariantsAsync(projectId, compositionId, editionId, cancellationToken)).FirstOrDefault()
+                        : composition.ActiveAuthoringVariantId is Guid activeId
+                            ? composition.Variants.FirstOrDefault(item => item.Id == activeId)
+                            : composition.Variants.OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
                 if (visibleVariant is not null)
                 {
                     details.Add($"Visible geometry variant ID: {visibleVariant.Id:D}.");
-                    details.Add($"Variant revision: {visibleVariant.Revision}; geometry key: {visibleVariant.GeometryKey}.");
+                    details.Add($"Variant revision: {workspaceContext.VariantRevision ?? visibleVariant.Revision}; geometry key: {visibleVariant.GeometryKey}.");
                 }
             }
         }
@@ -683,7 +685,11 @@ public sealed class PublishChatService(
                 PublishWorkspaceMutationKind.Edition,
                 ReadGuid(resultJson, "selectId") ?? ReadGuid(argumentsJson, "targetId"),
                 ReadGuid(resultJson, "sectionId"),
-                ReadGuid(resultJson, "compositionId") ?? ReadGuid(argumentsJson, "compositionId"));
+                ReadGuid(resultJson, "compositionId") ?? ReadGuid(argumentsJson, "compositionId"),
+                ReadGuid(resultJson, "variantId")
+                    ?? (toolName == "get_or_create_publication_section_page_variant"
+                        ? ReadGuid(resultJson, "targetId")
+                        : ReadGuid(argumentsJson, "variantId")));
         }
         if (toolName is "patch_publication_book" or "patch_publication_book_page_setup"
             or "upsert_publication_book_text_style" or "delete_publication_book_text_style"

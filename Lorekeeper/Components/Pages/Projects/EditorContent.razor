@@ -273,6 +273,7 @@ else
                                                    CompositionId="selectedCompositionId"
                                                    RefreshSignal="_pageWorkspaceRefreshSignal"
                                                    RequestedSelectionId="_pageWorkspaceSelectionId"
+                                                   InteractionLocked="_chapterLocked"
                                                    CompositionForked="HandleCompositionForkedAsync" />
                         }
                     </div>
@@ -1683,15 +1684,7 @@ else
         $"panel panel-editor panel-editor--{_mode.ToString().ToLowerInvariant()}";
 
     private string ChapterEditorClass()
-    {
-        var classes = $"chapter-editor chapter-editor--{_mode.ToString().ToLowerInvariant()}";
-        if (_chapterLocked)
-        {
-            classes += " chapter-editor--locked";
-        }
-
-        return classes;
-    }
+        => $"chapter-editor chapter-editor--{_mode.ToString().ToLowerInvariant()}";
 
     private EditorDocumentKey EditorKey(EditorDocumentState document) =>
         new(document.ChapterId, _contentTarget.StorageKey, document.RenderVersion, _styleCatalogVersion);

@@ -262,7 +262,13 @@ public sealed class CompositionService(
         if (current.EditionId is not null)
             throw new InvalidOperationException("Edition-owned Designed Pages require the selected release geometry.");
         var targetSetup = await ResolveCompositionSetupAsync(current, cancellationToken);
-        if (current.ActiveAuthoringVariantId is Guid currentActiveId)
+        var latestVariantId = await db.PageCompositionVariants.AsNoTracking()
+            .Where(item => item.CompositionId == compositionId)
+            .OrderByDescending(item => item.UpdatedAt)
+            .Select(item => (Guid?)item.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (current.ActiveAuthoringVariantId is Guid currentActiveId
+            && latestVariantId == currentActiveId)
         {
             var active = await ReadVariantAsync(projectId, currentActiveId, cancellationToken);
             if (targetSetup is not null)
@@ -284,8 +290,11 @@ public sealed class CompositionService(
             throw new InvalidOperationException("Edition-owned Designed Pages cannot select a Core authoring variant.");
         var setupUnderLease = await ResolveCompositionSetupAsync(composition, cancellationToken)
             ?? await RequirePageSetupUnderLeaseAsync(projectId, cancellationToken);
-        var existing = composition.Variants.SingleOrDefault(item => item.Id == composition.ActiveAuthoringVariantId)
-            ?? composition.Variants.OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
+        // Before active-layout persistence was enforced, changing surface geometry could
+        // save a newer variant without updating ActiveAuthoringVariantId. Treat the most
+        // recently edited variant as the user's selected authoring layout and repair the
+        // active pointer while normalizing it.
+        var existing = composition.Variants.OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
         if (existing is not null)
             return await NormalizeAuthoringVariantAsync(composition, existing, setupUnderLease, cancellationToken);
 
@@ -532,6 +541,7 @@ public sealed class CompositionService(
             ?? throw new KeyNotFoundException("Composition variant was not found in this project.");
         if (!VariantMatchesEdition(variant, edition))
             throw new InvalidDataException("The selected variant is incompatible with this edition.");
+        variant.Composition.ActiveAuthoringVariantId = variant.Id;
         variant.UpdatedAt = DateTime.UtcNow;
         await TouchProjectAsync(projectId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
@@ -653,6 +663,7 @@ public sealed class CompositionService(
             variant.Revision = checked(variant.Revision + 1);
             variant.UpdatedAt = DateTime.UtcNow;
         }
+        variant.Composition.ActiveAuthoringVariantId = variant.Id;
         await TouchProjectAsync(projectId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return variant;
@@ -932,6 +943,7 @@ public sealed class CompositionService(
             variant.Revision = checked(variant.Revision + 1);
             variant.UpdatedAt = DateTime.UtcNow;
         }
+        composition.ActiveAuthoringVariantId = variant.Id;
         await TouchProjectAsync(projectId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -1041,6 +1053,7 @@ public sealed class CompositionService(
             variant.Revision = checked(variant.Revision + 1);
             variant.UpdatedAt = DateTime.UtcNow;
         }
+        variant.Composition.ActiveAuthoringVariantId = variant.Id;
         var chapterId = variant.Composition.ChapterId;
         db.CompositionMutationStages.Remove(stage);
         await TouchProjectAsync(projectId, cancellationToken);
@@ -1302,6 +1315,7 @@ public sealed class CompositionService(
             variant.Revision = checked(variant.Revision + 1);
             variant.UpdatedAt = DateTime.UtcNow;
         }
+        variant.Composition.ActiveAuthoringVariantId = variant.Id;
         db.CompositionMutationStages.Remove(stage);
         await TouchProjectAsync(projectId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
