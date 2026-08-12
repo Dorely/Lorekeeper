@@ -8,6 +8,7 @@ public interface IPublishChatTurnRunner
     bool TryStart(
         Guid projectId,
         Guid? selectedEditionId,
+        PublishAssistantWorkspaceContext? workspaceContext,
         string userText,
         IReadOnlyList<ChatTurnImageAttachment> images);
     ChatTurnSnapshot? GetActiveTurn(Guid projectId);
@@ -24,6 +25,7 @@ public sealed class PublishChatTurnRunner(
     public bool TryStart(
         Guid projectId,
         Guid? selectedEditionId,
+        PublishAssistantWorkspaceContext? workspaceContext,
         string userText,
         IReadOnlyList<ChatTurnImageAttachment> images) =>
         runtime.TryStart(
@@ -32,6 +34,7 @@ public sealed class PublishChatTurnRunner(
             cancellationToken => RunAsync(
                 projectId,
                 selectedEditionId,
+                workspaceContext,
                 userText,
                 images.Select(image => image.ImageId).ToList(),
                 cancellationToken),
@@ -46,6 +49,7 @@ public sealed class PublishChatTurnRunner(
     private async IAsyncEnumerable<PublishTurnUpdate> RunAsync(
         Guid projectId,
         Guid? selectedEditionId,
+        PublishAssistantWorkspaceContext? workspaceContext,
         string userText,
         IReadOnlyList<Guid> imageIds,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -55,6 +59,7 @@ public sealed class PublishChatTurnRunner(
         await foreach (var update in chat.SendAsync(
             projectId,
             selectedEditionId,
+            workspaceContext,
             userText,
             imageIds,
             cancellationToken))

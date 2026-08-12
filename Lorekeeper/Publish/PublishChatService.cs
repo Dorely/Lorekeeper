@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Lorekeeper.ChatTurns;
+using Lorekeeper.Composition;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
@@ -16,10 +17,11 @@ public interface IPublishChatService
 {
     Task<PublishConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PublishMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
-    Task<string> GetSystemPromptAsync(Guid projectId, Guid? selectedEditionId, CancellationToken cancellationToken = default);
+    Task<string> GetSystemPromptAsync(Guid projectId, Guid? selectedEditionId, PublishAssistantWorkspaceContext? workspaceContext = null, CancellationToken cancellationToken = default);
     IAsyncEnumerable<PublishTurnUpdate> SendAsync(
         Guid projectId,
         Guid? selectedEditionId,
+        PublishAssistantWorkspaceContext? workspaceContext,
         string userText,
         IReadOnlyList<Guid> imageIds,
         CancellationToken cancellationToken = default);
@@ -39,7 +41,8 @@ public sealed class PublishChatService(
     ChatTurnEngine turnEngine,
     IOptions<AgentOptions> options,
     ILogger<PublishChatService> logger,
-    IEntityVisualContextService? entityVisualContext = null) : IPublishChatService
+    IEntityVisualContextService? entityVisualContext = null,
+    ICompositionService? compositions = null) : IPublishChatService
 {
     internal const string WorkflowInstructions = """
         You are Lorekeeper's conversational Publish assistant. You maintain Core Book and prepare optional publication releases through the supplied tools.
@@ -62,9 +65,10 @@ public sealed class PublishChatService(
         - Preserve unrelated values. Customize a release only where it differs; use ResetFields to restore live Core inheritance.
         - Create no release or ISBN unless requested. Never invent an ISBN.
         - Title and copyright are system Designed Pages: their linked copy resolves live from Core or effective release metadata while their placement and typography are edited on the page canvas. Contents is generated automatically from the effective book structure. Each other publication section has one content mode: either prose with optional flowing Figures, or Designed Page canvases. Use separate sections when both forms are needed. Sections may be placed at the front, back, or immediately before or after an act or chapter.
-        - To edit a title, copyright, or other designed publication section: list sections in the active target, read the section, take pageCompositionId from its Designed Page block, read and preview that composition, mutate it with the focused page tools, then preview again. An omitted section remains editable; do not change its inclusion merely to design it. For an inherited release section, materialize the release customization with upsert_publication_section while preserving every current field, then reread the returned section and composition IDs before page mutation.
+        - To edit a title, copyright, or other designed publication section: start from the protected visible-workspace context when that page is already open; otherwise list and read sections in the active target. The section read returns pageCanvases with exact composition and active-variant revisions. Call get_or_create_publication_section_page_variant before editing; it safely materializes and remaps an inherited release section when required. Then read and preview the returned variant, mutate it with focused page tools, and preview again. An omitted section remains editable; do not change its inclusion merely to design it. Never upsert unchanged section metadata merely to find or unlock its canvas.
         - Create user-authored material such as Dedication, Epigraph, Acknowledgments, About the Author, Also By, References, image pages, or arbitrary production pages with publication-section tools. Release sections inherit Core live until customized; do not create duplicate release content when inheritance is sufficient.
-        - While designing a publication-section page, read its selected variant, preview it in annotated mode, make focused changes or stage one large semantic-and-scene update, preview the result again, and finish with a clean preview. Customize an inherited release section before changing its page.
+        - While designing a publication-section page, resolve and read its selected variant, preview it in annotated mode, make focused changes or stage one large semantic-and-scene update, preview the result again, validate the active Core/release target, and finish with a clean preview. Use fill_publication_section_page_image_canvas for full-page art and place_project_image_in_publication_section_page_frame to replace an existing frame without reconstructing the scene.
+        - Read list_publication_book_fonts before choosing a font-family key for a section page, cover, or Book Text Style. Use only returned family keys and available face weights/styles; never invent a font name from appearance alone.
 
         Tool and state integrity:
         - Use tools for every publication read or mutation and honor Core or release revisions.
@@ -108,6 +112,11 @@ public sealed class PublishChatService(
         "remove_publication_section",
         "patch_publication_section_page_element",
         "add_project_image_to_publication_section_page",
+        "get_or_create_publication_section_page_variant",
+        "fill_publication_section_page_image_canvas",
+        "place_project_image_in_publication_section_page_frame",
+        "apply_publication_section_page_composition_stage",
+        "apply_publication_section_page_semantic_stage",
         "apply_publication_section_page_workspace_stage",
         "create_publication_release",
         "patch_publication_release_overrides",
@@ -161,6 +170,7 @@ public sealed class PublishChatService(
     public async Task<string> GetSystemPromptAsync(
         Guid projectId,
         Guid? selectedEditionId,
+        PublishAssistantWorkspaceContext? workspaceContext = null,
         CancellationToken cancellationToken = default)
     {
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
@@ -168,17 +178,69 @@ public sealed class PublishChatService(
         var selection = selectedEditionId is { } editionId
             ? $"The Publish workspace currently has publication release {editionId:D} selected. Treat that release as the active target: pass this release ID to Core/release tools and preserve inherited values. Do not switch to Core or pass a null release ID unless the user explicitly asks for a shared Core change. Read the selected release before acting."
             : "The Publish workspace currently targets Core Book. Read Core Book before acting; do not assume a publication release is required.";
+        var visibleWorkspace = await DescribeVisibleWorkspaceAsync(projectId, selectedEditionId, workspaceContext, cancellationToken);
         var assembly = await contextBuilder.BuildAsync(
             new ContextBuildRequest(
                 project,
                 Purpose: ContextBuildPurpose.Publish,
                 OperatingRules: WorkflowInstructions
                     + "\n\n" + selection
+                    + "\n\n" + visibleWorkspace
                     + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
+                    + "\n\n" + AssistantWorkflowInstructions.ImageGeneration
                     + "\n\n" + AssistantWorkflowInstructions.BookDesignCraft
+                    + "\n\n" + AssistantWorkflowInstructions.CompositionDesign
                     + "\n\n" + AssistantWorkflowInstructions.PublicationDesign),
             cancellationToken);
         return assembly.Assemble();
+    }
+
+    private async Task<string> DescribeVisibleWorkspaceAsync(
+        Guid projectId,
+        Guid? selectedEditionId,
+        PublishAssistantWorkspaceContext? workspaceContext,
+        CancellationToken cancellationToken)
+    {
+        if (workspaceContext is null)
+            return "Visible Publish workspace: no more specific design surface is open. Work against the selected Core Book or release overview.";
+
+        var details = new List<string>
+        {
+            $"Visible Publish workspace: {workspaceContext.TargetLabel}.",
+            $"Surface: {workspaceContext.Surface}.",
+        };
+        if (workspaceContext.SectionId is Guid sectionId)
+            details.Add($"Publication section ID: {sectionId:D}.");
+        if (!string.IsNullOrWhiteSpace(workspaceContext.SectionTitle))
+            details.Add($"Publication section title: {workspaceContext.SectionTitle}.");
+        if (workspaceContext.CompositionId is Guid compositionId)
+        {
+            details.Add($"Visible page composition ID: {compositionId:D}.");
+            var composition = compositions is null
+                ? null
+                : await compositions.GetAsync(projectId, compositionId, cancellationToken);
+            if (composition is not null)
+            {
+                details.Add($"Composition revision: {composition.Revision}.");
+                var visibleVariant = selectedEditionId is Guid editionId && composition.EditionId == editionId
+                    ? (await compositions!.ListVariantsAsync(projectId, compositionId, editionId, cancellationToken)).FirstOrDefault()
+                    : composition.ActiveAuthoringVariantId is Guid activeId
+                        ? composition.Variants.FirstOrDefault(item => item.Id == activeId)
+                        : composition.Variants.OrderByDescending(item => item.UpdatedAt).FirstOrDefault();
+                if (visibleVariant is not null)
+                {
+                    details.Add($"Visible geometry variant ID: {visibleVariant.Id:D}.");
+                    details.Add($"Variant revision: {visibleVariant.Revision}; geometry key: {visibleVariant.GeometryKey}.");
+                }
+            }
+        }
+        if (workspaceContext.SelectedObjectId is Guid objectId)
+            details.Add($"Selected canvas object ID: {objectId:D}.");
+        details.Add(selectedEditionId is null
+            ? "This visible surface belongs to Core Book."
+            : $"This visible surface belongs to selected release {selectedEditionId:D}.");
+        details.Add("Treat this protected UI context as the user's current focus. Do not make them identify the open section, canvas, or target again. Reread mutable state before changing it.");
+        return string.Join(' ', details);
     }
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
@@ -198,6 +260,7 @@ public sealed class PublishChatService(
     public async IAsyncEnumerable<PublishTurnUpdate> SendAsync(
         Guid projectId,
         Guid? selectedEditionId,
+        PublishAssistantWorkspaceContext? workspaceContext,
         string userText,
         IReadOnlyList<Guid> imageIds,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -249,9 +312,9 @@ public sealed class PublishChatService(
         try
         {
             chat = await clients.CreateChatClientAsync(availability.Provider.Id, cancellationToken);
-            assistantContext = new PublishAssistantContext(projectId, conversation.Id, cancellationToken);
+            assistantContext = new PublishAssistantContext(projectId, conversation.Id, selectedEditionId, workspaceContext, cancellationToken);
             aiTools = await tools.BuildAsync(assistantContext, cancellationToken);
-            systemPrompt = await GetSystemPromptAsync(projectId, selectedEditionId, cancellationToken);
+            systemPrompt = await GetSystemPromptAsync(projectId, selectedEditionId, workspaceContext, cancellationToken);
         }
         catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested)
         {
@@ -454,7 +517,7 @@ public sealed class PublishChatService(
                     {
                         var contents = new List<AIContent>
                         {
-                            new TextContent("Direct cover-canvas previews from the preceding tool. Inspect the complete surface before choosing further cover mutations."),
+                            new TextContent("Direct Publish canvas previews from the preceding tool. Inspect the complete cover or publication-section surface before choosing further design mutations."),
                         };
                         foreach (var visual in transientVisuals)
                         {
@@ -554,7 +617,12 @@ public sealed class PublishChatService(
                     : null);
         }
         if (toolName is "patch_publication_section_page_element"
+            or "get_or_create_publication_section_page_variant"
+            or "fill_publication_section_page_image_canvas"
+            or "place_project_image_in_publication_section_page_frame"
             or "add_project_image_to_publication_section_page"
+            or "apply_publication_section_page_composition_stage"
+            or "apply_publication_section_page_semantic_stage"
             or "apply_publication_section_page_workspace_stage")
         {
             var pageReleaseId = ReadGuid(resultJson, "releaseId") ?? ReadGuid(argumentsJson, "releaseId");

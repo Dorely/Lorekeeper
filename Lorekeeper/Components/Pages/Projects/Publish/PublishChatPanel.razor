@@ -49,14 +49,7 @@
             </div>
         }
         <div class="publish-chat-context">
-            @if (SelectedEditionId is { } editionId)
-            {
-                <span>Selected release</span><code>@editionId.ToString("N")[..8]</code>
-            }
-            else
-            {
-                <span>Core Book selected</span>
-            }
+            <span>@(WorkspaceContext?.TargetLabel ?? (SelectedEditionId is null ? "Core Book" : "Selected release"))</span>
         </div>
     </ExtraControls>
 </ChatSurface>
@@ -67,6 +60,7 @@
 
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public Guid? SelectedEditionId { get; set; }
+    [Parameter] public PublishAssistantWorkspaceContext? WorkspaceContext { get; set; }
     [Parameter] public bool WorkspaceRefreshing { get; set; }
     [Parameter] public EventCallback OnBeforeSend { get; set; }
     [Parameter] public EventCallback<PublishWorkspaceMutated> OnWorkspaceMutated { get; set; }
@@ -84,6 +78,7 @@
     private Guid? _listeningTurnId;
     private Guid? _loadedProjectId;
     private Guid? _promptEditionId;
+    private PublishAssistantWorkspaceContext? _promptWorkspaceContext;
     private string _systemPrompt = string.Empty;
     private string _input = string.Empty;
     private string? _pendingUserText;
@@ -112,10 +107,11 @@
             await LoadAsync();
             return;
         }
-        if (_promptEditionId != SelectedEditionId)
+        if (_promptEditionId != SelectedEditionId || _promptWorkspaceContext != WorkspaceContext)
         {
             _promptEditionId = SelectedEditionId;
-            _systemPrompt = await Chat.GetSystemPromptAsync(ProjectId, SelectedEditionId);
+            _promptWorkspaceContext = WorkspaceContext;
+            _systemPrompt = await Chat.GetSystemPromptAsync(ProjectId, SelectedEditionId, WorkspaceContext);
             UpdateConversationTokenCount();
         }
     }
@@ -132,7 +128,8 @@
             _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Publish);
             _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
             _promptEditionId = SelectedEditionId;
-            _systemPrompt = await Chat.GetSystemPromptAsync(ProjectId, SelectedEditionId);
+            _promptWorkspaceContext = WorkspaceContext;
+            _systemPrompt = await Chat.GetSystemPromptAsync(ProjectId, SelectedEditionId, WorkspaceContext);
             var activeTurn = ChatTurns.GetActiveTurn(ProjectId);
             RebuildRenderable(activeTurn?.StartedAtUtc);
             if (activeTurn is not null)
@@ -212,7 +209,7 @@
         RequestScroll(force: true);
         StateHasChanged();
 
-        if (!ChatTurns.TryStart(ProjectId, SelectedEditionId, text, submission.Images))
+        if (!ChatTurns.TryStart(ProjectId, SelectedEditionId, WorkspaceContext, text, submission.Images))
         {
             _error = "Publish Assistant already has a running turn.";
             if (ChatTurns.GetActiveTurn(ProjectId) is { } existingTurn)
@@ -355,7 +352,8 @@
             return;
         _messages = (await Chat.LoadMessagesAsync(_conversation.Id)).ToList();
         _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Publish);
-        _systemPrompt = await Chat.GetSystemPromptAsync(ProjectId, SelectedEditionId);
+        _promptWorkspaceContext = WorkspaceContext;
+        _systemPrompt = await Chat.GetSystemPromptAsync(ProjectId, SelectedEditionId, WorkspaceContext);
         RebuildRenderable();
         _pendingUserText = null;
         _live = null;

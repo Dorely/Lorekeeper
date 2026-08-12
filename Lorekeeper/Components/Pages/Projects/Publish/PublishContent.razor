@@ -31,6 +31,7 @@ else
                 {
                     <PublishChatPanel ProjectId="Project.Id"
                                       SelectedEditionId="_assistantSelectedReleaseId"
+                                      WorkspaceContext="@AssistantWorkspaceContext()"
                                       WorkspaceRefreshing="_targetLoading"
                                       OnBeforeSend="SavePendingAsync"
                                       OnWorkspaceMutated="HandleAssistantMutationAsync" />
@@ -841,6 +842,7 @@ else
         _sectionTargetId = item.TargetId;
         _sectionInclusion = item.InclusionMode;
         _selectedSectionCompositionId = item.Manuscript.Content.FirstOrDefault(block => block.PageCompositionId.HasValue)?.PageCompositionId;
+        _sectionPageSelectionId = null;
         _sectionSettingsOpen = false;
     }
 
@@ -851,6 +853,7 @@ else
         _editingSection = null;
         _publicationSectionEditor = null;
         _selectedSectionCompositionId = null;
+        _sectionPageSelectionId = null;
         _sectionSettingsOpen = false;
         _publicationSectionImageModalOpen = false;
         await RefreshPublicationSectionsAsync();
@@ -878,7 +881,10 @@ else
     {
         if (Guid.TryParse(args.Value?.ToString(), out var compositionId)
             && SectionCompositionIds().Contains(compositionId))
+        {
             _selectedSectionCompositionId = compositionId;
+            _sectionPageSelectionId = null;
+        }
         return Task.CompletedTask;
     }
 
@@ -1584,6 +1590,7 @@ else
         if (_coreDirty || _coreOutlineDirty || _pageSetupDirty)
             return;
         _selectedReleaseId = null;
+        _coverSelectionId = null;
         _coverEditorOpen = true;
     }
 
@@ -1595,6 +1602,7 @@ else
         {
             await Covers.CustomizeFromCoreAsync(Project.Id, _workspace.Edition.Id, _workspace.Edition.Revision);
             await SelectReleaseAsync(_workspace.Edition.Id);
+            _coverSelectionId = null;
             _coverEditorOpen = true;
         }
         catch (Exception exception) { _error = exception.Message; }
@@ -1605,7 +1613,10 @@ else
     {
         await SavePendingAsync();
         if (_selectedReleaseId is not null)
+        {
+            _coverSelectionId = null;
             _coverEditorOpen = true;
+        }
     }
 
     private async Task UseCoreCoverAsync()
@@ -1642,6 +1653,7 @@ else
     {
         var releaseId = _selectedReleaseId;
         _coverEditorOpen = false;
+        _coverSelectionId = null;
         if (releaseId is Guid id)
             await SelectReleaseAsync(id);
         else
@@ -1729,6 +1741,29 @@ else
         _targetLoadGeneration++;
         _error = null;
         StateHasChanged();
+    }
+
+    private PublishAssistantWorkspaceContext AssistantWorkspaceContext()
+    {
+        var target = _selectedReleaseId is null
+            ? "Core Book"
+            : _workspace?.Edition.Name ?? _releases.FirstOrDefault(item => item.Id == _selectedReleaseId)?.Name ?? "Selected release";
+        if (_editingSection is not null)
+        {
+            var surface = IsDesignedPublicationSection(_editingSection)
+                ? "publication-section-canvas"
+                : "publication-section-prose";
+            return new(
+                surface,
+                $"{target} · {_editingSection.Title}",
+                _editingSection.Id,
+                _editingSection.Title,
+                _selectedSectionCompositionId,
+                _sectionPageSelectionId);
+        }
+        if (_coverEditorOpen)
+            return new("cover-canvas", $"{target} · Cover", SelectedObjectId: _coverSelectionId);
+        return new("publish-overview", target);
     }
 
     private void CoreChanged(string field, string? value) { typeof(CoreDraft).GetProperty(field)!.SetValue(_coreDraft, value ?? string.Empty); _coreDirty = true; QueueFormAutosave(); }

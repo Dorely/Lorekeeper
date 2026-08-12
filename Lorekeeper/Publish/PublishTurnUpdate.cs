@@ -31,6 +31,14 @@ public sealed record PublishToolCallCompleted(
     string? Error,
     double DurationMs) : PublishTurnUpdate;
 
+public sealed record PublishAssistantWorkspaceContext(
+    string Surface,
+    string TargetLabel,
+    Guid? SectionId = null,
+    string? SectionTitle = null,
+    Guid? CompositionId = null,
+    Guid? SelectedObjectId = null);
+
 public enum PublishWorkspaceMutationKind
 {
     Edition,

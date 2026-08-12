@@ -475,8 +475,9 @@ rotation, opacity, shapes, grouping, clipping, and page bounds. Annotated mode
 adds safe/trim/gutter/object identifiers plus overflow and clipping indicators;
 clean mode returns only the composed artwork. Cache keys include scene and
 semantic revisions plus referenced image and font bytes. Editor's
-`preview_page_canvas` and Publish's `preview_publication_cover_canvas` deliver
-temporary vision context and never create project images. Assistants use
+`preview_page_canvas` and Publish's `preview_publication_section_page_canvas`
+and `preview_publication_cover_canvas` deliver temporary vision context and
+never create project images. Assistants use
 annotated previews during mutation and clean previews for final verification;
 `preview_chapter_page` remains the Press pagination/typesetting inspection tool
 for flowing manuscript output.
@@ -885,10 +886,16 @@ outside the current runtime. Vendor upload and physical review are external user
 activities and never alter the renderer's scoped structural result.
 
 Publish assistant section tools expose bounded reads, focused prose-section
-manuscript patches, designed-section page operations, live-inheritance customization/reset,
-and order changes only among sections sharing one fixed outline anchor. Large
-page changes use persisted non-replayable staging. The assistant cannot reorder
-chapters or mutate chapter manuscript content from Publish.
+manuscript patches, and Editor-parity designed-section page operations. Section
+reads return exact active composition/variant revisions; a target-aware resolver
+materializes an inherited release section and maps its cloned composition before
+any edit. Focused tools fill a canvas, replace an existing image frame, patch a
+single object, stage scene-only or semantic-only changes, stage coupled
+semantic/layout changes, preview the whole canvas, and validate either Core or
+release geometry. Live inheritance customization/reset and order changes remain
+limited to sections sharing one fixed outline anchor. Large page changes use
+persisted non-replayable staging. The assistant cannot reorder chapters or
+mutate chapter manuscript content from Publish.
 
 ISBN values are strict, checksum-validated, and stored in canonical ISBN-13
 form. The same ISBN may be shared only by same-format vendor editions whose
@@ -912,7 +919,14 @@ reconnection, image attachments, and text-only cross-turn replay. Every turn
 includes the complete ordered act/chapter outline, stable IDs, synopses, beats,
 Book Brief, Project Guidance, and project facts. Bounded project search and
 source/image reads provide chapter bodies, research, ingest sources, entities,
-facts, and reusable artwork on demand. The two-column
+facts, and reusable artwork on demand. Each turn also snapshots the protected
+visible Publish surface—Core/release overview, cover, prose section, or designed
+section—with its section/composition/variant revisions and any reported object
+selection. The assistant therefore treats a visible `Core Book · Title page`
+canvas as the active user focus without reconstructing it from chat history.
+Publish receives the same shared image-generation, book-design, typography, and
+page-composition judgment used by Editor, plus cover/publication-specific
+guidance. The two-column
 Publish workspace flushes pending manual autosaves before each turn and refreshes
 its selected Core/release target and artifact state from structured mutation notices. Manual
 publishing mutations are locked for the duration of a Publish turn, render state
