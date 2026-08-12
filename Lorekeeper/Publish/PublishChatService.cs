@@ -84,7 +84,7 @@ public sealed class PublishChatService(
         - Cover artwork always remains beneath canonical title, subtitle, author, spine, and back-cover copy. Adjust the artwork crop, opacity, and framing instead of trying to raise it above cover text.
         - For existing cover design work, call preview_publication_cover_canvas in annotated mode before mutating. After placing or arranging artwork, inspect another annotated whole-cover preview and correct clipping, hierarchy, protected regions, copy legibility, and collisions. Call the clean mode before reporting completion. You may skip only the initial preview for a genuinely empty cover.
         - Cover generation targets provide an exact moderate-resolution requested raster matching the selected cover surface or frame. If the provider returns different dimensions, the project image remains usable but geometryMatched is false and the mismatch is a warning. Inspect it and deliberately regenerate or fit it; never report it as exact-geometry output.
-        - A cover-canvas preview is transient visual context, not an image-library asset. If visual delivery is unavailable, report that you could not visually verify the cover instead of inferring appearance from scene JSON.
+        - A cover-canvas preview is a visible chat attachment and model visual context when vision is available; it is not an image-library asset. If model visual delivery is unavailable, leave the preview visible for the user and report that you could not visually verify the cover instead of inferring appearance from scene JSON.
         - Require alt text or an explicit decorative decision for publication releases and preserve logical reading order. A Core reading PDF may complete with unresolved image accessibility decisions as explicit warnings; report those warnings and do not describe the copy as publication-ready.
         - Submit large cover or publication-section page payloads once to staging, then apply only the stage ID and expected revision.
         - Release format is fixed. Create another release for another product type.
@@ -312,7 +312,7 @@ public sealed class PublishChatService(
         try
         {
             chat = await clients.CreateChatClientAsync(availability.Provider.Id, cancellationToken);
-            assistantContext = new PublishAssistantContext(projectId, conversation.Id, selectedEditionId, workspaceContext, cancellationToken);
+            assistantContext = new PublishAssistantContext(projectId, conversation.Id, selectedEditionId, workspaceContext, visionReady, cancellationToken);
             aiTools = await tools.BuildAsync(assistantContext, cancellationToken);
             systemPrompt = await GetSystemPromptAsync(projectId, selectedEditionId, workspaceContext, cancellationToken);
         }
@@ -448,6 +448,7 @@ public sealed class PublishChatService(
                     ChatTurnEngine.BuildAssistantContents(completedRound.Text, completedRound.ToolCalls)));
 
                 var resultContents = new List<AIContent>();
+                var roundTransientVisuals = new List<PublishAssistantTransientVisual>();
                 foreach (var pendingCall in completedRound.ToolCalls)
                 {
                     if (cancellationToken.IsCancellationRequested)
@@ -483,13 +484,41 @@ public sealed class PublishChatService(
                         ErrorMessage = outcome.Error,
                     };
                     await turnEngine.AddMessageAsync(conversations, toolMessage, CancellationToken.None);
+                    var transientVisuals = assistantContext?.DrainTransientVisuals() ?? [];
+                    roundTransientVisuals.AddRange(transientVisuals);
+                    var visualAttachments = transientVisuals
+                        .Select(visual => ToVisualAttachment(projectId, pendingCall.CallId, visual))
+                        .ToList();
+                    if (visualAttachments.Count > 0)
+                    {
+                        await conversations.AddMessageVisualsAsync(
+                            visualAttachments.Select((visual, index) => new PublishMessageVisual
+                            {
+                                Id = visual.Id,
+                                MessageId = toolMessage.Id,
+                                SortOrder = index,
+                                ToolCallId = visual.ToolCallId,
+                                Title = visual.Title,
+                                Caption = visual.Caption,
+                                SourceKind = visual.SourceKind,
+                                SourceRefId = visual.SourceRefId,
+                                ContentType = visual.ContentType,
+                                FileName = visual.FileName,
+                                Width = visual.Width,
+                                Height = visual.Height,
+                                Data = visual.Data ?? [],
+                            }),
+                            CancellationToken.None);
+                        await conversations.SaveChangesAsync(CancellationToken.None);
+                    }
                     resultContents.Add(new FunctionResultContent(pendingCall.CallId, outcome.Result));
                     yield return new PublishToolCallCompleted(
                         pendingCall.CallId,
                         pendingCall.Name,
                         outcome.Error is null ? outcome.Result : null,
                         outcome.Error,
-                        stopwatch.Elapsed.TotalMilliseconds);
+                        stopwatch.Elapsed.TotalMilliseconds,
+                        visualAttachments);
 
                     if (outcome.Error is null
                         && TryMutationNotice(pendingCall.Name, pendingCall.ArgumentsJson, outcome.Result) is { } mutation)
@@ -512,14 +541,13 @@ public sealed class PublishChatService(
                         if (visualMessage is not null)
                             messages.Add(ChatTurnEngine.MarkToolContextMessage(visualMessage));
                     }
-                    var transientVisuals = assistantContext.DrainTransientVisuals();
-                    if (visionReady && transientVisuals.Count > 0)
+                    if (visionReady && roundTransientVisuals.Count > 0)
                     {
                         var contents = new List<AIContent>
                         {
                             new TextContent("Direct Publish canvas previews from the preceding tool. Inspect the complete cover or publication-section surface before choosing further design mutations."),
                         };
-                        foreach (var visual in transientVisuals)
+                        foreach (var visual in roundTransientVisuals)
                         {
                             contents.Add(new TextContent($"\n{visual.Caption}; visualId={visual.Id:N}; file={visual.FileName}"));
                             contents.Add(new DataContent(visual.Data, visual.ContentType) { Name = visual.FileName });
@@ -557,7 +585,8 @@ public sealed class PublishChatService(
                         ChatTurnEngine.CompactionToolName,
                         ChatTurnEngine.CompactionNotice,
                         Error: null,
-                        DurationMs: 0);
+                        DurationMs: 0,
+                        Visuals: []);
                 }
 
                 if (iteration == maxIterations - 1)
@@ -576,6 +605,28 @@ public sealed class PublishChatService(
         {
             actorContext.Actor = priorActor;
         }
+    }
+
+    private static PublishChatVisualAttachment ToVisualAttachment(
+        Guid projectId,
+        string toolCallId,
+        PublishAssistantTransientVisual visual)
+    {
+        var contentUrl = $"/projects/{projectId:N}/publish-chat-visuals/{visual.Id:N}/content";
+        return new PublishChatVisualAttachment(
+            visual.Id,
+            visual.Title,
+            visual.Caption,
+            $"{contentUrl}?maxEdge=640",
+            contentUrl,
+            visual.Width,
+            visual.Height,
+            toolCallId,
+            visual.SourceKind,
+            visual.SourceRefId,
+            visual.ContentType,
+            visual.FileName,
+            visual.Data);
     }
 
     internal static PublishWorkspaceMutated? TryMutationNotice(

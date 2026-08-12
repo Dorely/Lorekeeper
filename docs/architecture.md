@@ -476,9 +476,13 @@ adds safe/trim/gutter/object identifiers plus overflow and clipping indicators;
 clean mode returns only the composed artwork. Cache keys include scene and
 semantic revisions plus referenced image and font bytes. Editor's
 `preview_page_canvas` and Publish's `preview_publication_section_page_canvas`
-and `preview_publication_cover_canvas` deliver temporary vision context and
-never create project images. Assistants use
-annotated previews during mutation and clean previews for final verification;
+and `preview_publication_cover_canvas` deliver vision context and never create
+project images. Editor stores these previews in `EditorMessageVisual`; Publish
+stores them in `PublishMessageVisual`, so the exact image inspected by the model
+is also visible on its tool chip and survives transcript reload. Assistants treat
+each visual mutation as a preview gate: inspect an annotated image of the same
+current revision before another visual mutation, then validate and inspect a
+clean preview for final verification;
 `preview_chapter_page` remains the Press pagination/typesetting inspection tool
 for flowing manuscript output.
 

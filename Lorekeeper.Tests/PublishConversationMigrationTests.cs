@@ -121,12 +121,42 @@ public sealed class PublishConversationMigrationTests
                 db.PublishConversations.Add(conversation);
                 await db.SaveChangesAsync();
 
+                var toolMessage = new PublishMessage
+                {
+                    ConversationId = conversation.Id,
+                    Order = 1,
+                    Role = PublishMessageRole.Tool,
+                    Content = "{\"ok\":true}",
+                    ToolCallId = "preview-call",
+                    ToolName = "preview_publication_cover_canvas",
+                };
+                toolMessage.Visuals.Add(new PublishMessageVisual
+                {
+                    SortOrder = 0,
+                    ToolCallId = toolMessage.ToolCallId,
+                    Title = "Cover preview",
+                    Caption = "Migration-safe preview",
+                    SourceKind = "publicationCoverCanvasPreview",
+                    SourceRefId = projectId,
+                    ContentType = "image/png",
+                    FileName = "cover-preview.png",
+                    Width = 12,
+                    Height = 18,
+                    Data = "preview-bytes"u8.ToArray(),
+                });
+                db.PublishMessages.Add(toolMessage);
+                await db.SaveChangesAsync();
+
                 var messages = await db.PublishMessages.AsNoTracking()
                     .Where(message => message.ConversationId == conversation.Id)
                     .OrderBy(message => message.Order)
                     .ToListAsync();
-                Assert.Single(messages);
+                Assert.Equal(2, messages.Count);
                 Assert.Equal("Ready to publish.", messages[0].Content);
+                var visual = await db.PublishMessageVisuals.AsNoTracking().SingleAsync();
+                Assert.Equal(toolMessage.Id, visual.MessageId);
+                Assert.Equal("preview-call", visual.ToolCallId);
+                Assert.Equal("preview-bytes"u8.ToArray(), visual.Data);
             }
         }
         finally

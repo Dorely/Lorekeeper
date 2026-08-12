@@ -29,7 +29,23 @@ public sealed record PublishToolCallCompleted(
     string ToolName,
     string? Result,
     string? Error,
-    double DurationMs) : PublishTurnUpdate;
+    double DurationMs,
+    IReadOnlyList<PublishChatVisualAttachment> Visuals) : PublishTurnUpdate;
+
+public sealed record PublishChatVisualAttachment(
+    Guid Id,
+    string Title,
+    string Caption,
+    string PreviewImageUrl,
+    string FullImageUrl,
+    int? Width,
+    int? Height,
+    string? ToolCallId,
+    string SourceKind,
+    Guid? SourceRefId,
+    string ContentType,
+    string FileName,
+    byte[]? Data = null);
 
 public sealed record PublishAssistantWorkspaceContext(
     string Surface,

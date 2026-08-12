@@ -311,7 +311,12 @@
                 StateHasChanged();
                 break;
             case PublishToolCallCompleted completed:
-                _live!.CompleteToolCall(completed.CallId, completed.Result, completed.Error, completed.DurationMs);
+                _live!.CompleteToolCall(
+                    completed.CallId,
+                    completed.Result,
+                    completed.Error,
+                    completed.DurationMs,
+                    completed.Visuals.Select(ToChatImageVisual).ToList());
                 UpdateConversationTokenCount();
                 RequestScroll();
                 StateHasChanged();
@@ -387,7 +392,7 @@
         }
     }
 
-    private static List<ChatMessagePart> BuildMessageParts(
+    private List<ChatMessagePart> BuildMessageParts(
         PublishMessage message,
         IReadOnlyDictionary<string, PublishMessage> byCallId)
     {
@@ -425,17 +430,42 @@
         return parts;
     }
 
-    private static ChatToolChip BuildToolChip(
+    private ChatToolChip BuildToolChip(
         ChatPersistedToolCall call,
         IReadOnlyDictionary<string, PublishMessage> byCallId)
     {
         byCallId.TryGetValue(call.CallId, out var result);
-        return new ChatToolChip(call.CallId, call.Name, call.ArgumentsJson)
+        var chip = new ChatToolChip(call.CallId, call.Name, call.ArgumentsJson)
         {
             Result = result?.Status == PublishMessageStatus.Completed ? result.Content : null,
             Error = result?.Status == PublishMessageStatus.Failed ? result.ErrorMessage ?? result.Content : null,
             Completed = result is not null,
         };
+        if (result is not null)
+            chip.Visuals.AddRange(result.Visuals.OrderBy(visual => visual.SortOrder).Select(ToChatImageVisual));
+        return chip;
+    }
+
+    private static ChatImageVisual ToChatImageVisual(PublishChatVisualAttachment visual) => new(
+        visual.Id,
+        visual.Title,
+        visual.Caption,
+        visual.PreviewImageUrl,
+        visual.FullImageUrl,
+        visual.Width,
+        visual.Height);
+
+    private ChatImageVisual ToChatImageVisual(PublishMessageVisual visual)
+    {
+        var contentUrl = $"/projects/{ProjectId:N}/publish-chat-visuals/{visual.Id:N}/content";
+        return new ChatImageVisual(
+            visual.Id,
+            visual.Title,
+            visual.Caption,
+            $"{contentUrl}?maxEdge=640",
+            contentUrl,
+            visual.Width,
+            visual.Height);
     }
 
     private static ChatMessageStatus ToChatStatus(PublishMessageStatus status) => status switch

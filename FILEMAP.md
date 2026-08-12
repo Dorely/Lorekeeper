@@ -289,6 +289,7 @@
 | `ResearchConversation.cs` | EF entity — one persistent project research chat per `Project` (unique on `ProjectId`). Owns ordered `ResearchMessage`s; cascade-deleted with the project. |
 | `ResearchMessage.cs` | EF entity for a single Research chat row with monotonic `Order`, role (`System`/`User`/`Assistant`/`Tool`), text content, assistant tool-call JSON, tool result metadata, status, optional error, and creation timestamp. |
 | `PublishConversation.cs` / `PublishMessage.cs` | One project-scoped persistent Publish conversation and ordered role/status/content/tool/error transcript rows, cascade-owned by the project. |
+| `PublishMessageVisual.cs` | Tool-associated Publish canvas-preview attachment with stored PNG bytes, bounded display metadata, and cascade ownership by its transcript row. |
 | `AiChangeBatch.cs` | EF entity grouping AI-proposed tool mutations from one assistant turn while they await approval/resolution, including the protected Core/release Editor target. |
 | `AiChange.cs` | EF entity for one queued AI tool mutation: tool metadata, before/after/result JSON, dependency metadata, status, rejection/error notes, timestamps. |
 | `ContestBatch.cs` | EF entity for one Editor Contest Mode run: captured Core/release target and chapter/body snapshot, operation metadata, status, and model candidates. |
@@ -560,7 +561,7 @@
 | `DataUrl.cs` | Shared data URL parse/format helper for mask and provider payloads. |
 | `ProjectImageBinary.cs` | Validates PNG/JPEG/WebP raster input and normalizes WebP library output. |
 | `ProjectImageResize.cs` | Shared bounded-edge image resize helper for model and preview delivery. |
-| `ProjectImageEndpoints.cs` | Minimal API endpoints for scoped project image bytes, masks, Images Chat visuals, and Editor Chat visual content, with optional image max-edge thumbnails. |
+| `ProjectImageEndpoints.cs` | Minimal API endpoints for scoped project image bytes, masks, and Images, Editor, and Publish chat visual content, with optional image max-edge thumbnails. |
 
 ### ImagesChat/
 
@@ -614,7 +615,7 @@
 | `PublicationPressMigrationService.cs` | Guarded v15 Press cutover/reconciliation owner with protected backup, atomic marker, integrity and byte/hash invariants, journal evidence, and recovery-shell fallback. |
 | `PublicationActorContext.cs` | Scoped UI/assistant actor attribution carried into immutable publication-edition audit entries. |
 | `PublishAssistantTools.cs` | Compact Core/release read/patch, bounded project search/image/font inspection, target-aware publication-section variant resolution plus focused/staged page operations, edition difference links, cover operations, terminal unattached image generation, direct canvas previews, Core/release validation, readiness, preparation/cancellation, and artifacts; chapter-manuscript mutations and raw profiles are absent. |
-| `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration with full outline and protected visible-workspace context, narrated durable work history, shared Editor page/typography/image-design guidance, publication/cover guidance, temporary generated-image and direct canvas vision, active-turn streaming/reconnection, and Core/release-targeted mutation notices. |
+| `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration with full outline and protected visible-workspace context, narrated durable work history, shared Editor page/typography/image-design guidance, persisted user-visible and model-visible direct canvas previews, active-turn streaming/reconnection, and Core/release-targeted mutation notices. |
 | `PublicationPressRuntime.cs` | Fail-closed exact-manifest resolver for the packaged native renderer, dynamic capabilities, integrity evidence, and empty controlled child environment with no machine-tool fallback. |
 | `PublicationRenderService.cs` | Persisted/recoverable queue, metadata-only artifact listings, purpose-bound protocol-v6 declared image/font staging from effective manuscript/publication-section/page/cover scenes, display-ready title handoff, native lifecycle, hash-verified paperback/Book PDF artifacts, semantic page maps, renderer-version staleness, and comparison. |
 | `PublicationCoverService.cs` | Revisioned format-aware structured cover aggregate with copy-safe artwork stacking, canonical bindings, draft-tolerant structural persistence, save-time print-wrap/digital-front geometry reflow, publication-readiness diagnostics, and acknowledgement invalidation. |

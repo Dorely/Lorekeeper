@@ -17,6 +17,7 @@ public sealed class PublishAssistantContext(
     Guid conversationId = default,
     Guid? selectedEditionId = null,
     PublishAssistantWorkspaceContext? workspaceContext = null,
+    bool visionReady = false,
     CancellationToken turnCancellationToken = default)
 {
     private readonly List<EntityVisualContextReference> _visuals = [];
@@ -27,6 +28,7 @@ public sealed class PublishAssistantContext(
     public Guid ConversationId { get; } = conversationId;
     public Guid? SelectedEditionId { get; } = selectedEditionId;
     public PublishAssistantWorkspaceContext? WorkspaceContext { get; } = workspaceContext;
+    public bool VisionReady { get; } = visionReady;
     public CancellationToken TurnCancellationToken { get; } = turnCancellationToken;
     public IReadOnlyList<Guid> ImageJobIds => _imageJobIds.ToList();
     public void TrackImageJob(Guid jobId) => _imageJobIds.Add(jobId);
@@ -48,10 +50,15 @@ public sealed class PublishAssistantContext(
 
 public sealed record PublishAssistantTransientVisual(
     Guid Id,
+    string Title,
     string FileName,
     string ContentType,
     byte[] Data,
-    string Caption);
+    string Caption,
+    int? Width,
+    int? Height,
+    string SourceKind,
+    Guid? SourceRefId);
 
 public sealed record PublicationSectionToolInput(
     Guid? SectionId,
@@ -267,7 +274,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid compositionId, Guid variantId, string mode = "annotated") => PreviewPublicationSectionPageAsync(context, context.SelectedEditionId, compositionId, variantId, mode),
                 name: "preview_publication_section_page_canvas",
-                description: "Render one complete publication-section Designed Page as a transient model-visible canvas. Use annotated while designing and clean before completion. The preview creates no project image."),
+                description: "Render one complete publication-section Designed Page as a visible chat image and model-visible canvas when vision is available. Use annotated immediately after every scene mutation and clean after final validation. The preview creates no project image."),
             AIFunctionFactory.Create(
                 method: (Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchPublicationSectionPageElementAsync(context, context.SelectedEditionId, variantId, expectedRevision, targetKind, targetId, patch),
                 name: "patch_publication_section_page_element",
@@ -350,7 +357,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid? releaseId = null, string mode = "annotated") => PreviewCoverCanvasAsync(context, releaseId, mode),
                 name: "preview_publication_cover_canvas",
-                description: "Render the complete Core or release cover authoring canvas directly as a transient image. Omit releaseId for Core. Use annotated while designing and clean for final visual verification. The preview is model-visible when vision is available and never creates a project-image asset."),
+                description: "Render the complete Core or release cover authoring canvas as a visible chat image and model-visible canvas when vision is available. Omit releaseId for Core. Use annotated immediately after every cover mutation and clean after final validation. The preview never creates a project-image asset."),
             AIFunctionFactory.Create(
                 method: (Guid? releaseId = null) => ValidateCoverAsync(context, releaseId),
                 name: "validate_publication_cover_composition",
@@ -1553,10 +1560,17 @@ public sealed class PublishAssistantTools(
             var visualId = Guid.NewGuid();
             context.AddTransientVisual(new(
                 visualId,
+                previewMode == CompositionCanvasPreviewMode.Annotated
+                    ? "Publication page — annotated canvas"
+                    : "Publication page — clean canvas",
                 $"publication-section-page-{compositionId:N}-{previewMode.ToString().ToLowerInvariant()}.png",
                 "image/png",
                 preview.Data,
-                $"{previewMode} publication-section page preview at composition revision {preview.CompositionRevision}, variant revision {preview.VariantRevision}"));
+                $"{previewMode} publication-section page preview at composition revision {preview.CompositionRevision}, variant revision {preview.VariantRevision}",
+                preview.PixelWidth,
+                preview.PixelHeight,
+                "publicationSectionCanvasPreview",
+                compositionId));
             return Serialize(new
             {
                 ok = true,
@@ -1570,6 +1584,9 @@ public sealed class PublishAssistantTools(
                 objectCounts = new { visible = preview.VisibleObjectCount, hidden = preview.HiddenObjectCount },
                 diagnosticCounts = new { total = preview.Diagnostics.Count },
                 diagnostics = preview.Diagnostics.Take(8),
+                delivery = context.VisionReady
+                    ? "The complete canvas image is visible in chat and attached as model visual context for the next reasoning iteration."
+                    : "The complete canvas image is visible in chat, but the active provider is not vision-ready; do not claim visual verification.",
                 summary = $"Rendered the complete {previewMode.ToString().ToLowerInvariant()} publication-section page canvas.",
             });
         }
@@ -2154,12 +2171,19 @@ public sealed class PublishAssistantTools(
             var fileName = $"cover-{targetId:N}-{previewMode.Value.ToString().ToLowerInvariant()}.png";
             context.AddTransientVisual(new(
                 visualId,
+                previewMode == CompositionCanvasPreviewMode.Annotated
+                    ? "Publication cover — annotated canvas"
+                    : "Publication cover — clean canvas",
                 fileName,
                 "image/png",
                 preview.Data,
                 previewMode == CompositionCanvasPreviewMode.Annotated
                     ? "Annotated direct cover-canvas preview."
-                    : "Clean direct cover-canvas preview."));
+                    : "Clean direct cover-canvas preview.",
+                preview.PixelWidth,
+                preview.PixelHeight,
+                "publicationCoverCanvasPreview",
+                targetId));
             var diagnostics = preview.Diagnostics.Take(10).ToList();
             return Serialize(new
             {
@@ -2187,7 +2211,9 @@ public sealed class PublishAssistantTools(
                 },
                 diagnostics,
                 hasMoreDiagnostics = preview.Diagnostics.Count > diagnostics.Count,
-                delivery = "The complete cover canvas is attached as transient visual context when the active provider supports vision.",
+                delivery = context.VisionReady
+                    ? "The complete cover image is visible in chat and attached as model visual context for the next reasoning iteration."
+                    : "The complete cover image is visible in chat, but the active provider is not vision-ready; do not claim visual verification.",
             });
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

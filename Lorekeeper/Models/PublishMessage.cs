@@ -16,6 +16,7 @@ public class PublishMessage
     public PublishMessageStatus Status { get; set; } = PublishMessageStatus.Completed;
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public ICollection<PublishMessageVisual> Visuals { get; set; } = [];
 }
 
 public enum PublishMessageRole

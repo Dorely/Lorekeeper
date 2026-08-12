@@ -163,6 +163,34 @@ public static class ProjectImageEndpoints
                     enableRangeProcessing: true);
             });
 
+        endpoints.MapGet(
+            "/projects/{projectId:guid}/publish-chat-visuals/{visualId:guid}/content",
+            async (
+                Guid projectId,
+                Guid visualId,
+                [FromQuery] int? maxEdge,
+                AppDbContext db,
+                CancellationToken cancellationToken) =>
+            {
+                var visual = await db.PublishMessageVisuals
+                    .AsNoTracking()
+                    .Include(item => item.Message)
+                    .ThenInclude(message => message.Conversation)
+                    .FirstOrDefaultAsync(item => item.Id == visualId && item.Message.Conversation.ProjectId == projectId, cancellationToken);
+                if (visual is null || visual.Data.Length == 0)
+                    return Results.NotFound();
+
+                var visualData = maxEdge is int edge && edge > 0
+                    ? ProjectImageResize.Resize(visual.Data, visual.ContentType, edge)
+                    : visual.Data;
+                return Results.File(
+                    visualData,
+                    visual.ContentType,
+                    fileDownloadName: null,
+                    lastModified: visual.CreatedAt,
+                    enableRangeProcessing: true);
+            });
+
         return endpoints;
     }
 }

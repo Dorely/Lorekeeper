@@ -35,6 +35,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<ResearchMessage> ResearchMessages => Set<ResearchMessage>();
     public DbSet<PublishConversation> PublishConversations => Set<PublishConversation>();
     public DbSet<PublishMessage> PublishMessages => Set<PublishMessage>();
+    public DbSet<PublishMessageVisual> PublishMessageVisuals => Set<PublishMessageVisual>();
     public DbSet<ProjectImageConversation> ProjectImageConversations => Set<ProjectImageConversation>();
     public DbSet<ProjectImageMessage> ProjectImageMessages => Set<ProjectImageMessage>();
     public DbSet<ProjectImageMessageVisual> ProjectImageMessageVisuals => Set<ProjectImageMessageVisual>();
@@ -380,6 +381,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.HasOne(e => e.Conversation)
                 .WithMany(c => c.Messages)
                 .HasForeignKey(e => e.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublishMessageVisual>(entity =>
+        {
+            entity.HasIndex(e => new { e.MessageId, e.SortOrder });
+            entity.HasIndex(e => new { e.ToolCallId, e.CreatedAt });
+
+            entity.HasOne(e => e.Message)
+                .WithMany(m => m.Visuals)
+                .HasForeignKey(e => e.MessageId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
