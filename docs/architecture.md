@@ -585,16 +585,17 @@ release and can produce only a private `ReadingPdf`, never a publication package
 or ISBN claim. Chapter rows are the selectable publication content. Acts remain
 structural groups: the act-heading and act-summary settings alone determine
 whether their divider presentation is emitted.
-For left-to-right print, system front matter has semantic rather than merely
-numeric ordering: title precedes copyright, a single-leaf title begins on a
-right/recto leaf, and copyright follows on its left/verso leaf. Contents and
-dedications begin recto. A two-leaf Designed Page spread begins verso so its
-leaves form one physical opening; a two-leaf title spread therefore occupies a
-left/right opening and copyright follows on the next verso. The section service
-normalizes already-saved inverted title/copyright order and prevents new
-reorders from separating them. Press independently enforces the order and leaf
-parity so a malformed staged request cannot produce a semantically reversed
-book.
+Publication-section inclusion, order, and single-page starting side are authored
+settings rather than vendor policy. Every Core or release section may be
+included or omitted, reordered within its anchor, and set to the next available,
+right/recto, or left/verso page. KDP explicitly makes the copyright page optional;
+its title-before-copyright and page-side descriptions are design guidance, not
+upload requirements. Ingram's current file guide specifies production geometry
+and PDF structure but no title/copyright presence or order. Press therefore
+preserves authored front matter and emits linked, non-blocking recommendations
+when it differs from common or KDP guidance. Only a genuine two-leaf Designed
+Page spread is forced to begin verso, because that parity is required for its two
+leaves to form one physical facing opening.
 Core Book also owns Digital PDF presentation defaults. Preserving Designed Page
 sizes keeps a facing composition as one wide PDF page and retains intentional
 independent page geometry; otherwise facing compositions are emitted as two
@@ -686,7 +687,7 @@ version changes.
 Archived releases are immutable at every owning mutation boundary; their
 existing artifacts remain readable and exportable, and cloning creates the
 editable continuation.
-Project export v20 writes manuscript-v4 documents, project page setup, page
+Project export v21 writes manuscript-v4 documents, project page setup, page
 compositions and exact geometry variants with active authoring variants, Core
 Book, sparse release overlays and cover scenes, Book Text Styles,
 edition chapter snapshots, publication sections and their compositions, visual references,
@@ -738,7 +739,7 @@ bleed, and captions, structured Designed Pages and cover scenes, reusable
 styles, proportional or explicitly stretched raster frames, page-clipped
 out-of-surface artwork, vector shapes, logical reading order, page-size overrides for eligible
 Digital PDFs, full-wrap cover geometry, EAN-13 bars, and PDF serialization.
-Recto chapter starts apply to flowing-content chapters. A two-leaf print
+Configured section-side starts and recto chapter starts apply to flowing content. A two-leaf print
 Designed Page always begins on a verso leaf; single-leaf Designed Page-only
 chapters otherwise remain a continuous leaf sequence, so picture-book
 authoring containers do not introduce blank pages between designs. Export
@@ -1234,7 +1235,7 @@ validates metadata/content projections, row counts, scene objects, packages,
 artifact bytes/hashes, and foreign keys before the cleanup migration removes
 runtime paper/binding/ink columns and the universal spine-caliper path.
 
-Project export v20 contains only the current v4/page-setup/composition model,
+Project export v21 contains only the current v4/page-setup/composition model,
 Core Book, sparse release overlays, edition chapter snapshots, edition-owned
 compositions, publication sections, target-aware publication records, resolved
 print-product selections, Generic printer templates, and independent cover

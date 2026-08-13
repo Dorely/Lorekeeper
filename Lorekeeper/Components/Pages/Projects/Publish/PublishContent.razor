@@ -224,6 +224,7 @@ else
     private PublishOutlineTargetKind? _sectionTargetKind;
     private Guid? _sectionTargetId;
     private PublicationSectionInclusionMode _sectionInclusion = PublicationSectionInclusionMode.Automatic;
+    private PublicationSectionStartSide _sectionStartSide = PublicationSectionStartSide.Next;
     private Dictionary<(PublishOutlineTargetKind Kind, Guid Id), bool> _coreSelections = [];
     private CoreDraft _coreDraft = new();
     private ReleaseDraft _releaseDraft = new();
@@ -694,10 +695,11 @@ else
                             @foreach (var item in group)
                             {
                                 <div class="publication-section-row @(!item.IsIncluded ? "omitted" : null)">
-                                    <div><strong>@item.Title</strong><span>@SectionTypeLabel(item) · @(item.IsInherited ? "From Core Book" : item.IsIncluded ? "Included" : "Omitted")</span></div>
+                                    <div><strong>@item.Title</strong><span>@SectionTypeLabel(item) · @(item.IsInherited ? "From Core Book" : item.IsIncluded ? "Included" : "Omitted") · @SectionStartSideSummary(item.StartSide)</span></div>
                                     <div class="button-row">
                                         <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section earlier" aria-label="Move @item.Title earlier" disabled="@(!CanMovePublicationSection(item, -1))" @onclick="() => MovePublicationSectionAsync(item, -1)">↑</button>
                                         <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section later" aria-label="Move @item.Title later" disabled="@(!CanMovePublicationSection(item, 1))" @onclick="() => MovePublicationSectionAsync(item, 1)">↓</button>
+                                        <button class="btn btn-sm @(item.IsIncluded ? "btn-outline-secondary" : "btn-outline-primary")" disabled="@_assistantRunning" @onclick="() => SetPublicationSectionIncludedAsync(item, !item.IsIncluded)">@(item.IsIncluded ? "Omit" : "Include")</button>
                                         @if (item.SystemRole == PublicationSectionSystemRole.Contents)
                                         {
                                             <span class="status-pill">Generated automatically</span>
@@ -747,6 +749,7 @@ else
                     <label class="field"><span>Place near</span><select class="form-select" disabled="@_assistantRunning" value="@SectionTargetValue()" @onchange="SectionTargetChangedAsync">@foreach (var item in SectionAnchorTargets()){<option value="@($"{item.TargetKind}|{item.TargetId}")">@item.Title</option>}</select></label>
                 }
                 <label class="field"><span>Include</span><select class="form-select" disabled="@_assistantRunning" value="@_sectionInclusion" @onchange="SectionInclusionChangedAsync"><option value="@PublicationSectionInclusionMode.Automatic">Automatic</option><option value="@PublicationSectionInclusionMode.Included">Included</option><option value="@PublicationSectionInclusionMode.Omitted">Omitted</option></select></label>
+                <label class="field"><span>Start on</span><select class="form-select" disabled="@_assistantRunning" value="@_sectionStartSide" @onchange="SectionStartSideChangedAsync"><option value="@PublicationSectionStartSide.Next">Next available page</option><option value="@PublicationSectionStartSide.Recto">Right-hand page (recto)</option><option value="@PublicationSectionStartSide.Verso">Left-hand page (verso)</option></select><small>A two-page facing spread always begins on a left page so both leaves face each other.</small></label>
             </div>
         }
         <div class="publication-section-editor-body">
@@ -891,6 +894,7 @@ else
             var saved = await PublicationSections.UpsertAsync(CurrentPublicationSectionTarget(), new(
                 null, designedPage ? "Designed page" : "New section", PublicationSectionKind.Custom,
                 PublicationSectionAnchor.Back, null, null, PublicationSectionInclusionMode.Included,
+                PublicationSectionStartSide.Next,
                 ManuscriptCodec.Serialize(document)));
             if (designedPage)
             {
@@ -936,6 +940,7 @@ else
         _sectionTargetKind = item.TargetKind;
         _sectionTargetId = item.TargetId;
         _sectionInclusion = item.InclusionMode;
+        _sectionStartSide = item.StartSide;
         var compositionIds = item.Manuscript.Content
             .Where(block => block.PageCompositionId.HasValue)
             .Select(block => block.PageCompositionId!.Value)
@@ -1034,7 +1039,7 @@ else
         {
             var saved = await PublicationSections.UpsertAsync(CurrentPublicationSectionTarget(), new(
                 sectionId, _sectionTitle, _sectionKind, _sectionAnchor, _sectionTargetKind, _sectionTargetId,
-                _sectionInclusion, manuscriptJson, expectedRevision));
+                _sectionInclusion, _sectionStartSide, manuscriptJson, expectedRevision));
             _editingSection = saved;
             await RefreshPublicationSectionsAsync(updateEditing: false);
             return new(true, saved.Revision);
@@ -1061,7 +1066,7 @@ else
         {
             var saved = await PublicationSections.UpsertAsync(CurrentPublicationSectionTarget(), new(
                 _editingSection.Id, _sectionTitle, _sectionKind, _sectionAnchor, _sectionTargetKind, _sectionTargetId,
-                _sectionInclusion, ManuscriptCodec.Serialize(_editingSection.Manuscript), _editingSection.Revision));
+                _sectionInclusion, _sectionStartSide, ManuscriptCodec.Serialize(_editingSection.Manuscript), _editingSection.Revision));
             BeginPublicationSectionEdit(saved);
             await RefreshPublicationSectionsAsync(updateEditing: false);
         }
@@ -1071,6 +1076,7 @@ else
     private async Task SectionTitleChangedAsync(ChangeEventArgs args) { _sectionTitle = args.Value?.ToString() ?? string.Empty; await SavePublicationSectionMetadataAsync(); }
     private async Task SectionKindChangedAsync(ChangeEventArgs args) { if (Enum.TryParse<PublicationSectionKind>(args.Value?.ToString(), out var value)) _sectionKind = value; await SavePublicationSectionMetadataAsync(); }
     private async Task SectionInclusionChangedAsync(ChangeEventArgs args) { if (Enum.TryParse<PublicationSectionInclusionMode>(args.Value?.ToString(), out var value)) _sectionInclusion = value; await SavePublicationSectionMetadataAsync(); }
+    private async Task SectionStartSideChangedAsync(ChangeEventArgs args) { if (Enum.TryParse<PublicationSectionStartSide>(args.Value?.ToString(), out var value)) _sectionStartSide = value; await SavePublicationSectionMetadataAsync(); }
     private async Task SectionAnchorChangedAsync(ChangeEventArgs args)
     {
         if (Enum.TryParse<PublicationSectionAnchor>(args.Value?.ToString(), out var value))
@@ -1147,12 +1153,22 @@ else
         var destination = index + delta;
         if (index < 0 || destination < 0 || destination >= ordered.Count)
             return false;
-        (ordered[index], ordered[destination]) = (ordered[destination], ordered[index]);
-        if (item.Anchor != PublicationSectionAnchor.Front)
-            return true;
-        var titleIndex = ordered.FindIndex(candidate => candidate.SystemRole == PublicationSectionSystemRole.Title);
-        var copyrightIndex = ordered.FindIndex(candidate => candidate.SystemRole == PublicationSectionSystemRole.Copyright);
-        return titleIndex < 0 || copyrightIndex == titleIndex + 1;
+        return true;
+    }
+
+    private async Task SetPublicationSectionIncludedAsync(PublicationSectionView item, bool included)
+    {
+        try
+        {
+            var saved = await PublicationSections.UpsertAsync(CurrentPublicationSectionTarget(), new(
+                item.Id, item.Title, item.Kind, item.Anchor, item.TargetKind, item.TargetId,
+                included ? PublicationSectionInclusionMode.Included : PublicationSectionInclusionMode.Omitted,
+                item.StartSide, ManuscriptCodec.Serialize(item.Manuscript), item.Revision));
+            if (_editingSection?.Id == item.Id)
+                BeginPublicationSectionEdit(saved);
+            await RefreshPublicationSectionsAsync(updateEditing: false);
+        }
+        catch (Exception exception) { _error = exception.Message; }
     }
 
     private Task DeletePublicationSectionAsync(PublicationSectionView item)
@@ -1242,6 +1258,12 @@ else
     private static string SectionTypeLabel(PublicationSectionView item) => item.DesignedPageCount > 0 && item.Manuscript.Content.All(block => block.Type == ManuscriptBlockType.DesignedPage)
         ? item.DesignedPageCount == 1 ? "Designed page" : $"{item.DesignedPageCount} designed pages"
         : SectionKindLabel(item.Kind);
+    private static string SectionStartSideSummary(PublicationSectionStartSide side) => side switch
+    {
+        PublicationSectionStartSide.Recto => "starts on right page",
+        PublicationSectionStartSide.Verso => "starts on left page",
+        _ => "starts on next page",
+    };
     private string PublicationSectionsStep() => _selectedReleaseId is null ? "04" : _workspace?.Edition.Format switch
     {
         PublicationEditionFormat.Epub => "05",

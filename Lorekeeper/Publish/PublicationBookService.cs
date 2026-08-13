@@ -115,7 +115,7 @@ public sealed class PublicationBookService(
             .Select(item => new
             {
                 item.Id, item.Revision, item.Title, item.Kind, item.SystemRole, item.Anchor,
-                item.TargetKind, item.TargetId, item.InclusionMode, item.LocalOrder, item.ManuscriptJson,
+                item.TargetKind, item.TargetId, item.InclusionMode, item.StartSide, item.LocalOrder, item.ManuscriptJson,
             }).ToListAsync(cancellationToken);
         var compositions = await db.PageCompositions.AsNoTracking().Where(item => item.ProjectId == projectId && item.EditionId == null)
             .OrderBy(item => item.Id).Select(item => new { item.Id, item.Revision, item.SemanticManuscriptJson, Variants = item.Variants.OrderBy(v => v.Id).Select(v => new { v.Id, v.Revision, v.GeometryKey, v.SceneJson }) }).ToListAsync(cancellationToken);

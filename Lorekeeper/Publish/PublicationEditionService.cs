@@ -512,6 +512,7 @@ public sealed class PublicationEditionService(
                 item.TargetKind,
                 item.TargetId,
                 item.InclusionMode,
+                item.StartSide,
                 item.LocalOrder,
                 item.ManuscriptJson,
                 item.Revision,
@@ -824,7 +825,7 @@ public sealed class PublicationEditionService(
             .Select(item => new
             {
                 item.CoreSectionId, item.Title, item.Kind, item.SystemRole, item.Anchor,
-                item.TargetKind, item.TargetId, item.InclusionMode, item.LocalOrder,
+                item.TargetKind, item.TargetId, item.InclusionMode, item.StartSide, item.LocalOrder,
                 Content = CanonicalManuscriptContent(ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision)),
             });
         var canonical = JsonSerializer.Serialize(
@@ -1088,6 +1089,7 @@ public sealed class PublicationEditionService(
             ActId = source.ActId,
             ChapterId = source.ChapterId,
             InclusionMode = source.InclusionMode,
+            StartSide = source.StartSide,
             LocalOrder = source.LocalOrder,
             ManuscriptJson = ManuscriptCodec.Serialize(document),
             Revision = source.Revision,

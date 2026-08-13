@@ -68,6 +68,7 @@ public sealed record PublicationSectionToolInput(
     PublishOutlineTargetKind? TargetKind,
     Guid? TargetId,
     PublicationSectionInclusionMode Inclusion,
+    PublicationSectionStartSide StartSide = PublicationSectionStartSide.Next,
     long? ExpectedRevision = null,
     string? ManuscriptJson = null);
 
@@ -191,7 +192,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid? releaseId = null, int offset = 0, int limit = 30) => ListPublicationSectionsAsync(context, releaseId, offset, limit),
                 name: "list_publication_sections",
-                description: "List a bounded page of effective Core or release publication sections with positions, inclusion/inheritance state, revisions, and compact visual counts."),
+                description: "List a bounded page of effective Core or release publication sections with authored order, next/recto/verso start side, inclusion/inheritance state, revisions, and compact visual counts."),
             AIFunctionFactory.Create(
                 method: (Guid sectionId, Guid? releaseId = null, int blockStart = 0, int blockCount = 30) => ReadPublicationSectionAsync(context, releaseId, sectionId, blockStart, blockCount),
                 name: "read_publication_section",
@@ -199,7 +200,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (PublicationSectionToolInput input, Guid? releaseId = null) => UpsertPublicationSectionAsync(context, releaseId, input),
                 name: "upsert_publication_section",
-                description: "Create or revision-check a Core/release publication section and its metadata. Supplying a selected release ID materializes an inherited section as a release customization while preserving its content. Choose one content mode per section: prose with optional Figures, or Designed Page canvases only. For existing prose, use patch_publication_section_manuscript instead of repeating the complete manuscript."),
+                description: "Create or revision-check a Core/release publication section and its metadata, including explicit inclusion and next/recto/verso start side. Supplying a selected release ID materializes an inherited section as a release customization while preserving its content. Choose one content mode per section: prose with optional Figures, or Designed Page canvases only. For existing prose, use patch_publication_section_manuscript instead of repeating the complete manuscript."),
             AIFunctionFactory.Create(
                 method: (Guid sectionId, long expectedRevision, ManuscriptOperationInput[] operations, Guid? releaseId = null) => PatchPublicationSectionManuscriptAsync(context, releaseId, sectionId, expectedRevision, operations),
                 name: "patch_publication_section_manuscript",
@@ -636,6 +637,7 @@ public sealed class PublishAssistantTools(
             anchorTargetId = item.TargetId,
             item.TargetTitle,
             item.InclusionMode,
+            item.StartSide,
             item.IsIncluded,
             item.IsInherited,
             item.LocalOrder,
@@ -705,6 +707,7 @@ public sealed class PublishAssistantTools(
             item.TargetKind,
             anchorTargetId = item.TargetId,
             item.InclusionMode,
+            item.StartSide,
             item.IsInherited,
             item.Revision,
             blocks,
@@ -733,6 +736,7 @@ public sealed class PublishAssistantTools(
             input.TargetKind,
             input.TargetId,
             input.Inclusion,
+            input.StartSide,
             ManuscriptCodec.Serialize(document),
             input.ExpectedRevision), context.TurnCancellationToken);
         return Serialize(new
@@ -741,7 +745,7 @@ public sealed class PublishAssistantTools(
             targetId = saved.Id,
             releaseId,
             revision = saved.Revision,
-            changedFields = new[] { "title", "kind", "anchor", "target", "inclusion", "manuscript" },
+            changedFields = new[] { "title", "kind", "anchor", "target", "inclusion", "startSide", "manuscript" },
             summary = $"Saved publication section '{saved.Title}'.",
             mutation = new { kind = "publication-section", releaseId, sectionId = saved.Id, refresh = new[] { "core", "release", "readiness", "artifacts" } },
         });

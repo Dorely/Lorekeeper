@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 7);
-    assert_eq!(value["rendererVersion"], "2.1.2");
+    assert_eq!(value["rendererVersion"], "2.1.3");
     assert_eq!(
         value["profiles"],
         json!([
@@ -63,7 +63,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 7);
-    assert_eq!(response["rendererVersion"], "2.1.2");
+    assert_eq!(response["rendererVersion"], "2.1.3");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -201,10 +201,10 @@ fn publication_sections_render_in_anchor_order_with_dynamic_contents() {
 }
 
 #[test]
-fn print_front_matter_places_title_on_recto_then_copyright_on_verso() {
+fn print_front_matter_preserves_configured_order_and_sides_with_advisory_warnings() {
     let mut job = PreparedJob::new("kdp-paperback-v1");
     job.request["document"]["sections"] = json!([]);
-    // A malformed saved order must not reverse the semantic title leaf.
+    // Authored front matter is not silently rewritten to match an optional convention.
     job.request["document"]["publicationSections"] = json!([
         {
             "id": "21000000-0000-0000-0000-000000000012",
@@ -213,6 +213,7 @@ fn print_front_matter_places_title_on_recto_then_copyright_on_verso() {
             "systemRole": "Copyright",
             "anchor": "Front",
             "localOrder": 0,
+            "startSide": "Recto",
             "blocks": [{
                 "id": "31000000-0000-0000-0000-000000000012",
                 "type": "Paragraph",
@@ -228,6 +229,7 @@ fn print_front_matter_places_title_on_recto_then_copyright_on_verso() {
             "systemRole": "Title",
             "anchor": "Front",
             "localOrder": 1,
+            "startSide": "Verso",
             "blocks": [{
                 "id": "31000000-0000-0000-0000-000000000011",
                 "type": "Heading",
@@ -259,11 +261,22 @@ fn print_front_matter_places_title_on_recto_then_copyright_on_verso() {
         .find(|entry| entry["blockId"] == "31000000-0000-0000-0000-000000000012")
         .and_then(|entry| entry["pageNumber"].as_u64())
         .expect("copyright page map");
-    assert_eq!(title_page, 1, "the title page must begin on a recto leaf");
     assert_eq!(
-        copyright_page, 2,
-        "copyright must follow on the title leaf's verso"
+        copyright_page, 1,
+        "configured copyright placement must be preserved"
     );
+    assert_eq!(
+        title_page, 2,
+        "configured title placement must be preserved"
+    );
+    assert!(has_diagnostic(
+        &rendered,
+        "PRESS_FRONT_MATTER_ORDER_RECOMMENDATION"
+    ));
+    assert!(has_diagnostic(
+        &rendered,
+        "PRESS_FRONT_MATTER_SIDE_RECOMMENDATION"
+    ));
 }
 
 #[test]
@@ -305,7 +318,7 @@ fn print_facing_designed_pages_begin_on_a_verso_leaf() {
 }
 
 #[test]
-fn print_title_spread_uses_facing_leaves_before_copyright_verso() {
+fn print_copyright_can_fill_recto_before_a_title_spread() {
     let mut job = PreparedJob::new("kdp-paperback-v1");
     let composition =
         job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"][0].clone();
@@ -313,12 +326,29 @@ fn print_title_spread_uses_facing_leaves_before_copyright_verso() {
     job.request["document"]["sections"] = json!([]);
     job.request["document"]["publicationSections"] = json!([
         {
+            "id": "21000000-0000-0000-0000-000000000022",
+            "title": "Copyright",
+            "kind": "Copyright",
+            "systemRole": "Copyright",
+            "anchor": "Front",
+            "localOrder": 0,
+            "startSide": "Recto",
+            "blocks": [{
+                "id": "31000000-0000-0000-0000-000000000022",
+                "type": "Paragraph",
+                "styleRole": "body",
+                "content": [{ "type": "Text", "text": "Copyright 2026 Mara Vale", "marks": [] }]
+            }],
+            "pageCompositions": []
+        },
+        {
             "id": "21000000-0000-0000-0000-000000000021",
             "title": "Title page",
             "kind": "TitlePage",
             "systemRole": "Title",
             "anchor": "Front",
-            "localOrder": 0,
+            "localOrder": 1,
+            "startSide": "Next",
             "blocks": [{
                 "id": "31000000-0000-0000-0000-000000000021",
                 "type": "DesignedPage",
@@ -327,21 +357,6 @@ fn print_title_spread_uses_facing_leaves_before_copyright_verso() {
                 "content": []
             }],
             "pageCompositions": [composition]
-        },
-        {
-            "id": "21000000-0000-0000-0000-000000000022",
-            "title": "Copyright",
-            "kind": "Copyright",
-            "systemRole": "Copyright",
-            "anchor": "Front",
-            "localOrder": 1,
-            "blocks": [{
-                "id": "31000000-0000-0000-0000-000000000022",
-                "type": "Paragraph",
-                "styleRole": "body",
-                "content": [{ "type": "Text", "text": "Copyright 2026 Mara Vale", "marks": [] }]
-            }],
-            "pageCompositions": []
         }
     ]);
     job.write_request();
@@ -365,10 +380,10 @@ fn print_title_spread_uses_facing_leaves_before_copyright_verso() {
         .find(|entry| entry["blockId"] == "31000000-0000-0000-0000-000000000022")
         .and_then(|entry| entry["pageNumber"].as_u64())
         .expect("copyright page map");
-    assert_eq!(title_spread, 2, "a title spread must begin on a verso leaf");
+    assert_eq!(copyright, 1, "copyright can occupy the opening recto leaf");
     assert_eq!(
-        copyright, 4,
-        "copyright follows the title spread on the next verso"
+        title_spread, 2,
+        "the following title spread begins on a verso leaf"
     );
 }
 

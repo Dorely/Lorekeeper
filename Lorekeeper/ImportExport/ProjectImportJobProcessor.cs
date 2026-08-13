@@ -569,6 +569,7 @@ public sealed class ProjectImportJobProcessor(
                 || !Enum.IsDefined(section.SystemRole)
                 || !Enum.IsDefined(section.Anchor)
                 || !Enum.IsDefined(section.InclusionMode)
+                || (document.FormatVersion >= 21 && !Enum.IsDefined(section.StartSide))
                 || section.LocalOrder < 0
                 || section.Revision < 0)
                 throw new InvalidOperationException($"Publication section {section.Id:N} has invalid metadata.");
@@ -1589,6 +1590,9 @@ public sealed class ProjectImportJobProcessor(
                 ActId = imported.TargetKind == PublishOutlineTargetKind.Act ? targetId : null,
                 ChapterId = imported.TargetKind == PublishOutlineTargetKind.Chapter ? targetId : null,
                 InclusionMode = imported.InclusionMode,
+                StartSide = document.FormatVersion >= 21
+                    ? imported.StartSide
+                    : RecommendedStartSide(imported.SystemRole, imported.Kind),
                 IsExcluded = imported.IsExcluded,
                 LocalOrder = imported.LocalOrder,
                 ManuscriptJson = ManuscriptCodec.Serialize(remapped),
@@ -1600,6 +1604,17 @@ public sealed class ProjectImportJobProcessor(
         if (document.PublicationSections.Count > 0)
             await db.SaveChangesAsync(cancellationToken);
     }
+
+    private static PublicationSectionStartSide RecommendedStartSide(
+        PublicationSectionSystemRole role,
+        PublicationSectionKind kind) => role switch
+    {
+        PublicationSectionSystemRole.Title or PublicationSectionSystemRole.Contents => PublicationSectionStartSide.Recto,
+        PublicationSectionSystemRole.Copyright => PublicationSectionStartSide.Verso,
+        _ when kind is PublicationSectionKind.Dedication or PublicationSectionKind.AboutAuthor or PublicationSectionKind.References
+            => PublicationSectionStartSide.Recto,
+        _ => PublicationSectionStartSide.Next,
+    };
 
     private async Task ImportPageCompositionsAsync(
         ProjectImportJob job,

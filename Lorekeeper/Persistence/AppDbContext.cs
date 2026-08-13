@@ -950,6 +950,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.Property(e => e.Anchor).HasConversion<string>();
             entity.Property(e => e.TargetKind).HasConversion<string>();
             entity.Property(e => e.InclusionMode).HasConversion<string>();
+            entity.Property(e => e.StartSide).HasConversion<string>();
             entity.Property(e => e.Revision).IsConcurrencyToken();
             entity.HasOne(e => e.Project).WithMany()
                 .HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Cascade);

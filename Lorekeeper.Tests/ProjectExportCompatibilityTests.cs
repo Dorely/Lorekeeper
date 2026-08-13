@@ -29,7 +29,7 @@ public sealed class ProjectExportCompatibilityTests
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(20, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(21, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationBook\"", json, StringComparison.Ordinal);
         Assert.Contains("\"allowDesignedPageOverrides\":true", json, StringComparison.Ordinal);

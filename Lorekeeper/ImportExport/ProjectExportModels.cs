@@ -27,7 +27,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 20;
+    public const int CurrentFormatVersion = 21;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -359,6 +359,7 @@ public sealed record ProjectExportPublicationSection(
     PublishOutlineTargetKind? TargetKind,
     Guid? TargetId,
     PublicationSectionInclusionMode InclusionMode,
+    PublicationSectionStartSide StartSide,
     bool IsExcluded,
     int LocalOrder,
     string ManuscriptJson,

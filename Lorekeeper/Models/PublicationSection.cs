@@ -45,6 +45,14 @@ public enum PublicationSectionInclusionMode
     Omitted,
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter<PublicationSectionStartSide>))]
+public enum PublicationSectionStartSide
+{
+    Next,
+    Recto,
+    Verso,
+}
+
 [JsonConverter(typeof(JsonStringEnumConverter<PublicationBoundField>))]
 public enum PublicationBoundField
 {
@@ -78,6 +86,7 @@ public class PublicationSection
     public Guid? ChapterId { get; set; }
     public Chapter? Chapter { get; set; }
     public PublicationSectionInclusionMode InclusionMode { get; set; } = PublicationSectionInclusionMode.Automatic;
+    public PublicationSectionStartSide StartSide { get; set; } = PublicationSectionStartSide.Next;
     public int LocalOrder { get; set; }
     public string ManuscriptJson { get; set; } = string.Empty;
     public long Revision { get; set; }

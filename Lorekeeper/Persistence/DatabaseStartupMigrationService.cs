@@ -89,6 +89,8 @@ public sealed class DatabaseStartupMigrationService(
         if (await recovery.IsRecoveryRequiredAsync(cancellationToken))
             return false;
 
+        await RemovePublicationSectionStartSideCompatibilityColumnAsync(db, cancellationToken);
+
         var migrationsBeforeCleanup = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
             .ToHashSet(StringComparer.Ordinal);
         if (!migrationsBeforeCleanup.Contains(PublicationCoreMigrationService.CleanupMigrationId))
@@ -214,6 +216,34 @@ public sealed class DatabaseStartupMigrationService(
             cancellationToken);
         await db.Database.ExecuteSqlRawAsync(
             "ALTER TABLE \"PageCompositions\" DROP COLUMN \"PublicationSectionId\";",
+            cancellationToken);
+        db.ChangeTracker.Clear();
+    }
+
+    internal static async Task EnsurePublicationSectionStartSideCompatibilityColumnAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(PublicationSectionMigrationService.StartSideMigrationId)
+            || await HasColumnAsync(db, "PublicationSections", "StartSide", cancellationToken))
+            return;
+        await db.Database.ExecuteSqlRawAsync(
+            "ALTER TABLE \"PublicationSections\" ADD COLUMN \"StartSide\" TEXT NOT NULL DEFAULT 'Next';",
+            cancellationToken);
+        db.ChangeTracker.Clear();
+    }
+
+    private static async Task RemovePublicationSectionStartSideCompatibilityColumnAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(PublicationSectionMigrationService.StartSideMigrationId)
+            || !await HasColumnAsync(db, "PublicationSections", "StartSide", cancellationToken))
+            return;
+        await db.Database.ExecuteSqlRawAsync(
+            "ALTER TABLE \"PublicationSections\" DROP COLUMN \"StartSide\";",
             cancellationToken);
         db.ChangeTracker.Clear();
     }

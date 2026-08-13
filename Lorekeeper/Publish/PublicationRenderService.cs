@@ -1153,6 +1153,7 @@ public sealed class PublicationRenderProcessor(
                 targetKind = item.TargetKind?.ToString(),
                 targetId = item.TargetId,
                 item.LocalOrder,
+                startSide = item.StartSide.ToString(),
                 blocks = item.Manuscript.Content.Select(BlockPayload).ToArray(),
                 pageCompositions = item.PageCompositions.Select(composition => new
                 {
@@ -1238,6 +1239,7 @@ public sealed class PublicationRenderProcessor(
                 publisher = document.Profile.Publisher,
                 copyright = document.Profile.Copyright,
                 publicationSections = publicationSectionPayloads,
+                printVendor = printProduct?.Vendor.ToString(),
                 includeActHeadings = document.Profile.IncludeActHeadings,
                 includeChapterHeadings = document.Profile.IncludeChapterHeadings,
                 // PublishDocument titles are already numbered consistently for every export format.

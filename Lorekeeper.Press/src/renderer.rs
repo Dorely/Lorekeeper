@@ -3939,7 +3939,7 @@ fn ordered_publication_sections<'a>(
     anchor: &str,
     target_id: Option<&str>,
 ) -> Vec<&'a Value> {
-    let mut sections = document
+    document
         .get("publicationSections")
         .and_then(Value::as_array)
         .into_iter()
@@ -3948,48 +3948,83 @@ fn ordered_publication_sections<'a>(
             string(section, "anchor").eq_ignore_ascii_case(anchor)
                 && target_id.is_none_or(|id| string(section, "targetId") == id)
         })
-        .collect::<Vec<_>>();
-    if !anchor.eq_ignore_ascii_case("Front") || target_id.is_some() {
-        return sections;
-    }
+        .collect::<Vec<_>>()
+}
 
+fn publication_section_leaf_side(section: &Value) -> Option<LeafSide> {
+    match string(section, "startSide").as_str() {
+        "Recto" => Some(LeafSide::Recto),
+        "Verso" => Some(LeafSide::Verso),
+        _ => None,
+    }
+}
+
+fn warn_front_matter_order(
+    document: &Value,
+    sections: &[&Value],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let title = sections
         .iter()
         .position(|section| string(section, "systemRole").eq_ignore_ascii_case("Title"));
     let copyright = sections
         .iter()
         .position(|section| string(section, "systemRole").eq_ignore_ascii_case("Copyright"));
-    let (Some(title_index), Some(copyright_index)) = (title, copyright) else {
-        return sections;
+    if !matches!((title, copyright), (Some(title), Some(copyright)) if copyright < title) {
+        return;
+    }
+    let vendor = string(document, "printVendor");
+    let message = if vendor.eq_ignore_ascii_case("AmazonKdp") {
+        "KDP's optional front-matter guidance recommends placing the title page before the copyright page. Lorekeeper preserved the configured order."
+    } else {
+        "Common left-to-right book-design practice places the title page before the copyright page. Lorekeeper preserved the configured order."
     };
-    let title_section = sections[title_index];
-    let copyright_section = sections[copyright_index];
-    let insertion_index = title_index.min(copyright_index);
-    sections.retain(|section| {
-        let role = string(section, "systemRole");
-        !role.eq_ignore_ascii_case("Title") && !role.eq_ignore_ascii_case("Copyright")
-    });
-    let insertion_index = insertion_index.min(sections.len());
-    sections.insert(insertion_index, title_section);
-    sections.insert(insertion_index + 1, copyright_section);
-    sections
+    diagnostics.push(
+        Diagnostic::warning("PRESS_FRONT_MATTER_ORDER_RECOMMENDATION", message).with_source(
+            "publication-section",
+            string(sections[copyright.unwrap()], "id"),
+        ),
+    );
 }
 
-fn publication_section_leaf_side(section: &Value, anchor: &str, index: usize) -> Option<LeafSide> {
-    match string(section, "systemRole").as_str() {
-        "Title" | "Contents" => Some(LeafSide::Recto),
-        "Copyright" => Some(LeafSide::Verso),
-        _ if string(section, "kind") == "Dedication" => Some(LeafSide::Recto),
-        _ if anchor.eq_ignore_ascii_case("Back") && index == 0 => Some(LeafSide::Recto),
-        _ if matches!(
-            string(section, "kind").as_str(),
-            "AboutAuthor" | "References"
-        ) =>
-        {
-            Some(LeafSide::Recto)
-        }
-        _ => None,
+fn warn_front_matter_side(
+    document: &Value,
+    section: &Value,
+    page: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let role = string(section, "systemRole");
+    let recommended = match role.as_str() {
+        "Title" => LeafSide::Recto,
+        "Copyright" => LeafSide::Verso,
+        _ => return,
+    };
+    let is_recto = page % 2 == 1;
+    if matches!(recommended, LeafSide::Recto) == is_recto {
+        return;
     }
+    let vendor = string(document, "printVendor");
+    let side = if matches!(recommended, LeafSide::Recto) {
+        "right-hand (recto)"
+    } else {
+        "left-hand (verso)"
+    };
+    let message = if vendor.eq_ignore_ascii_case("AmazonKdp") {
+        format!(
+            "KDP's optional front-matter guidance recommends the {} page on a {side} page. Lorekeeper preserved the configured placement.",
+            role.to_lowercase()
+        )
+    } else {
+        format!(
+            "Common left-to-right book-design practice places the {} page on a {side} page. Lorekeeper preserved the configured placement.",
+            role.to_lowercase()
+        )
+    };
+    diagnostics.push(
+        Diagnostic::warning("PRESS_FRONT_MATTER_SIDE_RECOMMENDATION", message)
+            .with_source("publication-section", string(section, "id"))
+            .with_page(page),
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4006,19 +4041,23 @@ fn append_publication_sections(
     semantic_order: &mut i32,
 ) -> RenderResult<Option<usize>> {
     let mut toc_index = None;
-    for (section_index, section) in ordered_publication_sections(document, anchor, target_id)
-        .into_iter()
-        .enumerate()
-    {
+    let ordered_sections = ordered_publication_sections(document, anchor, target_id);
+    if !is_digital_pdf && anchor.eq_ignore_ascii_case("Front") && target_id.is_none() {
+        warn_front_matter_order(document, &ordered_sections, diagnostics);
+    }
+    for section in ordered_sections {
         let section_id = string(section, "id");
         let leaf_side = (!is_digital_pdf)
-            .then(|| publication_section_leaf_side(section, anchor, section_index))
+            .then(|| publication_section_leaf_side(section))
             .flatten();
         if string(section, "systemRole").eq_ignore_ascii_case("Contents") {
             if let Some(side) = leaf_side {
                 ensure_next_leaf(pages, side);
             }
             toc_index = Some(pages.len());
+            if !is_digital_pdf {
+                warn_front_matter_side(document, section, pages.len() + 1, diagnostics);
+            }
             pages.push(centered_page("Contents", "", trim));
             continue;
         }
@@ -4034,6 +4073,9 @@ fn append_publication_sections(
         if begins_with_flowing_content {
             if let Some(side) = leaf_side {
                 ensure_next_leaf(pages, side);
+            }
+            if !is_digital_pdf {
+                warn_front_matter_side(document, section, pages.len() + 1, diagnostics);
             }
             pages.push(empty_body_page());
         }
@@ -4098,6 +4140,9 @@ fn append_publication_sections(
                     .map(|page| (page.lines.len(), page.images.len()))
                     .collect::<Vec<_>>();
                 let first_page = pages.len() + 1;
+                if !is_digital_pdf && block_index == 0 {
+                    warn_front_matter_side(document, section, first_page, diagnostics);
+                }
                 pages.extend(rendered);
                 assign_semantic_order_since(
                     pages,

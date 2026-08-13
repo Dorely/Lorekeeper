@@ -78,6 +78,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   reusable front-cover design. A publication section is either prose with
   optional Figures or a dedicated Designed Page canvas, and opens in its own
   full-height editor before, after, or around the Core outline.
+  Section inclusion, order, and next/right/left starting page are explicit Core
+  or release settings; optional KDP/common front-matter conventions produce
+  guidance rather than silently rewriting the book.
   Optional paperback, EPUB ebook, and PDF ebook
   releases inherit Core values live and store only explicit field or collection
   overrides; ISBN, destination, package, and product settings remain
@@ -129,7 +132,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   content, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded subset fonts, ToUnicode maps, and a
   240% total-ink ceiling. These checks establish only the exact named
   Lorekeeper profile; they do not claim that a vendor accepted an upload.
-- Versioned project import/export (current v20 manuscript-v4/page-setup/
+- Versioned project import/export (current v21 manuscript-v4/page-setup/
   composition model, Core Book, sparse release overlays, edition chapter
   snapshots/compositions, covers, custom-font binaries,
   and isolated older structured/text adapters) plus TXT, Markdown,

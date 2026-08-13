@@ -292,6 +292,7 @@ public sealed class PublishService(
             item.TargetKind,
             item.TargetId,
             item.LocalOrder,
+            item.StartSide,
             PublicationSectionService.ResolveBindings(item.Manuscript, boundValues),
             sectionCompositions.GetValueOrDefault(item.Id, []).Select(composition => CompositionDocument(composition, profile, boundValues)).ToList())).ToList();
         var coverDesign = coreTarget || profile.InheritsCoreCover

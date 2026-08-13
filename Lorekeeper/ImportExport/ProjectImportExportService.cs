@@ -214,6 +214,7 @@ public sealed class ProjectImportExportService(
                         section.TargetKind,
                         section.TargetId,
                         section.InclusionMode,
+                        section.StartSide,
                         section.IsExcluded,
                         section.LocalOrder,
                         section.ManuscriptJson,

@@ -273,6 +273,7 @@ public sealed record PublishPublicationSectionDocument(
     PublishOutlineTargetKind? TargetKind,
     Guid? TargetId,
     int LocalOrder,
+    PublicationSectionStartSide StartSide,
     ManuscriptDocument Manuscript,
     IReadOnlyList<PublishPageCompositionDocument> PageCompositions);
 

@@ -23,6 +23,7 @@ public sealed record PublicationSectionView(
     Guid? TargetId,
     string TargetTitle,
     PublicationSectionInclusionMode InclusionMode,
+    PublicationSectionStartSide StartSide,
     bool IsIncluded,
     bool IsInherited,
     int LocalOrder,
@@ -39,6 +40,7 @@ public sealed record PublicationSectionInput(
     PublishOutlineTargetKind? TargetKind,
     Guid? TargetId,
     PublicationSectionInclusionMode InclusionMode,
+    PublicationSectionStartSide StartSide,
     string ManuscriptJson,
     long? ExpectedRevision = null);
 
@@ -85,7 +87,7 @@ public sealed class PublicationSectionService(
             .Select(item => item.SystemRole)
             .ToListAsync(cancellationToken)).ToHashSet();
         var now = DateTime.UtcNow;
-        foreach (var (role, kind, title, order) in SystemSectionDefinitions)
+        foreach (var (role, kind, title, order, startSide) in SystemSectionDefinitions)
         {
             if (roles.Contains(role))
                 continue;
@@ -99,6 +101,7 @@ public sealed class PublicationSectionService(
                 SystemRole = role,
                 Anchor = PublicationSectionAnchor.Front,
                 InclusionMode = PublicationSectionInclusionMode.Automatic,
+                StartSide = startSide,
                 LocalOrder = order,
                 ManuscriptJson = ManuscriptCodec.Serialize(CreateSystemDocument(id, role)),
                 CreatedAt = now,
@@ -226,7 +229,7 @@ public sealed class PublicationSectionService(
         var changed = ManuscriptOperations.Apply(current.Manuscript, ManuscriptOperationInput.ToOperations(operations)).Document;
         return await UpsertAsync(target, new(
             current.Id, current.Title, current.Kind, current.Anchor, current.TargetKind, current.TargetId,
-            current.InclusionMode, ManuscriptCodec.Serialize(changed), expectedRevision), cancellationToken);
+            current.InclusionMode, current.StartSide, ManuscriptCodec.Serialize(changed), expectedRevision), cancellationToken);
     }
 
     public async Task<PublicationSectionView> CustomizeAsync(
@@ -417,6 +420,7 @@ public sealed class PublicationSectionService(
                     ActId = row.ActId,
                     ChapterId = row.ChapterId,
                     InclusionMode = PublicationSectionInclusionMode.Omitted,
+                    StartSide = row.StartSide,
                     LocalOrder = row.LocalOrder,
                     ManuscriptJson = row.ManuscriptJson,
                     Revision = row.Revision,
@@ -432,7 +436,7 @@ public sealed class PublicationSectionService(
             if (row.EditionId != target.EditionId)
                 throw new InvalidOperationException("The publication section belongs to another target.");
             if (row.SystemRole != PublicationSectionSystemRole.None)
-                throw new InvalidOperationException("Required publication sections can be omitted but not deleted.");
+                throw new InvalidOperationException("Generated publication sections can be omitted but not deleted.");
             db.PublicationSections.Remove(row);
             await TouchTargetAsync(target, cancellationToken);
         }
@@ -454,15 +458,6 @@ public sealed class PublicationSectionService(
         if (selected.Any(item => item.Anchor != first.Anchor || item.TargetId != first.TargetId)
             || effective.Count(item => item.Anchor == first.Anchor && item.TargetId == first.TargetId) != selected.Count)
             throw new InvalidOperationException("Reorder every section at one anchor together.");
-        if (first.Anchor == PublicationSectionAnchor.Front)
-        {
-            var requestedOrder = orderedSectionIds.Select(id => selected.Single(item => item.Id == id)).ToList();
-            var titleIndex = requestedOrder.FindIndex(item => item.SystemRole == PublicationSectionSystemRole.Title);
-            var copyrightIndex = requestedOrder.FindIndex(item => item.SystemRole == PublicationSectionSystemRole.Copyright);
-            if (titleIndex >= 0 && copyrightIndex != titleIndex + 1)
-                throw new InvalidOperationException("The title page must be followed by the copyright page. Their print leaf sides are assigned automatically.");
-        }
-
         foreach (var (id, index) in orderedSectionIds.Select((id, index) => (id, index)))
         {
             var view = selected.Single(item => item.Id == id);
@@ -685,26 +680,7 @@ public sealed class PublicationSectionService(
             .ThenBy(item => item.Row.Id)
             .Select(item => View(item.Row, item.Inherited, actTitles, chapterTitles, bindingValues))
             .ToList();
-        CanonicalizeFrontMatter(views);
         return views;
-    }
-
-    private static void CanonicalizeFrontMatter(List<PublicationSectionView> sections)
-    {
-        var titleIndex = sections.FindIndex(item => item.Anchor == PublicationSectionAnchor.Front
-            && item.SystemRole == PublicationSectionSystemRole.Title);
-        var copyrightIndex = sections.FindIndex(item => item.Anchor == PublicationSectionAnchor.Front
-            && item.SystemRole == PublicationSectionSystemRole.Copyright);
-        if (titleIndex < 0 || copyrightIndex < 0 || copyrightIndex == titleIndex + 1)
-            return;
-
-        var title = sections[titleIndex];
-        var copyright = sections[copyrightIndex];
-        var insertionIndex = Math.Min(titleIndex, copyrightIndex);
-        sections.RemoveAll(item => item.Id == title.Id || item.Id == copyright.Id);
-        insertionIndex = Math.Min(insertionIndex, sections.Count);
-        sections.Insert(insertionIndex, title);
-        sections.Insert(insertionIndex + 1, copyright);
     }
 
     private async Task<IReadOnlyDictionary<PublicationBoundField, string>> BindingValuesAsync(
@@ -755,7 +731,7 @@ public sealed class PublicationSectionService(
                 : chapters.GetValueOrDefault(targetId, "Missing chapter");
         return new(
             row.Id, row.CoreSectionId, row.EditionId, row.Title, row.Kind, row.SystemRole, row.Anchor,
-            row.TargetKind, row.TargetId, targetTitle, row.InclusionMode,
+            row.TargetKind, row.TargetId, targetTitle, row.InclusionMode, row.StartSide,
             row.InclusionMode != PublicationSectionInclusionMode.Omitted && !row.IsExcluded,
             inherited, row.LocalOrder, document, row.Revision,
             document.Content.Count(block => block.Type == ManuscriptBlockType.DesignedPage),
@@ -798,7 +774,7 @@ public sealed class PublicationSectionService(
             Id = Guid.NewGuid(), ProjectId = core.ProjectId, EditionId = editionId, CoreSectionId = core.Id,
             Title = core.Title, Kind = core.Kind, SystemRole = core.SystemRole, Anchor = core.Anchor,
             TargetKind = core.TargetKind, TargetId = core.TargetId, ActId = core.ActId, ChapterId = core.ChapterId,
-            InclusionMode = core.InclusionMode, LocalOrder = core.LocalOrder, Revision = core.Revision,
+            InclusionMode = core.InclusionMode, StartSide = core.StartSide, LocalOrder = core.LocalOrder, Revision = core.Revision,
         };
         var document = ManuscriptCodec.Deserialize(core.ManuscriptJson, core.Id, core.Revision);
         var sourceIds = document.Content.Where(item => item.PageCompositionId.HasValue).Select(item => item.PageCompositionId!.Value).Distinct().ToList();
@@ -882,6 +858,7 @@ public sealed class PublicationSectionService(
         row.ActId = input.TargetKind == PublishOutlineTargetKind.Act ? input.TargetId : null;
         row.ChapterId = input.TargetKind == PublishOutlineTargetKind.Chapter ? input.TargetId : null;
         row.InclusionMode = input.InclusionMode;
+        row.StartSide = input.StartSide;
         row.Revision = checked(row.Revision + 1);
         row.ManuscriptJson = ManuscriptCodec.Serialize(document with
         {
@@ -1011,10 +988,10 @@ public sealed class PublicationSectionService(
         _ => 6,
     };
 
-    private static readonly (PublicationSectionSystemRole Role, PublicationSectionKind Kind, string Title, int Order)[] SystemSectionDefinitions =
+    private static readonly (PublicationSectionSystemRole Role, PublicationSectionKind Kind, string Title, int Order, PublicationSectionStartSide StartSide)[] SystemSectionDefinitions =
     [
-        (PublicationSectionSystemRole.Title, PublicationSectionKind.TitlePage, "Title page", 0),
-        (PublicationSectionSystemRole.Copyright, PublicationSectionKind.Copyright, "Copyright", 1),
-        (PublicationSectionSystemRole.Contents, PublicationSectionKind.Contents, "Contents", 2),
+        (PublicationSectionSystemRole.Title, PublicationSectionKind.TitlePage, "Title page", 0, PublicationSectionStartSide.Recto),
+        (PublicationSectionSystemRole.Copyright, PublicationSectionKind.Copyright, "Copyright", 1, PublicationSectionStartSide.Verso),
+        (PublicationSectionSystemRole.Contents, PublicationSectionKind.Contents, "Contents", 2, PublicationSectionStartSide.Recto),
     ];
 }

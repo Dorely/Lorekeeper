@@ -22,6 +22,7 @@ public sealed class PublicationSectionMigrationService(
     public const string MigrationName = "publication-sections-v1";
     public const string SemanticRevisionRepairMigrationName = "publication-section-semantic-revisions-v1";
     public const string AdditiveMigrationId = "20260812033915_AddPublicationSectionsV25";
+    public const string StartSideMigrationId = "20260813181834_AddPublicationSectionStartSideV28";
 
     public async Task ApplyPendingAsync(AppDbContext db, CancellationToken cancellationToken = default)
     {
@@ -38,6 +39,7 @@ public sealed class PublicationSectionMigrationService(
                 cancellationToken);
             await db.GetService<IMigrator>().MigrateAsync(AdditiveMigrationId, cancellationToken);
         }
+        await DatabaseStartupMigrationService.EnsurePublicationSectionStartSideCompatibilityColumnAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureAuthoringTriggersAsync(db, cancellationToken);
         if (await db.ManuscriptMigrationJournals.AsNoTracking().AnyAsync(
@@ -344,6 +346,7 @@ public sealed class PublicationSectionMigrationService(
             Kind = Kind(matter.Kind), SystemRole = Role(matter.Kind),
             Anchor = matter.Location == PublicationMatterLocation.Front ? PublicationSectionAnchor.Front : PublicationSectionAnchor.Back,
             InclusionMode = matter.IsIncluded ? PublicationSectionInclusionMode.Included : PublicationSectionInclusionMode.Omitted,
+            StartSide = RecommendedStartSide(Role(matter.Kind), Kind(matter.Kind)),
             LocalOrder = LegacyMatterOrder(matter), ManuscriptJson = RemapDocument(matter.ManuscriptJson, matter.Id, matter.Revision, id),
             Revision = matter.Revision, CreatedAt = matter.CreatedAt, UpdatedAt = matter.UpdatedAt,
         };
@@ -362,6 +365,7 @@ public sealed class PublicationSectionMigrationService(
             IsExcluded = matter.IsExcluded, Title = matter.Title, Kind = Kind(matter.Kind), SystemRole = Role(matter.Kind),
             Anchor = matter.Location == PublicationMatterLocation.Front ? PublicationSectionAnchor.Front : PublicationSectionAnchor.Back,
             InclusionMode = matter.IsExcluded || !matter.IsIncluded ? PublicationSectionInclusionMode.Omitted : PublicationSectionInclusionMode.Included,
+            StartSide = RecommendedStartSide(Role(matter.Kind), Kind(matter.Kind)),
             LocalOrder = LegacyMatterOrder(matter), ManuscriptJson = RemapDocument(matter.ManuscriptJson, matter.Id, matter.Revision, id),
             Revision = matter.Revision, CreatedAt = matter.CreatedAt, UpdatedAt = matter.UpdatedAt,
         };
@@ -552,6 +556,7 @@ public sealed class PublicationSectionMigrationService(
             {
                 Id = id, ProjectId = projectId, Title = title, Kind = kind, SystemRole = role,
                 Anchor = PublicationSectionAnchor.Front, InclusionMode = PublicationSectionInclusionMode.Automatic,
+                StartSide = RecommendedStartSide(role, kind),
                 LocalOrder = order, ManuscriptJson = ManuscriptCodec.Serialize(new ManuscriptDocument { ManuscriptId = id, Content = content }),
             });
         }
@@ -576,6 +581,16 @@ public sealed class PublicationSectionMigrationService(
         PublicationMatterKind.Copyright => PublicationSectionSystemRole.Copyright,
         PublicationMatterKind.Contents => PublicationSectionSystemRole.Contents,
         _ => PublicationSectionSystemRole.None,
+    };
+    private static PublicationSectionStartSide RecommendedStartSide(
+        PublicationSectionSystemRole role,
+        PublicationSectionKind kind) => role switch
+    {
+        PublicationSectionSystemRole.Title or PublicationSectionSystemRole.Contents => PublicationSectionStartSide.Recto,
+        PublicationSectionSystemRole.Copyright => PublicationSectionStartSide.Verso,
+        _ when kind is PublicationSectionKind.Dedication or PublicationSectionKind.AboutAuthor or PublicationSectionKind.References
+            => PublicationSectionStartSide.Recto,
+        _ => PublicationSectionStartSide.Next,
     };
     private static PublicationSectionAnchor Anchor(PublicationImagePlacementKind kind) => kind switch
     {
