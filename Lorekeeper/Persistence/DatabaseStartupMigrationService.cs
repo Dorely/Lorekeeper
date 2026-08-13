@@ -100,7 +100,8 @@ public sealed class DatabaseStartupMigrationService(
                 PrintProductMigrationService.CleanupMigrationId,
                 cancellationToken);
         await db.GetService<IMigrator>().MigrateAsync(cancellationToken: cancellationToken);
-        return true;
+        await publicationSectionMigration.RepairSemanticRevisionDriftAsync(db, cancellationToken);
+        return !await recovery.IsRecoveryRequiredAsync(cancellationToken);
     }
 
     private static async Task EnsureEditionCompatibilityColumnsAsync(

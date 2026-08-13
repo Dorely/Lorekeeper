@@ -12,6 +12,7 @@ namespace Lorekeeper.Publish;
 public interface IPublicationSectionMigrationService
 {
     Task ApplyPendingAsync(AppDbContext db, CancellationToken cancellationToken = default);
+    Task RepairSemanticRevisionDriftAsync(AppDbContext db, CancellationToken cancellationToken = default);
 }
 
 public sealed class PublicationSectionMigrationService(
@@ -19,6 +20,7 @@ public sealed class PublicationSectionMigrationService(
     ILogger<PublicationSectionMigrationService> logger) : IPublicationSectionMigrationService
 {
     public const string MigrationName = "publication-sections-v1";
+    public const string SemanticRevisionRepairMigrationName = "publication-section-semantic-revisions-v1";
     public const string AdditiveMigrationId = "20260812033915_AddPublicationSectionsV25";
 
     public async Task ApplyPendingAsync(AppDbContext db, CancellationToken cancellationToken = default)
@@ -137,6 +139,112 @@ public sealed class PublicationSectionMigrationService(
             await recovery.EnterRecoveryModeAsync(db, backupPath, MigrationName, 18, 19, exception, cancellationToken);
         }
     }
+
+    public async Task RepairSemanticRevisionDriftAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken = default)
+    {
+        if (await db.ManuscriptMigrationJournals.AsNoTracking().AnyAsync(
+            item => item.MigrationName == SemanticRevisionRepairMigrationName
+                && item.Status == ManuscriptMigrationStatus.Completed,
+            cancellationToken))
+        {
+            return;
+        }
+
+        var compositions = await db.PageCompositions
+            .Where(item => item.PublicationSectionId != null)
+            .OrderBy(item => item.Id)
+            .ToListAsync(cancellationToken);
+        var documents = compositions.ToDictionary(
+            item => item.Id,
+            item => ManuscriptCodec.Deserialize(item.SemanticManuscriptJson));
+        foreach (var composition in compositions)
+        {
+            var document = documents[composition.Id];
+            ManuscriptCodec.Validate(document, composition.Id, document.Revision);
+        }
+
+        var drifted = compositions
+            .Where(item => documents[item.Id].Revision != item.Revision)
+            .ToList();
+        if (drifted.Count == 0)
+        {
+            db.ManuscriptMigrationJournals.Add(CompletedRepairJournal(string.Empty, 0));
+            await db.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
+        var backupPath = await recovery.CreateBackupAsync(
+            "publishing",
+            "pre-publication-section-semantic-revisions-v1",
+            cancellationToken);
+        try
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            var journal = new ManuscriptMigrationJournal
+            {
+                MigrationName = SemanticRevisionRepairMigrationName,
+                SourceSchemaVersion = ManuscriptDocument.CurrentSchemaVersion,
+                TargetSchemaVersion = ManuscriptDocument.CurrentSchemaVersion,
+                Phase = ManuscriptMigrationPhase.Transform,
+                Status = ManuscriptMigrationStatus.Running,
+                BackupPath = backupPath,
+            };
+            db.ManuscriptMigrationJournals.Add(journal);
+
+            foreach (var composition in drifted)
+            {
+                var document = documents[composition.Id];
+                if (document.Revision > composition.Revision)
+                {
+                    throw new InvalidDataException(
+                        $"Publication page {composition.Id:N} has semantic revision {document.Revision}, "
+                        + $"which is newer than owning revision {composition.Revision}.");
+                }
+
+                composition.SemanticManuscriptJson = ManuscriptCodec.Serialize(
+                    document with { Revision = composition.Revision });
+                ManuscriptCodec.Deserialize(
+                    composition.SemanticManuscriptJson,
+                    composition.Id,
+                    composition.Revision);
+            }
+
+            journal.ValidationReportJson = JsonSerializer.Serialize(new { repairedCompositions = drifted.Count });
+            journal.Phase = ManuscriptMigrationPhase.Complete;
+            journal.Status = ManuscriptMigrationStatus.Completed;
+            journal.CompletedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            db.ChangeTracker.Clear();
+            logger.LogError(exception, "Publication-section semantic revision repair failed.");
+            await recovery.EnterRecoveryModeAsync(
+                db,
+                backupPath,
+                SemanticRevisionRepairMigrationName,
+                ManuscriptDocument.CurrentSchemaVersion,
+                ManuscriptDocument.CurrentSchemaVersion,
+                exception,
+                cancellationToken);
+        }
+    }
+
+    private static ManuscriptMigrationJournal CompletedRepairJournal(string backupPath, int repairedCompositions) =>
+        new()
+        {
+            MigrationName = SemanticRevisionRepairMigrationName,
+            SourceSchemaVersion = ManuscriptDocument.CurrentSchemaVersion,
+            TargetSchemaVersion = ManuscriptDocument.CurrentSchemaVersion,
+            Phase = ManuscriptMigrationPhase.Complete,
+            Status = ManuscriptMigrationStatus.Completed,
+            BackupPath = backupPath,
+            ValidationReportJson = JsonSerializer.Serialize(new { repairedCompositions }),
+            CompletedAt = DateTime.UtcNow,
+        };
 
     private static async Task EnsureAuthoringTriggersAsync(
         AppDbContext db,

@@ -273,14 +273,24 @@ public sealed class PublicationSectionService(
             var changed = false;
             foreach (var composition in compositions)
             {
-                var currentSemantic = ManuscriptCodec.Deserialize(
-                    composition.SemanticManuscriptJson, composition.Id, composition.Revision);
+                // Binding refreshes update the semantic manuscript and its owning
+                // composition as one revisioned record. Older builds incremented
+                // only the composition row, so accept that one known drift here
+                // and repair it before exposing the canvas again.
+                var currentSemantic = ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson);
+                ManuscriptCodec.Validate(currentSemantic, composition.Id, currentSemantic.Revision);
+                if (currentSemantic.Revision > composition.Revision)
+                    throw new InvalidDataException("A publication page manuscript is newer than its owning composition.");
                 var resolved = ResolveBindings(currentSemantic, currentValues);
-                var resolvedJson = ManuscriptCodec.Serialize(resolved);
-                if (string.Equals(resolvedJson, composition.SemanticManuscriptJson, StringComparison.Ordinal))
+                var contentChanged = !ManuscriptCodec.ContentEquals(currentSemantic, resolved);
+                var revisionDrifted = currentSemantic.Revision != composition.Revision;
+                if (!contentChanged && !revisionDrifted)
                     continue;
-                composition.SemanticManuscriptJson = resolvedJson;
-                composition.Revision = checked(composition.Revision + 1);
+
+                if (contentChanged)
+                    composition.Revision = checked(composition.Revision + 1);
+                composition.SemanticManuscriptJson = ManuscriptCodec.Serialize(
+                    resolved with { Revision = composition.Revision });
                 changed = true;
             }
             if (changed)

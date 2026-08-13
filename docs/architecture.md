@@ -1087,6 +1087,11 @@ active recovery state.
 orchestrator used by both the application host and installed-database migration
 fixtures. Tests therefore exercise the same migration boundaries and recovery
 checks as a normal application start instead of maintaining a parallel sequence.
+The publication-section boundary also journals and transactionally repairs the
+known historical case where a bound system-page composition row advanced while
+its embedded semantic-manuscript revision did not. It changes only that embedded
+revision after validating identity and direction, uses a protected backup when
+repairs are required, and fails closed if the manuscript is newer than its owner.
 It delegates the structured-manuscript cutover to `IManuscriptMigrationService`
 before normal initialization. For a legacy
 database it runs `PRAGMA quick_check`, creates a consistent SQLite Online Backup
