@@ -8,7 +8,7 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
-    public void V20WritesPrintProductsAndPublicationSectionsWithoutObsoleteDefaultReleaseState()
+    public void V22WritesPrintProductsPublicationSectionsAndSparseReleaseOrderWithoutObsoleteDefaultReleaseState()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
@@ -29,13 +29,14 @@ public sealed class ProjectExportCompatibilityTests
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(21, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(22, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationBook\"", json, StringComparison.Ordinal);
         Assert.Contains("\"allowDesignedPageOverrides\":true", json, StringComparison.Ordinal);
         Assert.Contains($"\"selectedCoverImageId\":\"{coverImageId}\"", json, StringComparison.Ordinal);
         Assert.Contains("\"editionSpecificContentEnabled\":false", json, StringComparison.Ordinal);
         Assert.Contains("\"chapterOverrides\":[]", json, StringComparison.Ordinal);
+        Assert.Contains("\"publicationSectionOrder\":", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationSections\":[]", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"isDefault\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("selectedCoverChapterId", json, StringComparison.Ordinal);

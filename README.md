@@ -79,7 +79,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   optional Figures or a dedicated Designed Page canvas, and opens in its own
   full-height editor before, after, or around the Core outline.
   Section inclusion, order, and next/right/left starting page are explicit Core
-  or release settings; optional KDP/common front-matter conventions produce
+  or release settings. A release can override section order without copying or
+  claiming customization of inherited section content; optional KDP/common front-matter conventions produce
   guidance rather than silently rewriting the book. The Publish overview presents
   this as one collapsible Front/Main content/Back flow with direct Include/Omit
   chapter controls and correctly scoped prose or Designed Page creation.
@@ -109,7 +110,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   PDF page; PDF ebook releases inherit that choice until explicitly customized.
 - Lorekeeper-owned paperback, hardcover, and Digital PDF press jobs with cancellation/restart recovery,
   immutable SHA-256-verified interior and product-specific cover PDFs, in-app
-  single/facing-page PDF viewing with an optional page seam, semantic block-to-page
+  single/facing-page PDF viewing with an optional page seam and transparent
+  alignment slots, semantic block-to-page
   maps, render comparisons, and matching
   assistant controls. The exact-pinned Rust renderer is built and packaged in
   both Debug and Release; the running app invokes only that integrity-checked
@@ -135,7 +137,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   content, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded subset fonts, ToUnicode maps, and a
   240% total-ink ceiling. These checks establish only the exact named
   Lorekeeper profile; they do not claim that a vendor accepted an upload.
-- Versioned project import/export (current v21 manuscript-v4/page-setup/
+- Versioned project import/export (current v22 manuscript-v4/page-setup/
   composition model, Core Book, sparse release overlays, edition chapter
   snapshots/compositions, covers, custom-font binaries,
   and isolated older structured/text adapters) plus TXT, Markdown,

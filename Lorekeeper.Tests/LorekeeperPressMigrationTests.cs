@@ -400,6 +400,7 @@ public sealed class LorekeeperPressMigrationTests
                 Assert.Equal("kdp-pb-bw-white", edition.PrintProductKey);
                 Assert.Equal(PrintFinish.Matte, edition.PrintFinish);
                 Assert.Equal(PrintCoverMode.Simplex, edition.PrintCoverMode);
+                Assert.Equal("{}", edition.PublicationSectionOrderJson);
                 Assert.Equal(10, edition.Revision);
                 Assert.True(edition.EditionSpecificContentEnabled);
                 Assert.Equal("custom-profile-v9", unknownEdition.VendorProfileVersion);

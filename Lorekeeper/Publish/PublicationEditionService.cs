@@ -111,6 +111,9 @@ public sealed class PublicationEditionService(
             .ToListAsync(cancellationToken);
         var compositionMap = sourceCompositions.ToDictionary(item => item.Id, _ => Guid.NewGuid());
         var sectionMap = source.PublicationSections.ToDictionary(item => item.Id, _ => Guid.NewGuid());
+        clone.PublicationSectionOrderJson = PublicationSectionOrderCodec.Serialize(
+            PublicationSectionOrderCodec.Deserialize(source.PublicationSectionOrderJson)
+                .ToDictionary(item => sectionMap.GetValueOrDefault(item.Key, item.Key), item => item.Value));
         clone.PageCompositions = sourceCompositions.Select(item => CopyEditionComposition(
             item,
             clone.Id,
@@ -1176,6 +1179,7 @@ public sealed class PublicationEditionService(
             AllowDesignedPageOverrides = source.AllowDesignedPageOverrides,
             InheritsCoreCover = source.InheritsCoreCover,
             EditionSpecificContentEnabled = source.EditionSpecificContentEnabled,
+            PublicationSectionOrderJson = source.PublicationSectionOrderJson,
         };
 
     private static string Clean(string? value) => value?.Trim() ?? string.Empty;

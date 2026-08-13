@@ -687,10 +687,10 @@ version changes.
 Archived releases are immutable at every owning mutation boundary; their
 existing artifacts remain readable and exportable, and cloning creates the
 editable continuation.
-Project export v21 writes manuscript-v4 documents, project page setup, page
+Project export v22 writes manuscript-v4 documents, project page setup, page
 compositions and exact geometry variants with active authoring variants, Core
 Book, sparse release overlays and cover scenes, Book Text Styles,
-edition chapter snapshots, publication sections and their compositions, visual references,
+edition chapter snapshots, publication sections, sparse release section-order overlays and their compositions, visual references,
 and project-owned font families/faces with binary hashes.
 An isolated versioned transformer maps earlier visual structures into the
 current model; earlier structured and text adapters remain import-only
@@ -851,7 +851,9 @@ PDF viewer. A Lorekeeper-owned modal requests bounded PNG renditions of immutabl
 artifact pages through project-scoped endpoints, caches them by artifact hash and
 raster width, and presents fixed single-page or two-leaf facing rows. Facing pages
 with the seam hidden is the initial view; users may expose the seam or switch to
-single pages without changing the stored artifact. Source-fingerprint mismatch
+single pages without changing the stored artifact. Unpaired parity slots remain
+transparent, preserving right/left alignment without presenting them as PDF pages.
+Source-fingerprint mismatch
 marks otherwise valid immutable
 artifacts stale. Installed-renderer or selected-profile provenance mismatch also
 stales otherwise current PDF artifacts. Queued jobs snapshot the dynamic
@@ -968,6 +970,9 @@ navigation choices, and group-scoped creation places new prose or Designed Page
 sections at the selected part of the book. Custom sections can move between
 Front, Content, and Back directly from the list; changing position assigns a new
 local order at the destination instead of carrying an unrelated source order.
+Reordering inherited sections within a release stores a sparse order overlay on
+the release. It does not materialize a section content override, copy the Core
+manuscript or canvas, or change the section's inherited-content status.
 The visible contents
 section is generated from effective structure. Generated sections never enter
 the ordinary manuscript editor, and user-created sections cannot claim those
@@ -1253,7 +1258,7 @@ validates metadata/content projections, row counts, scene objects, packages,
 artifact bytes/hashes, and foreign keys before the cleanup migration removes
 runtime paper/binding/ink columns and the universal spine-caliper path.
 
-Project export v21 contains only the current v4/page-setup/composition model,
+Project export v22 contains only the current v4/page-setup/composition model,
 Core Book, sparse release overlays, edition chapter snapshots, edition-owned
 compositions, publication sections, target-aware publication records, resolved
 print-product selections, Generic printer templates, and independent cover

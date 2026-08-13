@@ -779,7 +779,7 @@ else
                     {
                         var included = IsPublicationSectionIncluded(item);
                         <div class="publication-section-row @(!included ? "omitted" : null)">
-                            <div><strong>@item.Title</strong><span>@SectionTypeLabel(item) · @(item.IsInherited ? "From Core Book" : included ? "Included" : "Omitted") · @SectionStartSideSummary(item.StartSide)</span></div>
+                            <div><strong>@item.Title</strong><span>@SectionTypeLabel(item) · @(item.IsInherited ? item.HasOrderOverride ? "From Core Book · Release order" : "From Core Book" : included ? "Included" : "Omitted") · @SectionStartSideSummary(item.StartSide)</span></div>
                             <div class="button-row">
                                 <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section earlier" aria-label="Move @item.Title earlier" disabled="@(!CanMovePublicationSection(item, -1))" @onclick="() => MovePublicationSectionAsync(item, -1)">↑</button>
                                 <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section later" aria-label="Move @item.Title later" disabled="@(!CanMovePublicationSection(item, 1))" @onclick="() => MovePublicationSectionAsync(item, 1)">↓</button>

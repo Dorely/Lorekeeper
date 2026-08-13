@@ -858,6 +858,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
             entity.Property(e => e.PrintCoverMode).HasConversion<string>();
             entity.Property(e => e.TitlePageMode).HasConversion<string>();
             entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.Property(e => e.PublicationSectionOrderJson).HasDefaultValue("{}");
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.PublicationEditions)

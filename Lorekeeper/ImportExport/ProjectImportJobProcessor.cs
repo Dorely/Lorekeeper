@@ -142,6 +142,7 @@ public sealed class ProjectImportJobProcessor(
                             state.FontFamilyMap,
                             state.EditionMap,
                             state.CompositionMap,
+                            state.PublicationSectionMap,
                             state.CoreMatterMap,
                             state.CorePlacementMap,
                             document.FormatVersion,
@@ -766,6 +767,16 @@ public sealed class ProjectImportJobProcessor(
                 || edition.OutlineItems.GroupBy(item => item.SortOrder).Any(group => group.Count() > 1))
             {
                 throw new InvalidOperationException($"Publication edition {edition.Id:N} contains invalid content order values.");
+            }
+            if (document.FormatVersion >= 22)
+            {
+                var validSectionOrderIds = document.PublicationSections
+                    .Where(section => section.EditionId == null
+                        || section.EditionId == edition.Id && section.CoreSectionId == null)
+                    .Select(section => section.Id)
+                    .ToHashSet();
+                if (edition.PublicationSectionOrder.Any(item => item.Value < 0 || !validSectionOrderIds.Contains(item.Key)))
+                    throw new InvalidOperationException($"Publication edition {edition.Id:N} contains an invalid publication section order overlay.");
             }
             if (document.FormatVersion < 16)
             {
@@ -1911,6 +1922,7 @@ public sealed class ProjectImportJobProcessor(
         IReadOnlyDictionary<Guid, Guid> fontFamilyMap,
         IReadOnlyDictionary<Guid, Guid> editionMap,
         IReadOnlyDictionary<Guid, Guid> compositionMap,
+        IReadOnlyDictionary<Guid, Guid> publicationSectionMap,
         IReadOnlyDictionary<Guid, Guid> coreMatterMap,
         IReadOnlyDictionary<Guid, Guid> corePlacementMap,
         int formatVersion,
@@ -2010,6 +2022,13 @@ public sealed class ProjectImportJobProcessor(
                 : "[]",
             InheritsCoreCover = formatVersion >= 16 && importedEdition.InheritsCoreCover,
             EditionSpecificContentEnabled = formatVersion >= 18 && importedEdition.EditionSpecificContentEnabled,
+            PublicationSectionOrderJson = formatVersion >= 22
+                ? PublicationSectionOrderCodec.Serialize(importedEdition.PublicationSectionOrder.ToDictionary(
+                    item => publicationSectionMap.TryGetValue(item.Key, out var mapped)
+                        ? mapped
+                        : throw new InvalidDataException($"Publication section order references missing section {item.Key:N}."),
+                    item => item.Value))
+                : "{}",
         };
         var exportedCoverImageId = importedEdition.SelectedCoverImageId;
         Guid? exportedLegacyCoverChapterId = null;

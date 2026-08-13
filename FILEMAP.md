@@ -63,7 +63,7 @@
 |------|-------------|
 | `Lorekeeper.Tests.csproj` / `Usings.cs` | xUnit project restricted to startup database and versioned project import/export migration-safety fixtures. |
 | `ManuscriptMigrationIntegrationTests.cs` | Actual legacy-schema WAL migration with plain-text audit compatibility, backup/journal/hash validation, confirmation, and restore drills. |
-| `ProjectExportCompatibilityTests.cs` | Current v21 manuscript/page-setup/composition/Core Book/publication-section/PDF-presentation/edition-content/print-product/cover/font fixtures plus isolated older fail-closed import-boundary checks. |
+| `ProjectExportCompatibilityTests.cs` | Current v22 manuscript/page-setup/composition/Core Book/publication-section/order/PDF-presentation/edition-content/print-product/cover/font fixtures plus isolated older fail-closed import-boundary checks. |
 | `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trips for manuscript/image remapping, current and legacy cover-image conversion, and whole-import rollback on late publication conflicts. |
 | `PublishConversationMigrationTests.cs` | Populated pre-v13 upgrade fixture proving manuscript, edition, render, artifact hash/bytes, and new Publish transcript persistence survive unchanged. |
 | `LorekeeperPressMigrationTests.cs` | Fully populated installed-schema fixture run through the real startup migrator, including no-release Picture Page scene/asset/binding preservation, Press/Core projection equality, recovery cases, and whole-database byte/hash checks. |
@@ -222,7 +222,7 @@
 | File | Description |
 |------|-------------|
 | `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, collapsible Front/Main content/Back flow, direct chapter and publication-section inclusion/placement, product-filtered print-release setup, autosave, target-preserving full-height editors, progress, previews, blockers, and downloads. |
-| `PublicationPdfPreview.razor` (+ `.razor.css`) | Lorekeeper-owned artifact viewer with single-page or fixed two-leaf facing rows, optional visible page seam, lazy immutable page images, and facing/seam-hidden defaults. |
+| `PublicationPdfPreview.razor` (+ `.razor.css`) | Lorekeeper-owned artifact viewer with single-page or fixed two-leaf facing rows, transparent parity slots, optional visible page seam, lazy immutable page images, and facing/seam-hidden defaults. |
 | `PublishChatPanel.razor` (+ `.razor.css`) | Refresh-safe Publish adapter over shared `ChatSurface` with a flush-returned exact turn context, persisted transcript/tool chips, streaming, Stop/Reset, provider/token state, image attachments, active-turn reconnection, and structured workspace mutation callbacks. |
 
 ### Components/Pages/Projects/Outline/
@@ -311,10 +311,10 @@
 | `ProjectImportReportItem.cs` | EF entity for import job report rows covering validation, structural appends, type/entity/relationship merges, indexing warnings, and failures. |
 | `WebIngestCandidate.cs` | EF entity for cached webpage/search-result sources used by Research and manual webpage ingest. Stores search/fetch provenance, extracted text/excerpt, cached links JSON, content hash, staging rationale, and queued ingest job id. |
 | `PublicationBook.cs` | One revisioned Core Book per project with shared metadata, structure/PDF-presentation defaults, fixed outline content, and reusable front-cover scene. |
-| `PublicationEdition.cs` | Optional paperback/hardcover/EPUB/PDF ebook release aggregate with destination, exact registry/product selection or Generic printer template, identifier, status, sparse Core override markers, and opt-in edition-content state. |
+| `PublicationEdition.cs` | Optional paperback/hardcover/EPUB/PDF ebook release aggregate with destination, exact registry/product selection or Generic printer template, identifier, status, sparse Core field/section-order overrides, and opt-in edition-content state. |
 | `PublicationEditionChapterOverride.cs` | Copy-on-write release chapter snapshot with Core base revision/hash and edition-owned manuscript revision. |
 | `PublicationEditionOutlineItem.cs` | Sparse release chapter-inclusion overlays with typed foreign keys; reading order always follows the Core outline and act presentation is controlled by release settings. |
-| `PublicationSection.cs` | Core/release publication section aggregate with live inheritance, explicit inclusion/order/start-side settings, outline-relative anchors, semantic manuscript content, and optional section-owned Designed Page compositions. |
+| `PublicationSection.cs` | Core/release publication section aggregate with live content inheritance, explicit inclusion/start-side settings, outline-relative anchors, semantic manuscript content, and optional section-owned Designed Page compositions; release-only order stays separate from content customization. |
 | `PublicationMatter.cs` / `PublicationImagePlacement.cs` | Historical persisted shapes retained only for protected startup conversion and versioned pre-v19 import; active publishing never reads or mutates them. |
 | `PublishAsset.cs` | EF entity for uploaded/generated/edited/cropped project images with bytes, crop lineage/coordinates, alt text, prompt/source metadata, masks, and placement navigation. |
 | `PublicationRender.cs` | Core/release-targeted render jobs, immutable artifact bytes/provenance including private Reading PDFs, statuses, and stable manuscript-block page maps. |
@@ -540,13 +540,13 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | Current v21 portable DTOs with v4 manuscripts, page setup, authoring/edition variants, Core Book publication sections/PDF presentation, sparse releases, exact print products/templates, edition chapter snapshots/cover surfaces, accessibility data, and complete custom-font binaries; retains isolated older input adapters. |
+| `ProjectExportModels.cs` | Current v22 portable DTOs with v4 manuscripts, page setup, authoring/edition variants, Core Book publication sections/PDF presentation, sparse release section ordering, exact print products/templates, edition chapter snapshots/cover surfaces, accessibility data, and complete custom-font binaries; retains isolated older input adapters. |
 | `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON including visual/image data for Full exports, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
-| `ProjectImportJobProcessor.cs` | Runs one import job, importing v21 manuscripts/page setup/Core, publication sections and compositions, releases/print products/cover surfaces/fonts, adapting older section-side defaults only at the versioned boundary, then refreshing projections and indexes. |
+| `ProjectImportJobProcessor.cs` | Runs one import job, importing v22 manuscripts/page setup/Core, publication sections/order overlays and compositions, releases/print products/cover surfaces/fonts, adapting older section-side defaults only at the versioned boundary, then refreshing projections and indexes. |
 
 ### Images/
 
@@ -606,7 +606,7 @@
 | `PublishModels.cs` | Core/release targets, effective workspace/readiness, revision-aware sparse mutations, publication-section, projection, cover, preparation, and artifact contracts. |
 | `PublicationBookService.cs` | Owning Core Book boundary for seeding, metadata/presentation patches with linked system-page copy propagation, consolidated workspace-detail reads, chapter inclusion, page-setup-normalized reusable covers, revisions, and source-fingerprint invalidation. |
 | `IPublicationEditionService.cs` / `PublicationEditionService.cs` | Owning release lifecycle and sparse-override boundary for presets, collision-safe numbered names, chapter inclusion, edition-content-aware cloning, archive/compare/audit, and effective fingerprints. |
-| `PublicationSectionService.cs` | Revision-safe Core/release publication-section ownership, live inheritance/customization, exclusive prose-or-designed authoring modes, user-controlled inclusion/order/start side, visible binding refresh, fixed-outline anchoring, validation, and reset/delete behavior. |
+| `PublicationSectionService.cs` / `PublicationSectionOrderCodec.cs` | Revision-safe Core/release publication-section ownership and stable sparse release-order serialization, keeping order changes separate from live content inheritance/customization while preserving prose/designed authoring, inclusion/start side, bindings, anchoring, validation, and reset/delete behavior. |
 | `PublicationSectionMigrationService.cs` | Protected, journaled startup conversion from historical matter/placement rows into publication sections, plus fail-closed repair of historical system-page semantic-revision drift. |
 | `EditionContentService.cs` | Enables/discards release content, resets individual chapters, reports stable-block differences/Core drift, and diagnoses release Designed Page geometry with Editor deep-link targets. |
 | `EditionContentMigrationService.cs` | Protected style/typography materialization into edition snapshots and shared Book Text Styles, proof-row removal, effective-projection validation, artifact Legacy marking, and cleanup handoff. |

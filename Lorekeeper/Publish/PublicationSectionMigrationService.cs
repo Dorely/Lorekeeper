@@ -39,6 +39,7 @@ public sealed class PublicationSectionMigrationService(
                 cancellationToken);
             await db.GetService<IMigrator>().MigrateAsync(AdditiveMigrationId, cancellationToken);
         }
+        await DatabaseStartupMigrationService.EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsurePublicationSectionStartSideCompatibilityColumnAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureAuthoringTriggersAsync(db, cancellationToken);

@@ -65,6 +65,7 @@ public class PublicationEdition
     public PublicationEditionStatus Status { get; set; } = PublicationEditionStatus.Draft;
     public long Revision { get; set; }
     public string OverrideFieldsJson { get; set; } = "[]";
+    public string PublicationSectionOrderJson { get; set; } = "{}";
 
     public string TitleOverride { get; set; } = string.Empty;
     public string Subtitle { get; set; } = string.Empty;

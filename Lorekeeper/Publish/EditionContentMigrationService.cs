@@ -30,6 +30,7 @@ public sealed class EditionContentMigrationService(
             return;
         if (!applied.Contains(AdditiveMigrationId))
             await db.GetService<IMigrator>().MigrateAsync(AdditiveMigrationId, cancellationToken);
+        await DatabaseStartupMigrationService.EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsurePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         if (await db.ManuscriptMigrationJournals.AsNoTracking().AnyAsync(

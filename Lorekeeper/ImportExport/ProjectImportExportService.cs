@@ -6,6 +6,7 @@ using Lorekeeper.Manuscripts;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Publish;
 using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.ImportExport;
@@ -487,6 +488,7 @@ public sealed class ProjectImportExportService(
             OverrideFields = ParseOverrideFields(profile.OverrideFieldsJson),
             InheritsCoreCover = profile.InheritsCoreCover,
             EditionSpecificContentEnabled = profile.EditionSpecificContentEnabled,
+            PublicationSectionOrder = PublicationSectionOrderCodec.Deserialize(profile.PublicationSectionOrderJson),
             ChapterOverrides = profile.ChapterOverrides
                 .OrderBy(item => item.ChapterId)
                 .Select(item => new ProjectExportEditionChapterOverride(

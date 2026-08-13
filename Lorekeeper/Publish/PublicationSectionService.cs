@@ -26,6 +26,7 @@ public sealed record PublicationSectionView(
     PublicationSectionStartSide StartSide,
     bool IsIncluded,
     bool IsInherited,
+    bool HasOrderOverride,
     int LocalOrder,
     ManuscriptDocument Manuscript,
     long Revision,
@@ -123,24 +124,30 @@ public sealed class PublicationSectionService(
         if (target.EditionId is not Guid editionId)
             return await ViewsAsync(target, core, inherited: false, cancellationToken);
 
-        await RequireEditionAsync(target.ProjectId, editionId, cancellationToken);
+        var edition = await db.PublicationEditions.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == editionId
+                && item.ProjectId == target.ProjectId
+                && item.Status != PublicationEditionStatus.Archived, cancellationToken)
+            ?? throw new KeyNotFoundException("Publication release was not found or is archived.");
+        var orderOverrides = PublicationSectionOrderCodec.Deserialize(edition.PublicationSectionOrderJson);
         var local = await db.PublicationSections.AsNoTracking()
             .Where(item => item.ProjectId == target.ProjectId && item.EditionId == editionId)
             .ToListAsync(cancellationToken);
         var overlays = local.Where(item => item.CoreSectionId.HasValue)
             .ToDictionary(item => item.CoreSectionId!.Value);
-        var effective = new List<(PublicationSection Row, bool Inherited)>();
+        var effective = new List<(PublicationSection Row, bool Inherited, int EffectiveOrder, bool OrderOverridden)>();
         foreach (var section in core)
         {
             if (overlays.TryGetValue(section.Id, out var overlay))
             {
                 if (!overlay.IsExcluded)
-                    effective.Add((overlay, false));
+                    effective.Add(EffectiveRow(overlay, orderOverrides));
             }
             else
-                effective.Add((section, true));
+                effective.Add(EffectiveRow(section, orderOverrides, inherited: true));
         }
-        effective.AddRange(local.Where(item => item.CoreSectionId == null && !item.IsExcluded).Select(item => (item, false)));
+        effective.AddRange(local.Where(item => item.CoreSectionId == null && !item.IsExcluded)
+            .Select(item => EffectiveRow(item, orderOverrides)));
         return await ViewsAsync(target, effective, cancellationToken);
     }
 
@@ -464,32 +471,39 @@ public sealed class PublicationSectionService(
         if (selected.Any(item => item.Anchor != first.Anchor || item.TargetId != first.TargetId)
             || effective.Count(item => item.Anchor == first.Anchor && item.TargetId == first.TargetId) != selected.Count)
             throw new InvalidOperationException("Reorder every section at one anchor together.");
-        foreach (var (id, index) in orderedSectionIds.Select((id, index) => (id, index)))
-        {
-            var view = selected.Single(item => item.Id == id);
-            if (view.IsInherited && target.EditionId is Guid editionId)
-                _ = await CustomizeAsync(target.ProjectId, editionId, view.Id, cancellationToken);
-        }
         await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
-        var ids = target.EditionId is null
-            ? orderedSectionIds
-            : await db.PublicationSections.AsNoTracking()
-                .Where(item => item.ProjectId == target.ProjectId
-                    && item.EditionId == target.EditionId
-                    && ((item.CoreSectionId.HasValue && orderedSectionIds.Contains(item.CoreSectionId.Value))
-                        || (!item.CoreSectionId.HasValue && orderedSectionIds.Contains(item.Id))))
-                .Select(item => item.Id)
-                .ToListAsync(cancellationToken);
-        var rows = await db.PublicationSections.Where(item => ids.Contains(item.Id)).ToListAsync(cancellationToken);
-        var orderMap = rows.Select((row, index) => (row.Id, index)).ToDictionary(item => item.Id, item => item.index);
-        var requested = orderedSectionIds.Select((id, index) => (id, index)).ToDictionary(item => item.id, item => item.index);
-        foreach (var row in rows)
+        if (target.EditionId is Guid editionId)
         {
-            var sourceId = row.CoreSectionId ?? row.Id;
-            row.LocalOrder = requested.GetValueOrDefault(sourceId, orderMap[row.Id]);
-            row.UpdatedAt = DateTime.UtcNow;
+            var edition = await db.PublicationEditions.SingleOrDefaultAsync(item => item.Id == editionId
+                && item.ProjectId == target.ProjectId
+                && item.Status != PublicationEditionStatus.Archived, cancellationToken)
+                ?? throw new KeyNotFoundException("Publication release was not found or is archived.");
+            var orderOverrides = PublicationSectionOrderCodec.Deserialize(edition.PublicationSectionOrderJson);
+            foreach (var (id, index) in orderedSectionIds.Select((id, index) => (id, index)))
+            {
+                var view = selected.Single(item => item.Id == id);
+                orderOverrides[view.CoreSectionId ?? view.Id] = index;
+            }
+            edition.PublicationSectionOrderJson = PublicationSectionOrderCodec.Serialize(orderOverrides);
+            edition.Revision = checked(edition.Revision + 1);
+            edition.UpdatedAt = DateTime.UtcNow;
         }
-        await TouchTargetAsync(target, cancellationToken);
+        else
+        {
+            var rows = await db.PublicationSections
+                .Where(item => item.ProjectId == target.ProjectId
+                    && item.EditionId == null
+                    && orderedSectionIds.Contains(item.Id))
+                .ToListAsync(cancellationToken);
+            var requested = orderedSectionIds.Select((id, index) => (id, index))
+                .ToDictionary(item => item.id, item => item.index);
+            foreach (var row in rows)
+            {
+                row.LocalOrder = requested[row.Id];
+                row.UpdatedAt = DateTime.UtcNow;
+            }
+            await TouchBookAsync(target.ProjectId, cancellationToken);
+        }
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -662,11 +676,11 @@ public sealed class PublicationSectionService(
         IReadOnlyList<PublicationSection> rows,
         bool inherited,
         CancellationToken cancellationToken) =>
-        await ViewsAsync(target, rows.Select(item => (item, inherited)).ToList(), cancellationToken);
+        await ViewsAsync(target, rows.Select(item => (item, inherited, item.LocalOrder, false)).ToList(), cancellationToken);
 
     private async Task<IReadOnlyList<PublicationSectionView>> ViewsAsync(
         PublicationSectionTarget target,
-        IReadOnlyList<(PublicationSection Row, bool Inherited)> rows,
+        IReadOnlyList<(PublicationSection Row, bool Inherited, int EffectiveOrder, bool OrderOverridden)> rows,
         CancellationToken cancellationToken)
     {
         var actTitles = await db.Acts.AsNoTracking().Where(item => item.ProjectId == target.ProjectId)
@@ -682,9 +696,9 @@ public sealed class PublicationSectionService(
                     ? actTitles.Keys.ToList().IndexOf(targetId)
                     : chapterTitles.Keys.ToList().IndexOf(targetId)
                 : -1)
-            .ThenBy(item => item.Row.LocalOrder)
+            .ThenBy(item => item.EffectiveOrder)
             .ThenBy(item => item.Row.Id)
-            .Select(item => View(item.Row, item.Inherited, actTitles, chapterTitles, bindingValues))
+            .Select(item => View(item.Row, item.Inherited, item.EffectiveOrder, item.OrderOverridden, actTitles, chapterTitles, bindingValues))
             .ToList();
         return views;
     }
@@ -724,6 +738,8 @@ public sealed class PublicationSectionService(
     private static PublicationSectionView View(
         PublicationSection row,
         bool inherited,
+        int effectiveOrder,
+        bool orderOverridden,
         IReadOnlyDictionary<Guid, string> acts,
         IReadOnlyDictionary<Guid, string> chapters,
         IReadOnlyDictionary<PublicationBoundField, string> bindingValues)
@@ -739,9 +755,20 @@ public sealed class PublicationSectionService(
             row.Id, row.CoreSectionId, row.EditionId, row.Title, row.Kind, row.SystemRole, row.Anchor,
             row.TargetKind, row.TargetId, targetTitle, row.InclusionMode, row.StartSide,
             row.InclusionMode != PublicationSectionInclusionMode.Omitted && !row.IsExcluded,
-            inherited, row.LocalOrder, document, row.Revision,
+            inherited, orderOverridden, effectiveOrder, document, row.Revision,
             document.Content.Count(block => block.Type == ManuscriptBlockType.DesignedPage),
             document.Content.Count(block => block.Type == ManuscriptBlockType.Figure));
+    }
+
+    private static (PublicationSection Row, bool Inherited, int EffectiveOrder, bool OrderOverridden) EffectiveRow(
+        PublicationSection row,
+        IReadOnlyDictionary<Guid, int> orderOverrides,
+        bool inherited = false)
+    {
+        var identity = row.CoreSectionId ?? row.Id;
+        return orderOverrides.TryGetValue(identity, out var order)
+            ? (row, inherited, order, true)
+            : (row, inherited, row.LocalOrder, false);
     }
 
     private async Task<PublicationSectionView> CustomizeAndApplyUnderLeaseAsync(

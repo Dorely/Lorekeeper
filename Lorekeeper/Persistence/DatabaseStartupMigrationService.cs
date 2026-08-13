@@ -24,11 +24,17 @@ public sealed class DatabaseStartupMigrationService(
     IPrintProductMigrationService printProductMigration,
     IDatabaseMigrationRecoveryService recovery) : IDatabaseStartupMigrationService
 {
+    private const string PublicationSectionOrderMigrationId = "20260813204554_AddPublicationSectionOrderOverrides";
+
     public async Task<bool> ApplyAsync(CancellationToken cancellationToken = default)
     {
+        await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await manuscriptMigration.ApplyPendingAsync(db, cancellationToken);
+        await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await editionMigration.ApplyPendingAsync(db, cancellationToken);
+        await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await pressMigration.ApplyPendingAsync(db, cancellationToken);
+        await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
 
         var appliedMigrations = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
@@ -39,6 +45,7 @@ public sealed class DatabaseStartupMigrationService(
                 VisualCompositionMigrationService.AdditiveMigrationId,
                 cancellationToken);
             await EnsureEditionCompatibilityColumnsAsync(db, cancellationToken);
+            await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
             await visualCompositionMigration.ApplyPendingAsync(db, cancellationToken);
             if (!await recovery.IsRecoveryRequiredAsync(cancellationToken))
                 await visualCompositionMigration.ApplyFinalSchemaAsync(db, cancellationToken);
@@ -47,11 +54,13 @@ public sealed class DatabaseStartupMigrationService(
         {
             await EnsureEditionCompatibilityColumnsAsync(db, cancellationToken);
             await visualCompositionMigration.ApplyFinalSchemaAsync(db, cancellationToken);
+            await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
             await visualCompositionMigration.ApplyPendingAsync(db, cancellationToken);
         }
         // Visual cleanup rebuilds several tables from its historical model and
         // therefore intentionally drops future compatibility columns.
         await EnsureEditionCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
 
         var migrationsBeforeAuthoring = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
             .ToHashSet(StringComparer.Ordinal);
@@ -59,18 +68,24 @@ public sealed class DatabaseStartupMigrationService(
             await db.GetService<IMigrator>().MigrateAsync(
                 PublicationCoreMigrationService.SchemaMigrationId,
                 cancellationToken);
+        await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
 
         await EnsurePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await authoringPageMigration.ApplyPendingAsync(db, cancellationToken);
+        await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await publicationCoreMigration.ApplyPendingAsync(db, cancellationToken);
+        await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
 
         await RemoveEditionCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await RemovePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await editionContentMigration.ApplyPendingAsync(db, cancellationToken);
+        await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await RemovePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await publicationSectionMigration.ApplyPendingAsync(db, cancellationToken);
+        await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
 
         var migrationsBeforePrintProducts = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
             .ToHashSet(StringComparer.Ordinal);
@@ -82,8 +97,10 @@ public sealed class DatabaseStartupMigrationService(
                 await db.GetService<IMigrator>().MigrateAsync(
                     PrintProductMigrationService.AdditiveMigrationId,
                     cancellationToken);
+                await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
             }
             await printProductMigration.ApplyPendingAsync(db, cancellationToken);
+            await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         }
 
         if (await recovery.IsRecoveryRequiredAsync(cancellationToken))
@@ -97,10 +114,16 @@ public sealed class DatabaseStartupMigrationService(
             await db.GetService<IMigrator>().MigrateAsync(
                 PublicationCoreMigrationService.CleanupMigrationId,
                 cancellationToken);
+        await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         if (!migrationsBeforeCleanup.Contains(PrintProductMigrationService.CleanupMigrationId))
             await db.GetService<IMigrator>().MigrateAsync(
                 PrintProductMigrationService.CleanupMigrationId,
                 cancellationToken);
+        // Historical cleanup migrations rebuild PublicationEditions from their
+        // own immutable models. Restore the compatibility column, remove it at
+        // the current boundary, then let the additive migration own it.
+        await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await RemovePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await db.GetService<IMigrator>().MigrateAsync(cancellationToken: cancellationToken);
         await publicationSectionMigration.RepairSemanticRevisionDriftAsync(db, cancellationToken);
         return !await recovery.IsRecoveryRequiredAsync(cancellationToken);
@@ -266,6 +289,55 @@ public sealed class DatabaseStartupMigrationService(
                 return true;
         }
         return false;
+    }
+
+    internal static async Task EnsurePublicationSectionOrderCompatibilityColumnAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(PublicationSectionOrderMigrationId))
+            return;
+        if (!await HasTableAsync(db, "PublicationEditions", cancellationToken))
+            return;
+        if (!await HasColumnAsync(db, "PublicationEditions", "PublicationSectionOrderJson", cancellationToken))
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"PublicationEditions\" ADD COLUMN \"PublicationSectionOrderJson\" TEXT NOT NULL DEFAULT '{{}}';",
+                cancellationToken);
+        }
+        db.ChangeTracker.Clear();
+    }
+
+    private static async Task RemovePublicationSectionOrderCompatibilityColumnAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(PublicationSectionOrderMigrationId)
+            || !await HasColumnAsync(db, "PublicationEditions", "PublicationSectionOrderJson", cancellationToken))
+            return;
+        await db.Database.ExecuteSqlRawAsync(
+            "ALTER TABLE \"PublicationEditions\" DROP COLUMN \"PublicationSectionOrderJson\";",
+            cancellationToken);
+        db.ChangeTracker.Clear();
+    }
+
+    private static async Task<bool> HasTableAsync(
+        AppDbContext db,
+        string table,
+        CancellationToken cancellationToken)
+    {
+        var connection = db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+            await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $table";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "$table";
+        parameter.Value = table;
+        command.Parameters.Add(parameter);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) > 0;
     }
 
     internal static async Task EnsurePrintProductCompatibilityColumnsAsync(AppDbContext db, CancellationToken cancellationToken)
