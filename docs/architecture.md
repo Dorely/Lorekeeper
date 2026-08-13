@@ -973,6 +973,9 @@ local order at the destination instead of carrying an unrelated source order.
 Reordering inherited sections within a release stores a sparse order overlay on
 the release. It does not materialize a section content override, copy the Core
 manuscript or canvas, or change the section's inherited-content status.
+The effective-configuration resolver applies that overlay before source
+fingerprinting, export, rendering, and packaging, so a reorder immediately
+stales older artifacts and every generated format follows the visible order.
 The visible contents
 section is generated from effective structure. Generated sections never enter
 the ordinary manuscript editor, and user-created sections cannot claim those

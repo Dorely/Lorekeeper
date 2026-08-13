@@ -877,13 +877,18 @@ public sealed class PublicationEffectiveConfigurationResolver(
             fields,
             await ResolveOutlineAsync(projectId, editionId, cancellationToken),
             readPublicationSections
-                ? await ResolveSectionsAsync(projectId, editionId, cancellationToken)
+                ? await ResolveSectionsAsync(
+                    projectId,
+                    editionId,
+                    stored.PublicationSectionOrderJson,
+                    cancellationToken)
                 : []);
     }
 
     private async Task<IReadOnlyList<PublicationSection>> ResolveSectionsAsync(
         Guid projectId,
         Guid editionId,
+        string publicationSectionOrderJson,
         CancellationToken cancellationToken)
     {
         var core = await db.PublicationSections.AsNoTracking()
@@ -891,9 +896,17 @@ public sealed class PublicationEffectiveConfigurationResolver(
         var local = await db.PublicationSections.AsNoTracking()
             .Where(item => item.ProjectId == projectId && item.EditionId == editionId).ToListAsync(cancellationToken);
         var overlays = local.Where(item => item.CoreSectionId.HasValue).ToDictionary(item => item.CoreSectionId!.Value);
-        return core.Where(item => !overlays.TryGetValue(item.Id, out var overlay) || !overlay.IsExcluded)
+        var orderOverrides = PublicationSectionOrderCodec.Deserialize(publicationSectionOrderJson);
+        var effective = core.Where(item => !overlays.TryGetValue(item.Id, out var overlay) || !overlay.IsExcluded)
             .Select(item => overlays.GetValueOrDefault(item.Id, item))
             .Concat(local.Where(item => item.CoreSectionId == null && !item.IsExcluded))
+            .ToList();
+        foreach (var section in effective)
+        {
+            if (orderOverrides.TryGetValue(section.CoreSectionId ?? section.Id, out var order))
+                section.LocalOrder = order;
+        }
+        return effective
             .OrderBy(item => item.Anchor).ThenBy(item => item.LocalOrder).ThenBy(item => item.Id)
             .ToList();
     }
@@ -945,6 +958,7 @@ public sealed class PublicationEffectiveConfigurationResolver(
         BodyLineHeight = source.BodyLineHeight, SelectedCoverImageId = source.SelectedCoverImageId,
         AllowDesignedPageOverrides = source.AllowDesignedPageOverrides, InheritsCoreCover = source.InheritsCoreCover,
         EditionSpecificContentEnabled = source.EditionSpecificContentEnabled,
+        PublicationSectionOrderJson = source.PublicationSectionOrderJson,
         CreatedAt = source.CreatedAt, UpdatedAt = source.UpdatedAt,
     };
 }
