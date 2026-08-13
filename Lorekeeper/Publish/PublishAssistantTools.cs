@@ -589,7 +589,8 @@ public sealed class PublishAssistantTools(
     {
         var book = await books.UpdateAsync(context.ProjectId, patch);
         return Serialize(new { ok = true, target = "core", targetId = context.ProjectId, revision = book.Revision,
-            summary = "Core Book updated; inheriting releases now resolve the changed values.", mutation = new { kind = "core-book", refresh = new[] { "core", "releases", "readiness", "artifacts" } } });
+            summary = "Core Book and linked title/copyright page copy updated; inheriting releases now resolve the changed values.",
+            mutation = new { kind = "core-book", refresh = new[] { "core", "publication-sections", "releases", "readiness", "artifacts" } } });
     }
 
     private async Task<string> ReadCoreContentAsync(PublishAssistantContext context)
@@ -1576,6 +1577,11 @@ public sealed class PublishAssistantTools(
                 throw new InvalidOperationException("The selected page composition is not part of this publication section.");
             }
 
+            section = await publicationSections.EnsureSystemDesignedPageAsync(
+                target,
+                section.Id,
+                context.TurnCancellationToken);
+
             var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable.");
             var composition = await service.GetAsync(context.ProjectId, effectiveCompositionId, context.TurnCancellationToken)
                 ?? throw new KeyNotFoundException("Publication-section page composition was not found.");
@@ -2102,6 +2108,11 @@ public sealed class PublishAssistantTools(
             throw new InvalidOperationException("The selected variant does not belong to that publication-section page.");
         if (variant.Composition.PublicationSectionId is null || variant.Composition.EditionId != releaseId)
             throw new InvalidOperationException("The page does not belong to the selected Core or release publication section. Customize an inherited release section before changing its page.");
+        _ = await publicationSections.EnsureSystemDesignedPageAsync(
+            new PublicationSectionTarget(context.ProjectId, releaseId),
+            variant.Composition.PublicationSectionId.Value,
+            context.TurnCancellationToken);
+        variant = await service.ReadVariantAsync(context.ProjectId, variantId, context.TurnCancellationToken);
         return variant;
     }
 

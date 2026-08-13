@@ -270,29 +270,7 @@ public sealed class PublicationSectionService(
             var compositions = await db.PageCompositions
                 .Where(item => item.PublicationSectionId == section.Id)
                 .ToListAsync(cancellationToken);
-            var changed = false;
-            foreach (var composition in compositions)
-            {
-                // Binding refreshes update the semantic manuscript and its owning
-                // composition as one revisioned record. Older builds incremented
-                // only the composition row, so accept that one known drift here
-                // and repair it before exposing the canvas again.
-                var currentSemantic = ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson);
-                ManuscriptCodec.Validate(currentSemantic, composition.Id, currentSemantic.Revision);
-                if (currentSemantic.Revision > composition.Revision)
-                    throw new InvalidDataException("A publication page manuscript is newer than its owning composition.");
-                var resolved = ResolveBindings(currentSemantic, currentValues);
-                var contentChanged = !ManuscriptCodec.ContentEquals(currentSemantic, resolved);
-                var revisionDrifted = currentSemantic.Revision != composition.Revision;
-                if (!contentChanged && !revisionDrifted)
-                    continue;
-
-                if (contentChanged)
-                    composition.Revision = checked(composition.Revision + 1);
-                composition.SemanticManuscriptJson = ManuscriptCodec.Serialize(
-                    resolved with { Revision = composition.Revision });
-                changed = true;
-            }
+            var changed = ApplyResolvedBindings(compositions, currentValues) > 0;
             if (changed)
                 await db.SaveChangesAsync(cancellationToken);
             return await GetStoredAsync(target, section.Id, cancellationToken);
@@ -622,6 +600,53 @@ public sealed class PublicationSectionService(
                 }
                 : block).ToList(),
         };
+
+    internal static async Task<int> RefreshSystemBindingsAsync(
+        AppDbContext db,
+        PublicationSectionTarget target,
+        IReadOnlyDictionary<PublicationBoundField, string> values,
+        CancellationToken cancellationToken = default)
+    {
+        var compositions = await db.PageCompositions
+            .Where(item => item.ProjectId == target.ProjectId
+                && item.EditionId == target.EditionId
+                && item.PublicationSectionId != null
+                && item.PublicationSection != null
+                && (item.PublicationSection.SystemRole == PublicationSectionSystemRole.Title
+                    || item.PublicationSection.SystemRole == PublicationSectionSystemRole.Copyright))
+            .ToListAsync(cancellationToken);
+        return ApplyResolvedBindings(compositions, values);
+    }
+
+    private static int ApplyResolvedBindings(
+        IReadOnlyList<PageComposition> compositions,
+        IReadOnlyDictionary<PublicationBoundField, string> values)
+    {
+        var changed = 0;
+        foreach (var composition in compositions)
+        {
+            // Binding refreshes update the semantic manuscript and its owning
+            // composition as one revisioned record. Older builds incremented
+            // only the composition row, so accept that one known drift here
+            // and repair it before exposing the canvas again.
+            var current = ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson);
+            ManuscriptCodec.Validate(current, composition.Id, current.Revision);
+            if (current.Revision > composition.Revision)
+                throw new InvalidDataException("A publication page manuscript is newer than its owning composition.");
+            var resolved = ResolveBindings(current, values);
+            var contentChanged = !ManuscriptCodec.ContentEquals(current, resolved);
+            var revisionDrifted = current.Revision != composition.Revision;
+            if (!contentChanged && !revisionDrifted)
+                continue;
+
+            if (contentChanged)
+                composition.Revision = checked(composition.Revision + 1);
+            composition.SemanticManuscriptJson = ManuscriptCodec.Serialize(
+                resolved with { Revision = composition.Revision });
+            changed++;
+        }
+        return changed;
+    }
 
     private async Task<IReadOnlyList<PublicationSectionView>> ViewsAsync(
         PublicationSectionTarget target,

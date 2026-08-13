@@ -603,9 +603,9 @@
 | File | Description |
 |------|-------------|
 | `PublishModels.cs` | Core/release targets, effective workspace/readiness, revision-aware sparse mutations, publication-section, projection, cover, preparation, and artifact contracts. |
-| `PublicationBookService.cs` | Owning Core Book boundary for seeding, metadata/presentation patches, consolidated workspace-detail reads, chapter inclusion, page-setup-normalized reusable covers, revisions, and style/font-aware source fingerprint invalidation. |
+| `PublicationBookService.cs` | Owning Core Book boundary for seeding, metadata/presentation patches with linked system-page copy propagation, consolidated workspace-detail reads, chapter inclusion, page-setup-normalized reusable covers, revisions, and source-fingerprint invalidation. |
 | `IPublicationEditionService.cs` / `PublicationEditionService.cs` | Owning release lifecycle and sparse-override boundary for presets, collision-safe numbered names, chapter inclusion, edition-content-aware cloning, archive/compare/audit, and effective fingerprints. |
-| `PublicationSectionService.cs` | Revision-safe Core/release publication-section ownership, live inheritance/customization, exclusive prose-or-designed authoring modes, system title/copyright Designed Page materialization with effective metadata bindings, fixed-outline anchoring, validation, and reset/delete behavior. |
+| `PublicationSectionService.cs` | Revision-safe Core/release publication-section ownership, live inheritance/customization, exclusive prose-or-designed authoring modes, visible title/copyright binding refresh, fixed-outline anchoring, validation, and reset/delete behavior. |
 | `PublicationSectionMigrationService.cs` | Protected, journaled startup conversion from historical matter/placement rows into publication sections, plus fail-closed repair of historical system-page semantic-revision drift. |
 | `EditionContentService.cs` | Enables/discards release content, resets individual chapters, reports stable-block differences/Core drift, and diagnoses release Designed Page geometry with Editor deep-link targets. |
 | `EditionContentMigrationService.cs` | Protected style/typography materialization into edition snapshots and shared Book Text Styles, proof-row removal, effective-projection validation, artifact Legacy marking, and cleanup handoff. |

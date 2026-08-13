@@ -313,6 +313,20 @@ public sealed class PublicationBookService(
         Validate(book);
         book.Revision++;
         book.UpdatedAt = DateTime.UtcNow;
+        _ = await PublicationSectionService.RefreshSystemBindingsAsync(
+            db,
+            new PublicationSectionTarget(projectId),
+            new Dictionary<PublicationBoundField, string>
+            {
+                [PublicationBoundField.Title] = book.Title,
+                [PublicationBoundField.Subtitle] = book.Subtitle,
+                [PublicationBoundField.Author] = book.Author,
+                [PublicationBoundField.Publisher] = book.Publisher,
+                [PublicationBoundField.Copyright] = book.Copyright,
+                [PublicationBoundField.Description] = book.Description,
+                [PublicationBoundField.Isbn] = string.Empty,
+            },
+            cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return (await ReadViewAsync(projectId, cancellationToken))!;
     }

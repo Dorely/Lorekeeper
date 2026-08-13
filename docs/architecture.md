@@ -908,7 +908,12 @@ serializable transaction rechecks the source immediately before each package
 write, so a concurrent fingerprint-affecting mutation cannot be
 mislabeled. Title and copyright are system Designed Pages whose linked copy
 resolves from effective Core/release fields while their geometry, typography,
-and placement are edited through the shared Pages canvas. Selecting Edit replaces
+and placement are edited through the shared Pages canvas. Core metadata changes
+transactionally refresh the stored display text while preserving each canonical
+field binding, and every Publish page read/preview/validation refreshes the
+active target before returning canvas state. The UI, assistant, direct canvas
+preview, validator, and final renderer therefore inspect the same resolved copy;
+an empty required bound frame is never treated as a successful preview. Selecting Edit replaces
 the Publish detail column with a dedicated full-height section surface: designed
 sections use the shared canvas workspace, while prose sections use the shared
 semantic manuscript editor wired to the section rather than a chapter. Section
