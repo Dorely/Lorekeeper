@@ -324,8 +324,14 @@ fn ingram_flattens_composition_opacity_without_pdf_transparency() {
 }
 
 #[test]
-fn ingram_rejects_transparency_that_overlaps_lower_page_art() {
+fn ingram_flattens_translucent_shape_into_lower_page_art() {
     let mut job = PreparedJob::new("ingram-paperback-pdfx1a-v1");
+    let artwork = rgb_png(256, 256, &vec![192; 256 * 256 * 3]);
+    fs::write(job.root.path().join("input/assets/pixel.png"), &artwork).expect("page artwork");
+    job.request["assets"][0]["byteLength"] = json!(artwork.len());
+    job.request["assets"][0]["sha256"] = json!(hex_hash(&artwork));
+    job.request["assets"][0]["widthPixels"] = json!(256);
+    job.request["assets"][0]["heightPixels"] = json!(256);
     let objects =
         job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"][0]["variants"][0]
             ["scene"]["objects"]
@@ -343,6 +349,76 @@ fn ingram_rejects_transparency_that_overlaps_lower_page_art() {
         "semanticRole": "Artifact",
         "zIndex": 4
     }));
+    job.write_request();
+
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let rendered = response(&output);
+    assert_eq!(rendered["status"], "completed");
+    assert_eq!(rendered["evidence"]["hasTransparency"], false);
+    assert!(!inspect(&job.artifact(&rendered, "interior-pdf")).transparency);
+}
+
+#[test]
+fn ingram_flattens_decorative_text_shadow_into_lower_page_art() {
+    let mut job = PreparedJob::new("ingram-paperback-pdfx1a-v1");
+    let artwork = rgb_png(256, 256, &vec![192; 256 * 256 * 3]);
+    fs::write(job.root.path().join("input/assets/pixel.png"), &artwork).expect("page artwork");
+    job.request["assets"][0]["byteLength"] = json!(artwork.len());
+    job.request["assets"][0]["sha256"] = json!(hex_hash(&artwork));
+    job.request["assets"][0]["widthPixels"] = json!(256);
+    job.request["assets"][0]["heightPixels"] = json!(256);
+    let text = &mut job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"][0]["variants"]
+        [0]["scene"]["objects"][1];
+    text["textShadow"] = json!("Soft");
+    text["backgroundOpacity"] = json!(0);
+    job.write_request();
+
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let rendered = response(&output);
+    assert_eq!(rendered["status"], "completed");
+    assert_eq!(rendered["evidence"]["hasTransparency"], false);
+    let interior_path = job.artifact(&rendered, "interior-pdf");
+    assert!(!inspect(&interior_path).transparency);
+    let pdf = Document::load(&interior_path).expect("Ingram PDF");
+    let page_numbers = pdf.get_pages().keys().copied().collect::<Vec<_>>();
+    assert!(
+        pdf.extract_text(&page_numbers)
+            .expect("selectable semantic text")
+            .contains("The sea occupied both leaves."),
+        "decorative-shadow flattening must retain the semantic text"
+    );
+    assert!(
+        pdf.objects
+            .values()
+            .filter_map(|object| {
+                let stream = object.as_stream().ok()?;
+                matches!(stream.dict.get(b"Subtype"), Ok(Object::Name(name)) if name == b"Image")
+                    .then(|| stream.decompressed_content().expect("image samples"))
+            })
+            .any(|samples| samples.windows(2).any(|pair| pair[0] != pair[1])),
+        "the decorative shadow must be baked into the otherwise uniform page artwork"
+    );
+}
+
+#[test]
+fn ingram_rejects_translucent_semantic_text_over_lower_page_art() {
+    let mut job = PreparedJob::new("ingram-paperback-pdfx1a-v1");
+    let text = &mut job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"][0]["variants"]
+        [0]["scene"]["objects"][1];
+    text["opacity"] = json!(0.5);
+    text["backgroundOpacity"] = json!(0);
     job.write_request();
 
     let rendered = response(&job.render());

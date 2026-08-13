@@ -1,4 +1,5 @@
 using Lorekeeper.Models;
+using Lorekeeper.Manuscripts;
 
 namespace Lorekeeper.Composition;
 
@@ -98,7 +99,7 @@ public static class CompositionSceneResolver
     public static CompositionOpacityOverlap? FindPdfxTransparencyOverlap(CompositionScene scene)
     {
         var visibleLayers = scene.Layers.Where(layer => layer.Visible).ToDictionary(layer => layer.Id, layer => layer.Order);
-        var painted = new List<(Guid Id, CompositionBounds Bounds)>();
+        var painted = new List<(CompositionObject Item, CompositionBounds Bounds)>();
         foreach (var item in Flatten(scene)
             .Where(item => item.Visible && visibleLayers.ContainsKey(item.LayerId))
             .OrderBy(item => visibleLayers[item.LayerId])
@@ -106,15 +107,36 @@ public static class CompositionSceneResolver
             .ThenBy(item => item.Id))
         {
             var bounds = RotationBounds(scene.Surface, item.Bounds, item.RotationDegrees);
-            if (item.Opacity < .999
-                && painted.FirstOrDefault(lower => Intersects(bounds, lower.Bounds)) is var lower
-                && lower.Id != Guid.Empty)
-                return new(item.Id, lower.Id);
+            if (item.Opacity < .999)
+            {
+                var lower = painted.LastOrDefault(candidate => Intersects(bounds, candidate.Bounds));
+                if (lower.Item is not null && !CanPrecomposeIntoLowerImage(item, bounds, lower.Item, lower.Bounds))
+                    return new(item.Id, lower.Item.Id);
+            }
             if (item.Opacity > .001)
-                painted.Add((item.Id, bounds));
+                painted.Add((item, bounds));
         }
         return null;
     }
+
+    private static bool CanPrecomposeIntoLowerImage(
+        CompositionObject item,
+        CompositionBounds bounds,
+        CompositionObject lower,
+        CompositionBounds lowerBounds) =>
+        item.Kind == CompositionObjectKind.Rectangle
+        && !string.Equals(item.FillColor, "transparent", StringComparison.OrdinalIgnoreCase)
+        && (item.StrokeWidthPoints <= .001
+            || string.Equals(item.StrokeColor, "transparent", StringComparison.OrdinalIgnoreCase))
+        && Math.Abs(item.RotationDegrees) <= .001
+        && lower.Kind == CompositionObjectKind.Image
+        && lower.Opacity >= .999
+        && Math.Abs(lower.RotationDegrees) <= .001
+        && lower.ImageFit is FigureImageFit.Cover or FigureImageFit.Stretch
+        && bounds.XPercent >= lowerBounds.XPercent - .001
+        && bounds.YPercent >= lowerBounds.YPercent - .001
+        && bounds.XPercent + bounds.WidthPercent <= lowerBounds.XPercent + lowerBounds.WidthPercent + .001
+        && bounds.YPercent + bounds.HeightPercent <= lowerBounds.YPercent + lowerBounds.HeightPercent + .001;
 
     private static CompositionBounds RotationBounds(CompositionSurface surface, CompositionBounds bounds, double degrees)
     {

@@ -38,7 +38,8 @@ current-runtime claims.
 - SkiaSharp for image, page, font, and publishing operations
 - PdfPig, Docnet, and VersOne.Epub for source ingest and EPUB handling
 - exact-pinned Rust 1.97.1 `Lorekeeper.Press`, using `pdf-writer`, `harfrust`,
-  `subsetter`, `moxcms`, `png`, and a separate `lopdf` post-write inspector
+  `skrifa`, `subsetter`, `moxcms`, `png`, and a separate `lopdf` post-write
+  inspector
 - Bootstrap and vis-network vendored under `Lorekeeper/wwwroot`
 
 The solution contains the application and its authorized migration/format

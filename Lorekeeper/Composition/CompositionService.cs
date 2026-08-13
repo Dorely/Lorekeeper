@@ -1564,7 +1564,7 @@ public sealed class CompositionService(
             diagnostics.Add(new(
                 "error",
                 "PDFX_TRANSPARENCY_OVERLAP",
-                $"Object {opacityOverlap.TransparentObjectId:N} uses opacity over lower object {opacityOverlap.LowerObjectId:N}. PDF/X-1a can flatten opacity only against the page substrate while preserving editable text and vector content; make it opaque or precompose the overlapping artwork as one image.",
+                $"Object {opacityOverlap.TransparentObjectId:N} uses opacity over lower object {opacityOverlap.LowerObjectId:N} in a form that cannot be precomposed while preserving editable semantic text and vector content. Make it opaque or combine the visual artwork into one image.",
                 opacityOverlap.TransparentObjectId));
         }
 

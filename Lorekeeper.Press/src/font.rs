@@ -2,6 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{OnceLock, RwLock};
 
 use harfrust::{FontRef, ShapeOptions, ShaperData, UnicodeBuffer};
+use skrifa::{
+    FontRef as OutlineFontRef, GlyphId, MetadataProvider,
+    instance::{LocationRef, Size},
+    outline::{DrawSettings, OutlinePen},
+};
 use subsetter::GlyphRemapper;
 
 use crate::model::{Diagnostic, FontDeclaration, FontFace, LayoutPage};
@@ -185,6 +190,100 @@ pub struct PositionedGlyph {
     pub y_offset: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct OutlineEdge {
+    pub start: [f32; 2],
+    pub end: [f32; 2],
+}
+
+struct EdgePen {
+    edges: Vec<OutlineEdge>,
+    first: Option<[f32; 2]>,
+    current: Option<[f32; 2]>,
+    offset: [f32; 2],
+}
+
+impl EdgePen {
+    fn new(offset: [f32; 2]) -> Self {
+        Self {
+            edges: Vec::new(),
+            first: None,
+            current: None,
+            offset,
+        }
+    }
+
+    fn point(&self, x: f32, y: f32) -> [f32; 2] {
+        [x + self.offset[0], y + self.offset[1]]
+    }
+
+    fn add_edge(&mut self, end: [f32; 2]) {
+        if let Some(start) = self.current {
+            self.edges.push(OutlineEdge { start, end });
+        }
+        self.current = Some(end);
+    }
+}
+
+impl OutlinePen for EdgePen {
+    fn move_to(&mut self, x: f32, y: f32) {
+        let point = self.point(x, y);
+        self.first = Some(point);
+        self.current = Some(point);
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.add_edge(self.point(x, y));
+    }
+
+    fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
+        let Some(start) = self.current else {
+            return;
+        };
+        let control = self.point(cx, cy);
+        let end = self.point(x, y);
+        for step in 1..=8 {
+            let t = step as f32 / 8.0;
+            let inverse = 1.0 - t;
+            self.add_edge([
+                inverse * inverse * start[0] + 2.0 * inverse * t * control[0] + t * t * end[0],
+                inverse * inverse * start[1] + 2.0 * inverse * t * control[1] + t * t * end[1],
+            ]);
+        }
+    }
+
+    fn curve_to(&mut self, cx0: f32, cy0: f32, cx1: f32, cy1: f32, x: f32, y: f32) {
+        let Some(start) = self.current else {
+            return;
+        };
+        let control0 = self.point(cx0, cy0);
+        let control1 = self.point(cx1, cy1);
+        let end = self.point(x, y);
+        for step in 1..=12 {
+            let t = step as f32 / 12.0;
+            let inverse = 1.0 - t;
+            self.add_edge([
+                inverse.powi(3) * start[0]
+                    + 3.0 * inverse * inverse * t * control0[0]
+                    + 3.0 * inverse * t * t * control1[0]
+                    + t.powi(3) * end[0],
+                inverse.powi(3) * start[1]
+                    + 3.0 * inverse * inverse * t * control0[1]
+                    + 3.0 * inverse * t * t * control1[1]
+                    + t.powi(3) * end[1],
+            ]);
+        }
+    }
+
+    fn close(&mut self) {
+        if let Some(first) = self.first {
+            self.add_edge(first);
+        }
+        self.first = None;
+        self.current = None;
+    }
+}
+
 impl EmbeddedFont {
     pub fn encode(&self, text: &str) -> Vec<u8> {
         let font = FontRef::new(self.source).expect("bundled font was validated");
@@ -249,6 +348,71 @@ impl EmbeddedFont {
                 }
             })
             .collect()
+    }
+
+    pub fn outline_edges(
+        &self,
+        text: &str,
+        size: f32,
+        origin_x: f32,
+        baseline_y: f32,
+        character_spacing: f32,
+        word_spacing: f32,
+    ) -> Result<(Vec<OutlineEdge>, f32), Diagnostic> {
+        let shaping_font = FontRef::new(self.source).expect("validated font source");
+        let data = ShaperData::new(&shaping_font);
+        let shaper = data.shaper(&shaping_font).build();
+        let mut buffer = UnicodeBuffer::new();
+        buffer.push_str(text);
+        buffer.guess_segment_properties();
+        let shaped = shaper.shape(buffer, ShapeOptions::default());
+        let outline_font = OutlineFontRef::new(self.source).map_err(|_| {
+            Diagnostic::error(
+                "PRESS_FONT_INVALID",
+                "A font outline could not be read for opacity flattening.",
+            )
+        })?;
+        let outlines = outline_font.outline_glyphs();
+        let scale = size / self.units_per_em;
+        let mut cursor_x = origin_x;
+        let mut edges = Vec::new();
+        for (index, (info, position)) in shaped
+            .glyph_infos()
+            .iter()
+            .zip(shaped.glyph_positions())
+            .enumerate()
+        {
+            if let Some(glyph) = outlines.get(GlyphId::new(info.glyph_id)) {
+                let mut pen = EdgePen::new([
+                    cursor_x + position.x_offset as f32 * scale,
+                    baseline_y + position.y_offset as f32 * scale,
+                ]);
+                glyph
+                    .draw(
+                        DrawSettings::unhinted(Size::new(size), LocationRef::default()),
+                        &mut pen,
+                    )
+                    .map_err(|_| {
+                        Diagnostic::error(
+                            "PRESS_FONT_INVALID",
+                            "A font outline could not be drawn for opacity flattening.",
+                        )
+                    })?;
+                edges.extend(pen.edges);
+            }
+            cursor_x += position.x_advance as f32 * scale;
+            if index + 1 < shaped.glyph_infos().len() {
+                cursor_x += character_spacing;
+            }
+            if text
+                .get(info.cluster as usize..)
+                .and_then(|remaining| remaining.chars().next())
+                .is_some_and(char::is_whitespace)
+            {
+                cursor_x += word_spacing;
+            }
+        }
+        Ok((edges, cursor_x - origin_x))
     }
 }
 

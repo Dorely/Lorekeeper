@@ -601,7 +601,7 @@ public sealed class PublicationCoverService(
         if (edition.Vendor == PublicationVendor.IngramSpark
             && CompositionSceneResolver.FindPdfxTransparencyOverlap(scene) is { } opacityOverlap)
         {
-            diagnostics.Add($"Object {opacityOverlap.TransparentObjectId:N} uses opacity over lower object {opacityOverlap.LowerObjectId:N}. PDF/X-1a requires it to be opaque or precomposed as one image.");
+            diagnostics.Add($"Object {opacityOverlap.TransparentObjectId:N} uses opacity over lower object {opacityOverlap.LowerObjectId:N} in a form that cannot be precomposed for PDF/X-1a. Make it opaque or combine the visual artwork into one image.");
         }
         var barcode = CoverCompositionFactory.RegionBoundsPercent(CompositionRegionConstraint.BarcodeReserve, geometry);
         foreach (var item in CompositionSceneResolver.Flatten(scene).Where(item => item.Visible))

@@ -10,7 +10,7 @@ use pdf_writer::types::{
 use pdf_writer::writers::StructTreeRoot;
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 
-use crate::font::EmbeddedFont;
+use crate::font::{EmbeddedFont, OutlineEdge};
 use crate::image::EmbeddedImage;
 use crate::model::{
     Diagnostic, FontFace, LayoutImageFit, LayoutLine, LayoutPage, LayoutPaint, LayoutRun,
@@ -1516,16 +1516,16 @@ fn flatten_pdfx_opacity(
 ) -> Result<(), Diagnostic> {
     let mut flattened_images = BTreeMap::<(String, u16, [u8; 3]), String>::new();
     for (page_index, page) in pages.iter_mut().enumerate() {
+        flatten_translucent_artifacts_into_lower_art(
+            page,
+            fonts,
+            images,
+            page_index,
+            options.width,
+            options.height,
+        )?;
         if reject_overlaps {
-            reject_overlapping_pdfx_transparency(page, fonts)?;
-        } else {
-            flatten_translucent_shapes_into_lower_art(
-                page,
-                images,
-                page_index,
-                options.width,
-                options.height,
-            );
+            reject_overlapping_pdfx_transparency(page, fonts, page_index)?;
         }
         let substrate = if page.kind == PageKind::Cover {
             options.background_rgb.unwrap_or([0.086, 0.196, 0.31])
@@ -1632,15 +1632,17 @@ fn flatten_pdfx_opacity(
     Ok(())
 }
 
-fn flatten_translucent_shapes_into_lower_art(
+fn flatten_translucent_artifacts_into_lower_art(
     page: &mut LayoutPage,
+    fonts: &BTreeMap<FontFace, EmbeddedFont>,
     images: &mut BTreeMap<String, EmbeddedImage>,
     page_index: usize,
     page_width: f32,
     page_height: f32,
-) {
+) -> Result<(), Diagnostic> {
     let paint_order = page.paint_order.clone();
     let mut baked_shapes = std::collections::BTreeSet::new();
+    let mut baked_lines = std::collections::BTreeSet::new();
     for (paint_position, paint) in paint_order.iter().enumerate() {
         let LayoutPaint::Shape(shape_index) = *paint else {
             continue;
@@ -1693,9 +1695,53 @@ fn flatten_translucent_shapes_into_lower_art(
         images.insert(flattened.id.clone(), flattened);
         baked_shapes.insert(shape_index);
     }
-    page.paint_order.retain(
-        |paint| !matches!(paint, LayoutPaint::Shape(index) if baked_shapes.contains(index)),
-    );
+
+    for (paint_position, paint) in paint_order.iter().enumerate() {
+        let LayoutPaint::Line(line_index) = *paint else {
+            continue;
+        };
+        let line = &page.lines[line_index];
+        if opacity_key(line.opacity) >= 1_000
+            || !line.artifact
+            || line.rotation_degrees.abs() > f32::EPSILON
+        {
+            continue;
+        }
+        let Some(image_index) = paint_order[..paint_position]
+            .iter()
+            .rev()
+            .find_map(|paint| match *paint {
+                LayoutPaint::Image(index) => Some(index),
+                _ => None,
+            })
+        else {
+            continue;
+        };
+        let image = &page.images[image_index];
+        if image.rotation_degrees.abs() > f32::EPSILON
+            || opacity_key(image.opacity) < 1_000
+            || !matches!(image.fit, LayoutImageFit::Cover | LayoutImageFit::Stretch)
+        {
+            continue;
+        }
+        let Some(source) = images.get(&image.asset_id).cloned() else {
+            continue;
+        };
+        let mut flattened = source;
+        if !blend_line_into_image(&mut flattened, image, line, fonts)? {
+            continue;
+        }
+        flattened.id = format!("{}-page-{page_index}-line-{line_index}-flat", flattened.id);
+        page.images[image_index].asset_id.clone_from(&flattened.id);
+        images.insert(flattened.id.clone(), flattened);
+        baked_lines.insert(line_index);
+    }
+    page.paint_order.retain(|paint| match *paint {
+        LayoutPaint::Shape(index) => !baked_shapes.contains(&index),
+        LayoutPaint::Line(index) => !baked_lines.contains(&index),
+        LayoutPaint::Image(_) => true,
+    });
+    Ok(())
 }
 
 fn blend_shape_into_image(
@@ -1794,22 +1840,230 @@ fn blend_shape_into_image(
     changed
 }
 
+fn blend_line_into_image(
+    source: &mut EmbeddedImage,
+    image: &crate::model::LayoutImage,
+    line: &LayoutLine,
+    fonts: &BTreeMap<FontFace, EmbeddedFont>,
+) -> Result<bool, Diagnostic> {
+    let edges = line_outline_edges(line, fonts)?;
+    if edges.is_empty() {
+        return Ok(false);
+    }
+    let left = edges
+        .iter()
+        .flat_map(|edge| [edge.start[0], edge.end[0]])
+        .fold(f32::INFINITY, f32::min);
+    let right = edges
+        .iter()
+        .flat_map(|edge| [edge.start[0], edge.end[0]])
+        .fold(f32::NEG_INFINITY, f32::max);
+    let bottom = edges
+        .iter()
+        .flat_map(|edge| [edge.start[1], edge.end[1]])
+        .fold(f32::INFINITY, f32::min);
+    let top = edges
+        .iter()
+        .flat_map(|edge| [edge.start[1], edge.end[1]])
+        .fold(f32::NEG_INFINITY, f32::max);
+    let source_fraction = image.source_width_fraction.clamp(0.01, 1.0);
+    let source_width = source.width as f32 * source_fraction;
+    let width_scale = image.width / source_width;
+    let height_scale = image.height / source.height as f32;
+    let (drawn_width, drawn_height) = match image.fit {
+        LayoutImageFit::Cover => {
+            let scale = width_scale.max(height_scale);
+            (source.width as f32 * scale, source.height as f32 * scale)
+        }
+        LayoutImageFit::Stretch => (image.width / source_fraction, image.height),
+        LayoutImageFit::Contain => return Ok(false),
+    };
+    let visible_width = source_width * drawn_width / source.width as f32;
+    let drawn_x = if source_fraction < 1.0 {
+        -image.width / 2.0 - drawn_width * image.source_left_fraction.clamp(0.0, 1.0)
+    } else {
+        -image.width / 2.0 + (image.width - visible_width) * image.focal_x.clamp(0.0, 1.0)
+    };
+    let drawn_y =
+        -image.height / 2.0 + (image.height - drawn_height) * (1.0 - image.focal_y.clamp(0.0, 1.0));
+    let origin_x = image.x + image.width / 2.0 + drawn_x;
+    let origin_y = image.y + image.height / 2.0 + drawn_y;
+    let pixel_width = drawn_width / source.width as f32;
+    let pixel_height = drawn_height / source.height as f32;
+    let fill = line.fill_rgb.unwrap_or([0.0; 3]);
+    let channels = if source.cmyk {
+        4
+    } else if source.grayscale {
+        1
+    } else {
+        3
+    };
+    let mut changed = false;
+    for row in 0..source.height {
+        let page_y = origin_y + (1.0 - (row as f32 + 0.5) / source.height as f32) * drawn_height;
+        if page_y < image.y || page_y > image.y + image.height || page_y < bottom || page_y > top {
+            continue;
+        }
+        for column in 0..source.width {
+            let page_x = origin_x + (column as f32 + 0.5) / source.width as f32 * drawn_width;
+            if page_x < image.x || page_x > image.x + image.width || page_x < left || page_x > right
+            {
+                continue;
+            }
+            let coverage = outline_coverage(&edges, page_x, page_y, pixel_width, pixel_height);
+            let alpha = line.opacity.clamp(0.0, 1.0) * coverage;
+            if alpha <= 0.0 {
+                continue;
+            }
+            let offset = (row as usize * source.width as usize + column as usize) * channels;
+            if source.cmyk {
+                let foreground = rgb_to_bounded_cmyk(fill);
+                for (channel, foreground_channel) in foreground.iter().enumerate() {
+                    source.samples[offset + channel] = blend_sample(
+                        (*foreground_channel * 255.0).round() as u8,
+                        f32::from(source.samples[offset + channel]) / 255.0,
+                        alpha,
+                    );
+                }
+            } else if source.grayscale {
+                let foreground = fill[0] * 0.2126 + fill[1] * 0.7152 + fill[2] * 0.0722;
+                source.samples[offset] = blend_sample(
+                    (foreground * 255.0).round() as u8,
+                    f32::from(source.samples[offset]) / 255.0,
+                    alpha,
+                );
+            } else {
+                for (channel, fill_channel) in fill.iter().enumerate() {
+                    source.samples[offset + channel] = blend_sample(
+                        (*fill_channel * 255.0).round() as u8,
+                        f32::from(source.samples[offset + channel]) / 255.0,
+                        alpha,
+                    );
+                }
+            }
+            changed = true;
+        }
+    }
+    if source.cmyk {
+        source.maximum_total_ink_percent = source
+            .samples
+            .chunks_exact(4)
+            .map(|pixel| {
+                pixel.iter().map(|channel| u32::from(*channel)).sum::<u32>() as f32 * 100.0 / 255.0
+            })
+            .fold(0.0_f32, f32::max);
+        if source.maximum_total_ink_percent > 240.001 {
+            return Err(Diagnostic::error(
+                "PRESS_TOTAL_INK_EXCEEDED",
+                "Flattened image content exceeds the 240% total-ink limit.",
+            ));
+        }
+    }
+    Ok(changed)
+}
+
+fn line_outline_edges(
+    line: &LayoutLine,
+    fonts: &BTreeMap<FontFace, EmbeddedFont>,
+) -> Result<Vec<OutlineEdge>, Diagnostic> {
+    let fallback;
+    let runs = if line.runs.is_empty() {
+        fallback = vec![LayoutRun {
+            text: line.text.clone(),
+            face: FontFace::SerifRegular,
+            underline: false,
+            strikethrough: false,
+            baseline_shift_em: 0.0,
+            size_scale: 1.0,
+        }];
+        fallback.as_slice()
+    } else {
+        line.runs.as_slice()
+    };
+    let mut cursor_x = line.x;
+    let mut edges = Vec::new();
+    for run in runs {
+        let font = fonts.get(&run.face).ok_or_else(|| {
+            Diagnostic::error(
+                "PRESS_FONT_REFERENCE_MISSING",
+                format!("Layout references an unavailable font face {:?}.", run.face),
+            )
+        })?;
+        let run_size = line.size * run.size_scale;
+        let (run_edges, advance) = font.outline_edges(
+            &run.text,
+            run_size,
+            cursor_x,
+            line.y + line.size * run.baseline_shift_em,
+            line.character_spacing,
+            line.word_spacing,
+        )?;
+        edges.extend(run_edges);
+        cursor_x += advance;
+    }
+    Ok(edges)
+}
+
+fn outline_coverage(
+    edges: &[OutlineEdge],
+    x: f32,
+    y: f32,
+    pixel_width: f32,
+    pixel_height: f32,
+) -> f32 {
+    let samples = [(-0.25, -0.25), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)];
+    samples
+        .iter()
+        .filter(|(offset_x, offset_y)| {
+            outline_contains(
+                edges,
+                x + offset_x * pixel_width,
+                y + offset_y * pixel_height,
+            )
+        })
+        .count() as f32
+        / samples.len() as f32
+}
+
+fn outline_contains(edges: &[OutlineEdge], x: f32, y: f32) -> bool {
+    let mut winding = 0_i32;
+    for edge in edges {
+        let [x0, y0] = edge.start;
+        let [x1, y1] = edge.end;
+        if (y0 <= y && y1 > y) || (y1 <= y && y0 > y) {
+            let crossing_x = x0 + (y - y0) * (x1 - x0) / (y1 - y0);
+            if crossing_x > x {
+                winding += if y1 > y0 { 1 } else { -1 };
+            }
+        }
+    }
+    winding != 0
+}
+
 fn reject_overlapping_pdfx_transparency(
     page: &LayoutPage,
     fonts: &BTreeMap<FontFace, EmbeddedFont>,
+    page_index: usize,
 ) -> Result<(), Diagnostic> {
     let paint = page_paint_bounds(page, fonts);
     let mut lower_bounds = Vec::<[f32; 4]>::new();
-    for (bounds, opacity) in paint {
+    for (paint_index, (bounds, opacity)) in paint.into_iter().enumerate() {
         if opacity_key(opacity) < 1_000
             && lower_bounds
                 .iter()
                 .any(|lower| bounds_overlap(bounds, *lower))
         {
-            return Err(Diagnostic::error(
+            let mut diagnostic = Diagnostic::error(
                 "PRESS_PDFX_TRANSPARENCY_OVERLAP",
-                "PDF/X-1a cannot preserve transparency that overlaps lower page art while keeping semantic text and vector objects intact. Make the object opaque or precompose the overlapping artwork as one image.",
-            ));
+                "PDF/X-1a cannot preserve this overlapping transparency while keeping semantic text and vector objects intact. Make the object opaque or combine the visual artwork into one image.",
+            )
+            .with_page(page_index + 1);
+            if let Some(LayoutPaint::Line(line_index)) = page.paint_order.get(paint_index)
+                && let Some(source_id) = &page.lines[*line_index].semantic_id
+            {
+                diagnostic = diagnostic.with_source("composition-object", source_id.clone());
+            }
+            return Err(diagnostic);
         }
         if opacity_key(opacity) > 0 {
             lower_bounds.push(bounds);
