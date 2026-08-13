@@ -1302,7 +1302,11 @@ constrained by the owned schema and reports removed elements. Manual edits and
 Editor/revision-worker tools share block, mark, style, validation, and
 structural-inspection semantics. Assistant operation conversion canonicalizes
 known built-in role aliases and the visible `***` scene-break representation;
-unknown custom roles still fail closed. GUID-backed stable block IDs compare by
+tool schemas and failures expose the complete canonical operation vocabulary,
+including `SetBlockStyle` and `SetParagraphPresentation`, rather than relying on
+model guesses. An inserted block may carry a caller-supplied stable ID so a
+later operation in the same atomic batch can format that exact block. Unknown
+custom roles still fail closed. GUID-backed stable block IDs compare by
 identity across strict compact and hyphenated representations, with exact
 ordinal matches taking precedence and ambiguous fallback matches failing
 closed; mutation results return the exact stored ID. Book Text Style semantic roles and

@@ -1,7 +1,11 @@
+using System.ComponentModel;
+
 namespace Lorekeeper.Manuscripts;
 
 public sealed record ManuscriptOperationInput(
+    [property: Description("Canonical operation name: InsertBlock, ReplaceBlockText, DeleteBlock, MoveBlock, SplitBlock, MergeBlocks, SetBlockType, SetBlockStyle, SetInlineMark, or SetParagraphPresentation.")]
     string Operation,
+    [property: Description("Stable block ID. Required for every operation except InsertBlock; supply it for InsertBlock when another operation in the same batch will target the new block.")]
     string? BlockId = null,
     string? SecondBlockId = null,
     int? Index = null,
@@ -16,8 +20,13 @@ public sealed record ManuscriptOperationInput(
     Guid? ImageId = null,
     string? AltText = null,
     int? HeadingLevel = null,
+    [property: Description("Direct paragraph formatting used only by SetParagraphPresentation. To format a new block in one batch, give InsertBlock an explicit blockId and follow it with SetParagraphPresentation for that ID.")]
     ParagraphPresentation? ParagraphPresentation = null)
 {
+    public const string ToolOperationGuidance =
+        "Canonical operations are InsertBlock, ReplaceBlockText, DeleteBlock, MoveBlock, SplitBlock, MergeBlocks, SetBlockType, SetBlockStyle, SetInlineMark, and SetParagraphPresentation. " +
+        "Use SetBlockStyle—not SetStyleRole—to apply a Book Text Style. For direct formatting on a new block, give InsertBlock an explicit blockId and follow it in the same batch with SetParagraphPresentation for that ID.";
+
     public static IReadOnlyList<ManuscriptOperation> ToOperations(
         IReadOnlyList<ManuscriptOperationInput> operations) =>
         operations.Select<ManuscriptOperationInput, ManuscriptOperation>(
@@ -51,7 +60,8 @@ public sealed record ManuscriptOperationInput(
                 "setparagraphpresentation" => new SetParagraphPresentation(
                     Required(operation.BlockId, "blockId"),
                     operation.ParagraphPresentation),
-                _ => throw new ArgumentException($"Unsupported manuscript operation '{operation.Operation}'."),
+                _ => throw new ArgumentException(
+                    $"Unsupported manuscript operation '{operation.Operation}'. {ToolOperationGuidance}"),
             })
             .ToList();
 
@@ -65,7 +75,8 @@ public sealed record ManuscriptOperationInput(
             NormalizeStyleRole(operation.StyleRole),
             operation.ImageId,
             operation.AltText,
-            operation.HeadingLevel);
+            operation.HeadingLevel,
+            BlockId: operation.BlockId);
     }
 
     private static SetManuscriptBlockType SetBlockType(ManuscriptOperationInput operation)

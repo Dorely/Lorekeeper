@@ -198,7 +198,7 @@ public sealed class ImagesChatTools(
             AIFunctionFactory.Create(
                 method: (Guid compositionId, long expectedRevision, ManuscriptOperationInput[] operations) => StageCompositionSemanticAsync(context, compositionId, expectedRevision, operations),
                 name: "stage_page_composition_semantic",
-                description: "Stage focused block or inline-mark operations against a Designed Page's sole semantic manuscript. Returns a compact one-use stage ID without repeating content."),
+                description: "Stage focused operations against a Designed Page's sole semantic manuscript. " + ManuscriptOperationInput.ToolOperationGuidance + " Returns a compact one-use stage ID without repeating content."),
 
             AIFunctionFactory.Create(
                 method: (Guid stageId, long expectedRevision) => ApplyCompositionSemanticStageAsync(context, stageId, expectedRevision),

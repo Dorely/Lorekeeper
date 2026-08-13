@@ -694,7 +694,7 @@
 | `ManuscriptCodec.cs` | Plain-text normalization/projection, deterministic migration IDs, validation, serialization, hashing, and stable-ID reparsing. |
 | `ManuscriptRangeResolver.cs` | Validates non-overlapping UTF-16 semantic text ranges, rejects surrogate splits, resolves frame content exactly once, and identifies unplaced composition content. |
 | `ChapterSemanticProjectionService.cs` | Expands Designed Page semantic fragments into chapter reading order exactly once for search, context, indexing, and plain-text projections without duplicating storage. |
-| `ManuscriptOperations.cs` / `ManuscriptOperationInput.cs` | Transactional insert/replace/delete/move/split/merge/type/style/mark transformations with GUID-format-independent stable-ID lookup and assistant-safe DTO conversion. |
+| `ManuscriptOperations.cs` / `ManuscriptOperationInput.cs` | Transactional insert/replace/delete/move/split/merge/type/style/mark/presentation transformations with GUID-format-independent stable-ID lookup, explicit operation guidance, and assistant-safe DTO conversion. |
 | `ManuscriptInspection.cs` | Shared schema validation, normalization diagnostics, and structural block search used by Editor and revision-worker assistants. |
 | `ManuscriptSchemaUpgrade.cs` | Strict lossless older-to-v4 document and nested historical-payload upgrader used by startup migration and isolated import adapters. |
 | `ManuscriptStyleService.cs` | Revision-checked project-wide Book Text Style ownership, built-in/imported font validation, immutable generated semantic keys, Core/release usage counts, and usage-safe deletion. |

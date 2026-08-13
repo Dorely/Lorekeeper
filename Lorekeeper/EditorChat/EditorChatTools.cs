@@ -191,7 +191,7 @@ public sealed class EditorChatTools(
                     manuscriptPreviews.PreviewAsync(context, chapterId, expectedRevision, operations),
                 name: "preview_manuscript_operations",
                 description:
-                    "Validate and stage semantic insert, replace, delete, move, split, merge, block-type, focused block-style, and inline-mark operations without saving. Use apply_manuscript_style for chapter-wide or repeated reusable styling. " +
+                    "Validate and stage semantic insert, replace, delete, move, split, merge, block-type, focused block-style, inline-mark, and paragraph-presentation operations without saving. " + ManuscriptOperationInput.ToolOperationGuidance + " Use apply_manuscript_style for chapter-wide or repeated reusable styling. " +
                     "Submit the operation payload here exactly once. Returns a compact opaque previewId, changed stable block IDs, projected counts, hashes, and next revision; it does not echo the manuscript. Stale revisions fail closed."),
 
             AIFunctionFactory.Create(
@@ -437,7 +437,7 @@ public sealed class EditorChatTools(
                 method: (Guid compositionId, long expectedRevision, ManuscriptOperationInput[] operations) =>
                     StageCompositionSemanticAsync(context, compositionId, expectedRevision, operations),
                 name: "stage_page_composition_semantic",
-                description: "Stage focused operations against the Designed Page's sole semantic manuscript without echoing its content. Supports block and inline-mark operations; returns a one-use stage ID."),
+                description: "Stage focused operations against the Designed Page's sole semantic manuscript without echoing its content. " + ManuscriptOperationInput.ToolOperationGuidance + " Returns a one-use stage ID."),
             AIFunctionFactory.Create(
                 method: (Guid stageId, long expectedRevision) => ApplyCompositionSemanticStageAsync(context, stageId, expectedRevision),
                 name: "apply_page_composition_semantic_stage",
