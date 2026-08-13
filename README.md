@@ -108,8 +108,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   Core PDF presentation can preserve a Designed Page as one wide or custom-sized
   PDF page; PDF ebook releases inherit that choice until explicitly customized.
 - Lorekeeper-owned paperback, hardcover, and Digital PDF press jobs with cancellation/restart recovery,
-  immutable SHA-256-verified interior and product-specific cover PDFs, actual in-app
-  PDF viewing, semantic block-to-page maps, render comparisons, and matching
+  immutable SHA-256-verified interior and product-specific cover PDFs, in-app
+  single/facing-page PDF viewing with an optional page seam, semantic block-to-page
+  maps, render comparisons, and matching
   assistant controls. The exact-pinned Rust renderer is built and packaged in
   both Debug and Release; the running app invokes only that integrity-checked
   native executable and never uses machine-installed PDF software.

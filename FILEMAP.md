@@ -222,6 +222,7 @@
 | File | Description |
 |------|-------------|
 | `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, collapsible Front/Main content/Back flow, direct chapter and publication-section inclusion/placement, product-filtered print-release setup, autosave, target-preserving full-height editors, progress, previews, blockers, and downloads. |
+| `PublicationPdfPreview.razor` (+ `.razor.css`) | Lorekeeper-owned artifact viewer with single-page or fixed two-leaf facing rows, optional visible page seam, lazy immutable page images, and facing/seam-hidden defaults. |
 | `PublishChatPanel.razor` (+ `.razor.css`) | Refresh-safe Publish adapter over shared `ChatSurface` with a flush-returned exact turn context, persisted transcript/tool chips, streaming, Stop/Reset, provider/token state, image attachments, active-turn reconnection, and structured workspace mutation callbacks. |
 
 ### Components/Pages/Projects/Outline/
@@ -627,7 +628,8 @@
 | `PublicationCoverService.cs` | Revisioned format/product-aware cover aggregate with Core-front materialization, independent outside/inside/case/jacket/cloth surface scenes, exact stock/page-count geometry reflow, diagnostics, and acknowledgement invalidation. |
 | `PublicationPackageService.cs` | Versioned registry-driven preflight and exact physical/digital package assembly with reusable validated reports, manifest, upload map, provenance, and legacy-artifact guards. |
 | `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying effective Core/release content into Core TXT/Markdown/Reading PDF and release EPUB/PDF/print output with active-compatible composition-variant selection and product-form guards. |
-| `PublishEndpoints.cs` | Cacheable/range project-scoped immutable publication artifact viewing/download endpoints. |
+| `PublicationArtifactPreviewService.cs` | Bounded, cached PDF-to-PNG page rendering for Lorekeeper-owned artifact previews using the already packaged PDFium/Skia runtime. |
+| `PublishEndpoints.cs` | Cacheable/range project-scoped immutable publication artifact viewing/download endpoints plus immutable rendered PDF-page previews. |
 | `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown plus semantic EPUB writer for flowing Figures, real-text fixed-layout Designed Pages/covers, reading order, captions, and alternatives. |
 
 ### Graph/

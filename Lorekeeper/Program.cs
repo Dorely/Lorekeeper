@@ -283,6 +283,8 @@ builder.Services.AddSingleton<IPublicationPressRuntime, PublicationPressRuntime>
 builder.Services.AddSingleton<IPublicationPressInstallationRoot, PublicationPressInstallationRoot>();
 builder.Services.AddSingleton<IPublicationRenderQueue, PublicationRenderQueue>();
 builder.Services.AddScoped<IPublicationRenderService, PublicationRenderService>();
+builder.Services.AddSingleton<PublicationArtifactPreviewCache>();
+builder.Services.AddScoped<IPublicationArtifactPreviewService, PublicationArtifactPreviewService>();
 builder.Services.AddScoped<IPublicationCoverService, PublicationCoverService>();
 builder.Services.AddScoped<IPublicationPackageService, PublicationPackageService>();
 builder.Services.AddSingleton<IPublicationPreparationQueue, PublicationPreparationQueue>();

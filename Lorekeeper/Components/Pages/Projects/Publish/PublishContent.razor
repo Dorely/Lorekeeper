@@ -155,7 +155,10 @@ else
             }
             else
             {
-                <iframe src="@ViewUrl(previewArtifact.Id)" title="@PreviewLabel(previewArtifact.Kind)"></iframe>
+                <PublicationPdfPreview @key="previewArtifact.Id"
+                                       ProjectId="Project.Id"
+                                       ArtifactId="previewArtifact.Id"
+                                       PageCount="@(previewArtifact.PageCount ?? 0)" />
             }
         </section>
     </div>

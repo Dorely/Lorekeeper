@@ -1,0 +1,98 @@
+.publication-pdf-preview {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.publication-pdf-preview-toolbar {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: .5rem;
+    padding: .1rem 0 .65rem;
+}
+
+.publication-pdf-preview-toolbar > span {
+    margin-left: auto;
+    color: var(--lk-muted);
+    font-size: .7rem;
+    font-weight: 700;
+}
+
+.publication-pdf-preview-scroll {
+    display: grid;
+    flex: 1;
+    gap: 1.25rem;
+    min-height: 0;
+    overflow: auto;
+    padding: 1rem;
+    background: #e7ebf2;
+    scrollbar-gutter: stable;
+}
+
+.publication-pdf-preview-spread {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    justify-self: center;
+    width: min(100%, 88rem);
+    filter: drop-shadow(0 .45rem 1rem rgb(20 27 40 / 18%));
+}
+
+.publication-pdf-preview-scroll.show-seam .publication-pdf-preview-spread {
+    gap: .8rem;
+}
+
+.publication-pdf-preview-scroll.single .publication-pdf-preview-spread {
+    display: flex;
+    justify-content: center;
+    width: min(100%, 44rem);
+}
+
+.publication-pdf-preview-page {
+    display: block;
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    background: #fff;
+}
+
+.publication-pdf-preview-page img {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.publication-pdf-preview-page.blank {
+    min-height: 4rem;
+}
+
+.publication-pdf-preview-empty {
+    display: grid;
+    flex: 1;
+    place-items: center;
+    min-height: 0;
+    padding: 2rem;
+    border: 1px solid var(--lk-line);
+    border-radius: .55rem;
+    background: #f7f9fc;
+    color: var(--lk-muted);
+    text-align: center;
+}
+
+@media (max-width: 720px) {
+    .publication-pdf-preview-toolbar {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .publication-pdf-preview-toolbar > span {
+        flex-basis: 100%;
+        margin-left: 0;
+    }
+
+    .publication-pdf-preview-scroll {
+        padding: .5rem;
+    }
+}

@@ -846,7 +846,13 @@ survive layout traces and diagnostics independently of the host console code
 page. Project-scoped range endpoints serve actual
 PDF/package bytes only after recomputing
 their stored length and SHA-256; corrupt rows fail closed before an ETag or body
-is returned. Source-fingerprint mismatch marks otherwise valid immutable
+is returned. Publish PDF previews do not delegate layout to the browser's native
+PDF viewer. A Lorekeeper-owned modal requests bounded PNG renditions of immutable
+artifact pages through project-scoped endpoints, caches them by artifact hash and
+raster width, and presents fixed single-page or two-leaf facing rows. Facing pages
+with the seam hidden is the initial view; users may expose the seam or switch to
+single pages without changing the stored artifact. Source-fingerprint mismatch
+marks otherwise valid immutable
 artifacts stale. Installed-renderer or selected-profile provenance mismatch also
 stales otherwise current PDF artifacts. Queued jobs snapshot the dynamic
 `describe` version and reject a different executable response. The guarded

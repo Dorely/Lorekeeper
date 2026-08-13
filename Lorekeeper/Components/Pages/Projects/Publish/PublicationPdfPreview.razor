@@ -1,0 +1,96 @@
+<section class="publication-pdf-preview" aria-label="PDF pages">
+    <header class="publication-pdf-preview-toolbar">
+        <div class="btn-group btn-group-sm" role="group" aria-label="Page display">
+            <button type="button" class="btn @ButtonClass(!_facingPages)" @onclick="() => _facingPages = false">Single page</button>
+            <button type="button" class="btn @ButtonClass(_facingPages)" @onclick="() => _facingPages = true">Facing pages</button>
+        </div>
+        @if (_facingPages)
+        {
+            <button type="button"
+                    class="btn btn-sm @ButtonClass(_showFacingSeam)"
+                    aria-pressed="@_showFacingSeam"
+                    title="Add space between the left and right pages"
+                    @onclick="() => _showFacingSeam = !_showFacingSeam">
+                @(_showFacingSeam ? "Hide page seam" : "Show page seam")
+            </button>
+        }
+        <span>@PageCount.ToString("N0") @(PageCount == 1 ? "page" : "pages")</span>
+    </header>
+
+    @if (PageCount <= 0)
+    {
+        <div class="publication-pdf-preview-empty" role="status">
+            Page information is unavailable. Regenerate this PDF before previewing it.
+        </div>
+    }
+    else
+    {
+        <div class="publication-pdf-preview-scroll @(_facingPages ? "facing" : "single") @(_facingPages && _showFacingSeam ? "show-seam" : null)">
+            @if (_facingPages)
+            {
+                @foreach (var spread in BuildFacingSpreads(PageCount))
+                {
+                    <div class="publication-pdf-preview-spread">
+                        @foreach (var pageNumber in spread)
+                        {
+                            if (pageNumber is int page)
+                            {
+                                @RenderPage(page)
+                            }
+                            else
+                            {
+                                <span class="publication-pdf-preview-page blank" aria-hidden="true"></span>
+                            }
+                        }
+                    </div>
+                }
+            }
+            else
+            {
+                @for (var page = 1; page <= PageCount; page++)
+                {
+                    <div class="publication-pdf-preview-spread">
+                        @RenderPage(page)
+                    </div>
+                }
+            }
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter, EditorRequired] public Guid ArtifactId { get; set; }
+    [Parameter, EditorRequired] public int PageCount { get; set; }
+
+    private bool _facingPages;
+    private bool _showFacingSeam;
+    private bool _initialized;
+
+    protected override void OnParametersSet()
+    {
+        if (_initialized)
+            return;
+        _facingPages = PageCount > 1;
+        _initialized = true;
+    }
+
+    private static IEnumerable<int?[]> BuildFacingSpreads(int pageCount)
+    {
+        yield return [null, 1];
+        for (var page = 2; page <= pageCount; page += 2)
+            yield return [page, page + 1 <= pageCount ? page + 1 : null];
+    }
+
+    private RenderFragment RenderPage(int pageNumber) => @<figure class="publication-pdf-preview-page" aria-label="PDF page @pageNumber">
+        <img src="@PageUrl(pageNumber)"
+             alt="PDF page @pageNumber"
+             loading="@(pageNumber <= 3 ? "eager" : "lazy")"
+             decoding="async" />
+    </figure>;
+
+    private string PageUrl(int pageNumber) =>
+        $"/projects/{ProjectId:N}/publish/artifacts/{ArtifactId:N}/pages/{pageNumber}.png?width=1200";
+
+    private static string ButtonClass(bool active) => active ? "btn-primary" : "btn-outline-secondary";
+}
