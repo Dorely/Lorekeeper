@@ -229,9 +229,13 @@ public sealed class PublicationSectionService(
         if (current.SystemRole != PublicationSectionSystemRole.None)
             throw new InvalidOperationException("Generated publication sections use their page-layout controls; their manuscript structure is not directly editable.");
         var changed = ManuscriptOperations.Apply(current.Manuscript, ManuscriptOperationInput.ToOperations(operations)).Document;
+        // UpsertAsync owns the persisted revision increment. ManuscriptOperations advances its
+        // result for direct persistence callers, so keep this draft tied to the revision that
+        // the upsert is revision-checking and let Apply stamp the committed next revision.
+        var draft = changed with { Revision = expectedRevision };
         return await UpsertAsync(target, new(
             current.Id, current.Title, current.Kind, current.Anchor, current.TargetKind, current.TargetId,
-            current.InclusionMode, current.StartSide, ManuscriptCodec.Serialize(changed), expectedRevision), cancellationToken);
+            current.InclusionMode, current.StartSide, ManuscriptCodec.Serialize(draft), expectedRevision), cancellationToken);
     }
 
     public async Task<PublicationSectionView> CustomizeAsync(
