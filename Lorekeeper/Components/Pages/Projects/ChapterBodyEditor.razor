@@ -60,6 +60,7 @@
     private IJSObjectReference? _handle;
     private DotNetObjectReference<ChapterBodyEditor>? _selfRef;
     private bool? _appliedReadOnly;
+    private bool? _appliedVisible;
     private bool _initializing;
     private bool _disposed;
     private bool _disposing;
@@ -142,6 +143,13 @@
         {
             await ApplyReadOnlyAsync(IsReadOnly);
             _appliedReadOnly = IsReadOnly;
+        }
+
+        if (_handle is not null && _appliedVisible != IsVisible)
+        {
+            if (IsVisible && !IsReadOnly)
+                await FocusAsync();
+            _appliedVisible = IsVisible;
         }
     }
 
@@ -388,6 +396,22 @@
         {
             await _handle.InvokeVoidAsync("setReadOnly", readOnly);
             _appliedReadOnly = readOnly;
+            if (!readOnly && IsVisible)
+                await _handle.InvokeVoidAsync("focus");
+        }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+        catch (JSException) { }
+    }
+
+    private async Task FocusAsync()
+    {
+        if (_disposed || _handle is null)
+            return;
+
+        try
+        {
+            await _handle.InvokeVoidAsync("focus");
         }
         catch (JSDisconnectedException) { }
         catch (OperationCanceledException) { }

@@ -4,6 +4,7 @@ The checked-in browser bundle is built from the exact versions in
 `package-lock.json`. Runtime packages are MIT licensed:
 
 - `prosemirror-commands` 1.7.1
+- `prosemirror-gapcursor` 1.4.1
 - `prosemirror-history` 1.5.0
 - `prosemirror-keymap` 1.2.3
 - `prosemirror-model` 1.25.11

@@ -74,7 +74,7 @@
 | File | Description |
 |------|-------------|
 | `package.json` / `package-lock.json` | Exact-pinned ProseMirror and esbuild dependency graph plus the deterministic editor build command. |
-| `src/semantic-editor.js` | Owned ProseMirror schema/adapter, disconnect-safe host attachment, direct Figure selection, compact always-visible grouped formatting controls, sticky Figure controls, autosave queue, paste diagnostics, outline, counts, and find/replace behavior. |
+| `src/semantic-editor.js` | Owned ProseMirror schema/adapter, disconnect-safe host attachment, focus/persistent-caret and non-text-block gap selection, direct Figure selection, compact grouped formatting controls, autosave queue, paste diagnostics, outline, counts, and find/replace behavior. |
 | `THIRD_PARTY_NOTICES.md` | Runtime/build dependency inventory and MIT notice for the semantic-editor bundle. |
 
 ## Lorekeeper.Press/ — Owned native publication renderer
@@ -167,7 +167,7 @@
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared project workspace shell: loads the project, renders the section tabs, condenses Editor navigation into one scrollable header row, and exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`), wraps `ProjectLayout` + `EditorContent`, and synchronizes in-place chapter selection with its route parameter. |
 | `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware Edit/Read/Pages/Review chapter workspace with in-place chapter switching/URL history, a stable project chat mount, keyed semantic editor, serialized refresh coordination, reusable project-image and Book Text Style modals, composition/variant-aware assistant refresh routing, and browser-local per-project chapter mode, Read view, and resizable/collapsible Chat/Memory preferences. |
-| `ChapterBodyEditor.razor` (+ `.razor.css`) | Isolated keyed ProseMirror host with disposal-safe asynchronous attachment, revision-aware save/flush, compact grouped project-font/size/spacing/character/paragraph controls, style-preserving list conversion, modal image selection, capture/apply/manage Book Text Styles, sticky styled Figure controls, and caller-controlled Designed Page insertion for chapter versus publication-prose use. |
+| `ChapterBodyEditor.razor` (+ `.razor.css`) | Shared Editor/Publish ProseMirror host with disposal-safe attachment, visible-mode autofocus, persistent selection caret, content-driven scrolling, revision-aware save/flush, compact formatting and Book Text Style controls, modal image selection, Figure controls, and caller-controlled Designed Page insertion. |
 | `ChapterReadPreview.razor` (+ `.razor.css`) | Press-backed current-chapter page preview with flush-before-layout, width-fit default, single/facing display, fixed two-leaf spread rows with an optional visible seam, fit/zoom controls, project page setup, exact bundled/imported font-face URLs, images, labels, links, identifier-safe authoring warnings, and retryable failures. |
 | `BookTextStylesModal.razor` (+ `.razor.css`) | Shared Editor/Publish modal shell for the revision-aware Book Text Styles manager. |
 | `ManuscriptStylesPanel.razor` (+ `.razor.css`) | Compact Book Text Style manager with an on-demand create/edit form, revision-aware paragraph/character typography, spacing, indentation, pagination, and stable semantic roles. |

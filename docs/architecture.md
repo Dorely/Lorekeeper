@@ -1340,6 +1340,13 @@ ordinal matches taking precedence and ambiguous fallback matches failing
 closed; mutation results return the exact stored ID. Book Text Style semantic roles and
 paragraph/character kinds are immutable stable keys; definitions are
 revision-checked and semantic roles are unique per project and kind.
+The shared chapter/publication-prose host focuses its editable surface when it
+becomes visible, retains a solid visual caret at the current selection while
+focus is elsewhere, and uses ProseMirror gap selections so the insertion point
+can move before and after Figures, Designed Pages, and other non-text blocks.
+Its surface consumes the available editor row without a fixed document-height
+minimum; the owning surface scrolls only when manuscript content exceeds that
+available space.
 Assistant style alignment uses the same typed logical Start, Center, End, and
 Justify values as direct paragraph formatting; the style service canonicalizes
 logical and left/right aliases at its persistence boundary. Invalid style

@@ -3,6 +3,7 @@ import {EditorState, NodeSelection, Plugin, PluginKey, TextSelection} from "pros
 import {EditorView} from "prosemirror-view";
 import {baseKeymap, chainCommands, createParagraphNear, liftEmptyBlock, newlineInCode, toggleMark} from "prosemirror-commands";
 import {history, redo, undo} from "prosemirror-history";
+import {GapCursor, gapCursor} from "prosemirror-gapcursor";
 import {keymap} from "prosemirror-keymap";
 
 const idsKey = new PluginKey("lorekeeper-block-ids");
@@ -254,6 +255,7 @@ const schema = new Schema({
         figure: {
             group: "block",
             content: "inline*",
+            createGapCursor: true,
             attrs: {...blockAttrs, styleRole: {default: "figure-caption"}},
             parseDOM: [{
                 tag: "figure[data-image-id]",
@@ -510,6 +512,13 @@ function blockIdPlugin() {
             return changed ? transaction : null;
         }
     });
+}
+
+function initialEditorSelection(doc) {
+    const start = doc.resolve(0);
+    return GapCursor.valid(start)
+        ? new GapCursor(start)
+        : TextSelection.atStart(doc);
 }
 
 function button(label, title, action) {
@@ -1909,14 +1918,47 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     editorChrome.append(toolbar);
     const surface = document.createElement("div");
     surface.className = "semantic-editor-surface";
+    const persistentCaret = document.createElement("span");
+    persistentCaret.className = "semantic-editor-persistent-caret";
+    persistentCaret.setAttribute("aria-hidden", "true");
     const status = document.createElement("div");
     status.className = "semantic-editor-status";
     status.setAttribute("aria-live", "polite");
+    root.classList.add("semantic-editor-root");
     root.replaceChildren(editorChrome, surface, status);
     installEditorFontRules(root, fontFamilies);
     const namedStyleRules = installNamedStyleRules(root, namedStyles);
 
     let view;
+    let caretFrame = null;
+    const updatePersistentCaret = () => {
+        caretFrame = null;
+        if (!view || readOnly || view.hasFocus() || !root.isConnected) {
+            persistentCaret.hidden = true;
+            return;
+        }
+
+        const selection = view.state.selection;
+        const position = selection instanceof NodeSelection
+            ? selection.to
+            : selection.head ?? selection.to;
+        try {
+            const coordinates = view.coordsAtPos(position, -1);
+            const surfaceBounds = surface.getBoundingClientRect();
+            const computedSize = Number.parseFloat(getComputedStyle(view.dom).fontSize) || 17;
+            const caretHeight = Math.min(32, Math.max(18, coordinates.bottom - coordinates.top || computedSize * 1.35));
+            persistentCaret.style.left = `${coordinates.left - surfaceBounds.left}px`;
+            persistentCaret.style.top = `${coordinates.top - surfaceBounds.top}px`;
+            persistentCaret.style.height = `${caretHeight}px`;
+            persistentCaret.hidden = false;
+        } catch {
+            persistentCaret.hidden = true;
+        }
+    };
+    const schedulePersistentCaret = () => {
+        if (caretFrame !== null) cancelAnimationFrame(caretFrame);
+        caretFrame = requestAnimationFrame(updatePersistentCaret);
+    };
     const saveNow = () => {
         if (conflictDraftJson !== null)
             return Promise.resolve(false);
@@ -1978,8 +2020,10 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         revision = incoming.revision;
         changeGeneration = 0;
         savedGeneration = 0;
+        const incomingDocument = documentFromDomain(incoming);
         view.updateState(EditorState.create({
-            doc: documentFromDomain(incoming),
+            doc: incomingDocument,
+            selection: initialEditorSelection(incomingDocument),
             plugins: view.state.plugins
         }));
         updateStatus();
@@ -1987,11 +2031,14 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         figureInspector.update();
     };
 
+    const initialDocument = documentFromDomain(initial);
     const state = EditorState.create({
-        doc: documentFromDomain(initial),
+        doc: initialDocument,
+        selection: initialEditorSelection(initialDocument),
         plugins: [
             history(),
             blockIdPlugin(),
+            gapCursor(),
             keymap({
                 "Mod-z": undo,
                 "Shift-Mod-z": redo,
@@ -2023,8 +2070,17 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             figureInspector.update();
             updateFormattingControls();
             updateStatus();
+            schedulePersistentCaret();
         },
         handleDOMEvents: {
+            focus() {
+                persistentCaret.hidden = true;
+                return false;
+            },
+            blur() {
+                schedulePersistentCaret();
+                return false;
+            },
             click(_view, event) {
                 if (!(event.target instanceof Element)) return false;
                 const figureImage = event.target.closest("figure[data-block-id] img");
@@ -2063,10 +2119,19 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         attributes: {
             class: "semantic-prosemirror",
             role: "textbox",
-            "aria-label": "Chapter manuscript",
+            "aria-label": "Manuscript text editor",
             "aria-multiline": "true",
             spellcheck: "true"
         }
+    });
+    surface.append(persistentCaret);
+    const caretResizeObserver = new ResizeObserver(schedulePersistentCaret);
+    caretResizeObserver.observe(surface);
+    caretResizeObserver.observe(view.dom);
+    surface.addEventListener("mousedown", event => {
+        if (event.target !== surface || readOnly) return;
+        event.preventDefault();
+        view.focus();
     });
 
     const findPanel = buildFindPanel(view, root);
@@ -2406,6 +2471,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         setReadOnly(value) {
             requestedReadOnly = !!value;
             applyEffectiveReadOnly();
+            schedulePersistentCaret();
         },
         setDocument(json) {
             replaceDocument(json);
@@ -2441,11 +2507,16 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             void setFigureImage(view, image, root);
             return true;
         },
-        focus() { view.focus(); },
+        focus() {
+            if (!readOnly) view.focus();
+        },
         dispose() {
             if (timer) clearTimeout(timer);
+            if (caretFrame !== null) cancelAnimationFrame(caretFrame);
+            caretResizeObserver.disconnect();
             view.destroy();
             root.replaceChildren();
+            root.classList.remove("semantic-editor-root");
         }
     };
 }

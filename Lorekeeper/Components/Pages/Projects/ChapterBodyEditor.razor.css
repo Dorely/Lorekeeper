@@ -4,12 +4,21 @@
     width: 100%;
     height: 100%;
     min-height: 0;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     background: var(--bs-body-bg, #fff);
 }
 
 .chapter-edit-surface--hidden {
     display: none;
+}
+
+.semantic-editor ::deep .semantic-editor-root {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    width: 100%;
+    height: 100%;
+    min-height: 100%;
 }
 
 .semantic-editor ::deep .semantic-editor-chrome {
@@ -357,15 +366,30 @@
 }
 
 .semantic-editor ::deep .semantic-editor-surface {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
     max-width: 52rem;
-    min-height: calc(100% - 7rem);
+    min-height: 0;
     margin: 0 auto;
     padding: clamp(1.5rem, 4vw, 4rem);
+    border-inline: 1px solid transparent;
+    cursor: text;
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.chapter-edit-surface:not(.chapter-edit-surface--locked) ::deep .semantic-editor-surface:hover {
+    border-inline-color: color-mix(in srgb, var(--bs-primary, #0d6efd) 18%, transparent);
+}
+
+.chapter-edit-surface:not(.chapter-edit-surface--locked) ::deep .semantic-editor-surface:focus-within {
+    border-inline-color: color-mix(in srgb, var(--bs-primary, #0d6efd) 34%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bs-primary, #0d6efd) 8%, transparent);
 }
 
 .semantic-editor ::deep .semantic-prosemirror {
     position: relative;
-    min-height: 40rem;
+    min-height: 100%;
     color: var(--bs-body-color, #212529);
     font-family: Georgia, "Times New Roman", serif;
     font-size: 1.08rem;
@@ -373,6 +397,43 @@
     outline: none;
     white-space: pre-wrap;
     overflow-wrap: break-word;
+}
+
+.chapter-edit-surface:not(.chapter-edit-surface--locked) ::deep .semantic-prosemirror p:first-child:last-child:has(> br.ProseMirror-trailingBreak:only-child)::before {
+    content: "Start writing\2026";
+    position: absolute;
+    color: var(--bs-secondary-color, #6c757d);
+    pointer-events: none;
+}
+
+.semantic-editor ::deep .semantic-editor-persistent-caret {
+    position: absolute;
+    z-index: 2;
+    width: 0;
+    border-left: 2px solid var(--bs-primary, #0d6efd);
+    pointer-events: none;
+}
+
+.semantic-editor ::deep .semantic-editor-persistent-caret[hidden] {
+    display: none;
+}
+
+.semantic-editor ::deep .semantic-prosemirror .ProseMirror-gapcursor {
+    position: absolute;
+    display: none;
+    pointer-events: none;
+}
+
+.semantic-editor ::deep .semantic-prosemirror.ProseMirror-focused .ProseMirror-gapcursor {
+    display: block;
+}
+
+.semantic-editor ::deep .semantic-prosemirror .ProseMirror-gapcursor::after {
+    content: "";
+    position: absolute;
+    top: -2px;
+    width: 1.5rem;
+    border-top: 2px solid var(--bs-primary, #0d6efd);
 }
 
 .semantic-editor ::deep .semantic-prosemirror pre {
