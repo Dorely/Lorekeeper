@@ -58,6 +58,7 @@ public interface IPublicationPackageService
 {
     Task<PublicationPreflightReport> PreflightAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
     Task<PublicationPackageResult> BuildAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken = default);
+    Task<PublicationPackageResult> BuildFromPreflightAsync(Guid projectId, Guid editionId, PublicationPreflightReport report, CancellationToken cancellationToken = default);
 }
 
 public sealed class PublicationPackageService(
@@ -375,8 +376,17 @@ public sealed class PublicationPackageService(
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var report = await PreflightAsync(projectId, editionId, cancellationToken);
+        return await BuildFromPreflightAsync(projectId, editionId, report, cancellationToken);
+    }
+
+    public async Task<PublicationPackageResult> BuildFromPreflightAsync(
+        Guid projectId,
+        Guid editionId,
+        PublicationPreflightReport report,
+        CancellationToken cancellationToken = default)
+    {
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         if (!report.CanPackage)
             throw new InvalidOperationException("Publication package is blocked by preflight errors.");
         var edition = await db.PublicationEditions.AsNoTracking().SingleAsync(
@@ -460,11 +470,14 @@ public sealed class PublicationPackageService(
                     (PublicationArtifactKind.FrontCoverImage, epubCover.MediaType, epubCover.Data);
         }
 
-        var document = await publishing.GetDocumentAsync(projectId, editionId, cancellationToken);
-        if (!files.Values.Any(item => item.Kind == PublicationArtifactKind.FrontCoverImage)
-            && document.Cover is null && document.CoverAsset is { } frontCover)
-            files[$"front-cover{ExtensionFor(frontCover.ContentType)}"] =
-                (PublicationArtifactKind.FrontCoverImage, frontCover.ContentType, frontCover.Data);
+        if (edition.Format == PublicationEditionFormat.Epub
+            && !files.Values.Any(item => item.Kind == PublicationArtifactKind.FrontCoverImage))
+        {
+            var document = await publishing.GetDocumentAsync(projectId, editionId, cancellationToken);
+            if (document.Cover is null && document.CoverAsset is { } frontCover)
+                files[$"front-cover{ExtensionFor(frontCover.ContentType)}"] =
+                    (PublicationArtifactKind.FrontCoverImage, frontCover.ContentType, frontCover.Data);
+        }
         var packagedReport = report with { CurrentPackage = null };
         var reportData = JsonSerializer.SerializeToUtf8Bytes(packagedReport, JsonOptions);
         files["preflight.json"] = (PublicationArtifactKind.PreflightReport, "application/json", reportData);

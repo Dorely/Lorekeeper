@@ -776,7 +776,19 @@ public sealed class PublicationRenderProcessor(
         await db.SaveChangesAsync(cancellationToken);
 
         Cleanup(job.Id);
-        var result = await InvokeAsync(job.Id, request, cancellationToken);
+        var result = await InvokeAsync(
+            job.Id,
+            request,
+            async progress =>
+            {
+                var mapped = 30 + progress.Percent * 60 / 100;
+                if (mapped <= job.ProgressPercent)
+                    return;
+                job.ProgressPercent = mapped;
+                job.ProgressMessage = progress.Message;
+                await db.SaveChangesAsync(cancellationToken);
+            },
+            cancellationToken);
         if (result.ProtocolVersion != 7)
             throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 7 is required.");
         if (result.JobId is not null
@@ -816,7 +828,7 @@ public sealed class PublicationRenderProcessor(
             if (coverResult.PageCount != expectedPages)
                 throw new InvalidOperationException($"The renderer returned {coverResult.PageCount} pages for {coverResult.Kind}; {expectedPages} are required.");
         }
-        job.ProgressPercent = 80;
+        job.ProgressPercent = 92;
         job.ProgressMessage = "Verifying immutable artifacts";
         await db.SaveChangesAsync(cancellationToken);
         var outputRoot = JobRoot(job.Id);
@@ -1406,6 +1418,7 @@ public sealed class PublicationRenderProcessor(
     private async Task<PressResponse> InvokeAsync(
         Guid jobId,
         PressPreparedRequest request,
+        Func<PressProgress, Task> progressChanged,
         CancellationToken cancellationToken)
     {
         var jobRoot = JobRoot(jobId);
@@ -1440,7 +1453,21 @@ public sealed class PublicationRenderProcessor(
         var stderrTask = ReadBoundedAsync(process.StandardError, 64 * 1024, linked.Token);
         try
         {
-            await process.WaitForExitAsync(linked.Token);
+            var exitTask = process.WaitForExitAsync(linked.Token);
+            var lastProgress = -1;
+            while (!exitTask.IsCompleted)
+            {
+                await Task.WhenAny(exitTask, Task.Delay(250, linked.Token));
+                var progress = await ReadProgressAsync(jobRoot, jobId, linked.Token);
+                if (progress is null || progress.Percent <= lastProgress)
+                    continue;
+                lastProgress = progress.Percent;
+                await progressChanged(progress);
+            }
+            await exitTask;
+            var finalProgress = await ReadProgressAsync(jobRoot, jobId, linked.Token);
+            if (finalProgress is not null && finalProgress.Percent > lastProgress)
+                await progressChanged(finalProgress);
             var stdout = await stdoutTask;
             var stderr = await stderrTask;
             if (string.IsNullOrWhiteSpace(stdout))
@@ -1466,6 +1493,42 @@ public sealed class PublicationRenderProcessor(
             if (!process.HasExited)
                 process.Kill(entireProcessTree: true);
             throw;
+        }
+    }
+
+    private static async Task<PressProgress?> ReadProgressAsync(
+        string jobRoot,
+        Guid jobId,
+        CancellationToken cancellationToken)
+    {
+        var path = Path.Combine(jobRoot, "progress.json");
+        try
+        {
+            var file = new FileInfo(path);
+            if (!file.Exists || file.Length is < 2 or > 4_096)
+                return null;
+            await using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                4_096,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            var progress = await JsonSerializer.DeserializeAsync<PressProgress>(stream, JsonOptions, cancellationToken);
+            return progress is not null
+                && progress.Percent is >= 0 and <= 100
+                && !string.IsNullOrWhiteSpace(progress.Message)
+                && string.Equals(progress.JobId, jobId.ToString("N"), StringComparison.OrdinalIgnoreCase)
+                    ? progress
+                    : null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
@@ -1594,6 +1657,8 @@ public sealed class PublicationRenderProcessor(
         PublicationRenderDiagnostic[]? Diagnostics,
         JsonElement Evidence,
         PressPageMap[]? PageMap);
+
+    private sealed record PressProgress(string JobId, int Percent, string Message);
 
     private sealed record PressArtifact(
         string Kind,

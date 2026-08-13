@@ -11,7 +11,7 @@ use crate::font::{
     assert_supported_language, configure_custom_fonts, custom_family, is_bold, is_italic,
     measure_text, subset_for_layout,
 };
-use crate::image::prepare_images;
+use crate::image::{DecodedImage, EmbeddedImage, prepare_images};
 use crate::inspect;
 use crate::model::{
     Artifact, CoverSurfaceEvidence, Diagnostic, FontEvidence, FontFace, FontFamily, ImageEvidence,
@@ -19,7 +19,9 @@ use crate::model::{
     LayoutSemanticRole, LayoutShape, LayoutShapeKind, OutputPurpose, PageKind, PageMapEntry,
     RenderRequest, RenderResponse, ValidationEvidence,
 };
-use crate::pdf::{PdfOptions, cover_background_total_ink_percent, write_pdf_cancellable};
+use crate::pdf::{
+    PdfOptions, cover_background_total_ink_percent, write_pdf_cancellable_with_progress,
+};
 
 const MAX_ASSETS: usize = 512;
 const MAX_ASSET_BYTES: u64 = 256 * 1024 * 1024;
@@ -406,8 +408,72 @@ pub fn run(job_root: &Path) -> RenderResult<()> {
     bind_job_id(run_parsed(job_root, &request), &request.job_id)
 }
 
+fn report_progress(job_root: &Path, request: &RenderRequest, percent: usize, message: &str) {
+    let payload = serde_json::json!({
+        "jobId": request.job_id,
+        "percent": percent.min(100),
+        "message": message,
+    });
+    if let Ok(bytes) = serde_json::to_vec(&payload) {
+        let _ = fs::write(job_root.join("progress.json"), bytes);
+    }
+}
+
+fn report_fraction(
+    job_root: &Path,
+    request: &RenderRequest,
+    start: usize,
+    end: usize,
+    completed: usize,
+    total: usize,
+    message: &str,
+) {
+    let percent = (end.saturating_sub(start) * completed.min(total))
+        .checked_div(total)
+        .map_or(end, |value| start + value);
+    report_progress(job_root, request, percent, message);
+}
+
+fn partition_images(
+    mut images: std::collections::BTreeMap<String, EmbeddedImage>,
+    interior_ids: &BTreeSet<String>,
+    cover_ids: &BTreeSet<String>,
+) -> (
+    std::collections::BTreeMap<String, EmbeddedImage>,
+    std::collections::BTreeMap<String, EmbeddedImage>,
+) {
+    let mut interior = std::collections::BTreeMap::new();
+    let mut cover = std::collections::BTreeMap::new();
+    for id in interior_ids.union(cover_ids) {
+        let Some(image) = images.remove(id) else {
+            continue;
+        };
+        if interior_ids.contains(id) && cover_ids.contains(id) {
+            interior.insert(id.clone(), image.clone());
+            cover.insert(id.clone(), image);
+        } else if interior_ids.contains(id) {
+            interior.insert(id.clone(), image);
+        } else {
+            cover.insert(id.clone(), image);
+        }
+    }
+    (interior, cover)
+}
+
 fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
-    let validated_assets = validate_request(request, job_root)?;
+    report_progress(job_root, request, 1, "Validating input");
+    let mut validation_progress = |completed: usize, total: usize| {
+        report_fraction(
+            job_root,
+            request,
+            2,
+            20,
+            completed,
+            total,
+            "Validating images",
+        );
+    };
+    let decoded_assets = validate_request(request, job_root, &mut validation_progress)?;
     ensure_output_is_safe(job_root)?;
     ensure_not_cancelled(job_root)?;
     let output = job_root.join("output");
@@ -417,6 +483,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         allow_pending_accessibility: request.output_purpose == OutputPurpose::ReadingCopy,
         ..LayoutTolerance::default()
     };
+    report_progress(job_root, request, 22, "Paginating book");
     let mut layout = paginate_with_cancellation(request, Some(job_root), tolerance)?;
     if let Some(product) = request.physical_product.as_ref() {
         while layout.pages.len() < product.minimum_pages {
@@ -439,6 +506,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             ),
         )));
     }
+    report_progress(job_root, request, 38, "Composing cover surfaces");
     let is_digital_pdf = request.profile == "generic-digital-pdf-v1";
     let mut cover_width = 0.0;
     let mut spine_width = 0.0;
@@ -498,17 +566,90 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
 
     ensure_not_cancelled(job_root)?;
+    report_progress(job_root, request, 48, "Preparing publication images");
 
     let is_pdfx = request.profile == "ingram-print-pdfx1a-v2";
-    let interior_images = prepare_images(
-        request,
-        &validated_assets,
-        is_pdfx,
-        request.ink == "BlackAndWhite",
-    )
-    .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
-    let cover_images = prepare_images(request, &validated_assets, is_pdfx, false)
+    let interior_image_ids = layout
+        .pages
+        .iter()
+        .chain(cover_page.iter())
+        .flat_map(|page| page.images.iter().map(|image| image.asset_id.clone()))
+        .collect::<BTreeSet<_>>();
+    let cover_image_ids = physical_covers
+        .iter()
+        .flat_map(|(_, page)| page.images.iter().map(|image| image.asset_id.clone()))
+        .collect::<BTreeSet<_>>();
+    let black_and_white = request.ink == "BlackAndWhite";
+    let (interior_images, cover_images) = if black_and_white {
+        let mut interior_progress = |completed: usize, total: usize| {
+            report_fraction(
+                job_root,
+                request,
+                48,
+                58,
+                completed,
+                total,
+                "Preparing interior images",
+            );
+        };
+        let interior = prepare_images(
+            request,
+            &decoded_assets,
+            &interior_image_ids,
+            is_pdfx,
+            true,
+            &mut interior_progress,
+        )
         .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
+        let mut cover_progress = |completed: usize, total: usize| {
+            report_fraction(
+                job_root,
+                request,
+                58,
+                68,
+                completed,
+                total,
+                "Preparing cover images",
+            );
+        };
+        let cover = prepare_images(
+            request,
+            &decoded_assets,
+            &cover_image_ids,
+            is_pdfx,
+            false,
+            &mut cover_progress,
+        )
+        .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
+        (interior, cover)
+    } else {
+        let all_image_ids = interior_image_ids
+            .union(&cover_image_ids)
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut image_progress = |completed: usize, total: usize| {
+            report_fraction(
+                job_root,
+                request,
+                48,
+                68,
+                completed,
+                total,
+                "Preparing publication images",
+            );
+        };
+        let prepared = prepare_images(
+            request,
+            &decoded_assets,
+            &all_image_ids,
+            is_pdfx,
+            false,
+            &mut image_progress,
+        )
+        .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
+        partition_images(prepared, &interior_image_ids, &cover_image_ids)
+    };
+    drop(decoded_assets);
     let mut maximum_total_ink_percent = interior_images
         .values()
         .chain(cover_images.values())
@@ -540,12 +681,23 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                 }
             }
         }
-        let book_bytes = write_pdf_cancellable(
+        let book_bytes = write_pdf_cancellable_with_progress(
             &layout.pages,
             &fonts,
             &interior_images,
             &interior_options,
             || job_root.join("cancel.requested").exists(),
+            |completed, total| {
+                report_fraction(
+                    job_root,
+                    request,
+                    70,
+                    88,
+                    completed,
+                    total,
+                    "Writing book PDF",
+                );
+            },
         )
         .map_err(pdf_failure)?;
         let book_path = staging.path().join("book.pdf");
@@ -562,12 +714,23 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             inspection,
         )
     } else {
-        let interior_bytes = write_pdf_cancellable(
+        let interior_bytes = write_pdf_cancellable_with_progress(
             &layout.pages,
             &fonts,
             &interior_images,
             &interior_options,
             || job_root.join("cancel.requested").exists(),
+            |completed, total| {
+                report_fraction(
+                    job_root,
+                    request,
+                    70,
+                    88,
+                    completed,
+                    total,
+                    "Writing interior PDF",
+                );
+            },
         )
         .map_err(pdf_failure)?;
         let interior_path = staging.path().join("interior.pdf");
@@ -620,11 +783,27 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                 surface.height_points,
                 surface.spine_points,
             );
-            let cover_bytes =
-                write_pdf_cancellable(&pages, &fonts, &cover_images, &cover_options, || {
-                    job_root.join("cancel.requested").exists()
-                })
-                .map_err(pdf_failure)?;
+            let cover_start = 88 + index * 5 / physical_covers.len().max(1);
+            let cover_end = 88 + (index + 1) * 5 / physical_covers.len().max(1);
+            let cover_bytes = write_pdf_cancellable_with_progress(
+                &pages,
+                &fonts,
+                &cover_images,
+                &cover_options,
+                || job_root.join("cancel.requested").exists(),
+                |completed, total| {
+                    report_fraction(
+                        job_root,
+                        request,
+                        cover_start,
+                        cover_end,
+                        completed,
+                        total,
+                        "Writing cover PDF",
+                    );
+                },
+            )
+            .map_err(pdf_failure)?;
             let cover_path = staging.path().join(filename);
             fs::write(&cover_path, &cover_bytes).map_err(io_failure)?;
             cover_inspections.push(
@@ -668,6 +847,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         }
     }
     ensure_not_cancelled(job_root)?;
+    report_progress(job_root, request, 95, "Inspecting finished PDFs");
 
     let image_evidence = layout
         .pages
@@ -710,6 +890,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         );
     }
 
+    report_progress(job_root, request, 98, "Promoting validated artifacts");
     staging.promote(&output)?;
     let response = RenderResponse {
         protocol_version: 7,
@@ -828,6 +1009,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         "{}",
         serde_json::to_string(&response).expect("serialize render response")
     );
+    report_progress(job_root, request, 100, "Render complete");
     Ok(())
 }
 
@@ -891,7 +1073,7 @@ pub fn trace(job_root: &Path) -> RenderResult<()> {
 }
 
 fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
-    validate_request(request, job_root)?;
+    validate_request(request, job_root, &mut |_, _| {})?;
     let browser_preview = request.layout_trace_mode.as_deref() == Some("browser-preview");
     let tolerance = if browser_preview {
         LayoutTolerance::authoring_preview()
@@ -1101,7 +1283,8 @@ fn load_request(job_root: &Path) -> RenderResult<RenderRequest> {
 fn validate_request(
     request: &RenderRequest,
     job_root: &Path,
-) -> RenderResult<std::collections::BTreeMap<String, Vec<u8>>> {
+    progress: &mut dyn FnMut(usize, usize),
+) -> RenderResult<std::collections::BTreeMap<String, DecodedImage>> {
     if request.protocol_version != 7 {
         return reject(
             "PRESS_PROTOCOL_INVALID",
@@ -1262,7 +1445,8 @@ fn validate_request(
     let mut declared = BTreeSet::new();
     let mut declared_ids = BTreeSet::new();
     let mut validated_assets = std::collections::BTreeMap::new();
-    for asset in &request.assets {
+    let asset_total = request.assets.len();
+    for (asset_index, asset) in request.assets.iter().enumerate() {
         let relative = Path::new(&asset.relative_path);
         if relative.is_absolute()
             || relative
@@ -1324,10 +1508,11 @@ fn validate_request(
                 format!("Asset '{}' changed after declaration.", asset.id),
             );
         }
-        crate::image::validate_declared_image(asset, &bytes)
+        let decoded = crate::image::decode_declared_image(asset, &bytes)
             .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
         total = total.saturating_add(bytes.len() as u64);
-        validated_assets.insert(asset.id.clone(), bytes);
+        validated_assets.insert(asset.id.clone(), decoded);
+        progress(asset_index + 1, asset_total);
     }
     let mut validated_fonts = std::collections::BTreeMap::new();
     let mut declared_font_faces = BTreeSet::new();
@@ -3237,7 +3422,7 @@ fn resolve_content_reference(
         .and_then(Value::as_u64)
         .map(|value| value as usize)
         .unwrap_or(utf16_len);
-    if end <= start || end > utf16_len {
+    if end < start || end > utf16_len {
         return Err(Diagnostic::error(
             "PRESS_COMPOSITION_RANGE_INVALID",
             format!("Composition content reference '{block_id}' has an invalid range."),
@@ -6738,6 +6923,19 @@ mod tests {
             serde_json::json!({ "blockId": "copy", "startOffset": 2, "endOffset": 4 }),
         ];
         assert!(validate_semantic_coverage(&blocks, &references).is_err());
+    }
+
+    #[test]
+    fn composition_references_allow_empty_bound_publication_fields() {
+        let blocks = vec![serde_json::json!({
+            "id": "section-text-publisher",
+            "type": "Paragraph",
+            "content": [{ "text": "" }]
+        })];
+        let reference = serde_json::json!({ "blockId": "section-text-publisher" });
+
+        assert_eq!(resolve_content_reference(&blocks, &reference).unwrap(), "");
+        assert!(validate_semantic_coverage(&blocks, &[reference]).is_ok());
     }
 
     #[test]

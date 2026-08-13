@@ -23,32 +23,41 @@ pub struct EmbeddedImage {
     pub maximum_total_ink_percent: f32,
 }
 
-pub fn prepare_images(
+#[derive(Debug)]
+pub struct DecodedImage {
+    pub width: u32,
+    pub height: u32,
+    pub rgb: Vec<u8>,
+}
+
+pub fn prepare_images<F>(
     request: &RenderRequest,
-    validated_assets: &BTreeMap<String, Vec<u8>>,
+    decoded_assets: &BTreeMap<String, DecodedImage>,
+    selected_ids: &std::collections::BTreeSet<String>,
     pdf_x: bool,
     black_and_white: bool,
-) -> Result<BTreeMap<String, EmbeddedImage>, Diagnostic> {
+    mut progress: F,
+) -> Result<BTreeMap<String, EmbeddedImage>, Diagnostic>
+where
+    F: FnMut(usize, usize),
+{
     let mut result = BTreeMap::new();
-    for declaration in &request.assets {
-        let bytes = validated_assets.get(&declaration.id).ok_or_else(|| {
+    let declarations = request
+        .assets
+        .iter()
+        .filter(|declaration| selected_ids.contains(&declaration.id))
+        .collect::<Vec<_>>();
+    let total = declarations.len();
+    for (index, declaration) in declarations.into_iter().enumerate() {
+        let decoded = decoded_assets.get(&declaration.id).ok_or_else(|| {
             Diagnostic::error(
                 "PRESS_ASSET_READ_FAILED",
-                "Validated asset bytes were unavailable.",
+                "Validated image pixels were unavailable.",
             )
         })?;
-        let (width, height, rgb) = match declaration.media_type.as_str() {
-            "image/png" => decode_png(&declaration.id, bytes)?,
-            "image/jpeg" => decode_jpeg(&declaration.id, bytes)?,
-            _ => {
-                return Err(Diagnostic::error(
-                    "PRESS_ASSET_FORMAT_UNSUPPORTED",
-                    format!("Asset '{}' must be PNG or JPEG.", declaration.id),
-                ));
-            }
-        };
         let (samples, cmyk, grayscale, maximum_total_ink_percent) = if black_and_white {
-            let gray = rgb
+            let gray = decoded
+                .rgb
                 .chunks_exact(3)
                 .map(|pixel| {
                     ((pixel[0] as u32 * 2126
@@ -60,7 +69,7 @@ pub fn prepare_images(
                 .collect();
             (gray, false, true, 0.0)
         } else if pdf_x {
-            let cmyk = convert_to_cmyk(&rgb)?;
+            let cmyk = convert_to_cmyk(&decoded.rgb)?;
             let maximum = cmyk
                 .chunks_exact(4)
                 .map(|pixel| {
@@ -78,20 +87,21 @@ pub fn prepare_images(
             }
             (cmyk, true, false, maximum)
         } else {
-            (rgb, false, false, 0.0)
+            (decoded.rgb.clone(), false, false, 0.0)
         };
         result.insert(
             declaration.id.clone(),
             EmbeddedImage {
                 id: declaration.id.clone(),
-                width,
-                height,
+                width: decoded.width,
+                height: decoded.height,
                 samples,
                 cmyk,
                 grayscale,
                 maximum_total_ink_percent,
             },
         );
+        progress(index + 1, total);
     }
     Ok(result)
 }
@@ -130,11 +140,11 @@ fn decode_jpeg(id: &str, bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), Diagnostic
     Ok((width, height, pixels))
 }
 
-pub fn validate_declared_image(
+pub fn decode_declared_image(
     declaration: &crate::model::AssetDeclaration,
     bytes: &[u8],
-) -> Result<(), Diagnostic> {
-    let (width, height, _) = match declaration.media_type.as_str() {
+) -> Result<DecodedImage, Diagnostic> {
+    let (width, height, rgb) = match declaration.media_type.as_str() {
         "image/png" => decode_png(&declaration.id, bytes)?,
         "image/jpeg" => decode_jpeg(&declaration.id, bytes)?,
         _ => {
@@ -153,7 +163,7 @@ pub fn validate_declared_image(
             ),
         ));
     }
-    Ok(())
+    Ok(DecodedImage { width, height, rgb })
 }
 
 fn decode_png(id: &str, bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), Diagnostic> {

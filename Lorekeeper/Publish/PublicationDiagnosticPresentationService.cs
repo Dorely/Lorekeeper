@@ -100,6 +100,8 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
         var candidateIds = ExtractIds(diagnostic).ToList();
         foreach (var candidateId in candidateIds)
         {
+            var canonicalCandidate = candidateId.ToString("D");
+            var compactCandidate = candidateId.ToString("N");
             var matchingVariants = await db.PageCompositionVariants.AsNoTracking()
                 .Include(item => item.Composition).ThenInclude(item => item.Chapter)
                 .Include(item => item.Composition).ThenInclude(item => item.PublicationSection)
@@ -108,7 +110,8 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
                         ? item.Composition.EditionId == null
                         : item.Composition.EditionId == selectedEditionId
                             || item.Composition.EditionId == null)
-                    && item.SceneJson.Contains(candidateId.ToString()))
+                    && (item.SceneJson.Contains(canonicalCandidate)
+                        || item.SceneJson.Contains(compactCandidate)))
                 .ToListAsync(cancellationToken);
             var variantMatch = matchingVariants
                 .Select(item => (Variant: item, ObjectId: SceneObjectReference(item.SceneJson, candidateId)))
@@ -229,8 +232,14 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
             var scene = System.Text.Json.JsonSerializer.Deserialize<CompositionScene>(
                 sceneJson,
                 ManuscriptCodec.JsonOptions);
+            var compact = referencedId.ToString("N");
+            var canonical = referencedId.ToString("D");
             return scene?.Objects
-                .FirstOrDefault(item => item.Id == referencedId || item.ImageId == referencedId)
+                .FirstOrDefault(item => item.Id == referencedId
+                    || item.ImageId == referencedId
+                    || item.ContentReferences.Any(reference =>
+                        reference.BlockId.Contains(compact, StringComparison.OrdinalIgnoreCase)
+                        || reference.BlockId.Contains(canonical, StringComparison.OrdinalIgnoreCase)))
                 ?.Id;
         }
         catch (System.Text.Json.JsonException)
@@ -256,6 +265,8 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
             return "An item extends beyond the canvas and will be clipped to the page.";
         if (string.Equals(code, "PRESS_ALT_DECISION_REQUIRED", StringComparison.OrdinalIgnoreCase))
             return "An image requires alternative text or an explicit decorative decision before publishing.";
+        if (string.Equals(code, "PRESS_COMPOSITION_RANGE_INVALID", StringComparison.OrdinalIgnoreCase))
+            return "A text frame points to an invalid portion of its page content. Open the page to repair or replace that text.";
 
         var sanitized = ObjectReferenceRegex().Replace(message, "This item ");
         sanitized = PublicationDiagnosticText.SanitizeIdentifiers(sanitized);
@@ -271,6 +282,7 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
             ["PRESS_COMPOSITION_CONTENT_UNPLACED"] = "Page content has not been placed",
             ["PRESS_COMPOSITION_VARIANT_MISSING"] = "Page layout is missing",
             ["PRESS_COMPOSITION_MISSING"] = "Designed Page is missing",
+            ["PRESS_COMPOSITION_RANGE_INVALID"] = "Page text reference needs repair",
         };
 
     [GeneratedRegex("(?i)(?:Composition\\s+)?(?:object|frame)\\s+['\"]?(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})['\"]?\\s*")]

@@ -658,6 +658,15 @@ blocking actions. A Core reading copy may complete while image alternative-text
 or decorative decisions remain pending; those images are omitted from the
 copy's tagged reading order and the preparation retains visible warnings.
 Publication releases continue to fail closed on the same unresolved decisions.
+Preparation progress is monotonic across readiness, native rendering,
+post-write verification, preflight, and package assembly. Press writes a
+bounded job-identity progress sidecar from actual validation, image, and PDF
+serialization work units; the render worker verifies and maps those updates into
+the persisted preparation range, so reconnecting clients see the same progress
+instead of coarse phase jumps. Package assembly consumes the preflight report it
+just validated and does not repeat that full pass. Print packages do not rebuild
+the complete publication document merely to rediscover an already-rendered
+front cover.
 `IPublishService` remains projection/export-only.
 Publish documents carry display-ready numbered titles across Markdown, EPUB,
 plain text, and Press. Protocol requests therefore disable Press-side title
@@ -774,6 +783,14 @@ corrupt assets, restricted/unsupported fonts, existing output, and cancellation
 fail before promotion. The renderer writes a fresh staging directory,
 independently validates every PDF, and atomically renames it to `output` only
 after all checks succeed; it never overwrites prior output.
+Declared rasters are decoded and structurally validated once, then their
+validated pixels are reused for only the interior and cover surfaces that
+actually reference them. A shared color transform is reused when interior and
+cover color intent match. Image streams remain lossless and deterministic but
+use a moderate DEFLATE level rather than maximum-compression CPU work; fonts and
+the output-intent profile retain maximum compression. Empty optional bound
+publication fields resolve as valid zero-length text and paint nothing, while
+genuinely reversed or out-of-bounds text ranges still fail closed.
 
 Composition-object opacity is preserved with bounded graphics states in Digital
 PDF. KDP PDF 1.7 omits fully transparent backing paint, deterministically composites translucent backing shapes into immediately lower page artwork while retaining selectable opaque text, then flattens remaining non-overlapping opacity to avoid vendor transparency warnings. Ingram PDF/X-1a deterministically flattens opacity against

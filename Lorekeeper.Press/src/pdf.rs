@@ -203,6 +203,21 @@ pub fn write_pdf_cancellable<F>(
 where
     F: Fn() -> bool,
 {
+    write_pdf_cancellable_with_progress(pages, fonts, images, options, cancelled, |_, _| {})
+}
+
+pub fn write_pdf_cancellable_with_progress<F, G>(
+    pages: &[LayoutPage],
+    fonts: &BTreeMap<FontFace, EmbeddedFont>,
+    images: &BTreeMap<String, EmbeddedImage>,
+    options: &PdfOptions,
+    cancelled: F,
+    mut progress: G,
+) -> Result<Vec<u8>, Diagnostic>
+where
+    F: Fn() -> bool,
+    G: FnMut(usize, usize),
+{
     if pages.is_empty() {
         return Err(Diagnostic::error(
             "PRESS_LAYOUT_EMPTY",
@@ -469,6 +484,8 @@ where
     pdf.pages(pages_id)
         .kids(page_ids.iter().copied())
         .count(pages.len() as i32);
+    let progress_total = pages.len().saturating_add(images.len());
+    let mut progress_completed = 0usize;
     for (index, page_model) in pages.iter().enumerate() {
         if cancelled() {
             return Err(Diagnostic::error(
@@ -1072,6 +1089,8 @@ where
             content.restore_state();
         }
         pdf.stream(content_id, &content.finish());
+        progress_completed += 1;
+        progress(progress_completed, progress_total);
     }
 
     for image in images.values() {
@@ -1082,7 +1101,7 @@ where
             ));
         }
         let image_ref = image_references[&image.id];
-        let compressed = compress(&image.samples)?;
+        let compressed = compress_image(&image.samples)?;
         let mut object = pdf.image_xobject(image_ref, &compressed);
         object.filter(Filter::FlateDecode);
         object.width(image.width as i32);
@@ -1095,6 +1114,8 @@ where
             object.color_space().device_rgb();
         }
         object.bits_per_component(8);
+        progress_completed += 1;
+        progress(progress_completed, progress_total);
     }
 
     for (face, font) in fonts {
@@ -2257,6 +2278,19 @@ pub fn cover_background_total_ink_percent(value: &str) -> f32 {
 
 fn compress(bytes: &[u8]) -> Result<Vec<u8>, Diagnostic> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+    encoder
+        .write_all(bytes)
+        .map_err(|error| Diagnostic::error("PRESS_COMPRESSION_FAILED", error.to_string()))?;
+    encoder
+        .finish()
+        .map_err(|error| Diagnostic::error("PRESS_COMPRESSION_FAILED", error.to_string()))
+}
+
+fn compress_image(bytes: &[u8]) -> Result<Vec<u8>, Diagnostic> {
+    // Publication rasters dominate render time and package size. Level 3 keeps
+    // the PDF stream fully lossless and deterministic while avoiding the very
+    // high CPU cost of DEFLATE level 9 on every full-page image.
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(3));
     encoder
         .write_all(bytes)
         .map_err(|error| Diagnostic::error("PRESS_COMPRESSION_FAILED", error.to_string()))?;

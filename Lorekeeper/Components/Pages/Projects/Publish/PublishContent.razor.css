@@ -35,3 +35,4 @@
 .release-workspace-stack>.publication-sections-card { order: 6; }
 .release-workspace-stack>.technical { order: 7; }
 .preparation.warning { background: #fff8e6; color: #7a5200; }
+.preparation-progress{flex:1 0 100%;height:.32rem;overflow:hidden;border-radius:999px;background:color-mix(in srgb,currentColor 14%,transparent)}.preparation-progress>span{display:block;height:100%;border-radius:inherit;background:currentColor;transition:width .3s linear}
