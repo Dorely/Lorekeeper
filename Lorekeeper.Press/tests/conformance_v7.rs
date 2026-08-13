@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 7);
-    assert_eq!(value["rendererVersion"], "2.1.1");
+    assert_eq!(value["rendererVersion"], "2.1.2");
     assert_eq!(
         value["profiles"],
         json!([
@@ -63,7 +63,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 7);
-    assert_eq!(response["rendererVersion"], "2.1.1");
+    assert_eq!(response["rendererVersion"], "2.1.2");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -198,6 +198,178 @@ fn publication_sections_render_in_anchor_order_with_dynamic_contents() {
             .any(|entry| entry["blockId"] == "31000000-0000-0000-0000-000000000003")
     );
     assert!(inspect(&job.artifact(&rendered, "interior-pdf")).page_count >= 4);
+}
+
+#[test]
+fn print_front_matter_places_title_on_recto_then_copyright_on_verso() {
+    let mut job = PreparedJob::new("kdp-paperback-v1");
+    job.request["document"]["sections"] = json!([]);
+    // A malformed saved order must not reverse the semantic title leaf.
+    job.request["document"]["publicationSections"] = json!([
+        {
+            "id": "21000000-0000-0000-0000-000000000012",
+            "title": "Copyright",
+            "kind": "Copyright",
+            "systemRole": "Copyright",
+            "anchor": "Front",
+            "localOrder": 0,
+            "blocks": [{
+                "id": "31000000-0000-0000-0000-000000000012",
+                "type": "Paragraph",
+                "styleRole": "body",
+                "content": [{ "type": "Text", "text": "Copyright 2026 Mara Vale", "marks": [] }]
+            }],
+            "pageCompositions": []
+        },
+        {
+            "id": "21000000-0000-0000-0000-000000000011",
+            "title": "Title page",
+            "kind": "TitlePage",
+            "systemRole": "Title",
+            "anchor": "Front",
+            "localOrder": 1,
+            "blocks": [{
+                "id": "31000000-0000-0000-0000-000000000011",
+                "type": "Heading",
+                "styleRole": "chapter-title",
+                "content": [{ "type": "Text", "text": "The Cartographer's Lantern", "marks": [] }]
+            }],
+            "pageCompositions": []
+        }
+    ]);
+    job.write_request();
+
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let rendered = response(&output);
+    assert_eq!(rendered["status"], "completed");
+    let page_map = rendered["pageMap"].as_array().expect("page map");
+    let title_page = page_map
+        .iter()
+        .find(|entry| entry["blockId"] == "31000000-0000-0000-0000-000000000011")
+        .and_then(|entry| entry["pageNumber"].as_u64())
+        .expect("title page map");
+    let copyright_page = page_map
+        .iter()
+        .find(|entry| entry["blockId"] == "31000000-0000-0000-0000-000000000012")
+        .and_then(|entry| entry["pageNumber"].as_u64())
+        .expect("copyright page map");
+    assert_eq!(title_page, 1, "the title page must begin on a recto leaf");
+    assert_eq!(
+        copyright_page, 2,
+        "copyright must follow on the title leaf's verso"
+    );
+}
+
+#[test]
+fn print_facing_designed_pages_begin_on_a_verso_leaf() {
+    let mut job = PreparedJob::new("kdp-paperback-v1");
+    let mut designed_chapter = job.request["document"]["sections"][0]["chapters"][1].clone();
+    designed_chapter["includeHeading"] = json!(false);
+    designed_chapter["synopsis"] = json!("");
+    job.request["document"]["publicationSections"] = json!([]);
+    job.request["document"]["sections"] = json!([{
+        "id": "40000000-0000-0000-0000-000000000010",
+        "title": "Picture Book",
+        "includePage": false,
+        "includeHeading": false,
+        "chapters": [designed_chapter]
+    }]);
+    job.write_request();
+
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let rendered = response(&output);
+    assert_eq!(rendered["status"], "completed");
+    let first_leaf = rendered["pageMap"]
+        .as_array()
+        .expect("page map")
+        .iter()
+        .find(|entry| entry["blockId"] == "60000000-0000-0000-0000-000000000005")
+        .and_then(|entry| entry["pageNumber"].as_u64())
+        .expect("Designed Page map");
+    assert_eq!(
+        first_leaf, 2,
+        "a facing spread must begin on the left/verso leaf"
+    );
+}
+
+#[test]
+fn print_title_spread_uses_facing_leaves_before_copyright_verso() {
+    let mut job = PreparedJob::new("kdp-paperback-v1");
+    let composition =
+        job.request["document"]["sections"][0]["chapters"][1]["pageCompositions"][0].clone();
+    let composition_id = composition["id"].as_str().expect("composition ID");
+    job.request["document"]["sections"] = json!([]);
+    job.request["document"]["publicationSections"] = json!([
+        {
+            "id": "21000000-0000-0000-0000-000000000021",
+            "title": "Title page",
+            "kind": "TitlePage",
+            "systemRole": "Title",
+            "anchor": "Front",
+            "localOrder": 0,
+            "blocks": [{
+                "id": "31000000-0000-0000-0000-000000000021",
+                "type": "DesignedPage",
+                "styleRole": "designed-page",
+                "pageCompositionId": composition_id,
+                "content": []
+            }],
+            "pageCompositions": [composition]
+        },
+        {
+            "id": "21000000-0000-0000-0000-000000000022",
+            "title": "Copyright",
+            "kind": "Copyright",
+            "systemRole": "Copyright",
+            "anchor": "Front",
+            "localOrder": 1,
+            "blocks": [{
+                "id": "31000000-0000-0000-0000-000000000022",
+                "type": "Paragraph",
+                "styleRole": "body",
+                "content": [{ "type": "Text", "text": "Copyright 2026 Mara Vale", "marks": [] }]
+            }],
+            "pageCompositions": []
+        }
+    ]);
+    job.write_request();
+
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let rendered = response(&output);
+    let page_map = rendered["pageMap"].as_array().expect("page map");
+    let title_spread = page_map
+        .iter()
+        .find(|entry| entry["blockId"] == "31000000-0000-0000-0000-000000000021")
+        .and_then(|entry| entry["pageNumber"].as_u64())
+        .expect("title spread page map");
+    let copyright = page_map
+        .iter()
+        .find(|entry| entry["blockId"] == "31000000-0000-0000-0000-000000000022")
+        .and_then(|entry| entry["pageNumber"].as_u64())
+        .expect("copyright page map");
+    assert_eq!(title_spread, 2, "a title spread must begin on a verso leaf");
+    assert_eq!(
+        copyright, 4,
+        "copyright follows the title spread on the next verso"
+    );
 }
 
 #[test]

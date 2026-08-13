@@ -1975,7 +1975,11 @@ fn paginate_with_cancellation(
                     &mut page_map,
                     &mut semantic_order,
                 )?;
-                if !is_designed_page_only_chapter(chapter) {
+                if request.profile != "generic-digital-pdf-v1"
+                    && chapter_begins_with_facing_spread(chapter)
+                {
+                    ensure_next_leaf(&mut pages, LeafSide::Verso);
+                } else if !is_designed_page_only_chapter(chapter) {
                     start_recto(&mut pages, trim);
                 }
                 let chapter_start = pages.len() + 1;
@@ -2081,24 +2085,26 @@ fn paginate_with_cancellation(
                                     format!("Designed Page {block_id} references a missing composition."),
                                 ),
                             )))?;
+                        let rendered = designed_pages(
+                            composition,
+                            document,
+                            trim,
+                            request.profile == "generic-digital-pdf-v1",
+                            document
+                                .get("allowDesignedPageOverrides")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false),
+                            tolerance,
+                            &mut diagnostics,
+                        )
+                        .map_err(|diagnostic| {
+                            Box::new(RenderResponse::failed("rejected", diagnostic))
+                        })?;
+                        if request.profile != "generic-digital-pdf-v1" && rendered.len() == 2 {
+                            ensure_next_leaf(&mut pages, LeafSide::Verso);
+                        }
                         let first_page = pages.len() + 1;
-                        pages.extend(
-                            designed_pages(
-                                composition,
-                                document,
-                                trim,
-                                request.profile == "generic-digital-pdf-v1",
-                                document
-                                    .get("allowDesignedPageOverrides")
-                                    .and_then(Value::as_bool)
-                                    .unwrap_or(false),
-                                tolerance,
-                                &mut diagnostics,
-                            )
-                            .map_err(|diagnostic| {
-                                Box::new(RenderResponse::failed("rejected", diagnostic))
-                            })?,
-                        );
+                        pages.extend(rendered);
                         assign_semantic_order_since(
                             &mut pages,
                             &semantic_snapshot,
@@ -2650,6 +2656,17 @@ fn assign_semantic_order_since(
             }
         }
     }
+}
+
+fn first_changed_page(pages: &[LayoutPage], snapshot: &[(usize, usize)]) -> usize {
+    pages
+        .iter()
+        .enumerate()
+        .find(|(index, page)| {
+            let (line_count, image_count) = snapshot.get(*index).copied().unwrap_or_default();
+            page.lines.len() > line_count || page.images.len() > image_count
+        })
+        .map_or_else(|| pages.len().max(1), |(index, _)| index + 1)
 }
 
 fn designed_page(
@@ -3855,6 +3872,126 @@ fn layout_image_fit(value: &str) -> LayoutImageFit {
     }
 }
 
+#[derive(Clone, Copy)]
+enum LeafSide {
+    Recto,
+    Verso,
+}
+
+fn blank_page() -> LayoutPage {
+    LayoutPage {
+        kind: PageKind::Blank,
+        ..empty_body_page()
+    }
+}
+
+fn ensure_next_leaf(pages: &mut Vec<LayoutPage>, side: LeafSide) {
+    let next_page_is_recto = (pages.len() + 1) % 2 == 1;
+    let needs_blank = match side {
+        LeafSide::Recto => !next_page_is_recto,
+        LeafSide::Verso => next_page_is_recto,
+    };
+    if needs_blank {
+        pages.push(blank_page());
+    }
+}
+
+fn chapter_begins_with_facing_spread(chapter: &Value) -> bool {
+    let Some(block) = chapter
+        .get("blocks")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|block| {
+            let block_type = string(block, "type");
+            !block_type.eq_ignore_ascii_case("Paragraph")
+                || !display_block_text(block).trim().is_empty()
+        })
+    else {
+        return false;
+    };
+    if !string(block, "type").eq_ignore_ascii_case("DesignedPage") {
+        return false;
+    }
+    let composition_id = string(block, "pageCompositionId");
+    chapter
+        .get("pageCompositions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|composition| string(composition, "id") == composition_id)
+        .and_then(|composition| composition.get("variants"))
+        .and_then(Value::as_array)
+        .and_then(|variants| variants.first())
+        .and_then(|variant| variant.get("scene"))
+        .and_then(|scene| scene.get("surface"))
+        .is_some_and(|surface| {
+            string(surface, "kind") == "FacingSpread"
+                && matches!(
+                    string(surface, "outputPageMode").as_str(),
+                    "" | "EditionLeaves"
+                )
+        })
+}
+
+fn ordered_publication_sections<'a>(
+    document: &'a Value,
+    anchor: &str,
+    target_id: Option<&str>,
+) -> Vec<&'a Value> {
+    let mut sections = document
+        .get("publicationSections")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|section| {
+            string(section, "anchor").eq_ignore_ascii_case(anchor)
+                && target_id.is_none_or(|id| string(section, "targetId") == id)
+        })
+        .collect::<Vec<_>>();
+    if !anchor.eq_ignore_ascii_case("Front") || target_id.is_some() {
+        return sections;
+    }
+
+    let title = sections
+        .iter()
+        .position(|section| string(section, "systemRole").eq_ignore_ascii_case("Title"));
+    let copyright = sections
+        .iter()
+        .position(|section| string(section, "systemRole").eq_ignore_ascii_case("Copyright"));
+    let (Some(title_index), Some(copyright_index)) = (title, copyright) else {
+        return sections;
+    };
+    let title_section = sections[title_index];
+    let copyright_section = sections[copyright_index];
+    let insertion_index = title_index.min(copyright_index);
+    sections.retain(|section| {
+        let role = string(section, "systemRole");
+        !role.eq_ignore_ascii_case("Title") && !role.eq_ignore_ascii_case("Copyright")
+    });
+    let insertion_index = insertion_index.min(sections.len());
+    sections.insert(insertion_index, title_section);
+    sections.insert(insertion_index + 1, copyright_section);
+    sections
+}
+
+fn publication_section_leaf_side(section: &Value, anchor: &str, index: usize) -> Option<LeafSide> {
+    match string(section, "systemRole").as_str() {
+        "Title" | "Contents" => Some(LeafSide::Recto),
+        "Copyright" => Some(LeafSide::Verso),
+        _ if string(section, "kind") == "Dedication" => Some(LeafSide::Recto),
+        _ if anchor.eq_ignore_ascii_case("Back") && index == 0 => Some(LeafSide::Recto),
+        _ if matches!(
+            string(section, "kind").as_str(),
+            "AboutAuthor" | "References"
+        ) =>
+        {
+            Some(LeafSide::Recto)
+        }
+        _ => None,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn append_publication_sections(
     pages: &mut Vec<LayoutPage>,
@@ -3869,18 +4006,18 @@ fn append_publication_sections(
     semantic_order: &mut i32,
 ) -> RenderResult<Option<usize>> {
     let mut toc_index = None;
-    for section in document
-        .get("publicationSections")
-        .and_then(Value::as_array)
+    for (section_index, section) in ordered_publication_sections(document, anchor, target_id)
         .into_iter()
-        .flatten()
-        .filter(|section| {
-            string(section, "anchor").eq_ignore_ascii_case(anchor)
-                && target_id.is_none_or(|id| string(section, "targetId") == id)
-        })
+        .enumerate()
     {
         let section_id = string(section, "id");
+        let leaf_side = (!is_digital_pdf)
+            .then(|| publication_section_leaf_side(section, anchor, section_index))
+            .flatten();
         if string(section, "systemRole").eq_ignore_ascii_case("Contents") {
+            if let Some(side) = leaf_side {
+                ensure_next_leaf(pages, side);
+            }
             toc_index = Some(pages.len());
             pages.push(centered_page("Contents", "", trim));
             continue;
@@ -3894,17 +4031,15 @@ fn append_publication_sections(
         let begins_with_flowing_content = blocks
             .first()
             .is_some_and(|block| !string(block, "type").eq_ignore_ascii_case("DesignedPage"));
-        if begins_with_flowing_content && !pages.is_empty() {
+        if begins_with_flowing_content {
+            if let Some(side) = leaf_side {
+                ensure_next_leaf(pages, side);
+            }
             pages.push(empty_body_page());
         }
         let mut previous_was_designed_page = false;
-        for block in blocks {
+        for (block_index, block) in blocks.into_iter().enumerate() {
             *semantic_order += 1;
-            let semantic_snapshot = pages
-                .iter()
-                .map(|page| (page.lines.len(), page.images.len()))
-                .collect::<Vec<_>>();
-            let first_page = pages.len() + 1;
             let block_id = string(block, "id");
             let block_type = string(block, "type");
             if previous_was_designed_page && !block_type.eq_ignore_ascii_case("DesignedPage") {
@@ -3949,6 +4084,20 @@ fn append_publication_sections(
                         diagnostic.with_source("publication-section", section_id.clone()),
                     ))
                 })?;
+                if !is_digital_pdf {
+                    if rendered.len() == 2 {
+                        ensure_next_leaf(pages, LeafSide::Verso);
+                    } else if block_index == 0
+                        && let Some(side) = leaf_side
+                    {
+                        ensure_next_leaf(pages, side);
+                    }
+                }
+                let semantic_snapshot = pages
+                    .iter()
+                    .map(|page| (page.lines.len(), page.images.len()))
+                    .collect::<Vec<_>>();
+                let first_page = pages.len() + 1;
                 pages.extend(rendered);
                 assign_semantic_order_since(
                     pages,
@@ -3967,6 +4116,10 @@ fn append_publication_sections(
                 previous_was_designed_page = true;
                 continue;
             }
+            let semantic_snapshot = pages
+                .iter()
+                .map(|page| (page.lines.len(), page.images.len()))
+                .collect::<Vec<_>>();
             previous_was_designed_page = false;
             if block_type.eq_ignore_ascii_case("Figure") {
                 let presentation = block.get("presentation").unwrap_or(&Value::Null);
@@ -4130,7 +4283,7 @@ fn append_publication_sections(
                     page_map.push(PageMapEntry {
                         chapter_id: section_id.clone(),
                         block_id,
-                        page_number: first_page,
+                        page_number: first_changed_page(pages, &semantic_snapshot),
                     });
                 }
                 continue;
@@ -4166,7 +4319,7 @@ fn append_publication_sections(
                 page_map.push(PageMapEntry {
                     chapter_id: section_id.clone(),
                     block_id,
-                    page_number: first_page,
+                    page_number: first_changed_page(pages, &semantic_snapshot),
                 });
             }
         }

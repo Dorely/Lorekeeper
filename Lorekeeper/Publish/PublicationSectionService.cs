@@ -454,6 +454,14 @@ public sealed class PublicationSectionService(
         if (selected.Any(item => item.Anchor != first.Anchor || item.TargetId != first.TargetId)
             || effective.Count(item => item.Anchor == first.Anchor && item.TargetId == first.TargetId) != selected.Count)
             throw new InvalidOperationException("Reorder every section at one anchor together.");
+        if (first.Anchor == PublicationSectionAnchor.Front)
+        {
+            var requestedOrder = orderedSectionIds.Select(id => selected.Single(item => item.Id == id)).ToList();
+            var titleIndex = requestedOrder.FindIndex(item => item.SystemRole == PublicationSectionSystemRole.Title);
+            var copyrightIndex = requestedOrder.FindIndex(item => item.SystemRole == PublicationSectionSystemRole.Copyright);
+            if (titleIndex >= 0 && copyrightIndex != titleIndex + 1)
+                throw new InvalidOperationException("The title page must be followed by the copyright page. Their print leaf sides are assigned automatically.");
+        }
 
         foreach (var (id, index) in orderedSectionIds.Select((id, index) => (id, index)))
         {
@@ -667,7 +675,7 @@ public sealed class PublicationSectionService(
             .OrderBy(item => item.Order)
             .ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
         var bindingValues = await BindingValuesAsync(target, cancellationToken);
-        return rows.OrderBy(item => AnchorOrder(item.Row.Anchor))
+        var views = rows.OrderBy(item => AnchorOrder(item.Row.Anchor))
             .ThenBy(item => item.Row.TargetId is Guid targetId
                 ? item.Row.TargetKind == PublishOutlineTargetKind.Act
                     ? actTitles.Keys.ToList().IndexOf(targetId)
@@ -677,6 +685,26 @@ public sealed class PublicationSectionService(
             .ThenBy(item => item.Row.Id)
             .Select(item => View(item.Row, item.Inherited, actTitles, chapterTitles, bindingValues))
             .ToList();
+        CanonicalizeFrontMatter(views);
+        return views;
+    }
+
+    private static void CanonicalizeFrontMatter(List<PublicationSectionView> sections)
+    {
+        var titleIndex = sections.FindIndex(item => item.Anchor == PublicationSectionAnchor.Front
+            && item.SystemRole == PublicationSectionSystemRole.Title);
+        var copyrightIndex = sections.FindIndex(item => item.Anchor == PublicationSectionAnchor.Front
+            && item.SystemRole == PublicationSectionSystemRole.Copyright);
+        if (titleIndex < 0 || copyrightIndex < 0 || copyrightIndex == titleIndex + 1)
+            return;
+
+        var title = sections[titleIndex];
+        var copyright = sections[copyrightIndex];
+        var insertionIndex = Math.Min(titleIndex, copyrightIndex);
+        sections.RemoveAll(item => item.Id == title.Id || item.Id == copyright.Id);
+        insertionIndex = Math.Min(insertionIndex, sections.Count);
+        sections.Insert(insertionIndex, title);
+        sections.Insert(insertionIndex + 1, copyright);
     }
 
     private async Task<IReadOnlyDictionary<PublicationBoundField, string>> BindingValuesAsync(

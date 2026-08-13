@@ -585,6 +585,16 @@ release and can produce only a private `ReadingPdf`, never a publication package
 or ISBN claim. Chapter rows are the selectable publication content. Acts remain
 structural groups: the act-heading and act-summary settings alone determine
 whether their divider presentation is emitted.
+For left-to-right print, system front matter has semantic rather than merely
+numeric ordering: title precedes copyright, a single-leaf title begins on a
+right/recto leaf, and copyright follows on its left/verso leaf. Contents and
+dedications begin recto. A two-leaf Designed Page spread begins verso so its
+leaves form one physical opening; a two-leaf title spread therefore occupies a
+left/right opening and copyright follows on the next verso. The section service
+normalizes already-saved inverted title/copyright order and prevents new
+reorders from separating them. Press independently enforces the order and leaf
+parity so a malformed staged request cannot produce a semantically reversed
+book.
 Core Book also owns Digital PDF presentation defaults. Preserving Designed Page
 sizes keeps a facing composition as one wide PDF page and retains intentional
 independent page geometry; otherwise facing compositions are emitted as two
@@ -728,9 +738,14 @@ bleed, and captions, structured Designed Pages and cover scenes, reusable
 styles, proportional or explicitly stretched raster frames, page-clipped
 out-of-surface artwork, vector shapes, logical reading order, page-size overrides for eligible
 Digital PDFs, full-wrap cover geometry, EAN-13 bars, and PDF serialization.
-Recto chapter starts apply to flowing-content chapters. Chapters whose meaningful
-content consists only of Designed Pages remain a continuous leaf sequence, so
-picture-book authoring containers do not introduce blank pages between designs.
+Recto chapter starts apply to flowing-content chapters. A two-leaf print
+Designed Page always begins on a verso leaf; single-leaf Designed Page-only
+chapters otherwise remain a continuous leaf sequence, so picture-book
+authoring containers do not introduce blank pages between designs. Export
+selects the active authoring variant when it is compatible with the target and
+otherwise the newest exact compatible variant. Print rejects `SingleSurface`
+facing variants and accepts only one trim leaf or two `EditionLeaves`, preventing
+a digital wide-page variant from being sent to a physical profile.
 Structured text remains text in the output rather than a rasterized page image.
 Digital covers declare no barcode mode; print-only Lorekeeper and vendor-overlay
 barcode modes are rejected for the Digital PDF profile. PDF structure,

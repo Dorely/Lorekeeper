@@ -4,12 +4,18 @@ Last reviewed: 2026-08-13
 
 ## Scope
 
-Lorekeeper Press 2.1.1 targets English/Latin, left-to-right paperback and
+Lorekeeper Press 2.1.2 targets English/Latin, left-to-right paperback and
 hardcover interiors, product-specific cover surfaces, and tagged Digital PDF
 books with front cover page one. Physical print jobs resolve through the
 checked-in registry `2026.08.1`; digital output uses
 `generic-digital-pdf-v1`. The application does not require a separate PDF
 converter or preflight product.
+
+Left-to-right front-matter order and leaf parity follow KDP's current
+[front-matter guidance](https://kdp.amazon.com/en_US/help/topic/GDDYZG2C7RVF5N9J):
+the title page is right-facing and copyright is the following left-facing page.
+Blank-leaf and odd/right versus even/left checks also follow KDP's current
+[formatting guidance](https://kdp.amazon.com/en_US/help/topic/G201834260).
 
 These profiles establish the durable taxonomy used by the application:
 Generic profiles provide configurable output without a named-vendor claim,
@@ -40,8 +46,8 @@ assertion was removed or relaxed.
 | Determinism | Identical semantic input, settings, assets, fonts, profile, and renderer produce byte-identical PDFs and hashes | Two independent job roots compared byte for byte |
 | Typography | Bundled OFL Lora/Nunito/Roboto Mono plus declared rights-confirmed project TTF and TrueType/CFF OTF; OpenType shaping with emitted advances/offsets; paragraph/character/object styles; semantic inline marks; glyph coverage and embedding-right failure; subset embedding; shaped widths and ToUnicode, including multi-codepoint ligatures | Deterministic CLI layout trace plus mixed-run/custom-font assertions and raw font dictionaries, descendant descriptors, streams, and CMaps parsed with test-only `lopdf` |
 | Line layout | Unicode line opportunities, English hyphenation, bounded overflow, widow/orphan minima, named and sparse alignment/whole/right/first-line/hanging indent and spacing/pagination settings with direct-override precedence, and deterministic line positions | Intermediate layout unit fixtures, protocol-v7 page-paint responses, plus extracted PDF content |
-| Pagination | Recto chapter starts, intentional blanks, running heads, page numbers, bounded/wrapped multi-page TOC convergence, stable chapter/block page maps, and page limit | Long-title/long-TOC glyph-bound fixtures, forced nonconvergence, narrow pages, long prose, and repeated renders |
-| Publication model | Fixed Core act/chapter order, anchored publication sections with semantic text, flowing Figures, captions and exact-geometry Designed Pages/spreads, globally numbered acts/chapters, structured cover scenes, and Digital PDF page overrides | Canonical full-model request, layout traces, section-anchor/order/dynamic-contents assertions, caption/flow/page-box assertions, semantic page maps, and structured-object evidence |
+| Pagination | Recto chapter starts, semantic title-recto/copyright-verso ordering, verso-starting physical spreads, intentional blanks, running heads, page numbers, bounded/wrapped multi-page TOC convergence, stable chapter/block page maps, and page limit | Dedicated single-title and two-leaf-title fixtures, facing-spread parity, long-title/long-TOC glyph-bound fixtures, forced nonconvergence, narrow pages, long prose, and repeated renders |
+| Publication model | Fixed Core act/chapter order, canonical system-front-matter order, anchored publication sections with semantic text, flowing Figures, captions and exact-geometry Designed Pages/spreads, globally numbered acts/chapters, structured cover scenes, and Digital PDF page overrides | Canonical full-model request, malformed saved front-order normalization, layout traces, section-anchor/order/dynamic-contents assertions, caption/flow/page-box assertions, semantic page maps, and structured-object evidence |
 | Images | Single-pass hash-validated arbitrary-aspect PNG/JPEG decoding, alpha flattening, B&W conversion, color-cover independence, flow/wrap/proportional contain-or-cover, explicit stretching, crop-position/bleed geometry, page-edge clipping for frames that extend beyond a surface, effective-DPI evidence, facing-spread splitting, and deterministic lossless compression | Image XObjects, page maps, transformations, clipping paths, boxes, hashes, and color spaces parsed independently |
 | Composition | Text, image, rectangle, ellipse, line, resolved group transforms/visibility/opacity/z-order, layer/style behavior, alignment, vertical alignment, letter spacing, backgrounds, shadows, logical reading order, vector shapes, selectable text, empty optional bound fields, strict invalid-range/overflow failure, and no C#/Skia page rasterization | Layout traces, range-resolution unit evidence, and raw PDF text/path/image operations |
 | Physical products | Exact submitted/normalized/reported page counts, supported product/trim/process/stock/finish/mode combinations, fixed-point geometry, and fail-closed registry version/hash matching. KDP paperback uses published stock formulas; KDP hardcover and every Ingram stock use complete frozen even-page calculator tables. Generic products require a complete printer template manifest. | Registry coverage assertions, boundary/representative golden measurements, absence-of-fallback assertions, and generic-template negatives |

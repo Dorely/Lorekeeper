@@ -664,7 +664,8 @@ public sealed class PublishService(
                 composition.Revision,
                 composition.Variants
                     .Where(variant => CompositionService.VariantMatchesEdition(variant, profile))
-                    .OrderByDescending(variant => variant.UpdatedAt)
+                    .OrderByDescending(variant => composition.ActiveAuthoringVariantId == variant.Id)
+                    .ThenByDescending(variant => variant.UpdatedAt)
                     .Take(1)
                     .Select(variant => new PublishPageCompositionVariantDocument(
                     variant.Id,
@@ -687,9 +688,8 @@ public sealed class PublishService(
                 boundValues),
             composition.Revision,
             composition.Variants
-                .Where(variant => CompositionService.VariantMatchesEdition(variant, profile)
-                    || composition.ActiveAuthoringVariantId == variant.Id)
-                .OrderByDescending(variant => CompositionService.VariantMatchesEdition(variant, profile))
+                .Where(variant => CompositionService.VariantMatchesEdition(variant, profile))
+                .OrderByDescending(variant => composition.ActiveAuthoringVariantId == variant.Id)
                 .ThenByDescending(variant => variant.UpdatedAt)
                 .Take(1)
                 .Select(variant => new PublishPageCompositionVariantDocument(

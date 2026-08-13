@@ -1142,8 +1142,6 @@ public sealed class PublicationRenderProcessor(
         }).ToArray();
         var publicationSectionPayloads = document.PublicationSections
             .OrderBy(item => item.Anchor)
-            .ThenBy(item => item.LocalOrder)
-            .ThenBy(item => item.Id)
             .Select(item => new
             {
                 id = item.Id,

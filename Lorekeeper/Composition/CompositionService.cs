@@ -2116,6 +2116,7 @@ public sealed class CompositionService(
     {
         var leafWidth = edition.PageWidthInches * 72;
         var leafHeight = edition.PageHeightInches * 72;
+        var print = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover;
         var expectedWidth = scene.Surface.Kind == CompositionSurfaceKind.FacingSpread
             ? leafWidth * 2
             : leafWidth;
@@ -2125,8 +2126,10 @@ public sealed class CompositionService(
         if (!independent && (Math.Abs(scene.Surface.WidthPoints - expectedWidth) > .01
             || Math.Abs(scene.Surface.HeightPoints - leafHeight) > .01))
             throw new InvalidDataException("The composition surface must use the edition's exact leaf or facing-spread geometry.");
-        if (edition.Format == PublicationEditionFormat.Paperback && independent)
+        if (print && independent)
             throw new InvalidDataException("Print editions require consistent physical leaf dimensions.");
+        if (print && scene.Surface.OutputPageMode != CompositionOutputPageMode.EditionLeaves)
+            throw new InvalidDataException("Print Designed Pages must output one trim-sized leaf or two edition leaves for a facing spread.");
     }
 
     internal static void Validate(

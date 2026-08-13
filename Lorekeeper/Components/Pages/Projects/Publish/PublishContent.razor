@@ -696,8 +696,8 @@ else
                                 <div class="publication-section-row @(!item.IsIncluded ? "omitted" : null)">
                                     <div><strong>@item.Title</strong><span>@SectionTypeLabel(item) · @(item.IsInherited ? "From Core Book" : item.IsIncluded ? "Included" : "Omitted")</span></div>
                                     <div class="button-row">
-                                        <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section earlier" aria-label="Move @item.Title earlier" disabled="@(group.First().Id == item.Id)" @onclick="() => MovePublicationSectionAsync(item, -1)">↑</button>
-                                        <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section later" aria-label="Move @item.Title later" disabled="@(group.Last().Id == item.Id)" @onclick="() => MovePublicationSectionAsync(item, 1)">↓</button>
+                                        <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section earlier" aria-label="Move @item.Title earlier" disabled="@(!CanMovePublicationSection(item, -1))" @onclick="() => MovePublicationSectionAsync(item, -1)">↑</button>
+                                        <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section later" aria-label="Move @item.Title later" disabled="@(!CanMovePublicationSection(item, 1))" @onclick="() => MovePublicationSectionAsync(item, 1)">↓</button>
                                         @if (item.SystemRole == PublicationSectionSystemRole.Contents)
                                         {
                                             <span class="status-pill">Generated automatically</span>
@@ -1123,8 +1123,6 @@ else
     {
         var ordered = _publicationSections
             .Where(candidate => candidate.Anchor == item.Anchor && candidate.TargetId == item.TargetId)
-            .OrderBy(candidate => candidate.LocalOrder)
-            .ThenBy(candidate => candidate.Id)
             .ToList();
         var index = ordered.FindIndex(candidate => candidate.Id == item.Id);
         var destination = index + delta;
@@ -1138,6 +1136,23 @@ else
             await RefreshPublicationSectionsAsync();
         }
         catch (Exception exception) { _error = exception.Message; }
+    }
+
+    private bool CanMovePublicationSection(PublicationSectionView item, int delta)
+    {
+        var ordered = _publicationSections
+            .Where(candidate => candidate.Anchor == item.Anchor && candidate.TargetId == item.TargetId)
+            .ToList();
+        var index = ordered.FindIndex(candidate => candidate.Id == item.Id);
+        var destination = index + delta;
+        if (index < 0 || destination < 0 || destination >= ordered.Count)
+            return false;
+        (ordered[index], ordered[destination]) = (ordered[destination], ordered[index]);
+        if (item.Anchor != PublicationSectionAnchor.Front)
+            return true;
+        var titleIndex = ordered.FindIndex(candidate => candidate.SystemRole == PublicationSectionSystemRole.Title);
+        var copyrightIndex = ordered.FindIndex(candidate => candidate.SystemRole == PublicationSectionSystemRole.Copyright);
+        return titleIndex < 0 || copyrightIndex == titleIndex + 1;
     }
 
     private Task DeletePublicationSectionAsync(PublicationSectionView item)
