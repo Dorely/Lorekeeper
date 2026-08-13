@@ -69,8 +69,7 @@ public sealed record PublicationSectionToolInput(
     Guid? TargetId,
     PublicationSectionInclusionMode Inclusion,
     PublicationSectionStartSide StartSide = PublicationSectionStartSide.Next,
-    long? ExpectedRevision = null,
-    string? ManuscriptJson = null);
+    long? ExpectedRevision = null);
 
 public interface IPublishAssistantTools
 {
@@ -200,7 +199,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (PublicationSectionToolInput input, Guid? releaseId = null) => UpsertPublicationSectionAsync(context, releaseId, input),
                 name: "upsert_publication_section",
-                description: "Create or revision-check a Core/release publication section and its metadata, including explicit inclusion and next/recto/verso start side. Supplying a selected release ID materializes an inherited section as a release customization while preserving its content. Choose one content mode per section: prose with optional Figures, or Designed Page canvases only. For existing prose, use patch_publication_section_manuscript instead of repeating the complete manuscript."),
+                description: "Create an empty Core/release publication section or revision-check only its metadata, including explicit inclusion and next/recto/verso start side. This tool never accepts or replaces manuscript content. After creating prose, use patch_publication_section_manuscript with focused operations. Supplying a selected release ID materializes an inherited section as a release customization while preserving its content. Choose one content mode per section: prose with optional Figures, or Designed Page canvases only."),
             AIFunctionFactory.Create(
                 method: (Guid sectionId, long expectedRevision, ManuscriptOperationInput[] operations, Guid? releaseId = null) => PatchPublicationSectionManuscriptAsync(context, releaseId, sectionId, expectedRevision, operations),
                 name: "patch_publication_section_manuscript",
@@ -721,13 +720,10 @@ public sealed class PublishAssistantTools(
         Guid? releaseId,
         PublicationSectionToolInput input)
     {
-        ManuscriptDocument document;
-        if (!string.IsNullOrWhiteSpace(input.ManuscriptJson))
-            document = ManuscriptCodec.Deserialize(input.ManuscriptJson, input.SectionId ?? Guid.NewGuid(), input.ExpectedRevision ?? 0);
-        else if (input.SectionId is Guid sectionId)
-            document = (await publicationSections.GetAsync(new(context.ProjectId, releaseId), sectionId, context.TurnCancellationToken)).Manuscript;
-        else
-            document = ManuscriptCodec.CreateEmpty(Guid.NewGuid());
+        var isNew = input.SectionId is null;
+        var document = input.SectionId is Guid sectionId
+            ? (await publicationSections.GetAsync(new(context.ProjectId, releaseId), sectionId, context.TurnCancellationToken)).Manuscript
+            : ManuscriptCodec.CreateEmpty(Guid.NewGuid());
         var saved = await publicationSections.UpsertAsync(new(context.ProjectId, releaseId), new(
             input.SectionId,
             input.Title,
@@ -745,8 +741,11 @@ public sealed class PublishAssistantTools(
             targetId = saved.Id,
             releaseId,
             revision = saved.Revision,
-            changedFields = new[] { "title", "kind", "anchor", "target", "inclusion", "startSide", "manuscript" },
-            summary = $"Saved publication section '{saved.Title}'.",
+            created = isNew,
+            changedFields = new[] { "title", "kind", "anchor", "target", "inclusion", "startSide" },
+            summary = isNew
+                ? $"Created empty publication section '{saved.Title}'. Add prose with focused manuscript operations or add a Designed Page canvas next."
+                : $"Saved publication section metadata for '{saved.Title}' without replacing its content.",
             mutation = new { kind = "publication-section", releaseId, sectionId = saved.Id, refresh = new[] { "core", "release", "readiness", "artifacts" } },
         });
     }

@@ -982,6 +982,10 @@ technical inspection.
 
 Publish assistant section tools expose bounded reads, focused prose-section
 manuscript patches, and Editor-parity designed-section page operations. Section
+creation and metadata updates never accept an opaque manuscript document: a new
+section starts empty, and the assistant adds prose through focused revision-safe
+operations. The bounded `blocks` read projection is therefore never accepted as
+a persistence payload or confused with the manuscript schema. Section
 reads return exact active composition/variant revisions; a target-aware resolver
 materializes an inherited release section and maps its cloned composition before
 any edit. Focused tools fill a canvas, replace an existing image frame, patch a
