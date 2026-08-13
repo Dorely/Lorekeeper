@@ -99,7 +99,11 @@ public sealed record PublicationEditionSummary(
     double PageHeightInches,
     double PageMarginInches,
     bool Bleed,
-    bool AllowDesignedPageOverrides);
+    bool AllowDesignedPageOverrides)
+{
+    public string PrintProductKey { get; init; } = string.Empty;
+    public PrintCoverMode PrintCoverMode { get; init; }
+}
 
 public sealed record PublicationEditionView(
     Guid Id,
@@ -134,9 +138,11 @@ public sealed record PublicationEditionView(
     double BodyFontSizePoints,
     double BodyLineHeight,
     Guid? SelectedCoverImageId,
-    PublicationBinding Binding,
-    PublicationPaper Paper,
-    PublicationInk Ink,
+    string PrintRegistryVersion,
+    string PrintProductKey,
+    PrintFinish PrintFinish,
+    PrintCoverMode PrintCoverMode,
+    string GenericPrintTemplateJson,
     bool Bleed,
     bool AllowDesignedPageOverrides)
 {
@@ -154,8 +160,10 @@ public sealed record PublicationReleaseOverridePatch(
     string? Name = null,
     PublicationVendor? Destination = null,
     string? Isbn = null,
-    PublicationPaper? Paper = null,
-    PublicationInk? Ink = null,
+    string? PrintProductKey = null,
+    PrintFinish? PrintFinish = null,
+    PrintCoverMode? PrintCoverMode = null,
+    string? GenericPrintTemplateJson = null,
     bool? AllowDesignedPageOverrides = null,
     string? Title = null,
     string? Subtitle = null,

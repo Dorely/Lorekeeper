@@ -29,15 +29,16 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
-    assert_eq!(value["protocolVersion"], 6);
-    assert_eq!(value["rendererVersion"], "2.0.8");
+    assert_eq!(value["protocolVersion"], 7);
+    assert_eq!(value["rendererVersion"], "2.1.0");
     assert_eq!(
         value["profiles"],
         json!([
-            "generic-paperback-v1",
+            "generic-print-v2",
             "generic-digital-pdf-v1",
-            "ingram-paperback-pdfx1a-v1",
-            "kdp-paperback-v1"
+            "ingram-print-pdfx1a-v2",
+            "kdp-paperback-v2",
+            "kdp-hardcover-v1"
         ])
     );
     assert_eq!(value["machineRuntimeDependencies"], json!([]));
@@ -61,8 +62,8 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
         stderr(&output)
     );
     let response = response(&output);
-    assert_eq!(response["protocolVersion"], 6);
-    assert_eq!(response["rendererVersion"], "2.0.8");
+    assert_eq!(response["protocolVersion"], 7);
+    assert_eq!(response["rendererVersion"], "2.1.0");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -736,7 +737,7 @@ fn declared_cff_otf_uses_cidfont_type0_and_an_opentype_fontfile3_stream() {
 }
 
 #[test]
-fn protocol_v6_renders_paragraph_presentation_and_structured_page_preview_data() {
+fn protocol_v7_renders_paragraph_presentation_and_structured_page_preview_data() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
     let chapter_id = "50000000-0000-0000-0000-000000000001";
     let figure_id = "60000000-0000-0000-0000-000000000001";
@@ -2199,7 +2200,7 @@ fn cover_width_is_derived_from_the_final_interior_page_count() {
                 .as_f64()
                 .unwrap()
     );
-    let expected_spine = long_pages as f64 * 0.0025 * 72.0;
+    let expected_spine = long_pages as f64 * 0.002252 * 72.0;
     let actual_spine = long_response["evidence"]["spineWidthPoints"]
         .as_f64()
         .unwrap();
@@ -2465,6 +2466,309 @@ fn run(arguments: &[&str]) -> Output {
         .expect("start press")
 }
 
+#[test]
+fn kdp_hardcover_uses_case_laminate_geometry_from_the_resolved_product() {
+    let mut job = PreparedJob::new("kdp-hardcover-v1");
+    job.configure_physical((
+        "kdp-hc-bw-white",
+        "AmazonKdp",
+        "Hardcover",
+        "CaseLaminate",
+        &["case-wrap"],
+    ));
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let response = response(&output);
+    let pages = response["artifacts"].as_array().expect("artifacts");
+    assert!(pages.iter().any(|item| item["kind"] == "case-cover-pdf"));
+    let interior_pages = artifact_value(&response, "interior-pdf")["pageCount"]
+        .as_u64()
+        .expect("page count") as f64;
+    let normalized = if (interior_pages as usize).is_multiple_of(2) {
+        interior_pages
+    } else {
+        interior_pages + 1.0
+    };
+    let expected = (12.0 + normalized * 0.002252 + 1.02) * 72.0;
+    let actual = response["evidence"]["coverWidthPoints"]
+        .as_f64()
+        .expect("cover width");
+    assert!(
+        (actual - expected).abs() < 0.01,
+        "actual={actual} expected={expected}"
+    );
+}
+
+#[test]
+fn every_specific_frozen_spine_table_has_an_exact_even_page_measurement() {
+    let registry: Value =
+        serde_json::from_slice(include_bytes!("../assets/print-products-v1.json"))
+            .expect("print registry");
+    for product in registry["products"].as_array().expect("products") {
+        if product["vendor"] == "Generic" || product["spineModel"]["kind"] != "FrozenLookup" {
+            continue;
+        }
+        let minimum = product["minimumPages"].as_u64().expect("minimum") as usize;
+        let maximum = product["maximumPages"].as_u64().expect("maximum") as usize;
+        let anchors = product["spineModel"]["anchors"]
+            .as_array()
+            .expect("frozen anchors");
+        let pages: Vec<_> = anchors
+            .iter()
+            .map(|anchor| anchor["pages"].as_u64().expect("anchor page") as usize)
+            .collect();
+        assert_eq!(pages.first(), Some(&minimum), "{}", product["key"]);
+        assert_eq!(pages.last(), Some(&maximum), "{}", product["key"]);
+        assert_eq!(
+            pages.len(),
+            (maximum - minimum) / 2 + 1,
+            "{}",
+            product["key"]
+        );
+        assert!(
+            pages.windows(2).all(|pair| pair[1] == pair[0] + 2),
+            "{} has a missing normalized page measurement",
+            product["key"]
+        );
+        assert!(
+            anchors
+                .iter()
+                .all(|anchor| anchor["inches"].as_f64().is_some_and(|value| value > 0.0))
+        );
+    }
+}
+
+#[test]
+fn generic_print_requires_and_honors_complete_printer_declared_geometry() {
+    let mut job = PreparedJob::new("generic-paperback-v1");
+    job.configure_physical((
+        "generic-perfectbound-template",
+        "Generic",
+        "Paperback",
+        "PrintedCover",
+        &["perfect-bound-outside"],
+    ));
+    job.request["physicalProduct"]["spineModel"] =
+        json!({ "kind": "Caliper", "inchesPerPage": 0.0023, "anchors": [] });
+    job.request["physicalProduct"]["genericTemplate"] = json!({
+        "trimWidthInches": 6.0,
+        "trimHeightInches": 9.0,
+        "bleedInches": 0.125,
+        "safeInches": 0.25,
+        "wrapInches": 0.0,
+        "hingeInches": 0.0,
+        "gutterInches": 0.0,
+        "flapInches": 0.0,
+        "barcodeWidthInches": 2.0,
+        "barcodeHeightInches": 1.2,
+        "inchesPerPage": 0.0023,
+        "minimumPages": 2,
+        "maximumPages": 10000,
+        "pdfStandard": "Printer-declared PDF 1.7"
+    });
+    job.write_request();
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+
+    let mut mismatched = job.request.clone();
+    mismatched["physicalProduct"]["genericTemplate"]["trimWidthInches"] = json!(5.5);
+    fs::write(
+        job.root.path().join("input/request.json"),
+        serde_json::to_vec_pretty(&mismatched).expect("request JSON"),
+    )
+    .expect("write request");
+    fs::remove_dir_all(job.root.path().join("output")).expect("remove prior immutable output");
+    let rejected = job.render();
+    assert!(!rejected.status.success());
+    assert!(has_diagnostic(
+        &response(&rejected),
+        "PRESS_PRINT_PRODUCT_MISMATCH"
+    ));
+}
+
+#[test]
+fn ingram_duplex_cover_is_one_two_page_pdf_outside_then_blank_inside_by_default() {
+    let mut job = PreparedJob::new("ingram-paperback-pdfx1a-v1");
+    job.configure_physical((
+        "ingram-pb-bw-white50",
+        "IngramSpark",
+        "Paperback",
+        "PrintedCover",
+        &["perfect-bound-outside", "perfect-bound-inside"],
+    ));
+    job.request["physicalProduct"]["coverMode"] = json!("Duplex");
+    job.request["cover"]["barcodeMode"] = json!("LorekeeperBarcode");
+    job.write_request();
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let response = response(&output);
+    assert_eq!(
+        artifact_value(&response, "perfect-bound-cover-pdf")["pageCount"],
+        2
+    );
+    let document =
+        Document::load(job.artifact(&response, "perfect-bound-cover-pdf")).expect("cover PDF");
+    let pages = document.get_pages();
+    assert_eq!(pages.len(), 2);
+    let inside_content = document.get_page_content(*pages.values().nth(1).expect("inside page"));
+    let inside_operators = String::from_utf8_lossy(&inside_content);
+    assert!(
+        !inside_operators.contains(" Tf") && !inside_operators.contains(" Do"),
+        "the default duplex inside surface must contain no text or image ink"
+    );
+}
+
+#[test]
+fn ingram_duplex_cover_renders_independent_inside_art_and_rejects_the_spine_no_ink_region() {
+    let mut job = PreparedJob::new("ingram-paperback-pdfx1a-v1");
+    job.configure_physical((
+        "ingram-pb-bw-white50",
+        "IngramSpark",
+        "Paperback",
+        "PrintedCover",
+        &["perfect-bound-outside", "perfect-bound-inside"],
+    ));
+    job.request["physicalProduct"]["coverMode"] = json!("Duplex");
+    job.request["cover"]["barcodeMode"] = json!("LorekeeperBarcode");
+    job.request["cover"]["scenes"]["perfect-bound-inside"] = json!({
+        "schemaVersion": 1,
+        "surface": { "kind": "FacingSpread", "outputPageMode": "SingleSurface",
+            "widthPoints": 900, "heightPoints": 666, "bleedPoints": 9,
+            "safeInsetPoints": 36, "allowIndependentPdfPage": false },
+        "layers": [{ "id": "91000000-0000-0000-0000-000000000001", "name": "Inside", "order": 0 }],
+        "objects": [{ "id": "92000000-0000-0000-0000-000000000001",
+            "layerId": "91000000-0000-0000-0000-000000000001", "kind": "Rectangle",
+            "bounds": { "xPercent": 5, "yPercent": 10, "widthPercent": 35, "heightPercent": 80 },
+            "fillColor": "#777777", "strokeColor": "transparent", "strokeWidthPoints": 0,
+            "opacity": 1, "semanticRole": "Artifact", "zIndex": 0 }]
+    });
+    job.write_request();
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let rendered = response(&output);
+    let document =
+        Document::load(job.artifact(&rendered, "perfect-bound-cover-pdf")).expect("cover PDF");
+    let pages = document.get_pages();
+    let inside_content = document.get_page_content(*pages.values().nth(1).expect("inside page"));
+    assert!(
+        String::from_utf8_lossy(&inside_content).contains(" re"),
+        "the independent inside scene must be painted on cover page two"
+    );
+
+    let mut invalid = PreparedJob::new("ingram-paperback-pdfx1a-v1");
+    invalid.configure_physical((
+        "ingram-pb-bw-white50",
+        "IngramSpark",
+        "Paperback",
+        "PrintedCover",
+        &["perfect-bound-outside", "perfect-bound-inside"],
+    ));
+    invalid.request["physicalProduct"]["coverMode"] = json!("Duplex");
+    invalid.request["cover"]["barcodeMode"] = json!("LorekeeperBarcode");
+    invalid.request["cover"]["scenes"]["perfect-bound-inside"] = json!({
+        "schemaVersion": 1,
+        "surface": { "kind": "FacingSpread", "outputPageMode": "SingleSurface",
+            "widthPoints": 900, "heightPoints": 666, "bleedPoints": 9,
+            "safeInsetPoints": 36, "allowIndependentPdfPage": false },
+        "layers": [{ "id": "93000000-0000-0000-0000-000000000001", "name": "Inside", "order": 0 }],
+        "objects": [{ "id": "94000000-0000-0000-0000-000000000001",
+            "layerId": "93000000-0000-0000-0000-000000000001", "kind": "Rectangle",
+            "bounds": { "xPercent": 49, "yPercent": 10, "widthPercent": 2, "heightPercent": 80 },
+            "fillColor": "#777777", "strokeColor": "transparent", "strokeWidthPoints": 0,
+            "opacity": 1, "semanticRole": "Artifact", "zIndex": 0 }]
+    });
+    invalid.write_request();
+    let invalid_output = invalid.render();
+    assert!(!invalid_output.status.success());
+    assert!(has_diagnostic(
+        &response(&invalid_output),
+        "PRESS_DUPLEX_INSIDE_SPINE_INK"
+    ));
+}
+
+#[test]
+fn ingram_jacketed_case_emits_independent_case_and_jacket_artifacts() {
+    let mut job = PreparedJob::new("ingram-paperback-pdfx1a-v1");
+    job.configure_physical((
+        "ingram-hc-jacketed-case-premium70",
+        "IngramSpark",
+        "Hardcover",
+        "JacketedCaseLaminate",
+        &["case-wrap", "dust-jacket"],
+    ));
+    job.request["ink"] = json!("PremiumColor");
+    job.write_request();
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let response = response(&output);
+    assert_eq!(artifact_value(&response, "case-cover-pdf")["pageCount"], 1);
+    assert_eq!(artifact_value(&response, "dust-jacket-pdf")["pageCount"], 1);
+    let case_width = inspect(&job.artifact(&response, "case-cover-pdf")).page_width;
+    let jacket_width = inspect(&job.artifact(&response, "dust-jacket-pdf")).page_width;
+    assert!(jacket_width > case_width);
+}
+
+#[test]
+fn ingram_digital_cloth_without_jacket_emits_setup_manifest_not_cover_pdf() {
+    let mut job = PreparedJob::new("ingram-paperback-pdfx1a-v1");
+    job.configure_physical((
+        "ingram-hc-cloth-blue",
+        "IngramSpark",
+        "Hardcover",
+        "DigitalClothBlue",
+        &["digital-cloth-setup"],
+    ));
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let response = response(&output);
+    assert!(
+        response["artifacts"]
+            .as_array()
+            .expect("artifacts")
+            .iter()
+            .any(|item| item["kind"] == "print-setup-manifest")
+    );
+    assert!(
+        !response["artifacts"]
+            .as_array()
+            .expect("artifacts")
+            .iter()
+            .any(|item| item["kind"]
+                .as_str()
+                .is_some_and(|kind| kind.ends_with("cover-pdf")))
+    );
+}
+
 struct PreparedJob {
     root: TempDir,
     request: Value,
@@ -2476,11 +2780,57 @@ impl PreparedJob {
         fs::create_dir_all(root.path().join("input/assets")).expect("input assets");
         fs::write(root.path().join("input/assets/pixel.png"), PIXEL_PNG).expect("pixel PNG");
         let mut request: Value =
-            serde_json::from_slice(include_bytes!("../fixtures/full-model-v6.json"))
+            serde_json::from_slice(include_bytes!("../fixtures/full-model-v7.json"))
                 .expect("canonical request");
+        request["protocolVersion"] = json!(7);
+        let profile = match profile {
+            "generic-paperback-v1" => "generic-print-v2",
+            "kdp-paperback-v1" => "kdp-paperback-v2",
+            "ingram-paperback-pdfx1a-v1" => "ingram-print-pdfx1a-v2",
+            other => other,
+        };
         request["profile"] = Value::String(profile.to_owned());
         if profile == "generic-digital-pdf-v1" {
             request["cover"]["barcodeMode"] = json!("None");
+            request["physicalProduct"] = Value::Null;
+            request["cover"]["surfaces"] = json!([]);
+        } else {
+            let registry: Value =
+                serde_json::from_slice(include_bytes!("../assets/print-products-v1.json"))
+                    .expect("print registry");
+            let product_key = if profile == "ingram-print-pdfx1a-v2" {
+                "ingram-pb-bw-white50"
+            } else {
+                "kdp-pb-bw-white"
+            };
+            let catalog = registry["products"]
+                .as_array()
+                .expect("products")
+                .iter()
+                .find(|item| item["key"] == product_key)
+                .expect("catalog product");
+            request["cover"]["surfaces"] = json!(["perfect-bound-outside"]);
+            request["physicalProduct"] = json!({
+                "registryVersion": "2026.08.1",
+                "registrySha256": hex_hash(include_bytes!("../assets/print-products-v1.json")),
+                "productKey": product_key,
+                "vendor": catalog["vendor"],
+                "format": catalog["format"],
+                "binding": catalog["binding"],
+                "interiorProcess": catalog["interiorProcess"],
+                "paperName": catalog["paperName"],
+                "basisWeightPounds": catalog["basisWeightPounds"],
+                "gsm": catalog["gsm"],
+                "coverMaterial": catalog["coverMaterial"],
+                "finish": "Matte",
+                "coverMode": "Simplex",
+                "minimumPages": catalog["minimumPages"],
+                "maximumPages": catalog["maximumPages"],
+                "minimumSubmittedPages": catalog["minimumSubmittedPages"],
+                "maximumSubmittedPages": catalog["maximumSubmittedPages"],
+                "spineModel": catalog["spineModel"],
+                "requiredCoverSurfaces": ["perfect-bound-outside"]
+            });
         }
         request["assets"][0]["byteLength"] = json!(PIXEL_PNG.len());
         request["assets"][0]["sha256"] = Value::String(hex_hash(PIXEL_PNG));
@@ -2496,6 +2846,42 @@ impl PreparedJob {
             serde_json::to_vec_pretty(&self.request).expect("request JSON"),
         )
         .expect("write request");
+    }
+
+    fn configure_physical(&mut self, config: (&str, &str, &str, &str, &[&str])) {
+        let (product_key, vendor, format, cover_material, surfaces) = config;
+        let registry: Value =
+            serde_json::from_slice(include_bytes!("../assets/print-products-v1.json"))
+                .expect("print registry");
+        let catalog = registry["products"]
+            .as_array()
+            .expect("products")
+            .iter()
+            .find(|item| item["key"] == product_key)
+            .expect("catalog product");
+        self.request["physicalProduct"] = json!({
+            "registryVersion": "2026.08.1",
+            "registrySha256": hex_hash(include_bytes!("../assets/print-products-v1.json")),
+            "productKey": product_key,
+            "vendor": vendor,
+            "format": format,
+            "binding": catalog["binding"],
+            "interiorProcess": catalog["interiorProcess"],
+            "paperName": catalog["paperName"],
+            "basisWeightPounds": catalog["basisWeightPounds"],
+            "gsm": catalog["gsm"],
+            "coverMaterial": cover_material,
+            "finish": catalog["finishes"][0],
+            "coverMode": if surfaces.contains(&"perfect-bound-inside") { "Duplex" } else { "Simplex" },
+            "minimumPages": catalog["minimumPages"],
+            "maximumPages": catalog["maximumPages"],
+            "minimumSubmittedPages": catalog["minimumSubmittedPages"],
+            "maximumSubmittedPages": catalog["maximumSubmittedPages"],
+            "spineModel": catalog["spineModel"],
+            "requiredCoverSurfaces": surfaces,
+        });
+        self.request["cover"]["surfaces"] = json!(surfaces);
+        self.write_request();
     }
 
     fn render(&self) -> Output {
@@ -2553,6 +2939,11 @@ fn response(output: &Output) -> Value {
 }
 
 fn artifact_value<'a>(response: &'a Value, kind: &str) -> &'a Value {
+    let kind = if kind == "cover-pdf" {
+        "perfect-bound-cover-pdf"
+    } else {
+        kind
+    };
     response["artifacts"]
         .as_array()
         .expect("artifact array")

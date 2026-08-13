@@ -16,6 +16,7 @@ public enum PublishTitlePageMode
 public enum PublicationEditionFormat
 {
     Paperback,
+    Hardcover,
     Epub,
     DigitalPdf,
 }
@@ -35,27 +36,19 @@ public enum PublicationEditionStatus
     Archived,
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<PublicationBinding>))]
-public enum PublicationBinding
+[JsonConverter(typeof(JsonStringEnumConverter<PrintFinish>))]
+public enum PrintFinish
 {
-    PerfectBound,
-    Digital,
+    Matte,
+    Gloss,
+    Textured,
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<PublicationPaper>))]
-public enum PublicationPaper
+[JsonConverter(typeof(JsonStringEnumConverter<PrintCoverMode>))]
+public enum PrintCoverMode
 {
-    White,
-    Cream,
-    Digital,
-}
-
-[JsonConverter(typeof(JsonStringEnumConverter<PublicationInk>))]
-public enum PublicationInk
-{
-    BlackAndWhite,
-    Color,
-    Digital,
+    Simplex,
+    Duplex,
 }
 
 public class PublicationEdition
@@ -68,7 +61,7 @@ public class PublicationEdition
     public required string Name { get; set; }
     public PublicationEditionFormat Format { get; set; } = PublicationEditionFormat.Paperback;
     public PublicationVendor Vendor { get; set; } = PublicationVendor.Generic;
-    public string VendorProfileVersion { get; set; } = "generic-paperback-v1";
+    public string VendorProfileVersion { get; set; } = "generic-print-v2";
     public PublicationEditionStatus Status { get; set; } = PublicationEditionStatus.Draft;
     public long Revision { get; set; }
     public string OverrideFieldsJson { get; set; } = "[]";
@@ -90,9 +83,11 @@ public class PublicationEdition
     public bool NumberActs { get; set; }
     public bool NumberChapters { get; set; }
     public PublishTitlePageMode TitlePageMode { get; set; } = PublishTitlePageMode.Automatic;
-    public PublicationBinding Binding { get; set; } = PublicationBinding.PerfectBound;
-    public PublicationPaper Paper { get; set; } = PublicationPaper.White;
-    public PublicationInk Ink { get; set; } = PublicationInk.BlackAndWhite;
+    public string PrintRegistryVersion { get; set; } = string.Empty;
+    public string PrintProductKey { get; set; } = string.Empty;
+    public PrintFinish PrintFinish { get; set; } = PrintFinish.Matte;
+    public PrintCoverMode PrintCoverMode { get; set; } = PrintCoverMode.Simplex;
+    public string GenericPrintTemplateJson { get; set; } = string.Empty;
     public bool Bleed { get; set; }
     public bool AllowDesignedPageOverrides { get; set; }
     public bool InheritsCoreCover { get; set; } = true;

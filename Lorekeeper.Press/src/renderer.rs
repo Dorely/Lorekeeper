@@ -14,8 +14,8 @@ use crate::font::{
 use crate::image::prepare_images;
 use crate::inspect;
 use crate::model::{
-    Artifact, Diagnostic, FontEvidence, FontFace, FontFamily, ImageEvidence, LayoutDocument,
-    LayoutImage, LayoutImageFit, LayoutLine, LayoutPage, LayoutPaint, LayoutRun,
+    Artifact, CoverSurfaceEvidence, Diagnostic, FontEvidence, FontFace, FontFamily, ImageEvidence,
+    LayoutDocument, LayoutImage, LayoutImageFit, LayoutLine, LayoutPage, LayoutPaint, LayoutRun,
     LayoutSemanticRole, LayoutShape, LayoutShapeKind, OutputPurpose, PageKind, PageMapEntry,
     RenderRequest, RenderResponse, ValidationEvidence,
 };
@@ -28,10 +28,365 @@ const MAX_REQUEST_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PAGES: usize = 10_000;
 type RenderResult<T> = Result<T, Box<RenderResponse>>;
 
+fn registry_sha256() -> String {
+    Sha256::digest(include_bytes!("../assets/print-products-v1.json"))
+        .iter()
+        .map(|value| format!("{value:02x}"))
+        .collect()
+}
+
+fn validate_registry_product(
+    product: &crate::model::PhysicalProduct,
+    request: &RenderRequest,
+) -> Result<(), Diagnostic> {
+    let registry: Value = serde_json::from_slice(include_bytes!(
+        "../assets/print-products-v1.json"
+    ))
+    .map_err(|_| {
+        Diagnostic::error(
+            "PRESS_PRINT_REGISTRY_INVALID",
+            "The bundled print-product registry is invalid.",
+        )
+    })?;
+    let catalog = registry["products"]
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| item["key"].as_str() == Some(&product.product_key))
+        })
+        .ok_or_else(|| {
+            Diagnostic::error(
+                "PRESS_PRINT_PRODUCT_UNKNOWN",
+                "The selected product is absent from the bundled registry.",
+            )
+        })?;
+    let matches_scalar = registry["registryVersion"].as_str() == Some(&product.registry_version)
+        && catalog["vendor"].as_str() == Some(&product.vendor)
+        && catalog["format"].as_str() == Some(&product.format)
+        && catalog["binding"].as_str() == Some(&product.binding)
+        && catalog["interiorProcess"].as_str() == Some(&product.interior_process)
+        && catalog["paperName"].as_str() == Some(&product.paper_name)
+        && catalog["basisWeightPounds"].as_u64() == product.basis_weight_pounds.map(u64::from)
+        && catalog["gsm"].as_u64() == product.gsm.map(u64::from)
+        && catalog["coverMaterial"].as_str() == Some(&product.cover_material)
+        && catalog["minimumPages"].as_u64() == Some(product.minimum_pages as u64)
+        && catalog["maximumPages"].as_u64() == Some(product.maximum_pages as u64)
+        && catalog["minimumSubmittedPages"].as_u64()
+            == product.minimum_submitted_pages.map(|value| value as u64)
+        && catalog["maximumSubmittedPages"].as_u64()
+            == product.maximum_submitted_pages.map(|value| value as u64)
+        && catalog["finishes"].as_array().is_some_and(|items| {
+            items
+                .iter()
+                .any(|item| item.as_str() == Some(&product.finish))
+        })
+        && catalog["coverModes"].as_array().is_some_and(|items| {
+            items
+                .iter()
+                .any(|item| item.as_str() == Some(&product.cover_mode))
+        })
+        && catalog["pdfProfile"].as_str() == Some(&request.profile);
+    let trim_matches = catalog["trimSizes"].as_array().is_some_and(|items| {
+        items.iter().any(|item| {
+            item.as_str().is_some_and(|value| {
+                let Some((width, height)) = value.split_once('x') else {
+                    return false;
+                };
+                width.parse::<f32>().is_ok_and(|width| {
+                    height.parse::<f32>().is_ok_and(|height| {
+                        (width - request.trim.width_inches).abs() < 0.000_1
+                            && (height - request.trim.height_inches).abs() < 0.000_1
+                    })
+                })
+            })
+        })
+    }) || catalog["allowsCustomTrim"].as_bool() == Some(true);
+    let catalog_spine = &catalog["spineModel"];
+    let anchors_match = match catalog_spine["anchors"].as_array() {
+        None => product.spine_model.anchors.is_empty(),
+        Some(items) => {
+            items.len() == product.spine_model.anchors.len()
+                && items
+                    .iter()
+                    .zip(&product.spine_model.anchors)
+                    .all(|(expected, actual)| {
+                        expected["pages"].as_u64() == Some(actual.pages as u64)
+                            && expected["inches"].as_f64().is_some_and(|value| {
+                                (value as f32 - actual.inches).abs() < 0.000_001
+                            })
+                    })
+        }
+    };
+    let spine_matches = (catalog_spine["kind"].as_str() == Some(&product.spine_model.kind)
+        && match (
+            catalog_spine["inchesPerPage"].as_f64(),
+            product.spine_model.inches_per_page,
+        ) {
+            (None, None) => true,
+            (Some(expected), Some(actual)) => (expected as f32 - actual).abs() < 0.000_001,
+            _ => false,
+        }
+        && anchors_match)
+        || (product.vendor == "Generic"
+            && catalog_spine["kind"].as_str() == Some("TemplateRequired")
+            && product.spine_model.kind == "Caliper"
+            && product.spine_model.inches_per_page.is_some()
+            && product.generic_template.is_some());
+    let expected_surfaces: Vec<&str> = match product.cover_material.as_str() {
+        "PrintedCover" if product.cover_mode == "Duplex" => {
+            vec!["perfect-bound-outside", "perfect-bound-inside"]
+        }
+        "PrintedCover" => vec!["perfect-bound-outside"],
+        "CaseLaminate" => vec!["case-wrap"],
+        "DigitalClothBlue" | "DigitalClothGray" => vec!["digital-cloth-setup"],
+        "DigitalClothBlueWithJacket" | "DigitalClothGrayWithJacket" => {
+            vec!["dust-jacket", "digital-cloth-setup"]
+        }
+        "JacketedCaseLaminate" => vec!["case-wrap", "dust-jacket"],
+        "Declared" if product.binding == "PerfectBound" => vec!["perfect-bound-outside"],
+        "Declared" if product.binding == "CaseBound" => vec!["case-wrap"],
+        _ => Vec::new(),
+    };
+    let surfaces_match = expected_surfaces.len() == product.required_cover_surfaces.len()
+        && expected_surfaces.iter().all(|surface| {
+            product
+                .required_cover_surfaces
+                .iter()
+                .any(|actual| actual == surface)
+        });
+    let generic_template_valid = product.vendor != "Generic"
+        || product.generic_template.as_ref().is_some_and(|template| {
+            let dimensions_valid = [
+                template.trim_width_inches,
+                template.trim_height_inches,
+                template.bleed_inches,
+                template.safe_inches,
+                template.wrap_inches,
+                template.hinge_inches,
+                template.gutter_inches,
+                template.flap_inches,
+                template.barcode_width_inches,
+                template.barcode_height_inches,
+            ]
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0);
+            dimensions_valid
+                && (template.trim_width_inches - request.trim.width_inches).abs() < 0.000_1
+                && (template.trim_height_inches - request.trim.height_inches).abs() < 0.000_1
+                && template.minimum_pages > 0
+                && template.maximum_pages >= template.minimum_pages
+                && !template.pdf_standard.trim().is_empty()
+                && template
+                    .inches_per_page
+                    .is_some_and(|value| value.is_finite() && value > 0.0)
+        });
+    if !matches_scalar
+        || !trim_matches
+        || !spine_matches
+        || !surfaces_match
+        || !generic_template_valid
+    {
+        return Err(Diagnostic::error(
+            "PRESS_PRINT_PRODUCT_MISMATCH",
+            format!(
+                "The resolved physical-product descriptor differs from the bundled registry entry (identity={matches_scalar}, trim={trim_matches}, spine={spine_matches}, surfaces={surfaces_match}, genericTemplate={generic_template_valid})."
+            ),
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Default)]
 struct LayoutTolerance {
     allow_pending_accessibility: bool,
     clip_composition_text_overflow: bool,
+}
+
+#[derive(Clone)]
+struct PhysicalCoverSurface {
+    role: String,
+    width_points: f32,
+    height_points: f32,
+    spine_points: f32,
+    inside_spine_no_ink_points: f32,
+}
+
+fn normalized_vendor_pages(request: &RenderRequest, submitted: usize) -> usize {
+    if request.physical_product.is_some() && !submitted.is_multiple_of(2) {
+        submitted + 1
+    } else {
+        submitted
+    }
+}
+
+fn product_spine_inches(request: &RenderRequest, pages: usize) -> Result<f32, Diagnostic> {
+    let product = request.physical_product.as_ref().ok_or_else(|| {
+        Diagnostic::error(
+            "PRESS_PRINT_PRODUCT_REQUIRED",
+            "A physical-product descriptor is required.",
+        )
+    })?;
+    let submitted_pages = pages;
+    let minimum_submitted = product
+        .minimum_submitted_pages
+        .unwrap_or(product.minimum_pages);
+    let maximum_submitted = product
+        .maximum_submitted_pages
+        .unwrap_or(product.maximum_pages);
+    if submitted_pages < minimum_submitted || submitted_pages > maximum_submitted {
+        return Err(Diagnostic::error(
+            "PRESS_PRODUCT_SUBMITTED_PAGE_COUNT",
+            format!(
+                "{} supports {minimum_submitted}-{maximum_submitted} submitted pages; the interior has {submitted_pages}.",
+                product.product_key
+            ),
+        ));
+    }
+    let pages = normalized_vendor_pages(request, submitted_pages);
+    if pages < product.minimum_pages || pages > product.maximum_pages {
+        return Err(Diagnostic::error(
+            "PRESS_PRODUCT_PAGE_COUNT",
+            format!(
+                "{} supports {}–{} pages; the normalized interior has {pages}.",
+                product.product_key, product.minimum_pages, product.maximum_pages
+            ),
+        ));
+    }
+    if let Some(template) = product.generic_template.as_ref()
+        && (pages < template.minimum_pages || pages > template.maximum_pages)
+    {
+        return Err(Diagnostic::error(
+            "PRESS_GENERIC_TEMPLATE_PAGE_COUNT",
+            format!(
+                "The generic printer template supports {}-{} pages; the normalized interior has {pages}.",
+                template.minimum_pages, template.maximum_pages
+            ),
+        ));
+    }
+    if product.spine_model.kind == "Caliper" {
+        return product
+            .spine_model
+            .inches_per_page
+            .map(|caliper| caliper * pages as f32)
+            .ok_or_else(|| {
+                Diagnostic::error(
+                    "PRESS_SPINE_MODEL_INVALID",
+                    "The product caliper is missing.",
+                )
+            });
+    }
+    if product.spine_model.kind == "FrozenLookup" {
+        let mut anchors = product.spine_model.anchors.clone();
+        anchors.sort_by_key(|anchor| anchor.pages);
+        if let Some(exact) = anchors.iter().find(|anchor| anchor.pages == pages) {
+            return Ok(exact.inches);
+        }
+        return Err(Diagnostic::error(
+            "PRESS_SPINE_MEASUREMENT_MISSING",
+            format!(
+                "{} has no verified spine measurement for {pages} normalized pages.",
+                product.product_key
+            ),
+        ));
+    }
+    Err(Diagnostic::error(
+        "PRESS_SPINE_MODEL_INVALID",
+        "The product has no usable spine evidence.",
+    ))
+}
+
+fn physical_cover_surfaces(
+    request: &RenderRequest,
+    pages: usize,
+) -> Result<Vec<PhysicalCoverSurface>, Diagnostic> {
+    let product = request.physical_product.as_ref().ok_or_else(|| {
+        Diagnostic::error(
+            "PRESS_PRINT_PRODUCT_REQUIRED",
+            "A physical-product descriptor is required.",
+        )
+    })?;
+    let spine = product_spine_inches(request, pages)?;
+    let trim_width = request.trim.width_inches;
+    let trim_height = request.trim.height_inches;
+    product
+        .required_cover_surfaces
+        .iter()
+        .filter_map(|role| {
+            let geometry = match role.as_str() {
+                "perfect-bound-outside" | "perfect-bound-inside" if product.vendor == "Generic" => {
+                    let template = product.generic_template.as_ref().ok_or_else(|| {
+                        Diagnostic::error(
+                            "PRESS_GENERIC_TEMPLATE_REQUIRED",
+                            "Generic print products require a complete printer geometry template.",
+                        )
+                    });
+                    match template {
+                        Ok(template) => (
+                            2.0 * trim_width
+                                + spine
+                                + 2.0
+                                    * (template.bleed_inches
+                                        + template.wrap_inches
+                                        + template.gutter_inches
+                                        + template.flap_inches),
+                            trim_height + 2.0 * (template.bleed_inches + template.wrap_inches),
+                        ),
+                        Err(diagnostic) => return Some(Err(diagnostic)),
+                    }
+                }
+                "perfect-bound-outside" | "perfect-bound-inside" => {
+                    (2.0 * trim_width + spine + 0.25, trim_height + 0.25)
+                }
+                "case-wrap" if product.vendor == "Generic" => {
+                    let template = product.generic_template.as_ref().ok_or_else(|| {
+                        Diagnostic::error(
+                            "PRESS_GENERIC_TEMPLATE_REQUIRED",
+                            "Generic print products require a complete printer geometry template.",
+                        )
+                    });
+                    match template {
+                        Ok(template) => (
+                            2.0 * trim_width
+                                + spine
+                                + 2.0
+                                    * (template.bleed_inches
+                                        + template.wrap_inches
+                                        + template.gutter_inches
+                                        + template.flap_inches),
+                            trim_height + 2.0 * (template.bleed_inches + template.wrap_inches),
+                        ),
+                        Err(diagnostic) => return Some(Err(diagnostic)),
+                    }
+                }
+                "case-wrap" if product.vendor == "AmazonKdp" => {
+                    (2.0 * trim_width + spine + 1.02, trim_height + 1.02)
+                }
+                "case-wrap" => (2.0 * (trim_width - 0.185) + spine + 2.25, trim_height + 1.5),
+                "dust-jacket" => (2.0 * (trim_width + 0.4375) + spine + 7.0, trim_height + 0.5),
+                "digital-cloth-setup" => return None,
+                _ => {
+                    return Some(Err(Diagnostic::error(
+                        "PRESS_COVER_SURFACE_INVALID",
+                        format!("Cover surface '{role}' is unsupported."),
+                    )));
+                }
+            };
+            Some(Ok(PhysicalCoverSurface {
+                role: role.clone(),
+                width_points: geometry.0 * 72.0,
+                height_points: geometry.1 * 72.0,
+                spine_points: spine * 72.0,
+                inside_spine_no_ink_points: if role == "perfect-bound-inside"
+                    && product.vendor == "IngramSpark"
+                {
+                    (spine + 0.125) * 72.0
+                } else {
+                    0.0
+                },
+            }))
+        })
+        .collect()
 }
 
 impl LayoutTolerance {
@@ -60,6 +415,18 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         ..LayoutTolerance::default()
     };
     let mut layout = paginate_with_cancellation(request, Some(job_root), tolerance)?;
+    if let Some(product) = request.physical_product.as_ref() {
+        while layout.pages.len() < product.minimum_pages {
+            let mut manufacturing_page = empty_body_page();
+            manufacturing_page.kind = PageKind::Blank;
+            layout.pages.push(manufacturing_page);
+        }
+        if !layout.pages.len().is_multiple_of(2) {
+            let mut manufacturing_page = empty_body_page();
+            manufacturing_page.kind = PageKind::Blank;
+            layout.pages.push(manufacturing_page);
+        }
+    }
     if layout.pages.len() > MAX_PAGES {
         return Err(Box::new(RenderResponse::failed(
             "failed",
@@ -72,7 +439,8 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     let is_digital_pdf = request.profile == "generic-digital-pdf-v1";
     let mut cover_width = 0.0;
     let mut spine_width = 0.0;
-    let cover_page = if let Some(cover) = request.cover.as_ref() {
+    let mut physical_covers = Vec::<(PhysicalCoverSurface, LayoutPage)>::new();
+    let cover_page = if request.cover.is_some() {
         if is_digital_pdf {
             cover_width = request.trim.width_inches * 72.0;
             Some(
@@ -84,26 +452,51 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                 .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?,
             )
         } else {
-            spine_width = layout.pages.len() as f32 * cover.paper_caliper_inches_per_page * 72.0;
-            cover_width =
-                request.trim.width_inches * 144.0 + spine_width + cover.bleed_inches * 144.0;
-            Some(
-                cover_layout(request, cover_width).map_err(|diagnostic| {
-                    Box::new(RenderResponse::failed("rejected", diagnostic))
-                })?,
-            )
+            for surface in physical_cover_surfaces(request, layout.pages.len())
+                .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?
+            {
+                let surface_scene = request
+                    .cover
+                    .as_ref()
+                    .and_then(|cover| cover.scenes.get(&surface.role));
+                if let Some(scene) = surface_scene {
+                    validate_inside_spine_no_ink(scene, &surface).map_err(|diagnostic| {
+                        Box::new(RenderResponse::failed("rejected", diagnostic))
+                    })?;
+                }
+                let page = if surface.role == "perfect-bound-inside" && surface_scene.is_none() {
+                    blank_cover_layout(surface.width_points, surface.height_points)
+                } else {
+                    cover_layout(
+                        request,
+                        surface.width_points,
+                        surface.height_points,
+                        surface_scene,
+                    )
+                    .map_err(|diagnostic| {
+                        Box::new(RenderResponse::failed("rejected", diagnostic))
+                    })?
+                };
+                physical_covers.push((surface, page));
+            }
+            if let Some((surface, _)) = physical_covers.first() {
+                cover_width = surface.width_points;
+                spine_width = surface.spine_points;
+            }
+            None
         }
     } else {
         None
     };
     let mut font_pages = layout.pages.clone();
     font_pages.extend(cover_page.iter().cloned());
+    font_pages.extend(physical_covers.iter().map(|(_, page)| page.clone()));
     let fonts = subset_for_layout(&font_pages)
         .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
 
     ensure_not_cancelled(job_root)?;
 
-    let is_pdfx = request.profile == "ingram-paperback-pdfx1a-v1";
+    let is_pdfx = request.profile == "ingram-print-pdfx1a-v2";
     let interior_images = prepare_images(
         request,
         &validated_assets,
@@ -188,31 +581,95 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             inspection,
         )
     };
-    let mut cover_inspection = None;
-    if !is_digital_pdf && let Some(rendered_cover) = &cover_page {
-        let cover_options = PdfOptions::cover(request, is_pdfx, cover_width, spine_width);
-        let cover_bytes = write_pdf_cancellable(
-            std::slice::from_ref(rendered_cover),
-            &fonts,
-            &cover_images,
-            &cover_options,
-            || job_root.join("cancel.requested").exists(),
-        )
-        .map_err(pdf_failure)?;
-        let cover_path = staging.path().join("cover.pdf");
-        fs::write(&cover_path, &cover_bytes).map_err(io_failure)?;
-        cover_inspection = Some(
-            inspect::validate(&cover_path, &cover_options)
-                .map_err(|diagnostic| Box::new(RenderResponse::failed("failed", diagnostic)))?,
-        );
-        artifacts.push(artifact("cover-pdf", "output/cover.pdf", &cover_bytes, 1));
+    let mut cover_inspections = Vec::new();
+    if !is_digital_pdf {
+        for (index, (surface, rendered_cover)) in physical_covers.iter().enumerate() {
+            if surface.role == "perfect-bound-inside" {
+                continue;
+            }
+            let (kind, filename, pages) = match surface.role.as_str() {
+                "perfect-bound-outside" => {
+                    let mut pages = vec![rendered_cover.clone()];
+                    if let Some((_, inside)) = physical_covers
+                        .iter()
+                        .find(|(item, _)| item.role == "perfect-bound-inside")
+                    {
+                        pages.push(inside.clone());
+                    }
+                    ("perfect-bound-cover-pdf", "perfect-bound-cover.pdf", pages)
+                }
+                "case-wrap" => (
+                    "case-cover-pdf",
+                    "case-cover.pdf",
+                    vec![rendered_cover.clone()],
+                ),
+                "dust-jacket" => (
+                    "dust-jacket-pdf",
+                    "dust-jacket.pdf",
+                    vec![rendered_cover.clone()],
+                ),
+                _ => continue,
+            };
+            let cover_options = PdfOptions::cover(
+                request,
+                is_pdfx,
+                surface.width_points,
+                surface.height_points,
+                surface.spine_points,
+            );
+            let cover_bytes =
+                write_pdf_cancellable(&pages, &fonts, &cover_images, &cover_options, || {
+                    job_root.join("cancel.requested").exists()
+                })
+                .map_err(pdf_failure)?;
+            let cover_path = staging.path().join(filename);
+            fs::write(&cover_path, &cover_bytes).map_err(io_failure)?;
+            cover_inspections.push(
+                inspect::validate(&cover_path, &cover_options)
+                    .map_err(|diagnostic| Box::new(RenderResponse::failed("failed", diagnostic)))?,
+            );
+            artifacts.push(artifact(
+                kind,
+                &format!("output/{filename}"),
+                &cover_bytes,
+                pages.len(),
+            ));
+            if index == 0 {
+                cover_width = surface.width_points;
+                spine_width = surface.spine_points;
+            }
+        }
+        if request.physical_product.as_ref().is_some_and(|product| {
+            product
+                .required_cover_surfaces
+                .iter()
+                .any(|surface| surface == "digital-cloth-setup")
+        }) {
+            let product = request.physical_product.as_ref().expect("physical product");
+            let manifest = serde_json::to_vec_pretty(&serde_json::json!({
+                "registryVersion": product.registry_version,
+                "productKey": product.product_key,
+                "coverMaterial": product.cover_material,
+                "finish": product.finish,
+                "spineWidthPoints": spine_width,
+                "spineCopy": request.cover.as_ref().map(|cover| cover.spine_text.as_str()).unwrap_or(""),
+                "constraint": "Ingram Digital Cloth spine copy uses the vendor constrained gold-stamp treatment."
+            })).map_err(|error| io_failure(std::io::Error::other(error)))?;
+            fs::write(staging.path().join("cloth-setup.json"), &manifest).map_err(io_failure)?;
+            artifacts.push(artifact(
+                "print-setup-manifest",
+                "output/cloth-setup.json",
+                &manifest,
+                0,
+            ));
+        }
     }
     ensure_not_cancelled(job_root)?;
 
     let image_evidence = layout
         .pages
         .iter()
-        .chain((!is_digital_pdf).then_some(cover_page.as_ref()).flatten())
+        .chain(physical_covers.iter().map(|(_, page)| page))
         .enumerate()
         .flat_map(|(page_index, page)| {
             let page_images = if page.kind == PageKind::Cover {
@@ -248,7 +705,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
 
     staging.promote(&output)?;
     let response = RenderResponse {
-        protocol_version: 6,
+        protocol_version: 7,
         renderer_version: env!("CARGO_PKG_VERSION"),
         job_id: Some(request.job_id.clone()),
         status: "completed".to_owned(),
@@ -263,18 +720,19 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             toc_converged: layout.toc_converged,
             has_encryption: false,
             has_transparency: interior_inspection.has_transparency
-                || cover_inspection
-                    .as_ref()
-                    .is_some_and(|inspection| inspection.has_transparency),
+                || cover_inspections
+                    .iter()
+                    .any(|inspection| inspection.has_transparency),
             has_forbidden_actions: false,
             annotation_count: interior_inspection.annotation_count
-                + cover_inspection
-                    .as_ref()
-                    .map_or(0, |inspection| inspection.annotation_count),
+                + cover_inspections
+                    .iter()
+                    .map(|inspection| inspection.annotation_count)
+                    .sum::<usize>(),
             fonts_embedded: interior_inspection.fonts_embedded,
             to_unicode_maps_present: interior_inspection.to_unicode,
             output_intent_count: if is_pdfx {
-                if request.cover.is_some() { 2 } else { 1 }
+                1 + cover_inspections.len()
             } else {
                 0
             },
@@ -284,9 +742,32 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             spine_width_points: spine_width,
             interior_width_points: request.trim.width_inches * 72.0,
             interior_height_points: request.trim.height_inches * 72.0,
-            cover_height_points: request.cover.as_ref().map_or(0.0, |cover| {
-                (request.trim.height_inches + cover.bleed_inches * 2.0) * 72.0
-            }),
+            cover_height_points: physical_covers.first().map_or_else(
+                || {
+                    request.cover.as_ref().map_or(0.0, |cover| {
+                        (request.trim.height_inches + cover.bleed_inches * 2.0) * 72.0
+                    })
+                },
+                |(surface, _)| surface.height_points,
+            ),
+            cover_surfaces: physical_covers
+                .iter()
+                .filter(|(surface, _)| surface.role != "perfect-bound-inside")
+                .map(|(surface, _)| CoverSurfaceEvidence {
+                    role: surface.role.clone(),
+                    width_points: surface.width_points,
+                    height_points: surface.height_points,
+                    page_count: if surface.role == "perfect-bound-outside"
+                        && physical_covers
+                            .iter()
+                            .any(|(candidate, _)| candidate.role == "perfect-bound-inside")
+                    {
+                        2
+                    } else {
+                        1
+                    },
+                })
+                .collect(),
             interior_page_boxes_consistent: true,
             cover_page_boxes_consistent: true,
             fonts: fonts
@@ -340,6 +821,52 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         "{}",
         serde_json::to_string(&response).expect("serialize render response")
     );
+    Ok(())
+}
+
+fn validate_inside_spine_no_ink(
+    scene: &Value,
+    surface: &PhysicalCoverSurface,
+) -> Result<(), Diagnostic> {
+    if surface.inside_spine_no_ink_points <= 0.0 {
+        return Ok(());
+    }
+    let center = surface.width_points / 2.0;
+    let start = center - surface.inside_spine_no_ink_points / 2.0;
+    let end = center + surface.inside_spine_no_ink_points / 2.0;
+    let intersects = scene
+        .get("objects")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|object| {
+            object
+                .get("visible")
+                .and_then(Value::as_bool)
+                .unwrap_or(true)
+        })
+        .any(|object| {
+            let bounds = object.get("bounds").unwrap_or(&Value::Null);
+            let x = bounds
+                .get("xPercent")
+                .and_then(Value::as_f64)
+                .unwrap_or_default() as f32
+                / 100.0
+                * surface.width_points;
+            let width = bounds
+                .get("widthPercent")
+                .and_then(Value::as_f64)
+                .unwrap_or_default() as f32
+                / 100.0
+                * surface.width_points;
+            x < end && x + width > start
+        });
+    if intersects {
+        return Err(Diagnostic::error(
+            "PRESS_DUPLEX_INSIDE_SPINE_INK",
+            "The duplex inside cover contains artwork in Ingram's required spine no-ink region.",
+        ));
+    }
     Ok(())
 }
 
@@ -568,10 +1095,10 @@ fn validate_request(
     request: &RenderRequest,
     job_root: &Path,
 ) -> RenderResult<std::collections::BTreeMap<String, Vec<u8>>> {
-    if request.protocol_version != 6 {
+    if request.protocol_version != 7 {
         return reject(
             "PRESS_PROTOCOL_INVALID",
-            "Lorekeeper Press requires protocol version 6.",
+            "Lorekeeper Press requires protocol version 7.",
         );
     }
     if request.job_id.len() != 32 || !request.job_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -582,10 +1109,11 @@ fn validate_request(
     }
     if !matches!(
         request.profile.as_str(),
-        "generic-paperback-v1"
+        "generic-print-v2"
             | "generic-digital-pdf-v1"
-            | "kdp-paperback-v1"
-            | "ingram-paperback-pdfx1a-v1"
+            | "kdp-paperback-v2"
+            | "kdp-hardcover-v1"
+            | "ingram-print-pdfx1a-v2"
     ) {
         return reject(
             "PRESS_PROFILE_UNSUPPORTED",
@@ -600,11 +1128,49 @@ fn validate_request(
             "Reading-copy output is supported only by the generic Digital PDF profile.",
         );
     }
-    if !matches!(request.ink.as_str(), "BlackAndWhite" | "Color") {
+    if !matches!(
+        request.ink.as_str(),
+        "BlackAndWhite" | "Color" | "StandardColor" | "PremiumColor"
+    ) {
         return reject(
             "PRESS_INK_UNSUPPORTED",
             format!("The ink intent '{}' is unsupported.", request.ink),
         );
+    }
+    if request.profile != "generic-digital-pdf-v1" {
+        let product = request.physical_product.as_ref().ok_or_else(|| {
+            Box::new(RenderResponse::failed(
+                "rejected",
+                Diagnostic::error(
+                    "PRESS_PRINT_PRODUCT_REQUIRED",
+                    "Print profiles require a resolved physical-product descriptor.",
+                ),
+            ))
+        })?;
+        if product.registry_sha256 != registry_sha256() {
+            return reject(
+                "PRESS_PRINT_REGISTRY_MISMATCH",
+                "The physical-product descriptor does not match the renderer's bundled registry.",
+            );
+        }
+        validate_registry_product(product, request)
+            .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
+        if product.minimum_pages == 0
+            || product.maximum_pages < product.minimum_pages
+            || product.product_key.is_empty()
+            || product.paper_name.is_empty()
+            || request.cover.as_ref().is_some_and(|cover| {
+                product
+                    .required_cover_surfaces
+                    .iter()
+                    .any(|surface| !cover.surfaces.contains(surface))
+            })
+        {
+            return reject(
+                "PRESS_PRINT_PRODUCT_INVALID",
+                "The physical-product descriptor or required cover surfaces are incomplete.",
+            );
+        }
     }
     if request
         .layout_trace_mode
@@ -640,7 +1206,7 @@ fn validate_request(
             matches!(
                 cover.barcode_mode.as_str(),
                 "LorekeeperBarcode" | "VendorOverlay"
-            ) && !(request.profile == "ingram-paperback-pdfx1a-v1"
+            ) && !(request.profile == "ingram-print-pdfx1a-v2"
                 && cover.barcode_mode == "VendorOverlay")
         };
         if !barcode_mode_is_valid {
@@ -657,14 +1223,13 @@ fn validate_request(
                 "Lorekeeper barcode generation requires a valid ISBN/EAN-13 checksum.",
             );
         }
-        if !(0.0..=0.25).contains(&cover.bleed_inches)
-            || !(0.001..=0.01).contains(&cover.paper_caliper_inches_per_page)
+        if !(0.0..=0.625).contains(&cover.bleed_inches)
             || !(0.0..=100.0).contains(&cover.image_crop_x_percent)
             || !(0.0..=100.0).contains(&cover.image_crop_y_percent)
         {
             return reject(
                 "PRESS_COVER_GEOMETRY_INVALID",
-                "Cover bleed, paper caliper, or crop geometry is outside supported bounds.",
+                "Cover bleed or crop geometry is outside supported bounds.",
             );
         }
         if cover.title.chars().count() > 240
@@ -4780,16 +5345,30 @@ fn dedicated_figure_page_with_layout(
     }
 }
 
-fn cover_layout(request: &RenderRequest, width: f32) -> Result<LayoutPage, Diagnostic> {
-    let height = (request.trim.height_inches
-        + request
-            .cover
-            .as_ref()
-            .map_or(0.0, |cover| cover.bleed_inches * 2.0))
-        * 72.0;
+fn blank_cover_layout(width: f32, height: f32) -> LayoutPage {
+    LayoutPage {
+        kind: PageKind::Cover,
+        width_points: Some(width),
+        height_points: Some(height),
+        lines: Vec::new(),
+        images: Vec::new(),
+        shapes: Vec::new(),
+        paint_order: Vec::new(),
+        barcode_modules: None,
+        page_label: None,
+        bookmark: None,
+    }
+}
+
+fn cover_layout(
+    request: &RenderRequest,
+    width: f32,
+    height: f32,
+    scene: Option<&Value>,
+) -> Result<LayoutPage, Diagnostic> {
     let cover = request.cover.as_ref().expect("cover");
-    if cover.scene.is_some() {
-        return cover_scene_layout(request, width, height, false, false, &mut Vec::new());
+    if scene.is_some() || cover.scene.is_some() {
+        return cover_scene_layout(request, width, height, false, false, &mut Vec::new(), scene);
     }
     let bleed = cover.bleed_inches * 72.0;
     let spine_width = (width - bleed * 2.0 - request.trim.width_inches * 144.0).max(0.0);
@@ -4905,8 +5484,8 @@ fn cover_layout(request: &RenderRequest, width: f32) -> Result<LayoutPage, Diagn
     }
     Ok(LayoutPage {
         kind: PageKind::Cover,
-        width_points: None,
-        height_points: None,
+        width_points: Some(width),
+        height_points: Some(height),
         lines,
         images: cover
             .asset_id
@@ -4963,6 +5542,7 @@ fn digital_cover_layout(
             true,
             allow_pending_accessibility,
             diagnostics,
+            None,
         );
     }
     let margin = (request.trim.margin_inches * 72.0).max(24.0);
@@ -5044,9 +5624,13 @@ fn cover_scene_layout(
     digital: bool,
     allow_pending_accessibility: bool,
     diagnostics: &mut Vec<Diagnostic>,
+    scene_override: Option<&Value>,
 ) -> Result<LayoutPage, Diagnostic> {
     let cover = request.cover.as_ref().expect("cover");
-    let mut scene = cover.scene.clone().expect("cover scene");
+    let mut scene = scene_override
+        .cloned()
+        .or_else(|| cover.scene.clone())
+        .expect("cover scene");
     let old_width = scene["surface"]["widthPoints"]
         .as_f64()
         .unwrap_or(width as f64) as f32;
@@ -5495,8 +6079,8 @@ mod tests {
     #[test]
     fn digital_and_print_profiles_apply_their_declared_dpi_thresholds() {
         assert_eq!(required_effective_dpi("generic-digital-pdf-v1"), 180.0);
-        assert_eq!(required_effective_dpi("kdp-paperback-v1"), 300.0);
-        assert_eq!(required_effective_dpi("ingram-paperback-pdfx1a-v1"), 300.0);
+        assert_eq!(required_effective_dpi("kdp-paperback-v2"), 300.0);
+        assert_eq!(required_effective_dpi("ingram-print-pdfx1a-v2"), 300.0);
     }
 
     #[test]
@@ -5652,10 +6236,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let request = RenderRequest {
-            protocol_version: 6,
+            protocol_version: 7,
             job_id: "1".repeat(32),
-            profile: "kdp-paperback-v1".to_owned(),
+            profile: "kdp-paperback-v2".to_owned(),
             ink: "BlackAndWhite".to_owned(),
+            physical_product: None,
             output_purpose: OutputPurpose::Publication,
             layout_trace_mode: None,
             document: serde_json::json!({
@@ -5922,7 +6507,6 @@ mod tests {
         let height = request.trim.height_inches * 72.0;
         request.cover = Some(crate::model::Cover {
             bleed_inches: 0.0,
-            paper_caliper_inches_per_page: 0.0,
             back_copy: String::new(),
             title: "Grouped title".to_owned(),
             subtitle: String::new(),
@@ -5942,10 +6526,19 @@ mod tests {
                     { "id": "child", "layerId": "layer", "kind": "Text", "groupId": "group", "textBinding": "title", "fontSizePoints": 12.0, "semanticRole": "Paragraph", "readingOrder": 1, "bounds": { "xPercent": 10.0, "yPercent": 20.0, "widthPercent": 50.0, "heightPercent": 40.0 } }
                 ]
             })),
+            scenes: Default::default(),
+            surfaces: Vec::new(),
         });
-        let unchanged =
-            cover_scene_layout(&request, old_width, height, false, false, &mut Vec::new())
-                .expect("same geometry");
+        let unchanged = cover_scene_layout(
+            &request,
+            old_width,
+            height,
+            false,
+            false,
+            &mut Vec::new(),
+            None,
+        )
+        .expect("same geometry");
         let expanded = cover_scene_layout(
             &request,
             old_width + 18.0,
@@ -5953,6 +6546,7 @@ mod tests {
             false,
             false,
             &mut Vec::new(),
+            None,
         )
         .expect("changed spine");
         assert_eq!(unchanged.lines.len(), 1);
@@ -6244,7 +6838,6 @@ mod tests {
         }));
         request.cover = Some(crate::model::Cover {
             bleed_inches: 0.125,
-            paper_caliper_inches_per_page: 0.0025,
             back_copy: "Back copy".to_owned(),
             title: "Front title".to_owned(),
             subtitle: "Subtitle".to_owned(),
@@ -6257,12 +6850,20 @@ mod tests {
             image_crop_x_percent: 50.0,
             image_crop_y_percent: 50.0,
             scene: None,
+            scenes: Default::default(),
+            surfaces: Vec::new(),
         });
         let spine_width = 1.0 * 72.0;
         let cover_width = request.trim.width_inches * 144.0
             + spine_width
             + request.cover.as_ref().unwrap().bleed_inches * 144.0;
-        let page = cover_layout(&request, cover_width).expect("cover layout");
+        let page = cover_layout(
+            &request,
+            cover_width,
+            request.trim.height_inches * 72.0 + 18.0,
+            None,
+        )
+        .expect("cover layout");
         let spine = page
             .lines
             .iter()
@@ -6293,10 +6894,11 @@ mod tests {
 
     fn request_with_document(document: Value) -> RenderRequest {
         RenderRequest {
-            protocol_version: 6,
+            protocol_version: 7,
             job_id: "1".repeat(32),
-            profile: "kdp-paperback-v1".to_owned(),
+            profile: "kdp-paperback-v2".to_owned(),
             ink: "BlackAndWhite".to_owned(),
+            physical_product: None,
             output_purpose: OutputPurpose::Publication,
             layout_trace_mode: None,
             document,

@@ -1814,9 +1814,6 @@ public sealed class CompositionService(
         ProjectId = projectId,
         Name = "Core Book",
         Format = PublicationEditionFormat.DigitalPdf,
-        Binding = PublicationBinding.Digital,
-        Paper = PublicationPaper.Digital,
-        Ink = PublicationInk.Digital,
         PageWidthInches = setup.PageWidthInches,
         PageHeightInches = setup.PageHeightInches,
         PageMarginInches = setup.PageMarginInches,
@@ -2040,7 +2037,7 @@ public sealed class CompositionService(
     }
 
     private static string GeometryCanonical(PublicationEdition edition) => FormattableString.Invariant(
-        $"{edition.Format}|{edition.PageWidthInches:F4}|{edition.PageHeightInches:F4}|{edition.PageMarginInches:F4}|{edition.Bleed}|{edition.Binding}|{edition.VendorProfileVersion}");
+        $"{edition.Format}|{edition.PageWidthInches:F4}|{edition.PageHeightInches:F4}|{edition.PageMarginInches:F4}|{edition.Bleed}|{edition.PrintProductKey}|{edition.PrintFinish}|{edition.PrintCoverMode}|{edition.VendorProfileVersion}");
 
     public static CompositionScene CreatePageScene(
         PublicationEdition edition,

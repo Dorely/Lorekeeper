@@ -27,6 +27,7 @@ public class PublicationCoverDesign
     public double ImageCropYPercent { get; set; } = 50;
     public string AcknowledgedTemplateFingerprint { get; set; } = string.Empty;
     public string CompositionSceneJson { get; set; } = string.Empty;
+    public string SurfaceScenesJson { get; set; } = "{}";
     public long Revision { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

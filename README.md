@@ -91,8 +91,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   jobs that compile, render, validate, and store or package the selected Core or
   release target. Unresolved image accessibility choices remain visible warnings
   on the private Core copy, while publication releases require those choices to
-  be resolved. Paperback output includes a configurable Generic profile plus
-  built-in Specific profiles for Amazon KDP and IngramSpark;
+  be resolved. Paperback and hardcover output use a checked-in, versioned
+  physical-product registry with configurable Generic templates plus built-in
+  Specific products for Amazon KDP and IngramSpark;
   EPUB and PDF ebook workspaces expose only relevant controls. The full-height
   conversational Publish assistant has compact Core/release tools, persistent
   streaming history, image attachments, complete outline context, bounded
@@ -101,8 +102,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   and one controls column instead of opening a modal.
   Core PDF presentation can preserve a Designed Page as one wide or custom-sized
   PDF page; PDF ebook releases inherit that choice until explicitly customized.
-- Lorekeeper-owned paperback and Digital PDF press jobs with cancellation/restart recovery,
-  immutable SHA-256-verified interior and full-wrap cover PDFs, actual in-app
+- Lorekeeper-owned paperback, hardcover, and Digital PDF press jobs with cancellation/restart recovery,
+  immutable SHA-256-verified interior and product-specific cover PDFs, actual in-app
   PDF viewing, semantic block-to-page maps, render comparisons, and matching
   assistant controls. The exact-pinned Rust renderer is built and packaged in
   both Debug and Release; the running app invokes only that integrity-checked
@@ -114,18 +115,21 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   Renderer/profile upgrades make older owned PDFs stale until regenerated.
 - Core/release-aware structured cover design with shared image/text/shape/layer/style
   tools: the Core front scene flows into digital releases and the front panel of
-  paperback wraps until explicitly customized. Print releases add
-  page-count/paper-caliper back/spine/front geometry, safe zones, and
-  ISBN-13/EAN-13 barcode or KDP reserve behavior.
+  print surfaces until explicitly customized. Print releases select exact
+  paper stock/weight, process, construction, finish, and cover mode. The final
+  interior page count resolves stock-specific spine geometry and the required
+  outside, inside, case, jacket, or cloth setup surfaces, safe regions, and
+  ISBN-13/EAN-13 barcode behavior. Ingram duplex paperback produces outside
+  then inside cover pages with the required no-ink spine region.
 - Versioned Lorekeeper validation with independent post-write inspection,
   deterministic EPUB 3/package assembly, downloadable manifests and reports,
   and matching assistant preflight/package controls. The owned KDP
-  profile emits PDF 1.7, and the owned Ingram profile emits restricted PDF 1.3
+  products emit PDF 1.7, and the owned Ingram products emit restricted PDF 1.3
   with PDF/X-1a:2001 identification, embedded CMYK output intent, CMYK/gray
   content, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded subset fonts, ToUnicode maps, and a
   240% total-ink ceiling. These checks establish only the exact named
   Lorekeeper profile; they do not claim that a vendor accepted an upload.
-- Versioned project import/export (current v19 manuscript-v4/page-setup/
+- Versioned project import/export (current v20 manuscript-v4/page-setup/
   composition model, Core Book, sparse release overlays, edition chapter
   snapshots/compositions, covers, custom-font binaries,
   and isolated older structured/text adapters) plus TXT, Markdown,

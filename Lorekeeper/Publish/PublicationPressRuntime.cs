@@ -22,6 +22,8 @@ public sealed record PublicationPressDescription(
     int ProtocolVersion,
     string RendererVersion,
     IReadOnlyList<string> Profiles,
+    string PrintProductRegistryVersion,
+    string PrintProductRegistrySha256,
     JsonElement Limits,
     JsonElement Capabilities);
 
@@ -189,12 +191,17 @@ public sealed class PublicationPressRuntime(
                 .Select(item => item.GetString() ?? string.Empty)
                 .Where(item => item.Length > 0)
                 .ToArray();
-            if (protocol != 6 || renderer.Length == 0 || profiles.Length == 0)
+            var registryVersion = description.GetProperty("printProductRegistryVersion").GetString() ?? string.Empty;
+            var registryHash = description.GetProperty("printProductRegistrySha256").GetString() ?? string.Empty;
+            if (protocol != 7 || renderer.Length == 0 || profiles.Length == 0
+                || registryVersion.Length == 0 || registryHash.Length != 64)
                 throw new InvalidDataException("The renderer capability contract is incomplete.");
             return new(
                 protocol,
                 renderer,
                 profiles,
+                registryVersion,
+                registryHash,
                 description.GetProperty("limits").Clone(),
                 description.GetProperty("capabilities").Clone());
         }

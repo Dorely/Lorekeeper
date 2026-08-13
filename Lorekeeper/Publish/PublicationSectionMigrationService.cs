@@ -36,6 +36,7 @@ public sealed class PublicationSectionMigrationService(
                 cancellationToken);
             await db.GetService<IMigrator>().MigrateAsync(AdditiveMigrationId, cancellationToken);
         }
+        await DatabaseStartupMigrationService.EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureAuthoringTriggersAsync(db, cancellationToken);
         if (await db.ManuscriptMigrationJournals.AsNoTracking().AnyAsync(
             item => item.MigrationName == MigrationName && item.Status == ManuscriptMigrationStatus.Completed,

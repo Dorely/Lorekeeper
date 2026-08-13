@@ -366,6 +366,10 @@ public sealed class LorekeeperPressMigrationTests
                     new PublicationSectionMigrationService(
                         recovery,
                         NullLogger<PublicationSectionMigrationService>.Instance),
+                    new PrintProductMigrationService(
+                        recovery,
+                        new PrintProductRegistry(),
+                        NullLogger<PrintProductMigrationService>.Instance),
                     recovery);
                 Assert.True(await startupMigration.ApplyAsync(), (await recovery.GetStateAsync()).Error);
                 var picturePdfPresentation = await db.PublicationBookPdfPresentations
@@ -391,7 +395,11 @@ public sealed class LorekeeperPressMigrationTests
                 var queued = jobs.Single(job => job.Id == queuedJobId);
                 var artifact = await db.PublicationArtifacts.AsNoTracking().SingleAsync();
 
-                Assert.Equal("kdp-paperback-v1", edition.VendorProfileVersion);
+                Assert.Equal("kdp-paperback-v2", edition.VendorProfileVersion);
+                Assert.Equal("2026.08.1", edition.PrintRegistryVersion);
+                Assert.Equal("kdp-pb-bw-white", edition.PrintProductKey);
+                Assert.Equal(PrintFinish.Matte, edition.PrintFinish);
+                Assert.Equal(PrintCoverMode.Simplex, edition.PrintCoverMode);
                 Assert.Equal(10, edition.Revision);
                 Assert.True(edition.EditionSpecificContentEnabled);
                 Assert.Equal("custom-profile-v9", unknownEdition.VendorProfileVersion);
@@ -403,6 +411,7 @@ public sealed class LorekeeperPressMigrationTests
                 Assert.Equal("kdp-paperback-v1", queued.ProfileId);
                 Assert.Null(queued.StartedAt);
                 Assert.True(artifact.IsLegacy);
+                Assert.Equal(PublicationArtifactKind.InteriorPdf, artifact.Kind);
                 Assert.Equal(artifactId, artifact.Id);
                 Assert.Equal(hash, artifact.Sha256);
                 Assert.Equal(bytes, artifact.Data);
@@ -433,7 +442,8 @@ public sealed class LorekeeperPressMigrationTests
                 var releasePlacement = Assert.Single(await db.PublicationImagePlacements.AsNoTracking().ToListAsync());
                 Assert.Equal(unknownEditionId, releasePlacement.EditionId);
                 Assert.True(releasePlacement.IsExcluded);
-                Assert.Single(await db.PublicationCoverDesigns.AsNoTracking().ToListAsync());
+                var migratedCover = Assert.Single(await db.PublicationCoverDesigns.AsNoTracking().ToListAsync());
+                Assert.Contains("perfect-bound-outside", migratedCover.SurfaceScenesJson, StringComparison.Ordinal);
                 Assert.Single(await db.PublicationEditionAuditEntries.AsNoTracking().ToListAsync());
                 Assert.Single(await db.PublicationPageMapEntries.AsNoTracking().ToListAsync());
                 Assert.Equal("Preserve this publishing decision.", (await db.PublishMessages.AsNoTracking().SingleAsync()).Content);

@@ -15,6 +15,7 @@ public sealed class PublicationEditionService(
     IPublicationBookService books,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IPublicationReleasePresetService releasePresets,
+    IPrintProductRegistry printProducts,
     IPublicationActorContext actorContext) : IPublicationEditionService
 {
     public PublicationEditionService(
@@ -22,7 +23,9 @@ public sealed class PublicationEditionService(
         IProjectMutationCoordinator projectMutations,
         IPublicationActorContext actorContext)
         : this(db, projectMutations, new PublicationBookService(db, projectMutations),
-            new PublicationEffectiveConfigurationResolver(db), new PublicationReleasePresetService(db), actorContext)
+            new PublicationEffectiveConfigurationResolver(db),
+            new PublicationReleasePresetService(db, new PrintProductRegistry()),
+            new PrintProductRegistry(), actorContext)
     {
     }
 
@@ -57,9 +60,10 @@ public sealed class PublicationEditionService(
             VendorProfileVersion = preset.ProfileId,
             OverrideFieldsJson = "[]",
             InheritsCoreCover = true,
-            Binding = preset.Binding,
-            Paper = preset.Paper,
-            Ink = preset.Ink,
+            PrintRegistryVersion = preset.RegistryVersion,
+            PrintProductKey = preset.ProductKey ?? string.Empty,
+            PrintFinish = preset.Finish,
+            PrintCoverMode = preset.CoverMode,
             PageWidthInches = core.PageSetup.PageWidthInches,
             PageHeightInches = core.PageSetup.PageHeightInches,
             PageMarginInches = core.PageSetup.PageMarginInches,
@@ -150,6 +154,7 @@ public sealed class PublicationEditionService(
                 ImageCropXPercent = source.CoverDesign.ImageCropXPercent,
                 ImageCropYPercent = source.CoverDesign.ImageCropYPercent,
                 CompositionSceneJson = source.CoverDesign.CompositionSceneJson,
+                SurfaceScenesJson = source.CoverDesign.SurfaceScenesJson,
             };
         db.PublicationEditions.Add(clone);
         await SaveWithAuditAsync(clone, "clone", string.Empty, new { sourceEditionId = source.Id }, cancellationToken);
@@ -183,11 +188,35 @@ public sealed class PublicationEditionService(
         if (patch.Destination is { } destination)
         {
             edition.Vendor = destination;
-            edition.VendorProfileVersion = DefaultProfile(edition.Format, destination);
+            if (edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
+            {
+                var product = printProducts.GetDefault(edition.Format, destination);
+                edition.PrintRegistryVersion = printProducts.Version;
+                edition.PrintProductKey = product.Key;
+                edition.VendorProfileVersion = product.PdfProfile;
+                edition.PrintFinish = PrintFinish.Matte;
+                edition.PrintCoverMode = PrintCoverMode.Simplex;
+            }
+            else
+            {
+                edition.VendorProfileVersion = DefaultProfile(edition.Format, destination);
+            }
         }
         if (patch.Isbn is not null) edition.Isbn = PublicationIsbn.NormalizeValidOrEmpty(patch.Isbn);
-        if (patch.Paper is { } paper && edition.Format == PublicationEditionFormat.Paperback) edition.Paper = paper;
-        if (patch.Ink is { } ink && edition.Format == PublicationEditionFormat.Paperback) edition.Ink = ink;
+        if (patch.PrintProductKey is { } productKey)
+        {
+            var product = printProducts.GetRequired(productKey);
+            if (product.Format != edition.Format || product.Vendor != edition.Vendor)
+                throw new InvalidOperationException("The selected print product is not available for this release type and destination.");
+            edition.PrintRegistryVersion = printProducts.Version;
+            edition.PrintProductKey = product.Key;
+            edition.VendorProfileVersion = product.PdfProfile;
+            if (!product.Finishes.Contains(edition.PrintFinish)) edition.PrintFinish = product.Finishes[0];
+            if (!product.CoverModes.Contains(edition.PrintCoverMode)) edition.PrintCoverMode = product.CoverModes[0];
+        }
+        if (patch.PrintFinish is { } finish) edition.PrintFinish = finish;
+        if (patch.PrintCoverMode is { } coverMode) edition.PrintCoverMode = coverMode;
+        if (patch.GenericPrintTemplateJson is not null) edition.GenericPrintTemplateJson = patch.GenericPrintTemplateJson;
         if (edition.Format == PublicationEditionFormat.DigitalPdf)
             Override(fields, PublicationEditionOverrideField.AllowDesignedPageOverrides, patch.AllowDesignedPageOverrides, value => edition.AllowDesignedPageOverrides = value);
 
@@ -323,9 +352,9 @@ public sealed class PublicationEditionService(
         AddDifference(differences, "Vendor", left.Vendor, right.Vendor);
         AddDifference(differences, "ISBN", left.Isbn, right.Isbn);
         AddDifference(differences, "Trim", $"{left.PageWidthInches}x{left.PageHeightInches}", $"{right.PageWidthInches}x{right.PageHeightInches}");
-        AddDifference(differences, "Binding", left.Binding, right.Binding);
-        AddDifference(differences, "Paper", left.Paper, right.Paper);
-        AddDifference(differences, "Ink", left.Ink, right.Ink);
+        AddDifference(differences, "Print product", left.PrintProductKey, right.PrintProductKey);
+        AddDifference(differences, "Finish", left.PrintFinish, right.PrintFinish);
+        AddDifference(differences, "Cover mode", left.PrintCoverMode, right.PrintCoverMode);
         var leftItems = (await effectiveConfigurations.ResolveReleaseAsync(projectId, leftEditionId, cancellationToken))
             .OutlineItems.Count(item => item.IsIncluded);
         var rightItems = (await effectiveConfigurations.ResolveReleaseAsync(projectId, rightEditionId, cancellationToken))
@@ -579,6 +608,7 @@ public sealed class PublicationEditionService(
                 design.ImageCropXPercent,
                 design.ImageCropYPercent,
                 design.CompositionSceneJson,
+                design.SurfaceScenesJson,
             })
             .SingleOrDefaultAsync(cancellationToken);
         var inheritedCoreCover = edition.InheritsCoreCover
@@ -599,6 +629,9 @@ public sealed class PublicationEditionService(
         var normalizedReleaseCoverScene = coverDesign is null
             ? null
             : NormalizeCoverSceneJson(coverDesign.CompositionSceneJson);
+        var normalizedReleaseSurfaceScenes = coverDesign is null
+            ? null
+            : NormalizeCoverSurfaceScenesJson(coverDesign.SurfaceScenesJson);
         var normalizedCoreCoverScene = inheritedCoreCover is null
             ? null
             : NormalizeCoverSceneJson(inheritedCoreCover.CompositionSceneJson);
@@ -630,6 +663,7 @@ public sealed class PublicationEditionService(
                 coverDesign.ImageCropXPercent,
                 coverDesign.ImageCropYPercent,
                 CompositionSceneJson = normalizedReleaseCoverScene,
+                SurfaceScenesJson = normalizedReleaseSurfaceScenes,
             };
         }
         var referencedAssetIds = new HashSet<Guid>();
@@ -649,6 +683,8 @@ public sealed class PublicationEditionService(
                 referencedAssetIds.Add(selectedCoverImageId);
             if (normalizedCoreCoverScene is not null)
                 CollectReferencedImageIds(normalizedCoreCoverScene, referencedAssetIds);
+            if (normalizedReleaseSurfaceScenes is not null)
+                CollectReferencedImageIds(normalizedReleaseSurfaceScenes, referencedAssetIds);
             else if (normalizedReleaseCoverScene is not null)
                 CollectReferencedImageIds(normalizedReleaseCoverScene, referencedAssetIds);
         }
@@ -692,9 +728,11 @@ public sealed class PublicationEditionService(
                 edition.NumberActs,
                 edition.NumberChapters,
                 edition.TitlePageMode,
-                edition.Binding,
-                edition.Paper,
-                edition.Ink,
+                edition.PrintRegistryVersion,
+                edition.PrintProductKey,
+                edition.PrintFinish,
+                edition.PrintCoverMode,
+                edition.GenericPrintTemplateJson,
                 edition.Bleed,
                 edition.AllowDesignedPageOverrides,
                 edition.PageWidthInches,
@@ -758,6 +796,17 @@ public sealed class PublicationEditionService(
             ?? throw new InvalidDataException("The cover composition scene is empty.");
         return JsonSerializer.Serialize(
             CoverCompositionFactory.KeepArtworkBehindCopy(scene),
+            ManuscriptCodec.JsonOptions);
+    }
+
+    private static string NormalizeCoverSurfaceScenesJson(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return "{}";
+        var scenes = JsonSerializer.Deserialize<Dictionary<string, string>>(json, ManuscriptCodec.JsonOptions)
+            ?? new Dictionary<string, string>();
+        return JsonSerializer.Serialize(
+            scenes.OrderBy(item => item.Key, StringComparer.Ordinal)
+                .ToDictionary(item => item.Key, item => NormalizeCoverSceneJson(item.Value), StringComparer.Ordinal),
             ManuscriptCodec.JsonOptions);
     }
 
@@ -841,24 +890,34 @@ public sealed class PublicationEditionService(
         return PublicationReleaseNaming.AllocateUnique(requestedName, names);
     }
 
-    private static void ValidateReleaseState(PublicationEdition edition)
+    private void ValidateReleaseState(PublicationEdition edition)
     {
         ValidateIdentity(edition.Name, edition.Format, edition.Vendor);
-        if (!Enum.IsDefined(edition.Binding) || !Enum.IsDefined(edition.Paper) || !Enum.IsDefined(edition.Ink)
+        if (!Enum.IsDefined(edition.PrintFinish) || !Enum.IsDefined(edition.PrintCoverMode)
             || !Enum.IsDefined(edition.TitlePageMode))
             throw new InvalidOperationException("One or more release settings are invalid.");
-        if (edition.Format == PublicationEditionFormat.Paperback)
+        if (edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
         {
-            if (edition.Binding != PublicationBinding.PerfectBound
-                || edition.Paper is not (PublicationPaper.White or PublicationPaper.Cream)
-                || edition.Ink is not (PublicationInk.BlackAndWhite or PublicationInk.Color))
-                throw new InvalidOperationException("Paperback releases require print binding, paper, and interior-color settings.");
+            if (string.IsNullOrWhiteSpace(edition.PrintProductKey))
+                throw new InvalidOperationException("Print releases require an exact print product.");
+            var product = printProducts.GetRequired(edition.PrintProductKey);
+            if (product.Format != edition.Format || product.Vendor != edition.Vendor)
+                throw new InvalidOperationException("The selected print product does not belong to this release type and destination.");
+            if (!product.Finishes.Contains(edition.PrintFinish) || !product.CoverModes.Contains(edition.PrintCoverMode))
+                throw new InvalidOperationException("The selected finish or cover mode is unavailable for this exact print product.");
+            var trimMatches = product.TrimSizes.Any(trim =>
+            {
+                var parts = trim.Split('x', StringSplitOptions.TrimEntries);
+                return parts.Length == 2
+                    && double.TryParse(parts[0], System.Globalization.CultureInfo.InvariantCulture, out var width)
+                    && double.TryParse(parts[1], System.Globalization.CultureInfo.InvariantCulture, out var height)
+                    && Math.Abs(width - edition.PageWidthInches) < .0001
+                    && Math.Abs(height - edition.PageHeightInches) < .0001;
+            });
+            if (!trimMatches && !product.AllowsCustomTrim)
+                throw new InvalidOperationException($"{product.DisplayName} is unavailable at {edition.PageWidthInches:0.###} x {edition.PageHeightInches:0.###} inches.");
         }
-        else if (edition.Vendor != PublicationVendor.Generic
-            || edition.Binding != PublicationBinding.Digital
-            || edition.Paper != PublicationPaper.Digital
-            || edition.Ink != PublicationInk.Digital
-            || edition.Bleed)
+        else if (edition.Vendor != PublicationVendor.Generic || edition.Bleed)
         {
             throw new InvalidOperationException("Digital releases use application-managed digital product settings.");
         }
@@ -924,7 +983,11 @@ public sealed class PublicationEditionService(
             edition.PageHeightInches,
             edition.PageMarginInches,
             edition.Bleed,
-            edition.AllowDesignedPageOverrides);
+            edition.AllowDesignedPageOverrides)
+        {
+            PrintProductKey = edition.PrintProductKey,
+            PrintCoverMode = edition.PrintCoverMode,
+        };
 
     internal static PublicationEditionView View(Project project, PublicationEdition edition) =>
         new PublicationEditionView(
@@ -960,9 +1023,11 @@ public sealed class PublicationEditionService(
             edition.BodyFontSizePoints,
             edition.BodyLineHeight,
             edition.SelectedCoverImageId,
-            edition.Binding,
-            edition.Paper,
-            edition.Ink,
+            edition.PrintRegistryVersion,
+            edition.PrintProductKey,
+            edition.PrintFinish,
+            edition.PrintCoverMode,
+            edition.GenericPrintTemplateJson,
             edition.Bleed,
             edition.AllowDesignedPageOverrides)
         {
@@ -1094,9 +1159,11 @@ public sealed class PublicationEditionService(
             NumberActs = source.NumberActs,
             NumberChapters = source.NumberChapters,
             TitlePageMode = source.TitlePageMode,
-            Binding = source.Binding,
-            Paper = source.Paper,
-            Ink = source.Ink,
+            PrintRegistryVersion = source.PrintRegistryVersion,
+            PrintProductKey = source.PrintProductKey,
+            PrintFinish = source.PrintFinish,
+            PrintCoverMode = source.PrintCoverMode,
+            GenericPrintTemplateJson = source.GenericPrintTemplateJson,
             Bleed = source.Bleed,
             PageWidthInches = source.PageWidthInches,
             PageHeightInches = source.PageHeightInches,

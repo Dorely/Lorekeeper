@@ -1,6 +1,6 @@
 # Publication artifact roadmap
 
-Last updated: 2026-08-10
+Last updated: 2026-08-12
 
 ## Destination
 
@@ -62,10 +62,16 @@ claim.
 | Product | Required files |
 |---|---|
 | Core reading copy | One tagged reading PDF; private/review output only |
-| Paperback | Separate single-page interior PDF and full-wrap cover PDF |
+| Generic paperback | Interior PDF plus the cover file(s) required by the supplied printer template |
+| KDP paperback | Interior PDF plus one-page outside cover PDF |
+| Ingram paperback | Interior PDF plus a one-page simplex cover or two-page outside/inside duplex cover PDF |
 | EPUB ebook | EPUB 3 plus a separately downloadable front-cover image |
 | PDF ebook | One tagged Book PDF with the front cover as page one |
-| Hardcover | Future product-specific interior plus case, jacket, or cover files required by the selected profile |
+| Generic hardcover | Interior PDF plus printer-declared case/jacket files from a complete template manifest |
+| KDP hardcover | Interior PDF plus one-page case-laminate cover PDF |
+| Ingram case laminate | Interior PDF plus case-wrap cover PDF |
+| Ingram Digital Cloth | Interior PDF plus setup manifest, and a dust-jacket PDF when selected |
+| Ingram jacketed case laminate | Interior PDF plus separate case-wrap and dust-jacket PDFs |
 
 Manifests, validation reports, and deterministic packages are useful supporting
 artifacts. They do not replace the directly downloadable files a vendor expects.
@@ -103,21 +109,26 @@ and artifact inspection belong to Publish and the Publish assistant.
 
 ## Current foundation
 
-Status: `Implemented core; completion work remains`
+Status: `Implemented physical-product foundation; completion work remains`
 
 The current application provides:
 
 - a structured semantic manuscript with stable blocks and Book Text Styles;
 - project-owned page setup, flowing Figures, Designed Pages, and structured
   cover scenes;
-- Core Book plus sparse paperback, EPUB ebook, and PDF ebook releases;
+- Core Book plus sparse paperback, hardcover, EPUB ebook, and PDF ebook releases;
 - opt-in, chapter-level edition content in Editor with live Core inheritance,
   copy-on-write snapshots, edition-owned Designed Pages, shared reusable Book
   Text Styles, reset-to-Core, and Publish difference/diagnostic links;
 - a Lorekeeper-owned Rust renderer with contained assets, deterministic PDF
   output, embedded fonts, page maps, and independent post-write inspection;
-- Generic and Amazon KDP PDF 1.7 paperback output;
-- Ingram PDF/X-1a:2001 paperback output with the owned CMYK profile;
+- a checked-in, versioned physical-product registry shared by Lorekeeper and
+  Press, with exact paper stock/weight, process, trim, page-range, finish,
+  cover-mode, artifact, and geometry rules;
+- Generic, Amazon KDP paperback/case-laminate hardcover, and Ingram paperback,
+  duplex-cover, case-laminate, Digital Cloth, dust-jacket, and jacketed-case
+  products;
+- KDP PDF 1.7 and Ingram PDF/X-1a:2001 output with the owned CMYK profile;
 - reflowable and fixed-layout EPUB generation;
 - tagged Digital PDF with its front cover as page one;
 - immutable artifacts, validation reports, manifests, packages, and downloads;
@@ -207,13 +218,22 @@ without unpacking a package or opening another production application.
 Gate: a user does not need to install or run EPUBCheck separately, and an
 invalid EPUB cannot be reported as ready.
 
-### 5. Versioned profile registry and broader rules
+### 5. Versioned physical-product registry and broader rules
 
-- Formalize Generic versus Specific as the durable profile taxonomy.
-- Review and encode current KDP and Ingram product constraints, including trim,
-  page count, margins, bleed, paper, color, image resolution, spine, barcode,
-  font, transparency, and file-size rules.
-- Keep Generic paperback, Generic EPUB, and Generic PDF ebook output available
+Status: `Implemented for current KDP and Ingram physical products`
+
+- Generic versus Specific is the durable profile taxonomy.
+- The checked-in offline registry encodes the reviewed KDP and Ingram physical
+  products, exact stock/process identity, submitted and manufacturing page
+  counts, permitted trims and finishes, cover modes, artifact sets, and
+  material-dependent spine/cover geometry.
+- KDP paperback spines use published stock formulas. KDP hardcover and Ingram
+  products use frozen calculator-derived measurements; a Specific product never
+  substitutes a generic or neighboring-stock caliper.
+- Generic paperback and hardcover preparation requires a complete printer
+  template manifest and is reported as Template validated, never vendor
+  conformant. Optional vendor PDF/PNG templates are visual underlays only.
+- Keep Generic print, Generic EPUB, and Generic PDF ebook output available
   without a named-vendor claim.
 - Add new Specific profiles one vendor/product at a time with sources,
   review dates, fixtures, and explicit supported scope. Google Books is a
@@ -227,8 +247,9 @@ unknown or custom destinations remain possible through Generic profiles.
 
 - Build and exercise the integrity-checked Press runtime on every platform the
   application claims to distribute.
-- Generate a Core reading PDF, Generic paperback, KDP paperback, Ingram
-  paperback, EPUB, and PDF ebook on applicable clean target machines.
+- Generate a Core reading PDF, Generic/KDP/Ingram paperback, supported
+  KDP/Ingram hardcover constructions, EPUB, and PDF ebook on applicable clean
+  target machines.
 - Verify operation without Rust, Cargo, Python, Java, or machine PDF software on
   the runtime `PATH`, except for any explicitly bundled validator runtime.
 - Do not claim an untested platform.
@@ -267,15 +288,16 @@ DOCX import writes through the semantic manuscript boundary. DOCX export reads
 the selected Core or effective release source; it does not become an alternate
 authoritative manuscript.
 
-### Hardcover and expanded physical products
+### Additional physical products
 
-Status: `Planned`
+Status: `Current hardcover scope implemented; more vendors deferred`
 
-Hardcover remains an explicit publication goal. It will be added as one or more
-product forms backed by Generic and Specific profiles rather than treated as a
-paperback flag. Profiles must describe their required case-wrap, printed-case,
-dust-jacket, spine, hinge, board, bleed, and interior files. Page-count and
-material-dependent geometry stays derived from the selected product profile.
+Hardcover is a first-class product form backed by Generic and Specific
+products, not a paperback flag. Current coverage includes KDP case laminate and
+Ingram case laminate, Digital Cloth with or without a jacket, and jacketed case
+laminate. Product records describe required case-wrap, dust-jacket, cloth setup,
+spine, hinge, board, bleed, safety, and interior files. Page-count and
+material-dependent geometry derives from the exact paper stock and construction.
 
 Additional printers and bindings follow the same profile process: research the
 current requirements, define the artifact set, implement a versioned Specific

@@ -80,12 +80,12 @@ external tools.
 
 Lorekeeper will grow through deliberate publication milestones:
 
-1. the current paperback, EPUB, PDF ebook, Core Book, illustration, cover, and
-   edition-specific Editor foundation;
+1. the current paperback, hardcover, EPUB, PDF ebook, Core Book, illustration,
+   cover, edition-specific Editor, and versioned physical-product foundation;
 2. artifact-complete release inspection, diagnostics, downloads, and broader
-   built-in profile coverage;
+   vendor/profile coverage;
 3. DOCX manuscript import/export;
-4. hardcover and additional Generic and Specific publication profiles;
+4. additional Generic and Specific publication products;
 5. advanced design, language, accessibility, and reference-book support.
 
 The detailed scope and verification gates live in

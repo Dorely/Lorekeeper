@@ -1,22 +1,24 @@
 # Lorekeeper Press requirements and evidence matrix
 
-Last reviewed: 2026-08-11
+Last reviewed: 2026-08-12
 
 ## Scope
 
-Lorekeeper Press 2.0 targets English/Latin, left-to-right paperback interiors,
-color full-wrap covers, and tagged Digital PDF books with front cover page one.
-The supported profiles are
-`generic-paperback-v1`, `kdp-paperback-v1`, and
-`ingram-paperback-pdfx1a-v1`, plus `generic-digital-pdf-v1`. The application does not require a separate PDF
+Lorekeeper Press 2.1 targets English/Latin, left-to-right paperback and
+hardcover interiors, product-specific cover surfaces, and tagged Digital PDF
+books with front cover page one. Physical print jobs resolve through the
+checked-in registry `2026.08.1`; digital output uses
+`generic-digital-pdf-v1`. The application does not require a separate PDF
 converter or preflight product.
 
 These profiles establish the durable taxonomy used by the application:
 Generic profiles provide configurable output without a named-vendor claim,
-while Specific profiles are built-in, versioned contracts for a named vendor
-and product. KDP and Ingram are the current Specific print profiles. Additional
-digital vendors and future hardcover products require new versioned profiles;
-they are not aliases for an existing generic or paperback profile.
+while Specific products are built-in, versioned contracts for a named vendor,
+binding construction, print process, exact paper stock/weight, trim, finish,
+cover mode, artifact set, and geometry. KDP paperback/hardcover and Ingram
+paperback, duplex, case, cloth, and jacket constructions are the current
+Specific print products. Additional vendors require new reviewed registry
+entries; they are never aliases for a neighboring stock or generic template.
 
 “Lorekeeper validated” means the artifact passed the renderer's scoped
 post-write rules and the corresponding independently implemented test fixture.
@@ -32,19 +34,20 @@ assertion was removed or relaxed.
 
 | Area | Required behavior | Evidence boundary |
 |---|---|---|
-| Protocol | Version 6; absolute job root; BOM-free UTF-8 app requests with compatible BOM parsing; job-bound terminal responses; staged request; declared relative image/font assets; hashes, sizes, dimensions/rights where applicable, limits, explicit publication/reading-copy purpose, anchored publication sections, full glyph-evidence and compact browser-preview layout traces, structured layout response, and diagnostics; browser preview and Core reading-copy output report unfinished accessibility decisions as warnings while publication artifact rendering rejects them | Black-box CLI adversarial fixtures, including BOM compatibility, deterministic page-paint responses, publication-section ordering, pending-accessibility preview/reading-copy/publication separation, reading-purpose profile containment, compact-trace payload assertions, and parsed-rejection identity assertions |
+| Protocol | Version 7; absolute job root; BOM-free UTF-8 app requests with compatible BOM parsing; job-bound terminal responses; staged request; declared relative image/font assets; resolved physical-product descriptor with registry version/hash; explicit cover surfaces; hashes, sizes, dimensions/rights where applicable, limits, explicit publication/reading-copy purpose, anchored publication sections, full glyph-evidence and compact browser-preview layout traces, structured layout response, and diagnostics; browser preview and Core reading-copy output report unfinished accessibility decisions as warnings while publication artifact rendering rejects them | Black-box CLI adversarial fixtures, including BOM compatibility, product-registry identity, deterministic page-paint responses, publication-section ordering, pending-accessibility preview/reading-copy/publication separation, reading-purpose profile containment, compact-trace payload assertions, and parsed-rejection identity assertions |
 | Containment | Reject traversal, absolute asset paths, symlinks/reparse points, undeclared files, corrupt/changed assets, pre-existing output, unsupported formats, and unsupported scripts | Test-owned filesystem fixtures; no production validator calls |
 | Atomicity | Cancellation before or during rendering and any failure leave no promoted artifact; existing output is never overwritten | Process tests, staging observation, and sentinel bytes |
 | Determinism | Identical semantic input, settings, assets, fonts, profile, and renderer produce byte-identical PDFs and hashes | Two independent job roots compared byte for byte |
 | Typography | Bundled OFL Lora/Nunito/Roboto Mono plus declared rights-confirmed project TTF and TrueType/CFF OTF; OpenType shaping with emitted advances/offsets; paragraph/character/object styles; semantic inline marks; glyph coverage and embedding-right failure; subset embedding; shaped widths and ToUnicode, including multi-codepoint ligatures | Deterministic CLI layout trace plus mixed-run/custom-font assertions and raw font dictionaries, descendant descriptors, streams, and CMaps parsed with test-only `lopdf` |
-| Line layout | Unicode line opportunities, English hyphenation, bounded overflow, widow/orphan minima, named and sparse alignment/whole/right/first-line/hanging indent and spacing/pagination settings with direct-override precedence, and deterministic line positions | Intermediate layout unit fixtures, protocol-v6 page-paint responses, plus extracted PDF content |
+| Line layout | Unicode line opportunities, English hyphenation, bounded overflow, widow/orphan minima, named and sparse alignment/whole/right/first-line/hanging indent and spacing/pagination settings with direct-override precedence, and deterministic line positions | Intermediate layout unit fixtures, protocol-v7 page-paint responses, plus extracted PDF content |
 | Pagination | Recto chapter starts, intentional blanks, running heads, page numbers, bounded/wrapped multi-page TOC convergence, stable chapter/block page maps, and page limit | Long-title/long-TOC glyph-bound fixtures, forced nonconvergence, narrow pages, long prose, and repeated renders |
 | Publication model | Fixed Core act/chapter order, anchored publication sections with semantic text, flowing Figures, captions and exact-geometry Designed Pages/spreads, globally numbered acts/chapters, structured cover scenes, and Digital PDF page overrides | Canonical full-model request, layout traces, section-anchor/order/dynamic-contents assertions, caption/flow/page-box assertions, semantic page maps, and structured-object evidence |
 | Images | Hash-validated arbitrary-aspect PNG/JPEG, alpha flattening, B&W conversion, color-cover independence, flow/wrap/proportional contain-or-cover, explicit stretching, crop-position/bleed geometry, page-edge clipping for frames that extend beyond a surface, effective-DPI evidence, facing-spread splitting, and deterministic compression | Image XObjects, page maps, transformations, clipping paths, boxes, and color spaces parsed independently |
 | Composition | Text, image, rectangle, ellipse, line, resolved group transforms/visibility/opacity/z-order, layer/style behavior, alignment, vertical alignment, letter spacing, backgrounds, shadows, logical reading order, vector shapes, selectable text, overflow failure, and no C#/Skia page rasterization | Layout traces and raw PDF text/path/image operations |
-| Covers | Structured front-only digital and page-count-derived back/spine/front print scenes, trim/bleed/safe/fold regions, canonical copy bindings, barcode reserve, and valid EAN-13 bars | One-page print cover and Digital PDF page-one geometry, spine/reflow evidence, checksum negatives, and raw object inspection |
-| KDP | PDF 1.7, embedded fonts, ToUnicode, correct page tree/boxes, no encryption, immutable interior and cover | Raw object and stream inspection |
-| Ingram | PDF 1.3; PDF/X-1a:2001 identification; embedded registered CMYK output intent; CMYK/gray only; no transparency, actions, annotations, or encryption; embedded fonts; maximum 240% total ink | Raw object/resource/content inspection plus deliberate RGB/structure/ink negatives |
+| Physical products | Exact submitted/normalized/reported page counts, supported product/trim/process/stock/finish/mode combinations, fixed-point geometry, and fail-closed registry version/hash matching. KDP paperback uses published stock formulas; KDP hardcover and every Ingram stock use complete frozen even-page calculator tables. Generic products require a complete printer template manifest. | Registry coverage assertions, boundary/representative golden measurements, absence-of-fallback assertions, and generic-template negatives |
+| Covers | Structured front-only digital and product-derived print scenes; perfect-bound outside/inside, case-wrap, dust-jacket, and Digital Cloth surfaces; trim/bleed/safe/fold/hinge/wrap/flap regions; canonical copy bindings; barcode reserve; and valid EAN-13 bars | Raw geometry inspection; exact artifact-role/count assertions; two-page duplex order and inside-spine no-ink negatives; case/jacket/cloth fixtures |
+| KDP | PDF 1.7, embedded fonts, ToUnicode, correct page tree/boxes, no encryption, immutable interior and required paperback/case-laminate cover | Raw object and stream inspection plus exact paperback/hardcover product geometry |
+| Ingram | PDF 1.3; PDF/X-1a:2001 identification; embedded registered CMYK output intent; CMYK/gray only; no transparency, actions, annotations, or encryption; embedded fonts; maximum 240% total ink; exact simplex/duplex/case/jacket/cloth artifacts | Raw object/resource/content inspection plus deliberate RGB/structure/ink negatives and product-specific artifact fixtures |
 | Digital PDF | One PDF with front cover page one; PDF 1.7; uniform geometry unless overrides are explicitly enabled; bookmarks, internal TOC links, metadata, selectable text, document language, structure/parent trees, MCIDs, logical block grouping, list parents, Figure/Caption nesting, semantic roles, alt text, decorative artifacts, and logical reading order. Private Core reading copies may temporarily artifact unresolved images and retain warnings; publication outputs remain strict. | Raw catalog, page-tree, annotation, marked-content, structure-tree, and page-box inspection; reading-copy warning/publication rejection fixtures; no formal PDF/UA claim |
 | Object opacity | Digital PDF preserves scene-object opacity through bounded graphics states. KDP PDF 1.7 omits fully transparent backing paint, deterministically composites translucent backing shapes into immediately lower page artwork while retaining selectable opaque text, and flattens remaining non-overlapping opacity against the page substrate. Ingram PDF/X-1a flattens non-overlapping opacity against the page/cover substrate; shared profile validation rejects opacity over lower page art with object-specific diagnostics so semantic text and vector content are never silently rasterized or visually miscomposited. Source-image alpha is flattened during normalization. | Display-list order and graphics-state operators are parsed for Digital PDF; KDP conformance inspects baked image samples, verifies zero-opacity paint is absent, and independently confirms that no transparency remains; KDP and PDF/X artifacts are checked for no transparency; overlapping PDF/X opacity has a fail-closed negative fixture. |
 | Post-write validation | Reparse candidates independently from the writer and reject mismatched version, boxes, fonts, CMaps, color, output intent, actions, annotations, security, or transparency | Production `lopdf` inspector challenged by malformed fixtures |
@@ -79,7 +82,7 @@ renderer has no network loader and no general document-language execution. The
 app normalizes project images into staged PNGs and passes no source filesystem
 paths. The renderer accepts no undeclared file and inherits no `PATH`.
 
-## Known 2.0 limitations and future phases
+## Known 2.1 limitations and future phases
 
 - Multilingual typography: add script/direction segmentation, tested fallback
   chains, language-specific line breaking and dictionaries, and complex-script
@@ -97,10 +100,9 @@ paths. The renderer accepts no undeclared file and inherits no `PATH`.
   page intervention without changing semantic ownership.
 - Manual page intervention: add stable page/column breaks and keep controls that
   remain edition-scoped, revisioned, assistant-accessible, and comparable.
-- Hardcover products: add Generic and Specific profiles for the required
-  interior, case-wrap, printed-case, and dust-jacket artifact sets, including
-  material- and page-count-dependent spine, hinge, board, bleed, and safe-area
-  geometry.
+- Additional physical vendors and bindings: add only reviewed registry products
+  with complete availability, artifact, calculator evidence, and conformance
+  fixtures; retain the complete Generic printer-template escape hatch.
 - Standalone extraction: move `Lorekeeper.Press` only after its protocol,
   fixtures, licenses, release matrix, and deterministic build remain independently
   versioned without weakening the app's integrity checks.

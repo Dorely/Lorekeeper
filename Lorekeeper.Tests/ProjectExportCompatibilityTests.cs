@@ -8,7 +8,7 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
-    public void V19WritesPublicationSectionsWithoutObsoleteDefaultReleaseState()
+    public void V20WritesPrintProductsAndPublicationSectionsWithoutObsoleteDefaultReleaseState()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
@@ -29,7 +29,7 @@ public sealed class ProjectExportCompatibilityTests
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(19, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(20, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationBook\"", json, StringComparison.Ordinal);
         Assert.Contains("\"allowDesignedPageOverrides\":true", json, StringComparison.Ordinal);
@@ -697,9 +697,9 @@ public sealed class ProjectExportCompatibilityTests
             9,
             0.75,
             coverImageId,
-            PublicationBinding.PerfectBound,
-            PublicationPaper.White,
-            PublicationInk.BlackAndWhite,
+            LegacyPublicationBinding.PerfectBound,
+            LegacyPublicationPaper.White,
+            LegacyPublicationInk.BlackAndWhite,
             false,
             false,
             outlineItems,

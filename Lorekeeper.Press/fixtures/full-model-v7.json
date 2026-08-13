@@ -209,7 +209,6 @@
   },
   "cover": {
     "bleedInches": 0.125,
-    "paperCaliperInchesPerPage": 0.0025,
     "backCopy": "A lantern. A forbidden map. A border that refuses to stay still.",
     "title": "The Cartographer's Lantern",
     "subtitle": "A Lorekeeper Press fixture",

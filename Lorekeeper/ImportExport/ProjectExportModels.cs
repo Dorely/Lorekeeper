@@ -4,6 +4,14 @@ using Lorekeeper.Models;
 
 namespace Lorekeeper.ImportExport;
 
+// These values exist only at the versioned import boundary for v19 and older files.
+[JsonConverter(typeof(JsonStringEnumConverter<LegacyPublicationBinding>))]
+public enum LegacyPublicationBinding { PerfectBound, Digital }
+[JsonConverter(typeof(JsonStringEnumConverter<LegacyPublicationPaper>))]
+public enum LegacyPublicationPaper { White, Cream, Digital }
+[JsonConverter(typeof(JsonStringEnumConverter<LegacyPublicationInk>))]
+public enum LegacyPublicationInk { BlackAndWhite, Color, Digital }
+
 [JsonConverter(typeof(JsonStringEnumConverter<ProjectExportKind>))]
 public enum ProjectExportKind
 {
@@ -19,7 +27,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 19;
+    public const int CurrentFormatVersion = 20;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -187,14 +195,19 @@ public sealed record ProjectExportPublicationEdition(
     double PageHeightInches,
     double PageMarginInches,
     Guid? SelectedCoverImageId,
-    PublicationBinding Binding,
-    PublicationPaper Paper,
-    PublicationInk Ink,
+    LegacyPublicationBinding Binding,
+    LegacyPublicationPaper Paper,
+    LegacyPublicationInk Ink,
     bool Bleed,
     bool AllowDesignedPageOverrides,
     List<ProjectExportEditionOutlineItem> OutlineItems,
     ProjectExportCoverDesign? CoverDesign)
 {
+    public string PrintRegistryVersion { get; init; } = string.Empty;
+    public string PrintProductKey { get; init; } = string.Empty;
+    public PrintFinish PrintFinish { get; init; } = PrintFinish.Matte;
+    public PrintCoverMode PrintCoverMode { get; init; } = PrintCoverMode.Simplex;
+    public string GenericPrintTemplateJson { get; init; } = string.Empty;
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? BodyFontSizePoints { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -280,7 +293,10 @@ public sealed record ProjectExportCoverDesign(
     double ImageCropXPercent,
     double ImageCropYPercent,
     string CompositionSceneJson,
-    long Revision);
+    long Revision)
+{
+    public string SurfaceScenesJson { get; init; } = "{}";
+}
 
 public sealed record ProjectExportEditionOutlineItem(
     Guid Id,

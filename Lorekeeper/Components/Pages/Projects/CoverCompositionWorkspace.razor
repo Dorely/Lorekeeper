@@ -11,6 +11,7 @@
 @inject IPublicationEditionService Editions
 @inject IProjectImageService Images
 @inject IProjectFontService ProjectFonts
+@inject IPrintProductRegistry PrintProducts
 @inject IJSRuntime JS
 
 <div class="cover-composer @(InteractionLocked ? "cover-composer--locked" : null)" aria-label="Cover composition editor" aria-disabled="@InteractionLocked" inert="@(InteractionLocked ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
@@ -33,6 +34,15 @@
                 <nav class="cover-toolbar" aria-label="Cover view controls">
                     <button type="button" class="cover-back" title="Return to the publishing workspace" @onclick="NavigateBackAsync"><span aria-hidden="true">&#8592;</span> Back</button>
                     <div class="cover-identity"><strong>@(CoreBook ? "Core cover" : "Release cover")</strong><small>@ModeSummary</small></div>
+                    @if (_surfaceRoles.Count > 1)
+                    {
+                        <div class="cover-surface-tabs" role="tablist" aria-label="Cover surfaces">
+                            @foreach (var surface in _surfaceRoles)
+                            {
+                                <button type="button" role="tab" aria-selected="@(surface == _surfaceRole)" class="@(surface == _surfaceRole ? "selected" : null)" @onclick="() => SelectSurfaceAsync(surface)">@SurfaceLabel(surface)</button>
+                            }
+                        </div>
+                    }
                     <div class="cover-view-toggles" role="group" aria-label="Cover canvas aids">
                         <label title="Snap objects to the cover regions while moving or resizing"><input type="checkbox" @bind="_snap" /><span aria-hidden="true">&#8982;</span><span>Snap</span></label>
                         <label title="Show or hide safe-area and panel guides"><input type="checkbox" @bind="_guides" /><span aria-hidden="true">&#9638;</span><span>Guides</span></label>
@@ -233,13 +243,14 @@
     private CancellationTokenSource? _autosaveCancellation;
     private long _changeVersion;
     private Guid _loadedProjectId; private Guid _loadedEditionId; private bool _loadedCoreBook; private long _loadedRefreshSignal = -1;
+    private string _surfaceRole = "front"; private IReadOnlyList<string> _surfaceRoles = ["front"];
     private string _title = "", _subtitle = "", _author = "", _spineText = "", _backCopy = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private string? _error; private bool _dirty, _snap = true, _guides = true, _cropReposition; private double _zoom = .95;
     private bool _newRetainAspectRatio = true;
     private ArtworkPickerMode? _artworkPickerMode;
     private Guid? _artworkPickerTargetId;
     private ElementReference _stageElement; private IJSObjectReference? _workspaceModule; private CoverTransformState? _transform;
     private CompositionObject? Selected => _objects.FirstOrDefault(item => item.Id == _selectedId);
-    private bool IsPrint => _edition?.Format == PublicationEditionFormat.Paperback;
+    private bool IsPrint => _edition?.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover;
     private string ModeSummary => CoreBook ? "Reusable front cover" : IsPrint ? "Print full wrap: back, spine, and front" : "Digital front cover";
     private IReadOnlyList<CompositionRegionConstraint> AvailableRegions => IsPrint ? Enum.GetValues<CompositionRegionConstraint>() : [CompositionRegionConstraint.Page, CompositionRegionConstraint.SafeArea, CompositionRegionConstraint.Front];
     private static readonly string[] Bindings = ["title", "subtitle", "author", "spineText", "backCopy"];
@@ -264,9 +275,11 @@
             _edition = CoreBook
                 ? null
                 : (await Editions.ListAsync(ProjectId)).Single(item => item.Id == EditionId);
+            _surfaceRoles = CoverSurfaceRoles();
+            if (!_surfaceRoles.Contains(_surfaceRole, StringComparer.Ordinal)) _surfaceRole = _surfaceRoles[0];
             _cover = CoreBook
                 ? await Books.GetCoverAsync(ProjectId)
-                : await Covers.GetAsync(ProjectId, EditionId);
+                : await Covers.GetSurfaceAsync(ProjectId, EditionId, _surfaceRole);
             _images = (await Images.ListAsync(ProjectId))
                 .Where(image => image.ContentType is "image/png" or "image/jpeg")
                 .ToList();
@@ -309,6 +322,38 @@
     }
 
     private void DismissError() => _error = null;
+    private IReadOnlyList<string> CoverSurfaceRoles()
+    {
+        if (CoreBook || _edition is null || string.IsNullOrWhiteSpace(_edition.PrintProductKey)) return ["front"];
+        var product = PrintProducts.GetRequired(_edition.PrintProductKey);
+        var result = new List<string>();
+        if (product.RequiresPerfectBoundCover)
+        {
+            result.Add("perfect-bound-outside");
+            if (_edition.PrintCoverMode == PrintCoverMode.Duplex) result.Add("perfect-bound-inside");
+        }
+        if (product.RequiresCaseCover) result.Add("case-wrap");
+        if (product.RequiresDustJacket) result.Add("dust-jacket");
+        if (product.RequiresClothManifest) result.Add("digital-cloth-setup");
+        return result.Count == 0 ? ["front"] : result;
+    }
+    private static string SurfaceLabel(string role) => role switch
+    {
+        "perfect-bound-outside" => "Outside",
+        "perfect-bound-inside" => "Inside",
+        "case-wrap" => "Case",
+        "dust-jacket" => "Jacket",
+        "digital-cloth-setup" => "Cloth setup",
+        _ => "Front",
+    };
+    private async Task SelectSurfaceAsync(string role)
+    {
+        if (role == _surfaceRole || !_surfaceRoles.Contains(role, StringComparer.Ordinal)) return;
+        if (!await FlushAsync()) return;
+        _surfaceRole = role;
+        _loadedRefreshSignal = -1;
+        await OnParametersSetAsync();
+    }
     private async Task NavigateBackAsync()
     {
         await FlushAsync();
@@ -517,7 +562,7 @@
             var saveProjectId = _loadedProjectId == Guid.Empty ? ProjectId : _loadedProjectId;
             _cover = _loadedCoreBook
                 ? await Books.SaveCoverAsync(saveProjectId, _cover.CoreBookRevision ?? throw new InvalidOperationException("Core Book revision is unavailable."), update, scene)
-                : await Covers.SaveWorkspaceAsync(saveProjectId, _cover.EditionId, update, scene);
+                : await Covers.SaveSurfaceWorkspaceAsync(saveProjectId, _cover.EditionId, _surfaceRole, update, scene);
             if (_changeVersion == changeVersion)
             {
                 _scene = CoverCompositionFactory.KeepArtworkBehindCopy(
@@ -537,7 +582,7 @@
             var saveProjectId = _loadedProjectId == Guid.Empty ? ProjectId : _loadedProjectId;
             _cover = _loadedCoreBook
                 ? await Books.GetCoverAsync(saveProjectId)
-                : await Covers.GetAsync(saveProjectId, _loadedEditionId);
+                : await Covers.GetSurfaceAsync(saveProjectId, _loadedEditionId, _surfaceRole);
             _dirty = true;
             ScheduleAutosave();
         }

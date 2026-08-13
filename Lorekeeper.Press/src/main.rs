@@ -4,21 +4,29 @@ use std::path::PathBuf;
 use lorekeeper_press::model::{Capabilities, Diagnostic, RenderResponse};
 use lorekeeper_press::renderer;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 fn main() {
+    let registry_hash = Sha256::digest(include_bytes!("../assets/print-products-v1.json"))
+        .iter()
+        .map(|value| format!("{value:02x}"))
+        .collect::<String>();
     let arguments: Vec<String> = env::args().skip(1).collect();
     let result = match arguments.as_slice() {
         [command, flag] if command == "describe" && flag == "--json" => {
             println!(
                 "{}",
                 serde_json::to_string(&json!({
-                    "protocolVersion": 6,
+                    "protocolVersion": 7,
                     "rendererVersion": env!("CARGO_PKG_VERSION"),
+                    "printProductRegistryVersion": "2026.08.1",
+                    "printProductRegistrySha256": registry_hash,
                     "profiles": [
-                        "generic-paperback-v1",
+                        "generic-print-v2",
                         "generic-digital-pdf-v1",
-                        "ingram-paperback-pdfx1a-v1",
-                        "kdp-paperback-v1"
+                        "ingram-print-pdfx1a-v2",
+                        "kdp-paperback-v2",
+                        "kdp-hardcover-v1"
                     ],
                     "machineRuntimeDependencies": [],
                     "limits": {

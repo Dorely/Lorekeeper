@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize, Serializer};
+use std::collections::BTreeMap;
+
 use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize)]
@@ -42,6 +44,7 @@ pub struct RenderRequest {
     pub job_id: String,
     pub profile: String,
     pub ink: String,
+    pub physical_product: Option<PhysicalProduct>,
     #[serde(default)]
     pub output_purpose: OutputPurpose,
     #[serde(default)]
@@ -91,7 +94,6 @@ fn default_two() -> usize {
 #[serde(rename_all = "camelCase")]
 pub struct Cover {
     pub bleed_inches: f32,
-    pub paper_caliper_inches_per_page: f32,
     #[serde(default)]
     pub back_copy: String,
     #[serde(default)]
@@ -113,6 +115,73 @@ pub struct Cover {
     #[serde(default = "default_focal")]
     pub image_crop_y_percent: f32,
     pub scene: Option<Value>,
+    #[serde(default)]
+    pub scenes: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub surfaces: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhysicalProduct {
+    pub registry_version: String,
+    pub registry_sha256: String,
+    pub product_key: String,
+    pub vendor: String,
+    pub format: String,
+    pub binding: String,
+    pub interior_process: String,
+    pub paper_name: String,
+    pub basis_weight_pounds: Option<u32>,
+    pub gsm: Option<u32>,
+    pub cover_material: String,
+    pub finish: String,
+    pub cover_mode: String,
+    pub minimum_pages: usize,
+    pub maximum_pages: usize,
+    #[serde(default)]
+    pub minimum_submitted_pages: Option<usize>,
+    #[serde(default)]
+    pub maximum_submitted_pages: Option<usize>,
+    pub spine_model: PhysicalSpineModel,
+    pub generic_template: Option<GenericPrintTemplate>,
+    #[serde(default)]
+    pub required_cover_surfaces: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenericPrintTemplate {
+    pub trim_width_inches: f32,
+    pub trim_height_inches: f32,
+    pub bleed_inches: f32,
+    pub safe_inches: f32,
+    pub wrap_inches: f32,
+    pub hinge_inches: f32,
+    pub gutter_inches: f32,
+    pub flap_inches: f32,
+    pub barcode_width_inches: f32,
+    pub barcode_height_inches: f32,
+    pub inches_per_page: Option<f32>,
+    pub minimum_pages: usize,
+    pub maximum_pages: usize,
+    pub pdf_standard: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhysicalSpineModel {
+    pub kind: String,
+    pub inches_per_page: Option<f32>,
+    #[serde(default)]
+    pub anchors: Vec<PhysicalSpineAnchor>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhysicalSpineAnchor {
+    pub pages: usize,
+    pub inches: f32,
 }
 
 fn default_focal() -> f32 {
@@ -163,7 +232,7 @@ pub struct RenderResponse {
 impl RenderResponse {
     pub fn failed(status: &str, diagnostic: Diagnostic) -> Self {
         Self {
-            protocol_version: 6,
+            protocol_version: 7,
             renderer_version: env!("CARGO_PKG_VERSION"),
             job_id: None,
             status: status.to_owned(),
@@ -257,6 +326,7 @@ pub struct ValidationEvidence {
     pub interior_width_points: f32,
     pub interior_height_points: f32,
     pub cover_height_points: f32,
+    pub cover_surfaces: Vec<CoverSurfaceEvidence>,
     pub interior_page_boxes_consistent: bool,
     pub cover_page_boxes_consistent: bool,
     pub fonts: Vec<FontEvidence>,
@@ -268,6 +338,15 @@ pub struct ValidationEvidence {
     pub image_count: usize,
     pub minimum_effective_dpi: Option<f32>,
     pub images: Vec<ImageEvidence>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoverSurfaceEvidence {
+    pub role: String,
+    pub width_points: f32,
+    pub height_points: f32,
+    pub page_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]

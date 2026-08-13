@@ -1071,9 +1071,9 @@ public sealed class ProjectImportJobProcessor(
                 legacy.PageHeightInches,
                 legacy.PageMarginInches,
                 null,
-                PublicationBinding.PerfectBound,
-                PublicationPaper.White,
-                PublicationInk.BlackAndWhite,
+                LegacyPublicationBinding.PerfectBound,
+                LegacyPublicationPaper.White,
+                LegacyPublicationInk.BlackAndWhite,
                 false,
                 false,
                 [],
@@ -1829,6 +1829,22 @@ public sealed class ProjectImportJobProcessor(
         }, ManuscriptCodec.JsonOptions);
     }
 
+    private static string RemapSurfaceScenesJson(
+        string json,
+        IReadOnlyDictionary<Guid, Guid> imageMap,
+        IReadOnlyDictionary<Guid, Guid> fontFamilyMap)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return "{}";
+        var scenes = JsonSerializer.Deserialize<Dictionary<string, string>>(json, ManuscriptCodec.JsonOptions)
+            ?? new Dictionary<string, string>();
+        return JsonSerializer.Serialize(
+            scenes.ToDictionary(
+                item => item.Key,
+                item => RemapSceneJson(item.Value, imageMap, fontFamilyMap),
+                StringComparer.Ordinal),
+            ManuscriptCodec.JsonOptions);
+    }
+
     private async Task ImportEntityVisualExamplesAsync(
         ProjectImportJob job,
         ProjectExportDocument document,
@@ -1965,9 +1981,13 @@ public sealed class ProjectImportJobProcessor(
             PageMarginInches = importedEdition.PageMarginInches,
             BodyFontSizePoints = importedEdition.ImportedBodyFontSizePoints,
             BodyLineHeight = importedEdition.ImportedBodyLineHeight,
-            Binding = importedEdition.Binding,
-            Paper = importedEdition.Paper,
-            Ink = importedEdition.Ink,
+            PrintRegistryVersion = formatVersion >= 20 ? importedEdition.PrintRegistryVersion : "2026.08.1",
+            PrintProductKey = formatVersion >= 20 && !string.IsNullOrWhiteSpace(importedEdition.PrintProductKey)
+                ? importedEdition.PrintProductKey
+                : LegacyPrintProduct(importedEdition.Format, importedEdition.Vendor, importedEdition.Paper, importedEdition.Ink),
+            PrintFinish = formatVersion >= 20 ? importedEdition.PrintFinish : PrintFinish.Matte,
+            PrintCoverMode = formatVersion >= 20 ? importedEdition.PrintCoverMode : PrintCoverMode.Simplex,
+            GenericPrintTemplateJson = formatVersion >= 20 ? importedEdition.GenericPrintTemplateJson : string.Empty,
             Bleed = importedEdition.Bleed,
             AllowDesignedPageOverrides = importedEdition.AllowDesignedPageOverrides,
             OverrideFieldsJson = formatVersion >= 16
@@ -2014,6 +2034,10 @@ public sealed class ProjectImportJobProcessor(
                 ImageCropYPercent = cover.ImageCropYPercent,
                 CompositionSceneJson = RemapSceneJson(
                     cover.CompositionSceneJson,
+                    imageMap,
+                    fontFamilyMap),
+                SurfaceScenesJson = RemapSurfaceScenesJson(
+                    cover.SurfaceScenesJson,
                     imageMap,
                     fontFamilyMap),
                 Revision = cover.Revision,
@@ -2577,9 +2601,6 @@ public sealed class ProjectImportJobProcessor(
             ProjectId = projectId,
             Name = "Core Book",
             Format = PublicationEditionFormat.DigitalPdf,
-            Binding = PublicationBinding.Digital,
-            Paper = PublicationPaper.Digital,
-            Ink = PublicationInk.Digital,
             PageWidthInches = setup.PageWidthInches,
             PageHeightInches = setup.PageHeightInches,
             PageMarginInches = setup.PageMarginInches,
@@ -3257,9 +3278,11 @@ public sealed class ProjectImportJobProcessor(
             edition.TitlePageMode,
             edition.PrintPicturePageSpreadMode,
             edition.EpubPicturePageSpreadMode,
-            edition.Binding,
-            edition.Paper,
-            edition.Ink,
+            edition.PrintRegistryVersion,
+            edition.PrintProductKey,
+            edition.PrintFinish,
+            edition.PrintCoverMode,
+            edition.GenericPrintTemplateJson,
             edition.Bleed,
             edition.PageWidthInches,
             edition.PageHeightInches,
@@ -3319,9 +3342,11 @@ public sealed class ProjectImportJobProcessor(
         && existing.NumberActs == imported.NumberActs
         && existing.NumberChapters == imported.NumberChapters
         && existing.TitlePageMode == imported.TitlePageMode
-        && existing.Binding == imported.Binding
-        && existing.Paper == imported.Paper
-        && existing.Ink == imported.Ink
+        && string.Equals(existing.PrintProductKey,
+            string.IsNullOrWhiteSpace(imported.PrintProductKey)
+                ? LegacyPrintProduct(imported.Format, imported.Vendor, imported.Paper, imported.Ink)
+                : imported.PrintProductKey,
+            StringComparison.Ordinal)
         && existing.Bleed == imported.Bleed
         && existing.AllowDesignedPageOverrides == imported.AllowDesignedPageOverrides
         && existing.PageWidthInches.Equals(imported.PageWidthInches)
@@ -3329,6 +3354,29 @@ public sealed class ProjectImportJobProcessor(
         && existing.PageMarginInches.Equals(imported.PageMarginInches)
         && existing.BodyFontSizePoints.Equals(imported.ImportedBodyFontSizePoints)
         && existing.BodyLineHeight.Equals(imported.ImportedBodyLineHeight);
+
+    private static string LegacyPrintProduct(
+        PublicationEditionFormat format,
+        PublicationVendor vendor,
+        LegacyPublicationPaper paper,
+        LegacyPublicationInk ink) => (format, vendor, paper, ink) switch
+    {
+        (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp, LegacyPublicationPaper.Cream, _) => "kdp-pb-bw-cream",
+        (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp, _, LegacyPublicationInk.Color) => "kdp-pb-premium-color",
+        (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp, _, _) => "kdp-pb-bw-white",
+        (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-pb-bw-cream50",
+        (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-pb-premium70",
+        (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, _) => "ingram-pb-bw-white50",
+        (PublicationEditionFormat.Paperback, _, _, _) => "generic-perfectbound-template",
+        (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, LegacyPublicationPaper.Cream, _) => "kdp-hc-bw-cream",
+        (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, LegacyPublicationInk.Color) => "kdp-hc-premium-color",
+        (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, _) => "kdp-hc-bw-white",
+        (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-hc-case-bw-cream50",
+        (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-hc-case-premium70",
+        (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, _) => "ingram-hc-case-bw-white50",
+        (PublicationEditionFormat.Hardcover, _, _, _) => "generic-casebound-template",
+        _ => string.Empty,
+    };
 
     private async Task<bool> ImportedBibliographicContentMatchesAsync(
         Guid existingEditionId,

@@ -513,7 +513,8 @@ public sealed class PublicationRenderService(
             artifact.IsLegacy,
             !string.Equals(artifact.SourceFingerprint, currentFingerprint, StringComparison.Ordinal)
                 || (artifact.Kind is PublicationArtifactKind.ReadingPdf or PublicationArtifactKind.InteriorPdf
-                    or PublicationArtifactKind.CoverPdf or PublicationArtifactKind.BookPdf
+                    or PublicationArtifactKind.PerfectBoundCoverPdf or PublicationArtifactKind.CaseCoverPdf
+                    or PublicationArtifactKind.DustJacketPdf or PublicationArtifactKind.BookPdf
                     && currentRendererVersion is not null
                     && !string.Equals(artifact.RendererVersion, currentRendererVersion, StringComparison.Ordinal)));
 
@@ -675,6 +676,7 @@ public sealed class PublicationRenderProcessor(
     IPublicationCoverService covers,
     IProjectFontService projectFonts,
     IPublicationPressRuntime pressRuntime,
+    IPrintProductRegistry printProducts,
     IOptions<PublicationPressOptions> options)
 {
     public PublicationRenderProcessor(
@@ -685,7 +687,8 @@ public sealed class PublicationRenderProcessor(
         IProjectFontService projectFonts,
         IPublicationPressRuntime pressRuntime,
         IOptions<PublicationPressOptions> options)
-        : this(db, publishing, editions, null!, covers, projectFonts, pressRuntime, options)
+        : this(db, publishing, editions, null!, covers, projectFonts, pressRuntime,
+            new PrintProductRegistry(), options)
     {
     }
 
@@ -694,11 +697,15 @@ public sealed class PublicationRenderProcessor(
     public static string ProfileFor(PublicationEditionFormat format, PublicationVendor vendor) =>
         format == PublicationEditionFormat.DigitalPdf
             ? "generic-digital-pdf-v1"
+            : format == PublicationEditionFormat.Hardcover && vendor == PublicationVendor.AmazonKdp
+                ? "kdp-hardcover-v1"
+            : format == PublicationEditionFormat.Hardcover && vendor == PublicationVendor.IngramSpark
+                ? "ingram-print-pdfx1a-v2"
             : vendor == PublicationVendor.IngramSpark
-        ? "ingram-paperback-pdfx1a-v1"
+        ? "ingram-print-pdfx1a-v2"
         : vendor == PublicationVendor.AmazonKdp
-            ? "kdp-paperback-v1"
-            : "generic-paperback-v1";
+            ? "kdp-paperback-v2"
+            : "generic-print-v2";
 
     public async Task ProcessAsync(Guid jobId, CancellationToken cancellationToken)
     {
@@ -719,6 +726,9 @@ public sealed class PublicationRenderProcessor(
                 "The edition's publication profile is unsupported by Lorekeeper Press.");
         }
         var runtime = pressRuntime.GetDescription();
+        if (!string.Equals(runtime.PrintProductRegistryVersion, printProducts.Version, StringComparison.Ordinal)
+            || !string.Equals(runtime.PrintProductRegistrySha256, printProducts.Sha256, StringComparison.Ordinal))
+            throw new InvalidOperationException("The installed Press renderer has a different print-product registry.");
         if (!runtime.Profiles.Contains(job.ProfileId, StringComparer.Ordinal))
             throw new InvalidOperationException("The queued publication profile is unsupported by the installed Lorekeeper Press runtime.");
         if (string.IsNullOrWhiteSpace(job.RendererVersion))
@@ -767,7 +777,7 @@ public sealed class PublicationRenderProcessor(
 
         Cleanup(job.Id);
         var result = await InvokeAsync(job.Id, request, cancellationToken);
-        if (result.ProtocolVersion != 6
+        if (result.ProtocolVersion != 7
             || !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a mismatched protocol or job identity.");
         if (!string.Equals(result.RendererVersion, job.RendererVersion, StringComparison.Ordinal))
@@ -787,28 +797,32 @@ public sealed class PublicationRenderProcessor(
             ?? throw new InvalidOperationException("The press renderer omitted its artifact list.");
         var resultKinds = resultArtifacts.Select(artifact => artifact.Kind).Order().ToArray();
         var digitalOutput = coreTarget || edition!.Format == PublicationEditionFormat.DigitalPdf;
-        var expectedKinds = digitalOutput
-            ? new[] { "book-pdf" }
-            : new[] { "cover-pdf", "interior-pdf" };
+        var expectedKinds = digitalOutput ? ["book-pdf"] : ExpectedPhysicalArtifactKinds(edition!, printProducts);
         if (!resultKinds.SequenceEqual(expectedKinds, StringComparer.Ordinal))
             throw new InvalidOperationException(digitalOutput
                 ? "The press renderer must return exactly one Digital PDF book artifact."
-                : "The press renderer must return exactly one interior and one cover PDF.");
+                : "The press renderer returned an artifact set that does not match the selected physical product.");
         var interiorResult = resultArtifacts.Single(artifact => artifact.Kind is "interior-pdf" or "book-pdf");
         if (interiorResult.PageCount is not > 0 or > 100_000)
             throw new InvalidOperationException("The renderer returned an invalid interior page count.");
-        if (!digitalOutput
-            && resultArtifacts.Single(artifact => artifact.Kind == "cover-pdf").PageCount != 1)
-            throw new InvalidOperationException("The renderer must return a one-page full-wrap cover.");
+        foreach (var coverResult in resultArtifacts.Where(artifact => artifact.Kind.EndsWith("cover-pdf", StringComparison.Ordinal)))
+        {
+            var expectedPages = coverResult.Kind == "perfect-bound-cover-pdf"
+                && edition!.PrintCoverMode == PrintCoverMode.Duplex ? 2 : 1;
+            if (coverResult.PageCount != expectedPages)
+                throw new InvalidOperationException($"The renderer returned {coverResult.PageCount} pages for {coverResult.Kind}; {expectedPages} are required.");
+        }
         job.ProgressPercent = 80;
         job.ProgressMessage = "Verifying immutable artifacts";
         await db.SaveChangesAsync(cancellationToken);
         var outputRoot = JobRoot(job.Id);
         foreach (var resultArtifact in resultArtifacts)
         {
-            if (!string.Equals(resultArtifact.MediaType, "application/pdf", StringComparison.Ordinal)
-                || resultArtifact.ByteLength is < 5 or > 256L * 1024 * 1024)
-                throw new InvalidOperationException("The renderer returned an invalid PDF artifact envelope.");
+            var setupManifest = resultArtifact.Kind == "print-setup-manifest";
+            var expectedMediaType = setupManifest ? "application/json" : "application/pdf";
+            if (!string.Equals(resultArtifact.MediaType, expectedMediaType, StringComparison.Ordinal)
+                || resultArtifact.ByteLength is < 2 or > 256L * 1024 * 1024)
+                throw new InvalidOperationException("The renderer returned an invalid artifact envelope.");
             var fullPath = Path.GetFullPath(Path.Combine(outputRoot, resultArtifact.RelativePath));
             var relative = Path.GetRelativePath(outputRoot, fullPath);
             if (Path.IsPathRooted(relative)
@@ -822,8 +836,21 @@ public sealed class PublicationRenderProcessor(
                 || file.Attributes.HasFlag(FileAttributes.ReparsePoint))
                 throw new InvalidOperationException($"Artifact integrity failed for {resultArtifact.RelativePath}.");
             var data = await File.ReadAllBytesAsync(fullPath, cancellationToken);
-            if (!data.AsSpan().StartsWith("%PDF-"u8))
+            if (setupManifest)
+            {
+                try
+                {
+                    using var _ = JsonDocument.Parse(data);
+                }
+                catch (JsonException exception)
+                {
+                    throw new InvalidOperationException($"Artifact {resultArtifact.RelativePath} is not a valid setup manifest.", exception);
+                }
+            }
+            else if (!data.AsSpan().StartsWith("%PDF-"u8))
+            {
                 throw new InvalidOperationException($"Artifact {resultArtifact.RelativePath} is not a PDF.");
+            }
             var sha = Convert.ToHexStringLower(SHA256.HashData(data));
             if (!string.Equals(sha, resultArtifact.Sha256, StringComparison.OrdinalIgnoreCase)
                 || data.LongLength != resultArtifact.ByteLength)
@@ -925,10 +952,22 @@ public sealed class PublicationRenderProcessor(
     }
 
     private static bool IsSupportedProfile(string profile) => profile is
-        "generic-paperback-v1" or
+        "generic-print-v2" or
         "generic-digital-pdf-v1" or
-        "kdp-paperback-v1" or
-        "ingram-paperback-pdfx1a-v1";
+        "kdp-paperback-v2" or
+        "kdp-hardcover-v1" or
+        "ingram-print-pdfx1a-v2";
+
+    private static string[] RequiredCoverSurfaces(PrintProductDefinition product, PrintCoverMode coverMode)
+    {
+        if (product.RequiresPerfectBoundCover)
+            return coverMode == PrintCoverMode.Duplex ? ["perfect-bound-outside", "perfect-bound-inside"] : ["perfect-bound-outside"];
+        var surfaces = new List<string>();
+        if (product.RequiresCaseCover) surfaces.Add("case-wrap");
+        if (product.RequiresDustJacket) surfaces.Add("dust-jacket");
+        if (product.RequiresClothManifest) surfaces.Add("digital-cloth-setup");
+        return [.. surfaces];
+    }
 
     internal static bool ApplyTerminalResponse(
         PublicationRenderJob job,
@@ -977,6 +1016,12 @@ public sealed class PublicationRenderProcessor(
             ManuscriptCodec.JsonOptions);
         if (coverScene is not null)
             coverScene = NormalizeSceneLanguages(CoverCompositionFactory.KeepArtworkBehindCopy(coverScene));
+        var coverSurfaceScenes = coverDesign.SurfaceScenes.ToDictionary(
+            item => item.Key,
+            item => NormalizeSceneLanguages(CoverCompositionFactory.KeepArtworkBehindCopy(
+                JsonSerializer.Deserialize<CompositionScene>(item.Value, ManuscriptCodec.JsonOptions)
+                    ?? throw new InvalidDataException($"Cover surface '{item.Key}' is empty."))),
+            StringComparer.Ordinal);
         var usedFontKeys = document.NamedStyles
             .Select(style => style.Definition.FontFamilyKey)
             .Concat(document.Sections.SelectMany(section => section.Chapters)
@@ -995,6 +1040,8 @@ public sealed class PublicationRenderProcessor(
                     .Concat(variant.Scene.Styles.Select(style => style.FontFamilyKey))))
             .Concat(coverScene?.Objects.Select(item => item.FontFamilyKey) ?? [])
             .Concat(coverScene?.Styles.Select(style => style.FontFamilyKey) ?? [])
+            .Concat(coverSurfaceScenes.Values.SelectMany(scene => scene.Objects.Select(item => item.FontFamilyKey)
+                .Concat(scene.Styles.Select(style => style.FontFamilyKey))))
             .Where(key => !string.IsNullOrWhiteSpace(key))
             .Select(key => key!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1124,17 +1171,50 @@ public sealed class PublicationRenderProcessor(
             .Select(composition => composition.Name));
         if (missingVariants.Count > 0)
             throw new InvalidOperationException($"Create and review an exact layout variant for this edition geometry: {string.Join(", ", missingVariants)}.");
+        var printProduct = release?.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
+            ? printProducts.GetRequired(release.PrintProductKey)
+            : null;
+        var genericPrintTemplate = printProduct?.Vendor == PublicationVendor.Generic
+            && !string.IsNullOrWhiteSpace(release!.GenericPrintTemplateJson)
+                ? JsonSerializer.Deserialize<GenericPrintTemplate>(release.GenericPrintTemplateJson)
+                : null;
+        if (printProduct?.Vendor == PublicationVendor.Generic && genericPrintTemplate is null)
+            throw new InvalidOperationException("Generic print releases require a complete printer geometry template before rendering.");
+        var requiredCoverSurfaces = printProduct is null ? Array.Empty<string>() : RequiredCoverSurfaces(printProduct, release!.PrintCoverMode);
         var payload = new
         {
-            protocolVersion = 6,
+            protocolVersion = 7,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
             outputPurpose = job.TargetKind == PublicationTargetKind.CoreBook
                 ? "reading-copy"
                 : "publication",
-            ink = release?.Ink is null or PublicationInk.Digital
-                ? PublicationInk.Color.ToString()
-                : release.Ink.ToString(),
+            ink = printProduct?.InteriorProcess.ToString() ?? PrintInteriorProcess.PremiumColor.ToString(),
+            physicalProduct = printProduct is null ? null : new
+            {
+                registryVersion = printProducts.Version,
+                registrySha256 = printProducts.Sha256,
+                productKey = printProduct.Key,
+                vendor = printProduct.Vendor.ToString(),
+                format = printProduct.Format.ToString(),
+                binding = printProduct.Binding.ToString(),
+                interiorProcess = printProduct.InteriorProcess.ToString(),
+                printProduct.PaperName,
+                printProduct.BasisWeightPounds,
+                printProduct.Gsm,
+                coverMaterial = printProduct.CoverMaterial.ToString(),
+                finish = release!.PrintFinish.ToString(),
+                coverMode = release.PrintCoverMode.ToString(),
+                printProduct.MinimumPages,
+                printProduct.MaximumPages,
+                printProduct.MinimumSubmittedPages,
+                printProduct.MaximumSubmittedPages,
+                spineModel = genericPrintTemplate?.InchesPerPage is decimal genericCaliper
+                    ? new PrintSpineModel("Caliper", genericCaliper)
+                    : printProduct.SpineModel,
+                genericTemplate = genericPrintTemplate,
+                requiredCoverSurfaces,
+            },
             document = new
             {
                 title = string.IsNullOrWhiteSpace(document.DisplayTitle) ? document.ProjectName : document.DisplayTitle,
@@ -1169,7 +1249,8 @@ public sealed class PublicationRenderProcessor(
                 marginInches = document.Profile.PageMarginInches,
                 bodyFontSizePoints = document.Profile.BodyFontSizePoints,
                 bodyLineHeight = document.Profile.BodyLineHeight,
-                bleedInches = release?.Bleed == true && release.Format == PublicationEditionFormat.Paperback ? 0.125 : 0,
+                bleedInches = release?.Bleed == true
+                    && release.Format is (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover) ? 0.125 : 0,
                 mirrorMargins = true,
                 rectoChapterStarts = true,
                 minimumWidowLines = 2,
@@ -1178,7 +1259,7 @@ public sealed class PublicationRenderProcessor(
             cover = new
             {
                 bleedInches = release?.Bleed == true ? 0.125 : 0,
-                paperCaliperInchesPerPage = release?.Paper == PublicationPaper.Cream ? 0.0025 : 0.002252,
+                surfaces = requiredCoverSurfaces,
                 backCopy = coverDesign.BackCopy,
                 title = coverDesign.Title,
                 subtitle = coverDesign.Subtitle,
@@ -1191,6 +1272,7 @@ public sealed class PublicationRenderProcessor(
                 imageCropXPercent = coverDesign.ImageCropXPercent,
                 imageCropYPercent = coverDesign.ImageCropYPercent,
                 scene = coverScene,
+                scenes = coverSurfaceScenes,
             },
             assets = assets.Select(asset => new
             {
@@ -1430,10 +1512,26 @@ public sealed class PublicationRenderProcessor(
         }).ToArray(),
     };
 
+    private static string[] ExpectedPhysicalArtifactKinds(
+        PublicationEdition edition,
+        IPrintProductRegistry printProducts)
+    {
+        var product = printProducts.GetRequired(edition.PrintProductKey);
+        var kinds = new List<string> { "interior-pdf" };
+        if (product.RequiresPerfectBoundCover) kinds.Add("perfect-bound-cover-pdf");
+        if (product.RequiresCaseCover) kinds.Add("case-cover-pdf");
+        if (product.RequiresDustJacket) kinds.Add("dust-jacket-pdf");
+        if (product.RequiresClothManifest) kinds.Add("print-setup-manifest");
+        return [.. kinds.OrderBy(kind => kind, StringComparer.Ordinal)];
+    }
+
     private static PublicationArtifactKind ParseKind(string kind) => kind switch
     {
         "interior-pdf" => PublicationArtifactKind.InteriorPdf,
-        "cover-pdf" => PublicationArtifactKind.CoverPdf,
+        "cover-pdf" or "perfect-bound-cover-pdf" => PublicationArtifactKind.PerfectBoundCoverPdf,
+        "case-cover-pdf" => PublicationArtifactKind.CaseCoverPdf,
+        "dust-jacket-pdf" => PublicationArtifactKind.DustJacketPdf,
+        "print-setup-manifest" => PublicationArtifactKind.PrintSetupManifest,
         "book-pdf" => PublicationArtifactKind.BookPdf,
         _ => throw new InvalidOperationException($"Unsupported renderer artifact kind '{kind}'."),
     };

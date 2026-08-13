@@ -82,7 +82,7 @@ impl PdfOptions {
         let height = trim_height + interior_bleed * 2.0;
         Self {
             pdf_x,
-            flatten_transparency: pdf_x || request.profile == "kdp-paperback-v1",
+            flatten_transparency: pdf_x || request.profile.starts_with("kdp-"),
             width,
             height,
             trim: Rect::new(0.0, 0.0, width, height),
@@ -129,15 +129,20 @@ impl PdfOptions {
         }
     }
 
-    pub fn cover(request: &RenderRequest, pdf_x: bool, width: f32, _spine_width: f32) -> Self {
+    pub fn cover(
+        request: &RenderRequest,
+        pdf_x: bool,
+        width: f32,
+        height: f32,
+        _spine_width: f32,
+    ) -> Self {
         let bleed_points = request
             .cover
             .as_ref()
             .map_or(0.0, |cover| cover.bleed_inches * 72.0);
-        let height = request.trim.height_inches * 72.0 + bleed_points * 2.0;
         Self {
             pdf_x,
-            flatten_transparency: pdf_x || request.profile == "kdp-paperback-v1",
+            flatten_transparency: pdf_x || request.profile.starts_with("kdp-"),
             width,
             height,
             trim: Rect::new(

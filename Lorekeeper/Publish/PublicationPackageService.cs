@@ -64,6 +64,8 @@ public sealed class PublicationPackageService(
     IPublicationCoverService covers,
     IProjectMutationCoordinator projectMutations,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
+    IPrintProductRegistry printProducts,
+    IPrintGeometryService printGeometry,
     IPublicationPressRuntime? pressRuntime = null) : IPublicationPackageService
 {
     private const string AssemblerVersion = "lorekeeper-package-v1";
@@ -74,36 +76,6 @@ public sealed class PublicationPackageService(
     };
     private static readonly IReadOnlyList<PublicationPreflightProfile> Profiles =
     [
-        new(
-            PublicationEditionFormat.Paperback,
-            PublicationVendor.AmazonKdp,
-            "amazon-kdp-paperback",
-            "kdp-paperback-v1",
-            new DateTime(2026, 7, 30, 0, 0, 0, DateTimeKind.Utc),
-            24,
-            800,
-            [
-                "https://kdp.amazon.com/en_US/help/topic/G201857950",
-                "https://kdp.amazon.com/en_US/help/topic/G201953020",
-            ]),
-        new(
-            PublicationEditionFormat.Paperback,
-            PublicationVendor.IngramSpark,
-            "ingramspark-paperback",
-            "ingram-paperback-pdfx1a-v1",
-            new DateTime(2026, 7, 30, 0, 0, 0, DateTimeKind.Utc),
-            18,
-            800,
-            ["https://www.ingramspark.com/hubfs/downloads/file-creation-guide.pdf"]),
-        new(
-            PublicationEditionFormat.Paperback,
-            PublicationVendor.Generic,
-            "generic-paperback",
-            "generic-paperback-v1",
-            new DateTime(2026, 7, 30, 0, 0, 0, DateTimeKind.Utc),
-            2,
-            800,
-            ["https://www.pdfa.org/wp-content/uploads/2017/05/PDFX-in-a-Nutshell.pdf"]),
         new(
             PublicationEditionFormat.Epub,
             PublicationVendor.AmazonKdp,
@@ -180,16 +152,23 @@ public sealed class PublicationPackageService(
         var artifacts = await db.PublicationArtifacts.AsNoTracking()
             .Where(artifact => artifact.EditionId == editionId
                 && (artifact.Kind == PublicationArtifactKind.InteriorPdf
-                    || artifact.Kind == PublicationArtifactKind.CoverPdf
+                    || artifact.Kind == PublicationArtifactKind.PerfectBoundCoverPdf
+                    || artifact.Kind == PublicationArtifactKind.CaseCoverPdf
+                    || artifact.Kind == PublicationArtifactKind.DustJacketPdf
+                    || artifact.Kind == PublicationArtifactKind.PrintSetupManifest
                     || artifact.Kind == PublicationArtifactKind.BookPdf))
             .OrderByDescending(artifact => artifact.CreatedAt)
             .ToListAsync(cancellationToken);
         var interior = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.InteriorPdf);
-        var coverArtifact = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.CoverPdf);
+        var coverArtifact = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.PerfectBoundCoverPdf);
+        var caseArtifact = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.CaseCoverPdf);
+        var jacketArtifact = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.DustJacketPdf);
+        var setupManifest = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.PrintSetupManifest);
+        var physicalArtifacts = new[] { coverArtifact, caseArtifact, jacketArtifact, setupManifest }
+            .Where(item => item is not null).Cast<PublicationArtifact>().ToList();
         var bookArtifact = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.BookPdf);
         var items = new List<PublicationPreflightItem>();
-        var profile = Profiles.Single(candidate =>
-            candidate.Format == edition.Format && candidate.Vendor == edition.Vendor);
+        var profile = ResolveProfile(edition);
         if (!string.Equals(edition.VendorProfileVersion, profile.Version, StringComparison.Ordinal))
         {
             items.Add(Error(
@@ -205,7 +184,7 @@ public sealed class PublicationPackageService(
         if (!string.IsNullOrWhiteSpace(edition.Isbn) && !PublicationIsbn.IsValidIsbn13(edition.Isbn))
             items.Add(Error("META_ISBN13_INVALID", "The supplied ISBN must be a valid ISBN-13."));
         PublicationCoverDesignView? coverDesign = null;
-        if (edition.Format == PublicationEditionFormat.Paperback)
+        if (edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
         {
             string? currentRendererVersion = null;
             if (pressRuntime is not null)
@@ -222,10 +201,34 @@ public sealed class PublicationPackageService(
                 }
             }
             ValidatePdf(interior, fingerprint, currentRendererVersion, edition.VendorProfileVersion, PublicationArtifactKind.InteriorPdf, "INTERIOR", items);
-            ValidatePdf(coverArtifact, fingerprint, currentRendererVersion, edition.VendorProfileVersion, PublicationArtifactKind.CoverPdf, "COVER", items);
-            if (coverArtifact is not null && coverArtifact.PageCount != 1)
-                items.Add(Error("COVER_PAGE_COUNT_INVALID", "The full-wrap cover PDF must contain exactly one page.", PublicationArtifactKind.CoverPdf));
-            if (interior?.IsLegacy == true || coverArtifact?.IsLegacy == true)
+            PrintProductDefinition product;
+            try
+            {
+                product = printProducts.GetRequired(edition.PrintProductKey);
+            }
+            catch (InvalidOperationException exception)
+            {
+                items.Add(Error("PRINT_PRODUCT_UNAVAILABLE", exception.Message));
+                product = null!;
+            }
+            if (product is not null)
+            {
+                foreach (var requiredKind in RequiredArtifactKinds(product, edition.PrintCoverMode))
+                {
+                    var artifact = artifacts.FirstOrDefault(item => item.Kind == requiredKind);
+                    if (requiredKind == PublicationArtifactKind.PrintSetupManifest)
+                    {
+                        ValidateStoredArtifact(artifact, fingerprint, currentRendererVersion, edition.VendorProfileVersion, requiredKind, "CLOTH_SETUP", items);
+                        continue;
+                    }
+                    ValidatePdf(artifact, fingerprint, currentRendererVersion, edition.VendorProfileVersion, requiredKind, requiredKind.ToString().ToUpperInvariant(), items);
+                    var expectedPages = requiredKind == PublicationArtifactKind.PerfectBoundCoverPdf
+                        && edition.PrintCoverMode == PrintCoverMode.Duplex ? 2 : 1;
+                    if (artifact is not null && artifact.PageCount != expectedPages)
+                        items.Add(Error("COVER_PAGE_COUNT_INVALID", $"The {requiredKind} must contain exactly {expectedPages} page(s).", requiredKind));
+                }
+            }
+            if (interior?.IsLegacy == true || physicalArtifacts.Any(item => item.IsLegacy))
             {
                 items.Add(Error(
                     "PRESS_RENDERER_LEGACY",
@@ -240,14 +243,14 @@ public sealed class PublicationPackageService(
                         : "warning",
                     "COVER_DESIGN",
                     message,
-                    PublicationArtifactKind.CoverPdf)));
+                    PublicationArtifactKind.PerfectBoundCoverPdf)));
             if (!coverDesign.Template.IsAcknowledged)
             {
                 items.Add(new PublicationPreflightItem(
                     "warning",
                     "COVER_TEMPLATE_REVIEW_RECOMMENDED",
                     "Review the calculated full-wrap cover template before preparing print files.",
-                    PublicationArtifactKind.CoverPdf));
+                    PublicationArtifactKind.PerfectBoundCoverPdf));
             }
             if (edition.Vendor == PublicationVendor.IngramSpark
                 && !PublicationIsbn.IsValidIsbn13(edition.Isbn))
@@ -259,7 +262,7 @@ public sealed class PublicationPackageService(
             {
                 items.Add(Error("META_ISBN13_BARCODE_REQUIRED", "Lorekeeper barcode output requires a valid ISBN-13."));
             }
-            await AddPressEvidenceAsync(edition, interior, coverArtifact, coverDesign.Template, currentRendererVersion, items, cancellationToken);
+            await AddPressEvidenceAsync(edition, interior, physicalArtifacts, coverDesign.Template, currentRendererVersion, items, cancellationToken);
         }
         else if (edition.Format == PublicationEditionFormat.DigitalPdf)
         {
@@ -302,7 +305,7 @@ public sealed class PublicationPackageService(
             "LOREKEEPER_VALIDATED_SCOPE",
             "Lorekeeper validation covers the generated file structure and selected profile; vendor acceptance occurs only after upload to the selected service."));
         var primaryPdf = edition.Format == PublicationEditionFormat.DigitalPdf ? bookArtifact : interior;
-        var packageIdentity = PackageIdentity(profile, fingerprint, primaryPdf, coverArtifact);
+        var packageIdentity = PackageIdentity(profile, fingerprint, primaryPdf, physicalArtifacts);
         var currentPackageEntity = await db.PublicationArtifacts.AsNoTracking()
             .Where(artifact => artifact.EditionId == editionId
                 && artifact.Kind == PublicationArtifactKind.PublicationPackage
@@ -338,8 +341,8 @@ public sealed class PublicationPackageService(
             profile.Sources,
             fingerprint,
             packageIdentity,
-            edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.DigitalPdf
-                ? artifacts.Where(artifact => artifact.Id == primaryPdf?.Id || artifact.Id == coverArtifact?.Id)
+            edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover or PublicationEditionFormat.DigitalPdf
+                ? artifacts.Where(artifact => artifact.Id == primaryPdf?.Id || physicalArtifacts.Any(item => item.Id == artifact.Id))
                     .Select(artifact => new PublicationValidatedArtifact(
                         artifact.Kind,
                         artifact.Sha256,
@@ -355,8 +358,8 @@ public sealed class PublicationPackageService(
             currentPackage,
             items)
         {
-            ValidatedArtifactIds = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.DigitalPdf
-                ? new[] { primaryPdf?.Id ?? Guid.Empty, coverArtifact?.Id ?? Guid.Empty }
+            ValidatedArtifactIds = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover or PublicationEditionFormat.DigitalPdf
+                ? new[] { primaryPdf?.Id ?? Guid.Empty }.Concat(physicalArtifacts.Select(item => item.Id))
                     .Where(id => id != Guid.Empty)
                     .ToList()
                 : [],
@@ -388,20 +391,58 @@ public sealed class PublicationPackageService(
             throw new InvalidOperationException("A preflighted press artifact is missing or failed its hash check.");
         }
         var interiorArtifact = sourceArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.InteriorPdf);
-        var coverArtifact = sourceArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.CoverPdf);
+        var coverArtifact = sourceArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.PerfectBoundCoverPdf);
+        var physicalArtifacts = sourceArtifacts.Where(artifact => artifact.Kind is
+            PublicationArtifactKind.PerfectBoundCoverPdf or PublicationArtifactKind.CaseCoverPdf
+            or PublicationArtifactKind.DustJacketPdf or PublicationArtifactKind.PrintSetupManifest).ToList();
         var bookArtifact = sourceArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.BookPdf);
-        var profile = Profiles.Single(candidate =>
-            candidate.Format == edition.Format && candidate.Vendor == edition.Vendor);
+        var profile = ResolveProfile(edition);
         var primaryPdf = edition.Format == PublicationEditionFormat.DigitalPdf ? bookArtifact : interiorArtifact;
-        var packageIdentity = PackageIdentity(profile, report.SourceFingerprint, primaryPdf, coverArtifact);
+        var packageIdentity = PackageIdentity(profile, report.SourceFingerprint, primaryPdf, physicalArtifacts);
         if (!string.Equals(packageIdentity, report.PackageIdentity, StringComparison.Ordinal))
             throw new InvalidOperationException("The press artifacts changed after preflight. Run preflight again.");
         var files = new Dictionary<string, (PublicationArtifactKind Kind, string MediaType, byte[] Data)>(
             StringComparer.Ordinal);
-        if (edition.Format == PublicationEditionFormat.Paperback)
+        if (edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
         {
             files["interior.pdf"] = (PublicationArtifactKind.InteriorPdf, "application/pdf", interiorArtifact!.Data);
-            files["cover.pdf"] = (PublicationArtifactKind.CoverPdf, "application/pdf", coverArtifact!.Data);
+            foreach (var artifact in physicalArtifacts)
+            {
+                var fileName = artifact.Kind switch
+                {
+                    PublicationArtifactKind.PerfectBoundCoverPdf => edition.PrintCoverMode == PrintCoverMode.Duplex ? "duplex-cover.pdf" : "outside-cover.pdf",
+                    PublicationArtifactKind.CaseCoverPdf => "case-wrap.pdf",
+                    PublicationArtifactKind.DustJacketPdf => "dust-jacket.pdf",
+                    PublicationArtifactKind.PrintSetupManifest => "cloth-setup.json",
+                    _ => throw new InvalidOperationException("Unexpected physical-product artifact."),
+                };
+                files[fileName] = (artifact.Kind, artifact.MediaType, artifact.Data);
+            }
+            var uploadMap = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                product = edition.PrintProductKey,
+                files = files
+                    .Where(item => item.Value.Kind is PublicationArtifactKind.InteriorPdf
+                        or PublicationArtifactKind.PerfectBoundCoverPdf
+                        or PublicationArtifactKind.CaseCoverPdf
+                        or PublicationArtifactKind.DustJacketPdf
+                        or PublicationArtifactKind.PrintSetupManifest)
+                    .OrderBy(item => item.Key, StringComparer.Ordinal)
+                    .Select(item => new
+                    {
+                        file = item.Key,
+                        uploadAs = item.Value.Kind switch
+                        {
+                            PublicationArtifactKind.InteriorPdf => "interior",
+                            PublicationArtifactKind.PerfectBoundCoverPdf => edition.PrintCoverMode == PrintCoverMode.Duplex ? "two-page cover: outside then inside" : "outside cover",
+                            PublicationArtifactKind.CaseCoverPdf => "case wrap",
+                            PublicationArtifactKind.DustJacketPdf => "dust jacket",
+                            PublicationArtifactKind.PrintSetupManifest => "Digital Cloth setup reference",
+                            _ => string.Empty,
+                        },
+                    }),
+            }, JsonOptions);
+            files["upload-map.json"] = (PublicationArtifactKind.Manifest, "application/json", uploadMap);
         }
         if (edition.Format == PublicationEditionFormat.DigitalPdf)
             files["book.pdf"] = (PublicationArtifactKind.BookPdf, "application/pdf", bookArtifact!.Data);
@@ -439,6 +480,16 @@ public sealed class PublicationPackageService(
             editionId,
             sourceFingerprint = report.SourceFingerprint,
             profile = new { report.ProfileId, report.ProfileVersion, report.ProfileReviewedAtUtc },
+            physicalProduct = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
+                ? new
+                {
+                    registryVersion = edition.PrintRegistryVersion,
+                    registrySha256 = printProducts.Sha256,
+                    edition.PrintProductKey,
+                    edition.PrintFinish,
+                    edition.PrintCoverMode,
+                }
+                : null,
             runtime = new
             {
                 assembler = AssemblerVersion,
@@ -461,7 +512,10 @@ public sealed class PublicationPackageService(
                 && !artifact.IsLegacy
                 && artifact.SourceFingerprint == report.SourceFingerprint
                 && (artifact.Kind == PublicationArtifactKind.InteriorPdf
-                    || artifact.Kind == PublicationArtifactKind.CoverPdf
+                    || artifact.Kind == PublicationArtifactKind.PerfectBoundCoverPdf
+                    || artifact.Kind == PublicationArtifactKind.CaseCoverPdf
+                    || artifact.Kind == PublicationArtifactKind.DustJacketPdf
+                    || artifact.Kind == PublicationArtifactKind.PrintSetupManifest
                     || artifact.Kind == PublicationArtifactKind.BookPdf))
             .OrderByDescending(artifact => artifact.CreatedAt)
             .ToListAsync(cancellationToken);
@@ -472,12 +526,17 @@ public sealed class PublicationPackageService(
                 (edition.Format == PublicationEditionFormat.DigitalPdf
                     ? PublicationArtifactKind.BookPdf
                     : PublicationArtifactKind.InteriorPdf)),
-            latestArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.CoverPdf));
+            latestArtifacts.Where(artifact => artifact.Kind is PublicationArtifactKind.PerfectBoundCoverPdf
+                or PublicationArtifactKind.CaseCoverPdf or PublicationArtifactKind.DustJacketPdf
+                or PublicationArtifactKind.PrintSetupManifest).ToList());
         if (!string.Equals(finalPackageIdentity, packageIdentity, StringComparison.Ordinal))
             throw new InvalidOperationException("The press artifacts changed while the publication package was being built.");
         var generated = new List<PublicationArtifact>();
         foreach (var file in files.Where(file => file.Value.Kind is not PublicationArtifactKind.InteriorPdf
-            and not PublicationArtifactKind.CoverPdf
+            and not PublicationArtifactKind.PerfectBoundCoverPdf
+            and not PublicationArtifactKind.CaseCoverPdf
+            and not PublicationArtifactKind.DustJacketPdf
+            and not PublicationArtifactKind.PrintSetupManifest
             and not PublicationArtifactKind.BookPdf))
             generated.Add(Artifact(
                 editionId,
@@ -549,6 +608,46 @@ public sealed class PublicationPackageService(
             || artifact.PageCount is not > 0
             || !ArtifactBytesMatch(artifact))
             items.Add(Error($"{prefix}_PDF_INVALID", $"The {prefix.ToLowerInvariant()} PDF is invalid.", kind));
+    }
+
+    private static void ValidateStoredArtifact(
+        PublicationArtifact? artifact,
+        string fingerprint,
+        string? currentRendererVersion,
+        string currentProfile,
+        PublicationArtifactKind kind,
+        string prefix,
+        List<PublicationPreflightItem> items)
+    {
+        if (artifact is null)
+        {
+            items.Add(Error($"{prefix}_REQUIRED", $"Generate the required {prefix.ToLowerInvariant()} file.", kind));
+            return;
+        }
+        if (!string.Equals(artifact.SourceFingerprint, fingerprint, StringComparison.Ordinal))
+            items.Add(Error($"{prefix}_STALE", $"The {prefix.ToLowerInvariant()} file is stale.", kind));
+        if (artifact.IsLegacy || !ArtifactBytesMatch(artifact))
+            items.Add(Error($"{prefix}_INVALID", $"The {prefix.ToLowerInvariant()} file is invalid or legacy.", kind));
+        if (currentRendererVersion is not null
+            && (!string.Equals(artifact.RendererVersion, currentRendererVersion, StringComparison.Ordinal)
+                || !string.Equals(artifact.ProfileId, currentProfile, StringComparison.Ordinal)))
+            items.Add(Error("PRESS_RENDERER_STALE", $"The {prefix.ToLowerInvariant()} file belongs to a different renderer or profile.", kind));
+    }
+
+    private static IReadOnlyList<PublicationArtifactKind> RequiredArtifactKinds(
+        PrintProductDefinition product,
+        PrintCoverMode coverMode)
+    {
+        var result = new List<PublicationArtifactKind>();
+        if (product.RequiresPerfectBoundCover)
+            result.Add(PublicationArtifactKind.PerfectBoundCoverPdf);
+        if (product.RequiresCaseCover)
+            result.Add(PublicationArtifactKind.CaseCoverPdf);
+        if (product.RequiresDustJacket)
+            result.Add(PublicationArtifactKind.DustJacketPdf);
+        if (product.RequiresClothManifest)
+            result.Add(PublicationArtifactKind.PrintSetupManifest);
+        return result;
     }
 
     private static bool ArtifactBytesMatch(PublicationArtifact artifact) =>
@@ -894,7 +993,7 @@ public sealed class PublicationPackageService(
         return string.IsNullOrEmpty(mediaType) ? null : new(mediaType, output.ToArray());
     }
 
-    private static void ValidateProfile(
+    private void ValidateProfile(
         PublicationEdition edition,
         PublicationPreflightProfile profile,
         PublicationArtifact? interior,
@@ -910,14 +1009,6 @@ public sealed class PublicationPackageService(
 
         if (edition.Format is PublicationEditionFormat.Epub or PublicationEditionFormat.DigitalPdf)
         {
-            if (edition.Binding != PublicationBinding.Digital
-                || edition.Paper != PublicationPaper.Digital
-                || edition.Ink != PublicationInk.Digital)
-            {
-                items.Add(Error(
-                    "DIGITAL_PRODUCT_SETTINGS",
-                    $"{(edition.Format == PublicationEditionFormat.Epub ? "EPUB" : "Digital PDF")} editions require digital binding, paper, and ink settings."));
-            }
             if (edition.Format == PublicationEditionFormat.Epub && document.Cover is null && document.CoverAsset is null)
                 items.Add(Error("EPUB_COVER_REQUIRED", "Create a composed front cover for the EPUB edition."));
             else if (edition.Format == PublicationEditionFormat.Epub
@@ -967,12 +1058,24 @@ public sealed class PublicationPackageService(
             return;
         }
 
-        if (edition.Binding != PublicationBinding.PerfectBound)
-            items.Add(Error("PRINT_BINDING_UNSUPPORTED", "The current paperback profiles support perfect binding only."));
-        if (edition.Paper is not PublicationPaper.White and not PublicationPaper.Cream)
-            items.Add(Error("PRINT_PAPER_UNSUPPORTED", "The current paperback profiles support white or cream paper."));
-        if (edition.Ink is not PublicationInk.BlackAndWhite and not PublicationInk.Color)
-            items.Add(Error("PRINT_INK_UNSUPPORTED", "Paperback interiors require either grayscale or color output."));
+        PrintProductDefinition product;
+        try
+        {
+            product = printProducts.GetRequired(edition.PrintProductKey);
+            if (product.Format != edition.Format || product.Vendor != edition.Vendor)
+                items.Add(Error("PRINT_PRODUCT_UNAVAILABLE", "The selected physical product is not available for this format and destination."));
+            if (!product.Finishes.Contains(edition.PrintFinish) || !product.CoverModes.Contains(edition.PrintCoverMode))
+                items.Add(Error("PRINT_PRODUCT_OPTION_UNAVAILABLE", "The selected finish or cover-printing mode is not available for this product."));
+            if (!product.AllowsCustomTrim && !product.TrimSizes.Contains($"{edition.PageWidthInches:0.##}x{edition.PageHeightInches:0.##}", StringComparer.Ordinal))
+                items.Add(Error("PRINT_TRIM_UNSUPPORTED", "The selected trim is not available for this exact print product."));
+            if (interior?.PageCount is int productPages)
+                _ = printGeometry.Calculate(edition, productPages);
+        }
+        catch (InvalidOperationException exception)
+        {
+            items.Add(Error("PRINT_PRODUCT_UNAVAILABLE", exception.Message));
+            return;
+        }
         if (edition.PageWidthInches is < 3.5 or > 12
             || edition.PageHeightInches is < 5 or > 15)
         {
@@ -1022,12 +1125,12 @@ public sealed class PublicationPackageService(
         PublicationPreflightProfile profile,
         string sourceFingerprint,
         PublicationArtifact? interior,
-        PublicationArtifact? cover)
+        IReadOnlyList<PublicationArtifact> physicalArtifacts)
     {
         if (profile.Format == PublicationEditionFormat.Epub)
         {
             interior = null;
-            cover = null;
+            physicalArtifacts = [];
         }
         var source = string.Join(
             "|",
@@ -1039,9 +1142,8 @@ public sealed class PublicationPackageService(
             interior?.Sha256 ?? string.Empty,
             interior?.RendererVersion ?? string.Empty,
             interior?.ProfileId ?? string.Empty,
-            cover?.Sha256 ?? string.Empty,
-            cover?.RendererVersion ?? string.Empty,
-            cover?.ProfileId ?? string.Empty);
+            string.Join(";", physicalArtifacts.OrderBy(item => item.Kind).Select(item =>
+                $"{item.Kind}:{item.Sha256}:{item.RendererVersion}:{item.ProfileId}")));
         return $"package:{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}";
     }
 
@@ -1199,14 +1301,15 @@ public sealed class PublicationPackageService(
     private async Task AddPressEvidenceAsync(
         PublicationEdition edition,
         PublicationArtifact? interior,
-        PublicationArtifact? cover,
+        IReadOnlyList<PublicationArtifact> physicalArtifacts,
         PublicationCoverTemplate template,
         string? currentRendererVersion,
         List<PublicationPreflightItem> items,
         CancellationToken cancellationToken)
     {
         if (interior?.RenderJobId is not Guid renderJobId
-            || cover?.RenderJobId != renderJobId)
+            || physicalArtifacts.Count == 0
+            || physicalArtifacts.Any(item => item.RenderJobId != renderJobId))
         {
             items.Add(Error("PRESS_EVIDENCE_REQUIRED", "The current PDFs must come from the same completed press render."));
             return;
@@ -1240,7 +1343,9 @@ public sealed class PublicationPackageService(
                 diagnostic.Message,
                 diagnostic.ArtifactKind switch
                 {
-                    "cover-pdf" => PublicationArtifactKind.CoverPdf,
+                    "cover-pdf" or "perfect-bound-cover-pdf" => PublicationArtifactKind.PerfectBoundCoverPdf,
+                    "case-cover-pdf" => PublicationArtifactKind.CaseCoverPdf,
+                    "dust-jacket-pdf" => PublicationArtifactKind.DustJacketPdf,
                     "interior-pdf" => PublicationArtifactKind.InteriorPdf,
                     _ => null,
                 })));
@@ -1254,8 +1359,7 @@ public sealed class PublicationPackageService(
             RequireZero(root, "annotationCount", "PDF_ANNOTATIONS", "Publication PDFs contain annotations.", items);
             RequireDimension(root, "interiorWidthPoints", edition.PageWidthInches * 72, "INTERIOR_WIDTH", items);
             RequireDimension(root, "interiorHeightPoints", edition.PageHeightInches * 72, "INTERIOR_HEIGHT", items);
-            RequireDimension(root, "coverWidthPoints", template.FullWidthInches * 72, "COVER_WIDTH", items);
-            RequireDimension(root, "coverHeightPoints", template.FullHeightInches * 72, "COVER_HEIGHT", items);
+            ValidateCoverSurfaceEvidence(edition, interior.PageCount ?? 0, physicalArtifacts, root, items);
             var expectedPdfVersion = edition.Vendor == PublicationVendor.IngramSpark ? "1.3" : "1.7";
             if (!root.TryGetProperty("pdfVersion", out var pdfVersion)
                 || pdfVersion.GetString() != expectedPdfVersion)
@@ -1275,9 +1379,9 @@ public sealed class PublicationPackageService(
                 RequireFalse(root, "hasTransparency", "PDF_TRANSPARENCY", "The Ingram PDF contains transparency.", items);
                 if (!root.TryGetProperty("outputIntentCount", out var outputIntentCount)
                     || outputIntentCount.ValueKind != JsonValueKind.Number
-                    || outputIntentCount.GetInt32() != 2)
+                    || outputIntentCount.GetInt32() != 1 + physicalArtifacts.Count(item => item.MediaType == "application/pdf"))
                 {
-                    items.Add(Error("PDF_OUTPUT_INTENT_REQUIRED", "Both Ingram PDFs require an output intent."));
+                    items.Add(Error("PDF_OUTPUT_INTENT_REQUIRED", "Every Ingram PDF requires its own output intent."));
                 }
                 if (!root.TryGetProperty("declaredStandard", out var declaredStandard)
                     || declaredStandard.GetString() != "PDF/X-1a:2001")
@@ -1290,7 +1394,8 @@ public sealed class PublicationPackageService(
             {
                 RequireFalse(root, "hasTransparency", "PDF_TRANSPARENCY", "The KDP PDFs contain transparency.", items);
             }
-            if (currentRendererVersion is not null && edition.Ink == PublicationInk.BlackAndWhite)
+            if (currentRendererVersion is not null
+                && printProducts.GetRequired(edition.PrintProductKey).InteriorProcess == PrintInteriorProcess.BlackAndWhite)
             {
                 if (!root.TryGetProperty("interiorImageCount", out var interiorImageCount)
                     || interiorImageCount.ValueKind != JsonValueKind.Number
@@ -1319,6 +1424,45 @@ public sealed class PublicationPackageService(
         catch (JsonException)
         {
             items.Add(Error("PRESS_EVIDENCE_INVALID", "Stored press evidence could not be read."));
+        }
+    }
+
+    private void ValidateCoverSurfaceEvidence(
+        PublicationEdition edition,
+        int interiorPageCount,
+        IReadOnlyList<PublicationArtifact> physicalArtifacts,
+        JsonElement evidence,
+        List<PublicationPreflightItem> items)
+    {
+        if (!evidence.TryGetProperty("coverSurfaces", out var surfaces) || surfaces.ValueKind != JsonValueKind.Array)
+        {
+            items.Add(Error("COVER_SURFACE_EVIDENCE", "The render does not contain product-specific cover-surface evidence."));
+            return;
+        }
+        foreach (var artifact in physicalArtifacts.Where(item => item.MediaType == "application/pdf"))
+        {
+            var role = artifact.Kind switch
+            {
+                PublicationArtifactKind.PerfectBoundCoverPdf => "perfect-bound-outside",
+                PublicationArtifactKind.CaseCoverPdf => "case-wrap",
+                PublicationArtifactKind.DustJacketPdf => "dust-jacket",
+                _ => null,
+            };
+            if (role is null) continue;
+            var surface = surfaces.EnumerateArray().FirstOrDefault(item =>
+                item.TryGetProperty("role", out var value) && value.GetString() == role);
+            if (surface.ValueKind == JsonValueKind.Undefined)
+            {
+                items.Add(Error("COVER_SURFACE_EVIDENCE", $"The render is missing geometry evidence for {role}.", artifact.Kind));
+                continue;
+            }
+            var geometry = printGeometry.Calculate(edition, interiorPageCount, role);
+            RequireDimension(surface, "widthPoints", (double)geometry.SurfaceWidthInches * 72, "COVER_WIDTH", items);
+            RequireDimension(surface, "heightPoints", (double)geometry.SurfaceHeightInches * 72, "COVER_HEIGHT", items);
+            if (!surface.TryGetProperty("pageCount", out var pageCount)
+                || pageCount.GetInt32() != (edition.PrintCoverMode == PrintCoverMode.Duplex
+                    && artifact.Kind == PublicationArtifactKind.PerfectBoundCoverPdf ? 2 : 1))
+                items.Add(Error("COVER_PAGE_COUNT", $"The {role} PDF has the wrong page count.", artifact.Kind));
         }
     }
 
@@ -1509,6 +1653,22 @@ public sealed class PublicationPackageService(
         string code,
         string message,
         PublicationArtifactKind? kind = null) => new("error", code, message, kind);
+
+    private PublicationPreflightProfile ResolveProfile(PublicationEdition edition)
+    {
+        if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover))
+            return Profiles.Single(candidate => candidate.Format == edition.Format && candidate.Vendor == edition.Vendor);
+        var product = printProducts.GetRequired(edition.PrintProductKey);
+        return new(
+            edition.Format,
+            edition.Vendor,
+            product.Key,
+            product.PdfProfile,
+            new DateTime(2026, 8, 12, 0, 0, 0, DateTimeKind.Utc),
+            product.MinimumSubmittedPages ?? product.MinimumPages,
+            product.MaximumSubmittedPages ?? product.MaximumPages,
+            ["Bundled Lorekeeper print-product registry " + printProducts.Version]);
+    }
 
     private static string ExtensionFor(string contentType) => contentType switch
     {

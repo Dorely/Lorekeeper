@@ -448,9 +448,9 @@ public sealed class ProjectImportExportService(
             profile.PageHeightInches,
             profile.PageMarginInches,
             profile.SelectedCoverImageId,
-            profile.Binding,
-            profile.Paper,
-            profile.Ink,
+            profile.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? LegacyPublicationBinding.PerfectBound : LegacyPublicationBinding.Digital,
+            profile.PrintProductKey.Contains("cream", StringComparison.Ordinal) ? LegacyPublicationPaper.Cream : profile.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? LegacyPublicationPaper.White : LegacyPublicationPaper.Digital,
+            profile.PrintProductKey.Contains("color", StringComparison.Ordinal) ? LegacyPublicationInk.Color : profile.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? LegacyPublicationInk.BlackAndWhite : LegacyPublicationInk.Digital,
             profile.Bleed,
             profile.AllowDesignedPageOverrides,
             profile.OutlineItems
@@ -473,8 +473,16 @@ public sealed class ProjectImportExportService(
                 profile.CoverDesign.ImageCropXPercent,
                 profile.CoverDesign.ImageCropYPercent,
                 profile.CoverDesign.CompositionSceneJson,
-                profile.CoverDesign.Revision))
+                profile.CoverDesign.Revision)
+            {
+                SurfaceScenesJson = profile.CoverDesign.SurfaceScenesJson,
+            })
         {
+            PrintRegistryVersion = profile.PrintRegistryVersion,
+            PrintProductKey = profile.PrintProductKey,
+            PrintFinish = profile.PrintFinish,
+            PrintCoverMode = profile.PrintCoverMode,
+            GenericPrintTemplateJson = profile.GenericPrintTemplateJson,
             OverrideFields = ParseOverrideFields(profile.OverrideFieldsJson),
             InheritsCoreCover = profile.InheritsCoreCover,
             EditionSpecificContentEnabled = profile.EditionSpecificContentEnabled,

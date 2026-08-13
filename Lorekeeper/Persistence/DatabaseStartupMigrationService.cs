@@ -21,6 +21,7 @@ public sealed class DatabaseStartupMigrationService(
     IPublicationCoreMigrationService publicationCoreMigration,
     IEditionContentMigrationService editionContentMigration,
     IPublicationSectionMigrationService publicationSectionMigration,
+    IPrintProductMigrationService printProductMigration,
     IDatabaseMigrationRecoveryService recovery) : IDatabaseStartupMigrationService
 {
     public async Task<bool> ApplyAsync(CancellationToken cancellationToken = default)
@@ -28,6 +29,7 @@ public sealed class DatabaseStartupMigrationService(
         await manuscriptMigration.ApplyPendingAsync(db, cancellationToken);
         await editionMigration.ApplyPendingAsync(db, cancellationToken);
         await pressMigration.ApplyPendingAsync(db, cancellationToken);
+        await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
 
         var appliedMigrations = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
             .ToHashSet(StringComparer.Ordinal);
@@ -59,13 +61,30 @@ public sealed class DatabaseStartupMigrationService(
                 cancellationToken);
 
         await EnsurePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await authoringPageMigration.ApplyPendingAsync(db, cancellationToken);
         await publicationCoreMigration.ApplyPendingAsync(db, cancellationToken);
 
         await RemoveEditionCompatibilityColumnsAsync(db, cancellationToken);
+        await RemovePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await editionContentMigration.ApplyPendingAsync(db, cancellationToken);
+        await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await RemovePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await publicationSectionMigration.ApplyPendingAsync(db, cancellationToken);
+
+        var migrationsBeforePrintProducts = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
+            .ToHashSet(StringComparer.Ordinal);
+        if (!migrationsBeforePrintProducts.Contains(PrintProductMigrationService.CleanupMigrationId))
+        {
+            if (!migrationsBeforePrintProducts.Contains(PrintProductMigrationService.AdditiveMigrationId))
+            {
+                await RemovePrintProductCompatibilityColumnsAsync(db, cancellationToken);
+                await db.GetService<IMigrator>().MigrateAsync(
+                    PrintProductMigrationService.AdditiveMigrationId,
+                    cancellationToken);
+            }
+            await printProductMigration.ApplyPendingAsync(db, cancellationToken);
+        }
 
         if (await recovery.IsRecoveryRequiredAsync(cancellationToken))
             return false;
@@ -75,6 +94,10 @@ public sealed class DatabaseStartupMigrationService(
         if (!migrationsBeforeCleanup.Contains(PublicationCoreMigrationService.CleanupMigrationId))
             await db.GetService<IMigrator>().MigrateAsync(
                 PublicationCoreMigrationService.CleanupMigrationId,
+                cancellationToken);
+        if (!migrationsBeforeCleanup.Contains(PrintProductMigrationService.CleanupMigrationId))
+            await db.GetService<IMigrator>().MigrateAsync(
+                PrintProductMigrationService.CleanupMigrationId,
                 cancellationToken);
         await db.GetService<IMigrator>().MigrateAsync(cancellationToken: cancellationToken);
         return true;
@@ -174,7 +197,7 @@ public sealed class DatabaseStartupMigrationService(
         db.ChangeTracker.Clear();
     }
 
-    private static async Task RemovePublicationSectionCompatibilityColumnsAsync(
+    internal static async Task RemovePublicationSectionCompatibilityColumnsAsync(
         AppDbContext db,
         CancellationToken cancellationToken)
     {
@@ -212,5 +235,68 @@ public sealed class DatabaseStartupMigrationService(
                 return true;
         }
         return false;
+    }
+
+    internal static async Task EnsurePrintProductCompatibilityColumnsAsync(AppDbContext db, CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(PrintProductMigrationService.AdditiveMigrationId)) return;
+        (string Name, string Definition)[] columns =
+        [
+            ("GenericPrintTemplateJson", "TEXT NOT NULL DEFAULT ''"),
+            ("PrintRegistryVersion", "TEXT NOT NULL DEFAULT ''"),
+            ("PrintProductKey", "TEXT NOT NULL DEFAULT ''"),
+            ("PrintFinish", "TEXT NOT NULL DEFAULT 'Matte'"),
+            ("PrintCoverMode", "TEXT NOT NULL DEFAULT 'Simplex'"),
+        ];
+        foreach (var (name, definition) in columns)
+        {
+            if (await HasColumnAsync(db, "PublicationEditions", name, cancellationToken)) continue;
+#pragma warning disable EF1002
+            await db.Database.ExecuteSqlRawAsync($"ALTER TABLE \"PublicationEditions\" ADD COLUMN \"{name}\" {definition};", cancellationToken);
+#pragma warning restore EF1002
+        }
+        if (!await HasColumnAsync(db, "PublicationCoverDesigns", "SurfaceScenesJson", cancellationToken))
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"PublicationCoverDesigns\" ADD COLUMN \"SurfaceScenesJson\" TEXT NOT NULL DEFAULT '{{}}';",
+                cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE PublicationEditions
+            SET PrintRegistryVersion = CASE WHEN Format IN ('Paperback','Hardcover') THEN '2026.08.1' ELSE '' END,
+                PrintProductKey = CASE
+                    WHEN Format = 'Paperback' AND Vendor = 'AmazonKdp' AND Ink = 'Color' THEN 'kdp-pb-premium-color'
+                    WHEN Format = 'Paperback' AND Vendor = 'AmazonKdp' AND Paper = 'Cream' THEN 'kdp-pb-bw-cream'
+                    WHEN Format = 'Paperback' AND Vendor = 'AmazonKdp' THEN 'kdp-pb-bw-white'
+                    WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' AND Ink = 'Color' THEN 'ingram-pb-premium70'
+                    WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' AND Paper = 'Cream' THEN 'ingram-pb-bw-cream50'
+                    WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' THEN 'ingram-pb-bw-white50'
+                    WHEN Format = 'Paperback' THEN 'generic-perfectbound-template'
+                    WHEN Format = 'Hardcover' AND Vendor = 'AmazonKdp' THEN 'kdp-hc-bw-white'
+                    WHEN Format = 'Hardcover' AND Vendor = 'IngramSpark' THEN 'ingram-hc-case-bw-white50'
+                    WHEN Format = 'Hardcover' THEN 'generic-casebound-template'
+                    ELSE '' END
+            WHERE PrintProductKey = '';
+            """,
+            cancellationToken);
+        db.ChangeTracker.Clear();
+    }
+
+    internal static async Task RemovePrintProductCompatibilityColumnsAsync(AppDbContext db, CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(PrintProductMigrationService.AdditiveMigrationId)) return;
+        foreach (var name in new[] { "GenericPrintTemplateJson", "PrintRegistryVersion", "PrintProductKey", "PrintFinish", "PrintCoverMode" })
+        {
+            if (!await HasColumnAsync(db, "PublicationEditions", name, cancellationToken)) continue;
+#pragma warning disable EF1002
+            await db.Database.ExecuteSqlRawAsync($"ALTER TABLE \"PublicationEditions\" DROP COLUMN \"{name}\";", cancellationToken);
+#pragma warning restore EF1002
+        }
+        if (await HasColumnAsync(db, "PublicationCoverDesigns", "SurfaceScenesJson", cancellationToken))
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"PublicationCoverDesigns\" DROP COLUMN \"SurfaceScenesJson\";",
+                cancellationToken);
+        db.ChangeTracker.Clear();
     }
 }

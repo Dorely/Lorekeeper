@@ -1,4 +1,5 @@
 using Lorekeeper.Models;
+using Lorekeeper.Publish;
 
 namespace Lorekeeper.Composition;
 
@@ -71,7 +72,7 @@ public static class CoverCompositionFactory
         CompositionScene sourceScene,
         PublicationEdition coreEdition)
     {
-        if (sourceEdition.Format != PublicationEditionFormat.Paperback)
+        if (sourceEdition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover))
             return Reflow(coreEdition, new PublicationCoverDesign { EditionId = Guid.Empty }, sourceScene, 0, 0);
         var sourceGeometry = new CoverGeometry(
             sourceScene.Surface.WidthPoints,
@@ -137,7 +138,7 @@ public static class CoverCompositionFactory
                 Locked = lockCoreLayers || item.Locked,
             }).ToList();
 
-        if (edition.Format != PublicationEditionFormat.Paperback)
+        if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover))
         {
             return KeepArtworkBehindCopy(coreScene with
             {
@@ -171,7 +172,7 @@ public static class CoverCompositionFactory
 
     public static CompositionScene Create(PublicationEdition edition, PublicationCoverDesign cover, int pageCount = 0)
     {
-        var print = edition.Format == PublicationEditionFormat.Paperback;
+        var print = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover;
         var geometry = Geometry(edition, pageCount);
         var layerId = Guid.NewGuid();
         var objects = new List<CompositionObject>();
@@ -233,7 +234,8 @@ public static class CoverCompositionFactory
         PublicationCoverDesign cover,
         CompositionScene scene,
         int oldPageCount,
-        int newPageCount)
+        int newPageCount,
+        string? surfaceRole = null)
     {
         var oldGeometry = scene.Surface.TrimWidthPoints > 0 && scene.Surface.TrimHeightPoints > 0
             ? new CoverGeometry(
@@ -243,8 +245,8 @@ public static class CoverCompositionFactory
                 scene.Surface.TrimHeightPoints,
                 scene.Surface.BleedPoints,
                 scene.Surface.SpineWidthPoints)
-            : Geometry(edition, oldPageCount);
-        var newGeometry = Geometry(edition, newPageCount);
+            : Geometry(edition, oldPageCount, surfaceRole);
+        var newGeometry = Geometry(edition, newPageCount, surfaceRole);
         var objects = scene.Objects.Select(item =>
         {
             // Group children use percentages local to their parent. Reflow the
@@ -274,7 +276,7 @@ public static class CoverCompositionFactory
         {
             Surface = scene.Surface with
             {
-                Kind = edition.Format == PublicationEditionFormat.Paperback
+                Kind = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
                     ? CompositionSurfaceKind.FacingSpread
                     : CompositionSurfaceKind.SinglePage,
                 WidthPoints = newGeometry.WidthPoints,
@@ -288,21 +290,24 @@ public static class CoverCompositionFactory
         });
     }
 
-    public static CoverGeometry Geometry(PublicationEdition edition, int pageCount)
+    public static CoverGeometry Geometry(PublicationEdition edition, int pageCount, string? surfaceRole = null)
     {
-        var print = edition.Format == PublicationEditionFormat.Paperback;
-        var bleed = print && edition.Bleed ? 9d : 0d;
         var trimWidth = edition.PageWidthInches * 72;
         var trimHeight = edition.PageHeightInches * 72;
-        var caliper = edition.Paper == PublicationPaper.Cream ? .0025 : .002252;
-        var spine = print ? pageCount * caliper * 72 : 0;
+        var print = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover;
+        if (!print)
+            return new CoverGeometry(trimWidth, trimHeight, trimWidth, trimHeight, 0, 0);
+        var registry = new PrintProductRegistry();
+        var product = registry.GetRequired(edition.PrintProductKey);
+        var effectivePages = Math.Max(pageCount, product.MinimumPages);
+        var physical = new PrintGeometryService(registry).Calculate(edition, effectivePages, surfaceRole);
         return new CoverGeometry(
-            print ? trimWidth * 2 + spine + bleed * 2 : trimWidth,
-            print ? trimHeight + bleed * 2 : trimHeight,
+            (double)physical.SurfaceWidthInches * 72,
+            (double)physical.SurfaceHeightInches * 72,
             trimWidth,
             trimHeight,
-            bleed,
-            spine);
+            (double)physical.BleedInches * 72,
+            (double)physical.SpineWidthInches * 72);
     }
 
     private static CoverRegion Region(CompositionRegionConstraint region, CoverGeometry geometry) => region switch

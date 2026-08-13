@@ -90,6 +90,8 @@ public sealed class PublishAssistantTools(
     IProjectFontService projectFonts,
     IProjectPageSetupService pageSetups,
     IProjectImageService projectImages,
+    IPrintProductRegistry printProducts,
+    IPrintGeometryService printGeometry,
     IEditionContentService? editionContent = null,
     ICompositionCanvasPreviewService? canvasPreviews = null,
     ICompositionService? compositions = null,
@@ -135,11 +137,19 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: () => ReadEditionsAsync(context),
                 name: "list_publication_releases",
-                description: "List the optional Paperback, EPUB ebook, and PDF ebook releases with stable IDs, product type, destination, status, and revision."),
+                description: "List the optional Paperback, Hardcover, EPUB ebook, and PDF ebook releases with stable IDs, product type, destination, status, and revision."),
+            AIFunctionFactory.Create(
+                method: (PublicationEditionFormat format, PublicationVendor destination) => ListPrintProducts(format, destination),
+                name: "list_compatible_print_products",
+                description: "List exact offline-registry print products for a Paperback or Hardcover destination. Results include stable product keys, paper weight, process, construction, finishes, cover modes, trims, and page limits."),
+            AIFunctionFactory.Create(
+                method: (Guid releaseId, int pageCount, string? surfaceRole = null) => ReadPrintGeometryAsync(context, releaseId, pageCount, surfaceRole),
+                name: "read_print_product_geometry",
+                description: "Calculate submitted, normalized, and reported page counts, exact spine width, and the requested outside, inside, case, or jacket surface geometry for the selected release product. Use the actual interior page count when available."),
             AIFunctionFactory.Create(
                 method: (string name, PublicationEditionFormat format, PublicationVendor destination) => CreateReleaseAsync(context, name, format, destination),
                 name: "create_publication_release",
-                description: "Create an optional release from safe application-managed presets. Use Generic destination for EPUB and PDF ebook; Paperback destinations are AmazonKdp, IngramSpark, or Generic."),
+                description: "Create an optional release from safe application-managed presets. Use Generic destination for EPUB and PDF ebook; Paperback and Hardcover destinations are AmazonKdp, IngramSpark, or Generic."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, int contentStart = 0, int contentCount = 30) => ReadWorkspaceAsync(context, releaseId, contentStart, contentCount),
                 name: "read_publication_release",
@@ -351,13 +361,13 @@ public sealed class PublishAssistantTools(
                 name: "patch_publication_release_content",
                 description: "Include or exclude chapters only where this release differs from Core Book. Act headings and summaries are sparse release setting overrides, not content rows."),
             AIFunctionFactory.Create(
-                method: (Guid? releaseId = null, int objectStart = 0, int objectCount = 30, int structureStart = 0, int structureCount = 30) => ReadCoverAsync(context, releaseId, objectStart, objectCount, structureStart, structureCount),
+                method: (Guid? releaseId = null, string? surfaceRole = null, int objectStart = 0, int objectCount = 30, int structureStart = 0, int structureCount = 30) => ReadCoverAsync(context, releaseId, surfaceRole, objectStart, objectCount, structureStart, structureCount),
                 name: "read_publication_cover_design",
-                description: "Read the Core front cover when releaseId is omitted, or one release cover when supplied. Returns compact copy, inheritance state, geometry, diagnostics, layers, and one bounded page of scene objects."),
+                description: "Read the Core front cover when releaseId is omitted, or a release's exact outside, inside, case, jacket, or cloth surface when releaseId and surfaceRole are supplied. Returns compact copy, product geometry, diagnostics, layers, and one bounded page of scene objects."),
             AIFunctionFactory.Create(
-                method: (Guid? releaseId = null, string mode = "annotated") => PreviewCoverCanvasAsync(context, releaseId, mode),
+                method: (Guid? releaseId = null, string? surfaceRole = null, string mode = "annotated") => PreviewCoverCanvasAsync(context, releaseId, surfaceRole, mode),
                 name: "preview_publication_cover_canvas",
-                description: "Render the complete Core or release cover authoring canvas as a visible chat image and model-visible canvas when vision is available. Omit releaseId for Core. Use annotated immediately after every cover mutation and clean after final validation. The preview never creates a project-image asset."),
+                description: "Render the complete Core or exact release cover surface as a visible chat image and model-visible canvas when vision is available. Supply surfaceRole for outside, inside, case, or jacket work. Use annotated immediately after every mutation and clean after final validation. The preview never creates a project-image asset."),
             AIFunctionFactory.Create(
                 method: (Guid? releaseId = null) => ValidateCoverAsync(context, releaseId),
                 name: "validate_publication_cover_composition",
@@ -400,6 +410,18 @@ public sealed class PublishAssistantTools(
                 name: "patch_publication_cover_element",
                 description: "Revision-check patch one stable cover object, guide, layer, or style using only changed fields. Preserve unrelated cover state; cover artwork remains below canonical copy. Use full-scene staging for structural changes."),
             AIFunctionFactory.Create(
+                method: (Guid releaseId, string surfaceRole, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchCoverSurfaceElementAsync(context, releaseId, surfaceRole, expectedRevision, targetKind, targetId, patch),
+                name: "patch_publication_cover_surface_element",
+                description: "Revision-check and patch one object, layer, or style on an exact outside, inside, case, or jacket surface. Read and visually preview that surface first; preserve every other surface."),
+            AIFunctionFactory.Create(
+                method: (Guid releaseId, string surfaceRole, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlaceCoverSurfaceImageAsync(context, releaseId, surfaceRole, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
+                name: "place_project_image_on_release_cover_surface",
+                description: "Place an existing project-image ID into one existing image object on the exact outside, inside, case, or jacket surface. This does not affect other surfaces and remains separate from image generation."),
+            AIFunctionFactory.Create(
+                method: (Guid releaseId, string surfaceRole, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddCoverSurfaceImageAsync(context, releaseId, surfaceRole, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
+                name: "add_project_image_to_release_cover_surface",
+                description: "Add an existing project-image ID as a new object on the exact outside, inside, case, or jacket surface. This does not affect other surfaces and remains separate from image generation."),
+            AIFunctionFactory.Create(
                 method: (Guid releaseId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlaceCoverImageAsync(context, releaseId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
                 name: "place_project_image_on_release_cover",
                 description: "Place an existing project-image ID into one existing release-cover image object. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an alt-text or decorative decision. This is separate from image generation."),
@@ -427,6 +449,7 @@ public sealed class PublishAssistantTools(
         {
             "list_search_sources", "read_project_source", "search_project", "list_project_images", "read_project_image",
             "read_publication_book", "patch_publication_book", "list_publication_releases",
+            "list_compatible_print_products", "read_print_product_geometry",
             "create_publication_release", "read_publication_release", "patch_publication_release_overrides",
             "set_edition_specific_content", "read_edition_content_differences",
             "prepare_publication_files", "cancel_publication_preparation", "read_publication_readiness",
@@ -444,7 +467,7 @@ public sealed class PublishAssistantTools(
             "read_publication_cover_design", "preview_publication_cover_canvas", "validate_publication_cover_composition", "update_publication_cover_design",
             "patch_publication_core_cover_element", "place_project_image_on_core_cover", "add_project_image_to_core_cover", "customize_publication_release_cover", "use_core_publication_cover",
             "stage_publication_core_cover_composition", "apply_publication_core_cover_composition_stage",
-            "patch_publication_cover_element", "place_project_image_on_release_cover", "add_project_image_to_release_cover", "stage_publication_cover_composition", "apply_publication_cover_composition_stage",
+            "patch_publication_cover_element", "patch_publication_cover_surface_element", "place_project_image_on_release_cover_surface", "add_project_image_to_release_cover_surface", "place_project_image_on_release_cover", "add_project_image_to_release_cover", "stage_publication_cover_composition", "apply_publication_cover_composition_stage",
             "export_publication_release",
         };
         return Task.FromResult<IList<AITool>>(tools
@@ -811,7 +834,57 @@ public sealed class PublishAssistantTools(
     }
 
     private Task<string> CreateReleaseAsync(PublishAssistantContext context, string name, PublicationEditionFormat format, PublicationVendor destination) =>
-        CreateReleaseCoreAsync(context, name, format, format == PublicationEditionFormat.Paperback ? destination : PublicationVendor.Generic);
+        CreateReleaseCoreAsync(context, name, format,
+            format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? destination : PublicationVendor.Generic);
+
+    private string ListPrintProducts(PublicationEditionFormat format, PublicationVendor destination)
+    {
+        if (format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover))
+            return Serialize(new { ok = false, code = "PRINT_FORMAT_REQUIRED", summary = "Choose Paperback or Hardcover." });
+        var products = printProducts.List(format, destination).Select(item => new
+        {
+            item.Key,
+            item.DisplayName,
+            process = item.InteriorProcess.ToString(),
+            item.PaperName,
+            item.BasisWeightPounds,
+            item.Gsm,
+            construction = item.CoverMaterial.ToString(),
+            finishes = item.Finishes,
+            coverModes = item.CoverModes,
+            trims = item.TrimSizes.Take(20),
+            item.AllowsCustomTrim,
+            submittedPageRange = new
+            {
+                minimum = item.MinimumSubmittedPages ?? item.MinimumPages,
+                maximum = item.MaximumSubmittedPages ?? item.MaximumPages,
+            },
+            normalizedCoverPageRange = new { minimum = item.MinimumPages, maximum = item.MaximumPages },
+        }).ToArray();
+        return Serialize(new { ok = true, registryVersion = printProducts.Version, registrySha256 = printProducts.Sha256, count = products.Length, products });
+    }
+
+    private async Task<string> ReadPrintGeometryAsync(PublishAssistantContext context, Guid releaseId, int pageCount, string? surfaceRole)
+    {
+        var workspace = await publishing.GetWorkspaceAsync(context.ProjectId, releaseId, context.TurnCancellationToken);
+        var geometry = printGeometry.Calculate(new PublicationEdition
+        {
+            Id = workspace.Edition.Id,
+            ProjectId = context.ProjectId,
+            Name = workspace.Edition.Name,
+            Format = workspace.Edition.Format,
+            Vendor = workspace.Edition.Vendor,
+            PrintRegistryVersion = workspace.Edition.PrintRegistryVersion,
+            PrintProductKey = workspace.Edition.PrintProductKey,
+            PrintFinish = workspace.Edition.PrintFinish,
+            PrintCoverMode = workspace.Edition.PrintCoverMode,
+            GenericPrintTemplateJson = workspace.Edition.GenericPrintTemplateJson,
+            PageWidthInches = workspace.Edition.PageWidthInches,
+            PageHeightInches = workspace.Edition.PageHeightInches,
+            Bleed = workspace.Edition.Bleed,
+        }, pageCount, surfaceRole);
+        return Serialize(new { ok = true, targetId = releaseId, revision = workspace.Edition.Revision, geometry });
+    }
 
     private async Task<string> PatchReleaseAsync(PublishAssistantContext context, Guid releaseId, PublicationReleaseOverridePatch patch)
     {
@@ -974,10 +1047,11 @@ public sealed class PublishAssistantTools(
                 Destination = workspace.Edition.Vendor,
                 workspace.Edition.Status,
                 workspace.Edition.Isbn,
-                workspace.Edition.Binding,
-                workspace.Edition.Paper,
-                workspace.Edition.Ink,
-                PrintBleedManaged = workspace.Edition.Format == PublicationEditionFormat.Paperback,
+                workspace.Edition.PrintRegistryVersion,
+                workspace.Edition.PrintProductKey,
+                workspace.Edition.PrintFinish,
+                workspace.Edition.PrintCoverMode,
+                PrintBleedManaged = workspace.Edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover,
                 workspace.Edition.AllowDesignedPageOverrides,
                 workspace.Edition.InheritsCoreCover,
                 effective = new
@@ -2120,13 +2194,16 @@ public sealed class PublishAssistantTools(
     private async Task<string> ReadCoverAsync(
         PublishAssistantContext context,
         Guid? releaseId,
+        string? surfaceRole,
         int objectStart,
         int objectCount,
         int structureStart,
         int structureCount)
     {
         var cover = releaseId is Guid editionId
-            ? await covers.GetAsync(context.ProjectId, editionId)
+            ? string.IsNullOrWhiteSpace(surfaceRole)
+                ? await covers.GetAsync(context.ProjectId, editionId)
+                : await covers.GetSurfaceAsync(context.ProjectId, editionId, surfaceRole)
             : await books.GetCoverAsync(context.ProjectId);
         var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
             ?? new CompositionScene();
@@ -2163,6 +2240,7 @@ public sealed class PublishAssistantTools(
     private async Task<string> PreviewCoverCanvasAsync(
         PublishAssistantContext context,
         Guid? releaseId,
+        string? surfaceRole,
         string mode)
     {
         if (canvasPreviews is null)
@@ -2179,7 +2257,9 @@ public sealed class PublishAssistantTools(
         try
         {
             var cover = releaseId is Guid editionId
-                ? await covers.GetAsync(context.ProjectId, editionId, context.TurnCancellationToken)
+                ? string.IsNullOrWhiteSpace(surfaceRole)
+                    ? await covers.GetAsync(context.ProjectId, editionId, context.TurnCancellationToken)
+                    : await covers.GetSurfaceAsync(context.ProjectId, editionId, surfaceRole, context.TurnCancellationToken)
                 : await books.GetCoverAsync(context.ProjectId, context.TurnCancellationToken);
             var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
                 ?? throw new InvalidDataException("The cover composition is empty.");
@@ -2437,6 +2517,45 @@ public sealed class PublishAssistantTools(
         catch (Exception ex) { return Serialize(new { ok = false, code = ex is DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "PATCH_REJECTED", targetId, summary = ex.Message, recovery = "Reread the cover and retry only the intended fields against its current revision." }); }
     }
 
+    private async Task<string> PatchCoverSurfaceElementAsync(
+        PublishAssistantContext context,
+        Guid editionId,
+        string surfaceRole,
+        long expectedRevision,
+        string targetKind,
+        Guid targetId,
+        CompositionElementPatch patch)
+    {
+        try
+        {
+            var cover = await covers.PatchSurfaceElementAsync(
+                context.ProjectId, editionId, surfaceRole, expectedRevision, targetKind, targetId, patch,
+                context.TurnCancellationToken);
+            return Serialize(new
+            {
+                ok = true,
+                targetId,
+                surfaceRole,
+                revision = cover.Revision,
+                changedIds = new[] { targetId },
+                summary = $"Patched {surfaceRole} {targetKind}.",
+                mutation = new { kind = "coverComposition", id = editionId, surfaceRole, selectId = targetId },
+            });
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException or InvalidOperationException or DbUpdateConcurrencyException)
+        {
+            return Serialize(new
+            {
+                ok = false,
+                code = exception is DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "PATCH_REJECTED",
+                targetId,
+                surfaceRole,
+                summary = exception.Message,
+                recovery = "Reread and preview this exact cover surface, then retry only the intended fields.",
+            });
+        }
+    }
+
     private async Task<string> PlaceCoverImageAsync(
         PublishAssistantContext context,
         Guid editionId,
@@ -2467,6 +2586,101 @@ public sealed class PublishAssistantTools(
                 SemanticRole: decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure,
                 ReadingOrder: decorative ? null : readingOrder,
                 ClearReadingOrder: decorative));
+    }
+
+    private async Task<string> PlaceCoverSurfaceImageAsync(
+        PublishAssistantContext context,
+        Guid editionId,
+        string surfaceRole,
+        long expectedRevision,
+        Guid targetId,
+        Guid imageId,
+        FigureImageFit fit,
+        string? altText,
+        bool decorative,
+        int? readingOrder)
+    {
+        if (!decorative && string.IsNullOrWhiteSpace(altText))
+            return Serialize(new { ok = false, code = "ALT_DECISION_REQUIRED", targetId, surfaceRole, summary = "Provide alternative text or explicitly mark the artwork decorative." });
+        if (await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken) is null)
+            return Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId, surfaceRole, imageId, summary = "Project image was not found." });
+        return await PatchCoverSurfaceElementAsync(
+            context,
+            editionId,
+            surfaceRole,
+            expectedRevision,
+            "object",
+            targetId,
+            new CompositionElementPatch(
+                ImageId: imageId,
+                ImageFit: fit,
+                AltText: decorative ? string.Empty : altText?.Trim(),
+                Decorative: decorative,
+                AccessibilityDecisionPending: false,
+                SemanticRole: decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure,
+                ReadingOrder: decorative ? null : readingOrder,
+                ClearReadingOrder: decorative));
+    }
+
+    private async Task<string> AddCoverSurfaceImageAsync(
+        PublishAssistantContext context,
+        Guid editionId,
+        string surfaceRole,
+        long expectedRevision,
+        Guid imageId,
+        FigureImageFit fit,
+        string? altText,
+        bool decorative,
+        CompositionBounds? bounds,
+        int? readingOrder)
+    {
+        try
+        {
+            if (!decorative && string.IsNullOrWhiteSpace(altText))
+                return Serialize(new { ok = false, code = "ALT_DECISION_REQUIRED", targetId = editionId, surfaceRole, summary = "Provide alternative text or explicitly mark the artwork decorative." });
+            if (await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken) is null)
+                return Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId = editionId, surfaceRole, imageId, summary = "Project image was not found." });
+            var cover = await covers.GetSurfaceAsync(context.ProjectId, editionId, surfaceRole, context.TurnCancellationToken);
+            if (cover.Revision != expectedRevision)
+                throw new DbUpdateConcurrencyException("The cover surface changed; reread it before retrying.");
+            var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
+                ?? throw new InvalidDataException("The release cover surface is empty.");
+            var mutation = CompositionService.AddImageObjectToScene(scene, imageId, fit, altText, decorative, bounds, readingOrder);
+            var saved = await covers.SaveSurfaceWorkspaceAsync(
+                context.ProjectId,
+                editionId,
+                surfaceRole,
+                new PublicationCoverDesignUpdate(
+                    cover.Title, cover.Subtitle, cover.Author, cover.SpineText, cover.BackCopy,
+                    cover.BackgroundColor, cover.BarcodeMode, cover.ImageCropXPercent, cover.ImageCropYPercent,
+                    expectedRevision, true),
+                mutation.Scene,
+                context.TurnCancellationToken);
+            return Serialize(new
+            {
+                ok = true,
+                targetId = editionId,
+                surfaceRole,
+                revision = saved.Revision,
+                changedIds = new[] { mutation.ObjectId },
+                selectId = mutation.ObjectId,
+                summary = $"Project image added to the {surfaceRole} cover surface.",
+                mutation = new { kind = "coverComposition", id = editionId, surfaceRole, selectId = mutation.ObjectId },
+            });
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException or InvalidOperationException or DbUpdateConcurrencyException)
+        {
+            return Serialize(new
+            {
+                ok = false,
+                code = exception is DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "PLACEMENT_REJECTED",
+                targetId = editionId,
+                surfaceRole,
+                imageId,
+                summary = exception.Message,
+                recovery = "Reread this exact cover surface and retry with the same project-image ID.",
+            });
+        }
     }
 
     private async Task<string> AddCoverImageAsync(

@@ -17,7 +17,10 @@ public enum PublicationArtifactKind
 {
     ReadingPdf,
     InteriorPdf,
-    CoverPdf,
+    PerfectBoundCoverPdf,
+    CaseCoverPdf,
+    DustJacketPdf,
+    PrintSetupManifest,
     BookPdf,
     Epub,
     FrontCoverImage,

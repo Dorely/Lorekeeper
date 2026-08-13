@@ -590,7 +590,7 @@ independent page geometry; otherwise facing compositions are emitted as two
 regular book leaves. PDF ebook releases inherit this value live and may store a
 sparse override. Tagged structure, bookmarks, links, document language, and
 logical reading order remain mandatory output rather than optional switches.
-`IPublicationEditionService` owns optional paperback, EPUB ebook, and PDF ebook
+`IPublicationEditionService` owns optional paperback, hardcover, EPUB ebook, and PDF ebook
 release aggregates. Releases retain destination, internal immutable profile,
 ISBN, product settings, status, artifacts, packages, sparse field and collection
 overrides, cloning, archival, comparison, and audit history. Proof tracking,
@@ -636,14 +636,18 @@ assistant turns, cover entry, and preparation flush that queue, while successful
 background saves remain silent and refresh artifact freshness. A revision race
 reloads the current target and retries the still-dirty patch instead of exposing
 an unhandled optimistic-concurrency exception.
-`IPublicationReleasePresetService` creates releases from only product type and,
-for paperback, destination. Application-owned profile versions and bleed policy
-are not normal UI or assistant inputs. Publication profiles have two durable
-classes. A Generic profile supplies safe configurable output for an unknown
-vendor or custom purpose and carries no named-vendor claim. A Specific profile
-is a built-in, versioned contract for a named vendor and product; KDP and Ingram
-are the current Specific paperback profiles, and future destinations such as
-Google Books follow the same source/review-date/profile-version boundary.
+`IPublicationReleasePresetService` creates releases from product type and
+destination. Application-owned profile/registry versions are not normal UI or
+assistant inputs. `IPrintProductRegistry` owns the checked-in offline physical
+product catalog. A `PrintProductSelection` identifies the exact registry
+version, stable product key, trim, finish, and cover mode. Product records own
+vendor, binding construction, interior process, exact paper stock and
+basis-weight/GSM, available trims, submitted/manufacturing page limits,
+finishes, cover modes, PDF rules, required artifacts, and spine evidence. A
+Generic product carries no named-vendor claim and requires complete printer
+geometry. A Specific product is a built-in, versioned contract; current entries
+cover KDP paperback and case-laminate hardcover plus Ingram paperback, duplex,
+case-laminate, Digital Cloth, dust-jacket, and jacketed-case products.
 `IPublicationPreparationService` owns
 persisted reconnectable one-action jobs: Core compiles/renders/validates its
 reading copy; paperback renders and packages interior/full-wrap files; EPUB
@@ -662,7 +666,7 @@ version changes.
 Archived releases are immutable at every owning mutation boundary; their
 existing artifacts remain readable and exportable, and cloning creates the
 editable continuation.
-Project export v19 writes manuscript-v4 documents, project page setup, page
+Project export v20 writes manuscript-v4 documents, project page setup, page
 compositions and exact geometry variants with active authoring variants, Core
 Book, sparse release overlays and cover scenes, Book Text Styles,
 edition chapter snapshots, publication sections and their compositions, visual references,
@@ -682,8 +686,9 @@ explicit post-commit indexing rebuilds the committed state instead. That
 post-commit work is best-effort and can add warnings, but cannot relabel
 committed imported data as a failed import.
 
-PDF output exists only through the contained press runtime. Paperback jobs
-produce separate immutable interior and full-wrap cover PDFs; Digital PDF jobs
+PDF output exists only through the contained press runtime. Physical print jobs
+produce an immutable interior plus the exact outside, inside, case, jacket, or
+cloth-setup artifacts required by the selected product; Digital PDF jobs
 produce one immutable Book PDF whose front cover is page one, followed by
 publication sections and manuscript content. The Publish workspace derives Generate,
 active/cancel, Retry, Regenerate, and applicable Save actions from render and
@@ -704,7 +709,7 @@ only after that Core/release refresh completes, preserving the active stream and
 preventing overlapping reads on the circuit-scoped data boundary. The transcript
 remains visible during that refresh while the composer is temporarily disabled.
 
-`Lorekeeper.Press` owns protocol v6, deterministic layout, English/Latin shaping
+`Lorekeeper.Press` owns protocol v7, deterministic layout, English/Latin shaping
 and glyph diagnostics, custom project TTF/OTF staging and embedding, font
 subsetting and ToUnicode maps, inline typography, bounded pagination, TOC
 convergence, stable block/page maps, sparse paragraph presentation, flowing
@@ -724,9 +729,9 @@ long tagged books cannot reuse an indirect object ID across pages.
 Group containers resolve into child geometry, rotation, opacity, visibility,
 locks, and z-order in canvases, export, generation targets, and Press rather
 than acting as editor-only metadata.
-KDP and generic paperback profiles emit PDF 1.7. Page-edge image and shape art
+KDP and generic print products emit PDF 1.7. Page-edge image and shape art
 extends through the vendor bleed box while the authored scene remains trim-sized.
-The Ingram profile emits PDF 1.3 with
+Ingram products emit PDF 1.3 with
 PDF/X-1a:2001 identification, the registered CGATS21 CRPC1 CMYK output intent,
 CMYK/gray-only resources, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded fonts, no encryption,
 annotations, actions, or transparency, and image/page-paint colors capped at
@@ -735,9 +740,16 @@ atomic promotion. An independent black-box test harness parses raw PDF objects
 without calling that validator. This is the evidence behind the scoped
 “Lorekeeper validated” state; it is not evidence of vendor upload acceptance.
 
-Protocol v6 stages `input/request.json` plus declared PNG/JPEG assets and
+Protocol v7 stages `input/request.json` plus declared PNG/JPEG assets and
 approved project TTF/OTF fonts in a bounded job root. Declarations carry media
 type, byte length, dimensions where applicable, rights state, and SHA-256.
+Physical requests also carry the resolved product descriptor, registry
+version/hash, submitted/normalized/reported page counts, and explicit cover
+surface scenes. Press fails closed if that descriptor differs from the packaged
+registry. KDP paperback uses the published exact stock formula. KDP hardcover
+and Ingram products require an exact frozen calculator measurement for the
+normalized even page count; no interpolation or generic caliper fallback is
+available. Generic products require a complete printer template manifest.
 Render requests explicitly identify `outputPurpose` as `publication` or
 `reading-copy`; the latter is accepted only by the generic Digital PDF profile
 used for Core Book and cannot weaken a publication profile.
@@ -786,7 +798,7 @@ WeasyPrint, Chromium, machine PDF software, or repository fallback. Runtime
 readiness and the dynamic `describe` contract are checked by the
 UI, assistant, and service before a render can be queued. The processor captures
 bounded stdout/stderr, bounds its lifetime and paths,
-and verifies every returned length/hash before persistence. Protocol-v6
+and verifies every returned length/hash before persistence. Protocol-v7
 requests are serialized as BOM-free UTF-8 JSON; the owned renderer also
 tolerates an optional UTF-8 BOM for compatibility and binds every post-parse
 terminal response to the parsed job identity before the app accepts its
@@ -817,24 +829,29 @@ snapshot, while an already-applied cutover restores its newest protected source
 backup into the existing projectless recovery shell.
 
 `PublicationBookService` owns the Core front-cover scene. EPUB and PDF ebook
-releases inherit it until customized; paperback releases project it into the
-front panel while retaining release-owned spine, back, and barcode regions.
+releases inherit it until customized; physical releases project it into the
+product's front panel while retaining product-owned spine, back, flap, inside,
+cloth, and barcode regions.
 Existing release covers and **Customize front** create explicit local
 overrides; inherited Core objects remain protected until the release front is
 customized.
-`PublicationCoverService` owns each release cover override and its shared
-structured scene. Canonical title, subtitle, author, spine, and back copy remain
-bindings, not duplicated frame text. Paperback geometry derives the
-back/spine/front surface, bleed, safe zones, folds, and barcode reserve from the
-current interior page count, trim, paper, vendor, and profile; Digital PDF and
-EPUB use a front-only surface. Constraint-bound objects reflow when geometry
-changes, while free-positioned objects retain their coordinates and surface
-overflow. ISBN-13 validation is shared by UI, assistant, and render gating; the
-renderer emits EAN-13 or the permitted KDP reserve, protects back copy, and
-suppresses unsafe narrow-spine text. Ingram cover scenes use the owned ICC and
-ink-limit path. Black-and-white editions convert interior raster and colored
-text to DeviceGray; cover color remains independent and uses RGB for
-KDP/generic or CMYK for Ingram.
+`PublicationCoverService` owns each release cover override and independent
+surface scenes keyed by exact product geometry. Canonical title, subtitle,
+author, spine, and back copy remain bindings, not duplicated frame text.
+`IPrintGeometryService` separates submitted, normalized cover-calculation, and
+reported production page counts, then resolves the selected stock's exact
+spine and the product's trim, bleed, safe, hinge, board, wrap, flap, gutter,
+barcode, and duplex no-ink regions. An interior layout pass precedes final cover
+geometry. Constraint-bound objects reflow when geometry changes, while
+free-positioned objects retain their coordinates and produce actionable
+compatibility warnings. ISBN-13 validation is shared by UI, assistant, and
+render gating; the renderer emits EAN-13 or the permitted KDP reserve, protects
+back copy, and suppresses unsafe narrow-spine text. Ingram cover scenes use the
+owned ICC and ink-limit path. Black-and-white editions convert interior raster
+and colored text to DeviceGray; cover color remains independent and uses RGB
+for KDP/generic or CMYK for Ingram. Duplex covers render outside first and
+inside second and reject paint across the inside spine plus its safety strip.
+Case laminate, dust jacket, and Digital Cloth emit distinct artifact roles.
 
 Cover editing is an embedded Publish workspace mode rather than a modal. The
 Publish assistant remains mounted in the left column. Pages and covers use the
@@ -919,7 +936,13 @@ semantic/layout changes, preview the whole canvas, and validate either Core or
 release geometry. Live inheritance customization/reset and order changes remain
 limited to sections sharing one fixed outline anchor. Large page changes use
 persisted non-replayable staging. The assistant cannot reorder chapters or
-mutate chapter manuscript content from Publish.
+mutate chapter manuscript content from Publish. Physical-product tools list
+compatible registry entries, select one stable key, explain
+stock/weight/process/finish tradeoffs, calculate exact page/spine/cover
+geometry, and read, patch, preview, or place existing project images on every
+required cover surface. Results remain compact and report exact artifact roles;
+the assistant cannot invent an unsupported combination or claim vendor upload
+acceptance.
 
 ISBN values are strict, checksum-validated, and stored in canonical ISBN-13
 form. The same ISBN may be shared only by same-format vendor editions whose
@@ -933,7 +956,11 @@ synchronized.
 `eng/BuildPressRuntime.ps1` builds `Cargo.lock` with Rust 1.97.1, rejects any
 unknown direct or transitive license expression, and packages only the native
 executable, the OFL Lora/Nunito/Roboto Mono assets, the registered ICC profile,
-third-party notices, SBOM, and exact hash manifest. Debug and Release use this
+the canonical print-product registry, third-party notices, SBOM, and exact hash
+manifest. `describe` reports the packaged registry version/hash and the app
+rejects a mismatch. `eng/ReviewPrintProductRegistry.ps1` is the maintainer-only
+candidate validator and evidence-report workflow; no runtime path contacts a
+vendor site. Debug and Release use this
 same boundary. Windows x64, Linux x64, macOS x64, and macOS arm64 build on their
 native target runners; neither the app nor release package compiles Rust at
 runtime.
@@ -1145,10 +1172,24 @@ style mappings. Existing rendered artifacts become Legacy because effective
 source fingerprinting now hashes inherited Core chapters or divergent edition
 chapters and only the shared styles actually referenced by effective content.
 
-Project export v19 contains only the current v4/page-setup/composition model,
+The physical-product cutover adds hardcover format state, registry/product
+selection, Generic printer templates, explicit cover artifact roles, and
+surface-scene storage before its protected transform. Legacy KDP and Ingram
+paper/ink selections map deterministically to exact registry products; legacy
+Generic releases receive complete geometry manifests from their stored trim,
+bleed, and caliper. Existing cover scenes become the product's primary outside
+or case surface. Existing cover artifacts retain identical bytes and hashes,
+are reclassified to the corresponding role, and become Legacy. The transform
+validates metadata/content projections, row counts, scene objects, packages,
+artifact bytes/hashes, and foreign keys before the cleanup migration removes
+runtime paper/binding/ink columns and the universal spine-caliper path.
+
+Project export v20 contains only the current v4/page-setup/composition model,
 Core Book, sparse release overlays, edition chapter snapshots, edition-owned
-compositions, publication sections, and target-aware publication records; older
-formats remain importable only through isolated versioned transformers.
+compositions, publication sections, target-aware publication records, resolved
+print-product selections, Generic printer templates, and independent cover
+surface scenes; older formats remain importable only through isolated versioned
+transformers.
 Human-readable language names from Book Briefs and publication inputs are
 canonicalized to culture tags when new Core/release values are persisted and at
 export, preview, preflight, and Press-request boundaries. Existing values such as
