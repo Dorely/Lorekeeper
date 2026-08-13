@@ -11,7 +11,6 @@ public sealed class BookBriefService(AppDbContext db) : IBookBriefService
     public async Task<BookBrief> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         var existing = await db.BookBriefs
-            .AsNoTracking()
             .SingleOrDefaultAsync(brief => brief.ProjectId == projectId, cancellationToken);
         if (existing is not null)
             return existing;
@@ -20,10 +19,8 @@ public sealed class BookBriefService(AppDbContext db) : IBookBriefService
             throw new InvalidOperationException($"Project {projectId} not found.");
 
         var brief = new BookBrief { ProjectId = projectId };
-        DetachTrackedBrief(projectId);
         db.BookBriefs.Add(brief);
         await db.SaveChangesAsync(cancellationToken);
-        db.Entry(brief).State = EntityState.Detached;
         return brief;
     }
 
@@ -34,7 +31,6 @@ public sealed class BookBriefService(AppDbContext db) : IBookBriefService
     {
         ArgumentNullException.ThrowIfNull(patch);
         var existing = await db.BookBriefs
-            .AsNoTracking()
             .SingleOrDefaultAsync(candidate => candidate.ProjectId == projectId, cancellationToken);
         var isNew = existing is null;
         if (isNew && !await db.Projects.AnyAsync(project => project.Id == projectId, cancellationToken))
@@ -48,13 +44,9 @@ public sealed class BookBriefService(AppDbContext db) : IBookBriefService
         Validate(brief);
 
         brief.UpdatedAt = DateTime.UtcNow;
-        DetachTrackedBrief(projectId);
         if (isNew)
             db.BookBriefs.Add(brief);
-        else
-            db.BookBriefs.Update(brief);
         await db.SaveChangesAsync(cancellationToken);
-        db.Entry(brief).State = EntityState.Detached;
         return brief;
     }
 
@@ -169,12 +161,6 @@ public sealed class BookBriefService(AppDbContext db) : IBookBriefService
     {
         if (value is not null && !cleared.Contains(field))
             setter(value.Trim());
-    }
-
-    private void DetachTrackedBrief(Guid projectId)
-    {
-        foreach (var tracked in db.BookBriefs.Local.Where(brief => brief.ProjectId == projectId).ToList())
-            db.Entry(tracked).State = EntityState.Detached;
     }
 
     private static string Field(string label, string value) =>

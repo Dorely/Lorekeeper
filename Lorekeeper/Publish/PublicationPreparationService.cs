@@ -253,7 +253,6 @@ public sealed class PublicationPreparationWorker(
             job.ProgressPercent = 10;
             await db.SaveChangesAsync(cancellationToken);
             preparationDiagnostics.AddRange(await WaitForRenderAsync(db, job, cancellationToken));
-            db.ChangeTracker.Clear();
             job = await db.PublicationPreparationJobs.Include(item => item.Edition).SingleAsync(item => item.Id == jobId, cancellationToken);
             job.Step = "Checking publication files";
             job.ProgressPercent = 88;
@@ -267,7 +266,6 @@ public sealed class PublicationPreparationWorker(
             await packages.BuildFromPreflightAsync(job.ProjectId, job.EditionId!.Value, report, cancellationToken);
         }
 
-        db.ChangeTracker.Clear();
         job = await db.PublicationPreparationJobs.SingleAsync(item => item.Id == jobId, cancellationToken);
         if (job.CancellationRequested || job.Status == PublicationPreparationStatus.Cancelled)
             return;
@@ -307,7 +305,6 @@ public sealed class PublicationPreparationWorker(
     {
         while (true)
         {
-            db.ChangeTracker.Clear();
             var state = await db.PublicationRenderJobs.AsNoTracking().SingleAsync(item => item.Id == preparation.RenderJobId, cancellationToken);
             var diagnostics = JsonSerializer.Deserialize<List<PublicationRenderDiagnostic>>(
                 state.DiagnosticsJson,

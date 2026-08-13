@@ -336,11 +336,12 @@
 
 | File | Description |
 |------|-------------|
-| `AppDbContext.cs` | EF Core context for projects, page setup, providers, chats, writing, graph, ingest/import, publishing, composition, fonts, and Book Text Styles. Configures relationships/indexes, JSON property bags, and transient SQLite lock retries. |
+| `AppDbContext.cs` | EF Core context for projects, page setup, providers, chats, writing, graph, ingest/import, publishing, composition, fonts, and Book Text Styles. Configures relationships/indexes, JSON property bags, centralized tracking coordination, friendly concurrency failures, and transient SQLite lock retries. |
+| `AppDbContextStateCoordinator.cs` | Process-wide table-generation coordinator and EF command/transaction interceptors that invalidate stale tracked reads, cover bulk mutations, and prevent superseded state from being saved. |
 | `DatabaseMigrationRecoveryService.cs` | Shared protected SQLite backup/restore, recovery-shell, expiring confirmation, backup discovery, and reference-aware pruning boundary for guarded migrations. |
 | `DatabaseStartupMigrationService.cs` | Single application-startup schema/data migration orchestrator shared by the real host and installed-database migration fixtures so verification cannot drift from startup order. |
 | `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |
-| `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings. |
+| `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings and the mandatory tracking/transaction interceptors. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
 | `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, publication-release, Publish-chat, Press, authoring-page, Core Book, edition-content, physical-product/cover-surface, and cleanup migrations with the current model snapshot. |
 

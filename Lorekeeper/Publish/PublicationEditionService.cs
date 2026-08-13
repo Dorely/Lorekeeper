@@ -946,15 +946,10 @@ public sealed class PublicationEditionService(
         Guid projectId,
         Guid editionId,
         CancellationToken cancellationToken)
-    {
-        if (db.PublicationEditions.Local.FirstOrDefault(edition => edition.Id == editionId) is { } tracked)
-            await db.Entry(tracked).ReloadAsync(cancellationToken);
-
-        return await db.PublicationEditions.FirstOrDefaultAsync(
+        => await db.PublicationEditions.FirstOrDefaultAsync(
             edition => edition.ProjectId == projectId && edition.Id == editionId,
             cancellationToken)
             ?? throw new InvalidOperationException("Publication release was not found.");
-    }
 
     private async Task<PublicationEdition> GetReadOnlyAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken) =>
         await db.PublicationEditions.AsNoTracking().FirstOrDefaultAsync(

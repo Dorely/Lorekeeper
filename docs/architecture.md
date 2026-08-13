@@ -1140,6 +1140,20 @@ binary assets. SQLite startup applies a busy timeout and WAL journal mode.
 sqlite-vec and internal FTS5 structures are initialized outside normal EF
 migrations.
 
+All dependency-injection-created contexts participate in the singleton
+`IAppDbContextStateCoordinator`. It versions tracked state per relational table,
+invalidates unchanged entities before a query can reuse data superseded by
+another application context, and observes bulk update/delete commands as well
+as ordinary `SaveChanges` operations. Explicit transactions publish their
+invalidations only after commit. A pending mutation based on superseded state is
+stopped before it writes, and a database-level optimistic-concurrency race is
+translated at the context boundary instead of leaking EF's affected-row error.
+This boundary is required because Blazor circuit scopes outlive an individual UI
+operation; feature services must not add their own tracker-clearing or entity-
+reload workarounds. Protected startup migrations retain their explicit
+transaction, backup, and validation boundaries while using the same registered
+context configuration.
+
 `IDatabaseMigrationRecoveryService` owns provider-specific backup paths,
 owner-only permissions, SQLite Online Backup creation, expiring restore
 confirmations, scheduled restore markers, recovery-shell creation, recursive

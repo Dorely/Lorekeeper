@@ -7,7 +7,10 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Lorekeeper.Persistence;
 
-public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbContext> logger) : DbContext(options)
+public class AppDbContext(
+    DbContextOptions<AppDbContext> options,
+    ILogger<AppDbContext> logger,
+    IAppDbContextStateCoordinator? stateCoordinator = null) : DbContext(options)
 {
     private const int _maxLockedSaveAttempts = 6;
 
@@ -94,6 +97,32 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     public DbSet<PageCompositionVariant> PageCompositionVariants => Set<PageCompositionVariant>();
     public DbSet<CompositionMutationStage> CompositionMutationStages => Set<CompositionMutationStage>();
 
+    public override int SaveChanges() => SaveChanges(acceptAllChangesOnSuccess: true);
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        NormalizePublicationTargetOwnership();
+        try
+        {
+            stateCoordinator?.BeginSave(this);
+            var saved = base.SaveChanges(acceptAllChangesOnSuccess);
+            stateCoordinator?.CompleteSave(this, saved);
+            return saved;
+        }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            stateCoordinator?.FailSave(this);
+            throw new DbUpdateConcurrencyException(
+                "The data changed while this operation was being saved. Nothing was overwritten; reload the current state and try again.",
+                exception);
+        }
+        catch
+        {
+            stateCoordinator?.FailSave(this);
+            throw;
+        }
+    }
+
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
         SaveChangesWithLockRetryAsync(acceptAllChangesOnSuccess: true, cancellationToken);
 
@@ -104,24 +133,42 @@ public class AppDbContext(DbContextOptions<AppDbContext> options, ILogger<AppDbC
     {
         NormalizePublicationTargetOwnership();
         var delay = TimeSpan.FromMilliseconds(100);
-        for (var attempt = 1; ; attempt++)
+        try
         {
-            try
+            stateCoordinator?.BeginSave(this);
+            for (var attempt = 1; ; attempt++)
             {
-                return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+                try
+                {
+                    var saved = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+                    stateCoordinator?.CompleteSave(this, saved);
+                    return saved;
+                }
+                catch (DbUpdateException ex) when (IsSqliteLocked(ex) && attempt < _maxLockedSaveAttempts && !cancellationToken.IsCancellationRequested)
+                {
+                    var retryDelay = delay + TimeSpan.FromMilliseconds(Random.Shared.Next(0, 75));
+                    logger.LogWarning(
+                        ex,
+                        "SQLite database was locked during SaveChanges; retrying attempt {Attempt}/{MaxAttempts} after {DelayMs} ms.",
+                        attempt,
+                        _maxLockedSaveAttempts,
+                        retryDelay.TotalMilliseconds);
+                    await Task.Delay(retryDelay, cancellationToken);
+                    delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 2_000));
+                }
             }
-            catch (DbUpdateException ex) when (IsSqliteLocked(ex) && attempt < _maxLockedSaveAttempts && !cancellationToken.IsCancellationRequested)
-            {
-                var retryDelay = delay + TimeSpan.FromMilliseconds(Random.Shared.Next(0, 75));
-                logger.LogWarning(
-                    ex,
-                    "SQLite database was locked during SaveChanges; retrying attempt {Attempt}/{MaxAttempts} after {DelayMs} ms.",
-                    attempt,
-                    _maxLockedSaveAttempts,
-                    retryDelay.TotalMilliseconds);
-                await Task.Delay(retryDelay, cancellationToken);
-                delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 2_000));
-            }
+        }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            stateCoordinator?.FailSave(this);
+            throw new DbUpdateConcurrencyException(
+                "The data changed while this operation was being saved. Nothing was overwritten; reload the current state and try again.",
+                exception);
+        }
+        catch
+        {
+            stateCoordinator?.FailSave(this);
+            throw;
         }
     }
 

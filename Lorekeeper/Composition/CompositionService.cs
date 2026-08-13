@@ -282,7 +282,6 @@ public sealed class CompositionService(
         }
 
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        DetachTrackedComposition(compositionId);
         var composition = await db.PageCompositions.Include(item => item.Variants)
             .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Page composition was not found in this project.");
@@ -398,7 +397,6 @@ public sealed class CompositionService(
         CancellationToken cancellationToken = default)
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        DetachTrackedComposition(compositionId);
         var composition = await db.PageCompositions.Include(item => item.Variants).SingleOrDefaultAsync(
             item => item.Id == compositionId && item.ProjectId == projectId,
             cancellationToken) ?? throw new KeyNotFoundException("Page composition was not found in this project.");
@@ -415,7 +413,6 @@ public sealed class CompositionService(
         CancellationToken cancellationToken = default)
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        DetachTrackedComposition(compositionId);
         var composition = await db.PageCompositions.SingleOrDefaultAsync(
             item => item.Id == compositionId && item.ProjectId == projectId,
             cancellationToken) ?? throw new KeyNotFoundException("Page composition was not found in this project.");
@@ -559,7 +556,6 @@ public sealed class CompositionService(
         CancellationToken cancellationToken = default)
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        DetachTrackedComposition(compositionId);
         var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
         var variant = await db.PageCompositionVariants.Include(item => item.Composition)
             .SingleOrDefaultAsync(item => item.Id == variantId && item.CompositionId == compositionId
@@ -659,7 +655,6 @@ public sealed class CompositionService(
     {
         scene = scene with { Guides = [] };
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        await DetachTrackedVariantCompositionAsync(variantId, cancellationToken);
         var variant = await db.PageCompositionVariants
             .Include(item => item.Composition)
             .SingleOrDefaultAsync(item => item.Id == variantId && item.Composition.ProjectId == projectId, cancellationToken)
@@ -915,7 +910,6 @@ public sealed class CompositionService(
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        DetachTrackedComposition(compositionId);
         var variant = await db.PageCompositionVariants.Include(item => item.Composition)
             .SingleOrDefaultAsync(item => item.Id == variantId
                 && item.CompositionId == compositionId
@@ -1048,7 +1042,6 @@ public sealed class CompositionService(
         var payloadHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(stage.OperationsJson)));
         if (!string.Equals(payloadHash, stage.PayloadSha256, StringComparison.Ordinal))
             throw new InvalidDataException("The staged composition payload failed its integrity check.");
-        await DetachTrackedVariantCompositionAsync(stage.TargetId, cancellationToken);
         var variant = await db.PageCompositionVariants.Include(item => item.Composition).SingleAsync(
             item => item.Id == stage.TargetId && item.Composition.ProjectId == projectId,
             cancellationToken);
@@ -1165,7 +1158,6 @@ public sealed class CompositionService(
         var payloadHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(stage.OperationsJson)));
         if (!string.Equals(payloadHash, stage.PayloadSha256, StringComparison.Ordinal))
             throw new InvalidDataException("The staged composition payload failed its integrity check.");
-        DetachTrackedComposition(stage.TargetId);
         var composition = await db.PageCompositions.Include(item => item.Variants)
             .SingleAsync(item => item.Id == stage.TargetId && item.ProjectId == projectId, cancellationToken);
         if (composition.Revision != expectedRevision)
@@ -1291,7 +1283,6 @@ public sealed class CompositionService(
             throw new InvalidDataException("The staged composition workspace payload failed its integrity check.");
         var payload = JsonSerializer.Deserialize<CompositionWorkspaceStagePayload>(stage.OperationsJson, JsonOptions)
             ?? throw new InvalidDataException("The staged composition workspace payload is empty.");
-        DetachTrackedComposition(stage.TargetId);
         var variant = await db.PageCompositionVariants.Include(item => item.Composition)
             .SingleOrDefaultAsync(item => item.Id == payload.VariantId && item.CompositionId == stage.TargetId
                 && item.Composition.ProjectId == projectId, cancellationToken)
@@ -2307,32 +2298,6 @@ public sealed class CompositionService(
         project.UpdatedAt = DateTime.UtcNow;
     }
 
-    private void DetachTrackedComposition(Guid compositionId)
-    {
-        foreach (var variant in db.PageCompositionVariants.Local
-            .Where(item => item.CompositionId == compositionId)
-            .ToList())
-        {
-            db.Entry(variant).State = EntityState.Detached;
-        }
-
-        if (db.PageCompositions.Local.FirstOrDefault(item => item.Id == compositionId) is { } composition)
-            db.Entry(composition).State = EntityState.Detached;
-    }
-
-    private async Task DetachTrackedVariantCompositionAsync(
-        Guid variantId,
-        CancellationToken cancellationToken)
-    {
-        var compositionId = db.PageCompositionVariants.Local
-            .FirstOrDefault(item => item.Id == variantId)?.CompositionId
-            ?? await db.PageCompositionVariants.AsNoTracking()
-                .Where(item => item.Id == variantId)
-                .Select(item => (Guid?)item.CompositionId)
-                .SingleOrDefaultAsync(cancellationToken);
-        if (compositionId is Guid id)
-            DetachTrackedComposition(id);
-    }
 }
 
 public sealed class CompositionRevisionConflictException(long expectedRevision, long actualRevision)

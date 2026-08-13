@@ -713,16 +713,6 @@ public sealed class PublicationCoverService(
         CancellationToken cancellationToken,
         bool tracked = false)
     {
-        if (tracked
-            && db.PublicationEditions.Local.FirstOrDefault(edition => edition.Id == editionId) is { } localEdition)
-        {
-            await db.Entry(localEdition).ReloadAsync(cancellationToken);
-        }
-        if (tracked
-            && db.PublicationCoverDesigns.Local.FirstOrDefault(design => design.EditionId == editionId) is { } localDesign)
-        {
-            await db.Entry(localDesign).ReloadAsync(cancellationToken);
-        }
         var editions = tracked ? db.PublicationEditions : db.PublicationEditions.AsNoTracking();
         return await editions.FirstOrDefaultAsync(
             edition => edition.Id == editionId && edition.ProjectId == projectId,

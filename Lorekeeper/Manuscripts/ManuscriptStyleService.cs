@@ -445,7 +445,6 @@ public sealed class ManuscriptStyleService(
         Guid styleId,
         CancellationToken cancellationToken)
     {
-        db.ChangeTracker.Clear();
         return await db.ManuscriptStyleDefinitions
             .AsNoTracking()
             .Where(style => style.ProjectId == projectId && style.Id == styleId)

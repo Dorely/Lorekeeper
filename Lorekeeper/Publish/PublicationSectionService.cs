@@ -474,14 +474,6 @@ public sealed class PublicationSectionService(
         await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
         if (target.EditionId is Guid editionId)
         {
-            var trackedEdition = db.ChangeTracker.Entries<PublicationEdition>()
-                .SingleOrDefault(entry => entry.Entity.Id == editionId);
-            if (trackedEdition is not null)
-            {
-                if (trackedEdition.State != EntityState.Unchanged)
-                    throw new InvalidOperationException("Finish saving the release settings before reordering publication sections.");
-                trackedEdition.State = EntityState.Detached;
-            }
             var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(item => item.Id == editionId
                 && item.ProjectId == target.ProjectId
                 && item.Status != PublicationEditionStatus.Archived, cancellationToken)

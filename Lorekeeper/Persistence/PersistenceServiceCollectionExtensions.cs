@@ -19,7 +19,10 @@ public static class PersistenceServiceCollectionExtensions
             configuration,
             usePerUserDataDirectory);
 
-        services.AddDbContext<AppDbContext>(options =>
+        services.AddSingleton<IAppDbContextStateCoordinator, AppDbContextStateCoordinator>();
+        services.AddSingleton<AppDbContextCommandInterceptor>();
+        services.AddSingleton<AppDbContextTransactionInterceptor>();
+        services.AddDbContext<AppDbContext>((serviceProvider, options) =>
         {
             switch (providerName)
             {
@@ -34,6 +37,9 @@ public static class PersistenceServiceCollectionExtensions
                         $"Unsupported persistence provider '{providerName}'. " +
                         "Supported values: Sqlite.");
             }
+            options.AddInterceptors(
+                serviceProvider.GetRequiredService<AppDbContextCommandInterceptor>(),
+                serviceProvider.GetRequiredService<AppDbContextTransactionInterceptor>());
         });
 
         return services;

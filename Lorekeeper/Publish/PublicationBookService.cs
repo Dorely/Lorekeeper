@@ -269,8 +269,6 @@ public sealed class PublicationBookService(
             .SetProperty(item => item.Revision, item => item.Revision + 1)
             .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        if (db.PublicationBooks.Local.FirstOrDefault(item => item.ProjectId == projectId) is { } trackedBook)
-            await db.Entry(trackedBook).ReloadAsync(cancellationToken);
         return (await ReadViewAsync(projectId, cancellationToken))!;
     }
 
@@ -397,7 +395,6 @@ public sealed class PublicationBookService(
     {
         _ = await GetOrCreateAsync(projectId, cancellationToken);
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        await ReloadTrackedCoreCoverStateAsync(projectId, cancellationToken);
         var book = await db.PublicationBooks.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         var design = await db.PublicationBookCoverDesigns.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         var setup = await db.ProjectPageSetups.AsNoTracking().SingleAsync(item => item.ProjectId == projectId, cancellationToken);
@@ -437,7 +434,6 @@ public sealed class PublicationBookService(
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        await ReloadTrackedCoreCoverStateAsync(projectId, cancellationToken);
         var book = await db.PublicationBooks.SingleOrDefaultAsync(
             item => item.ProjectId == projectId,
             cancellationToken) ?? throw new InvalidOperationException("Core Book was not found.");
@@ -557,7 +553,6 @@ public sealed class PublicationBookService(
         payload = payload with { Scene = CoverCompositionFactory.KeepArtworkBehindCopy(payload.Scene) };
         if (payload.ExpectedBookRevision != expectedBookRevision)
             throw new DbUpdateConcurrencyException("The staged Core Book revision does not match the requested revision.");
-        await ReloadTrackedCoreCoverStateAsync(projectId, cancellationToken);
         var book = await db.PublicationBooks.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         var cover = await db.PublicationBookCoverDesigns.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         if (book.Revision != expectedBookRevision || cover.Revision != expectedCoverRevision)
@@ -723,28 +718,12 @@ public sealed class PublicationBookService(
         long expectedRevision,
         CancellationToken cancellationToken)
     {
-        await ReloadTrackedBookAsync(projectId, cancellationToken);
         var book = await db.PublicationBooks.SingleOrDefaultAsync(
             item => item.ProjectId == projectId,
             cancellationToken) ?? throw new InvalidOperationException("Core Book was not found.");
         if (book.Revision != expectedRevision)
             throw new DbUpdateConcurrencyException($"Core Book changed in another editor (expected revision {expectedRevision}, current {book.Revision}).");
         return book;
-    }
-
-    private async Task ReloadTrackedBookAsync(Guid projectId, CancellationToken cancellationToken)
-    {
-        if (db.PublicationBooks.Local.FirstOrDefault(item => item.ProjectId == projectId) is { } local)
-            await db.Entry(local).ReloadAsync(cancellationToken);
-    }
-
-    private async Task ReloadTrackedCoreCoverStateAsync(
-        Guid projectId,
-        CancellationToken cancellationToken)
-    {
-        await ReloadTrackedBookAsync(projectId, cancellationToken);
-        if (db.PublicationBookCoverDesigns.Local.FirstOrDefault(item => item.ProjectId == projectId) is { } local)
-            await db.Entry(local).ReloadAsync(cancellationToken);
     }
 
     private static void Touch(PublicationBook book)
