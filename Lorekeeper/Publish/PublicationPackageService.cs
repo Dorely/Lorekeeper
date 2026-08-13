@@ -20,7 +20,10 @@ public sealed record PublicationPreflightItem(
     string Severity,
     string Code,
     string Message,
-    PublicationArtifactKind? ArtifactKind = null);
+    PublicationArtifactKind? ArtifactKind = null,
+    int? Page = null,
+    string? SourceKind = null,
+    string? SourceId = null);
 
 public sealed record PublicationPreflightReport(
     string ProfileId,
@@ -160,12 +163,7 @@ public sealed class PublicationPackageService(
             .OrderByDescending(artifact => artifact.CreatedAt)
             .ToListAsync(cancellationToken);
         var interior = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.InteriorPdf);
-        var coverArtifact = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.PerfectBoundCoverPdf);
-        var caseArtifact = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.CaseCoverPdf);
-        var jacketArtifact = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.DustJacketPdf);
-        var setupManifest = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.PrintSetupManifest);
-        var physicalArtifacts = new[] { coverArtifact, caseArtifact, jacketArtifact, setupManifest }
-            .Where(item => item is not null).Cast<PublicationArtifact>().ToList();
+        var physicalArtifacts = new List<PublicationArtifact>();
         var bookArtifact = artifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.BookPdf);
         var items = new List<PublicationPreflightItem>();
         var profile = ResolveProfile(edition);
@@ -213,7 +211,13 @@ public sealed class PublicationPackageService(
             }
             if (product is not null)
             {
-                foreach (var requiredKind in RequiredArtifactKinds(product, edition.PrintCoverMode))
+                var requiredKinds = RequiredArtifactKinds(product, edition.PrintCoverMode);
+                physicalArtifacts = requiredKinds
+                    .Select(kind => artifacts.FirstOrDefault(item => item.Kind == kind))
+                    .Where(item => item is not null)
+                    .Cast<PublicationArtifact>()
+                    .ToList();
+                foreach (var requiredKind in requiredKinds)
                 {
                     var artifact = artifacts.FirstOrDefault(item => item.Kind == requiredKind);
                     if (requiredKind == PublicationArtifactKind.PrintSetupManifest)
@@ -391,7 +395,6 @@ public sealed class PublicationPackageService(
             throw new InvalidOperationException("A preflighted press artifact is missing or failed its hash check.");
         }
         var interiorArtifact = sourceArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.InteriorPdf);
-        var coverArtifact = sourceArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.PerfectBoundCoverPdf);
         var physicalArtifacts = sourceArtifacts.Where(artifact => artifact.Kind is
             PublicationArtifactKind.PerfectBoundCoverPdf or PublicationArtifactKind.CaseCoverPdf
             or PublicationArtifactKind.DustJacketPdf or PublicationArtifactKind.PrintSetupManifest).ToList();
@@ -1348,7 +1351,10 @@ public sealed class PublicationPackageService(
                     "dust-jacket-pdf" => PublicationArtifactKind.DustJacketPdf,
                     "interior-pdf" => PublicationArtifactKind.InteriorPdf,
                     _ => null,
-                })));
+                },
+                diagnostic.Page,
+                diagnostic.SourceKind,
+                diagnostic.SourceId)));
 
             using var evidence = JsonDocument.Parse(job.EvidenceJson);
             var root = evidence.RootElement;
@@ -1504,7 +1510,10 @@ public sealed class PublicationPackageService(
                 diagnostic.Severity,
                 diagnostic.Code,
                 diagnostic.Message,
-                PublicationArtifactKind.BookPdf)));
+                PublicationArtifactKind.BookPdf,
+                diagnostic.Page,
+                diagnostic.SourceKind,
+                diagnostic.SourceId)));
 
             using var evidence = JsonDocument.Parse(job.EvidenceJson);
             var root = evidence.RootElement;

@@ -267,39 +267,48 @@ pub struct PageMapEntry {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Diagnostic {
-    pub severity: String,
-    pub code: String,
-    pub message: String,
+    pub severity: Box<str>,
+    pub code: Box<str>,
+    pub message: Box<str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_kind: Option<String>,
+    pub source_kind: Option<Box<str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_id: Option<String>,
+    pub source_id: Option<Box<str>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page: Option<usize>,
 }
 
 impl Diagnostic {
     pub fn error(code: &str, message: impl Into<String>) -> Self {
         Self {
-            severity: "error".to_owned(),
-            code: code.to_owned(),
-            message: message.into(),
+            severity: "error".into(),
+            code: code.into(),
+            message: message.into().into_boxed_str(),
             source_kind: None,
             source_id: None,
+            page: None,
         }
     }
 
     pub fn warning(code: &str, message: impl Into<String>) -> Self {
         Self {
-            severity: "warning".to_owned(),
-            code: code.to_owned(),
-            message: message.into(),
+            severity: "warning".into(),
+            code: code.into(),
+            message: message.into().into_boxed_str(),
             source_kind: None,
             source_id: None,
+            page: None,
         }
     }
 
     pub fn with_source(mut self, kind: &str, id: impl Into<String>) -> Self {
-        self.source_kind = Some(kind.to_owned());
-        self.source_id = Some(id.into());
+        self.source_kind = Some(kind.into());
+        self.source_id = Some(id.into().into_boxed_str());
+        self
+    }
+
+    pub fn with_page(mut self, page: usize) -> Self {
+        self.page = Some(page);
         self
     }
 }

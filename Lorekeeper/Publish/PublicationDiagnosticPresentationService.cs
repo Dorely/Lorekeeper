@@ -110,12 +110,13 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
                             || item.Composition.EditionId == null)
                     && item.SceneJson.Contains(candidateId.ToString()))
                 .ToListAsync(cancellationToken);
-            var variant = matchingVariants
-                .Where(item => SceneContainsObject(item.SceneJson, candidateId))
-                .OrderByDescending(item => item.Composition.EditionId == selectedEditionId)
+            var variantMatch = matchingVariants
+                .Select(item => (Variant: item, ObjectId: SceneObjectReference(item.SceneJson, candidateId)))
+                .Where(item => item.ObjectId is not null)
+                .OrderByDescending(item => item.Variant.Composition.EditionId == selectedEditionId)
                 .FirstOrDefault();
-            if (variant is not null)
-                return CompositionTarget(variant.Composition, candidateId, selectedEditionId, chapterOrdinals);
+            if (variantMatch.Variant is not null)
+                return CompositionTarget(variantMatch.Variant.Composition, variantMatch.ObjectId, selectedEditionId, chapterOrdinals);
 
             var composition = await db.PageCompositions.AsNoTracking()
                 .Include(item => item.Chapter)
@@ -137,14 +138,16 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
                     .SingleOrDefaultAsync(item => item.EditionId == editionId
                         && item.Edition.ProjectId == projectId
                         && item.CompositionSceneJson.Contains(candidateId.ToString()), cancellationToken);
-                if (releaseCover is not null
-                    && SceneContainsObject(releaseCover.CompositionSceneJson, candidateId))
+                var objectId = releaseCover is null
+                    ? null
+                    : SceneObjectReference(releaseCover.CompositionSceneJson, candidateId);
+                if (releaseCover is not null && objectId is not null)
                 {
                     return new(
                         PublicationDiagnosticTargetKind.Cover,
                         $"{releaseCover.Edition.Name} cover",
                         EditionId: releaseCover.EditionId,
-                        ObjectId: candidateId);
+                        ObjectId: objectId);
                 }
             }
             else
@@ -152,10 +155,12 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
                 var coreCover = await db.PublicationBookCoverDesigns.AsNoTracking()
                     .SingleOrDefaultAsync(item => item.ProjectId == projectId
                         && item.CompositionSceneJson.Contains(candidateId.ToString()), cancellationToken);
-                if (coreCover is not null
-                    && SceneContainsObject(coreCover.CompositionSceneJson, candidateId))
+                var objectId = coreCover is null
+                    ? null
+                    : SceneObjectReference(coreCover.CompositionSceneJson, candidateId);
+                if (coreCover is not null && objectId is not null)
                 {
-                    return new(PublicationDiagnosticTargetKind.Cover, "Core Book cover", ObjectId: candidateId);
+                    return new(PublicationDiagnosticTargetKind.Cover, "Core Book cover", ObjectId: objectId);
                 }
             }
         }
@@ -208,6 +213,8 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
     private static IEnumerable<Guid> ExtractIds(PublicationPreflightItem diagnostic)
     {
         var seen = new HashSet<Guid>();
+        if (Guid.TryParse(diagnostic.SourceId, out var sourceId) && seen.Add(sourceId))
+            yield return sourceId;
         foreach (Match match in IdentifierRegex().Matches(diagnostic.Message))
         {
             if (Guid.TryParse(match.Value, out var id) && seen.Add(id))
@@ -215,18 +222,20 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
         }
     }
 
-    private static bool SceneContainsObject(string sceneJson, Guid objectId)
+    private static Guid? SceneObjectReference(string sceneJson, Guid referencedId)
     {
         try
         {
             var scene = System.Text.Json.JsonSerializer.Deserialize<CompositionScene>(
                 sceneJson,
                 ManuscriptCodec.JsonOptions);
-            return scene?.Objects.Any(item => item.Id == objectId) == true;
+            return scene?.Objects
+                .FirstOrDefault(item => item.Id == referencedId || item.ImageId == referencedId)
+                ?.Id;
         }
         catch (System.Text.Json.JsonException)
         {
-            return false;
+            return null;
         }
     }
 

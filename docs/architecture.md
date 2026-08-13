@@ -753,6 +753,10 @@ available. Generic products require a complete printer template manifest.
 Render requests explicitly identify `outputPurpose` as `publication` or
 `reading-copy`; the latter is accepted only by the generic Digital PDF profile
 used for Core Book and cannot weaken a publication profile.
+Completed render and layout responses must echo both the protocol version and
+job identity. A request rejected before its body can be decoded may omit the
+job identity; Lorekeeper preserves and displays that Press diagnostic instead
+of replacing it with a misleading identity-mismatch error.
 The `layout` command defaults to its full glyph-evidence trace for conformance
 work; app previews explicitly request `layoutTraceMode: browser-preview`, which
 retains page paint order and typographic runs while omitting unused glyph arrays.
@@ -852,6 +856,9 @@ and colored text to DeviceGray; cover color remains independent and uses RGB
 for KDP/generic or CMYK for Ingram. Duplex covers render outside first and
 inside second and reject paint across the inside spine plus its safety strip.
 Case laminate, dust jacket, and Digital Cloth emit distinct artifact roles.
+Preflight and package identity select only the roles required by the current
+physical product, so changing from a jacketed construction to cloth-only or
+case laminate cannot pull an older surface artifact into the new package.
 
 Cover editing is an embedded Publish workspace mode rather than a modal. The
 Publish assistant remains mounted in the left column. Pages and covers use the

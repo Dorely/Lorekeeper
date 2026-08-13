@@ -784,7 +784,7 @@ mod tests {
             .set("MediaBox", vec![0.into(), 0.into(), 100.into(), 100.into()]);
         document.save(&path).expect("save bad box");
         assert_eq!(
-            validate(&path, &options).unwrap_err().code,
+            validate(&path, &options).unwrap_err().code.as_ref(),
             "PRESS_PDF_PAGE_BOX_INVALID"
         );
 
@@ -796,7 +796,10 @@ mod tests {
             .set("OpenAction", Object::Null);
         document.save(&action_path).expect("save action");
         assert_eq!(
-            validate(&action_path, &action_options).unwrap_err().code,
+            validate(&action_path, &action_options)
+                .unwrap_err()
+                .code
+                .as_ref(),
             "PRESS_PDF_ACTIONS_FORBIDDEN"
         );
         drop(root);
@@ -807,21 +810,21 @@ mod tests {
         let (_rgb_root, rgb_path, options) = valid_pdf(true);
         inject_image(&rgb_path, b"DeviceRGB", vec![255, 0, 0]);
         assert_eq!(
-            validate(&rgb_path, &options).unwrap_err().code,
+            validate(&rgb_path, &options).unwrap_err().code.as_ref(),
             "PRESS_PDFX_RGB_FORBIDDEN"
         );
 
         let (_ink_root, ink_path, options) = valid_pdf(true);
         inject_image(&ink_path, b"DeviceCMYK", vec![255, 255, 255, 255]);
         assert_eq!(
-            validate(&ink_path, &options).unwrap_err().code,
+            validate(&ink_path, &options).unwrap_err().code.as_ref(),
             "PRESS_TOTAL_INK_EXCEEDED"
         );
 
         let (_content_root, content_path, options) = valid_pdf(true);
         append_page_content(&content_path, b"\n1 1 1 1 k\n");
         assert_eq!(
-            validate(&content_path, &options).unwrap_err().code,
+            validate(&content_path, &options).unwrap_err().code.as_ref(),
             "PRESS_TOTAL_INK_EXCEEDED"
         );
     }

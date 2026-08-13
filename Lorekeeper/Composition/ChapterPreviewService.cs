@@ -557,8 +557,10 @@ public sealed class ChapterPreviewService(
                 throw new InvalidOperationException($"Press preview failed. {Limit(stderr)} {Limit(stdout)}".Trim());
             var response = JsonSerializer.Deserialize<LayoutResponse>(stdout, JsonOptions)
                 ?? throw new InvalidDataException("Lorekeeper Press returned an empty layout response.");
-            if (response.ProtocolVersion != 7 || response.JobId != jobId.ToString("N"))
-                throw new InvalidDataException("Lorekeeper Press returned the wrong preview protocol or job identity.");
+            if (response.ProtocolVersion != 7)
+                throw new InvalidDataException($"Lorekeeper Press returned preview protocol {response.ProtocolVersion}; protocol 7 is required.");
+            if (response.JobId != jobId.ToString("N"))
+                throw new InvalidDataException("Lorekeeper Press returned a preview response for a different job.");
             var firstPage = response.PageMap.Where(item => Guid.TryParse(item.ChapterId, out var mapped) && mapped == chapterId)
                 .Select(item => item.PageNumber).DefaultIfEmpty(1).Min();
             var pages = response.Pages.Select((page, index) => ToPage(page, index + 1))

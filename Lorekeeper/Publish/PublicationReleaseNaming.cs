@@ -12,6 +12,12 @@ public static class PublicationReleaseNaming
             PublicationVendor.IngramSpark => "IngramSpark Paperback",
             _ => "Generic Paperback",
         },
+        PublicationEditionFormat.Hardcover => vendor switch
+        {
+            PublicationVendor.AmazonKdp => "Amazon KDP Hardcover",
+            PublicationVendor.IngramSpark => "IngramSpark Hardcover",
+            _ => "Generic Hardcover",
+        },
         PublicationEditionFormat.Epub => "EPUB Ebook",
         _ => "PDF Ebook",
     };

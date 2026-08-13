@@ -266,8 +266,8 @@ public sealed class PublicationRenderService(
             cancellationToken) ?? throw new KeyNotFoundException("Publication release not found.");
         if (edition.Status != PublicationEditionStatus.Draft)
             throw new InvalidOperationException("Archived editions cannot be rendered.");
-        if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.DigitalPdf))
-            throw new InvalidOperationException("PDF rendering is available for paperback and Digital PDF editions.");
+        if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover or PublicationEditionFormat.DigitalPdf))
+            throw new InvalidOperationException("PDF rendering is available for paperback, hardcover, and Digital PDF editions.");
         var runtimeReadiness = GetRuntimeReadiness(edition.Format, edition.Vendor);
         if (!runtimeReadiness.IsReady)
             throw new InvalidOperationException(runtimeReadiness.Message);
@@ -777,9 +777,13 @@ public sealed class PublicationRenderProcessor(
 
         Cleanup(job.Id);
         var result = await InvokeAsync(job.Id, request, cancellationToken);
-        if (result.ProtocolVersion != 7
-            || !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
-            throw new InvalidOperationException("The press renderer returned a mismatched protocol or job identity.");
+        if (result.ProtocolVersion != 7)
+            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 7 is required.");
+        if (result.JobId is not null
+            && !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
+            throw new InvalidOperationException("The press renderer returned a response for a different job.");
+        if (result.JobId is null && string.Equals(result.Status, "completed", StringComparison.Ordinal))
+            throw new InvalidOperationException("The press renderer returned an unbound completion response.");
         if (!string.Equals(result.RendererVersion, job.RendererVersion, StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a different renderer version than the queued job.");
         if (ApplyTerminalResponse(
@@ -1209,9 +1213,9 @@ public sealed class PublicationRenderProcessor(
                 printProduct.MaximumPages,
                 printProduct.MinimumSubmittedPages,
                 printProduct.MaximumSubmittedPages,
-                spineModel = genericPrintTemplate?.InchesPerPage is decimal genericCaliper
+                spineModel = ToPressSpineModel(genericPrintTemplate?.InchesPerPage is decimal genericCaliper
                     ? new PrintSpineModel("Caliper", genericCaliper)
-                    : printProduct.SpineModel,
+                    : printProduct.SpineModel),
                 genericTemplate = genericPrintTemplate,
                 requiredCoverSurfaces,
             },
@@ -1300,6 +1304,13 @@ public sealed class PublicationRenderProcessor(
         };
         return new PressPreparedRequest(payload, assets, stagedFonts);
     }
+
+    private static object ToPressSpineModel(PrintSpineModel model) => new
+    {
+        model.Kind,
+        model.InchesPerPage,
+        anchors = model.Anchors ?? [],
+    };
 
     private static PressStagedFont StageFont(PublishFontDocument face)
     {

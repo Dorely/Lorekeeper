@@ -2731,6 +2731,11 @@ fn ingram_jacketed_case_emits_independent_case_and_jacket_artifacts() {
     let case_width = inspect(&job.artifact(&response, "case-cover-pdf")).page_width;
     let jacket_width = inspect(&job.artifact(&response, "dust-jacket-pdf")).page_width;
     assert!(jacket_width > case_width);
+    let spine_width = response["evidence"]["spineWidthPoints"]
+        .as_f64()
+        .expect("spine width evidence");
+    let expected_jacket_width = 2.0 * (6.0 + 0.4375) * 72.0 + spine_width + 7.25 * 72.0;
+    assert!((jacket_width - expected_jacket_width).abs() < 0.25);
 }
 
 #[test]
@@ -2758,6 +2763,13 @@ fn ingram_digital_cloth_without_jacket_emits_setup_manifest_not_cover_pdf() {
             .iter()
             .any(|item| item["kind"] == "print-setup-manifest")
     );
+    let setup_manifest = response["artifacts"]
+        .as_array()
+        .expect("artifacts")
+        .iter()
+        .find(|item| item["kind"] == "print-setup-manifest")
+        .expect("cloth setup manifest");
+    assert_eq!(setup_manifest["mediaType"], "application/json");
     assert!(
         !response["artifacts"]
             .as_array()

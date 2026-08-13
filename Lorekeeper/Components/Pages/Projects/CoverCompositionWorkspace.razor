@@ -58,7 +58,7 @@
                         <div class="cover-panel cover-panel-back" style="@BackStyle">Back</div>
                         <div class="cover-panel cover-panel-spine" style="@SpineStyle">Spine</div>
                         <div class="cover-panel cover-panel-front" style="@FrontStyle">Front</div>
-                        <div class="cover-barcode" style="@BarcodeStyle">Barcode reserve</div>
+                        <div class="cover-barcode" style="@BarcodeStyle">@(_surfaceRole == "perfect-bound-inside" ? "No-ink spine area" : "Barcode reserve")</div>
                     }
                     @foreach (var item in _objects.Where(IsVisible))
                     {

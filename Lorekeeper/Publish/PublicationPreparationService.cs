@@ -144,7 +144,9 @@ public sealed class PublicationPreparationService(
         try
         {
             return (JsonSerializer.Deserialize<List<PublicationRenderDiagnostic>>(json, DiagnosticsJsonOptions) ?? [])
-                .Select(item => new PublicationPreflightItem(item.Severity, item.Code, item.Message))
+                .Select(item => new PublicationPreflightItem(
+                    item.Severity, item.Code, item.Message, null,
+                    item.Page, item.SourceKind, item.SourceId))
                 .Where(IsUsable)
                 .ToList();
         }
@@ -296,7 +298,9 @@ public sealed class PublicationPreparationWorker(
                 state.DiagnosticsJson,
                 PublicationPreparationService.DiagnosticsJsonOptions) ?? [];
             if (state.Status == PublicationRenderStatus.Completed)
-                return diagnostics.Select(item => new PublicationPreflightItem(item.Severity, item.Code, item.Message)).ToList();
+                return diagnostics.Select(item => new PublicationPreflightItem(
+                    item.Severity, item.Code, item.Message, null,
+                    item.Page, item.SourceKind, item.SourceId)).ToList();
             if (state.Status is PublicationRenderStatus.Failed or PublicationRenderStatus.Cancelled)
                 throw new InvalidOperationException(state.ProgressMessage + " " + string.Join(' ', diagnostics.Select(item => item.Message)));
             await Task.Delay(250, cancellationToken);

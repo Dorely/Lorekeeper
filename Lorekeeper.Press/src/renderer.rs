@@ -363,7 +363,10 @@ fn physical_cover_surfaces(
                     (2.0 * trim_width + spine + 1.02, trim_height + 1.02)
                 }
                 "case-wrap" => (2.0 * (trim_width - 0.185) + spine + 2.25, trim_height + 1.5),
-                "dust-jacket" => (2.0 * (trim_width + 0.4375) + spine + 7.0, trim_height + 0.5),
+                "dust-jacket" => (
+                    2.0 * (trim_width + 0.4375) + spine + 7.25,
+                    trim_height + 0.5,
+                ),
                 "digital-cloth-setup" => return None,
                 _ => {
                     return Some(Err(Diagnostic::error(
@@ -686,21 +689,25 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             })
         })
         .collect::<Vec<_>>();
-    let minimum_effective_dpi = image_evidence
+    let lowest_resolution_image = image_evidence
         .iter()
-        .map(|item| item.effective_dpi)
-        .reduce(f32::min);
+        .min_by(|left, right| left.effective_dpi.total_cmp(&right.effective_dpi));
+    let minimum_effective_dpi = lowest_resolution_image.map(|item| item.effective_dpi);
     let mut diagnostics = layout.diagnostics.clone();
     let required_dpi = required_effective_dpi(&request.profile);
     if minimum_effective_dpi.is_some_and(|dpi| dpi < required_dpi) {
-        diagnostics.push(Diagnostic::warning(
-            "PRESS_IMAGE_DPI_LOW",
-            format!(
-                "The lowest effective image resolution is {:.1} DPI; this profile expects {:.0} DPI. Inspect the affected pages at proof size.",
-                minimum_effective_dpi.unwrap_or_default(),
-                required_dpi
-            ),
-        ));
+        let evidence = lowest_resolution_image.expect("minimum DPI came from image evidence");
+        diagnostics.push(
+            Diagnostic::warning(
+                "PRESS_IMAGE_DPI_LOW",
+                format!(
+                    "The lowest effective image resolution is {:.1} DPI; this profile expects {:.0} DPI. Inspect the affected page at full size.",
+                    evidence.effective_dpi, required_dpi
+                ),
+            )
+            .with_source("asset", evidence.asset_id.clone())
+            .with_page(evidence.page_number),
+        );
     }
 
     staging.promote(&output)?;
@@ -980,7 +987,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
-            "protocolVersion": 6,
+            "protocolVersion": 7,
             "rendererVersion": env!("CARGO_PKG_VERSION"),
             "jobId": request.job_id,
             "pages": pages,
@@ -1628,7 +1635,7 @@ fn check_layout_cancellation(job_root: Option<&Path>) -> RenderResult<()> {
 
 fn pdf_failure(diagnostic: Diagnostic) -> Box<RenderResponse> {
     Box::new(RenderResponse::failed(
-        if diagnostic.code == "PRESS_RENDER_CANCELLED" {
+        if diagnostic.code.as_ref() == "PRESS_RENDER_CANCELLED" {
             "cancelled"
         } else {
             "failed"
@@ -6020,7 +6027,12 @@ fn artifact(kind: &str, relative_path: &str, bytes: &[u8], page_count: usize) ->
             .expect("filename")
             .to_string_lossy()
             .into_owned(),
-        media_type: "application/pdf".to_owned(),
+        media_type: if kind == "print-setup-manifest" {
+            "application/json"
+        } else {
+            "application/pdf"
+        }
+        .to_owned(),
         byte_length: bytes.len() as u64,
         sha256: hex_hash(bytes),
         page_count,
@@ -6334,7 +6346,7 @@ mod tests {
             build_toc_pages_with_limit(&[("A chapter".to_owned(), 3)], 3, &standard_trim(), 1)
                 .expect_err("one pass cannot establish a stable page count");
 
-        assert_eq!(error.code, "PRESS_TOC_NONCONVERGENT");
+        assert_eq!(error.code.as_ref(), "PRESS_TOC_NONCONVERGENT");
     }
 
     #[test]
@@ -6825,7 +6837,10 @@ mod tests {
             &mut Vec::new(),
         )
         .expect_err("gutter-crossing text must be blocked");
-        assert_eq!(error.code, "PRESS_FACING_SPREAD_TEXT_CROSSES_GUTTER");
+        assert_eq!(
+            error.code.as_ref(),
+            "PRESS_FACING_SPREAD_TEXT_CROSSES_GUTTER"
+        );
     }
 
     #[test]
