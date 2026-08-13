@@ -221,7 +221,7 @@
 
 | File | Description |
 |------|-------------|
-| `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, product-filtered print-release flow, exact stock/weight/spine display, autosave, target-preserving full-height editors, and a continuously refreshed preparation progress bar; also owns inheritance, previews, blockers, and downloads. |
+| `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, collapsible Front/Main content/Back flow, direct chapter and publication-section inclusion/placement, product-filtered print-release setup, autosave, target-preserving full-height editors, progress, previews, blockers, and downloads. |
 | `PublishChatPanel.razor` (+ `.razor.css`) | Refresh-safe Publish adapter over shared `ChatSurface` with a flush-returned exact turn context, persisted transcript/tool chips, streaming, Stop/Reset, provider/token state, image attachments, active-turn reconnection, and structured workspace mutation callbacks. |
 
 ### Components/Pages/Projects/Outline/

@@ -80,7 +80,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   full-height editor before, after, or around the Core outline.
   Section inclusion, order, and next/right/left starting page are explicit Core
   or release settings; optional KDP/common front-matter conventions produce
-  guidance rather than silently rewriting the book.
+  guidance rather than silently rewriting the book. The Publish overview presents
+  this as one collapsible Front/Main content/Back flow with direct Include/Omit
+  chapter controls and correctly scoped prose or Designed Page creation.
   Optional paperback, EPUB ebook, and PDF ebook
   releases inherit Core values live and store only explicit field or collection
   overrides; ISBN, destination, package, and product settings remain

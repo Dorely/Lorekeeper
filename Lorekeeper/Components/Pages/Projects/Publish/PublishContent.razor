@@ -263,7 +263,6 @@ else
     private double _bodyLineHeight = 1.55;
     private bool _releaseDirty;
     private bool _releaseContentDirty;
-    private bool _releaseContentOpen;
     private bool _releaseDesignOpen;
     private IReadOnlyList<EditionChapterDifference> _editionDifferences = [];
     private bool _editionContentBusy;
@@ -452,6 +451,9 @@ else
         if (Project is null || generation != _targetLoadGeneration)
             return;
         _workspace = await Publishing.GetWorkspaceForEditingAsync(Project.Id, releaseId, _dispose.Token);
+        _coreOutline = await Books.ListOutlineAsync(Project.Id, _dispose.Token);
+        _coreSelections = _coreOutline.ToDictionary(item => (item.TargetKind, item.TargetId), item => item.IsIncluded);
+        _coreDetailsLoaded = true;
         if (generation != _targetLoadGeneration)
             return;
         _releaseDraft = ReleaseDraft.From(_workspace.Edition);
@@ -462,7 +464,6 @@ else
             .ToDictionary(item => item.Id, item => item.IsIncluded);
         _loadedReleaseSelections = _releaseSelections.ToDictionary();
         _releaseContentDirty = false;
-        _releaseContentOpen = _workspace.HasContentOverrides;
         _releaseDesignOpen = _workspace.OverrideFields.Any(IsDesignOverride);
         _publicationSections = await PublicationSections.ListAsync(new(Project.Id, releaseId), _dispose.Token);
         _editingSection = null;
@@ -523,23 +524,7 @@ else
             </div>
         </section>
 
-        <section class="workspace-card"><header><div><span class="step">02</span><div><h2>Content and structure</h2><p>Choose the book’s shared reading structure.</p></div></div></header>
-            <div class="option-grid">
-                @Toggle("Include navigation table of contents", _coreDraft.IncludeTableOfContents, value => CoreToggle(nameof(CoreDraft.IncludeTableOfContents), value))
-                @Toggle("Show a contents page", _coreDraft.IncludeVisibleTableOfContents, value => CoreToggle(nameof(CoreDraft.IncludeVisibleTableOfContents), value))
-                @Toggle("Show act headings", _coreDraft.IncludeActHeadings, value => CoreToggle(nameof(CoreDraft.IncludeActHeadings), value))
-                @Toggle("Show chapter headings", _coreDraft.IncludeChapterHeadings, value => CoreToggle(nameof(CoreDraft.IncludeChapterHeadings), value))
-                @Toggle("Include act summaries", _coreDraft.IncludeActSynopses, value => CoreToggle(nameof(CoreDraft.IncludeActSynopses), value))
-                @Toggle("Include chapter summaries", _coreDraft.IncludeChapterSynopses, value => CoreToggle(nameof(CoreDraft.IncludeChapterSynopses), value))
-                @Toggle("Number acts", _coreDraft.NumberActs, value => CoreToggle(nameof(CoreDraft.NumberActs), value))
-                @Toggle("Number chapters", _coreDraft.NumberChapters, value => CoreToggle(nameof(CoreDraft.NumberChapters), value))
-                <label class="field"><span>Title page</span><select class="form-select" @bind="_coreDraft.TitlePageMode" @bind:after="MarkCoreDirty"><option value="@PublishTitlePageMode.Automatic">Automatic</option><option value="@PublishTitlePageMode.Include">Always include</option><option value="@PublishTitlePageMode.Omit">Omit</option></select></label>
-            </div>
-            <div class="summary-strip"><span><strong>@_core!.IncludedChapterCount</strong> chapters included</span><span><strong>@_publicationSections.Count(item => item.IsIncluded)</strong> publication sections</span><span><strong>@_publicationSections.Sum(item => item.DesignedPageCount)</strong> designed pages</span></div>
-            <details class="content-choices"><summary>Choose included chapters</summary>
-                @if (!_coreDetailsLoaded){<div class="deferred-section-loading"><span class="spinner-border spinner-border-sm"></span> Loading chapter choices…</div>}else{<div class="content-choice-list">@foreach (var item in _coreOutline){<label class="check-row"><input type="checkbox" checked="@_coreSelections.GetValueOrDefault((item.TargetKind, item.TargetId))" @onchange="e => CoreOutlineChanged(item, (bool)e.Value!)" /><span><small>@item.TargetKind</small>@item.Title</span></label>}</div>}
-            </details>
-        </section>
+        @PublicationFlowCard()
 
         <section class="workspace-card"><header><div><span class="step">03</span><div><h2>PDF presentation</h2><p>Defaults for the Core reading PDF and inheriting PDF ebook releases.</p></div></div></header>
             <div class="option-grid pdf-presentation-options">
@@ -549,8 +534,6 @@ else
                 <div class="plain-setting"><strong>Reader navigation and accessibility</strong><span>Tagged text, bookmarks, internal contents links, language, and logical reading order are included automatically.</span></div>
             </div>
         </section>
-
-        @PublicationSectionsCard()
 
     </div>;
 
@@ -596,7 +579,7 @@ else
             }
         </section>
 
-        @PublicationSectionsCard()
+        @PublicationFlowCard()
 
         <section class="workspace-card release-setup-card"><header><div><span class="step">04</span><div><h2>Release setup</h2><p>Only settings that belong to this publication product. Changes save automatically.</p></div></div></header>
             <div class="form-grid">
@@ -644,7 +627,7 @@ else
             </div>
         </section>
 
-        <section class="workspace-card split release-content-cover-card"><div><span class="eyebrow">Content</span><h2>@(_workspace.HasContentOverrides ? "Release content customized" : "Uses Core Book")</h2><p>@_workspace.Sections.Sum(section => section.Chapters.Count(chapter => chapter.IsIncluded)) chapters · @_workspace.PublicationSections.Count(item => item.IsIncluded) publication sections</p><p class="muted">A release may omit chapters, but reading order remains the Core outline order. Publication sections are customized above.</p><div class="button-row"><button class="btn btn-sm btn-outline-primary" @onclick="() => _releaseContentOpen = !_releaseContentOpen">@(_releaseContentOpen ? "Hide content choices" : "Customize content")</button>@if (_workspace.HasContentOverrides){<button class="btn btn-sm btn-outline-secondary" @onclick="UseCoreContentAsync">Use Core Book content</button>}</div>@if (_releaseContentOpen){<div class="release-presentation-options">@InheritedToggle("Navigation contents", PublicationEditionOverrideField.IncludeTableOfContents, _releaseDraft.IncludeTableOfContents, value => ReleaseToggle(nameof(ReleaseDraft.IncludeTableOfContents), value))@InheritedToggle("Visible contents page", PublicationEditionOverrideField.IncludeVisibleTableOfContents, _releaseDraft.IncludeVisibleTableOfContents, value => ReleaseToggle(nameof(ReleaseDraft.IncludeVisibleTableOfContents), value))@InheritedToggle("Act headings", PublicationEditionOverrideField.IncludeActHeadings, _releaseDraft.IncludeActHeadings, value => ReleaseToggle(nameof(ReleaseDraft.IncludeActHeadings), value))@InheritedToggle("Chapter headings", PublicationEditionOverrideField.IncludeChapterHeadings, _releaseDraft.IncludeChapterHeadings, value => ReleaseToggle(nameof(ReleaseDraft.IncludeChapterHeadings), value))@InheritedToggle("Number acts", PublicationEditionOverrideField.NumberActs, _releaseDraft.NumberActs, value => ReleaseToggle(nameof(ReleaseDraft.NumberActs), value))@InheritedToggle("Number chapters", PublicationEditionOverrideField.NumberChapters, _releaseDraft.NumberChapters, value => ReleaseToggle(nameof(ReleaseDraft.NumberChapters), value))</div><div class="content-choice-list release-content">@foreach (var chapter in _workspace.Sections.SelectMany(section => section.Chapters)){<label class="check-row"><input type="checkbox" checked="@_releaseSelections.GetValueOrDefault(chapter.Id)" @onchange="e => ReleaseContentChanged(chapter.Id, (bool)e.Value!)" /><span>@chapter.Title</span></label>}</div>}</div><div><span class="eyebrow">@CoverEyebrow(_workspace.Edition.Format)</span><h2>@(_workspace.Edition.InheritsCoreCover ? "Front inherited from Core" : "Customized for this release")</h2><p>@CoverHelp(_workspace.Edition.Format)</p><div class="button-row">@if (_workspace.Edition.InheritsCoreCover){<button class="btn btn-sm btn-outline-primary" @onclick="CustomizeReleaseCoverAsync">Customize for this release</button>}else{<button class="btn btn-sm btn-outline-primary" @onclick="OpenReleaseCoverAsync">Edit release cover</button><button class="btn btn-sm btn-outline-secondary" @onclick="UseCoreCoverAsync">Use Core Book cover</button>}<span class="status-pill">@(_workspace.Edition.InheritsCoreCover ? "From Core Book" : "Release override")</span></div></div></section>
+        <section class="workspace-card release-cover-card"><div><span class="eyebrow">@CoverEyebrow(_workspace.Edition.Format)</span><h2>@(_workspace.Edition.InheritsCoreCover ? "Front inherited from Core" : "Customized for this release")</h2><p>@CoverHelp(_workspace.Edition.Format)</p><div class="button-row">@if (_workspace.Edition.InheritsCoreCover){<button class="btn btn-sm btn-outline-primary" @onclick="CustomizeReleaseCoverAsync">Customize for this release</button>}else{<button class="btn btn-sm btn-outline-primary" @onclick="OpenReleaseCoverAsync">Edit release cover</button><button class="btn btn-sm btn-outline-secondary" @onclick="UseCoreCoverAsync">Use Core Book cover</button>}<span class="status-pill">@(_workspace.Edition.InheritsCoreCover ? "From Core Book" : "Release override")</span></div></div></section>
 
         @if (_workspace.Edition.Format != PublicationEditionFormat.Epub)
         {
@@ -673,57 +656,158 @@ else
         <details class="technical"><summary>Advanced and technical details</summary><dl><div><dt>Profile</dt><dd>Managed automatically for @_workspace.Edition.Vendor</dd></div><div><dt>Source state</dt><dd>Calculated when files are prepared</dd></div><div><dt>Release revision</dt><dd>@_workspace.Edition.Revision</dd></div></dl><div class="button-row"><button class="btn btn-sm btn-outline-secondary" @onclick="CloneReleaseAsync">Clone release</button><button class="btn btn-sm btn-outline-danger" @onclick="ArchiveReleaseAsync">Archive release</button></div></details>
     </div>;
 
-    private RenderFragment PublicationSectionsCard() => @<section class="workspace-card publication-sections-card">
+    private RenderFragment PublicationFlowCard() => @<section class="workspace-card publication-flow-card">
         <header>
-                <div><span class="step">@PublicationSectionsStep()</span><div><h2>Publication sections</h2><p>Build title pages, copyright, acknowledgements, author notes, image pages, and other material around the Core outline.</p></div></div>
-                <div class="button-row">
-                    <button class="btn btn-sm btn-outline-primary" @onclick="() => AddPublicationSectionAsync(false)">Add prose section</button>
-                    <button class="btn btn-sm btn-outline-primary" @onclick="() => AddPublicationSectionAsync(true)">Add designed page</button>
-                </div>
+            <div><span class="step">@(_selectedReleaseId is null ? "02" : "01")</span><div><h2>Book content</h2><p>Choose what appears in the front, main content, and back of this book.</p></div></div>
         </header>
         @if (!_coreDetailsLoaded && _selectedReleaseId is null)
+        {
+            <div class="deferred-section-loading"><span class="spinner-border spinner-border-sm"></span> Loading book content...</div>
+        }
+        else
+        {
+            <div class="publication-flow-groups">
+                <details class="publication-flow-group" open>
+                    <summary><span><strong>Front of book</strong><small>@IncludedPublicationSectionCount(PublicationContentArea.Front) included</small></span></summary>
+                    <div class="publication-flow-body">
+                        <div class="publication-flow-actions"><span>Title pages, copyright, dedications, and other opening material.</span><div class="button-row"><button class="btn btn-sm btn-outline-primary" disabled="@_assistantRunning" @onclick="() => AddPublicationSectionAsync(false, PublicationSectionAnchor.Front)">Add prose</button><button class="btn btn-sm btn-outline-primary" disabled="@_assistantRunning" @onclick="() => AddPublicationSectionAsync(true, PublicationSectionAnchor.Front)">Add designed page</button></div></div>
+                        @PublicationSectionRows(PublicationSectionsFor(PublicationContentArea.Front))
+                    </div>
+                </details>
+
+                <details class="publication-flow-group" open>
+                    <summary><span><strong>Main content</strong><small>@IncludedChapterCount() chapters included</small></span></summary>
+                    <div class="publication-flow-body">
+                        <div class="publication-structure-options">
+                            <h3>Structure and presentation</h3>
+                            @ContentStructureOptions()
+                        </div>
+                        <div class="publication-chapter-list">
+                            <div class="publication-list-heading"><h3>Chapters</h3>@if (_selectedReleaseId is not null && _workspace!.HasContentOverrides){<button class="btn btn-sm btn-outline-secondary" disabled="@_assistantRunning" @onclick="UseCoreContentAsync">Use Core Book selections</button>}</div>
+                            @ChapterRows()
+                        </div>
+                        <div class="publication-content-sections">
+                            <div class="publication-flow-actions"><span>Material placed immediately before or after a chapter.</span><div class="button-row"><button class="btn btn-sm btn-outline-primary" disabled="@(_assistantRunning || _coreOutline.Count == 0)" @onclick="() => AddPublicationSectionAsync(false, PublicationSectionAnchor.BeforeChapter)">Add prose</button><button class="btn btn-sm btn-outline-primary" disabled="@(_assistantRunning || _coreOutline.Count == 0)" @onclick="() => AddPublicationSectionAsync(true, PublicationSectionAnchor.BeforeChapter)">Add designed page</button></div></div>
+                            @PublicationSectionRows(PublicationSectionsFor(PublicationContentArea.Content), showPosition: true)
+                        </div>
+                    </div>
+                </details>
+
+                <details class="publication-flow-group" open>
+                    <summary><span><strong>Back of book</strong><small>@IncludedPublicationSectionCount(PublicationContentArea.Back) included</small></span></summary>
+                    <div class="publication-flow-body">
+                        <div class="publication-flow-actions"><span>Acknowledgements, author notes, references, and other closing material.</span><div class="button-row"><button class="btn btn-sm btn-outline-primary" disabled="@_assistantRunning" @onclick="() => AddPublicationSectionAsync(false, PublicationSectionAnchor.Back)">Add prose</button><button class="btn btn-sm btn-outline-primary" disabled="@_assistantRunning" @onclick="() => AddPublicationSectionAsync(true, PublicationSectionAnchor.Back)">Add designed page</button></div></div>
+                        @PublicationSectionRows(PublicationSectionsFor(PublicationContentArea.Back))
+                    </div>
+                </details>
+            </div>
+        }
+    </section>;
+
+    private RenderFragment ContentStructureOptions() => @<div class="option-grid publication-option-grid">
+        @if (_selectedReleaseId is null)
+        {
+            @Toggle("Include navigation table of contents", _coreDraft.IncludeTableOfContents, value => CoreToggle(nameof(CoreDraft.IncludeTableOfContents), value))
+            @Toggle("Show a contents page", _coreDraft.IncludeVisibleTableOfContents, value => CoreToggle(nameof(CoreDraft.IncludeVisibleTableOfContents), value))
+            @Toggle("Show act headings", _coreDraft.IncludeActHeadings, value => CoreToggle(nameof(CoreDraft.IncludeActHeadings), value))
+            @Toggle("Show chapter headings", _coreDraft.IncludeChapterHeadings, value => CoreToggle(nameof(CoreDraft.IncludeChapterHeadings), value))
+            @Toggle("Include act summaries", _coreDraft.IncludeActSynopses, value => CoreToggle(nameof(CoreDraft.IncludeActSynopses), value))
+            @Toggle("Include chapter summaries", _coreDraft.IncludeChapterSynopses, value => CoreToggle(nameof(CoreDraft.IncludeChapterSynopses), value))
+            @Toggle("Number acts", _coreDraft.NumberActs, value => CoreToggle(nameof(CoreDraft.NumberActs), value))
+            @Toggle("Number chapters", _coreDraft.NumberChapters, value => CoreToggle(nameof(CoreDraft.NumberChapters), value))
+        }
+        else
+        {
+            @InheritedToggle("Navigation contents", PublicationEditionOverrideField.IncludeTableOfContents, _releaseDraft.IncludeTableOfContents, value => ReleaseToggle(nameof(ReleaseDraft.IncludeTableOfContents), value))
+            @InheritedToggle("Visible contents page", PublicationEditionOverrideField.IncludeVisibleTableOfContents, _releaseDraft.IncludeVisibleTableOfContents, value => ReleaseToggle(nameof(ReleaseDraft.IncludeVisibleTableOfContents), value))
+            @InheritedToggle("Act headings", PublicationEditionOverrideField.IncludeActHeadings, _releaseDraft.IncludeActHeadings, value => ReleaseToggle(nameof(ReleaseDraft.IncludeActHeadings), value))
+            @InheritedToggle("Chapter headings", PublicationEditionOverrideField.IncludeChapterHeadings, _releaseDraft.IncludeChapterHeadings, value => ReleaseToggle(nameof(ReleaseDraft.IncludeChapterHeadings), value))
+            @InheritedToggle("Act summaries", PublicationEditionOverrideField.IncludeActSynopses, _releaseDraft.IncludeActSynopses, value => ReleaseToggle(nameof(ReleaseDraft.IncludeActSynopses), value))
+            @InheritedToggle("Chapter summaries", PublicationEditionOverrideField.IncludeChapterSynopses, _releaseDraft.IncludeChapterSynopses, value => ReleaseToggle(nameof(ReleaseDraft.IncludeChapterSynopses), value))
+            @InheritedToggle("Number acts", PublicationEditionOverrideField.NumberActs, _releaseDraft.NumberActs, value => ReleaseToggle(nameof(ReleaseDraft.NumberActs), value))
+            @InheritedToggle("Number chapters", PublicationEditionOverrideField.NumberChapters, _releaseDraft.NumberChapters, value => ReleaseToggle(nameof(ReleaseDraft.NumberChapters), value))
+        }
+    </div>;
+
+    private RenderFragment ChapterRows() => @<div class="publication-section-groups chapter-groups">
+        @if (_selectedReleaseId is null)
+        {
+            @foreach (var item in _coreOutline)
             {
-                <div class="deferred-section-loading"><span class="spinner-border spinner-border-sm"></span> Loading publication sections...</div>
+                var included = _coreSelections.GetValueOrDefault((item.TargetKind, item.TargetId));
+                <div class="publication-section-row publication-chapter-row @(!included ? "omitted" : null)">
+                    <div><strong>@item.Title</strong><span>Chapter · @(included ? "Included" : "Omitted")</span></div>
+                    <button class="btn btn-sm @(included ? "btn-outline-secondary" : "btn-outline-primary")" disabled="@_assistantRunning" @onclick="() => CoreOutlineChanged(item, !included)">@(included ? "Omit" : "Include")</button>
+                </div>
             }
-            else
+        }
+        else
+        {
+            @foreach (var chapterGroup in _workspace!.Sections)
             {
-                <div class="publication-section-groups">
-                    @foreach (var group in _publicationSections.GroupBy(item => (item.Anchor, item.TargetId, item.TargetTitle)))
+                <div class="publication-chapter-group">
+                    @if (!string.IsNullOrWhiteSpace(chapterGroup.Title)){<h4>@chapterGroup.Title</h4>}
+                    @foreach (var chapter in chapterGroup.Chapters)
                     {
-                        <div class="publication-section-group">
-                            <h3>@SectionPositionLabel(group.Key.Anchor, group.Key.TargetTitle)</h3>
-                            @foreach (var item in group)
-                            {
-                                <div class="publication-section-row @(!item.IsIncluded ? "omitted" : null)">
-                                    <div><strong>@item.Title</strong><span>@SectionTypeLabel(item) · @(item.IsInherited ? "From Core Book" : item.IsIncluded ? "Included" : "Omitted") · @SectionStartSideSummary(item.StartSide)</span></div>
-                                    <div class="button-row">
-                                        <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section earlier" aria-label="Move @item.Title earlier" disabled="@(!CanMovePublicationSection(item, -1))" @onclick="() => MovePublicationSectionAsync(item, -1)">↑</button>
-                                        <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section later" aria-label="Move @item.Title later" disabled="@(!CanMovePublicationSection(item, 1))" @onclick="() => MovePublicationSectionAsync(item, 1)">↓</button>
-                                        <button class="btn btn-sm @(item.IsIncluded ? "btn-outline-secondary" : "btn-outline-primary")" disabled="@_assistantRunning" @onclick="() => SetPublicationSectionIncludedAsync(item, !item.IsIncluded)">@(item.IsIncluded ? "Omit" : "Include")</button>
-                                        @if (item.SystemRole == PublicationSectionSystemRole.Contents)
-                                        {
-                                            <span class="status-pill">Generated automatically</span>
-                                        }
-                                        else
-                                        {
-                                            <button class="btn btn-sm btn-outline-primary" @onclick="() => BeginPublicationSectionEditAsync(item)">@(item.IsInherited ? "Customize" : "Edit")</button>
-                                        }
-                                        @if (item.CoreSectionId is not null && !item.IsInherited)
-                                        {
-                                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => ResetPublicationSectionAsync(item)">Use Core Book</button>
-                                        }
-                                        @if (item.SystemRole == PublicationSectionSystemRole.None)
-                                        {
-                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePublicationSectionAsync(item)">Remove</button>
-                                        }
-                                    </div>
-                                </div>
-                            }
+                        var included = _releaseSelections.GetValueOrDefault(chapter.Id);
+                        var coreIncluded = _coreSelections.GetValueOrDefault((PublishOutlineTargetKind.Chapter, chapter.Id));
+                        <div class="publication-section-row publication-chapter-row @(!included ? "omitted" : null)">
+                            <div><strong>@chapter.Title</strong><span>Chapter · @(included ? "Included" : "Omitted") · @(included == coreIncluded ? "From Core Book" : "Release choice")</span></div>
+                            <button class="btn btn-sm @(included ? "btn-outline-secondary" : "btn-outline-primary")" disabled="@_assistantRunning" @onclick="() => ReleaseContentChanged(chapter.Id, !included)">@(included ? "Omit" : "Include")</button>
                         </div>
                     }
                 </div>
+            }
         }
-    </section>;
+    </div>;
+
+    private RenderFragment PublicationSectionRows(IEnumerable<PublicationSectionView> sections, bool showPosition = false) => @<div class="publication-section-groups">
+        @if (!sections.Any())
+        {
+            <div class="publication-empty-row">No additional sections.</div>
+        }
+        else
+        {
+            @foreach (var group in sections.GroupBy(item => (item.Anchor, item.TargetId, item.TargetTitle)))
+            {
+                <div class="publication-section-group">
+                    @if (showPosition){<h3>@SectionPositionLabel(group.Key.Anchor, group.Key.TargetTitle)</h3>}
+                    @foreach (var item in group)
+                    {
+                        var included = IsPublicationSectionIncluded(item);
+                        <div class="publication-section-row @(!included ? "omitted" : null)">
+                            <div><strong>@item.Title</strong><span>@SectionTypeLabel(item) · @(item.IsInherited ? "From Core Book" : included ? "Included" : "Omitted") · @SectionStartSideSummary(item.StartSide)</span></div>
+                            <div class="button-row">
+                                <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section earlier" aria-label="Move @item.Title earlier" disabled="@(!CanMovePublicationSection(item, -1))" @onclick="() => MovePublicationSectionAsync(item, -1)">↑</button>
+                                <button class="btn btn-sm btn-outline-secondary section-order-button" title="Move section later" aria-label="Move @item.Title later" disabled="@(!CanMovePublicationSection(item, 1))" @onclick="() => MovePublicationSectionAsync(item, 1)">↓</button>
+                                <button class="btn btn-sm @(included ? "btn-outline-secondary" : "btn-outline-primary")" disabled="@_assistantRunning" @onclick="() => SetPublicationSectionIncludedAsync(item, !included)">@(included ? "Omit" : "Include")</button>
+                                @if (item.SystemRole == PublicationSectionSystemRole.Contents)
+                                {
+                                    <span class="status-pill">Generated automatically</span>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-outline-primary" disabled="@_assistantRunning" @onclick="() => BeginPublicationSectionEditAsync(item)">@(item.IsInherited ? "Customize" : "Edit")</button>
+                                }
+                                @if (item.SystemRole == PublicationSectionSystemRole.None)
+                                {
+                                    <select class="form-select form-select-sm section-area-select" disabled="@_assistantRunning" value="@PublicationArea(item.Anchor)" aria-label="Move @item.Title" @onchange="e => MovePublicationSectionAreaAsync(item, e)"><option value="Front">Front</option><option value="Content" disabled="@(_coreOutline.Count == 0)">Content</option><option value="Back">Back</option></select>
+                                }
+                                @if (item.CoreSectionId is not null && !item.IsInherited)
+                                {
+                                    <button class="btn btn-sm btn-outline-secondary" disabled="@_assistantRunning" @onclick="() => ResetPublicationSectionAsync(item)">Use Core Book</button>
+                                }
+                                @if (item.SystemRole == PublicationSectionSystemRole.None)
+                                {
+                                    <button class="btn btn-sm btn-outline-danger" disabled="@_assistantRunning" @onclick="() => DeletePublicationSectionAsync(item)">Remove</button>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        }
+    </div>;
 
     private RenderFragment PublicationSectionEditorView() => @<section class="publication-section-editor" aria-label="Publication section editor">
         <header class="publication-section-editor-header">
@@ -871,11 +955,16 @@ else
     private PublicationSectionTarget CurrentPublicationSectionTarget() =>
         new(Project!.Id, _selectedReleaseId);
 
-    private async Task AddPublicationSectionAsync(bool designedPage)
+    private async Task AddPublicationSectionAsync(bool designedPage, PublicationSectionAnchor anchor)
     {
         if (Project is null) return;
         try
         {
+            var target = anchor is PublicationSectionAnchor.Front or PublicationSectionAnchor.Back
+                ? null
+                : _coreOutline.FirstOrDefault();
+            if (target is null && anchor is not (PublicationSectionAnchor.Front or PublicationSectionAnchor.Back))
+                throw new InvalidOperationException("Add a chapter before placing a section in the main content.");
             var id = Guid.NewGuid();
             var document = new ManuscriptDocument
             {
@@ -893,7 +982,7 @@ else
             };
             var saved = await PublicationSections.UpsertAsync(CurrentPublicationSectionTarget(), new(
                 null, designedPage ? "Designed page" : "New section", PublicationSectionKind.Custom,
-                PublicationSectionAnchor.Back, null, null, PublicationSectionInclusionMode.Included,
+                anchor, target?.TargetKind, target?.TargetId, PublicationSectionInclusionMode.Included,
                 PublicationSectionStartSide.Next,
                 ManuscriptCodec.Serialize(document)));
             if (designedPage)
@@ -1171,6 +1260,40 @@ else
         catch (Exception exception) { _error = exception.Message; }
     }
 
+    private async Task MovePublicationSectionAreaAsync(PublicationSectionView item, ChangeEventArgs args)
+    {
+        var area = args.Value?.ToString();
+        var anchor = area switch
+        {
+            "Front" => PublicationSectionAnchor.Front,
+            "Back" => PublicationSectionAnchor.Back,
+            _ when item.Anchor is not (PublicationSectionAnchor.Front or PublicationSectionAnchor.Back) => item.Anchor,
+            _ => PublicationSectionAnchor.BeforeChapter,
+        };
+        PublicationBookOutlineView? target = null;
+        if (anchor is not (PublicationSectionAnchor.Front or PublicationSectionAnchor.Back))
+        {
+            target = item.TargetId is Guid targetId
+                ? _coreOutline.FirstOrDefault(candidate => candidate.TargetId == targetId)
+                : _coreOutline.FirstOrDefault();
+            if (target is null)
+            {
+                _error = "Add a chapter before moving a section into the main content.";
+                return;
+            }
+        }
+        try
+        {
+            var saved = await PublicationSections.UpsertAsync(CurrentPublicationSectionTarget(), new(
+                item.Id, item.Title, item.Kind, anchor, target?.TargetKind, target?.TargetId,
+                item.InclusionMode, item.StartSide, ManuscriptCodec.Serialize(item.Manuscript), item.Revision));
+            if (_editingSection?.Id == item.Id)
+                BeginPublicationSectionEdit(saved);
+            await RefreshPublicationSectionsAsync(updateEditing: false);
+        }
+        catch (Exception exception) { _error = exception.Message; }
+    }
+
     private Task DeletePublicationSectionAsync(PublicationSectionView item)
     {
         _pendingSectionRemoval = item;
@@ -1264,12 +1387,49 @@ else
         PublicationSectionStartSide.Verso => "starts on left page",
         _ => "starts on next page",
     };
-    private string PublicationSectionsStep() => _selectedReleaseId is null ? "04" : _workspace?.Edition.Format switch
+    private enum PublicationContentArea { Front, Content, Back }
+
+    private IEnumerable<PublicationSectionView> PublicationSectionsFor(PublicationContentArea area) =>
+        _publicationSections.Where(item => area switch
+        {
+            PublicationContentArea.Front => item.Anchor == PublicationSectionAnchor.Front,
+            PublicationContentArea.Back => item.Anchor == PublicationSectionAnchor.Back,
+            _ => item.Anchor is not (PublicationSectionAnchor.Front or PublicationSectionAnchor.Back),
+        });
+
+    private static string PublicationArea(PublicationSectionAnchor anchor) => anchor switch
     {
-        PublicationEditionFormat.Epub => "05",
-        PublicationEditionFormat.Paperback => "06",
-        _ => "07",
+        PublicationSectionAnchor.Front => "Front",
+        PublicationSectionAnchor.Back => "Back",
+        _ => "Content",
     };
+
+    private bool IsPublicationSectionIncluded(PublicationSectionView item)
+    {
+        if (item.InclusionMode == PublicationSectionInclusionMode.Omitted)
+            return false;
+        if (item.InclusionMode == PublicationSectionInclusionMode.Included)
+            return true;
+        var titlePageMode = _selectedReleaseId is null ? _coreDraft.TitlePageMode : _workspace!.Edition.TitlePageMode;
+        var copyright = _selectedReleaseId is null ? _coreDraft.Copyright : _releaseDraft.Copyright;
+        var includeContents = _selectedReleaseId is null
+            ? _coreDraft.IncludeVisibleTableOfContents
+            : _releaseDraft.IncludeVisibleTableOfContents;
+        return item.SystemRole switch
+        {
+            PublicationSectionSystemRole.Title => titlePageMode != PublishTitlePageMode.Omit,
+            PublicationSectionSystemRole.Copyright => !string.IsNullOrWhiteSpace(copyright),
+            PublicationSectionSystemRole.Contents => includeContents,
+            _ => item.IsIncluded,
+        };
+    }
+
+    private int IncludedPublicationSectionCount(PublicationContentArea area) =>
+        PublicationSectionsFor(area).Count(IsPublicationSectionIncluded);
+
+    private int IncludedChapterCount() => _selectedReleaseId is null
+        ? _coreOutline.Count(item => _coreSelections.GetValueOrDefault((item.TargetKind, item.TargetId)))
+        : _releaseSelections.Count(item => item.Value);
 
     private async Task RefreshCoreDataAsync()
     {
@@ -1684,7 +1844,6 @@ else
         foreach (var id in _releaseSelections.Keys.ToList())
             if (chapters.TryGetValue(id, out var included)) _releaseSelections[id] = included;
         _releaseContentDirty = true;
-        _releaseContentOpen = true;
         QueueFormAutosave();
     }
 

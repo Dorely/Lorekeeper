@@ -954,7 +954,15 @@ customization copies the currently selected Core canvas and adapts that complete
 scene to the release geometry; an older saved layout for the same geometry must
 never replace current typography, artwork, or object styling during that cutover.
 metadata remains available in a compact secondary panel; section content is never
-expanded inline in the publication-section list. The visible contents
+expanded inline in the publication-section list. The Publish overview combines
+publication sections and chapter inclusion into one collapsible Front/Main
+content/Back flow. Each chapter and section uses an explicit Include/Omit action,
+the Main content group owns act/chapter heading, synopsis, numbering, and
+navigation choices, and group-scoped creation places new prose or Designed Page
+sections at the selected part of the book. Custom sections can move between
+Front, Content, and Back directly from the list; changing position assigns a new
+local order at the destination instead of carrying an unrelated source order.
+The visible contents
 section is generated from effective structure. Generated sections never enter
 the ordinary manuscript editor, and user-created sections cannot claim those
 reserved roles or duplicate generated output. EPUB

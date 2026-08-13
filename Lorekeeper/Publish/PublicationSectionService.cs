@@ -191,6 +191,8 @@ public sealed class PublicationSectionService(
                 && input.Kind is PublicationSectionKind.TitlePage or PublicationSectionKind.Copyright or PublicationSectionKind.Contents)
                 throw new InvalidOperationException("Title, copyright, and contents use the existing generated publication sections.");
             ValidateSystemDocument(row.SystemRole, input, document);
+            if (row.Anchor != input.Anchor || row.TargetKind != input.TargetKind || row.TargetId != input.TargetId)
+                row.LocalOrder = await NextOrderAsync(target, input.Anchor, input.TargetId, cancellationToken);
         }
         else
         {
@@ -747,6 +749,8 @@ public sealed class PublicationSectionService(
         CancellationToken cancellationToken)
     {
         var clone = await CloneSectionAsync(core, editionId, cancellationToken);
+        if (clone.Anchor != input.Anchor || clone.TargetKind != input.TargetKind || clone.TargetId != input.TargetId)
+            clone.LocalOrder = await NextOrderAsync(new(projectId, editionId), input.Anchor, input.TargetId, cancellationToken);
         Apply(clone, input with { Id = clone.Id, ExpectedRevision = clone.Revision }, document with { ManuscriptId = clone.Id });
         db.PublicationSections.Add(clone);
         await TouchEditionAsync(editionId, cancellationToken);
@@ -912,9 +916,26 @@ public sealed class PublicationSectionService(
             throw new InvalidOperationException("Linked Core Book fields in a generated publication section cannot be removed or rebound.");
     }
 
-    private async Task<int> NextOrderAsync(PublicationSectionTarget target, PublicationSectionAnchor anchor, Guid? targetId, CancellationToken cancellationToken) =>
-        (await db.PublicationSections.Where(item => item.ProjectId == target.ProjectId && item.EditionId == target.EditionId
-            && item.Anchor == anchor && item.TargetId == targetId).Select(item => (int?)item.LocalOrder).MaxAsync(cancellationToken) ?? -1) + 1;
+    private async Task<int> NextOrderAsync(
+        PublicationSectionTarget target,
+        PublicationSectionAnchor anchor,
+        Guid? targetId,
+        CancellationToken cancellationToken)
+    {
+        var localMaximum = await db.PublicationSections
+            .Where(item => item.ProjectId == target.ProjectId && item.EditionId == target.EditionId
+                && item.Anchor == anchor && item.TargetId == targetId)
+            .Select(item => (int?)item.LocalOrder)
+            .MaxAsync(cancellationToken) ?? -1;
+        if (target.EditionId is null)
+            return localMaximum + 1;
+        var inheritedMaximum = await db.PublicationSections
+            .Where(item => item.ProjectId == target.ProjectId && item.EditionId == null
+                && item.Anchor == anchor && item.TargetId == targetId)
+            .Select(item => (int?)item.LocalOrder)
+            .MaxAsync(cancellationToken) ?? -1;
+        return Math.Max(localMaximum, inheritedMaximum) + 1;
+    }
 
     private async Task RequireEditionAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken)
     {
