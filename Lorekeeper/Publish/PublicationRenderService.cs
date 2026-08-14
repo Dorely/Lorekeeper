@@ -428,12 +428,17 @@ public sealed class PublicationRenderService(
     {
         var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
         var rendererVersion = CurrentRendererVersion();
+        var editionFormat = await db.PublicationEditions.AsNoTracking()
+            .Where(edition => edition.Id == editionId && edition.ProjectId == projectId)
+            .Select(edition => edition.Format)
+            .SingleAsync(cancellationToken);
+        var packageRuntimeVersion = PublicationPackageService.PackageRuntimeVersion(editionFormat);
         return (await db.PublicationArtifacts.AsNoTracking()
                 .Where(artifact => artifact.EditionId == editionId && artifact.ProjectId == projectId)
                 .OrderByDescending(artifact => artifact.CreatedAt)
                 .Select(ArtifactMetadataProjection)
                 .ToListAsync(cancellationToken))
-            .Select(artifact => ArtifactView(artifact, fingerprint, rendererVersion))
+            .Select(artifact => ArtifactView(artifact, fingerprint, rendererVersion, packageRuntimeVersion))
             .ToList();
     }
 
@@ -497,8 +502,28 @@ public sealed class PublicationRenderService(
     private static PublicationArtifactView ArtifactView(
         PublicationArtifact artifact,
         string currentFingerprint,
-        string? currentRendererVersion) =>
-        new(
+        string? currentRendererVersion,
+        string? currentPackageRuntimeVersion = null)
+    {
+        var pressArtifact = artifact.Kind is PublicationArtifactKind.ReadingPdf
+            or PublicationArtifactKind.InteriorPdf
+            or PublicationArtifactKind.PerfectBoundCoverPdf
+            or PublicationArtifactKind.CaseCoverPdf
+            or PublicationArtifactKind.DustJacketPdf
+            or PublicationArtifactKind.BookPdf;
+        var packageArtifact = artifact.Kind is PublicationArtifactKind.Epub
+            or PublicationArtifactKind.FrontCoverImage
+            or PublicationArtifactKind.PublicationPackage
+            or PublicationArtifactKind.PreflightReport
+            or PublicationArtifactKind.Manifest;
+        var isStale = !string.Equals(artifact.SourceFingerprint, currentFingerprint, StringComparison.Ordinal)
+            || (pressArtifact
+                && currentRendererVersion is not null
+                && !string.Equals(artifact.RendererVersion, currentRendererVersion, StringComparison.Ordinal))
+            || (packageArtifact
+                && currentPackageRuntimeVersion is not null
+                && !string.Equals(artifact.RendererVersion, currentPackageRuntimeVersion, StringComparison.Ordinal));
+        return new(
             artifact.Id,
             artifact.Kind,
             artifact.FileName,
@@ -511,12 +536,8 @@ public sealed class PublicationRenderService(
             artifact.ProfileId,
             artifact.CreatedAt,
             artifact.IsLegacy,
-            !string.Equals(artifact.SourceFingerprint, currentFingerprint, StringComparison.Ordinal)
-                || (artifact.Kind is PublicationArtifactKind.ReadingPdf or PublicationArtifactKind.InteriorPdf
-                    or PublicationArtifactKind.PerfectBoundCoverPdf or PublicationArtifactKind.CaseCoverPdf
-                    or PublicationArtifactKind.DustJacketPdf or PublicationArtifactKind.BookPdf
-                    && currentRendererVersion is not null
-                    && !string.Equals(artifact.RendererVersion, currentRendererVersion, StringComparison.Ordinal)));
+            isStale);
+    }
 
     private static IReadOnlyList<PublicationRenderDiagnostic> DeserializeDiagnostics(string json)
     {

@@ -73,7 +73,7 @@ public sealed class PublicationPackageService(
     IPublicationPressRuntime? pressRuntime = null) : IPublicationPackageService
 {
     private const string AssemblerVersion = "lorekeeper-package-v1";
-    private const string EpubExporterVersion = "lorekeeper-epub-v2";
+    private const string EpubExporterVersion = "lorekeeper-epub-v3";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -316,7 +316,7 @@ public sealed class PublicationPackageService(
                 && artifact.Kind == PublicationArtifactKind.PublicationPackage
                 && !artifact.IsLegacy
                 && artifact.SourceFingerprint == fingerprint
-                && artifact.RendererVersion == RuntimeVersion(profile.Format)
+                && artifact.RendererVersion == PackageRuntimeVersion(profile.Format)
                 && artifact.ProfileId == packageIdentity)
             .OrderByDescending(artifact => artifact.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
@@ -561,7 +561,7 @@ public sealed class PublicationPackageService(
                 file.Value.MediaType,
                 file.Value.Data,
                 report.SourceFingerprint,
-                RuntimeVersion(edition.Format),
+                PackageRuntimeVersion(edition.Format),
                 packageIdentity));
         generated.Add(Artifact(
             editionId,
@@ -570,7 +570,7 @@ public sealed class PublicationPackageService(
             "application/zip",
             packageData,
             report.SourceFingerprint,
-            RuntimeVersion(edition.Format),
+            PackageRuntimeVersion(edition.Format),
             packageIdentity));
         db.PublicationArtifacts.AddRange(generated);
         await db.SaveChangesAsync(cancellationToken);
@@ -1282,7 +1282,7 @@ public sealed class PublicationPackageService(
         || rune.Value is >= 0x2100 and <= 0x214F
         || rune.Value == 0xFEFF;
 
-    private static string RuntimeVersion(PublicationEditionFormat format) =>
+    internal static string PackageRuntimeVersion(PublicationEditionFormat format) =>
         format == PublicationEditionFormat.Epub
             ? $"{AssemblerVersion}+{EpubExporterVersion}"
             : AssemblerVersion;

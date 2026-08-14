@@ -634,7 +634,7 @@
 | `PublicationArtifactPreviewService.cs` | Bounded, cached PDF-to-PNG page rendering for Lorekeeper-owned artifact previews using the already packaged PDFium/Skia runtime. |
 | `PublicationEpubPreviewService.cs` | Hash-verified, bounded in-memory EPUB parser/cache with safe manifest/spine/navigation reads, preview-only XHTML/SVG/CSS sanitization, fixed-layout metadata, and bounded assistant text extraction. |
 | `PublishEndpoints.cs` | Cacheable/range project-scoped immutable publication artifact viewing/download endpoints plus immutable rendered PDF-page previews and CSP-restricted validated EPUB resources. |
-| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown plus semantic EPUB writer for flowing Figures, real-text fixed-layout Designed Pages/covers, reading order, captions, and alternatives. |
+| `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown plus semantic EPUB writer for flowing Figures, non-empty mixed-layout spine segmentation, canvas-faithful real-text Designed Pages/covers, reading order, captions, and alternatives. |
 
 ### Graph/
 

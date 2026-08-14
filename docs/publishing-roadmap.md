@@ -204,9 +204,10 @@ Status: `Implemented`
 Prepared EPUBs open in a Lorekeeper-owned, sandboxed reader that parses the
 stored artifact in memory, preserves reflowable and fixed-layout spine order,
 and serves only validated manifest resources through artifact-scoped endpoints.
-The reader supports navigation and bounded assistant inspection, but is visual
-artifact review rather than authoritative EPUB conformance or cross-reader
-compatibility evidence.
+Designed Page spine items retain the canvas scene's typography and do not gain
+empty reflowable pages before or after them. The reader supports navigation and
+bounded assistant inspection, but is visual artifact review rather than
+authoritative EPUB conformance or cross-reader compatibility evidence.
 
 Artifact history, render comparison, and production audit browsing may improve
 diagnosis, but they are not prerequisites for producing an uploadable file.

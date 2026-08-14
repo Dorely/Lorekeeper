@@ -875,6 +875,17 @@ not change or suppress the immutable download. Publish tools expose only
 bounded spine/navigation metadata and paged extracted text, never binary data or
 complete XHTML. This reader is artifact inspection, not EPUBCheck evidence or a
 general third-party EPUB import reader.
+The EPUB exporter segments mixed semantic and Designed Page content at actual
+content boundaries. A fixed-layout canvas is one spine item by itself; the
+exporter does not synthesize empty reflowable siblings before or after it. The
+first real segment retains the chapter or publication-section navigation target,
+whether that segment is flowing XHTML or a Designed Page. Fixed-layout
+viewports use the composition scene's own point-sized coordinate space as CSS
+pixels, matching the Pages/Cover canvas for text size, wrapping, vertical
+alignment, padding, borders, and object placement instead of allowing CSS point
+conversion to enlarge text by one third. Changing this serialization contract
+advances the EPUB exporter version so previously prepared EPUB/package artifacts
+become stale and must be regenerated.
 Source-fingerprint mismatch
 marks otherwise valid immutable
 artifacts stale. Installed-renderer or selected-profile provenance mismatch also

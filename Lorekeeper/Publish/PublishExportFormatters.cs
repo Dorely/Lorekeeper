@@ -445,7 +445,9 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         var items = new List<EpubXhtmlItem>();
         if (document.Cover is not null || CoverImageHref(imageItems) is not null)
         {
-            var viewport = CoverViewport(document.Profile);
+            var viewport = document.Cover is { } cover
+                ? SceneViewport(cover.Scene)
+                : CoverViewport(document.Profile);
             items.Add(new EpubXhtmlItem(
                 "cover-page",
                 "cover.xhtml",
@@ -508,9 +510,10 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             var first = true;
             void Flush()
             {
-                if (segment.Count == 0 && !first) return;
+                var generatedContents = first && section.SystemRole == PublicationSectionSystemRole.Contents;
+                if (segment.Count == 0 && !generatedContents) return;
                 var id = first ? baseId : $"{baseId}-part-{++part}";
-                var content = section.SystemRole == PublicationSectionSystemRole.Contents
+                var content = generatedContents
                     ? RenderVisibleToc(document)
                     : RenderSemanticMatterBody(section.Title, string.Concat(segment.Select(block =>
                         SemanticPublishFormatting.HtmlBlock(block, imageId => ImageHref(imageItems, imageId)))));
@@ -533,18 +536,17 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                     ?? throw new InvalidOperationException($"Designed Page '{compositionId:N}' is missing from publication section '{section.Title}'.");
                 var variant = composition.Variants.FirstOrDefault()
                     ?? throw new InvalidOperationException($"Designed Page '{composition.Name}' has no layout for EPUB export.");
-                var id = $"{baseId}-designed-{++designedIndex}";
-                var viewport = new EpubViewport(
-                    Math.Max(1, (int)Math.Round(variant.Scene.Surface.WidthPoints)),
-                    Math.Max(1, (int)Math.Round(variant.Scene.Surface.HeightPoints)));
+                var id = first ? baseId : $"{baseId}-designed-{++designedIndex}";
+                var viewport = SceneViewport(variant.Scene);
                 var body = new StringBuilder();
                 AppendDesignedPage(body, composition, imageItems);
                 items.Add(new EpubXhtmlItem(id, $"{id}.xhtml", composition.Name,
                     RenderXhtmlPage(document, composition.Name, body.ToString(), viewport, "fixed-layout"),
-                    IncludeInNavigation: false,
+                    IncludeInNavigation: first,
                     SpineProperties: variant.Scene.Surface.Kind == CompositionSurfaceKind.FacingSpread
                         ? "rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"
                         : "rendition:layout-pre-paginated rendition:spread-none"));
+                first = false;
             }
             Flush();
         }
@@ -560,9 +562,12 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         var segment = new List<ManuscriptBlock>();
         var part = 0;
         var firstReflow = true;
-        void FlushReflow(bool final)
+        void FlushReflow()
         {
-            if (segment.Count == 0 && !firstReflow && !final) return;
+            var hasOpeningPresentation = firstReflow
+                && (chapter.IncludeHeading
+                    || (document.Profile.IncludeChapterSynopses && !string.IsNullOrWhiteSpace(chapter.Synopsis)));
+            if (segment.Count == 0 && !hasOpeningPresentation) return;
             var id = firstReflow ? chapterId : $"{chapterId}-part-{++part}";
             var title = firstReflow ? chapter.Title : $"{chapter.Title}, continued";
             items.Add(new EpubXhtmlItem(
@@ -577,8 +582,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                         chapter,
                         imageItems,
                         segment,
-                        includeOpening: firstReflow,
-                        includeEnding: final)),
+                        includeOpening: firstReflow)),
                 IncludeInNavigation: firstReflow));
             segment.Clear();
             firstReflow = false;
@@ -593,15 +597,13 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 segment.Add(block);
                 continue;
             }
-            FlushReflow(final: false);
+            FlushReflow();
             var composition = chapter.PageCompositions.FirstOrDefault(item => item.Id == compositionId)
                 ?? throw new InvalidOperationException($"Designed Page '{compositionId:N}' is missing from the chapter publication document.");
             var variant = composition.Variants.FirstOrDefault()
                 ?? throw new InvalidOperationException($"Designed Page '{composition.Name}' has no layout for EPUB export.");
-            var id = $"{chapterId}-designed-{++designedIndex}";
-            var viewport = new EpubViewport(
-                Math.Max(1, (int)Math.Round(variant.Scene.Surface.WidthPoints)),
-                Math.Max(1, (int)Math.Round(variant.Scene.Surface.HeightPoints)));
+            var id = firstReflow ? chapterId : $"{chapterId}-designed-{++designedIndex}";
+            var viewport = SceneViewport(variant.Scene);
             var spread = variant.Scene.Surface.Kind == CompositionSurfaceKind.FacingSpread
                 ? "rendition:layout-pre-paginated rendition:spread-none rendition:page-spread-center"
                 : "rendition:layout-pre-paginated rendition:spread-none";
@@ -612,10 +614,11 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 $"{id}.xhtml",
                 composition.Name,
                 RenderXhtmlPage(document, composition.Name, body.ToString(), viewport, "fixed-layout"),
-                IncludeInNavigation: false,
+                IncludeInNavigation: firstReflow,
                 SpineProperties: spread));
+            firstReflow = false;
         }
-        FlushReflow(final: true);
+        FlushReflow();
     }
 
     private static List<EpubImageItem> BuildImageItems(PublishDocument document)
@@ -724,14 +727,14 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 var text = item.TextBinding switch { "title" => cover.Title, "subtitle" => cover.Subtitle, "author" => cover.Author, "spineText" => cover.SpineText, "backCopy" => cover.BackCopy, _ => item.TextBinding };
                 sb.Append("<foreignObject x=\"").Append(x.ToString(CultureInfo.InvariantCulture)).Append("\" y=\"").Append(y.ToString(CultureInfo.InvariantCulture))
                     .Append("\" width=\"").Append(width.ToString(CultureInfo.InvariantCulture)).Append("\" height=\"").Append(height.ToString(CultureInfo.InvariantCulture))
-                    .Append("\" opacity=\"").Append(item.Opacity.ToString(CultureInfo.InvariantCulture)).Append("\" transform=\"").Append(transform).Append("\"><div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"box-sizing:border-box;display:flex;width:100%;height:100%;overflow:hidden;white-space:pre-wrap;color:")
+                    .Append("\" opacity=\"").Append(item.Opacity.ToString(CultureInfo.InvariantCulture)).Append("\" transform=\"").Append(transform).Append("\"><div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"box-sizing:border-box;display:flex;flex-direction:column;width:100%;height:100%;overflow:hidden;overflow-wrap:anywhere;white-space:pre-wrap;color:")
                     .Append(Html(item.FillColor)).Append(";background:").Append(Html(BackgroundCss(item.BackgroundColor, item.BackgroundOpacity)))
-                    .Append(";border:").Append(item.StrokeWidthPoints.ToString(CultureInfo.InvariantCulture)).Append("pt solid ").Append(Html(item.StrokeColor))
-                    .Append(";font-family:").Append(Html(FontCssFamily(item.FontFamilyKey))).Append(";font-size:").Append(item.FontSizePoints.ToString(CultureInfo.InvariantCulture)).Append("pt;font-weight:").Append(item.FontWeight)
+                    .Append(";border:").Append(item.StrokeWidthPoints.ToString(CultureInfo.InvariantCulture)).Append("px solid ").Append(Html(item.StrokeColor))
+                    .Append(";font-family:").Append(Html(FontCssFamily(item.FontFamilyKey))).Append(";font-size:").Append(item.FontSizePoints.ToString(CultureInfo.InvariantCulture)).Append("px;font-weight:").Append(item.FontWeight)
                     .Append(";font-style:").Append(item.Italic ? "italic" : "normal").Append(";line-height:").Append(item.LineHeight.ToString(CultureInfo.InvariantCulture))
                     .Append(";letter-spacing:").Append(item.LetterSpacingEm.ToString(CultureInfo.InvariantCulture)).Append("em;text-align:")
                     .Append(item.TextAlignment == CompositionTextAlignment.Center ? "center" : item.TextAlignment == CompositionTextAlignment.End ? "right" : "left")
-                    .Append(";align-items:").Append(item.VerticalAlignment == CompositionVerticalAlignment.Center ? "center" : item.VerticalAlignment == CompositionVerticalAlignment.Bottom ? "flex-end" : "flex-start")
+                    .Append(";justify-content:").Append(item.VerticalAlignment == CompositionVerticalAlignment.Center ? "center" : item.VerticalAlignment == CompositionVerticalAlignment.Bottom ? "flex-end" : "flex-start")
                     .Append(";text-shadow:").Append(TextShadowCss(item.TextShadow)).Append("\">").Append(Html(text)).Append("</div></foreignObject>");
             }
             else if (item.Kind == CompositionObjectKind.Ellipse)
@@ -776,7 +779,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             {
                 var item = ResolveCompositionStyle(cover.Scene, sceneItem);
                 var style = FormattableString.Invariant(
-                    $"left:{item.Bounds.XPercent}%;top:{item.Bounds.YPercent}%;width:{item.Bounds.WidthPercent}%;height:{item.Bounds.HeightPercent}%;opacity:{item.Opacity};transform:rotate({item.RotationDegrees}deg);z-index:{item.ZIndex};color:{item.FillColor};background:{BackgroundCss(item.BackgroundColor, item.BackgroundOpacity)};border:{item.StrokeWidthPoints}px solid {item.StrokeColor};font-family:{FontCssFamily(item.FontFamilyKey)};font-weight:{item.FontWeight};font-style:{(item.Italic ? "italic" : "normal")};font-size:{item.FontSizePoints}pt;line-height:{item.LineHeight};letter-spacing:{item.LetterSpacingEm}em;text-align:{(item.TextAlignment == CompositionTextAlignment.Center ? "center" : item.TextAlignment == CompositionTextAlignment.End ? "right" : "left")};align-items:{(item.VerticalAlignment == CompositionVerticalAlignment.Center ? "center" : item.VerticalAlignment == CompositionVerticalAlignment.Bottom ? "flex-end" : "flex-start")};text-shadow:{TextShadowCss(item.TextShadow)};object-fit:{ImageFitCss(item.ImageFit)};object-position:{item.CropXPercent}% {item.CropYPercent}%");
+                    $"left:{item.Bounds.XPercent}%;top:{item.Bounds.YPercent}%;width:{item.Bounds.WidthPercent}%;height:{item.Bounds.HeightPercent}%;opacity:{item.Opacity};transform:rotate({item.RotationDegrees}deg);z-index:{item.ZIndex};color:{item.FillColor};background:{BackgroundCss(item.BackgroundColor, item.BackgroundOpacity)};border:{item.StrokeWidthPoints}px solid {item.StrokeColor};font-family:{FontCssFamily(item.FontFamilyKey)};font-weight:{item.FontWeight};font-style:{(item.Italic ? "italic" : "normal")};font-size:{item.FontSizePoints}px;line-height:{item.LineHeight};letter-spacing:{item.LetterSpacingEm}em;text-align:{(item.TextAlignment == CompositionTextAlignment.Center ? "center" : item.TextAlignment == CompositionTextAlignment.End ? "right" : "left")};justify-content:{(item.VerticalAlignment == CompositionVerticalAlignment.Center ? "center" : item.VerticalAlignment == CompositionVerticalAlignment.Bottom ? "flex-end" : "flex-start")};text-shadow:{TextShadowCss(item.TextShadow)};object-fit:{ImageFitCss(item.ImageFit)};object-position:{item.CropXPercent}% {item.CropYPercent}%");
                 if (item.Kind == CompositionObjectKind.Text)
                 {
                     var text = item.TextBinding switch
@@ -850,8 +853,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         PublishChapterDocument chapter,
         IReadOnlyList<EpubImageItem> imageItems,
         IReadOnlyList<ManuscriptBlock> blocks,
-        bool includeOpening,
-        bool includeEnding)
+        bool includeOpening)
     {
         var sb = new StringBuilder();
         sb.AppendLine("<article class=\"chapter-page\">");
@@ -935,21 +937,21 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                 sb.Append(" style=\"").Append(style)
                     .Append(";font-family:").Append(Html(FontCssFamily(item.FontFamilyKey))).Append(";font-weight:")
                     .Append(item.FontWeight).Append(";font-style:").Append(item.Italic ? "italic" : "normal")
-                    .Append(";font-size:").Append(item.FontSizePoints.ToString(CultureInfo.InvariantCulture)).Append("pt;line-height:")
+                    .Append(";font-size:").Append(item.FontSizePoints.ToString(CultureInfo.InvariantCulture)).Append("px;line-height:")
                     .Append(item.LineHeight.ToString(CultureInfo.InvariantCulture)).Append(";letter-spacing:")
                     .Append(item.LetterSpacingEm.ToString(CultureInfo.InvariantCulture)).Append("em;color:")
                     .Append(Html(item.FillColor)).Append(";background:").Append(Html(BackgroundCss(item.BackgroundColor, item.BackgroundOpacity)))
                     .Append(";text-align:").Append(item.TextAlignment switch { CompositionTextAlignment.Center => "center", CompositionTextAlignment.End => "right", _ => "left" })
-                    .Append(";align-items:").Append(item.VerticalAlignment switch { CompositionVerticalAlignment.Center => "center", CompositionVerticalAlignment.Bottom => "flex-end", _ => "flex-start" })
+                    .Append(";justify-content:").Append(item.VerticalAlignment switch { CompositionVerticalAlignment.Center => "center", CompositionVerticalAlignment.Bottom => "flex-end", _ => "flex-start" })
                     .Append(";text-shadow:").Append(TextShadowCss(item.TextShadow))
-                    .Append(";-webkit-text-stroke:").Append(item.StrokeWidthPoints.ToString(CultureInfo.InvariantCulture)).Append("pt ")
+                    .Append(";-webkit-text-stroke:").Append(item.StrokeWidthPoints.ToString(CultureInfo.InvariantCulture)).Append("px ")
                     .Append(Html(item.StrokeColor)).Append("\">").Append(text).Append("</").Append(tag).AppendLine(">");
             }
             else
             {
                 var shapeStyle = item.Kind == CompositionObjectKind.Line
-                    ? style + $";height:0;border-top:{item.StrokeWidthPoints.ToString(CultureInfo.InvariantCulture)}pt solid {item.StrokeColor};background:transparent"
-                    : style + $";background:{item.FillColor};border:{item.StrokeWidthPoints.ToString(CultureInfo.InvariantCulture)}pt solid {item.StrokeColor}"
+                    ? style + $";height:0;border-top:{item.StrokeWidthPoints.ToString(CultureInfo.InvariantCulture)}px solid {item.StrokeColor};background:transparent"
+                    : style + $";background:{item.FillColor};border:{item.StrokeWidthPoints.ToString(CultureInfo.InvariantCulture)}px solid {item.StrokeColor}"
                         + (item.Kind == CompositionObjectKind.Ellipse ? ";border-radius:50%" : string.Empty);
                 sb.Append("<div class=\"composition-object composition-shape composition-")
                     .Append(item.Kind.ToString().ToLowerInvariant())
@@ -1047,6 +1049,10 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             Math.Max(1, (int)Math.Round(profile.PageWidthInches * scale)),
             Math.Max(1, (int)Math.Round(profile.PageHeightInches * scale)));
     }
+
+    private static EpubViewport SceneViewport(CompositionScene scene) => new(
+        Math.Max(1, (int)Math.Round(scene.Surface.WidthPoints)),
+        Math.Max(1, (int)Math.Round(scene.Surface.HeightPoints)));
 
     private static string RenderXhtmlPage(
         PublishDocument document,
@@ -1383,8 +1389,14 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         .composition-text,
         .cover-scene-text {
           display: flex;
+          flex-direction: column;
           overflow: hidden;
+          overflow-wrap: anywhere;
           white-space: pre-wrap;
+        }
+
+        .composition-text {
+          padding: .25rem;
         }
 
         .fixed-page-image {
