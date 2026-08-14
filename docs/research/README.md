@@ -1,6 +1,6 @@
 # Lorekeeper editorial and composition research
 
-Last reviewed: 2026-07-31
+Last reviewed: 2026-08-13
 
 Research access date: recorded by brief.
 
@@ -12,6 +12,7 @@ These briefs are engineering references for Lorekeeper's prompts, automation, co
 ## Briefs
 
 - [Image generation prompting](image-generation-prompting.md) — production prompt structure, references, edits, masks, story-page targeting, and direct mappings to Lorekeeper's structured image contracts.
+- [Visual development and concept-art practice](visual-development-and-concept-art.md) — style vocabulary, exploratory art direction, canonical character/location design, and the Images assistant's library/entity boundary.
 - [Story writing and editorial practice](story-writing-and-editorial-practice.md) — professional editorial stages, narrative craft, picture-book practice, and the requirements for Lorekeeper's code-owned system role.
 - [Page composition and typesetting](page-composition-and-typesetting.md) — page/spread design, typography, accessibility, diagnostic thresholds, and shared page geometry.
 - [Genre-aware book-format guidance](book-format-guidance.md) — current Book Brief-derived Outline guidance, format-neutral structure, and compact assistant contract.

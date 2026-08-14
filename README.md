@@ -41,10 +41,12 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   assistants share one revision-checked manuscript boundary; HTML is not
   authoritative.
 - Outline treats chapters as format-neutral containers and derives concise,
-  non-prescriptive genre-format guidance from the Book Brief. Outline, Editor,
-  Images, and Publish share revision-safe Figure/composition/cover tools,
-  server-owned image-generation geometry, compact paginated reads, and one-use
-  persisted stages for large scenes so payloads are not repeated.
+  non-prescriptive genre-format guidance from the Book Brief. Editor owns
+  chapter Figure and Designed Page work; Publish owns publication sections and
+  covers. Images is a concept-art workspace for style discovery, free-standing
+  library generation, user-approved Visual Direction, and canonical character,
+  location, prop, creature, and custom-entity references. All assistants retain
+  compact grounded reads, while mutation tools stay within their owning surface.
 - Text, EPUB, PDF, image, and webpage ingest with structured source provenance,
   canon extraction, graph synchronization, and combined lexical/semantic
   retrieval.
@@ -101,11 +103,12 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   physical-product registry with configurable Generic templates plus built-in
   Specific products for Amazon KDP and IngramSpark;
   EPUB and PDF ebook workspaces expose only relevant controls. The full-height
-  conversational Publish assistant has compact Core/release tools, persistent
-  streaming history, image attachments, complete outline context, bounded
-  project search, geometry-aware image creation, Stop/Reset, and reconnectable
-  jobs. Cover design is embedded beside the assistant with a live scene canvas
-  and one controls column instead of opening a modal.
+  conversational Publish assistant acts as a publication editor and production
+  expert, with compact Core/release tools, persistent streaming history, image
+  attachments, complete outline context, bounded project search,
+  geometry-aware image creation, matter and metadata guidance, Stop/Reset, and
+  reconnectable jobs. Cover design is embedded beside the assistant with a live
+  scene canvas and one controls column instead of opening a modal.
   Core PDF presentation can preserve a Designed Page as one wide or custom-sized
   PDF page; PDF ebook releases inherit that choice until explicitly customized.
 - Lorekeeper-owned paperback, hardcover, and Digital PDF press jobs with cancellation/restart recovery,

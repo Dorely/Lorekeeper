@@ -310,14 +310,19 @@ physical/protected-region prompt guidance. Returned pixels are stored without
 cropping, resizing, or rejection: a provider dimension mismatch is returned
 visually with `geometryMatched=false` and a
 `LAYOUT_IMAGE_GEOMETRY_MISMATCH` warning so the assistant can inspect,
-regenerate, or deliberately fit it. Outline
-requests omit geometry and are restricted by prompt and tool contract to
-explicit canonical entity-appearance work. Focused Figure, Designed Page,
-cover, and canonical-reference tools consume a completed
-image ID in a subsequent tool round; revision conflicts never discard or
-regenerate that library asset. Job read/wait/cancel tools reconnect without
-replaying the original prompt, and persisted chat never stores image bytes or
-repeated generation payloads.
+regenerate, or deliberately fit it. Outline and Images requests omit geometry.
+Outline is restricted to explicit canonical entity-appearance work. Images is
+the concept-art and visual-canon workspace: it may read project/manuscript
+sources for grounding, but can mutate only library images, canonical entity
+references, and the user-approved Book Brief Visual Direction. Its focused
+Visual Direction service update compares the exact previously read value so a
+stale assistant turn cannot overwrite newer art direction. Editor consumes a
+completed image ID with Figure or Designed Page tools; Publish consumes it with
+publication-section or cover tools; Images consumes it only with canonical
+reference tools. Revision conflicts never discard or regenerate the library
+asset. Job read/wait/cancel tools reconnect without replaying the original
+prompt, and persisted chat never stores image bytes or repeated generation
+payloads.
 
 Entity visual examples are ordered associations between graph entities and
 project images. Image prompting, editor context, research/ingest promotion, and
@@ -1048,8 +1053,10 @@ section—with its section/composition/variant revisions and any reported object
 selection. The assistant therefore treats a visible `Core Book · Title page`
 canvas as the active user focus without reconstructing it from chat history.
 Publish receives the same shared image-generation, book-design, typography, and
-page-composition judgment used by Editor, plus cover/publication-specific
-guidance. The two-column
+page-composition judgment used by Editor, plus publication-editor guidance for
+matter purpose and sequence, print versus EPUB presentation, supported metadata
+consistency, current-vendor versus exact-product rules, and unsupported portal
+follow-up. The two-column
 Publish workspace flushes pending form, prose, cover, and Designed Page
 autosaves before each turn and refuses to start when the visible draft cannot be
 persisted. The flush returns the newly persisted section/composition/variant
@@ -1067,9 +1074,9 @@ preparation, cancellation, and artifact metadata. Tool results contain changed
 IDs/fields, revisions, prioritized diagnostic counts, and refresh notices rather
 than complete unchanged records. Raw profile selection and low-level
 render/preflight/package orchestration are not assistant capabilities. ISBN
-invention remains unavailable. Outline, Editor, Images, and
-Publish share compact paginated reads and revision-aware mutations. Large scene
-payloads are persisted once as project/conversation-scoped, hashed, expiring,
+invention remains unavailable. Outline, Editor, Images, and Publish share
+compact paginated reads, while mutations remain explicitly role-scoped. Large
+scene payloads are persisted once as project/conversation-scoped, hashed, expiring,
 non-replayable stages; preview returns a stage ID and compact diagnostics, and
 apply accepts only that ID plus expected revision. Tool history stores compact
 summaries rather than image bytes, rendered manuscripts, or complete unchanged
@@ -1083,13 +1090,16 @@ author, spine, or back-cover text through z-order changes. Runtime prompts
 describe only the current format-neutral chapter, Figure, Designed Page, cover,
 geometry, and publication-validation boundaries. Artifact results include
 current/stale state and safe view/download URLs.
-Editor, Images, and Publish also share a current book-design craft contract:
+Editor and Publish also share a current book-design craft contract:
 copy, typography, illustration, and negative space form one composition; type
 palettes stay restrained; hierarchy, reading path, line shape, contrast, and
 quiet regions receive visual judgment in addition to structural validation.
 Publish adds cover-specific front/spine/back hierarchy, thumbnail legibility,
 genre fit, and protected-region checks while retaining the current embedded
 cover-canvas and exact-geometry tool workflow.
+Images instead owns a concept-art contract for style discovery, observable art
+vocabulary, controlled iteration, canonical character/location/entity studies,
+and explicit separation between invariant identity and scene-specific variation.
 
 Preparation and cancellation tool results identify their nullable release
 target at the result root. Their mutation notices refresh and reconnect polling

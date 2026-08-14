@@ -33,6 +33,7 @@
 | `scripts/generate-brand-assets.py` | Deterministically exports browser PNG sizes and the multi-resolution Windows ICO from the 1024px Lorekeeper icon master. |
 | `docs/research/README.md` | Index and maintenance policy for Lorekeeper's sourced editorial, image-prompting, and composition research briefs. |
 | `docs/research/image-generation-prompting.md` | Sourced `gpt-image-2` prompting/API brief with structured reference/edit/page-target guidance and runtime contract mappings. |
+| `docs/research/visual-development-and-concept-art.md` | Sourced concept-art role, style vocabulary, canonical character/location design, and Images assistant boundary. |
 | `docs/research/story-writing-and-editorial-practice.md` | Sourced professional editing, narrative craft, picture-book practice, and system-prompt requirement brief. |
 | `docs/research/page-composition-and-typesetting.md` | Sourced page/spread, typography, accessibility, diagnostic threshold, and shared-geometry brief. |
 | `docs/research/book-format-guidance.md` | Current genre-aware Outline guidance contract, assistant/token boundaries, research basis, and limitations. |
@@ -408,8 +409,8 @@
 | `OpenAIChatToolMetadataClient.cs` | OpenAI-compatible client boundary that preserves unknown streamed tool-call extensions and restores them on the correlated assistant/tool-result request. |
 | `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs Codex or metadata-preserving OpenAI-compatible chat clients, applies exact per-model reasoning effort and Codex timeout, and exposes configured verification probes. |
 | `IVisionModelClientFactory.cs` / `VisionModelClientFactory.cs` | Provider-backed image reader for vision probes and PDF transcription, with per-model reasoning effort across Codex Responses and OpenAI-compatible requests. |
-| `AssistantWorkflowInstructions.cs` | Current code-owned AI workflow/tool rules for durable narrated work logs, proactive Editor execution, book-design and typography craft, exact IDs, compact paging/staging, post-style visual verification, Figures, Designed Pages/covers, image generation, publication validation, and Contest preparation. |
-| `SystemPromptComposer.cs` | Central composer for the one actual system-role prompt: professional charter, tool rules, dynamic book/page guidance, Project Guidance, Book Brief, then working context. |
+| `AssistantWorkflowInstructions.cs` | Current code-owned AI workflow/tool rules for durable narrated work logs, proactive Editor execution, visual-development canon, publication content craft, book design/typography, exact IDs, compact paging/staging, image generation, publication validation, and Contest preparation. |
+| `SystemPromptComposer.cs` | Central composer for the one actual system-role prompt, including specialized Images concept-art and Publish production charters, tool rules, dynamic guidance, Project Guidance, Book Brief, then working context. |
 | `AgentOptions.cs` | Shared agent options bound from `Agents:*`; caps iterative tool-call rounds, configures transient ingest LLM retry attempts/delays, and sets Codex/OAuth request timeout. |
 | `SeedSystemPrompt.cs` | Frozen historical seed retained only so legacy migrations can identify and clear untouched seeded guidance; runtime prompts no longer use it. |
 
@@ -466,7 +467,7 @@
 | File | Description |
 |------|-------------|
 | `IProjectService.cs` / `ProjectService.cs` | Project CRUD and blank optional Project Guidance persistence; creates the Book Brief, syncs graph defaults, preserves stable slugs, and performs indexed-project cleanup on delete. |
-| `IBookBriefService.cs` / `BookBriefService.cs` | Get/create, validated partial update, explicit field clearing, and compact system-prompt formatting for the project Book Brief. |
+| `IBookBriefService.cs` / `BookBriefService.cs` | Get/create, validated partial update, explicit field clearing, stale-write-protected Visual Direction update, and compact system-prompt formatting for the project Book Brief. |
 
 ### Writing/
 
@@ -571,8 +572,8 @@
 
 | File | Description |
 |------|-------------|
-| `IImagesChatService.cs` / `ImagesChatService.cs` | Images adapter over the shared chat engine with image/layout guidance, automatic and attached visual context, persisted transcript visuals, and terminal unattached generation/edit workflows. |
-| `ImagesChatTools.cs` | Images tools for grounded reads, canonical-reference mutations/crops, terminal unattached generation/editing, reconnectable jobs, masks, geometry, and separate revision-safe Figure/page/cover placement. |
+| `IImagesChatService.cs` / `ImagesChatService.cs` | Concept-art and visual-canon adapter over the shared chat engine with automatic/attached visual context, persisted transcript visuals, approved Visual Direction, and terminal free-standing generation/edit workflows. |
+| `ImagesChatTools.cs` | Images tools for grounded read-only project/manuscript context, conditional Visual Direction updates, canonical-reference mutations/crops, free-standing generation/editing, reconnectable jobs, and masks; manuscript, page, and cover mutations are absent. |
 | `ImagesChatToolContext.cs` | Per-turn Images Chat tool context carrying provider/vision readiness, cancellation and owned image jobs, current tool metadata, visible/model-only images, and mutation signaling. |
 | `ImagesChatTurnUpdate.cs` | Streaming update records consumed by `ImagesChatPanel`: text deltas, tool start/argument/completion with visuals, mutation refresh, assistant completion, and turn errors. |
 | `ImagesChatTurnRunner.cs` | Background turn runner for Images Chat: executes scoped chat turns outside component lifetime and replays buffered live updates to reopened panels. |

@@ -101,7 +101,7 @@ public sealed class PublishChatService(
         """;
 
     private const string InitialGreeting =
-        "I can help finish the shared Core Book, choose an exact paperback, hardcover, or ebook product, and prepare its required files without making you manage production internals.";
+        "I can help shape the complete publication—from metadata and front/back matter through book design, product selection, preflight, and prepared files—while keeping vendor requirements and editorial conventions distinct.";
 
     private static readonly HashSet<string> MutationTools =
     [
@@ -192,6 +192,7 @@ public sealed class PublishChatService(
                     + "\n\n" + selection
                     + "\n\n" + visibleWorkspace
                     + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
+                    + "\n\n" + AssistantWorkflowInstructions.PublicationContentCraft
                     + "\n\n" + AssistantWorkflowInstructions.ImageGeneration
                     + "\n\n" + AssistantWorkflowInstructions.BookDesignCraft
                     + "\n\n" + AssistantWorkflowInstructions.CompositionDesign

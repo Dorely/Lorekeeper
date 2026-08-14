@@ -1,8 +1,6 @@
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Lorekeeper.Chapters;
-using Lorekeeper.Composition;
 using Lorekeeper.Context;
 using Lorekeeper.EditorChat;
 using Lorekeeper.EntityVisuals;
@@ -11,7 +9,7 @@ using Lorekeeper.Llm;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
-using Lorekeeper.Publish;
+using Lorekeeper.Projects;
 using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -28,11 +26,8 @@ public sealed class ImagesChatTools(
     IProjectImageJobService imageJobs,
     IAgentProjectImageWorkflow imageWorkflow,
     IManuscriptService manuscripts,
-    ICompositionService compositions,
-    IProjectPageSetupService pageSetups,
     IChapterSemanticProjectionService semanticProjection,
-    IPublicationCoverService covers,
-    IEditorContextService editorContext,
+    IBookBriefService bookBriefs,
     IOptions<ProjectImageGenerationOptions> imageOptions,
     IOptions<EditorChatOptions> editorOptions)
 {
@@ -79,20 +74,20 @@ public sealed class ImagesChatTools(
                 description: "List project image library metadata, ids, preview URLs, source, prompts, model names, and sizes."),
 
             AIFunctionFactory.Create(
-                method: () => ReadProjectPageSetupAsync(context),
-                name: "read_project_page_setup",
-                description: "Read project-owned authoring geometry and its revision for Figures, Designed Pages, preview, and target-bound generation. Publication releases do not govern authoring geometry."),
-
-            AIFunctionFactory.Create(
-                method: (long expectedRevision, double pageWidthInches, double pageHeightInches, double pageMarginInches, double bodyFontSizePoints, double bodyLineHeight) =>
-                    UpdateProjectPageSetupAsync(context, expectedRevision, pageWidthInches, pageHeightInches, pageMarginInches, bodyFontSizePoints, bodyLineHeight),
-                name: "update_project_page_setup",
-                description: "Revision-check the project authoring page setup. Read it first, then retain every value the user did not ask to change."),
-
-            AIFunctionFactory.Create(
                 method: (Guid imageId) => ReadProjectImageAsync(context, imageId),
                 name: "read_project_image",
                 description: "Read one project image's metadata and URLs and load it as visual context when the provider supports vision."),
+
+            AIFunctionFactory.Create(
+                method: () => ReadProjectVisualDirectionAsync(context),
+                name: "read_project_visual_direction",
+                description: "Read the current project-wide Visual Direction exactly before proposing or saving a coherent approved art direction."),
+
+            AIFunctionFactory.Create(
+                method: (string expectedCurrentVisualDirection, string visualDirection) =>
+                    SetProjectVisualDirectionAsync(context, expectedCurrentVisualDirection, visualDirection),
+                name: "set_project_visual_direction",
+                description: "Save only the user-approved project-wide Visual Direction. Pass the exact current value from read_project_visual_direction; stale updates are rejected instead of overwriting newer direction."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
@@ -112,7 +107,7 @@ public sealed class ImagesChatTools(
             AIFunctionFactory.Create(
                 method: (Guid entityId, Guid imageId, string? label = null) => AttachEntityVisualAsync(context, entityId, imageId, label),
                 name: "attach_entity_canonical_reference",
-                description: "Attach one isolated, stable appearance or design image to an eligible story entity as a labeled canonical reference. Do not attach an ordinary narrative scene merely because the entity appears in it."),
+                description: "Attach one approved, stable appearance or design image to an eligible story entity as a labeled canonical reference. Use isolated studies for characters/objects and intentional environmental studies for locations; never attach an ordinary narrative scene merely because the entity appears in it."),
 
             AIFunctionFactory.Create(
                 method: (Guid canonicalReferenceId, string label, int? sortOrder = null) => UpdateEntityVisualAsync(context, canonicalReferenceId, label, sortOrder),
@@ -123,129 +118,6 @@ public sealed class ImagesChatTools(
                 method: (Guid canonicalReferenceId) => DetachEntityVisualAsync(context, canonicalReferenceId),
                 name: "detach_entity_canonical_reference",
                 description: "Detach an entity canonical visual reference without deleting the library image."),
-
-            AIFunctionFactory.Create(
-                method: (Guid chapterId, int start = 0, int count = 30) => ListManuscriptVisualsAsync(context, chapterId, start, count),
-                name: "list_manuscript_visuals",
-                description: "List a bounded page of Figure and DesignedPage blocks with stable IDs, accessibility decisions, presentation, current manuscript revision, and continuation metadata."),
-
-            AIFunctionFactory.Create(
-                method: (Guid compositionId, Guid variantId, int semanticStart = 0, int semanticCount = 20, int objectStart = 0, int objectCount = 30, int structureStart = 0, int structureCount = 30) => ReadPageCompositionAsync(context, compositionId, variantId, semanticStart, semanticCount, objectStart, objectCount, structureStart, structureCount),
-                name: "read_page_composition",
-                description: "Read one selected geometry variant losslessly in bounded object pages, including complete surface, layers, styles, object fields, semantic excerpts, and revisions. Computed page overlays and image bytes are omitted."),
-
-            AIFunctionFactory.Create(
-                method: (Guid chapterId, long expectedRevision, int index, Guid imageId, string? caption, string? altText, bool decorative, string? language, FigureAccessibilityRole accessibilityRole, FigurePresentation presentation) =>
-                    InsertFigureAsync(context, chapterId, expectedRevision, index, imageId, caption, altText, decorative, language, accessibilityRole, presentation),
-                name: "insert_manuscript_figure",
-                description: "Insert one project image as a revision-checked Figure block. Supply alt text or an explicit decorative decision and preserve server-owned generation geometry."),
-
-            AIFunctionFactory.Create(
-                method: (Guid chapterId, long expectedRevision, string blockId, Guid imageId, string? caption, string? altText, bool decorative, string? language, FigureAccessibilityRole accessibilityRole, FigurePresentation presentation) =>
-                    PatchFigureAsync(context, chapterId, expectedRevision, blockId, imageId, caption, altText, decorative, language, accessibilityRole, presentation),
-                name: "patch_manuscript_figure",
-                description: "Revision-check replace or reformat one existing Figure while preserving unrelated manuscript blocks."),
-
-            AIFunctionFactory.Create(
-                method: (
-                    Guid chapterId,
-                    long expectedRevision,
-                    int blockIndex,
-                    string name,
-                    DesignedPageLayoutMode layoutMode = DesignedPageLayoutMode.SinglePage) =>
-                    CreateDesignedPageAsync(
-                        context,
-                        chapterId,
-                        expectedRevision,
-                        blockIndex,
-                        name,
-                        layoutMode),
-                name: "create_designed_page",
-                description: "Insert an empty Designed Page container in project authoring geometry with an explicit single-page or facing-spread mode. Place existing project images afterward with a separate focused tool."),
-
-            AIFunctionFactory.Create(
-                method: (Guid compositionId) => GetOrCreateCompositionVariantAsync(context, compositionId),
-                name: "get_or_create_page_composition_variant",
-                description: "Get or create the active project-authoring geometry variant for a Designed Page."),
-
-            AIFunctionFactory.Create(
-                method: (Guid variantId) => ValidateCompositionAsync(context, variantId),
-                name: "validate_page_composition",
-                description: "Validate an authoring Designed Page for scene geometry, semantic coverage, reading order, accessibility, overflow, and font readiness. Publication DPI and edition compatibility are checked only in Publish. Returns compact prioritized diagnostics."),
-
-            AIFunctionFactory.Create(
-                method: (Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchCompositionElementAsync(context, variantId, expectedRevision, targetKind, targetId, patch),
-                name: "patch_page_composition_element",
-                description: "Revision-check patch one stable composition object, layer, or style using only changed fields. Page overlays are computed and cannot be authored. Preserve all unrelated scene state; use full-scene staging only for structural edits."),
-            AIFunctionFactory.Create(
-                method: (Guid variantId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlacePageImageAsync(context, variantId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
-                name: "place_project_image_in_page_frame",
-                description: "Place an existing project-image ID into an existing Designed Page image frame. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an accessibility decision."),
-            AIFunctionFactory.Create(
-                method: (Guid variantId, long expectedRevision, Guid imageId, FigureImageFit fit, string? altText, bool decorative, CompositionBounds? bounds = null, int? readingOrder = null) => AddPageImageAsync(context, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder),
-                name: "add_project_image_to_page",
-                description: "Add a new image object to a Designed Page from an existing project-image ID. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an accessibility decision."),
-            AIFunctionFactory.Create(
-                method: (Guid variantId, long expectedRevision, CompositionScene scene) => StageCompositionAsync(context, variantId, expectedRevision, scene),
-                name: "stage_page_composition",
-                description: "Submit one complete composition scene once. Returns an opaque one-use stage ID and compact validation summary without echoing the scene."),
-
-            AIFunctionFactory.Create(
-                method: (Guid stageId, long expectedRevision) => ApplyCompositionStageAsync(context, stageId, expectedRevision),
-                name: "apply_page_composition_stage",
-                description: "Apply a staged page scene using only its stage ID and expected revision; never repeat the full scene."),
-
-            AIFunctionFactory.Create(
-                method: (Guid compositionId, long expectedRevision, ManuscriptOperationInput[] operations) => StageCompositionSemanticAsync(context, compositionId, expectedRevision, operations),
-                name: "stage_page_composition_semantic",
-                description: "Stage focused operations against a Designed Page's sole semantic manuscript. " + ManuscriptOperationInput.ToolOperationGuidance + " Returns a compact one-use stage ID without repeating content."),
-
-            AIFunctionFactory.Create(
-                method: (Guid stageId, long expectedRevision) => ApplyCompositionSemanticStageAsync(context, stageId, expectedRevision),
-                name: "apply_page_composition_semantic_stage",
-                description: "Apply a staged Designed Page semantic edit by one-use stage ID and exact composition revision."),
-            AIFunctionFactory.Create(
-                method: (Guid compositionId, long expectedCompositionRevision, Guid variantId, long expectedVariantRevision, ManuscriptOperationInput[] semanticOperations, CompositionScene scene) => StageCompositionWorkspaceAsync(context, compositionId, expectedCompositionRevision, variantId, expectedVariantRevision, semanticOperations, scene),
-                name: "stage_page_composition_workspace",
-                description: "Atomically stage coupled Designed Page content and layout changes. Semantic content accepts paragraph, heading, sceneBreak, blockQuote, or listItem blocks only; scene images represent Figures. Submit the payload once."),
-            AIFunctionFactory.Create(
-                method: (Guid stageId, long expectedCompositionRevision) => ApplyCompositionWorkspaceStageAsync(context, stageId, expectedCompositionRevision),
-                name: "apply_page_composition_workspace_stage",
-                description: "Apply a coupled content-and-layout stage by one-use stage ID; both stored revisions are checked."),
-
-            AIFunctionFactory.Create(
-                method: (Guid editionId, int objectStart = 0, int objectCount = 30, int structureStart = 0, int structureCount = 30) => ReadCoverAsync(context, editionId, objectStart, objectCount, structureStart, structureCount),
-                name: "read_cover_composition",
-                description: "Read compact cover geometry, diagnostics, layers, and one bounded scene-object page."),
-
-            AIFunctionFactory.Create(
-                method: (Guid editionId) => ValidateCoverAsync(context, editionId),
-                name: "validate_cover_composition",
-                description: "Validate the current format-aware cover for geometry, safe regions, folds, barcode reserve, accessibility, reading order, images, and current interior-derived spine state. Returns compact diagnostics."),
-
-            AIFunctionFactory.Create(
-                method: (Guid editionId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchCoverElementAsync(context, editionId, expectedRevision, targetKind, targetId, patch),
-                name: "patch_cover_composition_element",
-                description: "Revision-check patch one stable cover object, guide, layer, or style using only changed fields. Preserve unrelated cover state; use full-scene staging for structural edits."),
-            AIFunctionFactory.Create(
-                method: (Guid editionId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder = null) => PlaceCoverImageAsync(context, editionId, expectedRevision, targetId, imageId, fit, altText, decorative, readingOrder),
-                name: "place_project_image_in_cover_frame",
-                description: "Place an existing project-image ID into an existing publication-cover image frame. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an accessibility decision."),
-
-            AIFunctionFactory.Create(
-                method: (Guid editionId, long expectedRevision, CompositionScene scene) => StageCoverAsync(context, editionId, expectedRevision, scene),
-                name: "stage_cover_composition",
-                description: "Submit one complete cover scene once and receive an opaque one-use stage ID without echoed payload."),
-
-            AIFunctionFactory.Create(
-                method: (Guid stageId, long expectedRevision) => ApplyCoverStageAsync(context, stageId, expectedRevision),
-                name: "apply_cover_composition_stage",
-                description: "Apply a staged cover scene by stage ID and expected revision; never repeat the full scene."),
-
-            AIFunctionFactory.Create(
-                method: (string targetKind, Guid targetId, Guid? variantId = null, Guid? editionId = null) => ReadLayoutGenerationTargetAsync(context, targetKind, targetId, variantId, editionId),
-                name: "read_layout_generation_target",
-                description: "Read server-owned dimensions, exact target aspect, moderate requested raster, print-DPI recommendation, and reserved regions. project-page, Figure, and page frame/surface targets use project authoring geometry and omit editionId; use the project ID for project-page. Cover targets require editionId. Composition page targets require the active variantId."),
 
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, ProjectImageCropRegion crop, string? fileName = null, string? altText = null, EntityVisualTarget? entityTarget = null) =>
@@ -260,16 +132,16 @@ public sealed class ImagesChatTools(
                 description: "Create a PNG edit mask for an existing image from percentage-based rect/ellipse/polygon shapes. Transparent pixels are the editable regions."),
 
             AIFunctionFactory.Create(
-                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? label = null) =>
-                    GenerateImageAsync(context, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression, label),
+                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? label = null) =>
+                    GenerateImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression, label),
                 name: "generate_project_image",
-                description: $"Generate one unattached project image and wait for a terminal result. Optional server-owned geometry guides composition only and never places the result. Inspect the returned image before using its ID with a separate placement tool. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
+                description: $"Generate one free-standing, unattached project-library image and wait for a terminal result. Inspect it before promoting it to an entity's canonical references. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
 
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, ImageEditBrief brief, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? label = null) =>
-                    EditImageAsync(context, sourceImageId, brief, maskId, maskShapes, maskLabel, references, geometryGuidance, altText, quality, outputFormat, outputCompression, label),
+                method: (Guid sourceImageId, ImageEditBrief brief, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? label = null) =>
+                    EditImageAsync(context, sourceImageId, brief, maskId, maskShapes, maskLabel, references, altText, quality, outputFormat, outputCompression, label),
                 name: "edit_project_image",
-                description: $"Edit one project image and wait for a terminal result. The output is a new unattached project image; optional geometry guidance never places it. Inspect the returned image before applying its ID. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
+                description: $"Edit one project image and wait for a terminal result. The output is a new free-standing, unattached library image; inspect it before promoting it to canon. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
 
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadImageJobAsync(context, jobId, wait: false),
@@ -285,51 +157,9 @@ public sealed class ImagesChatTools(
                 method: (Guid jobId) => CancelImageJobAsync(context, jobId),
                 name: "cancel_project_image_job",
                 description: "Cancel a previously started project-image generation or edit job."),
-
-            AIFunctionFactory.Create(
-                method: (Guid chapterId, Guid imageId) => AddProjectImageToContextAsync(context, chapterId, imageId),
-                name: "add_project_image_to_context",
-                description: "Add an existing project image as explicit chapter context without changing the chapter layout."),
         ];
 
         return Task.FromResult(tools);
-    }
-
-    private async Task<string> ReadProjectPageSetupAsync(ImagesChatToolContext ctx)
-    {
-        var setup = await pageSetups.GetOrCreateAsync(ctx.ProjectId, ctx.TurnCancellationToken);
-        return JsonSerializer.Serialize(new
-        {
-            ok = true,
-            targetId = setup.ProjectId,
-            revision = setup.Revision,
-            page = new { widthInches = setup.PageWidthInches, heightInches = setup.PageHeightInches, marginInches = setup.PageMarginInches },
-            body = new { fontSizePoints = setup.BodyFontSizePoints, lineHeight = setup.BodyLineHeight },
-        }, JsonOptions);
-    }
-
-    private async Task<string> UpdateProjectPageSetupAsync(
-        ImagesChatToolContext ctx,
-        long expectedRevision,
-        double pageWidthInches,
-        double pageHeightInches,
-        double pageMarginInches,
-        double bodyFontSizePoints,
-        double bodyLineHeight)
-    {
-        var setup = await pageSetups.UpdateAsync(ctx.ProjectId, expectedRevision,
-            new(pageWidthInches, pageHeightInches, pageMarginInches, bodyFontSizePoints, bodyLineHeight),
-            ctx.TurnCancellationToken);
-        ctx.MarkMutated();
-        return JsonSerializer.Serialize(new
-        {
-            ok = true,
-            targetId = setup.ProjectId,
-            revision = setup.Revision,
-            changedFields = new[] { "pageWidthInches", "pageHeightInches", "pageMarginInches", "bodyFontSizePoints", "bodyLineHeight" },
-            summary = "Project page setup updated.",
-            mutation = new { kind = "projectPageSetup", id = setup.ProjectId, revision = setup.Revision },
-        }, JsonOptions);
     }
 
     private async Task<string> ListSearchSourcesAsync(ImagesChatToolContext ctx, string? query, string[]? sourceTypes, int topK)
@@ -551,423 +381,52 @@ public sealed class ImagesChatTools(
         }, JsonOptions);
     }
 
-    private async Task<string> ListManuscriptVisualsAsync(ImagesChatToolContext ctx, Guid chapterId, int start, int count)
+    private async Task<string> ReadProjectVisualDirectionAsync(ImagesChatToolContext ctx)
     {
-        var chapter = await chapters.GetAsync(chapterId);
-        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
-            return JsonSerializer.Serialize(new { ok = false, code = "NOT_FOUND", summary = "Chapter was not found." }, JsonOptions);
-        var snapshot = await manuscripts.GetManuscriptAsync(EditorContentTarget.Core, chapterId, ctx.TurnCancellationToken);
-        if (snapshot is null)
-            return JsonSerializer.Serialize(new { ok = false, code = "NOT_FOUND", summary = "Manuscript was not found." }, JsonOptions);
-        var visuals = snapshot.Document.Content.Where(block => block.Type is ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage).ToList();
-        start = Math.Clamp(start, 0, visuals.Count);
-        count = Math.Clamp(count, 1, 50);
-        var page = visuals.Skip(start).Take(count).Select(block => new
-        {
-            blockId = block.Id, type = block.Type.ToString(), block.ImageId, compositionId = block.PageCompositionId,
-            block.FigurePresentation, block.Decorative, altText = block.Decorative ? null : block.AltText, block.Language,
-        }).ToList();
+        var brief = await bookBriefs.GetOrCreateAsync(ctx.ProjectId, ctx.TurnCancellationToken);
         return JsonSerializer.Serialize(new
         {
-            ok = true, targetId = chapterId, revision = snapshot.Revision, summary = $"{visuals.Count} manuscript visual block(s).",
-            items = page,
-            continuation = new { start, returned = page.Count, total = visuals.Count, hasMore = start + page.Count < visuals.Count, nextStart = start + page.Count < visuals.Count ? start + page.Count : (int?)null },
+            visualDirection = brief.VisualDirection,
+            brief.UpdatedAt,
+            summary = string.IsNullOrWhiteSpace(brief.VisualDirection)
+                ? "No project-wide Visual Direction has been saved."
+                : "Current project-wide Visual Direction read.",
         }, JsonOptions);
     }
 
-    private async Task<string> ReadPageCompositionAsync(
+    private async Task<string> SetProjectVisualDirectionAsync(
         ImagesChatToolContext ctx,
-        Guid compositionId,
-        Guid variantId,
-        int semanticStart,
-        int semanticCount,
-        int objectStart,
-        int objectCount,
-        int structureStart,
-        int structureCount)
-    {
-        try { return await CompositionAgentPayloads.ReadVariantAsync(compositions, ctx.ProjectId, compositionId, variantId, semanticStart, semanticCount, objectStart, objectCount, structureStart, structureCount, ctx.TurnCancellationToken); }
-        catch (Exception ex) when (ex is InvalidDataException or KeyNotFoundException) { return JsonSerializer.Serialize(new { ok = false, code = "NOT_FOUND", targetId = variantId, summary = ex.Message }, JsonOptions); }
-    }
-
-    private async Task<string> PatchCompositionElementAsync(ImagesChatToolContext ctx, Guid variantId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch)
-    {
-        var result = await CompositionAgentPayloads.PatchElementAsync(compositions, EditorContentTarget.Core, ctx.ProjectId, variantId, expectedRevision, targetKind, targetId, patch, ctx.TurnCancellationToken);
-        if (JsonDocument.Parse(result).RootElement.GetProperty("ok").GetBoolean()) ctx.MarkMutated();
-        return result;
-    }
-
-    private async Task<string> PlacePageImageAsync(
-        ImagesChatToolContext ctx,
-        Guid variantId,
-        long expectedRevision,
-        Guid targetId,
-        Guid imageId,
-        FigureImageFit fit,
-        string? altText,
-        bool decorative,
-        int? readingOrder)
-    {
-        if (!decorative && string.IsNullOrWhiteSpace(altText))
-            return JsonSerializer.Serialize(new { ok = false, code = "ALT_DECISION_REQUIRED", targetId, summary = "Provide alternative text or explicitly mark the artwork decorative." }, JsonOptions);
-        if (await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken) is null)
-            return JsonSerializer.Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId, imageId, summary = "Project image was not found." }, JsonOptions);
-        return await PatchCompositionElementAsync(
-            ctx,
-            variantId,
-            expectedRevision,
-            "object",
-            targetId,
-            new CompositionElementPatch(
-                ImageId: imageId,
-                ImageFit: fit,
-                AltText: decorative ? string.Empty : altText?.Trim(),
-                Decorative: decorative,
-                AccessibilityDecisionPending: false,
-                SemanticRole: decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure,
-                ReadingOrder: decorative ? null : readingOrder,
-                ClearReadingOrder: decorative));
-    }
-
-    private async Task<string> AddPageImageAsync(
-        ImagesChatToolContext ctx,
-        Guid variantId,
-        long expectedRevision,
-        Guid imageId,
-        FigureImageFit fit,
-        string? altText,
-        bool decorative,
-        CompositionBounds? bounds,
-        int? readingOrder)
+        string expectedCurrentVisualDirection,
+        string visualDirection)
     {
         try
         {
-            if (await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken) is null)
-                return JsonSerializer.Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId = variantId, imageId, summary = "Project image was not found." }, JsonOptions);
-            var placed = await compositions.AddImageObjectAsync(
-                EditorContentTarget.Core, ctx.ProjectId, variantId, expectedRevision, imageId, fit, altText, decorative, bounds, readingOrder, ctx.TurnCancellationToken);
-            ctx.MarkMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = variantId, variantId = placed.Variant.Id, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the Designed Page.", mutation = new { kind = "pageComposition", id = placed.Variant.CompositionId, variantId = placed.Variant.Id, selectId = placed.ObjectId } }, JsonOptions);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException or CompositionRevisionConflictException)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = ex is CompositionRevisionConflictException ? "REVISION_CONFLICT" : "PLACEMENT_REJECTED", targetId = variantId, summary = ex.Message, recovery = "Reread the compact page composition and retry with the same project-image ID." }, JsonOptions);
-        }
-    }
-
-    private async Task<string> InsertFigureAsync(
-        ImagesChatToolContext ctx,
-        Guid chapterId,
-        long expectedRevision,
-        int index,
-        Guid imageId,
-        string? caption,
-        string? altText,
-        bool decorative,
-        string? language,
-        FigureAccessibilityRole accessibilityRole,
-        FigurePresentation presentation)
-    {
-        try
-        {
-            _ = await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken)
-                ?? throw new KeyNotFoundException("Project image was not found.");
-            var result = await manuscripts.ApplyAsync(
-                EditorContentTarget.Core,
-                chapterId,
-                expectedRevision,
-                [new InsertManuscriptBlock(
-                    index,
-                    ManuscriptBlockType.Figure,
-                    caption ?? string.Empty,
-                    ManuscriptStyleRoles.FigureCaption,
-                    imageId,
-                    altText,
-                    Decorative: decorative,
-                    FigurePresentation: presentation,
-                    Language: language,
-                    AccessibilityRole: accessibilityRole)],
-                ctx.TurnCancellationToken);
-            ctx.MarkMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = chapterId, revision = result.Snapshot.Revision, changedIds = result.ChangedBlockIds, summary = "Figure inserted.", mutation = new { kind = "manuscript", id = chapterId } }, JsonOptions);
-        }
-        catch (ManuscriptRevisionConflictException ex)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = chapterId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact manuscript visuals and retry against the current revision." }, JsonOptions);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = "FIGURE_REJECTED", targetId = chapterId, summary = ex.Message }, JsonOptions);
-        }
-    }
-
-    private async Task<string> PatchFigureAsync(
-        ImagesChatToolContext ctx,
-        Guid chapterId,
-        long expectedRevision,
-        string blockId,
-        Guid imageId,
-        string? caption,
-        string? altText,
-        bool decorative,
-        string? language,
-        FigureAccessibilityRole accessibilityRole,
-        FigurePresentation presentation)
-    {
-        try
-        {
-            _ = await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken)
-                ?? throw new KeyNotFoundException("Project image was not found.");
-            var operations = new List<ManuscriptOperation>
-            {
-                new SetFigurePresentation(blockId, imageId, altText, decorative, language, presentation, accessibilityRole),
-            };
-            if (caption is not null)
-                operations.Insert(0, new ReplaceManuscriptBlockText(blockId, caption));
-            var result = await manuscripts.ApplyAsync(
-                EditorContentTarget.Core,
-                chapterId,
-                expectedRevision,
-                operations,
-                ctx.TurnCancellationToken);
-            ctx.MarkMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = chapterId, revision = result.Snapshot.Revision, changedIds = result.ChangedBlockIds, summary = "Figure updated.", mutation = new { kind = "manuscript", id = chapterId, selectId = blockId } }, JsonOptions);
-        }
-        catch (ManuscriptRevisionConflictException ex)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = chapterId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact manuscript visuals and retry against the current revision." }, JsonOptions);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = "FIGURE_REJECTED", targetId = chapterId, summary = ex.Message }, JsonOptions);
-        }
-    }
-
-    private async Task<string> CreateDesignedPageAsync(
-        ImagesChatToolContext ctx,
-        Guid chapterId,
-        long expectedRevision,
-        int blockIndex,
-        string name,
-        DesignedPageLayoutMode layoutMode)
-    {
-        try
-        {
-            var result = await compositions.CreateDesignedPageAsync(
-                EditorContentTarget.Core,
+            var brief = await bookBriefs.UpdateVisualDirectionAsync(
                 ctx.ProjectId,
-                chapterId,
-                blockIndex,
-                name,
-                expectedRevision,
-                new DesignedPageInitialContent
-                {
-                    LayoutMode = layoutMode,
-                },
+                expectedCurrentVisualDirection,
+                visualDirection,
                 ctx.TurnCancellationToken);
             ctx.MarkMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Manuscript.Revision, changedIds = new[] { result.BlockId }, variantId = result.Variant?.Id, layoutMode, summary = "Designed Page inserted.", mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant?.Id } }, JsonOptions);
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                visualDirection = brief.VisualDirection,
+                brief.UpdatedAt,
+                summary = "Approved project-wide Visual Direction saved.",
+                mutation = new { kind = "bookBriefVisualDirection", id = ctx.ProjectId },
+            }, JsonOptions);
         }
-        catch (ManuscriptRevisionConflictException ex)
+        catch (BookBriefVisualDirectionConflictException ex)
         {
-            return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = chapterId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread manuscript visuals and retry." }, JsonOptions);
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                code = "VISUAL_DIRECTION_CONFLICT",
+                actualVisualDirection = ex.ActualVisualDirection,
+                summary = ex.Message,
+                recovery = "Review the current direction with the user before attempting a replacement.",
+            }, JsonOptions);
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = "COMPOSITION_REJECTED", targetId = chapterId, summary = ex.Message }, JsonOptions);
-        }
-    }
-
-    private async Task<string> GetOrCreateCompositionVariantAsync(ImagesChatToolContext ctx, Guid compositionId)
-    {
-        try
-        {
-            var variant = await compositions.GetOrCreateAuthoringVariantAsync(ctx.ProjectId, compositionId, ctx.TurnCancellationToken);
-            ctx.MarkMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, revision = variant.Revision, summary = "Authoring layout is ready.", mutation = new { kind = "pageComposition", id = compositionId, selectId = variant.Id } }, JsonOptions);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = "INVALID_TARGET", targetId = compositionId, summary = ex.Message }, JsonOptions);
-        }
-    }
-
-    private async Task<string> StageCompositionAsync(ImagesChatToolContext ctx, Guid variantId, long expectedRevision, CompositionScene scene)
-    {
-        try
-        {
-            var stage = await compositions.StageVariantAsync(EditorContentTarget.Core, ctx.ProjectId, ctx.ConversationId, variantId, expectedRevision, scene, ctx.TurnCancellationToken);
-            return JsonSerializer.Serialize(new { ok = true, targetId = variantId, revision = expectedRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {scene.Objects.Count} composition object(s).", diagnosticCounts = new { errors = 0, warnings = 0 } }, JsonOptions);
-        }
-        catch (CompositionRevisionConflictException ex)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = variantId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the bounded composition, preserve unrelated objects, and submit one replacement stage." }, JsonOptions);
-        }
-        catch (Exception ex)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = "INVALID_SCENE", targetId = variantId, summary = ex.Message }, JsonOptions);
-        }
-    }
-
-    private async Task<string> ApplyCompositionStageAsync(ImagesChatToolContext ctx, Guid stageId, long expectedRevision)
-    {
-        try
-        {
-            var variant = await compositions.ApplyStageAsync(EditorContentTarget.Core, ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken);
-            ctx.MarkMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = variant.Id, variantId = variant.Id, revision = variant.Revision, changedIds = new[] { variant.Id }, summary = "Staged composition applied.", mutation = new { kind = "pageComposition", id = variant.CompositionId, variantId = variant.Id } }, JsonOptions);
-        }
-        catch (CompositionRevisionConflictException ex)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread and submit a new non-replayed stage." }, JsonOptions);
-        }
-        catch (Exception ex)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = "STAGE_REJECTED", targetId = stageId, summary = ex.Message }, JsonOptions);
-        }
-    }
-
-    private async Task<string> StageCompositionSemanticAsync(ImagesChatToolContext ctx, Guid compositionId, long expectedRevision, ManuscriptOperationInput[] operations)
-    {
-        try { var stage = await compositions.StageSemanticOperationsAsync(EditorContentTarget.Core, ctx.ProjectId, ctx.ConversationId, compositionId, expectedRevision, operations, ctx.TurnCancellationToken); return JsonSerializer.Serialize(new { ok = true, targetId = compositionId, revision = expectedRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {operations.Length} semantic operation(s)." }, JsonOptions); }
-        catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = compositionId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the bounded composition and submit a replacement stage." }, JsonOptions); }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "SEMANTIC_STAGE_REJECTED", targetId = compositionId, summary = ex.Message }, JsonOptions); }
-    }
-
-    private async Task<string> ApplyCompositionSemanticStageAsync(ImagesChatToolContext ctx, Guid stageId, long expectedRevision)
-    {
-        try { var result = await compositions.ApplySemanticStageAsync(EditorContentTarget.Core, ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken); ctx.MarkMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Composition.Revision, changedIds = result.ChangedBlockIds, summary = "Staged Designed Page content applied.", mutation = new { kind = "pageComposition", id = result.Composition.Id } }, JsonOptions); }
-        catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread and submit a new non-replayed stage." }, JsonOptions); }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "STAGE_REJECTED", targetId = stageId, summary = ex.Message }, JsonOptions); }
-    }
-
-    private async Task<string> StageCompositionWorkspaceAsync(ImagesChatToolContext ctx, Guid compositionId, long expectedCompositionRevision, Guid variantId, long expectedVariantRevision, ManuscriptOperationInput[] semanticOperations, CompositionScene scene)
-    {
-        try { var stage = await compositions.StageWorkspaceAsync(EditorContentTarget.Core, ctx.ProjectId, ctx.ConversationId, compositionId, expectedCompositionRevision, variantId, expectedVariantRevision, semanticOperations, scene, ctx.TurnCancellationToken); return JsonSerializer.Serialize(new { ok = true, targetId = compositionId, revision = expectedCompositionRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {semanticOperations.Length} semantic operation(s) with {scene.Objects.Count} scene object(s)." }, JsonOptions); }
-        catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = compositionId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact workspace and submit one replacement stage." }, JsonOptions); }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "WORKSPACE_STAGE_REJECTED", targetId = compositionId, summary = ex.Message }, JsonOptions); }
-    }
-
-    private async Task<string> ApplyCompositionWorkspaceStageAsync(ImagesChatToolContext ctx, Guid stageId, long expectedCompositionRevision)
-    {
-        try { var result = await compositions.ApplyWorkspaceStageAsync(EditorContentTarget.Core, ctx.ProjectId, ctx.ConversationId, stageId, expectedCompositionRevision, ctx.TurnCancellationToken); ctx.MarkMutated(); return JsonSerializer.Serialize(new { ok = true, targetId = result.Composition.Id, revision = result.Composition.Revision, variantId = result.Variant.Id, variantRevision = result.Variant.Revision, changedIds = result.ChangedBlockIds, summary = "Designed Page content and layout applied atomically.", mutation = new { kind = "pageComposition", id = result.Composition.Id, selectId = result.Variant.Id } }, JsonOptions); }
-        catch (CompositionRevisionConflictException ex) { return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread the compact workspace and submit a new non-replayed stage." }, JsonOptions); }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "WORKSPACE_STAGE_REJECTED", targetId = stageId, summary = ex.Message }, JsonOptions); }
-    }
-
-    private async Task<string> ReadCoverAsync(ImagesChatToolContext ctx, Guid editionId, int objectStart, int objectCount, int structureStart, int structureCount)
-    {
-        try
-        {
-            var cover = await covers.GetAsync(ctx.ProjectId, editionId, ctx.TurnCancellationToken);
-            var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions) ?? new CompositionScene();
-            objectStart = Math.Clamp(objectStart, 0, scene.Objects.Count);
-            objectCount = Math.Clamp(objectCount, 1, 50);
-            structureStart = Math.Max(0, structureStart);
-            structureCount = Math.Clamp(structureCount, 1, 50);
-            var objects = scene.Objects.Skip(objectStart).Take(objectCount).ToList();
-            return JsonSerializer.Serialize(new { ok = true, targetId = cover.Id, editionId, revision = cover.Revision, summary = $"{scene.Objects.Count} cover object(s).", cover.Title, cover.Subtitle, cover.Author, cover.SpineText, cover.BackCopy, cover.Template, cover.Diagnostics, scene.SchemaVersion, scene.Surface, layers = scene.Layers.Skip(structureStart).Take(structureCount), styles = scene.Styles.Skip(structureStart).Take(structureCount), guides = scene.Guides.Skip(structureStart).Take(structureCount), objects, continuation = new { objects = new { start = objectStart, returned = objects.Count, total = scene.Objects.Count, hasMore = objectStart + objects.Count < scene.Objects.Count, nextStart = objectStart + objects.Count < scene.Objects.Count ? objectStart + objects.Count : (int?)null }, structure = new { start = structureStart, count = structureCount, layerTotal = scene.Layers.Count, styleTotal = scene.Styles.Count, guideTotal = scene.Guides.Count } } }, JsonOptions);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = "NOT_FOUND", targetId = editionId, summary = ex.Message }, JsonOptions);
-        }
-    }
-
-    private async Task<string> PatchCoverElementAsync(ImagesChatToolContext ctx, Guid editionId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch)
-    {
-        try { var cover = await covers.PatchElementAsync(ctx.ProjectId, editionId, expectedRevision, targetKind, targetId, patch, ctx.TurnCancellationToken); ctx.MarkMutated(); return JsonSerializer.Serialize(new { ok = true, targetId, revision = cover.Revision, changedIds = new[] { targetId }, summary = $"Patched cover {targetKind} {targetId:N}.", mutation = new { kind = "coverComposition", id = editionId } }, JsonOptions); }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = ex is Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "PATCH_REJECTED", targetId, summary = ex.Message, recovery = "Reread the cover and retry only the intended fields against its current revision." }, JsonOptions); }
-    }
-
-    private async Task<string> PlaceCoverImageAsync(ImagesChatToolContext ctx, Guid editionId, long expectedRevision, Guid targetId, Guid imageId, FigureImageFit fit, string? altText, bool decorative, int? readingOrder)
-    {
-        if (!decorative && string.IsNullOrWhiteSpace(altText))
-            return JsonSerializer.Serialize(new { ok = false, code = "ALT_DECISION_REQUIRED", targetId, summary = "Provide alternative text or explicitly mark the artwork decorative." }, JsonOptions);
-        if (await projectImages.GetAsync(ctx.ProjectId, imageId, ctx.TurnCancellationToken) is null)
-            return JsonSerializer.Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId, imageId, summary = "Project image was not found." }, JsonOptions);
-        return await PatchCoverElementAsync(ctx, editionId, expectedRevision, "object", targetId, new CompositionElementPatch(
-            ImageId: imageId,
-            ImageFit: fit,
-            AltText: decorative ? string.Empty : altText?.Trim(),
-            Decorative: decorative,
-            AccessibilityDecisionPending: false,
-            SemanticRole: decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure,
-            ReadingOrder: decorative ? null : readingOrder,
-            ClearReadingOrder: decorative));
-    }
-
-    private async Task<string> ValidateCoverAsync(ImagesChatToolContext ctx, Guid editionId)
-    {
-        try
-        {
-            var cover = await covers.GetAsync(ctx.ProjectId, editionId, ctx.TurnCancellationToken);
-            return JsonSerializer.Serialize(new { ok = cover.Diagnostics.Count == 0, targetId = editionId, revision = cover.Revision, summary = cover.Diagnostics.Count == 0 ? "Cover validation passed." : $"Cover validation found {cover.Diagnostics.Count} diagnostic(s).", diagnosticCounts = new { errors = cover.Diagnostics.Count, warnings = 0 }, diagnostics = cover.Diagnostics.Take(12) }, JsonOptions);
-        }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "VALIDATION_FAILED", targetId = editionId, summary = ex.Message }, JsonOptions); }
-    }
-
-    private async Task<string> StageCoverAsync(ImagesChatToolContext ctx, Guid editionId, long expectedRevision, CompositionScene scene)
-    {
-        try
-        {
-            var stage = await covers.StageSceneAsync(ctx.ProjectId, ctx.ConversationId, editionId, expectedRevision, scene, ctx.TurnCancellationToken);
-            return JsonSerializer.Serialize(new { ok = true, targetId = editionId, revision = expectedRevision, stageId = stage.Id, stage.ExpiresAt, summary = $"Validated {scene.Objects.Count} cover object(s)." }, JsonOptions);
-        }
-        catch (Exception ex)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = ex is Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "INVALID_SCENE", targetId = editionId, summary = ex.Message, recovery = "Reread the compact cover and submit one replacement stage." }, JsonOptions);
-        }
-    }
-
-    private async Task<string> ApplyCoverStageAsync(ImagesChatToolContext ctx, Guid stageId, long expectedRevision)
-    {
-        try
-        {
-            var cover = await covers.ApplySceneStageAsync(ctx.ProjectId, ctx.ConversationId, stageId, expectedRevision, ctx.TurnCancellationToken);
-            ctx.MarkMutated();
-            return JsonSerializer.Serialize(new { ok = true, targetId = cover.Id, revision = cover.Revision, changedIds = new[] { cover.Id }, summary = "Staged cover composition applied.", mutation = new { kind = "coverComposition", id = cover.EditionId } }, JsonOptions);
-        }
-        catch (Exception ex)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = ex is Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "STAGE_REJECTED", targetId = stageId, summary = ex.Message, recovery = "Reread the compact cover and submit a new non-replayed stage." }, JsonOptions);
-        }
-    }
-
-    private async Task<string> ReadLayoutGenerationTargetAsync(ImagesChatToolContext ctx, string targetKind, Guid targetId, Guid? variantId, Guid? editionId)
-    {
-        try
-        {
-            var descriptor = targetKind.StartsWith("cover", StringComparison.OrdinalIgnoreCase)
-                ? await compositions.DescribeGenerationTargetAsync(
-                    ctx.ProjectId,
-                    editionId ?? throw new ArgumentException("Cover targets require editionId."),
-                    targetKind,
-                    targetId,
-                    variantId,
-                    ctx.TurnCancellationToken)
-                : await compositions.DescribeAuthoringGenerationTargetAsync(
-                    ctx.ProjectId,
-                    targetKind,
-                    targetId,
-                    variantId,
-                    ctx.TurnCancellationToken);
-            return JsonSerializer.Serialize(new { ok = true, targetId, summary = $"{descriptor.AspectRatio}; {descriptor.RecommendedWidthPixels}x{descriptor.RecommendedHeightPixels}px.", descriptor }, JsonOptions);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
-        {
-            return JsonSerializer.Serialize(new { ok = false, code = "INVALID_TARGET", targetId, summary = ex.Message }, JsonOptions);
-        }
-    }
-
-    private async Task<string> ValidateCompositionAsync(ImagesChatToolContext ctx, Guid variantId)
-    {
-        try
-        {
-            var result = await compositions.ValidateAuthoringVariantAsync(ctx.ProjectId, variantId, ctx.TurnCancellationToken);
-            return JsonSerializer.Serialize(new { ok = result.ErrorCount == 0, targetId = result.TargetId, revision = result.Revision, summary = $"Validation found {result.ErrorCount} error(s) and {result.WarningCount} warning(s).", diagnosticCounts = new { errors = result.ErrorCount, warnings = result.WarningCount }, diagnostics = result.Diagnostics }, JsonOptions);
-        }
-        catch (Exception ex) { return JsonSerializer.Serialize(new { ok = false, code = "VALIDATION_FAILED", targetId = variantId, summary = ex.Message }, JsonOptions); }
     }
 
     private async Task<string> CreateShapeMaskAsync(ImagesChatToolContext ctx, Guid imageId, string label, ProjectImageMaskShape[] shapes)
@@ -1041,7 +500,6 @@ public sealed class ImagesChatTools(
         ImagesChatToolContext ctx,
         ImageGenerationBrief brief,
         ImageReferenceUse[]? references,
-        ImageGenerationTarget? target,
         string? altText,
         string? quality,
         string? outputFormat,
@@ -1054,7 +512,7 @@ public sealed class ImagesChatTools(
                 ctx.ProjectId,
                 brief,
                 references,
-                target,
+                null,
                 altText,
                 quality,
                 outputFormat,
@@ -1078,7 +536,6 @@ public sealed class ImagesChatTools(
         ProjectImageMaskShape[]? maskShapes,
         string? maskLabel,
         ImageReferenceUse[]? references,
-        ImageGenerationTarget? target,
         string? altText,
         string? quality,
         string? outputFormat,
@@ -1106,7 +563,7 @@ public sealed class ImagesChatTools(
                 brief,
                 effectiveMaskId,
                 references,
-                target,
+                null,
                 altText,
                 quality,
                 outputFormat,
@@ -1134,7 +591,7 @@ public sealed class ImagesChatTools(
             var visual = await BuildVisualAsync(ctx, image, image.FileName, caption);
             ctx.AddVisual(visual);
             ctx.AddModelOnlyImage(image);
-            outputs.Add(ImageOutputPayload(output, result.TargetAspect, result.RequestedRaster));
+            outputs.Add(ImageOutputPayload(output));
         }
         if (result.Images.Count > 0)
             ctx.MarkMutated();
@@ -1143,16 +600,11 @@ public sealed class ImagesChatTools(
             ok = result.Succeeded,
             jobId = result.JobId,
             status = result.Status,
-            targetAspect = result.TargetAspect,
-            requestedRaster = result.RequestedRaster,
             outputImageIds = result.Images.Select(image => image.Id),
             images = outputs,
             attached = false,
-            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.LayoutBound ? result.Outputs.Count(output => !output.GeometryMatched) : 0 },
+            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = 0 },
             diagnostics = result.Diagnostics.Take(3),
-            geometryWarnings = result.LayoutBound
-                ? result.Outputs.Where(output => !output.GeometryMatched).Select(output => new { code = "LAYOUT_IMAGE_GEOMETRY_MISMATCH", message = $"Provider returned {output.ActualRaster} instead of requested {result.RequestedRaster}. Inspect before placement or regeneration." })
-                : [],
             summary = result.Summary,
         }, JsonOptions);
     }
@@ -1171,24 +623,6 @@ public sealed class ImagesChatTools(
     {
         await imageWorkflow.CancelAsync(ctx.ProjectId, jobId, ctx.TurnCancellationToken);
         return JsonSerializer.Serialize(new { ok = true, jobId, status = "cancelled", summary = "Project-image job cancellation requested; no image was placed." }, JsonOptions);
-    }
-
-    private async Task<string> AddProjectImageToContextAsync(ImagesChatToolContext ctx, Guid chapterId, Guid imageId)
-    {
-        var chapter = await chapters.GetAsync(chapterId);
-        if (chapter is null || chapter.ProjectId != ctx.ProjectId)
-            return $"Error: chapter {chapterId} not found in this project.";
-        if (await projectImages.GetAsync(ctx.ProjectId, imageId) is null)
-            return $"Error: image {imageId} not found in this project.";
-
-        await editorContext.SetItemIncludedAsync(
-            ctx.ProjectId,
-            chapterId,
-            ContextItemKind.ProjectImage,
-            EditorContextKeys.ProjectImage(imageId),
-            isIncluded: true);
-        ctx.MarkMutated();
-        return "Image added to chapter context.";
     }
 
     private async Task<ImagesChatVisualAttachment> BuildVisualAsync(
@@ -1218,9 +652,6 @@ public sealed class ImagesChatTools(
 
     private static int CountTextPages(string text, int pageMaxChars) =>
         string.IsNullOrEmpty(text) ? 1 : (text.Length + pageMaxChars - 1) / pageMaxChars;
-
-    private static string CleanOr(string? value, string fallback) =>
-        string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
 
     private static IReadOnlyList<Guid>? ParseSourceIds(string[]? sourceIds, out string? error)
     {
@@ -1264,7 +695,7 @@ public sealed class ImagesChatTools(
         image.SizeBytes,
     };
 
-    private static object ImageOutputPayload(AgentProjectImageOutput output, string targetAspect, string requestedRaster) => new
+    private static object ImageOutputPayload(AgentProjectImageOutput output) => new
     {
         output.Image.Id,
         output.Image.FileName,
@@ -1275,41 +706,10 @@ public sealed class ImagesChatTools(
         output.Image.Source,
         output.Image.Prompt,
         output.Image.GenerationModel,
-        targetAspect,
-        requestedRaster,
         output.ActualRaster,
-        output.GeometryMatched,
-        effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null,
         output.Image.CreatedAt,
         output.Image.UpdatedAt,
         output.Image.SizeBytes,
-    };
-
-    private static object JobPayload(ProjectImageJobView job) => new
-    {
-        job.Id,
-        job.Kind,
-        job.Status,
-        job.Label,
-        job.Prompt,
-        job.BriefJson,
-        job.ReferenceManifestJson,
-        job.TargetGeometryJson,
-        job.ProviderRevisedPrompts,
-        job.Size,
-        job.Quality,
-        job.OutputFormat,
-        job.Count,
-        job.SourceImageId,
-        job.MaskId,
-        job.ReferenceImageIds,
-        job.OutputImageIds,
-        job.OutputStates,
-        job.OutputErrors,
-        job.Error,
-        job.CreatedAt,
-        job.StartedAt,
-        job.CompletedAt,
     };
 
     private static (int? Width, int? Height) ReadSize(byte[] data)
@@ -1318,35 +718,6 @@ public sealed class ImagesChatTools(
         return bitmap is null
             ? ((int?)null, (int?)null)
             : (bitmap.Width, bitmap.Height);
-    }
-
-    private static object RasterMetadata(int? width, int? height) => new
-    {
-        width,
-        height,
-        orientation = width is null || height is null
-            ? "unknown"
-            : width == height
-                ? "square"
-                : width > height ? "landscape" : "portrait",
-        aspectRatio = width is null || height is null || width <= 0 || height <= 0
-            ? "unknown"
-            : ReducedAspectRatio(width.Value, height.Value),
-    };
-
-    private static string ReducedAspectRatio(int width, int height)
-    {
-        var a = Math.Abs(width);
-        var b = Math.Abs(height);
-        while (b != 0)
-        {
-            var next = a % b;
-            a = b;
-            b = next;
-        }
-
-        var divisor = Math.Max(1, a);
-        return $"{width / divisor}:{height / divisor}";
     }
 
     private static string Truncate(string value, int max) =>

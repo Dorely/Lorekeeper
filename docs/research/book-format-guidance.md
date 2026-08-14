@@ -51,8 +51,9 @@ belong in the Book Brief.
 ## Assistant and token behavior
 
 Outline treats chapters as format-neutral containers of semantic text, Figures,
-and Designed Pages. Concrete placeholders use the same revision-aware visual
-services as Editor, Images, and Publish. Large scenes use one-use persisted
+and Designed Pages. Concrete placeholders use the revision-aware visual
+services owned by Editor and Publish. Images remains limited to free-standing
+library art and canonical entity references. Large scenes use one-use persisted
 staging so a scene payload is sent once and the apply call contains only a stage
 ID and expected revision. Reads are compact and paginated; results report
 changed IDs/fields and prioritized diagnostics rather than full manuscripts or

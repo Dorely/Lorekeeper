@@ -81,9 +81,21 @@ the live test project; terminate the browser host after the run.
   Pages without offering chapter visual types.
 - Check fiction, nonfiction, picture-book, illustrated-book, poetry, and hybrid
   briefs receive concise relevant guidance subordinate to explicit direction.
-- Ask Editor and Images to read and mutate a Figure/composition; ask Publish to
-  read edition differences and layout diagnostics. Verify compact
-  IDs/revisions/diagnostics and conflict recovery.
+- Ask Editor to read and mutate a Figure/composition and ask Publish to read
+  edition differences and layout diagnostics. Verify compact
+  IDs/revisions/diagnostics and conflict recovery. Ask Images for the same
+  Figure, page, page-setup, cover, or chapter-context mutation and confirm it
+  explains the Editor/Publish handoff without exposing or invoking such a tool.
+- In Images, ask for two or three materially different art directions for the
+  current book. Confirm the comparison uses observable medium, mark, shape,
+  proportion, palette/value, light, texture, composition, influence, genre, and
+  audience traits. Approve one, confirm the exact current Visual Direction is
+  read before it is saved, then simulate a stale value and confirm the newer
+  direction is not overwritten.
+- Generate and inspect canonical studies for one character and one location.
+  Confirm exploratory art remains unattached, the approved character uses an
+  isolated study or tight crop, the location may use an intentional broad
+  environment study, and both references receive role-specific labels.
 - On each assistant surface, generate or edit an image and confirm the tool
   remains active until it returns a readable terminal result and an unattached
   project-image ID. Confirm no numeric job status or queued-success result is
@@ -96,10 +108,21 @@ the live test project; terminate the browser host after the run.
   chapter body. Confirm the full outline is already available and that bounded
   source search/read finds the body detail. Generate cover art, inspect it, and
   separately place its image ID without replaying the generation request.
+- Ask Publish to audit a book with incomplete front/back matter for both print
+  and reflowable EPUB. Confirm it explains each recommended section's purpose,
+  treats KDP order and recto/verso practice as guidance rather than a universal
+  blocker, preserves existing authored choices, and does not add irrelevant
+  ceremonial matter. Confirm it distinguishes Lorekeeper validation from
+  actual KDP/Ingram acceptance.
+- Ask Publish to complete the destination metadata. Confirm it works only with
+  supported Core/release fields and identifies BISAC/Thema, keywords, expanded
+  contributors, price, territories, and publication date as external portal
+  follow-up instead of claiming to store or submit them.
 - Stage a large scene once, apply by stage ID, and verify the payload is neither
   repeated nor replayable.
-- Confirm every assistant defaults reusable art and ordinary flowing Figures to
-  free-standing generation, and uses a geometry-bound target only when artwork
+- Confirm Images and Outline expose only free-standing generation. Confirm
+  Editor and Publish default reusable art and ordinary flowing Figures to
+  free-standing generation, and use a geometry-bound target only when artwork
   must honor a concrete page, frame, Figure placement, or cover region. Verify
   bound guidance does not crop or resize the stored raster, and confirm no
   assistant claims vendor acceptance or that a URL was downloaded.

@@ -50,6 +50,51 @@ public sealed class BookBriefService(AppDbContext db) : IBookBriefService
         return brief;
     }
 
+    public async Task<BookBrief> UpdateVisualDirectionAsync(
+        Guid projectId,
+        string expectedCurrentVisualDirection,
+        string visualDirection,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(expectedCurrentVisualDirection);
+        ArgumentNullException.ThrowIfNull(visualDirection);
+
+        _ = await GetOrCreateAsync(projectId, cancellationToken);
+        var nextVisualDirection = visualDirection.Trim();
+        var updatedAt = DateTime.UtcNow;
+        var affected = await db.BookBriefs
+            .Where(brief => brief.ProjectId == projectId
+                && brief.VisualDirection == expectedCurrentVisualDirection)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(brief => brief.VisualDirection, nextVisualDirection)
+                .SetProperty(brief => brief.UpdatedAt, updatedAt), cancellationToken);
+
+        if (affected == 0)
+        {
+            var actualVisualDirection = await db.BookBriefs
+                .AsNoTracking()
+                .Where(brief => brief.ProjectId == projectId)
+                .Select(brief => brief.VisualDirection)
+                .SingleAsync(cancellationToken);
+            throw new BookBriefVisualDirectionConflictException(actualVisualDirection);
+        }
+
+        var updated = await db.BookBriefs
+            .AsNoTracking()
+            .SingleAsync(brief => brief.ProjectId == projectId, cancellationToken);
+        var trackedEntry = db.ChangeTracker
+            .Entries<BookBrief>()
+            .SingleOrDefault(entry => entry.Entity.ProjectId == projectId);
+        if (trackedEntry is not null)
+        {
+            trackedEntry.CurrentValues.SetValues(updated);
+            trackedEntry.State = EntityState.Unchanged;
+            return trackedEntry.Entity;
+        }
+
+        return updated;
+    }
+
     public string FormatForPrompt(BookBrief brief)
     {
         ArgumentNullException.ThrowIfNull(brief);
