@@ -223,7 +223,7 @@
 | File | Description |
 |------|-------------|
 | `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, collapsible Front/Main content/Back flow, direct chapter and publication-section inclusion/placement, product-filtered print-release setup, autosave, target-preserving full-height editors, progress, previews, blockers, and downloads. |
-| `PublicationPdfPreview.razor` (+ `.razor.css`) | Lorekeeper-owned artifact viewer with viewer-height single-page or fixed two-leaf facing rows, transparent parity slots, optional visible page seam, lazy immutable page images, scroll snapping between complete rows, and facing/seam-hidden defaults. |
+| `PublicationPdfPreview.razor` (+ `.razor.css`) | Lorekeeper-owned artifact viewer with height-contained single-page or fixed two-leaf facing rows, transparent parity slots, optional visible page seam, lazy immutable page images, and facing/seam-hidden defaults. |
 | `PublicationEpubPreview.razor` (+ `.razor.css`) | Full-height sandboxed reader for the actual prepared EPUB artifact, with spine/contents selection, previous/next navigation, responsive reflow, and fit-to-workspace fixed-layout pages. |
 | `PublishChatPanel.razor` (+ `.razor.css`) | Refresh-safe Publish adapter over shared `ChatSurface` with a flush-returned exact turn context, persisted transcript/tool chips, streaming, Stop/Reset, provider/token state, image attachments, active-turn reconnection, and structured workspace mutation callbacks. |
 

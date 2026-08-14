@@ -857,10 +857,8 @@ artifact pages through project-scoped endpoints, caches them by artifact hash an
 raster width, and presents fixed single-page or two-leaf facing rows. Facing pages
 with the seam hidden is the initial view; users may expose the seam or switch to
 single pages without changing the stored artifact. Each row is contained within
-the available modal height, so vertical scrolling advances between complete pages
-or spreads rather than revealing the remainder of an oversized page. Unpaired
-parity slots remain transparent, preserving right/left alignment without
-presenting them as PDF pages.
+the available modal height. Unpaired parity slots remain transparent, preserving
+right/left alignment without presenting them as PDF pages.
 Prepared EPUB previews likewise render the immutable artifact rather than a
 projection rebuilt from current source state. `PublicationEpubPreviewService`
 revalidates artifact length and SHA-256, parses the ZIP in memory without disk
