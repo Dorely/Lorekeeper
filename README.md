@@ -113,8 +113,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   the immutable artifact's cover, reflowable chapters, Figures, and canvas-faithful
   fixed-layout Designed Pages without synthetic blank spine locations, with spine
   navigation and direct EPUB/front-cover downloads.
-  The sandboxed reader is visual artifact inspection; authoritative EPUBCheck
-  validation and cross-reader compatibility remain separate readiness work.
+  The sandboxed reader is visual artifact inspection; Lorekeeper's preparation
+  checks provide the app's declared structural-validation scope, while actual
+  behavior across third-party readers remains an external compatibility check.
   Core PDF presentation can preserve a Designed Page as one wide or custom-sized
   PDF page; PDF ebook releases inherit that choice until explicitly customized.
 - Lorekeeper-owned paperback, hardcover, and Digital PDF press jobs with cancellation/restart recovery,

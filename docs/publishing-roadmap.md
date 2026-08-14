@@ -136,13 +136,13 @@ The current application provides:
 - app-owned previews of immutable PDF, image, and mixed-layout EPUB artifacts;
 - conversational Publish assistance and shared page/cover composition tools.
 
-This foundation is broad enough to keep. The principal artifact-readiness gates
-that remain are authoritative EPUB validation and complete native packaged-pipeline
-acceptance on Windows and both macOS architectures, not a replacement renderer.
+This foundation is broad enough to keep. The principal artifact-readiness gate
+that remains is complete native packaged-pipeline acceptance on Windows and both
+macOS architectures, not another renderer or validator runtime.
 
 ## Next phase — artifact-complete publishing
 
-Status: `In progress — EPUBCheck and native release acceptance remain`
+Status: `In progress — native release acceptance remains`
 
 ### 1. Edition-specific authoring in Editor
 
@@ -206,8 +206,9 @@ stored artifact in memory, preserves reflowable and fixed-layout spine order,
 and serves only validated manifest resources through artifact-scoped endpoints.
 Designed Page spine items retain the canvas scene's typography and do not gain
 empty reflowable pages before or after them. The reader supports navigation and
-bounded assistant inspection, but is visual artifact review rather than
-authoritative EPUB conformance or cross-reader compatibility evidence.
+bounded assistant inspection. Preparation's owned structural checks define
+Lorekeeper's validation scope; neither preview nor preparation claims acceptance
+by every external reader.
 
 Artifact history, render comparison, and production audit browsing may improve
 diagnosis, but they are not prerequisites for producing an uploadable file.
@@ -215,23 +216,7 @@ diagnosis, but they are not prerequisites for producing an uploadable file.
 Gate: a user can visually inspect and download every required constituent file
 without unpacking a package or opening another production application.
 
-### 4. Authoritative EPUB validation
-
-- Bundle and invoke EPUBCheck 5.3.0, the current EPUB 3.3 validator target, through an
-  integrity-checked, app-owned runtime boundary.
-- Consume its structured JSON report rather than scraping console text. See the
-  [official release](https://github.com/w3c/epubcheck/releases/tag/v5.3.0) and
-  [CLI documentation](https://w3c.github.io/epubcheck/docs/cli/).
-- Validate every prepared EPUB before reporting it ready.
-- Store and display the complete validator result with source-oriented recovery
-  actions.
-- Keep visual review and semantic accessibility diagnostics separate from the
-  structural EPUBCheck result.
-
-Gate: a user does not need to install or run EPUBCheck separately, and an
-invalid EPUB cannot be reported as ready.
-
-### 5. Versioned physical-product registry and broader rules
+### 4. Versioned physical-product registry and broader rules
 
 Status: `Implemented for current KDP and Ingram physical products`
 
@@ -256,7 +241,7 @@ Status: `Implemented for current KDP and Ingram physical products`
 Gate: each named destination has a reproducible versioned contract, while
 unknown or custom destinations remain possible through Generic profiles.
 
-### 6. Native release acceptance
+### 5. Native release acceptance
 
 - Build and exercise the integrity-checked Press runtime on every platform the
   application claims to distribute.
@@ -299,7 +284,11 @@ added later but are not prerequisites for baseline DOCX interchange.
 
 DOCX import writes through the semantic manuscript boundary. DOCX export reads
 the selected Core or effective release source; it does not become an alternate
-authoritative manuscript.
+authoritative manuscript. The deferred, decision-complete implementation shape
+is preserved in
+[`plans/deferred-docx-interchange.md`](plans/deferred-docx-interchange.md): rich
+Word paste, one DOCX imported directly into one empty chapter, and manuscript or
+full-book DOCX export without a multi-chapter import workflow.
 
 ### Additional physical products
 

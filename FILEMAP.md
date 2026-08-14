@@ -15,6 +15,7 @@
 | `CLAUDE.md` | Claude compatibility entry point that delegates all project guidance to `AGENTS.md`. |
 | `docs/architecture.md` | Current technical architecture, ownership boundaries, persistence/security constraints, platform scope, and validation commands. |
 | `docs/publishing-roadmap.md` | Artifact-focused route to complete paperback, hardcover, EPUB, and PDF ebook production, with Generic/Specific products, Editor-owned release variations, and eventual DOCX interchange. |
+| `docs/plans/deferred-docx-interchange.md` | Deferred decision-complete plan for rich Word paste, single-empty-chapter DOCX import, broad Word-derived manuscript semantics, and Core/release DOCX export. |
 | `docs/print-product-registry.md` | Current physical-product scope, exact stock/geometry rules, artifact sets, truthful claims, official sources, and maintainer refresh workflow. |
 | `docs/manual-acceptance-unified-composition.md` | Manual UI/output checklist for genre guidance, Figures, Designed Pages, covers, geometry-bound generation, accessibility, and assistants. |
 | `FILEMAP.md` | This file — concise map of every source file. |

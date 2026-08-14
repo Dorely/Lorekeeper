@@ -185,7 +185,7 @@ public sealed class PublishAssistantTools(
                 method: (Guid artifactId, int? locationIndex = null, int start = 0, int count = 4000) =>
                     ReadEpubArtifactPreviewAsync(context, artifactId, locationIndex, start, count),
                 name: "read_epub_artifact_preview",
-                description: "Read bounded navigation/spine metadata from one immutable prepared EPUB artifact. Supply locationIndex to read a bounded plain-text slice from that location. Returns no binary data or XHTML and does not perform authoritative EPUB conformance validation."),
+                description: "Read bounded navigation/spine metadata from one immutable prepared EPUB artifact. Supply locationIndex to read a bounded plain-text slice from that location. Returns no binary data or XHTML; preparation separately reports Lorekeeper's structural validation result."),
             AIFunctionFactory.Create(
                 method: () => ReadCoreContentAsync(context),
                 name: "read_publication_book_content",
@@ -1065,7 +1065,7 @@ public sealed class PublishAssistantTools(
                 hasMoreLocations = preview.Locations.Count > 80,
                 previewAction = "Use Preview EPUB beside the current artifact in Publish.",
                 downloadUrl = $"/projects/{context.ProjectId:N}/publish/artifacts/{artifactId:N}/download",
-                validationScope = "Lorekeeper artifact preview; not authoritative EPUB conformance or cross-reader compatibility.",
+                validationScope = "Visual inspection of a Lorekeeper structurally validated artifact; not cross-reader acceptance.",
             });
         }
 

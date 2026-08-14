@@ -874,8 +874,8 @@ artifact-scoped endpoints, and uses one nonce-authorized app-owned fit routine
 for fixed-layout viewports; artifact scripts never run. A preview failure does
 not change or suppress the immutable download. Publish tools expose only
 bounded spine/navigation metadata and paged extracted text, never binary data or
-complete XHTML. This reader is artifact inspection, not EPUBCheck evidence or a
-general third-party EPUB import reader.
+complete XHTML. This reader is artifact inspection, not a general third-party
+EPUB import reader or evidence of behavior in every external reading system.
 The EPUB exporter segments mixed semantic and Designed Page content at actual
 content boundaries. A fixed-layout canvas is one spine item by itself; the
 exporter does not synthesize empty reflowable siblings before or after it. The
@@ -970,9 +970,10 @@ alt text, decorative artifacts, and
 logical reading order. This is implemented accessible output but is not a formal
 PDF/UA certification claim. EPUB emits corresponding semantic XHTML plus
 `schema:accessMode`, sufficient-mode, feature, hazard, and human-review summary
-metadata; EPUB validation remains structural rather than a certification claim.
-The structural checks are defense in depth and are not described as authoritative
-EPUB conformance. Bundled EPUBCheck remains a separate roadmap gate.
+metadata. `PublicationPackageService` owns Lorekeeper's declared EPUB
+structural-validation boundary; the result is reported as Lorekeeper validated,
+not as third-party reader acceptance or an independent accessibility
+certification claim. No external EPUB validator runtime is planned.
 Every included ordered
 semantic-matter document is projected into TXT, Markdown, EPUB, and contained
 press output. The service persists SHA-256-addressed EPUB, front-cover, report,
