@@ -358,6 +358,7 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
         if (await db.Chapters.AnyAsync(chapter => chapter.ProjectId == projectId
             && (chapter.ManuscriptJson.Contains(idN) || chapter.ManuscriptJson.Contains(idD)), cancellationToken)) return true;
         if (await db.PageCompositionVariants.AnyAsync(variant => variant.Composition.ProjectId == projectId
+            && variant.DetachedAt == null && variant.Composition.DetachedAt == null
             && (variant.SceneJson.Contains(idN) || variant.SceneJson.Contains(idD)), cancellationToken)) return true;
         if (await db.PublicationCoverDesigns.AnyAsync(cover => cover.Edition.ProjectId == projectId
             && (cover.CompositionSceneJson.Contains(idN) || cover.CompositionSceneJson.Contains(idD)), cancellationToken)) return true;

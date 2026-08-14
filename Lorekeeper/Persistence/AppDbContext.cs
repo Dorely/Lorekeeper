@@ -96,6 +96,10 @@ public class AppDbContext(
     public DbSet<PageComposition> PageCompositions => Set<PageComposition>();
     public DbSet<PageCompositionVariant> PageCompositionVariants => Set<PageCompositionVariant>();
     public DbSet<CompositionMutationStage> CompositionMutationStages => Set<CompositionMutationStage>();
+    public DbSet<AuthoringHistoryStream> AuthoringHistoryStreams => Set<AuthoringHistoryStream>();
+    public DbSet<AuthoringHistoryEntry> AuthoringHistoryEntries => Set<AuthoringHistoryEntry>();
+    public DbSet<AuthoringTurnHistoryBatch> AuthoringTurnHistoryBatches => Set<AuthoringTurnHistoryBatch>();
+    public DbSet<AuthoringHistoryDependency> AuthoringHistoryDependencies => Set<AuthoringHistoryDependency>();
 
     public override int SaveChanges() => SaveChanges(acceptAllChangesOnSuccess: true);
 
@@ -340,6 +344,57 @@ public class AppDbContext(
             entity.HasOne(e => e.Project)
                 .WithMany(e => e.CompositionMutationStages)
                 .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AuthoringHistoryStream>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.StreamKey }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.DocumentKind, e.DocumentId });
+            entity.Property(e => e.DocumentKind).HasConversion<string>();
+            entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.Project)
+                .WithMany()
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AuthoringHistoryEntry>(entity =>
+        {
+            entity.HasIndex(e => new { e.StreamId, e.Sequence }).IsUnique();
+            entity.HasIndex(e => e.AssistantTurnId);
+            entity.Property(e => e.Origin).HasConversion<string>();
+            entity.HasOne(e => e.Stream)
+                .WithMany(e => e.Entries)
+                .HasForeignKey(e => e.StreamId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AuthoringTurnHistoryBatch>(entity =>
+        {
+            entity.HasIndex(e => new { e.AssistantTurnId, e.StreamId }).IsUnique();
+            entity.HasIndex(e => new { e.Status, e.UpdatedAt });
+            entity.Property(e => e.Status).HasConversion<string>();
+            entity.HasOne(e => e.Stream)
+                .WithMany(e => e.TurnBatches)
+                .HasForeignKey(e => e.StreamId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AuthoringHistoryDependency>(entity =>
+        {
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_AuthoringHistoryDependencies_Owner",
+                "(\"EntryId\" IS NULL) <> (\"TurnBatchId\" IS NULL)"));
+            entity.HasIndex(e => new { e.Kind, e.ResourceId });
+            entity.Property(e => e.Kind).HasConversion<string>();
+            entity.HasOne(e => e.Entry)
+                .WithMany(e => e.Dependencies)
+                .HasForeignKey(e => e.EntryId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.TurnBatch)
+                .WithMany(e => e.Dependencies)
+                .HasForeignKey(e => e.TurnBatchId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

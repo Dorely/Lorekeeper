@@ -194,8 +194,9 @@ public sealed class PublishService(
         var compositions = await db.PageCompositions
             .AsNoTracking()
             .Where(composition => composition.ProjectId == projectId
+                && composition.DetachedAt == null
                 && (composition.EditionId == null || composition.EditionId == editionId))
-            .Include(composition => composition.Variants)
+            .Include(composition => composition.Variants.Where(variant => variant.DetachedAt == null))
             .ToListAsync(cancellationToken);
         var sections = new List<PublishSectionDocument>();
         var actNumber = 0;

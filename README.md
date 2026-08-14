@@ -35,11 +35,19 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   captions, direct font/size/line-spacing and paragraph controls, Book Text Styles
   with reusable typography, alignment, indentation, spacing, and pagination,
   one-click paragraph/chapter application, capture-from-paragraph,
-  compact assistant style tools, sparse per-paragraph overrides, rich inline marks, undo/redo,
+  compact assistant style tools, sparse per-paragraph overrides, rich inline marks,
+  database-backed Undo/Redo retained across reloads and application restarts,
   normalized paste, find/replace, and
   outline navigation. Manual edits and AI
   assistants share one revision-checked manuscript boundary; HTML is not
   authoritative.
+- Persistent authoring history retains the latest 100 actions independently for
+  Core/release chapters, publication prose sections, Designed Pages, and Core/release
+  covers. Typing is grouped naturally, canvas gestures remain single actions, and
+  every assistant turn becomes one action per affected document rather than one per
+  tool call. Undo can restore a deleted Designed Page with its original semantic
+  content, scene, variants, IDs, and asset references. History is working-database
+  state and is intentionally excluded from project exports.
 - Outline treats chapters as format-neutral containers and derives concise,
   non-prescriptive genre-format guidance from the Book Brief. Editor owns
   chapter Figure and Designed Page work; Publish owns publication sections and

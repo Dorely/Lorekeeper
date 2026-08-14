@@ -2,7 +2,6 @@ import {DOMParser as ProseMirrorDOMParser, Fragment, Schema, Slice} from "prosem
 import {EditorState, NodeSelection, Plugin, PluginKey, TextSelection} from "prosemirror-state";
 import {EditorView} from "prosemirror-view";
 import {baseKeymap, chainCommands, createParagraphNear, liftEmptyBlock, newlineInCode, toggleMark} from "prosemirror-commands";
-import {history, redo, undo} from "prosemirror-history";
 import {GapCursor, gapCursor} from "prosemirror-gapcursor";
 import {keymap} from "prosemirror-keymap";
 
@@ -873,6 +872,53 @@ function blockPositionById(doc, blockId) {
         return false;
     });
     return found;
+}
+
+function captureStableSelection(view) {
+    const {selection, doc} = view.state;
+    if (selection instanceof NodeSelection) {
+        const node = doc.nodeAt(selection.from);
+        return node?.attrs?.id ? {blockId: node.attrs.id, node: true, anchorOffset: 0, headOffset: 0} : {};
+    }
+    let selected = null;
+    doc.descendants((node, position) => {
+        if (!node.attrs?.id || selection.head < position || selection.head > position + node.nodeSize)
+            return true;
+        selected = {node, position};
+        return true;
+    });
+    if (!selected) return {};
+    const contentStart = selected.position + 1;
+    return {
+        blockId: selected.node.attrs.id,
+        node: false,
+        anchorOffset: Math.max(0, selection.anchor - contentStart),
+        headOffset: Math.max(0, selection.head - contentStart)
+    };
+}
+
+function restoreStableSelection(view, selectionJson) {
+    if (!selectionJson) return;
+    try {
+        const saved = typeof selectionJson === "string" ? JSON.parse(selectionJson) : selectionJson;
+        if (!saved?.blockId) return;
+        const position = blockPositionById(view.state.doc, saved.blockId);
+        if (!Number.isInteger(position)) {
+            view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)));
+            return;
+        }
+        const node = view.state.doc.nodeAt(position);
+        if (!node) return;
+        const selection = saved.node
+            ? NodeSelection.create(view.state.doc, position)
+            : TextSelection.create(
+                view.state.doc,
+                position + 1 + Math.min(Number(saved.anchorOffset) || 0, node.content.size),
+                position + 1 + Math.min(Number(saved.headOffset) || 0, node.content.size));
+        view.dispatch(view.state.tr.setSelection(selection).scrollIntoView());
+    } catch {
+        // Selection restoration is best-effort; the restored document remains authoritative.
+    }
 }
 
 function applyMark(view, markName, value = null) {
@@ -1900,6 +1946,8 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     let conflictDraftJson = null;
     const conflictStorageKey = `lorekeeper.manuscript-conflict.${manuscriptId}`;
     let updateFormattingControls = () => {};
+    let persistentHistoryState = {canUndo: false, canRedo: false, undoLabel: null, redoLabel: null};
+    let performPersistentHistory = async () => false;
     const applyEffectiveReadOnly = () => {
         readOnly = requestedReadOnly || conflictDraftJson !== null;
         if (!view) return;
@@ -1966,39 +2014,48 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             clearTimeout(timer);
             timer = null;
         }
+        const targetGeneration = changeGeneration;
+        const snapshotJson = JSON.stringify(
+            domainFromDocument(view.state.doc, manuscriptId, revision));
+        const selectionJson = JSON.stringify(captureStableSelection(view));
         saveChain = saveChain.catch(() => false).then(async () => {
             if (conflictDraftJson !== null)
                 return false;
-            while (savedGeneration < changeGeneration) {
-                if (conflictDraftJson !== null)
-                    return false;
-                const targetGeneration = changeGeneration;
-                const payload = domainFromDocument(view.state.doc, manuscriptId, revision);
-                const json = JSON.stringify(payload);
-                try {
-                    const result = await dotNetRef.invokeMethodAsync("OnDocumentDebounced", revision, json);
-                    if (result?.conflict) {
-                        conflictDraftJson = JSON.stringify(
-                            domainFromDocument(view.state.doc, manuscriptId, revision));
-                        try { localStorage.setItem(conflictStorageKey, conflictDraftJson); } catch {}
-                        if (timer) {
-                            clearTimeout(timer);
-                            timer = null;
-                        }
-                        applyEffectiveReadOnly();
-                        await dotNetRef.invokeMethodAsync(
-                            "OnConflictPreserved",
-                            conflictDraftJson,
-                            result.currentManuscriptJson);
-                        return false;
+            if (savedGeneration >= targetGeneration)
+                return true;
+            const payload = JSON.parse(snapshotJson);
+            payload.revision = revision;
+            const json = JSON.stringify(payload);
+            try {
+                const result = await dotNetRef.invokeMethodAsync(
+                    "OnDocumentDebounced",
+                    revision,
+                    json,
+                    selectionJson);
+                if (result?.conflict) {
+                    conflictDraftJson = json;
+                    try { localStorage.setItem(conflictStorageKey, conflictDraftJson); } catch {}
+                    if (timer) {
+                        clearTimeout(timer);
+                        timer = null;
                     }
-                    if (!result?.saved) return false;
-                    revision = result.revision;
-                    savedGeneration = targetGeneration;
-                    updateStatus();
-                } catch {
+                    applyEffectiveReadOnly();
+                    await dotNetRef.invokeMethodAsync(
+                        "OnConflictPreserved",
+                        conflictDraftJson,
+                        result.currentManuscriptJson);
                     return false;
                 }
+                if (!result?.saved) return false;
+                revision = result.revision;
+                savedGeneration = Math.max(savedGeneration, targetGeneration);
+                try {
+                    persistentHistoryState = await dotNetRef.invokeMethodAsync("GetAuthoringHistoryState");
+                    updateFormattingControls();
+                } catch {}
+                updateStatus();
+            } catch {
+                return false;
             }
             return true;
         });
@@ -2036,13 +2093,12 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         doc: initialDocument,
         selection: initialEditorSelection(initialDocument),
         plugins: [
-            history(),
             blockIdPlugin(),
             gapCursor(),
             keymap({
-                "Mod-z": undo,
-                "Shift-Mod-z": redo,
-                "Mod-y": redo,
+                "Mod-z": () => { void performPersistentHistory(false); return true; },
+                "Shift-Mod-z": () => { void performPersistentHistory(true); return true; },
+                "Mod-y": () => { void performPersistentHistory(true); return true; },
                 "Mod-b": toggleMark(schema.marks.strong),
                 "Mod-i": toggleMark(schema.marks.em),
                 "Tab": (_state, _dispatch, editorView) => { changeParagraphIndent(editorView, 1.5); return true; },
@@ -2104,6 +2160,10 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             }
         },
         handlePaste(_view, event) {
+            void saveNow();
+            // The first save closes any typing group before the paste. The queued save
+            // records the pasted document before later typing can join that action.
+            setTimeout(() => { void saveNow(); }, 0);
             const warnings = pasteNormalizationWarnings(
                 event,
                 paragraphRoles,
@@ -2315,14 +2375,8 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             view.dispatch(view.state.tr.insertText(value).scrollIntoView());
             view.focus();
         }),
-        iconButton("↶", "Undo (Ctrl+Z)", () => {
-            undo(view.state, transaction => view.dispatch(transaction), view);
-            view.focus();
-        }),
-        iconButton("↷", "Redo (Ctrl+Y)", () => {
-            redo(view.state, transaction => view.dispatch(transaction), view);
-            view.focus();
-        }),
+        iconButton("↶", "Undo (Ctrl+Z)", () => void performPersistentHistory(false)),
+        iconButton("↷", "Redo (Ctrl+Y)", () => void performPersistentHistory(true)),
         iconButton("⌕", "Find and replace", () => findPanel.open()),
         iconButton("☷", "Toggle document outline", () => outline.open())
     );
@@ -2446,12 +2500,61 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         if (headingSelect) headingSelect.value = paragraph?.type.name === "heading"
             ? String(paragraph.attrs.headingLevel || 2)
             : "";
+        const undoControl = toolbar.querySelector('[data-history-direction="undo"]');
+        const redoControl = toolbar.querySelector('[data-history-direction="redo"]');
+        if (undoControl) {
+            undoControl.disabled = readOnly || !persistentHistoryState.canUndo;
+            undoControl.title = persistentHistoryState.undoLabel
+                ? `Undo ${persistentHistoryState.undoLabel} (Ctrl+Z)`
+                : "Nothing to undo";
+        }
+        if (redoControl) {
+            redoControl.disabled = readOnly || !persistentHistoryState.canRedo;
+            redoControl.title = persistentHistoryState.redoLabel
+                ? `Redo ${persistentHistoryState.redoLabel} (Ctrl+Y)`
+                : "Nothing to redo";
+        }
     };
     updateFormattingControls = () => {
         typographyControls.update();
         updateToolbarState();
     };
+    const undoControl = toolbar.querySelector('[title="Undo (Ctrl+Z)"]');
+    const redoControl = toolbar.querySelector('[title="Redo (Ctrl+Y)"]');
+    if (undoControl) undoControl.dataset.historyDirection = "undo";
+    if (redoControl) redoControl.dataset.historyDirection = "redo";
     updateFormattingControls();
+    performPersistentHistory = async redoDirection => {
+        if (readOnly) return false;
+        const flushed = await saveNow();
+        if (!flushed) return false;
+        try {
+            const result = await dotNetRef.invokeMethodAsync(
+                redoDirection ? "OnRedoAuthoring" : "OnUndoAuthoring");
+            if (!result?.applied) {
+                status.textContent = result?.error || (redoDirection ? "Nothing to redo." : "Nothing to undo.");
+                return false;
+            }
+            replaceDocument(result.manuscriptJson);
+            restoreStableSelection(view, result.selectionJson);
+            persistentHistoryState = result;
+            updateFormattingControls();
+            view.focus();
+            return true;
+        } catch (error) {
+            status.textContent = error?.message || "History could not be applied.";
+            return false;
+        }
+    };
+    toolbar.addEventListener("pointerdown", event => {
+        const control = event.target instanceof Element ? event.target.closest("button, select, input") : null;
+        if (!control || control.dataset.historyDirection) return;
+        void saveNow();
+    }, true);
+    void dotNetRef.invokeMethodAsync("GetAuthoringHistoryState").then(state => {
+        persistentHistoryState = state;
+        updateFormattingControls();
+    }).catch(() => {});
     updateStatus();
     outline.update();
     try {

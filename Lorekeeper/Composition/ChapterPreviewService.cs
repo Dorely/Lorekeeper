@@ -273,10 +273,11 @@ public sealed class ChapterPreviewService(
             .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.PageCompositionId is not null)
             .Select(block => block.PageCompositionId!.Value).Distinct().ToArray();
         var compositions = await db.PageCompositions.AsNoTracking()
-            .Where(item => item.ProjectId == projectId && compositionIds.Contains(item.Id))
+            .Where(item => item.ProjectId == projectId && compositionIds.Contains(item.Id) && item.DetachedAt == null)
             .ToListAsync(cancellationToken);
         var variants = await db.PageCompositionVariants.AsNoTracking()
-            .Where(item => compositionIds.Contains(item.CompositionId))
+            .Where(item => compositionIds.Contains(item.CompositionId) && item.DetachedAt == null
+                && item.Composition.DetachedAt == null)
             .ToListAsync(cancellationToken);
         var compositionPayloads = new Dictionary<Guid, object>();
         var usedFontKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

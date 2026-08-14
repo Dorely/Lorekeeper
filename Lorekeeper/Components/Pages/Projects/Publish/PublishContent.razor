@@ -868,6 +868,10 @@ else
                                    IsReadOnly="_assistantRunning"
                                    SaveAsync="SavePublicationSectionDocumentAsync"
                                    ReadDocumentOverrideAsync="ReadPublicationSectionDocumentAsync"
+                                   ReadHistoryOverrideAsync="ReadPublicationSectionHistoryAsync"
+                                   HistoryDocumentKindOverride="AuthoringHistoryDocumentKind.PublicationSection"
+                                   UndoOverrideAsync="UndoPublicationSectionAsync"
+                                   RedoOverrideAsync="RedoPublicationSectionAsync"
                                    AllowDesignedPages="false"
                                    OpenProjectImagePicker="OpenPublicationSectionImageModal"
                                    OpenBookTextStyles="OpenBookTextStylesModal"
@@ -1152,6 +1156,38 @@ else
         {
             _error = exception.Message;
             return new(false, expectedRevision);
+        }
+    }
+
+    private Task<Lorekeeper.Authoring.AuthoringHistoryState> ReadPublicationSectionHistoryAsync() =>
+        _editingSection is null
+            ? Task.FromResult(new Lorekeeper.Authoring.AuthoringHistoryState(0, false, false, null, null, 0, 0))
+            : PublicationSections.GetHistoryStateAsync(CurrentPublicationSectionTarget(), _editingSection.Id);
+
+    private Task<ChapterBodyEditor.SemanticEditorHistoryResult> UndoPublicationSectionAsync() =>
+        MovePublicationSectionHistoryAsync(redo: false);
+
+    private Task<ChapterBodyEditor.SemanticEditorHistoryResult> RedoPublicationSectionAsync() =>
+        MovePublicationSectionHistoryAsync(redo: true);
+
+    private async Task<ChapterBodyEditor.SemanticEditorHistoryResult> MovePublicationSectionHistoryAsync(bool redo)
+    {
+        if (_editingSection is null)
+            return new(false, null, 0, false, false, null, null, null, "No publication section is open.");
+        try
+        {
+            var result = redo
+                ? await PublicationSections.RedoAsync(CurrentPublicationSectionTarget(), _editingSection.Id)
+                : await PublicationSections.UndoAsync(CurrentPublicationSectionTarget(), _editingSection.Id);
+            _editingSection = result.Section;
+            await RefreshPublicationSectionsAsync(updateEditing: false);
+            return new(true, ManuscriptCodec.Serialize(result.Section.Manuscript), result.Section.Revision,
+                result.History.CanUndo, result.History.CanRedo, result.History.UndoLabel, result.History.RedoLabel,
+                result.SelectionJson, null);
+        }
+        catch (Exception exception)
+        {
+            return new(false, null, 0, false, false, null, null, null, exception.Message);
         }
     }
 

@@ -74,6 +74,24 @@ public sealed class EditorChatTools(
         var tools = new List<AITool>();
         var impactDescription = "Read-only book-level impact map for continuity changes. Combines outline order, chapter synopses, server-side keyword/body checks, hybrid project search hits, affected entities/events, adjacency, and downstream chapters from an anchor chapter. Use this before spawning revision agents or before deciding which chapters need body edits.";
 
+        if (context.CurrentChapterId is not null)
+        {
+            tools.AddRange([
+                AIFunctionFactory.Create(
+                    method: () => ReadAuthoringHistoryAsync(context),
+                    name: "read_authoring_history",
+                    description: "Read compact Undo/Redo state for the protected current chapter and selected Core/release target. No history payload is returned."),
+                AIFunctionFactory.Create(
+                    method: () => MoveAuthoringHistoryAsync(context, redo: false),
+                    name: "undo_authoring_action",
+                    description: "Undo the latest completed action in the protected current chapter and selected Core/release target. The target cannot be supplied or changed by tool input."),
+                AIFunctionFactory.Create(
+                    method: () => MoveAuthoringHistoryAsync(context, redo: true),
+                    name: "redo_authoring_action",
+                    description: "Redo the next action in the protected current chapter and selected Core/release target. The target cannot be supplied or changed by tool input."),
+            ]);
+        }
+
         tools.AddRange([
             AIFunctionFactory.Create(
                 method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
@@ -611,6 +629,82 @@ public sealed class EditorChatTools(
                 summary = exception.Message,
             });
         }
+    }
+
+    private async Task<string> ReadAuthoringHistoryAsync(EditorChatContext context)
+    {
+        if (context.CurrentCompositionId is Guid compositionId)
+        {
+            var compositionState = await compositions.GetHistoryStateAsync(context.ProjectId, compositionId, context.TurnCancellationToken);
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                targetId = compositionId,
+                revision = compositionState.Revision,
+                compositionState.CanUndo,
+                compositionState.CanRedo,
+                compositionState.UndoLabel,
+                compositionState.RedoLabel,
+                compositionState.RetainedActions,
+                summary = "Current Designed Page authoring history read."
+            });
+        }
+
+        var chapterId = context.CurrentChapterId
+            ?? throw new InvalidOperationException("No chapter is selected.");
+        var state = await manuscripts.GetHistoryStateAsync(context.ContentTarget, chapterId, context.TurnCancellationToken);
+        return JsonSerializer.Serialize(new
+        {
+            ok = true,
+            targetId = chapterId,
+            revision = state.Revision,
+            state.CanUndo,
+            state.CanRedo,
+            state.UndoLabel,
+            state.RedoLabel,
+            state.RetainedActions,
+            summary = "Current chapter authoring history read."
+        });
+    }
+
+    private async Task<string> MoveAuthoringHistoryAsync(EditorChatContext context, bool redo)
+    {
+        if (context.CurrentCompositionId is Guid compositionId)
+        {
+            var compositionResult = redo
+                ? await compositions.RedoAsync(context.ContentTarget, context.ProjectId, compositionId, context.TurnCancellationToken)
+                : await compositions.UndoAsync(context.ContentTarget, context.ProjectId, compositionId, context.TurnCancellationToken);
+            context.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                targetId = compositionId,
+                revision = compositionResult.Composition.Revision,
+                action = compositionResult.ActionLabel,
+                compositionResult.History.CanUndo,
+                compositionResult.History.CanRedo,
+                summary = redo ? "Designed Page action redone." : "Designed Page action undone.",
+                mutation = new { kind = "pageComposition", id = compositionId }
+            });
+        }
+
+        var chapterId = context.CurrentChapterId
+            ?? throw new InvalidOperationException("No chapter is selected.");
+        var result = redo
+            ? await manuscripts.RedoAsync(context.ContentTarget, chapterId, context.TurnCancellationToken)
+            : await manuscripts.UndoAsync(context.ContentTarget, chapterId, context.TurnCancellationToken);
+        context.OnMutated();
+        return JsonSerializer.Serialize(new
+        {
+            ok = true,
+            targetId = chapterId,
+            revision = result.Snapshot.Revision,
+            action = result.ActionLabel,
+            result.History.CanUndo,
+            result.History.CanRedo,
+            summary = redo ? "Authoring action redone." : "Authoring action undone.",
+            mutation = new { kind = "manuscript", id = chapterId }
+        });
     }
 
     private static string? TextAlignmentValue(ParagraphAlignment? alignment) => alignment switch

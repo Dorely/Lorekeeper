@@ -106,6 +106,8 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
                 .Include(item => item.Composition).ThenInclude(item => item.Chapter)
                 .Include(item => item.Composition).ThenInclude(item => item.PublicationSection)
                 .Where(item => item.Composition.ProjectId == projectId
+                    && item.DetachedAt == null
+                    && item.Composition.DetachedAt == null
                     && (selectedEditionId == null
                         ? item.Composition.EditionId == null
                         : item.Composition.EditionId == selectedEditionId
@@ -126,6 +128,7 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
                 .Include(item => item.PublicationSection)
                 .Where(item => item.ProjectId == projectId
                     && item.Id == candidateId
+                    && item.DetachedAt == null
                     && (selectedEditionId == null
                         ? item.EditionId == null
                         : item.EditionId == selectedEditionId || item.EditionId == null))

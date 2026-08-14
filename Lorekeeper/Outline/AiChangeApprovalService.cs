@@ -5,6 +5,7 @@ using System.Runtime.ExceptionServices;
 using Lorekeeper.Chapters;
 using Lorekeeper.Composition;
 using Lorekeeper.Context;
+using Lorekeeper.Authoring;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Images;
 using Lorekeeper.Manuscripts;
@@ -27,6 +28,8 @@ public sealed class AiChangeApprovalService(
     IVectorIndexWorkCoordinator indexWork,
     IEntityVisualExampleService entityVisualExamples,
     IProjectImageService projectImages,
+    IAuthoringHistoryService authoringHistory,
+    IAuthoringMutationContextAccessor authoringMutationContext,
     ILogger<AiChangeApprovalService> logger) : IAiChangeApprovalService
 {
     private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
@@ -254,6 +257,7 @@ public sealed class AiChangeApprovalService(
                     : conflict.ErrorMessage);
         }
 
+        await using var authoringTurn = await BeginReviewedEditorTurnAsync(batch, cancellationToken);
         await using var indexDeferral = indexWork.BeginDeferral();
         ExceptionDispatchInfo? capturedException = null;
         try
@@ -267,6 +271,7 @@ public sealed class AiChangeApprovalService(
         }
         finally
         {
+            if (capturedException is null) authoringTurn?.Complete(); else authoringTurn?.Fail();
             UpdateBatchStatus(batch);
             await changes.SaveChangesAsync(CancellationToken.None);
             await indexDeferral.FlushAsync(CancellationToken.None);
@@ -280,6 +285,7 @@ public sealed class AiChangeApprovalService(
         var change = await changes.GetChangeAsync(changeId, cancellationToken)
             ?? throw new InvalidOperationException($"AI change {changeId} not found.");
 
+        await using var authoringTurn = await BeginReviewedEditorTurnAsync(change.Batch, cancellationToken);
         await using var indexDeferral = indexWork.BeginDeferral();
         ExceptionDispatchInfo? capturedException = null;
         try
@@ -292,6 +298,7 @@ public sealed class AiChangeApprovalService(
         }
         finally
         {
+            if (capturedException is null) authoringTurn?.Complete(); else authoringTurn?.Fail();
             UpdateBatchStatus(change.Batch);
             await changes.SaveChangesAsync(CancellationToken.None);
             await indexDeferral.FlushAsync(CancellationToken.None);
@@ -324,11 +331,28 @@ public sealed class AiChangeApprovalService(
         ExceptionDispatchInfo? capturedException = null;
         try
         {
-            foreach (var change in selectedChanges
-                .OrderBy(change => change.Batch.CreatedAt)
-                .ThenBy(change => change.Order))
+            foreach (var group in selectedChanges
+                .GroupBy(change => change.Batch)
+                .OrderBy(group => group.Key.CreatedAt))
             {
-                await ApplyChangeCoreAsync(change.Batch, change, cancellationToken);
+                var authoringTurn = await BeginReviewedEditorTurnAsync(group.Key, cancellationToken);
+                var groupFailed = false;
+                try
+                {
+                    foreach (var change in group.OrderBy(change => change.Order))
+                        await ApplyChangeCoreAsync(change.Batch, change, cancellationToken);
+                }
+                catch
+                {
+                    groupFailed = true;
+                    throw;
+                }
+                finally
+                {
+                    if (groupFailed) authoringTurn?.Fail(); else authoringTurn?.Complete();
+                    if (authoringTurn is not null)
+                        await authoringTurn.DisposeAsync();
+                }
             }
         }
         catch (Exception ex)
@@ -344,6 +368,33 @@ public sealed class AiChangeApprovalService(
         }
 
         capturedException?.Throw();
+    }
+
+    private async Task<AuthoringTurnHistoryScope?> BeginReviewedEditorTurnAsync(
+        AiChangeBatch batch,
+        CancellationToken cancellationToken)
+    {
+        if (batch.ConversationKind != AiChangeConversationKind.Editor)
+            return null;
+        var messages = await editorConversations.LoadMessagesAsync(batch.ConversationId, cancellationToken);
+        var assistantIndex = batch.AssistantMessageId is Guid assistantId
+            ? messages.FindIndex(item => item.Id == assistantId)
+            : messages.Count;
+        if (assistantIndex < 0)
+            assistantIndex = messages.Count;
+        var request = messages.Take(assistantIndex)
+            .LastOrDefault(item => item.Role == EditorMessageRole.User);
+        var turnId = request?.Id ?? batch.Id;
+        var summary = string.IsNullOrWhiteSpace(request?.Content)
+            ? "Apply reviewed editor changes"
+            : request.Content.Trim();
+        if (summary.Length > 140)
+            summary = summary[..140].TrimEnd() + "...";
+        return new AuthoringTurnHistoryScope(
+            authoringHistory,
+            authoringMutationContext,
+            turnId,
+            $"Assistant: {summary}");
     }
 
     public async Task RejectBatchAsync(Guid batchId, string? message, CancellationToken cancellationToken = default)

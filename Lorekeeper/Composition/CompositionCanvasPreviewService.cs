@@ -89,7 +89,9 @@ public sealed partial class CompositionCanvasPreviewService(
             .Include(item => item.Composition)
             .SingleOrDefaultAsync(item => item.Id == variantId
                 && item.CompositionId == compositionId
-                && item.Composition.ProjectId == projectId,
+                && item.DetachedAt == null
+                && item.Composition.ProjectId == projectId
+                && item.Composition.DetachedAt == null,
                 cancellationToken)
             ?? throw new KeyNotFoundException("Composition variant was not found in this project.");
         var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)

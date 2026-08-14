@@ -238,6 +238,14 @@ else
     </div>
 }
 
+<ConfirmationDialog IsOpen="@(_historyDeleteImageId is not null)"
+                    Title="Delete image and clear Undo/Redo history?"
+                    Message="@(_historyDeleteMessage ?? string.Empty)"
+                    ConfirmLabel="Delete and clear history"
+                    Destructive="true"
+                    OnConfirm="ConfirmHistoryImageDeleteAsync"
+                    OnCancel="CancelHistoryDelete" />
+
 @code {
     private const long MaxImageBytes = 20L * 1024 * 1024;
 
@@ -474,21 +482,42 @@ else
         }
     }
 
-    private async Task DeleteAsync(Guid imageId)
+    private Guid? _historyDeleteImageId;
+    private string? _historyDeleteMessage;
+
+    private async Task DeleteAsync(Guid imageId, bool clearAffectedHistory = false)
     {
         if (Project is null) return;
         _error = null;
         try
         {
-            await Images.DeleteAsync(Project.Id, imageId);
+            await Images.DeleteAsync(Project.Id, imageId, clearAffectedHistory);
+            _historyDeleteImageId = null;
+            _historyDeleteMessage = null;
             _status = "Image deleted.";
             await ReloadAsync();
         }
         catch (Exception ex)
         {
-            _error = ex.Message;
+            if (ex.Message.StartsWith("AUTHORING_HISTORY_DEPENDENCY:", StringComparison.Ordinal))
+            {
+                _historyDeleteImageId = imageId;
+                _historyDeleteMessage = ex.Message["AUTHORING_HISTORY_DEPENDENCY:".Length..].Trim();
+            }
+            else
+                _error = ex.Message;
         }
     }
+
+    private void CancelHistoryDelete()
+    {
+        _historyDeleteImageId = null;
+        _historyDeleteMessage = null;
+    }
+
+    private Task ConfirmHistoryImageDeleteAsync() => _historyDeleteImageId is Guid imageId
+        ? DeleteAsync(imageId, true)
+        : Task.CompletedTask;
 
     private async Task AttachToChatAsync(ProjectImageView image)
     {

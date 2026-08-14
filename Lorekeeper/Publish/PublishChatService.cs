@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Lorekeeper.Authoring;
 using Lorekeeper.ChatTurns;
 using Lorekeeper.Composition;
 using Lorekeeper.Context;
@@ -39,6 +40,8 @@ public sealed class PublishChatService(
     IPublicationActorContext actorContext,
     ChatTurnRuntime turnRuntime,
     ChatTurnEngine turnEngine,
+    IAuthoringHistoryService authoringHistory,
+    IAuthoringMutationContextAccessor authoringMutationContext,
     IOptions<AgentOptions> options,
     ILogger<PublishChatService> logger,
     IEntityVisualContextService? entityVisualContext = null,
@@ -143,6 +146,8 @@ public sealed class PublishChatService(
         "add_project_image_to_release_cover",
         "generate_project_image",
         "edit_project_image",
+        "undo_authoring_action",
+        "redo_authoring_action",
     ];
 
     public async Task<PublishConversation> GetOrCreateAsync(
@@ -311,6 +316,11 @@ public sealed class PublishChatService(
             userMessage.Id,
             imageIds,
             cancellationToken);
+        await using var authoringTurn = new AuthoringTurnHistoryScope(
+            authoringHistory,
+            authoringMutationContext,
+            userMessage.Id,
+            BuildAssistantHistoryLabel(userText));
 
         IChatClient? chat = null;
         IList<AITool>? aiTools = null;
@@ -347,6 +357,7 @@ public sealed class PublishChatService(
         }
         if (setupException is not null)
         {
+            if (setupCancelled) authoringTurn.Cancel(); else authoringTurn.Fail();
             yield return new PublishTurnError(
                 setupCancelled ? "Cancelled." : setupException.Message,
                 setupCancelled);
@@ -420,6 +431,7 @@ public sealed class PublishChatService(
                                 : PublishMessageStatus.Failed;
                             activeAssistant.ErrorMessage = failed.Cancelled ? "Cancelled by user." : failed.Message;
                             await SafePersistAsync(activeAssistant);
+                            if (failed.Cancelled) authoringTurn.Cancel(); else authoringTurn.Fail();
                             yield return new PublishTurnError(failed.Message, failed.Cancelled);
                             yield break;
                     }
@@ -430,6 +442,7 @@ public sealed class PublishChatService(
                     activeAssistant.Status = PublishMessageStatus.Failed;
                     activeAssistant.ErrorMessage = "Publish chat streaming ended without a completed round.";
                     await SafePersistAsync(activeAssistant);
+                    authoringTurn.Fail();
                     yield return new PublishTurnError(activeAssistant.ErrorMessage, Cancelled: false);
                     yield break;
                 }
@@ -441,6 +454,7 @@ public sealed class PublishChatService(
                     await SafePersistAsync(activeAssistant);
                     conversation.UpdatedAt = DateTime.UtcNow;
                     await conversations.SaveChangesAsync(CancellationToken.None);
+                    authoringTurn.Complete();
                     yield return new PublishAssistantMessageCompleted(activeAssistant.Id);
                     yield break;
                 }
@@ -465,6 +479,7 @@ public sealed class PublishChatService(
                         activeAssistant.Status = PublishMessageStatus.Cancelled;
                         activeAssistant.ErrorMessage = "Cancelled by user.";
                         await SafePersistAsync(activeAssistant);
+                        authoringTurn.Cancel();
                         yield return new PublishTurnError("Cancelled.", Cancelled: true);
                         yield break;
                     }
@@ -477,6 +492,7 @@ public sealed class PublishChatService(
                         activeAssistant.Status = PublishMessageStatus.Cancelled;
                         activeAssistant.ErrorMessage = "Cancelled by user.";
                         await SafePersistAsync(activeAssistant);
+                        authoringTurn.Cancel();
                         yield return new PublishTurnError("Cancelled.", Cancelled: true);
                         yield break;
                     }
@@ -603,6 +619,7 @@ public sealed class PublishChatService(
                     activeAssistant.Status = PublishMessageStatus.Failed;
                     activeAssistant.ErrorMessage = ChatTurnEngine.ToolLoopLimitError(maxIterations);
                     await SafePersistAsync(activeAssistant);
+                    authoringTurn.Fail();
                     yield return new PublishTurnError(
                         activeAssistant.ErrorMessage,
                         Cancelled: false);
@@ -614,6 +631,14 @@ public sealed class PublishChatService(
         {
             actorContext.Actor = priorActor;
         }
+    }
+
+    private static string BuildAssistantHistoryLabel(string userText)
+    {
+        var compact = string.Join(' ', userText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (compact.Length > 120)
+            compact = compact[..117] + "...";
+        return $"Assistant: Publish — {compact}";
     }
 
     private static PublishChatVisualAttachment ToVisualAttachment(

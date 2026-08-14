@@ -371,6 +371,50 @@ from overwriting or introducing dangling references. ProseMirror, assistants,
 contests, revision agents, approvals, indexing, composition, and publishing all
 consume the same document or a derived projection; direct body-string and
 chapter-visual persistence are not runtime paths.
+
+`IAuthoringHistoryService` owns persistent Undo/Redo for Core and release
+chapters, publication prose sections, complete Page Composition aggregates, and
+Core/release cover aggregates. Each canonical stream stores a Brotli-compressed
+baseline plus at most 100 resulting action snapshots; document revisions always
+advance when an older snapshot is restored. A current-snapshot hash must match
+the stream cursor before movement, otherwise the operation returns
+`HISTORY_DIVERGED` and leaves the live document untouched. New work after Undo
+deletes the Redo branch. History state and selection anchors are stored in
+SQLite, but history streams and open assistant batches are working-database
+state and are deliberately absent from project export/import.
+
+The semantic editor does not install ProseMirror's local history plugin.
+Adjacent typing and IME activity within 500 ms share a persisted action; paste,
+formatting, block conversion, Figure changes, and structural mutations flush an
+explicit action boundary. Selection restoration uses stable block IDs and text
+offsets with a nearest-valid fallback. Page and cover editors use the same
+service: a completed drag, resize, rotation, or crop gesture is one action, and
+each aggregate snapshot includes every variant/surface plus the selected object.
+Removing a Designed Page detaches its composition and variants instead of
+destroying them. Undo reactivates the original IDs and full semantic/scene data;
+pruning permanently removes detached resources only after current content and
+retained history no longer reference them.
+
+Assistant mutations use the persisted outgoing user-message ID as a durable
+turn batch. The first successful mutation opens one batch for that document;
+later tools update its after-state. Completion, stop, cancellation, and failure
+all finalize committed work as one action per affected document. Startup
+finalizes abandoned open batches from their last committed snapshots. Preview,
+read, failed, conflict, and staging-only calls do not create history. Editor and
+Publish expose protected current-target history reads and Undo/Redo tools; tool
+inputs cannot redirect history to another chapter, edition, composition, or
+cover. Applying staged Review Edits reconnects to the originating Editor turn;
+separately approved changes from that turn extend the same completed action
+rather than creating one history entry per stored tool call.
+
+History snapshots store references rather than image/font bytes. Dependency
+rows retain project images, imported fonts, and detached compositions required
+by the current baseline, completed entries, or open turn batches. Deleting a
+history-only image/font requires a Lorekeeper-owned confirmation that clears
+the affected streams in the same project mutation transaction. Live document
+references remain a hard deletion blocker. Confirmed lifecycle operations such
+as deleting a chapter/section/release or discarding edition content clear their
+owned history rather than becoming toolbar actions.
 Editor Chat submits each semantic operation payload only to
 `preview_manuscript_operations`. That tool validates and retains the exact
 projected document in turn-local memory behind an opaque, chapter-specific
@@ -1321,8 +1365,9 @@ Project export v22 contains only the current v4/page-setup/composition model,
 Core Book, sparse release overlays, edition chapter snapshots, edition-owned
 compositions, publication sections, target-aware publication records, resolved
 print-product selections, Generic printer templates, and independent cover
-surface scenes; older formats remain importable only through isolated versioned
-transformers.
+surface scenes; authoring-history streams, entries, selections, dependencies,
+and open assistant batches are excluded. Older formats remain importable only
+through isolated versioned transformers.
 Human-readable language names from Book Briefs and publication inputs are
 canonicalized to culture tags when new Core/release values are persisted and at
 export, preview, preflight, and Press-request boundaries. Existing values such as

@@ -1,4 +1,5 @@
 @using System.Text.Json
+@using Lorekeeper.Authoring
 @using Lorekeeper.Composition
 @using Lorekeeper.Fonts
 @using Lorekeeper.Manuscripts
@@ -10,6 +11,7 @@
 @inject IManuscriptService Manuscripts
 @inject IProjectImageService Images
 @inject IProjectFontService ProjectFonts
+@inject IAuthoringHistoryService AuthoringHistory
 @inject IJSRuntime JS
 
 <section class="composition-workspace @(InteractionLocked ? "composition-workspace--locked" : null)" aria-label="Designed page workspace" aria-disabled="@InteractionLocked" inert="@(InteractionLocked ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
@@ -156,7 +158,7 @@
             </Selection>
             <Details>
                 <div class="composition-workspace-actions">
-                    <div><button type="button" title="Undo last page change" @onclick="Undo" disabled="@(_undo.Count == 0)">↶</button><button type="button" title="Redo last undone change" @onclick="Redo" disabled="@(_redo.Count == 0)">↷</button><button type="button" title="Zoom out" @onclick="() => _zoom = Math.Max(.5, _zoom - .1)">−</button><span>@Math.Round(_zoom * 100)%</span><button type="button" title="Zoom in" @onclick="() => _zoom = Math.Min(2, _zoom + .1)">+</button></div>
+                    <div><button type="button" title="@UndoTitle" @onclick="() => MoveHistoryAsync(false)" disabled="@(!_history.CanUndo || InteractionLocked)">↶</button><button type="button" title="@RedoTitle" @onclick="() => MoveHistoryAsync(true)" disabled="@(!_history.CanRedo || InteractionLocked)">↷</button><button type="button" title="Zoom out" @onclick="() => _zoom = Math.Max(.5, _zoom - .1)">−</button><span>@Math.Round(_zoom * 100)%</span><button type="button" title="Zoom in" @onclick="() => _zoom = Math.Min(2, _zoom + .1)">+</button></div>
                     <details class="composition-secondary-controls">
                         <summary title="Open accessibility, content, and exact layout settings">Page details</summary>
                         <div class="composition-details-panel">
@@ -300,8 +302,9 @@
     private CompositionEditionGeometry? _authoringGeometry;
     private IReadOnlyList<ProjectImageView> _images = [];
     private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = [];
-    private readonly Stack<WorkspaceSnapshot> _undo = new();
-    private readonly Stack<WorkspaceSnapshot> _redo = new();
+    private Lorekeeper.Authoring.AuthoringHistoryState _history = new(0, false, false, null, null, 0, 0);
+    private string UndoTitle => _history.UndoLabel is null ? "Nothing to undo" : $"Undo {_history.UndoLabel}";
+    private string RedoTitle => _history.RedoLabel is null ? "Nothing to redo" : $"Redo {_history.RedoLabel}";
     private bool _newRetainAspectRatio = true;
     private ImagePickerMode? _imagePickerMode;
     private Guid? _imagePickerTargetId;
@@ -475,6 +478,7 @@
             _images = (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg").ToList();
             _fontFamilies = await ProjectFonts.ListAsync(ProjectId);
             await LoadVariantAsync();
+            _history = await Compositions.GetHistoryStateAsync(ProjectId, CompositionId);
             if (RequestedSelectionId is Guid requestedSelectionId
                 && _objects.Any(item => item.Id == requestedSelectionId))
             {
@@ -503,8 +507,6 @@
         _layers = _scene.Layers.ToList();
         _styles = _scene.Styles.ToList();
         _groupSelection.Clear();
-        _undo.Clear();
-        _redo.Clear();
         _selectedId = _objects.FirstOrDefault()?.Id;
         _dirty = false;
     }
@@ -526,8 +528,7 @@
         _layers = _scene.Layers.ToList();
         _styles = _scene.Styles.ToList();
         _selectedId = _objects.FirstOrDefault()?.Id;
-        _undo.Clear();
-        _redo.Clear();
+        _history = await Compositions.GetHistoryStateAsync(ProjectId, CompositionId);
         await NotifyWorkspaceChangedAsync();
     }
 
@@ -1010,26 +1011,39 @@
             _error = exception.Message;
         }
     }
-    private WorkspaceSnapshot Capture() => new(_objects.ToList(), _layers.ToList(), _styles.ToList(), _semanticBlocks.ToList(), _scene!.Surface);
-    private void Restore(WorkspaceSnapshot snapshot)
+    private void Snapshot()
     {
-        _objects = snapshot.Objects;
-        _layers = snapshot.Layers;
-        _styles = snapshot.Styles;
-        _semanticBlocks = snapshot.SemanticBlocks;
-        _scene = _scene! with { Surface = snapshot.Surface };
-        _selectedId = _objects.FirstOrDefault(item => item.Id == _selectedId)?.Id;
-        if (_editingTextId is Guid editingTextId && _objects.All(item => item.Id != editingTextId))
+        if (!_dirty)
+            return;
+        _autosaveCancellation?.Cancel();
+        _ = SaveAsync();
+    }
+
+    private async Task MoveHistoryAsync(bool redo)
+    {
+        if (InteractionLocked)
+            return;
+        if (!await FlushAsync())
+            return;
+        try
         {
-            _editingTextId = null;
-            _focusTextId = null;
-            _textFocusRequest = null;
-            _textSelectionRestore = null;
+            var result = redo
+                ? await Compositions.RedoAsync(ContentTarget, ProjectId, CompositionId)
+                : await Compositions.UndoAsync(ContentTarget, ProjectId, CompositionId);
+            _composition = result.Composition;
+            _history = result.History;
+            _semanticBlocks = ManuscriptCodec.Deserialize(
+                _composition.SemanticManuscriptJson, _composition.Id, _composition.Revision).Content.ToList();
+            await LoadVariantAsync();
+            RestoreHistorySelection(result.SelectionJson);
+            _error = null;
+            await NotifyWorkspaceChangedAsync();
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
         }
     }
-    private void Snapshot() { if (_scene is null) return; _undo.Push(Capture()); _redo.Clear(); }
-    private void Undo() { if (_undo.Count == 0) return; _redo.Push(Capture()); Restore(_undo.Pop()); MarkDirty(); }
-    private void Redo() { if (_redo.Count == 0) return; _undo.Push(Capture()); Restore(_redo.Pop()); MarkDirty(); }
     private static double Number(ChangeEventArgs e) => double.TryParse(e.Value?.ToString(), out var value) ? value : 0;
     private static int? NullableInt(ChangeEventArgs e) => int.TryParse(e.Value?.ToString(), out var value) ? value : null;
 
@@ -1097,6 +1111,14 @@
             _composition = saved.Composition;
             _variant = saved.Variant;
             _variants = await Compositions.ListVariantsAsync(ProjectId, _composition.Id);
+            _history = await Compositions.GetHistoryStateAsync(ProjectId, _composition.Id);
+            await AuthoringHistory.UpdateSelectionAsync(
+                new AuthoringHistoryTarget(
+                    ProjectId,
+                    AuthoringHistoryDocumentKind.PageComposition,
+                    _composition.Id,
+                    ContentTarget.EditionId),
+                SerializeHistorySelection());
             if (_changeVersion == changeVersion)
             {
                 _scene = scene;
@@ -1106,6 +1128,7 @@
             if (forkedCompositionId is Guid forkedId)
                 await CompositionForked.InvokeAsync(forkedId);
             await NotifyWorkspaceChangedAsync();
+            await InvokeAsync(StateHasChanged);
         }
         catch (Exception exception) { _error = exception.Message; }
         finally { _saveGate.Release(); }
@@ -1122,6 +1145,33 @@
                 break;
         }
         return !_dirty;
+    }
+
+    private string SerializeHistorySelection() => JsonSerializer.Serialize(new
+    {
+        objectId = _selectedId,
+        variantId = _variant?.Id
+    });
+
+    private void RestoreHistorySelection(string selectionJson)
+    {
+        if (string.IsNullOrWhiteSpace(selectionJson))
+            return;
+        try
+        {
+            using var document = JsonDocument.Parse(selectionJson);
+            if (document.RootElement.TryGetProperty("objectId", out var objectIdElement)
+                && objectIdElement.ValueKind == JsonValueKind.String
+                && Guid.TryParse(objectIdElement.GetString(), out var objectId)
+                && _objects.Any(item => item.Id == objectId))
+                _selectedId = objectId;
+            else
+                _selectedId = null;
+        }
+        catch (JsonException)
+        {
+            _selectedId = null;
+        }
     }
 
     private string StageStyle() => $"--surface-ratio:{_scene!.Surface.WidthPoints / _scene.Surface.HeightPoints:R};--zoom:{_zoom:R}";
@@ -1343,13 +1393,6 @@
         };
         _objects = _objects.Select(item => item.GroupId is null ? item with { Bounds = Map(item.Bounds) } : item).ToList();
     }
-
-    private sealed record WorkspaceSnapshot(
-        List<CompositionObject> Objects,
-        List<CompositionLayer> Layers,
-        List<CompositionObjectStyle> Styles,
-        List<ManuscriptBlock> SemanticBlocks,
-        CompositionSurface Surface);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

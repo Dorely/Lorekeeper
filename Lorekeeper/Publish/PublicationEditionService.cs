@@ -106,8 +106,8 @@ public sealed class PublicationEditionService(
         clone.Isbn = string.Empty;
         clone.OutlineItems = source.OutlineItems.Select(CopyOutlineItem).ToList();
         var sourceCompositions = await db.PageCompositions.AsNoTracking()
-            .Include(item => item.Variants)
-            .Where(item => item.EditionId == source.Id)
+            .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
+            .Where(item => item.EditionId == source.Id && item.DetachedAt == null)
             .ToListAsync(cancellationToken);
         var compositionMap = sourceCompositions.ToDictionary(item => item.Id, _ => Guid.NewGuid());
         var sectionMap = source.PublicationSections.ToDictionary(item => item.Id, _ => Guid.NewGuid());
@@ -527,7 +527,7 @@ public sealed class PublicationEditionService(
             .Select(block => block.PageCompositionId!.Value));
         compositionIds = compositionIds.Distinct().OrderBy(id => id).ToList();
         var compositions = await db.PageCompositions.AsNoTracking()
-            .Where(composition => compositionIds.Contains(composition.Id))
+            .Where(composition => compositionIds.Contains(composition.Id) && composition.DetachedAt == null)
             .OrderBy(composition => composition.Id)
             .Select(composition => new
             {
@@ -536,7 +536,7 @@ public sealed class PublicationEditionService(
                 composition.Name,
                 composition.SemanticManuscriptJson,
                 composition.Revision,
-                Variants = composition.Variants
+                Variants = composition.Variants.Where(variant => variant.DetachedAt == null)
                     .Select(variant => new
                     {
                         variant.Id,

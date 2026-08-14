@@ -25,9 +25,11 @@ public sealed class DatabaseStartupMigrationService(
     IDatabaseMigrationRecoveryService recovery) : IDatabaseStartupMigrationService
 {
     private const string PublicationSectionOrderMigrationId = "20260813204554_AddPublicationSectionOrderOverrides";
+    private const string AuthoringHistoryMigrationId = "20260814202943_AddPersistentAuthoringHistoryV29";
 
     public async Task<bool> ApplyAsync(CancellationToken cancellationToken = default)
     {
+        await EnsureAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await manuscriptMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
@@ -44,6 +46,7 @@ public sealed class DatabaseStartupMigrationService(
             await db.GetService<IMigrator>().MigrateAsync(
                 VisualCompositionMigrationService.AdditiveMigrationId,
                 cancellationToken);
+            await EnsureAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
             await EnsureEditionCompatibilityColumnsAsync(db, cancellationToken);
             await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
             await visualCompositionMigration.ApplyPendingAsync(db, cancellationToken);
@@ -60,6 +63,7 @@ public sealed class DatabaseStartupMigrationService(
         // Visual cleanup rebuilds several tables from its historical model and
         // therefore intentionally drops future compatibility columns.
         await EnsureEditionCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsureAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
 
         var migrationsBeforeAuthoring = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
@@ -124,9 +128,57 @@ public sealed class DatabaseStartupMigrationService(
         // the current boundary, then let the additive migration own it.
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await RemovePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await RemoveAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
         await db.GetService<IMigrator>().MigrateAsync(cancellationToken: cancellationToken);
         await publicationSectionMigration.RepairSemanticRevisionDriftAsync(db, cancellationToken);
         return !await recovery.IsRecoveryRequiredAsync(cancellationToken);
+    }
+
+    internal static async Task EnsureAuthoringHistoryCompatibilityColumnsAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(AuthoringHistoryMigrationId))
+            return;
+        (string Table, string Column)[] columns =
+        [
+            ("PageCompositions", "DetachedAt"),
+            ("PageCompositionVariants", "DetachedAt"),
+        ];
+        foreach (var (table, column) in columns)
+        {
+            if (!await HasTableAsync(db, table, cancellationToken)
+                || await HasColumnAsync(db, table, column, cancellationToken))
+                continue;
+#pragma warning disable EF1002 // Table and column come exclusively from the fixed list above.
+            await db.Database.ExecuteSqlRawAsync(
+                $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" TEXT NULL;",
+                cancellationToken);
+#pragma warning restore EF1002
+        }
+        db.ChangeTracker.Clear();
+    }
+
+    internal static async Task RemoveAuthoringHistoryCompatibilityColumnsAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(AuthoringHistoryMigrationId))
+            return;
+        foreach (var table in new[] { "PageCompositionVariants", "PageCompositions" })
+        {
+            if (!await HasTableAsync(db, table, cancellationToken)
+                || !await HasColumnAsync(db, table, "DetachedAt", cancellationToken))
+                continue;
+#pragma warning disable EF1002 // Table comes exclusively from the fixed list above.
+            await db.Database.ExecuteSqlRawAsync(
+                $"ALTER TABLE \"{table}\" DROP COLUMN \"DetachedAt\";",
+                cancellationToken);
+#pragma warning restore EF1002
+        }
+        db.ChangeTracker.Clear();
     }
 
     private static async Task EnsureEditionCompatibilityColumnsAsync(

@@ -31,7 +31,7 @@ public sealed class ChapterSemanticProjectionService(AppDbContext db) : IChapter
             .Distinct()
             .ToArray();
         var compositionRows = await db.PageCompositions.AsNoTracking()
-            .Where(item => compositionIds.Contains(item.Id))
+            .Where(item => compositionIds.Contains(item.Id) && item.DetachedAt == null)
             .Select(item => new { item.Id, item.ProjectId, item.ChapterId, item.SemanticManuscriptJson })
             .ToListAsync(cancellationToken);
         var compositionJson = compositionRows.ToDictionary(item => item.Id);

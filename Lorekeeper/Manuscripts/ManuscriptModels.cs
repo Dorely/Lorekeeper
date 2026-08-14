@@ -210,6 +210,12 @@ public sealed record ManuscriptMutationResult(
     ManuscriptSnapshot Snapshot,
     IReadOnlyList<string> ChangedBlockIds);
 
+public sealed record ManuscriptHistoryMutationResult(
+    ManuscriptSnapshot Snapshot,
+    Lorekeeper.Authoring.AuthoringHistoryState History,
+    string ActionLabel,
+    string SelectionJson);
+
 public sealed record ManuscriptRangeReference(
     string BlockId,
     int? StartOffset = null,

@@ -129,8 +129,9 @@ public sealed class ProjectPageSetupService(
         CancellationToken cancellationToken)
     {
         var compositions = await db.PageCompositions
-            .Include(item => item.Variants)
-            .Where(item => item.ProjectId == projectId && item.ActiveAuthoringVariantId != null)
+            .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
+            .Where(item => item.ProjectId == projectId && item.DetachedAt == null
+                && item.ActiveAuthoringVariantId != null)
             .ToListAsync(cancellationToken);
         foreach (var composition in compositions)
         {

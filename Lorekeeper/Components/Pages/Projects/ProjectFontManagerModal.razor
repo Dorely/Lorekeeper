@@ -65,6 +65,15 @@
     </div>
 }
 
+<ConfirmationDialog IsOpen="@(_historyDeleteFamilyId is not null)"
+                    Title="Delete font and clear Undo/Redo history?"
+                    Message="@(_historyDeleteMessage ?? string.Empty)"
+                    ConfirmLabel="Delete and clear history"
+                    Destructive="true"
+                    Busy="_busy"
+                    OnConfirm="ConfirmHistoryFontDeleteAsync"
+                    OnCancel="CancelHistoryDelete" />
+
 @code {
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public bool IsOpen { get; set; }
@@ -79,6 +88,8 @@
     private string? _status;
     private bool _rightsConfirmed;
     private string _rightsDeclaration = string.Empty;
+    private Guid? _historyDeleteFamilyId;
+    private string? _historyDeleteMessage;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -131,14 +142,16 @@
             await OnChanged.InvokeAsync();
     }
 
-    private async Task DeleteAsync(Guid familyId)
+    private async Task DeleteAsync(Guid familyId, bool clearAffectedHistory = false)
     {
         _busy = true;
         _error = null;
         _status = null;
         try
         {
-            await ProjectFonts.DeleteFamilyAsync(ProjectId, familyId);
+            await ProjectFonts.DeleteFamilyAsync(ProjectId, familyId, clearAffectedHistory);
+            _historyDeleteFamilyId = null;
+            _historyDeleteMessage = null;
             await ReloadAsync();
             _status = "Font family deleted.";
             if (OnChanged.HasDelegate)
@@ -146,13 +159,29 @@
         }
         catch (InvalidOperationException ex)
         {
-            _error = ex.Message;
+            if (ex.Message.StartsWith("AUTHORING_HISTORY_DEPENDENCY:", StringComparison.Ordinal))
+            {
+                _historyDeleteFamilyId = familyId;
+                _historyDeleteMessage = ex.Message["AUTHORING_HISTORY_DEPENDENCY:".Length..].Trim();
+            }
+            else
+                _error = ex.Message;
         }
         finally
         {
             _busy = false;
         }
     }
+
+    private void CancelHistoryDelete()
+    {
+        _historyDeleteFamilyId = null;
+        _historyDeleteMessage = null;
+    }
+
+    private Task ConfirmHistoryFontDeleteAsync() => _historyDeleteFamilyId is Guid familyId
+        ? DeleteAsync(familyId, true)
+        : Task.CompletedTask;
 
     private async Task CloseAsync()
     {

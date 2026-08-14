@@ -124,6 +124,7 @@ public sealed class DatabaseMigrationRecoveryService(
         await DatabaseStartupMigrationService.RemoveEditionCompatibilityColumnsAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.RemovePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.RemovePrintProductCompatibilityColumnsAsync(db, cancellationToken);
+        await DatabaseStartupMigrationService.RemoveAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
         await db.Database.MigrateAsync(cancellationToken);
         await db.Database.ExecuteSqlRawAsync("DELETE FROM Projects;", cancellationToken);
         db.ChangeTracker.Clear();

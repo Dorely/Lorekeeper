@@ -1,4 +1,5 @@
 using Lorekeeper.Knowledge;
+using Lorekeeper.Authoring;
 using Lorekeeper.Llm;
 using Lorekeeper.Context;
 using Lorekeeper.Graph;
@@ -27,6 +28,8 @@ public class ChapterService(
     IManuscriptStyleService manuscriptStyles,
     IChapterSemanticProjectionService semanticProjection,
     IProjectMutationCoordinator projectMutations,
+    IAuthoringHistoryService authoringHistory,
+    IAuthoringMutationContextAccessor authoringMutationContext,
     ILogger<ChapterService> logger) : IChapterService, IManuscriptService
 {
     public async Task<IReadOnlyList<Chapter>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
@@ -149,6 +152,211 @@ public class ChapterService(
             ? await SnapshotAsync(chapter, cancellationToken)
             : await EditionSnapshotAsync(target, chapter, cancellationToken);
     }
+
+    public async Task<AuthoringHistoryState> GetHistoryStateAsync(
+        EditorContentTarget target,
+        Guid chapterId,
+        CancellationToken cancellationToken = default)
+    {
+        var chapter = await repo.GetByIdAsync(chapterId, cancellationToken)
+            ?? throw new KeyNotFoundException("The chapter was not found.");
+        return await authoringHistory.ReadStateAsync(HistoryTarget(target, chapter), cancellationToken);
+    }
+
+    public Task<ManuscriptHistoryMutationResult> UndoAsync(
+        EditorContentTarget target,
+        Guid chapterId,
+        CancellationToken cancellationToken = default) =>
+        MoveHistoryAsync(target, chapterId, redo: false, cancellationToken);
+
+    public Task<ManuscriptHistoryMutationResult> RedoAsync(
+        EditorContentTarget target,
+        Guid chapterId,
+        CancellationToken cancellationToken = default) =>
+        MoveHistoryAsync(target, chapterId, redo: true, cancellationToken);
+
+    private async Task<ManuscriptHistoryMutationResult> MoveHistoryAsync(
+        EditorContentTarget target,
+        Guid chapterId,
+        bool redo,
+        CancellationToken cancellationToken)
+    {
+        var chapter = await repo.GetByIdAsync(chapterId, cancellationToken)
+            ?? throw new KeyNotFoundException("The chapter was not found.");
+        await using var mutation = await projectMutations.AcquireAsync(chapter.ProjectId, cancellationToken);
+        EditionManuscriptState? editionState = null;
+        var current = target.IsCore
+            ? ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision)
+            : (editionState = await GetRequiredEditionStateWithoutRevisionAsync(target, chapter, cancellationToken)).Document;
+        var currentPayload = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
+            db, current, chapter.ProjectId, chapter.Id, null, target.EditionId, cancellationToken,
+            inherited: editionState?.Override is null && !target.IsCore);
+        var historyTarget = HistoryTarget(target, chapter);
+        var result = redo
+            ? await authoringHistory.RedoAsync(historyTarget, currentPayload,
+                (payload, ct) => RestoreHistorySnapshotAsync(target, chapter, payload, ct), cancellationToken)
+            : await authoringHistory.UndoAsync(historyTarget, currentPayload,
+                (payload, ct) => RestoreHistorySnapshotAsync(target, chapter, payload, ct), cancellationToken);
+        await RefreshDerivedStateAsync(target, chapterId, cancellationToken);
+        var snapshot = await GetManuscriptAsync(target, chapterId, cancellationToken)
+            ?? throw new KeyNotFoundException("The restored chapter was not found.");
+        return new ManuscriptHistoryMutationResult(snapshot, result.State, result.ActionLabel, result.SelectionJson);
+    }
+
+    private async Task RestoreHistorySnapshotAsync(
+        EditorContentTarget target,
+        Chapter chapter,
+        string payload,
+        CancellationToken cancellationToken)
+    {
+        var snapshot = AuthoringSnapshotCodec.ReadManuscript(payload);
+        var source = ManuscriptCodec.Deserialize(snapshot.ManuscriptJson);
+        long nextRevision;
+        PublicationEditionChapterOverride? editionOverride = null;
+        PublicationEdition? edition = null;
+        if (target.IsCore)
+        {
+            nextRevision = checked(chapter.ManuscriptRevision + 1);
+        }
+        else
+        {
+            edition = await RequireEditableEditionAsync(target, chapter.ProjectId, cancellationToken);
+            editionOverride = await db.PublicationEditionChapterOverrides.SingleOrDefaultAsync(
+                item => item.EditionId == edition.Id && item.ChapterId == chapter.Id,
+                cancellationToken);
+            if (snapshot.Inherited)
+            {
+                var editionCompositions = await db.PageCompositions
+                    .Include(item => item.Variants)
+                    .Where(item => item.ProjectId == chapter.ProjectId
+                        && item.ChapterId == chapter.Id
+                        && item.EditionId == edition.Id
+                        && item.DetachedAt == null)
+                    .ToListAsync(cancellationToken);
+                var detachedAt = DateTime.UtcNow;
+                foreach (var composition in editionCompositions)
+                {
+                    composition.DetachedAt = detachedAt;
+                    foreach (var variant in composition.Variants)
+                        variant.DetachedAt = detachedAt;
+                }
+                if (editionOverride is not null)
+                    db.PublicationEditionChapterOverrides.Remove(editionOverride);
+                edition.Revision = checked(edition.Revision + 1);
+                edition.UpdatedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(cancellationToken);
+                return;
+            }
+            nextRevision = checked((editionOverride?.Revision ?? chapter.ManuscriptRevision) + 1);
+        }
+        var document = source with { ManuscriptId = chapter.Id, Revision = nextRevision };
+        ManuscriptCodec.Validate(document, chapter.Id, nextRevision);
+        await ValidateFigureAssetsAsync(chapter.ProjectId, document, cancellationToken);
+        await ValidateStyleReferencesAsync(chapter.ProjectId, document, null, cancellationToken);
+        await RestoreCompositionsAsync(chapter.ProjectId, chapter.Id, null, target.EditionId, snapshot.Compositions, cancellationToken);
+
+        if (target.IsCore)
+        {
+            chapter.ManuscriptJson = ManuscriptCodec.Serialize(document);
+            chapter.ManuscriptRevision = nextRevision;
+            chapter.UpdatedAt = DateTime.UtcNow;
+            chapter.VectorIndexState = VectorIndexState.Stale;
+            repo.Update(chapter);
+        }
+        else
+        {
+            editionOverride ??= new PublicationEditionChapterOverride
+            {
+                EditionId = edition!.Id,
+                ChapterId = chapter.Id,
+                BaseCoreRevision = chapter.ManuscriptRevision,
+                BaseCoreHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(chapter.Manuscript))
+            };
+            if (editionOverride.Id == Guid.Empty)
+                editionOverride.Id = Guid.NewGuid();
+            if (db.Entry(editionOverride).State == EntityState.Detached)
+                db.PublicationEditionChapterOverrides.Add(editionOverride);
+            editionOverride.ManuscriptJson = ManuscriptCodec.Serialize(document);
+            editionOverride.Revision = nextRevision;
+            editionOverride.UpdatedAt = DateTime.UtcNow;
+            edition!.Revision = checked(edition.Revision + 1);
+            edition.UpdatedAt = DateTime.UtcNow;
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task RestoreCompositionsAsync(
+        Guid projectId,
+        Guid? chapterId,
+        Guid? publicationSectionId,
+        Guid? editionId,
+        IReadOnlyList<AuthoringCompositionSnapshot> desired,
+        CancellationToken cancellationToken)
+    {
+        var current = await db.PageCompositions
+            .IgnoreQueryFilters()
+            .Include(item => item.Variants)
+            .Where(item => item.ProjectId == projectId
+                && item.ChapterId == chapterId
+                && item.PublicationSectionId == publicationSectionId
+                && item.EditionId == editionId)
+            .ToListAsync(cancellationToken);
+        var desiredIds = desired.Select(item => item.Id).ToHashSet();
+        var now = DateTime.UtcNow;
+        foreach (var composition in current.Where(item => !desiredIds.Contains(item.Id)))
+        {
+            composition.DetachedAt = now;
+            foreach (var variant in composition.Variants)
+                variant.DetachedAt = now;
+        }
+        foreach (var item in desired)
+        {
+            var composition = current.SingleOrDefault(value => value.Id == item.Id);
+            if (composition is null)
+            {
+                composition = new PageComposition { Id = item.Id, ProjectId = projectId };
+                db.PageCompositions.Add(composition);
+                current.Add(composition);
+            }
+            composition.ChapterId = chapterId;
+            composition.PublicationSectionId = publicationSectionId;
+            composition.EditionId = editionId;
+            composition.SourceCompositionId = item.SourceCompositionId;
+            composition.Name = item.Name;
+            composition.DetachedAt = null;
+            composition.UpdatedAt = now;
+            composition.Revision = checked(composition.Revision + 1);
+            var semantic = ManuscriptCodec.Deserialize(item.SemanticManuscriptJson) with
+            {
+                ManuscriptId = item.Id,
+                Revision = composition.Revision
+            };
+            composition.SemanticManuscriptJson = ManuscriptCodec.Serialize(semantic);
+            composition.ActiveAuthoringVariantId = item.ActiveAuthoringVariantId;
+            var variantIds = item.Variants.Select(value => value.Id).ToHashSet();
+            foreach (var variant in composition.Variants.Where(value => !variantIds.Contains(value.Id)))
+                variant.DetachedAt = now;
+            foreach (var desiredVariant in item.Variants)
+            {
+                var variant = composition.Variants.SingleOrDefault(value => value.Id == desiredVariant.Id);
+                if (variant is null)
+                {
+                    variant = new PageCompositionVariant { Id = desiredVariant.Id, Composition = composition, CompositionId = composition.Id };
+                    composition.Variants.Add(variant);
+                }
+                variant.GeometryKey = desiredVariant.GeometryKey;
+                variant.SceneJson = desiredVariant.SceneJson;
+                variant.DetachedAt = null;
+                variant.UpdatedAt = now;
+                variant.Revision = checked(variant.Revision + 1);
+            }
+        }
+    }
+
+    private static AuthoringHistoryTarget HistoryTarget(EditorContentTarget target, Chapter chapter) =>
+        target.IsCore
+            ? new AuthoringHistoryTarget(chapter.ProjectId, AuthoringHistoryDocumentKind.CoreChapter, chapter.Id)
+            : new AuthoringHistoryTarget(chapter.ProjectId, AuthoringHistoryDocumentKind.EditionChapter, chapter.Id, target.EditionId);
 
     public async Task<ManuscriptMutationResult> ReplaceDocumentAsync(
         EditorContentTarget target,
@@ -338,6 +546,8 @@ public class ChapterService(
         await ValidateStyleReferencesAsync(chapter.ProjectId, document, null, cancellationToken);
         await ValidateDesignedPageReferencesAsync(chapter, document, EditorContentTarget.Core, cancellationToken);
         var previous = ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
+        var beforeHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
+            db, previous, chapter.ProjectId, chapter.Id, null, null, cancellationToken);
         var removedCompositionIds = DesignedPageIds(previous).Except(DesignedPageIds(document)).ToList();
         chapter.ManuscriptJson = ManuscriptCodec.Serialize(document);
         chapter.ManuscriptRevision = document.Revision;
@@ -357,14 +567,31 @@ public class ChapterService(
             var removed = await db.PageCompositions
                 .Where(composition => composition.ProjectId == chapter.ProjectId
                     && composition.ChapterId == chapter.Id
+                    && composition.DetachedAt == null
                     && removedCompositionIds.Contains(composition.Id))
                 .ToListAsync(cancellationToken);
-            db.PageCompositions.RemoveRange(removed);
+            var detachedAt = DateTime.UtcNow;
+            foreach (var composition in removed)
+            {
+                composition.DetachedAt = detachedAt;
+                foreach (var variant in await db.PageCompositionVariants
+                    .Where(item => item.CompositionId == composition.Id && item.DetachedAt == null)
+                    .ToListAsync(cancellationToken))
+                    variant.DetachedAt = detachedAt;
+            }
         }
 
         try
         {
-            await repo.SaveChangesAsync(cancellationToken);
+            var afterHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
+                db, document, chapter.ProjectId, chapter.Id, null, null, cancellationToken);
+            var target = new AuthoringHistoryTarget(chapter.ProjectId, AuthoringHistoryDocumentKind.CoreChapter, chapter.Id);
+            var context = authoringMutationContext.Current;
+            if (context?.IsAssistant == true)
+                await authoringHistory.UpdateAssistantTurnBatchAsync(target, context.AssistantTurnId, beforeHistory, afterHistory, context.ActionLabel, cancellationToken: cancellationToken);
+            else
+                await authoringHistory.RecordManualActionAsync(target, beforeHistory, afterHistory,
+                    AuthoringSnapshotCodec.DescribeManuscriptAction(beforeHistory, afterHistory, "chapter"), cancellationToken: cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -416,6 +643,7 @@ public class ChapterService(
             .CountAsync(composition => composition.ProjectId == chapter.ProjectId
                 && composition.ChapterId == chapter.Id
                 && composition.EditionId == target.EditionId
+                && composition.DetachedAt == null
                 && ids.Contains(composition.Id), cancellationToken);
         if (found != ids.Count)
             throw new InvalidDataException("Every Designed Page must reference a composition owned by this chapter and project.");
@@ -565,6 +793,10 @@ public class ChapterService(
     {
         var edition = await RequireEditableEditionAsync(target, chapter.ProjectId, cancellationToken);
         var document = requested with { ManuscriptId = chapter.Id };
+        var wasInherited = chapterOverride is null;
+        var beforeHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
+            db, previous, chapter.ProjectId, chapter.Id, null, edition.Id, cancellationToken,
+            inherited: wasInherited);
         if (chapterOverride is null)
         {
             var remap = await CloneReferencedCompositionsAsync(chapter, edition, document, cancellationToken);
@@ -588,9 +820,18 @@ public class ChapterService(
         if (removedCompositionIds.Count > 0)
         {
             var removed = await db.PageCompositions
-                .Where(item => item.EditionId == edition.Id && removedCompositionIds.Contains(item.Id))
+                .Where(item => item.EditionId == edition.Id && item.DetachedAt == null
+                    && removedCompositionIds.Contains(item.Id))
                 .ToListAsync(cancellationToken);
-            db.PageCompositions.RemoveRange(removed);
+            var detachedAt = DateTime.UtcNow;
+            foreach (var composition in removed)
+            {
+                composition.DetachedAt = detachedAt;
+                foreach (var variant in await db.PageCompositionVariants
+                    .Where(item => item.CompositionId == composition.Id && item.DetachedAt == null)
+                    .ToListAsync(cancellationToken))
+                    variant.DetachedAt = detachedAt;
+            }
         }
         chapterOverride.ManuscriptJson = ManuscriptCodec.Serialize(document);
         chapterOverride.Revision = document.Revision;
@@ -599,7 +840,15 @@ public class ChapterService(
         edition.Revision = checked(edition.Revision + 1);
         try
         {
-            await db.SaveChangesAsync(cancellationToken);
+            var afterHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
+                db, document, chapter.ProjectId, chapter.Id, null, edition.Id, cancellationToken);
+            var historyTarget = new AuthoringHistoryTarget(chapter.ProjectId, AuthoringHistoryDocumentKind.EditionChapter, chapter.Id, edition.Id);
+            var context = authoringMutationContext.Current;
+            if (context?.IsAssistant == true)
+                await authoringHistory.UpdateAssistantTurnBatchAsync(historyTarget, context.AssistantTurnId, beforeHistory, afterHistory, context.ActionLabel, cancellationToken: cancellationToken);
+            else
+                await authoringHistory.RecordManualActionAsync(historyTarget, beforeHistory, afterHistory,
+                    AuthoringSnapshotCodec.DescribeManuscriptAction(beforeHistory, afterHistory, "chapter"), cancellationToken: cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -625,10 +874,11 @@ public class ChapterService(
         if (sourceIds.Count == 0)
             return [];
         var sources = await db.PageCompositions.AsNoTracking()
-            .Include(item => item.Variants)
+            .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
             .Where(item => item.ProjectId == chapter.ProjectId
                 && item.ChapterId == chapter.Id
                 && item.EditionId == null
+                && item.DetachedAt == null
                 && sourceIds.Contains(item.Id))
             .ToListAsync(cancellationToken);
         if (sources.Count != sourceIds.Count)
@@ -695,7 +945,8 @@ public class ChapterService(
         await using var mutation = await projectMutations.AcquireAsync(chapter.ProjectId, cancellationToken);
         var edition = await RequireEditableEditionAsync(target, chapter.ProjectId, cancellationToken);
         var existingComposition = await db.PageCompositions.AsNoTracking().SingleOrDefaultAsync(
-            item => item.Id == sourceCompositionId && item.ProjectId == chapter.ProjectId,
+            item => item.Id == sourceCompositionId && item.ProjectId == chapter.ProjectId
+                && item.DetachedAt == null,
             cancellationToken) ?? throw new KeyNotFoundException("The Designed Page was not found.");
         if (existingComposition.EditionId == editionId)
             return existingComposition.Id;
@@ -711,6 +962,7 @@ public class ChapterService(
                 item => item.ProjectId == chapter.ProjectId
                     && item.ChapterId == chapterId
                     && item.EditionId == editionId
+                    && item.DetachedAt == null
                     && item.SourceCompositionId == sourceCompositionId,
                 cancellationToken);
             return existingClone?.Id
@@ -764,6 +1016,23 @@ public class ChapterService(
             : ManuscriptCodec.Deserialize(chapterOverride.ManuscriptJson, chapter.Id, chapterOverride.Revision);
         if (document.Revision != expectedRevision)
             throw new ManuscriptRevisionConflictException(expectedRevision, document.Revision);
+        var snapshot = chapterOverride is null
+            ? await SnapshotAsync(chapter, cancellationToken)
+            : await EditionSnapshotAsync(target, chapter, cancellationToken);
+        return new EditionManuscriptState(chapterOverride, document, snapshot);
+    }
+
+    private async Task<EditionManuscriptState> GetRequiredEditionStateWithoutRevisionAsync(
+        EditorContentTarget target,
+        Chapter chapter,
+        CancellationToken cancellationToken)
+    {
+        var edition = await RequireEditableEditionAsync(target, chapter.ProjectId, cancellationToken);
+        var chapterOverride = await db.PublicationEditionChapterOverrides
+            .SingleOrDefaultAsync(item => item.EditionId == edition.Id && item.ChapterId == chapter.Id, cancellationToken);
+        var document = chapterOverride is null
+            ? ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision)
+            : ManuscriptCodec.Deserialize(chapterOverride.ManuscriptJson, chapter.Id, chapterOverride.Revision);
         var snapshot = chapterOverride is null
             ? await SnapshotAsync(chapter, cancellationToken)
             : await EditionSnapshotAsync(target, chapter, cancellationToken);
@@ -900,6 +1169,7 @@ public class ChapterService(
         if (chapter is null) return;
         var projectId = chapter.ProjectId;
         var actId = chapter.ActId;
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
 
         try
         {
@@ -924,8 +1194,24 @@ public class ChapterService(
 
         await contextIndexing.DeleteChapterAsync(projectId, chapter.Id, cancellationToken);
 
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var ownedCompositions = await db.PageCompositions.IgnoreQueryFilters().AsNoTracking()
+            .Where(item => item.ProjectId == projectId && item.ChapterId == chapter.Id)
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+        var editionIds = await db.PublicationEditionChapterOverrides.AsNoTracking()
+            .Where(item => item.ChapterId == chapter.Id)
+            .Select(item => item.EditionId)
+            .ToListAsync(cancellationToken);
+        await authoringHistory.DeleteDocumentHistoryAsync(projectId, AuthoringHistoryDocumentKind.CoreChapter, chapter.Id, cancellationToken: cancellationToken);
+        foreach (var editionId in editionIds)
+            await authoringHistory.DeleteDocumentHistoryAsync(projectId, AuthoringHistoryDocumentKind.EditionChapter, chapter.Id, editionId, cancellationToken);
+        foreach (var compositionId in ownedCompositions)
+            await authoringHistory.DeleteDocumentHistoryAsync(projectId, AuthoringHistoryDocumentKind.PageComposition, compositionId, cancellationToken: cancellationToken);
+
         repo.Remove(chapter);
         await repo.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         if (actId is Guid deletedFromActId)
             await contextIndexing.ReindexActAsync(deletedFromActId, cancellationToken);
     }

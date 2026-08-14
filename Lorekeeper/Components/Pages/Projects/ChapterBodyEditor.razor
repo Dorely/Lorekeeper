@@ -3,6 +3,8 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Composition
 @using Lorekeeper.Fonts
+@using Lorekeeper.Authoring
+@using Microsoft.EntityFrameworkCore
 @using System.Text.Json
 @implements IAsyncDisposable
 @inject IJSRuntime JS
@@ -11,6 +13,7 @@
 @inject IProjectImageService Images
 @inject IProjectFontService Fonts
 @inject Lorekeeper.Composition.ICompositionService Compositions
+@inject IAuthoringHistoryService AuthoringHistory
 
 <div class="@RootClass()">
     <div @ref="_root"></div>
@@ -52,6 +55,10 @@
     [Parameter] public EventCallback StyleCatalogChanged { get; set; }
     [Parameter] public Func<string, string, int, long, Task<object>>? CreateDesignedPageOverrideAsync { get; set; }
     [Parameter] public Func<long, Task<ManuscriptDocument>>? ReadDocumentOverrideAsync { get; set; }
+    [Parameter] public Func<Task<SemanticEditorHistoryResult>>? UndoOverrideAsync { get; set; }
+    [Parameter] public Func<Task<SemanticEditorHistoryResult>>? RedoOverrideAsync { get; set; }
+    [Parameter] public Func<Task<AuthoringHistoryState>>? ReadHistoryOverrideAsync { get; set; }
+    [Parameter] public AuthoringHistoryDocumentKind? HistoryDocumentKindOverride { get; set; }
     [Parameter, EditorRequired]
     public Func<Guid, long, string, Task<SemanticEditorSaveResult>> SaveAsync { get; set; } = null!;
 
@@ -111,7 +118,7 @@
                     "attach",
                     _root,
                     (_selfRef ??= DotNetObjectReference.Create(this)),
-                    750,
+                    500,
                     InitialManuscriptJson,
                     stylesJson,
                     imagesJson,
@@ -316,12 +323,77 @@
     [JSInvokable]
     public async Task<SemanticEditorSaveResult> OnDocumentDebounced(
         long expectedRevision,
-        string manuscriptJson)
+        string manuscriptJson,
+        string selectionJson)
     {
         if (_disposed || SaveAsync is null)
             return new SemanticEditorSaveResult(false, expectedRevision);
 
-        return await SaveAsync(ChapterId, expectedRevision, manuscriptJson);
+        var result = await SaveAsync(ChapterId, expectedRevision, manuscriptJson);
+        if (result.Saved)
+            await AuthoringHistory.UpdateSelectionAsync(HistoryTarget(), selectionJson);
+        return result;
+    }
+
+    [JSInvokable]
+    public async Task<object> GetAuthoringHistoryState()
+    {
+        var state = ReadHistoryOverrideAsync is null
+            ? await Manuscripts.GetHistoryStateAsync(ContentTarget, ChapterId)
+            : await ReadHistoryOverrideAsync();
+        return HistoryPayload(state);
+    }
+
+    [JSInvokable]
+    public async Task<SemanticEditorHistoryResult> OnUndoAuthoring()
+    {
+        if (UndoOverrideAsync is not null)
+            return await UndoOverrideAsync();
+        try
+        {
+            var result = await Manuscripts.UndoAsync(ContentTarget, ChapterId);
+            return new(true, ManuscriptCodec.Serialize(result.Snapshot.Document), result.Snapshot.Revision,
+                result.History.CanUndo, result.History.CanRedo, result.History.UndoLabel, result.History.RedoLabel,
+                result.SelectionJson, null);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or DbUpdateConcurrencyException)
+        {
+            return new(false, null, 0, false, false, null, null, null, exception.Message);
+        }
+    }
+
+    [JSInvokable]
+    public async Task<SemanticEditorHistoryResult> OnRedoAuthoring()
+    {
+        if (RedoOverrideAsync is not null)
+            return await RedoOverrideAsync();
+        try
+        {
+            var result = await Manuscripts.RedoAsync(ContentTarget, ChapterId);
+            return new(true, ManuscriptCodec.Serialize(result.Snapshot.Document), result.Snapshot.Revision,
+                result.History.CanUndo, result.History.CanRedo, result.History.UndoLabel, result.History.RedoLabel,
+                result.SelectionJson, null);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or DbUpdateConcurrencyException)
+        {
+            return new(false, null, 0, false, false, null, null, null, exception.Message);
+        }
+    }
+
+    private static object HistoryPayload(AuthoringHistoryState state) => new
+    {
+        state.CanUndo,
+        state.CanRedo,
+        state.UndoLabel,
+        state.RedoLabel,
+        state.Revision,
+    };
+
+    private AuthoringHistoryTarget HistoryTarget()
+    {
+        var kind = HistoryDocumentKindOverride
+            ?? (ContentTarget.IsCore ? AuthoringHistoryDocumentKind.CoreChapter : AuthoringHistoryDocumentKind.EditionChapter);
+        return new AuthoringHistoryTarget(ProjectId, kind, ChapterId, ContentTarget.EditionId);
     }
 
     [JSInvokable]
@@ -458,6 +530,17 @@
         long Revision,
         bool Conflict = false,
         string? CurrentManuscriptJson = null);
+
+    public sealed record SemanticEditorHistoryResult(
+        bool Applied,
+        string? ManuscriptJson,
+        long Revision,
+        bool CanUndo,
+        bool CanRedo,
+        string? UndoLabel,
+        string? RedoLabel,
+        string? SelectionJson,
+        string? Error);
 
     private sealed record DesignedPageEditorSummary(
         Guid Id,

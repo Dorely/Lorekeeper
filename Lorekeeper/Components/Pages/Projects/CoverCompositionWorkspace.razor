@@ -1,4 +1,5 @@
 @using System.Text.Json
+@using Lorekeeper.Authoring
 @using Lorekeeper.Composition
 @using Lorekeeper.Fonts
 @using Lorekeeper.Images
@@ -11,6 +12,7 @@
 @inject IPublicationEditionService Editions
 @inject IProjectImageService Images
 @inject IProjectFontService ProjectFonts
+@inject IAuthoringHistoryService AuthoringHistory
 @inject IPrintProductRegistry PrintProducts
 @inject IJSRuntime JS
 
@@ -123,7 +125,7 @@
             </Selection>
             <Details>
                 <div class="cover-workspace-actions">
-                    <div><button type="button" title="Undo last cover change" @onclick="Undo" disabled="@(_undo.Count == 0)">↶</button><button type="button" title="Redo last undone change" @onclick="Redo" disabled="@(_redo.Count == 0)">↷</button><button type="button" title="Zoom out" @onclick="() => _zoom = Math.Max(.3, _zoom - .1)">−</button><span>@Math.Round(_zoom * 100)%</span><button type="button" title="Zoom in" @onclick="() => _zoom = Math.Min(1.6, _zoom + .1)">+</button></div>
+                    <div><button type="button" title="@UndoTitle" @onclick="() => MoveHistoryAsync(false)" disabled="@(!_history.CanUndo || InteractionLocked)">↶</button><button type="button" title="@RedoTitle" @onclick="() => MoveHistoryAsync(true)" disabled="@(!_history.CanRedo || InteractionLocked)">↷</button><button type="button" title="Zoom out" @onclick="() => _zoom = Math.Max(.3, _zoom - .1)">−</button><span>@Math.Round(_zoom * 100)%</span><button type="button" title="Zoom in" @onclick="() => _zoom = Math.Min(1.6, _zoom + .1)">+</button></div>
                     <details class="cover-secondary-controls">
                     <summary title="Open cover copy, accessibility, and exact layout settings">Cover details</summary>
                     <div class="cover-details-panel">
@@ -238,7 +240,9 @@
     [Parameter] public EventCallback Back { get; set; }
     private PublicationCoverDesignView? _cover; private PublicationEditionSummary? _edition; private CompositionScene? _scene;
     private List<CompositionObject> _objects = []; private List<CompositionLayer> _layers = []; private List<CompositionObjectStyle> _styles = []; private IReadOnlyList<ProjectImageView> _images = []; private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = []; private Guid? _selectedId;
-    private readonly Stack<WorkspaceSnapshot> _undo = new(); private readonly Stack<WorkspaceSnapshot> _redo = new();
+    private Lorekeeper.Authoring.AuthoringHistoryState _history = new(0, false, false, null, null, 0, 0);
+    private string UndoTitle => _history.UndoLabel is null ? "Nothing to undo" : $"Undo {_history.UndoLabel}";
+    private string RedoTitle => _history.RedoLabel is null ? "Nothing to redo" : $"Redo {_history.RedoLabel}";
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private CancellationTokenSource? _autosaveCancellation;
     private long _changeVersion;
@@ -306,8 +310,9 @@
             _backCopy = _cover.BackCopy;
             _background = _cover.BackgroundColor;
             _barcodeMode = _cover.BarcodeMode;
-            _undo.Clear();
-            _redo.Clear();
+            _history = CoreBook
+                ? await Books.GetCoverHistoryStateAsync(ProjectId)
+                : await Covers.GetHistoryStateAsync(ProjectId, EditionId);
             _dirty = false;
             _error = null;
             _loadedProjectId = ProjectId;
@@ -383,9 +388,13 @@
         {
         }
     }
-    private WorkspaceSnapshot Capture() => new(_objects.ToList(), _layers.ToList(), _styles.ToList());
-    private void Restore(WorkspaceSnapshot snapshot) { _objects = snapshot.Objects; _layers = snapshot.Layers; _styles = snapshot.Styles; _selectedId = _objects.FirstOrDefault(item => item.Id == _selectedId)?.Id; }
-    private void Snapshot() { _undo.Push(Capture()); _redo.Clear(); }
+    private void Snapshot()
+    {
+        if (!_dirty)
+            return;
+        _autosaveCancellation?.Cancel();
+        _ = SaveAsync();
+    }
     private void Patch(CompositionObject item) { Snapshot(); var index = _objects.FindIndex(candidate => candidate.Id == item.Id); if (index >= 0) { _objects[index] = item; MarkDirty(); } }
     private void PatchBounds(CompositionObject item, double? x = null, double? y = null, double? width = null, double? height = null) => Patch(item with { Bounds = item.Bounds with { XPercent = Snap(x ?? item.Bounds.XPercent), YPercent = Snap(y ?? item.Bounds.YPercent), WidthPercent = Snap(width ?? item.Bounds.WidthPercent), HeightPercent = Snap(height ?? item.Bounds.HeightPercent) } });
     private double Snap(double value) => _snap ? Math.Round(value * 2, MidpointRounding.AwayFromZero) / 2 : value;
@@ -513,8 +522,40 @@
         return imageZIndex;
     }
     private void MoveReadingOrder(CompositionObject item, int delta) { var ordered = _objects.Where(candidate => candidate.ReadingOrder is not null).OrderBy(candidate => candidate.ReadingOrder).ToList(); var index = ordered.FindIndex(candidate => candidate.Id == item.Id); var target = index + delta; if (index < 0 || target < 0 || target >= ordered.Count) return; Snapshot(); var other = ordered[target]; var order = item.ReadingOrder; _objects = _objects.Select(candidate => candidate.Id == item.Id ? candidate with { ReadingOrder = other.ReadingOrder } : candidate.Id == other.Id ? candidate with { ReadingOrder = order } : candidate).ToList(); MarkDirty(); }
-    private void Undo() { if (_undo.Count == 0) return; _redo.Push(Capture()); Restore(_undo.Pop()); MarkDirty(); }
-    private void Redo() { if (_redo.Count == 0) return; _undo.Push(Capture()); Restore(_redo.Pop()); MarkDirty(); }
+    private async Task MoveHistoryAsync(bool redo)
+    {
+        if (InteractionLocked || !await FlushAsync())
+            return;
+        try
+        {
+            var result = CoreBook
+                ? redo ? await Books.RedoCoverAsync(ProjectId) : await Books.UndoCoverAsync(ProjectId)
+                : redo ? await Covers.RedoAsync(ProjectId, EditionId) : await Covers.UndoAsync(ProjectId, EditionId);
+            _cover = result.Cover;
+            _history = result.History;
+            _scene = CoverCompositionFactory.KeepArtworkBehindCopy(
+                JsonSerializer.Deserialize<CompositionScene>(_cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
+                ?? throw new InvalidDataException("The restored cover scene is empty."));
+            _objects = _scene.Objects.ToList();
+            _layers = _scene.Layers.ToList();
+            _styles = _scene.Styles.ToList();
+            RestoreHistorySelection(result.SelectionJson);
+            _title = _cover.Title;
+            _subtitle = _cover.Subtitle;
+            _author = _cover.Author;
+            _spineText = _cover.SpineText;
+            _backCopy = _cover.BackCopy;
+            _background = _cover.BackgroundColor;
+            _barcodeMode = _cover.BarcodeMode;
+            _dirty = false;
+            _error = null;
+            await Saved.InvokeAsync();
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+    }
     private void OpenAddArtworkPicker() { _artworkPickerMode = ArtworkPickerMode.Add; _artworkPickerTargetId = null; }
     private void OpenReplaceArtworkPicker(Guid targetId) { _artworkPickerMode = ArtworkPickerMode.Replace; _artworkPickerTargetId = targetId; }
     private void CloseArtworkPicker() { _artworkPickerMode = null; _artworkPickerTargetId = null; }
@@ -563,6 +604,21 @@
             _cover = _loadedCoreBook
                 ? await Books.SaveCoverAsync(saveProjectId, _cover.CoreBookRevision ?? throw new InvalidOperationException("Core Book revision is unavailable."), update, scene)
                 : await Covers.SaveSurfaceWorkspaceAsync(saveProjectId, _cover.EditionId, _surfaceRole, update, scene);
+            _history = _loadedCoreBook
+                ? await Books.GetCoverHistoryStateAsync(saveProjectId)
+                : await Covers.GetHistoryStateAsync(saveProjectId, _cover.EditionId);
+            await AuthoringHistory.UpdateSelectionAsync(
+                _loadedCoreBook
+                    ? new AuthoringHistoryTarget(
+                        saveProjectId,
+                        AuthoringHistoryDocumentKind.CoreCover,
+                        saveProjectId)
+                    : new AuthoringHistoryTarget(
+                        saveProjectId,
+                        AuthoringHistoryDocumentKind.ReleaseCover,
+                        _cover.EditionId,
+                        _cover.EditionId),
+                SerializeHistorySelection());
             if (_changeVersion == changeVersion)
             {
                 _scene = CoverCompositionFactory.KeepArtworkBehindCopy(
@@ -576,6 +632,7 @@
                 _dirty = false;
             }
             await Saved.InvokeAsync();
+            await InvokeAsync(StateHasChanged);
         }
         catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
         {
@@ -601,6 +658,36 @@
         }
         return !_dirty;
     }
+
+    private string SerializeHistorySelection() => JsonSerializer.Serialize(new
+    {
+        objectId = _selectedId,
+        surface = _surfaceRole.ToString()
+    });
+
+    private void RestoreHistorySelection(string selectionJson)
+    {
+        if (string.IsNullOrWhiteSpace(selectionJson))
+        {
+            _selectedId = null;
+            return;
+        }
+        try
+        {
+            using var document = JsonDocument.Parse(selectionJson);
+            if (document.RootElement.TryGetProperty("objectId", out var objectIdElement)
+                && objectIdElement.ValueKind == JsonValueKind.String
+                && Guid.TryParse(objectIdElement.GetString(), out var objectId)
+                && _objects.Any(item => item.Id == objectId))
+                _selectedId = objectId;
+            else
+                _selectedId = null;
+        }
+        catch (JsonException)
+        {
+            _selectedId = null;
+        }
+    }
     private void HandleKeyDown(KeyboardEventArgs e) { if (InteractionLocked || Selected is not { Locked: false } selected || LayerLocked(selected.LayerId)) return; var delta = e.ShiftKey ? 1d : .25; if (IsCropRepositioning(selected)) { switch (e.Key) { case "ArrowLeft": Patch(selected with { CropXPercent = Math.Clamp(selected.CropXPercent + delta, 0, 100) }); break; case "ArrowRight": Patch(selected with { CropXPercent = Math.Clamp(selected.CropXPercent - delta, 0, 100) }); break; case "ArrowUp": Patch(selected with { CropYPercent = Math.Clamp(selected.CropYPercent + delta, 0, 100) }); break; case "ArrowDown": Patch(selected with { CropYPercent = Math.Clamp(selected.CropYPercent - delta, 0, 100) }); break; } return; } switch (e.Key) { case "ArrowLeft": PatchBounds(selected, x: selected.Bounds.XPercent - delta); break; case "ArrowRight": PatchBounds(selected, x: selected.Bounds.XPercent + delta); break; case "ArrowUp": PatchBounds(selected, y: selected.Bounds.YPercent - delta); break; case "ArrowDown": PatchBounds(selected, y: selected.Bounds.YPercent + delta); break; } }
     private string StageStyle() => $"--cover-ratio:{_scene!.Surface.WidthPoints / _scene.Surface.HeightPoints:R};--cover-zoom:{_zoom:R};--cover-bg:{_background}";
     private string FrontStyle => RegionStyle(_cover!.Template.BleedInches + _cover.Template.TrimWidthInches + _cover.Template.SpineWidthInches, _cover.Template.BleedInches, _cover.Template.TrimWidthInches, _cover.Template.TrimHeightInches);
@@ -623,7 +710,6 @@
     private static int? NullableInt(ChangeEventArgs e) => int.TryParse(e.Value?.ToString(), out var value) ? value : null;
     private static string Color(ChangeEventArgs e) => e.Value?.ToString() ?? "#000000";
     private static string ColorValue(string value) => value.StartsWith('#') && value.Length == 7 ? value : "#000000";
-    private sealed record WorkspaceSnapshot(List<CompositionObject> Objects, List<CompositionLayer> Layers, List<CompositionObjectStyle> Styles);
     private enum ArtworkPickerMode { Add, Replace }
 
     protected override async Task OnAfterRenderAsync(bool firstRender) { if (firstRender) _workspaceModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-workspace.js"); }

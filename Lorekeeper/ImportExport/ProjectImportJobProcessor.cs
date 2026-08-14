@@ -2352,8 +2352,10 @@ public sealed class ProjectImportJobProcessor(
             .Select(item => item.PageCompositionId!.Value).Distinct().ToList();
         if (sourceIds.Count == 0)
             return [];
-        var sources = await db.PageCompositions.AsNoTracking().Include(item => item.Variants)
-            .Where(item => item.ProjectId == projectId && item.ChapterId == chapterId && item.EditionId == null && sourceIds.Contains(item.Id))
+        var sources = await db.PageCompositions.AsNoTracking()
+            .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
+            .Where(item => item.ProjectId == projectId && item.ChapterId == chapterId
+                && item.EditionId == null && item.DetachedAt == null && sourceIds.Contains(item.Id))
             .ToListAsync(cancellationToken);
         var map = new Dictionary<Guid, Guid>();
         foreach (var source in sources)
@@ -3222,8 +3224,9 @@ public sealed class ProjectImportJobProcessor(
         if (seeds.Count == 0) return;
         var compositionIds = seeds.Select(item => item.TargetId).ToHashSet();
         var compositions = await db.PageCompositions
-            .Include(item => item.Variants)
-            .Where(item => item.ProjectId == projectId && compositionIds.Contains(item.Id))
+            .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
+            .Where(item => item.ProjectId == projectId && item.DetachedAt == null
+                && compositionIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, cancellationToken);
         foreach (var seed in seeds)
         {

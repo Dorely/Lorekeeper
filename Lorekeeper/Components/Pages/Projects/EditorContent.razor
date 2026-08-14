@@ -63,6 +63,7 @@ else
             <EditorChatPanel @key="Project.Id"
                              ProjectId="Project.Id"
                              CurrentChapterId="_activeChapterId"
+                             CurrentCompositionId="@(_mode == EditorMode.Pages ? _openCompositionId : null)"
                              ContentTarget="_contentTarget"
                              ContextRefreshSignal="_contextRefreshSignal"
                              ReviewRefreshSignal="_reviewRefreshSignal"

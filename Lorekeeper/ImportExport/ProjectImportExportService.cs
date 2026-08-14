@@ -171,8 +171,8 @@ public sealed class ProjectImportExportService(
             PageCompositions = kind == ProjectExportKind.Full
                 ? (await db.PageCompositions
                     .AsNoTracking()
-                    .Include(composition => composition.Variants)
-                    .Where(composition => composition.ProjectId == projectId)
+                    .Include(composition => composition.Variants.Where(variant => variant.DetachedAt == null))
+                    .Where(composition => composition.ProjectId == projectId && composition.DetachedAt == null)
                     .OrderBy(composition => composition.ChapterId)
                     .ThenBy(composition => composition.CreatedAt)
                     .ToListAsync(cancellationToken))

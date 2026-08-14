@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.Authoring;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -6,7 +7,11 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Fonts;
 
-public sealed class ProjectFontService(AppDbContext db, IWebHostEnvironment environment) : IProjectFontService
+public sealed class ProjectFontService(
+    AppDbContext db,
+    IWebHostEnvironment environment,
+    IAuthoringHistoryService authoringHistory,
+    IProjectMutationCoordinator projectMutations) : IProjectFontService
 {
     public async Task<IReadOnlyList<ProjectFontFamilyView>> ListAsync(
         Guid projectId,
@@ -81,8 +86,11 @@ public sealed class ProjectFontService(AppDbContext db, IWebHostEnvironment envi
     public async Task DeleteFamilyAsync(
         Guid projectId,
         Guid familyId,
+        bool clearAffectedHistory = false,
         CancellationToken cancellationToken = default)
     {
+        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var family = await db.ProjectFontFamilies
             .Include(candidate => candidate.Faces)
             .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == familyId, cancellationToken);
@@ -92,7 +100,8 @@ public sealed class ProjectFontService(AppDbContext db, IWebHostEnvironment envi
         var key = CustomKey(family.Id);
         var usedBy = (await db.PageCompositionVariants
                 .AsNoTracking()
-                .Where(variant => variant.Composition.ProjectId == projectId)
+                .Where(variant => variant.Composition.ProjectId == projectId
+                    && variant.DetachedAt == null && variant.Composition.DetachedAt == null)
                 .Select(variant => new { variant.Composition.Name, variant.SceneJson })
                 .ToListAsync(cancellationToken))
             .Where(item => SceneUsesFont(item.SceneJson, key))
@@ -126,10 +135,18 @@ public sealed class ProjectFontService(AppDbContext db, IWebHostEnvironment envi
                 $"{family.Name} is used by {usedBy.Count} book item(s): {string.Join(", ", usedBy)}. Choose another font before deleting it.");
         }
 
+        var dependentHistory = await authoringHistory.FindDependentStreamsAsync(
+            projectId, AuthoringHistoryDependencyKind.ProjectFont, familyId, cancellationToken);
+        if (dependentHistory.Count > 0 && !clearAffectedHistory)
+            throw new InvalidOperationException($"AUTHORING_HISTORY_DEPENDENCY: This font is retained by {dependentHistory.Count} Undo/Redo histor{(dependentHistory.Count == 1 ? "y" : "ies")}. Delete it and clear the affected history?");
+        if (dependentHistory.Count > 0)
+            await authoringHistory.ClearDependentStreamsAsync(projectId, AuthoringHistoryDependencyKind.ProjectFont, familyId, cancellationToken);
+
         db.ProjectFontFamilies.Remove(family);
         var project = await db.Projects.FirstAsync(project => project.Id == projectId, cancellationToken);
         project.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private static bool SceneUsesFont(string json, string key)

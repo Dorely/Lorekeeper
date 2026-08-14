@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Authoring;
 using Lorekeeper.ChatTurns;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
@@ -40,6 +41,8 @@ public sealed class EditorChatService(
     IAiChangeRepository changes,
     IServiceScopeFactory scopeFactory,
     ChatTurnEngine turnEngine,
+    IAuthoringHistoryService authoringHistory,
+    IAuthoringMutationContextAccessor authoringMutationContext,
     IOptions<AgentOptions> options,
     ILogger<EditorChatService> logger) : IEditorChatService
 {
@@ -131,6 +134,7 @@ public sealed class EditorChatService(
     public async IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(
         Guid projectId,
         Guid? currentChapterId,
+        Guid? currentCompositionId,
         EditorContentTarget contentTarget,
         string userText,
         IReadOnlyList<Guid> imageIds,
@@ -190,6 +194,11 @@ public sealed class EditorChatService(
         conversation.UpdatedAt = DateTime.UtcNow;
         await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
         await imageAttachments.PersistAsync(projectId, ChatTurnSurface.Editor, userMessage.Id, imageIds, cancellationToken);
+        await using var authoringTurn = new AuthoringTurnHistoryScope(
+            authoringHistory,
+            authoringMutationContext,
+            userMessage.Id,
+            BuildAssistantHistoryLabel(userText, "Edit"));
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
@@ -245,6 +254,7 @@ public sealed class EditorChatService(
                 projectId,
                 conversation.Id,
                 currentChapterId,
+                currentCompositionId,
                 contentTarget,
                 providerAvailability.Provider.Id,
                 visionReady,
@@ -263,6 +273,7 @@ public sealed class EditorChatService(
         }
         if (setupError is not null)
         {
+            authoringTurn.Fail();
             yield return new EditorChatTurnError(setupError, Cancelled: false);
             yield break;
         }
@@ -332,6 +343,7 @@ public sealed class EditorChatService(
                             : EditorMessageStatus.Failed;
                         activeAssistant.ErrorMessage = failed.Cancelled ? "Cancelled by user." : failed.Message;
                         await SafePersistAsync(activeAssistant);
+                        if (failed.Cancelled) authoringTurn.Cancel(); else authoringTurn.Fail();
                         yield return new EditorChatTurnError(failed.Message, failed.Cancelled);
                         yield break;
                 }
@@ -343,6 +355,7 @@ public sealed class EditorChatService(
                 activeAssistant.Status = EditorMessageStatus.Failed;
                 activeAssistant.ErrorMessage = "Editor chat streaming ended without a completed round.";
                 await SafePersistAsync(activeAssistant);
+                authoringTurn.Fail();
                 yield return new EditorChatTurnError(activeAssistant.ErrorMessage, Cancelled: false);
                 yield break;
             }
@@ -358,6 +371,7 @@ public sealed class EditorChatService(
 
                 conversation.UpdatedAt = DateTime.UtcNow;
                 await conversations.SaveChangesAsync(CancellationToken.None);
+                authoringTurn.Complete();
                 yield return new EditorChatAssistantMessageCompleted(activeAssistant.Id);
                 yield break;
             }
@@ -369,6 +383,7 @@ public sealed class EditorChatService(
                 activeAssistant.Status = EditorMessageStatus.Failed;
                 activeAssistant.ErrorMessage = "start_contest must be the final tool call in a Contest Mode turn.";
                 await SafePersistAsync(activeAssistant);
+                authoringTurn.Fail();
                 yield return new EditorChatTurnError(activeAssistant.ErrorMessage, Cancelled: false);
                 yield break;
             }
@@ -398,6 +413,7 @@ public sealed class EditorChatService(
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
+                    authoringTurn.Cancel();
                     yield return new EditorChatTurnError("Cancelled.", Cancelled: true);
                     yield break;
                 }
@@ -641,6 +657,7 @@ public sealed class EditorChatService(
 
                     conversation.UpdatedAt = DateTime.UtcNow;
                     await conversations.SaveChangesAsync(CancellationToken.None);
+                    authoringTurn.Complete();
                     yield return new EditorChatAssistantMessageCompleted(activeAssistant.Id);
                     yield break;
                 }
@@ -689,6 +706,7 @@ public sealed class EditorChatService(
 
             if (iteration == maxIterations - 1)
             {
+                authoringTurn.Fail();
                 yield return new EditorChatTurnError(ChatTurnEngine.ToolLoopLimitError(maxIterations), Cancelled: false);
                 yield break;
             }
@@ -1046,6 +1064,14 @@ public sealed class EditorChatService(
         catch (OperationCanceledException) when (updateCancellation.IsCancellationRequested)
         {
         }
+    }
+
+    private static string BuildAssistantHistoryLabel(string userText, string surface)
+    {
+        var compact = string.Join(' ', userText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (compact.Length > 120)
+            compact = compact[..117] + "...";
+        return $"Assistant: {surface} — {compact}";
     }
 
     internal static EditorWorkspaceMutated? TryWorkspaceMutation(

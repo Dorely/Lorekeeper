@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Composition;
+using Lorekeeper.Authoring;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -49,6 +50,12 @@ public sealed record PublicationSectionDesignedPageResult(
     PublicationSectionView Section,
     PageComposition Composition);
 
+public sealed record PublicationSectionHistoryResult(
+    PublicationSectionView Section,
+    AuthoringHistoryState History,
+    string ActionLabel,
+    string SelectionJson);
+
 public interface IPublicationSectionService
 {
     Task EnsureSystemSectionsAsync(Guid projectId, CancellationToken cancellationToken = default);
@@ -63,6 +70,9 @@ public interface IPublicationSectionService
     Task ReorderWithinAnchorAsync(PublicationSectionTarget target, IReadOnlyList<Guid> orderedSectionIds, CancellationToken cancellationToken = default);
     Task<PublicationSectionDesignedPageResult> CreateDesignedPageAsync(PublicationSectionTarget target, Guid sectionId, int blockIndex, string name, DesignedPageLayoutMode layoutMode, long expectedRevision, CancellationToken cancellationToken = default);
     Task<string> ResolveBoundFieldAsync(PublicationSectionTarget target, PublicationBoundField field, CancellationToken cancellationToken = default);
+    Task<AuthoringHistoryState> GetHistoryStateAsync(PublicationSectionTarget target, Guid sectionId, CancellationToken cancellationToken = default);
+    Task<PublicationSectionHistoryResult> UndoAsync(PublicationSectionTarget target, Guid sectionId, CancellationToken cancellationToken = default);
+    Task<PublicationSectionHistoryResult> RedoAsync(PublicationSectionTarget target, Guid sectionId, CancellationToken cancellationToken = default);
 }
 
 public sealed class PublicationSectionService(
@@ -70,7 +80,9 @@ public sealed class PublicationSectionService(
     IPublicationBookService books,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IManuscriptStyleService manuscriptStyles,
-    IProjectMutationCoordinator projectMutations) : IPublicationSectionService
+    IProjectMutationCoordinator projectMutations,
+    IAuthoringHistoryService authoringHistory,
+    IAuthoringMutationContextAccessor authoringMutationContext) : IPublicationSectionService
 {
     public async Task EnsureSystemSectionsAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -180,6 +192,7 @@ public sealed class PublicationSectionService(
 
         await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
         PublicationSection row;
+        string? beforeHistory = null;
         if (input.Id is Guid id)
         {
             row = await db.PublicationSections.SingleOrDefaultAsync(item => item.Id == id && item.ProjectId == target.ProjectId, cancellationToken)
@@ -200,6 +213,9 @@ public sealed class PublicationSectionService(
             ValidateSystemDocument(row.SystemRole, input, document);
             if (row.Anchor != input.Anchor || row.TargetKind != input.TargetKind || row.TargetId != input.TargetId)
                 row.LocalOrder = await NextOrderAsync(target, input.Anchor, input.TargetId, cancellationToken);
+            var previousDocument = ManuscriptCodec.Deserialize(row.ManuscriptJson, row.Id, row.Revision);
+            beforeHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
+                db, previousDocument, target.ProjectId, null, row.Id, target.EditionId, cancellationToken);
         }
         else
         {
@@ -217,9 +233,85 @@ public sealed class PublicationSectionService(
 
         Apply(row, input, document);
         await TouchTargetAsync(target, cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
+        if (beforeHistory is not null)
+        {
+            var committedDocument = ManuscriptCodec.Deserialize(row.ManuscriptJson, row.Id, row.Revision);
+            var afterHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
+                db, committedDocument, target.ProjectId, null, row.Id, target.EditionId, cancellationToken);
+            var historyTarget = SectionHistoryTarget(target, row.Id);
+            var context = authoringMutationContext.Current;
+            if (context?.IsAssistant == true)
+                await authoringHistory.UpdateAssistantTurnBatchAsync(historyTarget, context.AssistantTurnId, beforeHistory, afterHistory, context.ActionLabel, cancellationToken: cancellationToken);
+            else
+                await authoringHistory.RecordManualActionAsync(historyTarget, beforeHistory, afterHistory,
+                    AuthoringSnapshotCodec.DescribeManuscriptAction(beforeHistory, afterHistory, "publication section"), cancellationToken: cancellationToken);
+        }
+        else
+            await db.SaveChangesAsync(cancellationToken);
         return await GetStoredAsync(target, row.Id, cancellationToken);
     }
+
+    public async Task<AuthoringHistoryState> GetHistoryStateAsync(
+        PublicationSectionTarget target,
+        Guid sectionId,
+        CancellationToken cancellationToken = default) =>
+        await authoringHistory.ReadStateAsync(SectionHistoryTarget(target, sectionId), cancellationToken);
+
+    public Task<PublicationSectionHistoryResult> UndoAsync(
+        PublicationSectionTarget target,
+        Guid sectionId,
+        CancellationToken cancellationToken = default) =>
+        MoveHistoryAsync(target, sectionId, redo: false, cancellationToken);
+
+    public Task<PublicationSectionHistoryResult> RedoAsync(
+        PublicationSectionTarget target,
+        Guid sectionId,
+        CancellationToken cancellationToken = default) =>
+        MoveHistoryAsync(target, sectionId, redo: true, cancellationToken);
+
+    private async Task<PublicationSectionHistoryResult> MoveHistoryAsync(
+        PublicationSectionTarget target,
+        Guid sectionId,
+        bool redo,
+        CancellationToken cancellationToken)
+    {
+        await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
+        var row = await db.PublicationSections.SingleOrDefaultAsync(
+            item => item.ProjectId == target.ProjectId && item.EditionId == target.EditionId && item.Id == sectionId,
+            cancellationToken) ?? throw new KeyNotFoundException("Publication section was not found.");
+        var currentDocument = ManuscriptCodec.Deserialize(row.ManuscriptJson, row.Id, row.Revision);
+        var current = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
+            db, currentDocument, target.ProjectId, null, row.Id, target.EditionId, cancellationToken);
+        var historyTarget = SectionHistoryTarget(target, row.Id);
+        async Task Apply(string payload, CancellationToken ct)
+        {
+            var saved = AuthoringSnapshotCodec.ReadManuscript(payload);
+            if (saved.Compositions.Count != 0)
+                throw new InvalidDataException("A prose publication-section history snapshot cannot contain page canvases.");
+            var document = ManuscriptCodec.Deserialize(saved.ManuscriptJson) with
+            {
+                ManuscriptId = row.Id,
+                Revision = checked(row.Revision + 1)
+            };
+            ValidateSectionMode(document);
+            await ValidateDocumentAsync(target, document, ct);
+            row.Revision = document.Revision;
+            row.ManuscriptJson = ManuscriptCodec.Serialize(document);
+            row.UpdatedAt = DateTime.UtcNow;
+            await TouchTargetAsync(target, ct);
+        }
+        var result = redo
+            ? await authoringHistory.RedoAsync(historyTarget, current, Apply, cancellationToken)
+            : await authoringHistory.UndoAsync(historyTarget, current, Apply, cancellationToken);
+        return new PublicationSectionHistoryResult(
+            await GetStoredAsync(target, row.Id, cancellationToken),
+            result.State,
+            result.ActionLabel,
+            result.SelectionJson);
+    }
+
+    private static AuthoringHistoryTarget SectionHistoryTarget(PublicationSectionTarget target, Guid sectionId) =>
+        new(target.ProjectId, AuthoringHistoryDocumentKind.PublicationSection, sectionId, target.EditionId);
 
     public async Task<PublicationSectionView> PatchManuscriptAsync(
         PublicationSectionTarget target,
@@ -284,7 +376,7 @@ public sealed class PublicationSectionService(
         {
             var currentValues = await BindingValuesAsync(target, cancellationToken);
             var compositions = await db.PageCompositions
-                .Where(item => item.PublicationSectionId == section.Id)
+                .Where(item => item.PublicationSectionId == section.Id && item.DetachedAt == null)
                 .ToListAsync(cancellationToken);
             var changed = ApplyResolvedBindings(compositions, currentValues) > 0;
             if (changed)
@@ -402,6 +494,7 @@ public sealed class PublicationSectionService(
             ?? throw new KeyNotFoundException("Release publication section was not found.");
         if (row.CoreSectionId is null)
             throw new InvalidOperationException("A release-only section cannot be reset to Core Book.");
+        await ClearOwnedHistoryAsync(row, cancellationToken);
         db.PublicationSections.Remove(row);
         await TouchEditionAsync(editionId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
@@ -410,6 +503,7 @@ public sealed class PublicationSectionService(
     public async Task DeleteAsync(PublicationSectionTarget target, Guid sectionId, CancellationToken cancellationToken = default)
     {
         await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var row = await db.PublicationSections.SingleOrDefaultAsync(item => item.ProjectId == target.ProjectId && item.Id == sectionId, cancellationToken);
         if (row is null)
             return;
@@ -450,10 +544,28 @@ public sealed class PublicationSectionService(
                 throw new InvalidOperationException("The publication section belongs to another target.");
             if (row.SystemRole != PublicationSectionSystemRole.None)
                 throw new InvalidOperationException("Generated publication sections can be omitted but not deleted.");
+            await ClearOwnedHistoryAsync(row, cancellationToken);
             db.PublicationSections.Remove(row);
             await TouchTargetAsync(target, cancellationToken);
         }
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private async Task ClearOwnedHistoryAsync(PublicationSection row, CancellationToken cancellationToken)
+    {
+        await authoringHistory.DeleteDocumentHistoryAsync(
+            row.ProjectId,
+            AuthoringHistoryDocumentKind.PublicationSection,
+            row.Id,
+            row.EditionId,
+            cancellationToken);
+        var compositionIds = await db.PageCompositions.IgnoreQueryFilters().AsNoTracking()
+            .Where(item => item.PublicationSectionId == row.Id)
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+        foreach (var compositionId in compositionIds)
+            await authoringHistory.DeleteDocumentHistoryAsync(row.ProjectId, AuthoringHistoryDocumentKind.PageComposition, compositionId, cancellationToken: cancellationToken);
     }
 
     public async Task ReorderWithinAnchorAsync(
@@ -639,6 +751,7 @@ public sealed class PublicationSectionService(
         var compositions = await db.PageCompositions
             .Where(item => item.ProjectId == target.ProjectId
                 && item.EditionId == target.EditionId
+                && item.DetachedAt == null
                 && item.PublicationSectionId != null
                 && item.PublicationSection != null
                 && (item.PublicationSection.SystemRole == PublicationSectionSystemRole.Title
@@ -819,8 +932,9 @@ public sealed class PublicationSectionService(
         };
         var document = ManuscriptCodec.Deserialize(core.ManuscriptJson, core.Id, core.Revision);
         var sourceIds = document.Content.Where(item => item.PageCompositionId.HasValue).Select(item => item.PageCompositionId!.Value).Distinct().ToList();
-        var sources = await db.PageCompositions.AsNoTracking().Include(item => item.Variants)
-            .Where(item => sourceIds.Contains(item.Id)).ToListAsync(cancellationToken);
+        var sources = await db.PageCompositions.AsNoTracking()
+            .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
+            .Where(item => sourceIds.Contains(item.Id) && item.DetachedAt == null).ToListAsync(cancellationToken);
         var remap = new Dictionary<Guid, Guid>();
         foreach (var source in sources)
         {
@@ -874,6 +988,7 @@ public sealed class PublicationSectionService(
             return;
         var owned = await db.PageCompositions.AsNoTracking().CountAsync(item => compositionIds.Contains(item.Id)
             && item.ProjectId == target.ProjectId
+            && item.DetachedAt == null
             && item.EditionId == target.EditionId,
             cancellationToken);
         if (owned != compositionIds.Count)

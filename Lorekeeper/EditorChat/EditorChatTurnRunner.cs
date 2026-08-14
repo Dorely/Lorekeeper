@@ -6,7 +6,7 @@ namespace Lorekeeper.EditorChat;
 
 public interface IEditorChatTurnRunner
 {
-    bool TryStart(Guid projectId, Guid? currentChapterId, EditorContentTarget contentTarget, string userText, IReadOnlyList<ChatTurnImageAttachment> images);
+    bool TryStart(Guid projectId, Guid? currentChapterId, Guid? currentCompositionId, EditorContentTarget contentTarget, string userText, IReadOnlyList<ChatTurnImageAttachment> images);
     ChatTurnSnapshot? GetActiveTurn(Guid projectId);
     IChatTurnSubscription<EditorChatTurnUpdate>? Subscribe(Guid projectId);
     void Cancel(Guid projectId);
@@ -18,11 +18,11 @@ public sealed class EditorChatTurnRunner(
 {
     private static ChatTurnKey Key(Guid projectId) => new(projectId, ChatTurnSurface.Editor);
 
-    public bool TryStart(Guid projectId, Guid? currentChapterId, EditorContentTarget contentTarget, string userText, IReadOnlyList<ChatTurnImageAttachment> images) =>
+    public bool TryStart(Guid projectId, Guid? currentChapterId, Guid? currentCompositionId, EditorContentTarget contentTarget, string userText, IReadOnlyList<ChatTurnImageAttachment> images) =>
         runtime.TryStart(
             Key(projectId),
             userText,
-            cancellationToken => RunAsync(projectId, currentChapterId, contentTarget, userText, images.Select(image => image.ImageId).ToList(), cancellationToken),
+            cancellationToken => RunAsync(projectId, currentChapterId, currentCompositionId, contentTarget, userText, images.Select(image => image.ImageId).ToList(), cancellationToken),
             static (ex, cancelled) => new EditorChatTurnError(cancelled ? "Cancelled." : ex.Message, cancelled),
             static update => update is EditorChatAssistantMessageCompleted or EditorChatTurnError,
             images);
@@ -36,6 +36,7 @@ public sealed class EditorChatTurnRunner(
     private async IAsyncEnumerable<EditorChatTurnUpdate> RunAsync(
         Guid projectId,
         Guid? currentChapterId,
+        Guid? currentCompositionId,
         EditorContentTarget contentTarget,
         string userText,
         IReadOnlyList<Guid> imageIds,
@@ -43,7 +44,7 @@ public sealed class EditorChatTurnRunner(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var chat = scope.ServiceProvider.GetRequiredService<IEditorChatService>();
-        await foreach (var update in chat.SendAsync(projectId, currentChapterId, contentTarget, userText, imageIds, cancellationToken))
+        await foreach (var update in chat.SendAsync(projectId, currentChapterId, currentCompositionId, contentTarget, userText, imageIds, cancellationToken))
             yield return update;
     }
 }

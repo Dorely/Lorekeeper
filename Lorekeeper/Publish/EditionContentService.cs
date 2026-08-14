@@ -1,4 +1,5 @@
 using Lorekeeper.Manuscripts;
+using Lorekeeper.Authoring;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -58,7 +59,8 @@ public sealed class EditionContentService(
     AppDbContext db,
     IProjectMutationCoordinator projectMutations,
     IProjectSearchIndex projectSearch,
-    IVectorStore vectors) : IEditionContentService
+    IVectorStore vectors,
+    IAuthoringHistoryService? authoringHistory = null) : IEditionContentService
 {
     public async Task<IReadOnlyList<EditionContentReleaseView>> ListReleasesAsync(
         Guid projectId,
@@ -105,6 +107,7 @@ public sealed class EditionContentService(
             return new EditionContentReleaseView(edition.Id, edition.Name, enabled, false, edition.ChapterOverrides.Count);
         if (!enabled && edition.ChapterOverrides.Count > 0 && !confirmDiscard)
             throw new InvalidOperationException("Disabling edition-specific content will discard every divergent chapter and its edition layouts. Confirmation is required.");
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         if (!enabled)
         {
             var activeReview = await db.AiChangeBatches.AsNoTracking().AnyAsync(
@@ -138,7 +141,12 @@ public sealed class EditionContentService(
                 var sourceId = chapterOverride.Id.ToString("N");
                 await projectSearch.DeleteBySourceAsync(ProjectSearchSourceTypes.EditionChapter, sourceId, scopeKey, cancellationToken);
                 await vectors.DeleteBySourceAsync(ProjectSearchSourceTypes.EditionChapter, sourceId, scopeKey, cancellationToken);
+                if (authoringHistory is not null)
+                    await authoringHistory.DeleteDocumentHistoryAsync(projectId, AuthoringHistoryDocumentKind.EditionChapter, chapterOverride.ChapterId, editionId, cancellationToken);
             }
+            if (authoringHistory is not null)
+                foreach (var composition in compositions)
+                    await authoringHistory.DeleteDocumentHistoryAsync(projectId, AuthoringHistoryDocumentKind.PageComposition, composition.Id, cancellationToken: cancellationToken);
             db.PageCompositions.RemoveRange(compositions);
             db.PublicationEditionChapterOverrides.RemoveRange(edition.ChapterOverrides);
         }
@@ -146,6 +154,7 @@ public sealed class EditionContentService(
         edition.Revision = checked(edition.Revision + 1);
         edition.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return new EditionContentReleaseView(edition.Id, edition.Name, enabled, false, enabled ? edition.ChapterOverrides.Count : 0);
     }
 
@@ -192,6 +201,7 @@ public sealed class EditionContentService(
             cancellationToken);
         if (chapterOverride is null)
             return;
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var compositions = await db.PageCompositions
             .Where(item => item.ProjectId == projectId && item.ChapterId == chapterId && item.EditionId == editionId)
             .ToListAsync(cancellationToken);
@@ -199,11 +209,18 @@ public sealed class EditionContentService(
         var sourceId = chapterOverride.Id.ToString("N");
         await projectSearch.DeleteBySourceAsync(ProjectSearchSourceTypes.EditionChapter, sourceId, scopeKey, cancellationToken);
         await vectors.DeleteBySourceAsync(ProjectSearchSourceTypes.EditionChapter, sourceId, scopeKey, cancellationToken);
+        if (authoringHistory is not null)
+        {
+            await authoringHistory.DeleteDocumentHistoryAsync(projectId, AuthoringHistoryDocumentKind.EditionChapter, chapterId, editionId, cancellationToken);
+            foreach (var composition in compositions)
+                await authoringHistory.DeleteDocumentHistoryAsync(projectId, AuthoringHistoryDocumentKind.PageComposition, composition.Id, cancellationToken: cancellationToken);
+        }
         db.PageCompositions.RemoveRange(compositions);
         db.PublicationEditionChapterOverrides.Remove(chapterOverride);
         edition.Revision = checked(edition.Revision + 1);
         edition.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<EditionChapterDifference>> ReadDifferencesAsync(
@@ -235,9 +252,10 @@ public sealed class EditionContentService(
                 .Distinct()
                 .ToList();
             var editionCompositions = await db.PageCompositions.AsNoTracking()
-                .Include(item => item.Variants)
+                .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
                 .Where(item => item.ProjectId == projectId
                     && item.EditionId == editionId
+                    && item.DetachedAt == null
                     && editionCompositionIds.Contains(item.Id))
                 .ToListAsync(cancellationToken);
             var sourceCompositionIds = editionCompositions
@@ -246,9 +264,10 @@ public sealed class EditionContentService(
                 .Distinct()
                 .ToList();
             var sourceCompositions = await db.PageCompositions.AsNoTracking()
-                .Include(item => item.Variants)
+                .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
                 .Where(item => item.ProjectId == projectId
                     && item.EditionId == null
+                    && item.DetachedAt == null
                     && sourceCompositionIds.Contains(item.Id))
                 .ToDictionaryAsync(item => item.Id, cancellationToken);
             var sourceByEditionComposition = editionCompositions
@@ -313,8 +332,9 @@ public sealed class EditionContentService(
         if (compositionIds.Count == 0)
             return [];
         var compositions = await db.PageCompositions.AsNoTracking()
-            .Include(item => item.Variants)
-            .Where(item => item.ProjectId == projectId && item.EditionId == release.Id && compositionIds.Contains(item.Id))
+            .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
+            .Where(item => item.ProjectId == projectId && item.EditionId == release.Id
+                && item.DetachedAt == null && compositionIds.Contains(item.Id))
             .ToListAsync(cancellationToken);
         var issues = new List<EditionLayoutIssue>();
         foreach (var compositionId in compositionIds)

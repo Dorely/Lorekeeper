@@ -180,6 +180,8 @@ builder.Services.AddScoped<ChapterService>();
 builder.Services.AddScoped<IChapterSemanticProjectionService, ChapterSemanticProjectionService>();
 builder.Services.AddScoped<IChapterService>(services => services.GetRequiredService<ChapterService>());
 builder.Services.AddScoped<IManuscriptService>(services => services.GetRequiredService<ChapterService>());
+builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringHistoryService, Lorekeeper.Authoring.AuthoringHistoryService>();
+builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringMutationContextAccessor, Lorekeeper.Authoring.AuthoringMutationContextAccessor>();
 builder.Services.AddSingleton<IDatabaseMigrationRecoveryService, DatabaseMigrationRecoveryService>();
 builder.Services.AddSingleton<IManuscriptMigrationService, ManuscriptMigrationService>();
 builder.Services.AddScoped<IDatabaseStartupMigrationService, DatabaseStartupMigrationService>();
@@ -334,6 +336,8 @@ using (var scope = app.Services.CreateScope())
     var startupMigration = scope.ServiceProvider.GetRequiredService<IDatabaseStartupMigrationService>();
     if (await startupMigration.ApplyAsync())
     {
+        await scope.ServiceProvider.GetRequiredService<Lorekeeper.Authoring.IAuthoringHistoryService>()
+            .FinalizeAbandonedBatchesAsync();
         var embeddingConfiguration = await db.EmbeddingConfigurations.AsNoTracking().FirstOrDefaultAsync();
         var vectorMaintenance = scope.ServiceProvider.GetRequiredService<IVectorStoreMaintenance>();
         vectorMaintenance.Initialize(embeddingConfiguration?.Dimensions);

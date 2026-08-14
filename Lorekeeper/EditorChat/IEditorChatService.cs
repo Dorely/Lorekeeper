@@ -19,7 +19,7 @@ public interface IEditorChatService
     Task ResolveContestCandidateLineAsync(Guid projectId, Guid chapterId, ContestCandidateReviewLineResolution request, CancellationToken cancellationToken = default);
     Task KeepContestCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default);
     Task FinishContestBatchAsync(Guid batchId, CancellationToken cancellationToken = default);
-    IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(Guid projectId, Guid? currentChapterId, EditorContentTarget contentTarget, string userText, IReadOnlyList<Guid> imageIds, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(Guid projectId, Guid? currentChapterId, Guid? currentCompositionId, EditorContentTarget contentTarget, string userText, IReadOnlyList<Guid> imageIds, CancellationToken cancellationToken = default);
     Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default);
 }
 
@@ -27,6 +27,7 @@ public sealed class EditorChatContext(
     Guid projectId,
     Guid conversationId,
     Guid? currentChapterId,
+    Guid? currentCompositionId,
     EditorContentTarget contentTarget,
     int providerId,
     bool visionReady,
@@ -49,6 +50,7 @@ public sealed class EditorChatContext(
     public Guid ProjectId { get; } = projectId;
     public Guid ConversationId { get; } = conversationId;
     public Guid? CurrentChapterId { get; } = currentChapterId;
+    public Guid? CurrentCompositionId { get; } = currentCompositionId;
     public EditorContentTarget ContentTarget { get; } = contentTarget;
     public int ProviderId { get; } = providerId;
     public bool VisionReady { get; } = visionReady;

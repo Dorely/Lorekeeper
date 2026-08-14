@@ -2,6 +2,24 @@ namespace Lorekeeper.Manuscripts;
 
 public interface IManuscriptService
 {
+    Task<Lorekeeper.Authoring.AuthoringHistoryState> GetHistoryStateAsync(
+        EditorContentTarget target,
+        Guid chapterId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(new Lorekeeper.Authoring.AuthoringHistoryState(0, false, false, null, null, 0, 0));
+
+    Task<ManuscriptHistoryMutationResult> UndoAsync(
+        EditorContentTarget target,
+        Guid chapterId,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Persistent manuscript history is unavailable.");
+
+    Task<ManuscriptHistoryMutationResult> RedoAsync(
+        EditorContentTarget target,
+        Guid chapterId,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Persistent manuscript history is unavailable.");
+
     Task<ManuscriptSnapshot?> GetManuscriptAsync(
         EditorContentTarget target,
         Guid chapterId,

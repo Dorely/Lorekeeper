@@ -4,7 +4,7 @@ public interface IProjectFontService
 {
     Task<IReadOnlyList<ProjectFontFamilyView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<ProjectFontFamilyView> ImportAsync(Guid projectId, ProjectFontUpload upload, CancellationToken cancellationToken = default);
-    Task DeleteFamilyAsync(Guid projectId, Guid familyId, CancellationToken cancellationToken = default);
+    Task DeleteFamilyAsync(Guid projectId, Guid familyId, bool clearAffectedHistory = false, CancellationToken cancellationToken = default);
     Task<ProjectFontFaceData?> GetFaceDataAsync(Guid projectId, Guid faceId, CancellationToken cancellationToken = default);
     Task<ProjectFontFaceData?> ResolveFaceAsync(
         Guid projectId,

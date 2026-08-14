@@ -285,3 +285,34 @@ the live test project; terminate the browser host after the run.
   order.
 - Review final text contrast over artwork manually; automated composed-background
   contrast sampling is documented as deferred.
+
+## Persistent Undo and Redo
+
+- Type continuously in a Core chapter, pause for more than 500 ms, format a
+  paragraph, paste text, change a Figure, and insert/move/delete a block. Confirm
+  each natural boundary appears as one Undo action, shortcuts match toolbar
+  buttons, and Redo survives a reload until new work branches from an undone
+  state.
+- Delete a Designed Page from a chapter, wait for autosave, reload, and Undo.
+  Confirm the original composition/variant/object IDs, semantic text, artwork,
+  selection, and complete canvas return. Redo must detach it again.
+- Repeat manuscript history in Core and an enabled release target and confirm
+  their cursors and restored content never cross targets.
+- Edit a publication prose section, Designed Page, Core cover, and release cover;
+  reload each workspace and confirm the named Undo/Redo state and selected
+  object persist.
+- Ask Editor or Publish to perform a multi-tool change touching one document.
+  Confirm the entire turn is one history action. If the turn touches a chapter
+  and a Designed Page, confirm each surface receives one independent action.
+  Repeat with Review Edits enabled, approving the stored changes separately,
+  and confirm they still extend the single action for the originating turn.
+  Stop or fail a turn after a committed mutation and confirm the committed work
+  remains one undoable action. Reload during a reconnecting turn and confirm its
+  last committed state is recovered as one action.
+- Create more than 100 actions in one disposable document and confirm only the
+  newest 100 remain while Undo reaches the advanced baseline without losing the
+  document. After Undo, make a new edit and confirm Redo is cleared.
+- Remove an image or custom font referenced only by retained history. Confirm a
+  Lorekeeper-owned warning offers Cancel or Delete and clear history; Cancel
+  preserves both, while confirmation clears only affected streams and completes
+  deletion. A resource still used by current content remains blocked.

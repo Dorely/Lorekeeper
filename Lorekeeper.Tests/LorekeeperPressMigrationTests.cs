@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using Lorekeeper.Authoring;
 using Lorekeeper.Composition;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
@@ -476,6 +477,7 @@ public sealed class LorekeeperPressMigrationTests
                 var compositionId = Assert.IsType<Guid>(designedPage.PageCompositionId);
                 var composition = await db.PageCompositions.AsNoTracking()
                     .SingleAsync(item => item.Id == compositionId && item.ProjectId == pictureProjectId);
+                Assert.Null(composition.DetachedAt);
                 Assert.Equal(
                     "The lighthouse shone across the water.",
                     ManuscriptCodec.ProjectPlainText(
@@ -485,6 +487,7 @@ public sealed class LorekeeperPressMigrationTests
                 var activeVariantId = Assert.IsType<Guid>(composition.ActiveAuthoringVariantId);
                 var variant = await db.PageCompositionVariants.AsNoTracking()
                     .SingleAsync(item => item.Id == activeVariantId && item.CompositionId == composition.Id);
+                Assert.Null(variant.DetachedAt);
                 var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions);
                 Assert.NotNull(scene);
                 Assert.Equal(CompositionSurfaceKind.FacingSpread, scene.Surface.Kind);
@@ -501,6 +504,21 @@ public sealed class LorekeeperPressMigrationTests
                 Assert.Equal(pictureBlockId, Assert.Single(text.ContentReferences).BlockId);
                 Assert.Equal(32, text.FontSizePoints);
                 Assert.Equal(CompositionTextShadow.Soft, text.TextShadow);
+                var history = new AuthoringHistoryService(db);
+                var historyTarget = new AuthoringHistoryTarget(
+                    pictureProjectId,
+                    AuthoringHistoryDocumentKind.PageComposition,
+                    composition.Id);
+                var historyState = await history.RecordManualActionAsync(
+                    historyTarget,
+                    "{\"state\":\"before\"}",
+                    "{\"state\":\"after\"}",
+                    "Migration history usability check");
+                Assert.True(historyState.CanUndo);
+                Assert.Single(await db.AuthoringHistoryStreams.AsNoTracking()
+                    .Where(item => item.ProjectId == pictureProjectId)
+                    .ToListAsync());
+                Assert.Single(await db.AuthoringHistoryEntries.AsNoTracking().ToListAsync());
                 Assert.Equal(
                     pictureImageBytes,
                     (await db.PublishAssets.AsNoTracking().SingleAsync(item => item.Id == pictureImageId)).Data);

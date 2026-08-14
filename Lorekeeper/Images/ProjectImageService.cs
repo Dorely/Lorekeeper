@@ -1,4 +1,5 @@
 using Lorekeeper.Context;
+using Lorekeeper.Authoring;
 using Lorekeeper.Models;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Persistence;
@@ -14,7 +15,8 @@ public sealed class ProjectImageService(
     IProjectImageGenerationRuntime imageRuntime,
     IOptions<ProjectImageGenerationOptions> imageOptions,
     IContextIndexingService contextIndexing,
-    IProjectMutationCoordinator projectMutations) : IProjectImageService
+    IProjectMutationCoordinator projectMutations,
+    IAuthoringHistoryService authoringHistory) : IProjectImageService
 {
     public async Task<IReadOnlyList<ProjectImageView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -287,9 +289,10 @@ public sealed class ProjectImageService(
         return ToView(projectId, asset);
     }
 
-    public async Task DeleteAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default)
+    public async Task DeleteAsync(Guid projectId, Guid imageId, bool clearAffectedHistory = false, CancellationToken cancellationToken = default)
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var project = await GetProjectAsync(projectId, cancellationToken);
         var asset = await db.PublishAssets.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == imageId, cancellationToken);
         if (asset is null) return;
@@ -327,7 +330,8 @@ public sealed class ProjectImageService(
         }
         var compositionUses = (await db.PageCompositionVariants
             .AsNoTracking()
-            .Where(variant => variant.Composition.ProjectId == projectId)
+            .Where(variant => variant.Composition.ProjectId == projectId
+                && variant.DetachedAt == null && variant.Composition.DetachedAt == null)
             .Select(variant => new { variant.Composition.Name, variant.SceneJson })
             .ToListAsync(cancellationToken))
             .Where(item => SceneUsesImage(item.SceneJson, imageId))
@@ -365,9 +369,17 @@ public sealed class ProjectImageService(
                 $"Image '{asset.FileName}' is used by a publication-edition placement. Remove the placement in Publish before deleting the image.");
         }
 
+        var dependentHistory = await authoringHistory.FindDependentStreamsAsync(
+            projectId, AuthoringHistoryDependencyKind.ProjectImage, imageId, cancellationToken);
+        if (dependentHistory.Count > 0 && !clearAffectedHistory)
+            throw new InvalidOperationException($"AUTHORING_HISTORY_DEPENDENCY: This image is retained by {dependentHistory.Count} Undo/Redo histor{(dependentHistory.Count == 1 ? "y" : "ies")}. Delete it and clear the affected history?");
+        if (dependentHistory.Count > 0)
+            await authoringHistory.ClearDependentStreamsAsync(projectId, AuthoringHistoryDependencyKind.ProjectImage, imageId, cancellationToken);
+
         db.PublishAssets.Remove(asset);
         project.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         foreach (var entityId in entityIds)
             await contextIndexing.ReindexEntityAsync(projectId, entityId, cancellationToken);
     }
