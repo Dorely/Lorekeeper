@@ -91,6 +91,55 @@ public static class PublishEndpoints
                     entityTag: etag);
             });
 
+        endpoints.MapGet(
+            "/projects/{projectId:guid}/publish/artifacts/{artifactId:guid}/epub/{**resourcePath}",
+            async (
+                Guid projectId,
+                Guid artifactId,
+                string resourcePath,
+                HttpContext httpContext,
+                IPublicationEpubPreviewService previews,
+                CancellationToken cancellationToken) =>
+            {
+                PublicationEpubPreviewResource? resource;
+                try
+                {
+                    resource = await previews.ReadResourceAsync(
+                        projectId,
+                        artifactId,
+                        resourcePath,
+                        cancellationToken);
+                }
+                catch (Exception exception) when (exception is InvalidDataException or UriFormatException)
+                {
+                    return Results.BadRequest("The EPUB artifact could not be previewed safely.");
+                }
+
+                if (resource is null)
+                    return Results.NotFound();
+
+                httpContext.Response.Headers.CacheControl = "private, max-age=31536000, immutable";
+                httpContext.Response.Headers.ContentSecurityPolicy =
+                    "default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; " +
+                    "script-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
+                httpContext.Response.Headers.XContentTypeOptions = "nosniff";
+                httpContext.Response.Headers["Referrer-Policy"] = "no-referrer";
+                httpContext.Response.Headers.AccessControlAllowOrigin = "*";
+                var etag = new EntityTagHeaderValue(
+                    $"\"sha256-{resource.ArtifactSha256}-{resource.ResourceSha256}\"");
+                var responseMediaType = resource.MediaType.Equals(
+                    "application/xhtml+xml",
+                    StringComparison.OrdinalIgnoreCase)
+                        ? "text/html; charset=utf-8"
+                        : resource.MediaType;
+                return Results.File(
+                    resource.Data,
+                    responseMediaType,
+                    fileDownloadName: null,
+                    lastModified: resource.CreatedAt,
+                    entityTag: etag);
+            });
+
         return endpoints;
     }
 }

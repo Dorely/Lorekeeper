@@ -153,6 +153,12 @@ else
             {
                 <div class="artifact-image-preview"><img src="@ViewUrl(previewArtifact.Id)" alt="@PreviewLabel(previewArtifact.Kind)" /></div>
             }
+            else if (previewArtifact.Kind == PublicationArtifactKind.Epub)
+            {
+                <PublicationEpubPreview @key="previewArtifact.Id"
+                                        ProjectId="Project.Id"
+                                        ArtifactId="previewArtifact.Id" />
+            }
             else
             {
                 <PublicationPdfPreview @key="previewArtifact.Id"
@@ -2357,9 +2363,9 @@ else
     private void ClosePdfPreview() => _previewArtifact = null;
     private string ViewUrl(Guid artifactId) => $"/projects/{Project!.Id:N}/publish/artifacts/{artifactId:N}";
     private string DownloadUrl(Guid artifactId) => $"/projects/{Project!.Id:N}/publish/artifacts/{artifactId:N}/download";
-    private static string DownloadLabel(PublicationArtifactKind kind) => kind switch { PublicationArtifactKind.ReadingPdf => "Save reading PDF", PublicationArtifactKind.InteriorPdf => "Save interior PDF", PublicationArtifactKind.PerfectBoundCoverPdf => "Save cover PDF", PublicationArtifactKind.CaseCoverPdf => "Save case cover PDF", PublicationArtifactKind.DustJacketPdf => "Save dust jacket PDF", PublicationArtifactKind.PrintSetupManifest => "Save cloth setup", PublicationArtifactKind.BookPdf => "Save book PDF", PublicationArtifactKind.Epub => "Save EPUB", PublicationArtifactKind.PublicationPackage => "Save package", _ => $"Save {kind}" };
-    private static bool CanPreview(PublicationArtifactView artifact) => artifact.MediaType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase) || artifact.MediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
-    private static string PreviewLabel(PublicationArtifactKind kind) => kind switch { PublicationArtifactKind.ReadingPdf => "Preview reading PDF", PublicationArtifactKind.InteriorPdf => "Preview interior PDF", PublicationArtifactKind.PerfectBoundCoverPdf => "Preview cover PDF", PublicationArtifactKind.CaseCoverPdf => "Preview case cover PDF", PublicationArtifactKind.DustJacketPdf => "Preview dust jacket PDF", PublicationArtifactKind.BookPdf => "Preview book PDF", PublicationArtifactKind.FrontCoverImage => "Preview cover image", _ => $"Preview {kind}" };
+    private static string DownloadLabel(PublicationArtifactKind kind) => kind switch { PublicationArtifactKind.ReadingPdf => "Save reading PDF", PublicationArtifactKind.InteriorPdf => "Save interior PDF", PublicationArtifactKind.PerfectBoundCoverPdf => "Save cover PDF", PublicationArtifactKind.CaseCoverPdf => "Save case cover PDF", PublicationArtifactKind.DustJacketPdf => "Save dust jacket PDF", PublicationArtifactKind.PrintSetupManifest => "Save cloth setup", PublicationArtifactKind.BookPdf => "Save book PDF", PublicationArtifactKind.Epub => "Save EPUB", PublicationArtifactKind.FrontCoverImage => "Save front cover", PublicationArtifactKind.PublicationPackage => "Save package", _ => $"Save {kind}" };
+    private static bool CanPreview(PublicationArtifactView artifact) => artifact.Kind == PublicationArtifactKind.Epub || artifact.MediaType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase) || artifact.MediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
+    private static string PreviewLabel(PublicationArtifactKind kind) => kind switch { PublicationArtifactKind.ReadingPdf => "Preview reading PDF", PublicationArtifactKind.InteriorPdf => "Preview interior PDF", PublicationArtifactKind.PerfectBoundCoverPdf => "Preview cover PDF", PublicationArtifactKind.CaseCoverPdf => "Preview case cover PDF", PublicationArtifactKind.DustJacketPdf => "Preview dust jacket PDF", PublicationArtifactKind.BookPdf => "Preview book PDF", PublicationArtifactKind.Epub => "Preview EPUB", PublicationArtifactKind.FrontCoverImage => "Preview front cover", _ => $"Preview {kind}" };
     private static string FormatBytes(long bytes) => bytes >= 1024 * 1024 ? $"{bytes / 1024d / 1024d:0.0} MB" : $"{Math.Max(1, bytes / 1024d):0} KB";
     private IReadOnlyList<PrintProductDefinition> CompatiblePrintProducts(PublicationEditionFormat format, PublicationVendor vendor) => PrintProducts.List(format, vendor);
     private PrintProductDefinition? SelectedProduct() => string.IsNullOrWhiteSpace(_releaseDraft.PrintProductKey) ? null : PrintProducts.List().FirstOrDefault(item => item.Key == _releaseDraft.PrintProductKey);

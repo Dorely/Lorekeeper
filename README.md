@@ -109,6 +109,11 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   geometry-aware image creation, matter and metadata guidance, Stop/Reset, and
   reconnectable jobs. Cover design is embedded beside the assistant with a live
   scene canvas and one controls column instead of opening a modal.
+  Prepared EPUB releases open in a full-height Lorekeeper reader that displays
+  the immutable artifact's cover, reflowable chapters, Figures, and fixed-layout
+  Designed Pages with spine navigation and direct EPUB/front-cover downloads.
+  The sandboxed reader is visual artifact inspection; authoritative EPUBCheck
+  validation and cross-reader compatibility remain separate readiness work.
   Core PDF presentation can preserve a Designed Page as one wide or custom-sized
   PDF page; PDF ebook releases inherit that choice until explicitly customized.
 - Lorekeeper-owned paperback, hardcover, and Digital PDF press jobs with cancellation/restart recovery,

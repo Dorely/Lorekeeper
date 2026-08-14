@@ -133,16 +133,16 @@ The current application provides:
 - tagged Digital PDF with its front cover as page one;
 - immutable artifacts, validation reports, manifests, packages, and downloads;
 - private Core reading-PDF generation and preview;
+- app-owned previews of immutable PDF, image, and mixed-layout EPUB artifacts;
 - conversational Publish assistance and shared page/cover composition tools.
 
-This foundation is broad enough to keep. The remaining work is chiefly human UI
-completeness, artifact inspection, external-standard
-validation integration, profile coverage, and native release verification—not
-a replacement renderer.
+This foundation is broad enough to keep. The principal artifact-readiness gates
+that remain are authoritative EPUB validation and complete native packaged-pipeline
+acceptance on Windows and both macOS architectures, not a replacement renderer.
 
 ## Next phase — artifact-complete publishing
 
-Status: `Planned`
+Status: `In progress — EPUBCheck and native release acceptance remain`
 
 ### 1. Edition-specific authoring in Editor
 
@@ -188,6 +188,8 @@ has an understandable manual workflow.
 
 ### 3. Artifact preview, diagnostics, and downloads
 
+Status: `Implemented`
+
 - Preview paperback interiors, full-wrap covers, PDF ebooks, and EPUB books
   inside the corresponding release workspace.
 - Show all prioritized validation diagnostics rather than truncating the result
@@ -199,6 +201,13 @@ has an understandable manual workflow.
 - Preserve immutable artifact identity and clearly distinguish current, stale,
   invalid, and legacy output.
 
+Prepared EPUBs open in a Lorekeeper-owned, sandboxed reader that parses the
+stored artifact in memory, preserves reflowable and fixed-layout spine order,
+and serves only validated manifest resources through artifact-scoped endpoints.
+The reader supports navigation and bounded assistant inspection, but is visual
+artifact review rather than authoritative EPUB conformance or cross-reader
+compatibility evidence.
+
 Artifact history, render comparison, and production audit browsing may improve
 diagnosis, but they are not prerequisites for producing an uploadable file.
 
@@ -207,8 +216,11 @@ without unpacking a package or opening another production application.
 
 ### 4. Authoritative EPUB validation
 
-- Bundle and invoke the current production EPUBCheck release through an
+- Bundle and invoke EPUBCheck 5.3.0, the current EPUB 3.3 validator target, through an
   integrity-checked, app-owned runtime boundary.
+- Consume its structured JSON report rather than scraping console text. See the
+  [official release](https://github.com/w3c/epubcheck/releases/tag/v5.3.0) and
+  [CLI documentation](https://w3c.github.io/epubcheck/docs/cli/).
 - Validate every prepared EPUB before reporting it ready.
 - Store and display the complete validator result with source-oriented recovery
   actions.

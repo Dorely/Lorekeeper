@@ -224,6 +224,7 @@
 |------|-------------|
 | `PublishContent.razor` (+ `.razor.css`) | Progressively loaded two-column Core Book/release workspace with persistent assistant, collapsible Front/Main content/Back flow, direct chapter and publication-section inclusion/placement, product-filtered print-release setup, autosave, target-preserving full-height editors, progress, previews, blockers, and downloads. |
 | `PublicationPdfPreview.razor` (+ `.razor.css`) | Lorekeeper-owned artifact viewer with single-page or fixed two-leaf facing rows, transparent parity slots, optional visible page seam, lazy immutable page images, and facing/seam-hidden defaults. |
+| `PublicationEpubPreview.razor` (+ `.razor.css`) | Full-height sandboxed reader for the actual prepared EPUB artifact, with spine/contents selection, previous/next navigation, responsive reflow, and fit-to-workspace fixed-layout pages. |
 | `PublishChatPanel.razor` (+ `.razor.css`) | Refresh-safe Publish adapter over shared `ChatSurface` with a flush-returned exact turn context, persisted transcript/tool chips, streaming, Stop/Reset, provider/token state, image attachments, active-turn reconnection, and structured workspace mutation callbacks. |
 
 ### Components/Pages/Projects/Outline/
@@ -623,7 +624,7 @@
 | `PublicationMigrationLock.cs` | Database-scoped process and crash-releasing file lease shared by edition recovery and Press schema advancement so the v14 rebuild/history window has one migration owner. |
 | `PublicationPressMigrationService.cs` | Guarded v15 Press cutover/reconciliation owner with protected backup, atomic marker, integrity and byte/hash invariants, journal evidence, and recovery-shell fallback. |
 | `PublicationActorContext.cs` | Scoped UI/assistant actor attribution carried into immutable publication-edition audit entries. |
-| `PublishAssistantTools.cs` | Compact Core/release read/patch, metadata-only publication-section creation plus focused prose mutations, bounded project search/image/font inspection, target-aware section variants and staged page operations, edition links, cover operations, terminal unattached image generation, direct previews, validation, preparation, and artifacts; raw manuscript replacement, chapter mutations, and raw profiles are absent. |
+| `PublishAssistantTools.cs` | Compact Core/release read/patch, metadata-only publication-section creation plus focused prose mutations, bounded project search/image/font and immutable EPUB spine/text inspection, target-aware section variants and staged page operations, edition links, cover operations, terminal unattached image generation, direct previews, validation, preparation, and artifacts; raw manuscript replacement, chapter mutations, and raw profiles are absent. |
 | `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration with full outline and protected visible-workspace context, narrated durable work history, shared Editor page/typography/image-design guidance, persisted user-visible and model-visible direct canvas previews, active-turn streaming/reconnection, and Core/release-targeted mutation notices. |
 | `PublicationPressRuntime.cs` | Fail-closed exact-manifest resolver for the packaged native renderer, dynamic capabilities, integrity evidence, and empty controlled child environment with no machine-tool fallback. |
 | `PublicationRenderService.cs` | Persisted/recoverable queue, metadata-only artifact listings, canonically ordered protocol-v7 image/font staging, bounded native progress ingestion, hash-verified print/Book PDF artifacts, semantic page maps, renderer/registry staleness, and comparison. |
@@ -631,7 +632,8 @@
 | `PublicationPackageService.cs` | Versioned registry-driven preflight and exact physical/digital package assembly with reusable validated reports, manifest, upload map, provenance, and legacy-artifact guards. |
 | `IPublishService.cs` / `PublishService.cs` | Read/projection/export facade carrying effective Core/release content into Core TXT/Markdown/Reading PDF and release EPUB/PDF/print output with active-compatible composition-variant selection and product-form guards. |
 | `PublicationArtifactPreviewService.cs` | Bounded, cached PDF-to-PNG page rendering for Lorekeeper-owned artifact previews using the already packaged PDFium/Skia runtime. |
-| `PublishEndpoints.cs` | Cacheable/range project-scoped immutable publication artifact viewing/download endpoints plus immutable rendered PDF-page previews. |
+| `PublicationEpubPreviewService.cs` | Hash-verified, bounded in-memory EPUB parser/cache with safe manifest/spine/navigation reads, preview-only XHTML/SVG/CSS sanitization, fixed-layout metadata, and bounded assistant text extraction. |
+| `PublishEndpoints.cs` | Cacheable/range project-scoped immutable publication artifact viewing/download endpoints plus immutable rendered PDF-page previews and CSP-restricted validated EPUB resources. |
 | `IPublishExportFormatter.cs` / `PublishExportFormatters.cs` | TXT/Markdown plus semantic EPUB writer for flowing Figures, real-text fixed-layout Designed Pages/covers, reading order, captions, and alternatives. |
 
 ### Graph/

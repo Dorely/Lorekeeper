@@ -858,6 +858,23 @@ raster width, and presents fixed single-page or two-leaf facing rows. Facing pag
 with the seam hidden is the initial view; users may expose the seam or switch to
 single pages without changing the stored artifact. Unpaired parity slots remain
 transparent, preserving right/left alignment without presenting them as PDF pages.
+Prepared EPUB previews likewise render the immutable artifact rather than a
+projection rebuilt from current source state. `PublicationEpubPreviewService`
+revalidates artifact length and SHA-256, parses the ZIP in memory without disk
+extraction, bounds entry count and expanded bytes, rejects traversal, duplicate
+paths, undeclared resources, scripted/remote manifest properties, and unsupported
+media, then parses `container.xml`, OPF manifest/spine, navigation, rendition
+layout, and fixed-layout viewports. Parsed metadata is cached by artifact hash.
+Project/artifact-scoped endpoints expose only validated manifest resources with
+manifest MIME enforcement, no-sniff headers, external-resource blocking, and
+sanitized XHTML/SVG/CSS. The reader places sanitized spine XHTML into an
+opaque-origin sandboxed iframe, loads images, fonts, and styles only through the
+artifact-scoped endpoints, and uses one nonce-authorized app-owned fit routine
+for fixed-layout viewports; artifact scripts never run. A preview failure does
+not change or suppress the immutable download. Publish tools expose only
+bounded spine/navigation metadata and paged extracted text, never binary data or
+complete XHTML. This reader is artifact inspection, not EPUBCheck evidence or a
+general third-party EPUB import reader.
 Source-fingerprint mismatch
 marks otherwise valid immutable
 artifacts stale. Installed-renderer or selected-profile provenance mismatch also
@@ -942,6 +959,8 @@ logical reading order. This is implemented accessible output but is not a formal
 PDF/UA certification claim. EPUB emits corresponding semantic XHTML plus
 `schema:accessMode`, sufficient-mode, feature, hazard, and human-review summary
 metadata; EPUB validation remains structural rather than a certification claim.
+The structural checks are defense in depth and are not described as authoritative
+EPUB conformance. Bundled EPUBCheck remains a separate roadmap gate.
 Every included ordered
 semantic-matter document is projected into TXT, Markdown, EPUB, and contained
 press output. The service persists SHA-256-addressed EPUB, front-cover, report,

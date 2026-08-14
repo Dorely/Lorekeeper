@@ -1,0 +1,280 @@
+@using Lorekeeper.Publish
+@using System.Security.Cryptography
+@using System.Text
+@using System.Xml.Linq
+@inject IPublicationEpubPreviewService EpubPreviews
+@inject NavigationManager Navigation
+
+<section class="publication-epub-preview" aria-label="EPUB reader">
+    @if (_loading)
+    {
+        <div class="publication-epub-preview-state" role="status">
+            <span class="spinner-border spinner-border-sm"></span>
+            <span>Opening the prepared EPUB…</span>
+        </div>
+    }
+    else if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <div class="publication-epub-preview-state error" role="alert">
+            <strong>EPUB preview could not be opened.</strong>
+            <span>@_error</span>
+            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="LoadAsync">Retry preview</button>
+        </div>
+    }
+    else if (_document is { Locations.Count: > 0 } document)
+    {
+        <header class="publication-epub-preview-toolbar">
+            <div class="publication-epub-preview-book">
+                <strong>@document.Title</strong>
+                <small>Prepared EPUB</small>
+            </div>
+            <button type="button"
+                    class="btn btn-sm btn-outline-secondary"
+                    disabled="@(_locationIndex == 0)"
+                    title="Previous EPUB location"
+                    @onclick="PreviousLocation">
+                ← Previous
+            </button>
+            <label>
+                <span>Contents</span>
+                <select class="form-select form-select-sm" value="@_locationIndex" @onchange="SelectLocation">
+                    @foreach (var navigationLocation in document.Locations)
+                    {
+                        <option value="@navigationLocation.Index">@navigationLocation.Title</option>
+                    }
+                </select>
+            </label>
+            <button type="button"
+                    class="btn btn-sm btn-outline-secondary"
+                    disabled="@(_locationIndex >= document.Locations.Count - 1)"
+                    title="Next EPUB location"
+                    @onclick="NextLocation">
+                Next →
+            </button>
+            <span class="publication-epub-preview-position">
+                @(_locationIndex + 1) of @document.Locations.Count
+                @if (CurrentLocation is { IsFixedLayout: true })
+                {
+                    <small>Fixed layout</small>
+                }
+                else
+                {
+                    <small>Reflowable</small>
+                }
+            </span>
+        </header>
+
+        @if (CurrentLocation is { } location)
+        {
+            <div class="publication-epub-preview-stage @(location.IsFixedLayout ? "fixed" : "reflowable")">
+                @if (_locationLoading)
+                {
+                    <div class="publication-epub-preview-location-state" role="status">
+                        <span class="spinner-border spinner-border-sm"></span>
+                        <span>Opening this EPUB location...</span>
+                    </div>
+                }
+                else if (!string.IsNullOrWhiteSpace(_locationError))
+                {
+                    <div class="publication-epub-preview-location-state error" role="alert">
+                        <strong>This EPUB location could not be opened.</strong>
+                        <span>@_locationError</span>
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="LoadLocationAsync">Retry location</button>
+                    </div>
+                }
+                else if (!string.IsNullOrWhiteSpace(_locationMarkup))
+                {
+                    <iframe @key="(ArtifactId, location.Index)"
+                            class="publication-epub-preview-frame"
+                            style="@FixedFrameStyle(location)"
+                            srcdoc="@_locationMarkup"
+                            title="@($"{document.Title}: {location.Title}")"
+                            sandbox="@SandboxPermissions(location)"
+                            referrerpolicy="no-referrer"></iframe>
+                }
+            </div>
+        }
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter, EditorRequired] public Guid ArtifactId { get; set; }
+
+    private PublicationEpubPreviewDocument? _document;
+    private Guid _loadedArtifactId;
+    private int _locationIndex;
+    private int _locationLoadVersion;
+    private bool _loading;
+    private bool _locationLoading;
+    private string? _error;
+    private string? _locationError;
+    private string? _locationMarkup;
+
+    private PublicationEpubPreviewLocation? CurrentLocation =>
+        _document is { Locations.Count: > 0 } && _locationIndex >= 0 && _locationIndex < _document.Locations.Count
+            ? _document.Locations[_locationIndex]
+            : null;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedArtifactId == ArtifactId)
+            return;
+        _loadedArtifactId = ArtifactId;
+        _locationIndex = 0;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _document = await EpubPreviews.ReadAsync(ProjectId, ArtifactId);
+            if (_document is null)
+                _error = "The stored artifact is unavailable or is not an EPUB.";
+            else if (_document.Locations.Count == 0)
+                _error = "The stored EPUB does not contain any readable spine locations.";
+            _locationIndex = Math.Clamp(_locationIndex, 0, Math.Max(0, (_document?.Locations.Count ?? 1) - 1));
+            if (_error is null)
+                await LoadLocationAsync();
+        }
+        catch (InvalidDataException exception)
+        {
+            _document = null;
+            _error = exception.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task PreviousLocation()
+    {
+        _locationIndex = Math.Max(0, _locationIndex - 1);
+        await LoadLocationAsync();
+    }
+
+    private async Task NextLocation()
+    {
+        if (_document is not null)
+        {
+            _locationIndex = Math.Min(_document.Locations.Count - 1, _locationIndex + 1);
+            await LoadLocationAsync();
+        }
+    }
+
+    private async Task SelectLocation(ChangeEventArgs args)
+    {
+        if (_document is not null
+            && int.TryParse(args.Value?.ToString(), out var index)
+            && index >= 0
+            && index < _document.Locations.Count)
+        {
+            _locationIndex = index;
+            await LoadLocationAsync();
+        }
+    }
+
+    private async Task LoadLocationAsync()
+    {
+        if (CurrentLocation is not { } location)
+            return;
+
+        var loadVersion = ++_locationLoadVersion;
+        _locationLoading = true;
+        _locationError = null;
+        _locationMarkup = null;
+        try
+        {
+            var resource = await EpubPreviews.ReadResourceAsync(ProjectId, ArtifactId, location.ResourcePath);
+            if (loadVersion != _locationLoadVersion)
+                return;
+            if (resource is null || !resource.MediaType.Equals("application/xhtml+xml", StringComparison.OrdinalIgnoreCase))
+            {
+                _locationError = "The prepared artifact no longer contains this spine document.";
+                return;
+            }
+
+            _locationMarkup = BuildSourceDocument(resource.Data, location);
+        }
+        catch (InvalidDataException exception)
+        {
+            if (loadVersion == _locationLoadVersion)
+                _locationError = exception.Message;
+        }
+        catch (System.Xml.XmlException)
+        {
+            if (loadVersion == _locationLoadVersion)
+                _locationError = "The prepared EPUB location is malformed.";
+        }
+        finally
+        {
+            if (loadVersion == _locationLoadVersion)
+                _locationLoading = false;
+        }
+    }
+
+    private string BuildSourceDocument(byte[] data, PublicationEpubPreviewLocation location)
+    {
+        var document = XDocument.Parse(Encoding.UTF8.GetString(data), LoadOptions.PreserveWhitespace);
+        var root = document.Root ?? throw new InvalidDataException("The prepared EPUB location has no document element.");
+        var head = root.Elements().FirstOrDefault(element => element.Name.LocalName == "head")
+            ?? throw new InvalidDataException("The prepared EPUB location has no document head.");
+        var namespaceName = root.Name.Namespace;
+        var origin = Navigation.ToAbsoluteUri("/").GetLeftPart(UriPartial.Authority);
+        var scriptNonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(18));
+        var scriptPolicy = location.IsFixedLayout ? $"'nonce-{scriptNonce}'" : "'none'";
+        var contentSecurityPolicy =
+            $"default-src 'none'; img-src {origin} data:; style-src {origin} 'unsafe-inline'; font-src {origin}; " +
+            $"script-src {scriptPolicy}; connect-src 'none'; object-src 'none'; frame-src 'none'; form-action 'none'";
+        head.AddFirst(
+            new XElement(namespaceName + "base", new XAttribute("href", ResourceDirectoryUrl(location.ResourcePath))),
+            new XElement(
+                namespaceName + "meta",
+                new XAttribute("http-equiv", "Content-Security-Policy"),
+                new XAttribute("content", contentSecurityPolicy)));
+        if (location.IsFixedLayout)
+        {
+            var viewportWidth = location.ViewportWidth
+                ?? throw new InvalidDataException("The fixed-layout EPUB location has no viewport width.");
+            var viewportHeight = location.ViewportHeight
+                ?? throw new InvalidDataException("The fixed-layout EPUB location has no viewport height.");
+            head.Add(
+                new XElement(
+                    namespaceName + "style",
+                    $"html, body.fixed-layout {{ width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }} " +
+                    $".fixed-page-surface {{ width: {viewportWidth}px; height: {viewportHeight}px; margin: 0; padding: 0; overflow: hidden; transform-origin: top left; }}"),
+                new XElement(
+                    namespaceName + "script",
+                    new XAttribute("nonce", scriptNonce),
+                    $"function fit(){{const page=document.querySelector('.fixed-page-surface');if(!page)return;" +
+                    $"const scale=Math.min(innerWidth/{viewportWidth},innerHeight/{viewportHeight});page.style.transform=`scale(${{scale}})`;}};" +
+                    "addEventListener('resize',fit);requestAnimationFrame(fit);"));
+        }
+        return document.ToString(SaveOptions.DisableFormatting);
+    }
+
+    private string ResourceDirectoryUrl(string resourcePath)
+    {
+        var separator = resourcePath.LastIndexOf('/');
+        var directory = separator < 0 ? string.Empty : resourcePath[..separator];
+        var relative = $"/projects/{ProjectId:N}/publish/artifacts/{ArtifactId:N}/epub/";
+        if (!string.IsNullOrEmpty(directory))
+            relative += $"{EncodePath(directory)}/";
+        return Navigation.ToAbsoluteUri(relative).AbsoluteUri;
+    }
+
+    private static string EncodePath(string path) =>
+        string.Join('/', path.Split('/').Select(Uri.EscapeDataString));
+
+    private static string? FixedFrameStyle(PublicationEpubPreviewLocation location) =>
+        location is { IsFixedLayout: true, ViewportWidth: > 0, ViewportHeight: > 0 }
+            ? $"aspect-ratio:{location.ViewportWidth}/{location.ViewportHeight}"
+            : null;
+
+    private static string SandboxPermissions(PublicationEpubPreviewLocation location) =>
+        location.IsFixedLayout ? "allow-scripts" : string.Empty;
+}

@@ -85,6 +85,7 @@ public sealed class PublishAssistantTools(
     IPublicationPreparationService preparation,
     IPublishService publishing,
     IPublicationRenderService renders,
+    IPublicationEpubPreviewService epubPreviews,
     IPublicationCoverService covers,
     IManuscriptStyleService manuscriptStyles,
     IProjectFontService projectFonts,
@@ -180,6 +181,11 @@ public sealed class PublishAssistantTools(
                 method: (Guid? releaseId = null) => ReadPreparationAsync(context, releaseId),
                 name: "read_publication_readiness",
                 description: "Read compact current preparation state, prioritized blockers, and immutable artifact download metadata for Core Book or one release."),
+            AIFunctionFactory.Create(
+                method: (Guid artifactId, int? locationIndex = null, int start = 0, int count = 4000) =>
+                    ReadEpubArtifactPreviewAsync(context, artifactId, locationIndex, start, count),
+                name: "read_epub_artifact_preview",
+                description: "Read bounded navigation/spine metadata from one immutable prepared EPUB artifact. Supply locationIndex to read a bounded plain-text slice from that location. Returns no binary data or XHTML and does not perform authoritative EPUB conformance validation."),
             AIFunctionFactory.Create(
                 method: () => ReadCoreContentAsync(context),
                 name: "read_publication_book_content",
@@ -1016,6 +1022,86 @@ public sealed class PublishAssistantTools(
                 diagnostics = job.Diagnostics.Take(5) }),
             diagnosticCounts = jobs.FirstOrDefault()?.Diagnostics.GroupBy(item => item.Severity).ToDictionary(group => group.Key, group => group.Count()),
             artifacts = artifacts.Where(item => !item.IsLegacy).Take(12).Select(item => DownloadView(context, item)), hasMoreArtifacts = artifacts.Count > 12 });
+    }
+
+    private async Task<string> ReadEpubArtifactPreviewAsync(
+        PublishAssistantContext context,
+        Guid artifactId,
+        int? locationIndex,
+        int start,
+        int count)
+    {
+        PublicationEpubPreviewDocument? preview;
+        try
+        {
+            preview = await epubPreviews.ReadAsync(context.ProjectId, artifactId, context.TurnCancellationToken);
+        }
+        catch (InvalidDataException exception)
+        {
+            return Serialize(new { ok = false, targetId = artifactId, code = "EPUB_PREVIEW_INVALID", summary = exception.Message });
+        }
+        if (preview is null)
+            return Serialize(new { ok = false, targetId = artifactId, code = "EPUB_ARTIFACT_NOT_FOUND", summary = "The immutable EPUB artifact is unavailable." });
+
+        var locations = preview.Locations.Take(80).Select(item => new
+        {
+            item.Index,
+            item.Title,
+            item.IsFixedLayout,
+            viewport = item.ViewportWidth is int width && item.ViewportHeight is int height
+                ? new { width, height }
+                : null,
+        });
+        if (locationIndex is null)
+        {
+            return Serialize(new
+            {
+                ok = true,
+                targetId = artifactId,
+                preview.Title,
+                artifactSha256 = preview.ArtifactSha256,
+                locationCount = preview.Locations.Count,
+                locations,
+                hasMoreLocations = preview.Locations.Count > 80,
+                previewAction = "Use Preview EPUB beside the current artifact in Publish.",
+                downloadUrl = $"/projects/{context.ProjectId:N}/publish/artifacts/{artifactId:N}/download",
+                validationScope = "Lorekeeper artifact preview; not authoritative EPUB conformance or cross-reader compatibility.",
+            });
+        }
+
+        PublicationEpubPreviewText? text;
+        try
+        {
+            text = await epubPreviews.ReadLocationTextAsync(
+                context.ProjectId,
+                artifactId,
+                locationIndex.Value,
+                Math.Max(0, start),
+                Math.Clamp(count, 1, 12000),
+                context.TurnCancellationToken);
+        }
+        catch (InvalidDataException exception)
+        {
+            return Serialize(new { ok = false, targetId = artifactId, code = "EPUB_PREVIEW_INVALID", summary = exception.Message });
+        }
+        return text is null
+            ? Serialize(new { ok = false, targetId = artifactId, code = "EPUB_LOCATION_NOT_FOUND", summary = "The requested EPUB spine location is unavailable." })
+            : Serialize(new
+            {
+                ok = true,
+                targetId = artifactId,
+                text.Location.Index,
+                text.Location.Title,
+                text.Location.IsFixedLayout,
+                text.Start,
+                text.Count,
+                text.TotalCharacters,
+                text.HasMore,
+                text.Text,
+                nextArguments = text.HasMore
+                    ? new { artifactId, locationIndex, start = text.Start + text.Count, count = Math.Clamp(count, 1, 12000) }
+                    : null,
+            });
     }
 
     private async Task<string> ReadEditionsAsync(PublishAssistantContext context) =>

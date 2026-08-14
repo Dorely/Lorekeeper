@@ -96,6 +96,7 @@ public sealed class PublishChatService(
 
         Publishing trust:
         - Distinguish Core reading-copy validation from publication-release validation. Never describe a Core reading PDF as vendor-ready or published.
+        - Preview prepared EPUB artifacts with read_epub_artifact_preview when navigation order or extracted location text matters. Lorekeeper's in-app reader is a visual inspection of the immutable prepared artifact, not proof of cross-reader compatibility and not authoritative EPUB conformance. EPUBCheck remains a separate future validation gate; never imply that preview success replaces it.
         - A successful print preparation means “Lorekeeper validated for profile version …”. You may prepare files and explain validation, but only a real vendor upload can establish acceptance.
         - End with exact mutations, inheritance or override state, current preparation state, blockers, download actions, and remaining user actions.
         """;
