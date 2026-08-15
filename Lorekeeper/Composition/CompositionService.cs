@@ -59,8 +59,7 @@ public sealed class CompositionService(
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IProjectMutationCoordinator projectMutations,
     IAuthoringHistoryService authoringHistory,
-    IAuthoringMutationContextAccessor authoringMutationContext,
-    ILogger<CompositionService> logger) : ICompositionService
+    IAuthoringMutationContextAccessor authoringMutationContext) : ICompositionService
 {
     private static readonly JsonSerializerOptions JsonOptions = ManuscriptCodec.JsonOptions;
 
@@ -777,37 +776,6 @@ public sealed class CompositionService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
-        for (var attempt = 1; ; attempt++)
-        {
-            try
-            {
-                return await SaveVariantOnceAsync(
-                    target,
-                    projectId,
-                    variantId,
-                    expectedRevision,
-                    scene,
-                    cancellationToken);
-            }
-            catch (DbUpdateConcurrencyException exception) when (attempt == 1)
-            {
-                logger.LogWarning(
-                    exception,
-                    "Discarded stale tracked state and will retry page variant {VariantId} from its protected revision {Revision}.",
-                    variantId,
-                    expectedRevision);
-            }
-        }
-    }
-
-    private async Task<PageCompositionVariant> SaveVariantOnceAsync(
-        EditorContentTarget target,
-        Guid projectId,
-        Guid variantId,
-        long expectedRevision,
-        CompositionScene scene,
-        CancellationToken cancellationToken)
-    {
         scene = scene with { Guides = [] };
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await PrepareFreshVariantCompositionMutationAsync(variantId, cancellationToken);
@@ -1206,37 +1174,6 @@ public sealed class CompositionService(
         Guid stageId,
         long expectedRevision,
         CancellationToken cancellationToken = default)
-    {
-        for (var attempt = 1; ; attempt++)
-        {
-            try
-            {
-                return await ApplyStageOnceAsync(
-                    target,
-                    projectId,
-                    conversationId,
-                    stageId,
-                    expectedRevision,
-                    cancellationToken);
-            }
-            catch (DbUpdateConcurrencyException exception) when (attempt == 1)
-            {
-                logger.LogWarning(
-                    exception,
-                    "Discarded stale tracked state and will retry composition stage {StageId} from its protected revision {Revision}.",
-                    stageId,
-                    expectedRevision);
-            }
-        }
-    }
-
-    private async Task<PageCompositionVariant> ApplyStageOnceAsync(
-        EditorContentTarget target,
-        Guid projectId,
-        Guid conversationId,
-        Guid stageId,
-        long expectedRevision,
-        CancellationToken cancellationToken)
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);

@@ -24,6 +24,7 @@ public interface IAppDbContextStateCoordinator
 /// Keeps every DI-created context coherent even though Blazor circuit scopes live longer
 /// than an individual persistence operation. Table generations invalidate tracked reads;
 /// bulk mutations invalidate matching tracked reads before a later UI event can reuse them.
+/// Row-level write reconciliation belongs to <see cref="AppDbContext"/>, not this table cache.
 /// </summary>
 public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordinator> logger)
     : IAppDbContextStateCoordinator
@@ -46,10 +47,7 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
         lock (state.Gate)
         {
             if (state.IsSaving)
-            {
-                EnsureSaveWasNotSuperseded(state, MutationTables(commandText));
                 return;
-            }
             RefreshTrackedReads(db, state, ReadTables(commandText));
         }
     }
@@ -117,10 +115,6 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
             var tables = ChangedTables(db);
             RefreshTrackedReads(db, state, tables);
             state.SavingTables = tables;
-            state.SaveBaseGenerations = tables.ToDictionary(
-                table => table,
-                table => _tableGenerations.GetValueOrDefault(table),
-                StringComparer.OrdinalIgnoreCase);
             state.IsSaving = true;
         }
     }
@@ -141,7 +135,6 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
                 }
             }
             state.SavingTables = [];
-            state.SaveBaseGenerations.Clear();
             state.IsSaving = false;
         }
     }
@@ -152,7 +145,6 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
         lock (state.Gate)
         {
             state.SavingTables = [];
-            state.SaveBaseGenerations.Clear();
             state.IsSaving = false;
             db.ChangeTracker.Clear();
         }
@@ -184,18 +176,6 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
             var seen = state.SeenGenerations.GetValueOrDefault(table);
             if (current <= seen)
                 continue;
-            var conflicting = db.ChangeTracker.Entries()
-                .Where(entry => IsTable(entry, table)
-                    && entry.State is EntityState.Modified or EntityState.Deleted)
-                .Select(entry => entry.Metadata.ClrType.Name)
-                .Distinct(StringComparer.Ordinal)
-                .Order(StringComparer.Ordinal)
-                .ToArray();
-            if (conflicting.Length > 0)
-            {
-                throw new DbUpdateConcurrencyException(
-                    $"Newer database state exists for {string.Join(", ", conflicting)}. The pending operation was stopped before it could overwrite that data; reload and try again.");
-            }
             var detached = DetachUnchanged(db, table);
             state.SeenGenerations[table] = current;
             if (detached > 0)
@@ -204,20 +184,6 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
                     "Discarded {Count} stale tracked {Table} entities before the next persistence operation.",
                     detached,
                     table);
-            }
-        }
-    }
-
-    private void EnsureSaveWasNotSuperseded(ContextState state, IReadOnlySet<string> commandTables)
-    {
-        foreach (var table in commandTables.Where(state.SavingTables.Contains))
-        {
-            var current = _tableGenerations.GetValueOrDefault(table);
-            var saveBase = state.SaveBaseGenerations.GetValueOrDefault(table);
-            if (current > saveBase)
-            {
-                throw new DbUpdateConcurrencyException(
-                    $"Newer database state exists for {table}. The pending operation was stopped before it could overwrite that data; reload and try again.");
             }
         }
     }
@@ -285,7 +251,6 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
         public object Gate { get; } = new();
         public Dictionary<string, long> SeenGenerations { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> SavingTables { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-        public Dictionary<string, long> SaveBaseGenerations { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> PendingTransactionTables { get; } = new(StringComparer.OrdinalIgnoreCase);
         public bool IsSaving { get; set; }
     }

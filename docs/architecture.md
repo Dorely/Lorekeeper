@@ -1238,16 +1238,29 @@ All dependency-injection-created contexts participate in the singleton
 invalidates unchanged entities before a query can reuse data superseded by
 another application context, and observes bulk update/delete commands as well
 as ordinary `SaveChanges` operations. Explicit transactions publish their
-invalidations only after commit. A pending mutation based on superseded state is
-stopped before it writes, and a database-level optimistic-concurrency race is
-translated at the context boundary instead of leaking EF's affected-row error.
-This boundary is required because Blazor circuit scopes outlive an individual UI
-operation. Revision-checked aggregate services identify their mutation target
-through `AppDbContext.PrepareFreshMutation`; the coordinator alone validates and
-refreshes that tracked state, so feature code does not clear the tracker or
-silently discard pending entities. Protected startup migrations retain their
-explicit transaction, backup, and validation boundaries while using the same
-registered context configuration.
+invalidations only after commit. Table generations are cache-invalidation hints,
+not write locks: unrelated rows in the same table may be updated by UI and
+background work without producing a false conflict. This boundary is required
+because Blazor circuit scopes outlive an individual UI operation.
+
+`AppDbContext` centrally resolves a genuine affected-row concurrency miss. It
+reloads the conflicting row, rebases only the properties marked modified by the
+pending operation, advances numeric revision tokens from the persisted value,
+and retries the save. Repeated deletes are idempotent. A modified row that was
+actually deleted, an entryless provider failure, or a conflict that cannot settle
+within the bounded retry count still fails closed; the context never recreates a
+missing aggregate or discards unknown pending data. This row-level policy applies
+to every repository and service using the registered context, so feature code
+does not implement ad hoc EF retries. Revision-checked aggregate services may
+still reject an obsolete user/tool request before mutation when its explicit
+expected revision no longer matches.
+
+Services that need an authoritative aggregate read identify their mutation
+target through `AppDbContext.PrepareFreshMutation`; the coordinator alone
+validates and refreshes that tracked state, so feature code does not clear the
+tracker or silently discard pending entities. Protected startup migrations
+retain their explicit transaction, backup, and validation boundaries while
+using the same registered context configuration.
 
 `IDatabaseMigrationRecoveryService` owns provider-specific backup paths,
 owner-only permissions, SQLite Online Backup creation, expiring restore

@@ -13,6 +13,7 @@ public class AppDbContext(
     IAppDbContextStateCoordinator? stateCoordinator = null) : DbContext(options)
 {
     private const int _maxLockedSaveAttempts = 6;
+    private const int _maxConcurrencySaveAttempts = 4;
 
     public DbSet<LlmProvider> LlmProviders => Set<LlmProvider>();
     public DbSet<EmbeddingConfiguration> EmbeddingConfigurations => Set<EmbeddingConfiguration>();
@@ -113,9 +114,20 @@ public class AppDbContext(
         try
         {
             stateCoordinator?.BeginSave(this);
-            var saved = base.SaveChanges(acceptAllChangesOnSuccess);
-            stateCoordinator?.CompleteSave(this, saved);
-            return saved;
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    var saved = base.SaveChanges(acceptAllChangesOnSuccess);
+                    stateCoordinator?.CompleteSave(this, saved);
+                    return saved;
+                }
+                catch (DbUpdateConcurrencyException exception)
+                    when (attempt < _maxConcurrencySaveAttempts && TryRebaseConcurrencyConflict(exception))
+                {
+                    LogRebasedConcurrencyConflict(exception, attempt);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException exception)
         {
@@ -145,6 +157,7 @@ public class AppDbContext(
         try
         {
             stateCoordinator?.BeginSave(this);
+            var concurrencyAttempt = 1;
             for (var attempt = 1; ; attempt++)
             {
                 try
@@ -152,6 +165,17 @@ public class AppDbContext(
                     var saved = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
                     stateCoordinator?.CompleteSave(this, saved);
                     return saved;
+                }
+                catch (DbUpdateConcurrencyException exception)
+                {
+                    if (concurrencyAttempt >= _maxConcurrencySaveAttempts
+                        || !await TryRebaseConcurrencyConflictAsync(exception, cancellationToken))
+                    {
+                        throw;
+                    }
+                    LogRebasedConcurrencyConflict(exception, concurrencyAttempt);
+                    concurrencyAttempt++;
+                    attempt--;
                 }
                 catch (DbUpdateException ex) when (IsSqliteLocked(ex) && attempt < _maxLockedSaveAttempts && !cancellationToken.IsCancellationRequested)
                 {
@@ -194,6 +218,99 @@ public class AppDbContext(
             "Optimistic database concurrency conflict while saving {Entries}.",
             entries.Length == 0 ? "an unidentified tracked entity" : string.Join("; ", entries));
     }
+
+    private void LogRebasedConcurrencyConflict(DbUpdateConcurrencyException exception, int attempt)
+    {
+        logger.LogInformation(
+            "Refreshed {Count} stale tracked row(s) and will retry database save attempt {Attempt}/{MaxAttempts}.",
+            exception.Entries.Count,
+            attempt + 1,
+            _maxConcurrencySaveAttempts);
+    }
+
+    private bool TryRebaseConcurrencyConflict(DbUpdateConcurrencyException exception)
+    {
+        if (exception.Entries.Count == 0)
+            return false;
+
+        var databaseValues = new List<(EntityEntry Entry, PropertyValues? Values)>();
+        foreach (var entry in exception.Entries)
+            databaseValues.Add((entry, entry.GetDatabaseValues()));
+        return TryRebaseConcurrencyEntries(databaseValues);
+    }
+
+    private async Task<bool> TryRebaseConcurrencyConflictAsync(
+        DbUpdateConcurrencyException exception,
+        CancellationToken cancellationToken)
+    {
+        if (exception.Entries.Count == 0)
+            return false;
+
+        var databaseValues = new List<(EntityEntry Entry, PropertyValues? Values)>();
+        foreach (var entry in exception.Entries)
+        {
+            databaseValues.Add((
+                entry,
+                await entry.GetDatabaseValuesAsync(cancellationToken)));
+        }
+        return TryRebaseConcurrencyEntries(databaseValues);
+    }
+
+    private static bool TryRebaseConcurrencyEntries(
+        IReadOnlyList<(EntityEntry Entry, PropertyValues? Values)> entries)
+    {
+        if (entries.Any(item => item.Values is null && item.Entry.State != EntityState.Deleted))
+            return false;
+
+        foreach (var (entry, databaseValues) in entries)
+        {
+            if (databaseValues is null)
+            {
+                // A repeated delete is already in the requested final state.
+                entry.State = EntityState.Detached;
+                continue;
+            }
+
+            if (entry.State == EntityState.Deleted)
+            {
+                entry.OriginalValues.SetValues(databaseValues);
+                continue;
+            }
+
+            var intendedChanges = entry.Properties
+                .Where(property => property.IsModified)
+                .Select(property => new IntendedPropertyChange(
+                    property.Metadata.Name,
+                    property.CurrentValue,
+                    property.Metadata.IsConcurrencyToken))
+                .ToArray();
+            if (intendedChanges.Length == 0)
+                return false;
+
+            entry.OriginalValues.SetValues(databaseValues);
+            entry.CurrentValues.SetValues(databaseValues);
+            foreach (var change in intendedChanges)
+            {
+                var property = entry.Property(change.Name);
+                property.CurrentValue = change.IsConcurrencyToken
+                    ? AdvanceConcurrencyToken(change.Value, databaseValues[change.Name])
+                    : change.Value;
+                property.IsModified = true;
+            }
+        }
+
+        return true;
+    }
+
+    private static object? AdvanceConcurrencyToken(object? intended, object? persisted) =>
+        (intended, persisted) switch
+        {
+            (long intendedValue, long persistedValue) when intendedValue <= persistedValue => checked(persistedValue + 1),
+            (int intendedValue, int persistedValue) when intendedValue <= persistedValue => checked(persistedValue + 1),
+            _ => intended
+        };
+
+    private sealed record IntendedPropertyChange(string Name, object? Value, bool IsConcurrencyToken);
 
     private static bool IsSqliteLocked(Exception exception)
     {
