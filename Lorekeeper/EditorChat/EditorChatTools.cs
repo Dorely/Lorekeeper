@@ -15,6 +15,7 @@ using Lorekeeper.Outline;
 using Lorekeeper.Publish;
 using Lorekeeper.Search;
 using Lorekeeper.Persistence.Repositories;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using SkiaSharp;
@@ -2518,9 +2519,9 @@ public sealed class EditorChatTools(
             ctx.OnMutated();
             return JsonSerializer.Serialize(new { ok = true, targetId = variantId, variantId = placed.Variant.Id, revision = placed.Variant.Revision, changedIds = new[] { placed.ObjectId }, selectId = placed.ObjectId, summary = "Project image added to the Designed Page.", mutation = new { kind = "pageComposition", id = placed.Variant.CompositionId, variantId = placed.Variant.Id, selectId = placed.ObjectId } });
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException or CompositionRevisionConflictException)
+        catch (Exception ex) when (ex is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException or CompositionRevisionConflictException or DbUpdateConcurrencyException)
         {
-            return JsonSerializer.Serialize(new { ok = false, code = ex is CompositionRevisionConflictException ? "REVISION_CONFLICT" : "PLACEMENT_REJECTED", targetId = variantId, summary = ex.Message, recovery = "Reread the compact page composition and retry with the same project-image ID." });
+            return JsonSerializer.Serialize(new { ok = false, code = ex is CompositionRevisionConflictException or DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "PLACEMENT_REJECTED", targetId = variantId, summary = ex.Message, recovery = "Reread the compact page composition and retry with the same project-image ID." });
         }
     }
 
@@ -2600,9 +2601,9 @@ public sealed class EditorChatTools(
         {
             return JsonSerializer.Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = stageId, currentRevision = ex.ActualRevision, summary = ex.Message, recovery = "Reread and stage a new scene; stages are not rebased." });
         }
-        catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or KeyNotFoundException)
+        catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or KeyNotFoundException or DbUpdateConcurrencyException)
         {
-            return JsonSerializer.Serialize(new { ok = false, code = "STAGE_REJECTED", targetId = stageId, summary = ex.Message });
+            return JsonSerializer.Serialize(new { ok = false, code = ex is DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "STAGE_REJECTED", targetId = stageId, summary = ex.Message, recovery = ex is DbUpdateConcurrencyException ? "Reread the composition and submit a new non-replayed stage." : null });
         }
     }
 

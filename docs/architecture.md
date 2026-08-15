@@ -593,9 +593,10 @@ without replacing dirty manual state. Authoring-variant refreshes use fresh
 no-tracking reads so mutations performed by a background assistant scope cannot
 be hidden by an older variant already tracked in the Blazor circuit. Before a
 revision-checked composition mutation loads its writable entity graph, it also
-detaches any locally tracked copy of that composition and its variants. The
-expected revisions are therefore compared with current persisted state rather
-than a stale long-lived circuit snapshot.
+asks the central context-state coordinator to discard any unchanged locally
+tracked copy of that composition and its variants. The expected revisions are
+therefore compared with current persisted state rather than a stale long-lived
+circuit snapshot; a pending unsaved aggregate is never discarded.
 
 `LayoutGenerationTargetDescriptor` is the server-owned geometry boundary for a
 project page, Figure, page surface/frame, or publication cover surface/frame.
@@ -1241,10 +1242,12 @@ invalidations only after commit. A pending mutation based on superseded state is
 stopped before it writes, and a database-level optimistic-concurrency race is
 translated at the context boundary instead of leaking EF's affected-row error.
 This boundary is required because Blazor circuit scopes outlive an individual UI
-operation; feature services must not add their own tracker-clearing or entity-
-reload workarounds. Protected startup migrations retain their explicit
-transaction, backup, and validation boundaries while using the same registered
-context configuration.
+operation. Revision-checked aggregate services identify their mutation target
+through `AppDbContext.PrepareFreshMutation`; the coordinator alone validates and
+refreshes that tracked state, so feature code does not clear the tracker or
+silently discard pending entities. Protected startup migrations retain their
+explicit transaction, backup, and validation boundaries while using the same
+registered context configuration.
 
 `IDatabaseMigrationRecoveryService` owns provider-specific backup paths,
 owner-only permissions, SQLite Online Backup creation, expiring restore

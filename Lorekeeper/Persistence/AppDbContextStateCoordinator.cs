@@ -11,6 +11,8 @@ public interface IAppDbContextStateCoordinator
 {
     void BeforeCommand(AppDbContext db, string commandText);
     void CompleteDirectMutation(AppDbContext db, string commandText);
+    void PrepareFreshMutation<TEntity>(AppDbContext db, Func<TEntity, bool> predicate)
+        where TEntity : class;
     void BeginSave(AppDbContext db);
     void CompleteSave(AppDbContext db, int savedEntries);
     void FailSave(AppDbContext db);
@@ -69,6 +71,38 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
                     state.PendingTransactionTables.Add(table);
                 else
                     state.SeenGenerations[table] = NextGeneration(table);
+            }
+        }
+    }
+
+    public void PrepareFreshMutation<TEntity>(AppDbContext db, Func<TEntity, bool> predicate)
+        where TEntity : class
+    {
+        var state = State(db);
+        lock (state.Gate)
+        {
+            if (state.IsSaving)
+                throw new InvalidOperationException("A fresh mutation cannot begin while this persistence context is saving.");
+            var entries = db.ChangeTracker.Entries<TEntity>()
+                .Where(entry => predicate(entry.Entity))
+                .ToList();
+            var pending = entries
+                .Where(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                .Select(entry => entry.Metadata.ClrType.Name)
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            if (pending.Length > 0)
+            {
+                throw new InvalidOperationException(
+                    $"A previous {string.Join(", ", pending)} mutation has not finished saving. Wait for it to complete and retry.");
+            }
+            foreach (var entry in entries.Where(entry => entry.State == EntityState.Unchanged))
+            {
+                var table = entry.Metadata.GetTableName();
+                entry.State = EntityState.Detached;
+                if (!string.IsNullOrWhiteSpace(table))
+                    state.SeenGenerations[table] = _tableGenerations.GetValueOrDefault(table);
             }
         }
     }

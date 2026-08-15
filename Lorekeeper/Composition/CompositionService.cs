@@ -59,7 +59,8 @@ public sealed class CompositionService(
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IProjectMutationCoordinator projectMutations,
     IAuthoringHistoryService authoringHistory,
-    IAuthoringMutationContextAccessor authoringMutationContext) : ICompositionService
+    IAuthoringMutationContextAccessor authoringMutationContext,
+    ILogger<CompositionService> logger) : ICompositionService
 {
     private static readonly JsonSerializerOptions JsonOptions = ManuscriptCodec.JsonOptions;
 
@@ -91,6 +92,7 @@ public sealed class CompositionService(
         CancellationToken cancellationToken)
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        PrepareFreshCompositionMutation(compositionId);
         var current = await AuthoringSnapshotCodec.CaptureCompositionAsync(db, projectId, compositionId, "", cancellationToken);
         var historyTarget = CompositionHistoryTarget(projectId, compositionId);
         async Task Apply(string payload, CancellationToken ct)
@@ -394,6 +396,7 @@ public sealed class CompositionService(
         }
 
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        PrepareFreshCompositionMutation(compositionId);
         var composition = await db.PageCompositions
             .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
             .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId && item.DetachedAt == null, cancellationToken)
@@ -510,6 +513,7 @@ public sealed class CompositionService(
         CancellationToken cancellationToken = default)
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        PrepareFreshCompositionMutation(compositionId);
         var composition = await db.PageCompositions
             .Include(item => item.Variants.Where(variant => variant.DetachedAt == null)).SingleOrDefaultAsync(
             item => item.Id == compositionId && item.ProjectId == projectId && item.DetachedAt == null,
@@ -527,6 +531,7 @@ public sealed class CompositionService(
         CancellationToken cancellationToken = default)
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        PrepareFreshCompositionMutation(compositionId);
         var composition = await db.PageCompositions.SingleOrDefaultAsync(
             item => item.Id == compositionId && item.ProjectId == projectId && item.DetachedAt == null,
             cancellationToken) ?? throw new KeyNotFoundException("Page composition was not found in this project.");
@@ -673,6 +678,7 @@ public sealed class CompositionService(
         CancellationToken cancellationToken = default)
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        PrepareFreshCompositionMutation(compositionId);
         var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
         var variant = await db.PageCompositionVariants.Include(item => item.Composition)
             .SingleOrDefaultAsync(item => item.Id == variantId && item.CompositionId == compositionId
@@ -771,8 +777,40 @@ public sealed class CompositionService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await SaveVariantOnceAsync(
+                    target,
+                    projectId,
+                    variantId,
+                    expectedRevision,
+                    scene,
+                    cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException exception) when (attempt == 1)
+            {
+                logger.LogWarning(
+                    exception,
+                    "Discarded stale tracked state and will retry page variant {VariantId} from its protected revision {Revision}.",
+                    variantId,
+                    expectedRevision);
+            }
+        }
+    }
+
+    private async Task<PageCompositionVariant> SaveVariantOnceAsync(
+        EditorContentTarget target,
+        Guid projectId,
+        Guid variantId,
+        long expectedRevision,
+        CompositionScene scene,
+        CancellationToken cancellationToken)
+    {
         scene = scene with { Guides = [] };
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await PrepareFreshVariantCompositionMutationAsync(variantId, cancellationToken);
         var beforeHistory = await AuthoringSnapshotCodec.CaptureCompositionAsync(db, projectId, compositionId: await db.PageCompositionVariants.AsNoTracking()
             .Where(item => item.Id == variantId && item.DetachedAt == null && item.Composition.DetachedAt == null)
             .Select(item => item.CompositionId)
@@ -1060,6 +1098,7 @@ public sealed class CompositionService(
     {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        PrepareFreshCompositionMutation(compositionId);
         var beforeHistory = await AuthoringSnapshotCodec.CaptureCompositionAsync(db, projectId, compositionId, "", cancellationToken);
         var variant = await db.PageCompositionVariants.Include(item => item.Composition)
             .ThenInclude(item => item.Variants.Where(other => other.DetachedAt == null))
@@ -1168,6 +1207,37 @@ public sealed class CompositionService(
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await ApplyStageOnceAsync(
+                    target,
+                    projectId,
+                    conversationId,
+                    stageId,
+                    expectedRevision,
+                    cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException exception) when (attempt == 1)
+            {
+                logger.LogWarning(
+                    exception,
+                    "Discarded stale tracked state and will retry composition stage {StageId} from its protected revision {Revision}.",
+                    stageId,
+                    expectedRevision);
+            }
+        }
+    }
+
+    private async Task<PageCompositionVariant> ApplyStageOnceAsync(
+        EditorContentTarget target,
+        Guid projectId,
+        Guid conversationId,
+        Guid stageId,
+        long expectedRevision,
+        CancellationToken cancellationToken)
+    {
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var stage = await db.CompositionMutationStages.SingleOrDefaultAsync(
@@ -1187,6 +1257,7 @@ public sealed class CompositionService(
         var payloadHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(stage.OperationsJson)));
         if (!string.Equals(payloadHash, stage.PayloadSha256, StringComparison.Ordinal))
             throw new InvalidDataException("The staged composition payload failed its integrity check.");
+        await PrepareFreshVariantCompositionMutationAsync(stage.TargetId, cancellationToken);
         var variant = await db.PageCompositionVariants.Include(item => item.Composition)
             .ThenInclude(item => item.Variants.Where(other => other.DetachedAt == null)).SingleAsync(
             item => item.Id == stage.TargetId && item.DetachedAt == null
@@ -1303,6 +1374,7 @@ public sealed class CompositionService(
         var payloadHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(stage.OperationsJson)));
         if (!string.Equals(payloadHash, stage.PayloadSha256, StringComparison.Ordinal))
             throw new InvalidDataException("The staged composition payload failed its integrity check.");
+        PrepareFreshCompositionMutation(stage.TargetId);
         var composition = await db.PageCompositions
             .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
             .SingleAsync(item => item.Id == stage.TargetId && item.ProjectId == projectId
@@ -1432,6 +1504,7 @@ public sealed class CompositionService(
             throw new InvalidDataException("The staged composition workspace payload failed its integrity check.");
         var payload = JsonSerializer.Deserialize<CompositionWorkspaceStagePayload>(stage.OperationsJson, JsonOptions)
             ?? throw new InvalidDataException("The staged composition workspace payload is empty.");
+        PrepareFreshCompositionMutation(stage.TargetId);
         var variant = await db.PageCompositionVariants.Include(item => item.Composition)
             .ThenInclude(item => item.Variants.Where(other => other.DetachedAt == null))
             .SingleOrDefaultAsync(item => item.Id == payload.VariantId && item.CompositionId == stage.TargetId
@@ -2441,6 +2514,26 @@ public sealed class CompositionService(
     {
         var project = await db.Projects.SingleAsync(item => item.Id == projectId, cancellationToken);
         project.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private void PrepareFreshCompositionMutation(Guid compositionId)
+    {
+        db.PrepareFreshMutation<PageCompositionVariant>(item => item.CompositionId == compositionId);
+        db.PrepareFreshMutation<PageComposition>(item => item.Id == compositionId);
+    }
+
+    private async Task PrepareFreshVariantCompositionMutationAsync(
+        Guid variantId,
+        CancellationToken cancellationToken)
+    {
+        var compositionId = db.PageCompositionVariants.Local
+            .FirstOrDefault(item => item.Id == variantId)?.CompositionId
+            ?? await db.PageCompositionVariants.AsNoTracking()
+                .Where(item => item.Id == variantId)
+                .Select(item => (Guid?)item.CompositionId)
+                .SingleOrDefaultAsync(cancellationToken);
+        if (compositionId is Guid id)
+            PrepareFreshCompositionMutation(id);
     }
 
 }

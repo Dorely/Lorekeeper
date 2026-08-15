@@ -101,6 +101,10 @@ public class AppDbContext(
     public DbSet<AuthoringTurnHistoryBatch> AuthoringTurnHistoryBatches => Set<AuthoringTurnHistoryBatch>();
     public DbSet<AuthoringHistoryDependency> AuthoringHistoryDependencies => Set<AuthoringHistoryDependency>();
 
+    public void PrepareFreshMutation<TEntity>(Func<TEntity, bool> predicate)
+        where TEntity : class =>
+        stateCoordinator?.PrepareFreshMutation(this, predicate);
+
     public override int SaveChanges() => SaveChanges(acceptAllChangesOnSuccess: true);
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -115,6 +119,7 @@ public class AppDbContext(
         }
         catch (DbUpdateConcurrencyException exception)
         {
+            LogConcurrencyConflict(exception);
             stateCoordinator?.FailSave(this);
             throw new DbUpdateConcurrencyException(
                 "The data changed while this operation was being saved. Nothing was overwritten; reload the current state and try again.",
@@ -164,6 +169,7 @@ public class AppDbContext(
         }
         catch (DbUpdateConcurrencyException exception)
         {
+            LogConcurrencyConflict(exception);
             stateCoordinator?.FailSave(this);
             throw new DbUpdateConcurrencyException(
                 "The data changed while this operation was being saved. Nothing was overwritten; reload the current state and try again.",
@@ -174,6 +180,19 @@ public class AppDbContext(
             stateCoordinator?.FailSave(this);
             throw;
         }
+    }
+
+    private void LogConcurrencyConflict(DbUpdateConcurrencyException exception)
+    {
+        var entries = exception.Entries
+            .Select(entry => $"{entry.Metadata.ClrType.Name} ({string.Join(", ", entry.Properties
+                .Where(property => property.Metadata.IsPrimaryKey() || property.Metadata.IsConcurrencyToken)
+                .Select(property => $"{property.Metadata.Name}={property.OriginalValue}"))})")
+            .ToArray();
+        logger.LogWarning(
+            exception,
+            "Optimistic database concurrency conflict while saving {Entries}.",
+            entries.Length == 0 ? "an unidentified tracked entity" : string.Join("; ", entries));
     }
 
     private static bool IsSqliteLocked(Exception exception)
