@@ -66,7 +66,14 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
 
     public async Task<AuthoringHistoryState> ReadStateAsync(AuthoringHistoryTarget target, CancellationToken cancellationToken = default)
     {
-        var stream = await QueryStream(target).AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+        AuthoringHistoryStream? stream;
+        await using (var databaseOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            stream = await QueryStream(databaseOperation.Db, target)
+                .AsNoTracking()
+                .SingleOrDefaultAsync(cancellationToken);
+        }
+
         return stream is null
             ? EmptyState()
             : await BuildStateAsync(stream, cancellationToken);
@@ -176,7 +183,7 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
         if (status == AuthoringTurnHistoryBatchStatus.Open)
             throw new ArgumentOutOfRangeException(nameof(status));
 
-        var stream = await QueryStream(target).SingleOrDefaultAsync(cancellationToken);
+        var stream = await QueryStream(db, target).SingleOrDefaultAsync(cancellationToken);
         if (stream is null)
             return EmptyState();
         var batch = await db.AuthoringTurnHistoryBatches
@@ -253,7 +260,7 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        var stream = await QueryStream(target).SingleOrDefaultAsync(cancellationToken);
+        var stream = await QueryStream(db, target).SingleOrDefaultAsync(cancellationToken);
         if (stream is null)
             return;
         db.AuthoringHistoryStreams.Remove(stream);
@@ -311,7 +318,7 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        var stream = await QueryStream(target).SingleOrDefaultAsync(cancellationToken);
+        var stream = await QueryStream(db, target).SingleOrDefaultAsync(cancellationToken);
         if (stream is null)
             return;
         var batch = await db.AuthoringTurnHistoryBatches
@@ -365,7 +372,7 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
         await using var databaseOperation = await database.OpenWriteAsync(target.ProjectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        var stream = await QueryStream(target).SingleOrDefaultAsync(cancellationToken)
+        var stream = await QueryStream(db, target).SingleOrDefaultAsync(cancellationToken)
             ?? throw new InvalidOperationException(moveForward ? "Nothing is available to redo." : "Nothing is available to undo.");
         if (await db.AuthoringTurnHistoryBatches.AnyAsync(item => item.StreamId == stream.Id && item.Status == AuthoringTurnHistoryBatchStatus.Open, cancellationToken))
             throw new InvalidOperationException("Finish or stop the active assistant turn before using history.");
@@ -412,7 +419,7 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        var stream = await QueryStream(target).SingleOrDefaultAsync(cancellationToken);
+        var stream = await QueryStream(db, target).SingleOrDefaultAsync(cancellationToken);
         if (stream is not null)
             return stream;
         var now = DateTime.UtcNow;
@@ -434,12 +441,12 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
         return stream;
     }
 
-    private IQueryable<AuthoringHistoryStream> QueryStream(AuthoringHistoryTarget target)
-    {
-        using var databaseOperation = database.OpenRead();
-        var db = databaseOperation.Db;
-        return db.AuthoringHistoryStreams.Where(item => item.ProjectId == target.ProjectId && item.StreamKey == target.StreamKey);
-    }
+    private static IQueryable<AuthoringHistoryStream> QueryStream(
+        AppDbContext db,
+        AuthoringHistoryTarget target) =>
+        db.AuthoringHistoryStreams.Where(item =>
+            item.ProjectId == target.ProjectId
+            && item.StreamKey == target.StreamKey);
     private async Task AppendEntryAsync(
         AuthoringHistoryStream stream,
         string afterSnapshot,

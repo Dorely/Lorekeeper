@@ -12,7 +12,9 @@ public sealed class EntityVisualExampleService(IAppDatabaseOperationFactory data
 {
     public async Task<EntityVisualExampleView?> GetAsync(Guid projectId, Guid exampleId, CancellationToken cancellationToken = default)
     {
-        var example = await QueryExamples(projectId).FirstOrDefaultAsync(item => item.Id == exampleId, cancellationToken);
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var example = await QueryExamples(databaseOperation.Db, projectId)
+            .FirstOrDefaultAsync(item => item.Id == exampleId, cancellationToken);
         return example is null ? null : ToView(projectId, example);
     }
 
@@ -20,7 +22,10 @@ public sealed class EntityVisualExampleService(IAppDatabaseOperationFactory data
     {
         var node = await FindEntityNodeAsync(projectId, entityId, cancellationToken);
         if (node is null) return [];
-        var examples = await QueryExamples(projectId).Where(example => example.GraphNodeId == node.Id).ToListAsync(cancellationToken);
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var examples = await QueryExamples(databaseOperation.Db, projectId)
+            .Where(example => example.GraphNodeId == node.Id)
+            .ToListAsync(cancellationToken);
         return examples.Select(example => ToView(projectId, example)).ToList();
     }
 
@@ -31,7 +36,8 @@ public sealed class EntityVisualExampleService(IAppDatabaseOperationFactory data
     {
         if (entityIds.Count == 0) return new Dictionary<Guid, IReadOnlyList<EntityVisualExampleView>>();
         var keys = entityIds.Distinct().Select(id => id.ToString("N")).ToList();
-        var rows = await QueryExamples(projectId)
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var rows = await QueryExamples(databaseOperation.Db, projectId)
             .Where(example => keys.Contains(example.GraphNode.Key))
             .ToListAsync(cancellationToken);
         var examples = rows.Select(example => ToView(projectId, example)).ToList();
@@ -40,7 +46,10 @@ public sealed class EntityVisualExampleService(IAppDatabaseOperationFactory data
 
     public async Task<IReadOnlyList<EntityVisualExampleView>> ListForImageAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default)
     {
-        var examples = await QueryExamples(projectId).Where(example => example.ImageId == imageId).ToListAsync(cancellationToken);
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var examples = await QueryExamples(databaseOperation.Db, projectId)
+            .Where(example => example.ImageId == imageId)
+            .ToListAsync(cancellationToken);
         return examples.Select(example => ToView(projectId, example)).ToList();
     }
 
@@ -135,7 +144,8 @@ public sealed class EntityVisualExampleService(IAppDatabaseOperationFactory data
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        var example = await QueryExamples(projectId, tracking: true).FirstOrDefaultAsync(item => item.Id == exampleId, cancellationToken)
+        var example = await QueryExamples(db, projectId, tracking: true)
+            .FirstOrDefaultAsync(item => item.Id == exampleId, cancellationToken)
             ?? throw new InvalidOperationException("Entity canonical visual reference was not found.");
         example.Label = label?.Trim() ?? string.Empty;
         if (sortOrder is int requestedOrder)
@@ -409,10 +419,11 @@ public sealed class EntityVisualExampleService(IAppDatabaseOperationFactory data
                 || job.ReferenceImageIdsJson.Contains(idN) || job.ReferenceImageIdsJson.Contains(idD)), cancellationToken);
     }
 
-    private IQueryable<EntityVisualExample> QueryExamples(Guid projectId, bool tracking = false)
+    private static IQueryable<EntityVisualExample> QueryExamples(
+        AppDbContext db,
+        Guid projectId,
+        bool tracking = false)
     {
-        using var databaseOperation = database.OpenRead();
-        var db = databaseOperation.Db;
         var query = db.EntityVisualExamples.Include(example => example.GraphNode).Include(example => example.Image).Where(example => example.ProjectId == projectId).OrderBy(example => example.SortOrder).ThenBy(example => example.CreatedAt);
         return tracking ? query : query.AsNoTracking();
     }
