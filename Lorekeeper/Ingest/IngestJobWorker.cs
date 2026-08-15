@@ -1,4 +1,5 @@
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.Hosting;
 
@@ -6,6 +7,7 @@ namespace Lorekeeper.Ingest;
 
 public sealed class IngestJobWorker(
     IServiceScopeFactory scopeFactory,
+    IAppDatabaseOperationFactory database,
     IIngestJobQueue queue,
     IIngestJobNotifier notifier,
     ILogger<IngestJobWorker> logger) : BackgroundService
@@ -35,8 +37,8 @@ public sealed class IngestJobWorker(
 
     private async Task MarkInterruptedJobsAsync(CancellationToken cancellationToken)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IIngestRepository>();
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var repo = operation.Repositories.Ingest;
         var interrupted = await repo.ListInterruptedJobsAsync(cancellationToken);
         var repairedJobs = new List<(Guid ProjectId, Guid JobId)>();
         foreach (var job in interrupted)
@@ -68,7 +70,7 @@ public sealed class IngestJobWorker(
         }
         if (interrupted.Count > 0)
         {
-            await repo.SaveChangesAsync(cancellationToken);
+            await operation.SaveChangesAsync(cancellationToken);
             foreach (var repairedJob in repairedJobs)
                 notifier.Notify(new IngestJobUpdate(repairedJob.ProjectId, repairedJob.JobId, IngestJobUpdateKind.Stopped, DateTime.UtcNow));
         }
@@ -76,11 +78,13 @@ public sealed class IngestJobWorker(
 
     private async Task EnqueueQueuedJobsAsync(CancellationToken cancellationToken)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IIngestRepository>();
-        var queued = await repo.ListQueuedJobsAsync(cancellationToken);
-        foreach (var job in queued)
-            queue.Enqueue(job.Id);
+        IReadOnlyList<Guid> queuedIds;
+        await using (var operation = await database.OpenReadAsync(cancellationToken))
+            queuedIds = (await operation.Repositories.Ingest.ListQueuedJobsAsync(cancellationToken))
+                .Select(job => job.Id)
+                .ToList();
+        foreach (var jobId in queuedIds)
+            queue.Enqueue(jobId);
     }
 
     private async Task RunJobAsync(Guid jobId, CancellationToken stoppingToken)

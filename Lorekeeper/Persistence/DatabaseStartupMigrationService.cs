@@ -12,7 +12,7 @@ public interface IDatabaseStartupMigrationService
 }
 
 public sealed class DatabaseStartupMigrationService(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     IManuscriptMigrationService manuscriptMigration,
     IPublicationEditionMigrationService editionMigration,
     IPublicationPressMigrationService pressMigration,
@@ -29,6 +29,9 @@ public sealed class DatabaseStartupMigrationService(
 
     public async Task<bool> ApplyAsync(CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await EnsureAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await manuscriptMigration.ApplyPendingAsync(db, cancellationToken);

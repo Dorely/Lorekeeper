@@ -47,5 +47,4 @@ public interface IIngestRepository
     void UpdateReportItem(IngestReportItem item);
     void RemoveSource(IngestSource source);
     void RemoveJob(IngestJob job);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

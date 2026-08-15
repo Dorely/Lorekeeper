@@ -3,17 +3,17 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Composition;
-using Lorekeeper.ImportExport;
-using Lorekeeper.Models;
-using Lorekeeper.Manuscripts;
-using Lorekeeper.Persistence;
 using Lorekeeper.Fonts;
+using Lorekeeper.ImportExport;
+using Lorekeeper.Manuscripts;
+using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Publish;
 
 public sealed class PublishService(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     IPublicationEditionService editions,
     IPublicationBookService books,
     IPublicationSectionService publicationSections,
@@ -49,6 +49,8 @@ public sealed class PublishService(
         bool includeSourceFingerprint,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var project = await GetProjectAsync(projectId, cancellationToken);
         _ = await books.GetOrCreateAsync(projectId, cancellationToken);
         var effective = await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken);
@@ -87,6 +89,8 @@ public sealed class PublishService(
         PublishExportFormat format,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var formatter = formatters.FirstOrDefault(candidate => candidate.Format == format)
             ?? throw new InvalidOperationException($"No publish formatter is registered for {format}.");
         if (format == PublishExportFormat.Epub
@@ -143,6 +147,8 @@ public sealed class PublishService(
         Guid projectId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var core = await books.GetOrCreateAsync(projectId, cancellationToken);
         var book = await db.PublicationBooks.AsNoTracking()
             .Include(item => item.OutlineItems)
@@ -168,6 +174,9 @@ public sealed class PublishService(
         bool coreTarget,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var project = await GetProjectAsync(projectId, cancellationToken);
         var acts = await db.Acts
             .AsNoTracking()
@@ -463,6 +472,8 @@ public sealed class PublishService(
 
     private async Task<PublicationCoverDesign?> CoreCoverAsync(Guid projectId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var book = await db.PublicationBooks.AsNoTracking()
             .Include(item => item.CoverDesign)
             .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
@@ -522,19 +533,25 @@ public sealed class PublishService(
     private static Guid DeterministicFontId(string value) =>
         new(SHA256.HashData(Encoding.UTF8.GetBytes(value)).AsSpan(0, 16));
 
-    private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken cancellationToken) =>
-        await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
-        ?? throw new InvalidOperationException($"Project {projectId} not found.");
-
+    private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectId} not found.");
+    }
     private async Task<PublicationEdition> GetEditionAsync(
         Guid projectId,
         Guid editionId,
-        CancellationToken cancellationToken) =>
-        await db.PublicationEditions.FirstOrDefaultAsync(
-            edition => edition.ProjectId == projectId && edition.Id == editionId,
-            cancellationToken)
-        ?? throw new InvalidOperationException("Publication release was not found.");
-
+        CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.PublicationEditions.FirstOrDefaultAsync(
+                    edition => edition.ProjectId == projectId && edition.Id == editionId,
+                    cancellationToken)
+                ?? throw new InvalidOperationException("Publication release was not found.");
+    }
     private static PublishDocumentProfile ProfileDocument(PublicationEdition profile) =>
         new(
             profile.TitleOverride,

@@ -5,6 +5,7 @@ using System.Text.Json;
 using Lorekeeper.ChatTurns;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -12,15 +13,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Writing;
 
 public sealed class WritingCoachService(
-    IProjectRepository projects,
-    IWritingCoachConversationRepository conversations,
-    IChatImageAttachmentService imageAttachments,
-    ILlmProviderService providerService,
-    IChatClientFactory chatClientFactory,
-    WritingCoachTools tools,
-    ChatTurnEngine turnEngine,
-    IOptions<AgentOptions> options,
-    ILogger<WritingCoachService> logger) : IWritingCoachService
+IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, WritingCoachTools tools, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<WritingCoachService> logger) : IWritingCoachService
 {
     public static readonly string CoachSystemPrompt = """
         You are a Writing Coach for a long-form fiction project. Your job is to help
@@ -51,6 +44,10 @@ public sealed class WritingCoachService(
 
     public async Task<WritingCoachConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
+        var conversations = databaseOperation.Repositories.WritingCoachConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is not null) return existing;
 
@@ -69,21 +66,27 @@ public sealed class WritingCoachService(
             Status = WritingCoachMessageStatus.Completed,
         };
         await conversations.AddMessageAsync(greeting, cancellationToken);
-        await conversations.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return conversation;
     }
 
-    public async Task<IReadOnlyList<WritingCoachMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        await conversations.LoadMessagesAsync(conversationId, cancellationToken);
-
+    public async Task<IReadOnlyList<WritingCoachMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var conversations = databaseOperation.Repositories.WritingCoachConversations;
+        return await conversations.LoadMessagesAsync(conversationId, cancellationToken);
+    }
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.WritingCoach, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var conversations = databaseOperation.Repositories.WritingCoachConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
 
         conversations.RemoveConversation(existing);
-        await conversations.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async IAsyncEnumerable<WritingCoachTurnUpdate> SendAsync(
@@ -112,7 +115,10 @@ public sealed class WritingCoachService(
         }
         await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);
 
-        var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
+        var nextOrder = await turnEngine.ReadAsync(
+            repositories => repositories.WritingCoachConversations,
+            conversations => conversations.GetMaxOrderAsync(conversation.Id, cancellationToken),
+            cancellationToken) + 1;
 
         var userMessage = new WritingCoachMessage
         {
@@ -123,7 +129,7 @@ public sealed class WritingCoachService(
             Status = WritingCoachMessageStatus.Completed,
         };
         conversation.UpdatedAt = DateTime.UtcNow;
-        await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
+        await turnEngine.AddMessageAsync(repositories => repositories.WritingCoachConversations, userMessage, cancellationToken);
         await imageAttachments.PersistAsync(projectId, ChatTurnSurface.WritingCoach, userMessage.Id, imageIds, cancellationToken);
 
         IChatClient chat = null!;
@@ -131,7 +137,10 @@ public sealed class WritingCoachService(
         string? setupError = null;
         try
         {
-            var project = await projects.GetByIdAsync(projectId, cancellationToken)
+            var project = await turnEngine.ReadAsync(
+                repositories => repositories.Projects,
+                projects => projects.GetByIdAsync(projectId, cancellationToken),
+                cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
             chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
             aiTools = tools.Build(new WritingCoachContext(project.Id, currentSampleTitle, currentSampleBody));
@@ -155,7 +164,10 @@ public sealed class WritingCoachService(
             ToolMode = ChatToolMode.Auto,
         };
 
-        var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
+        var history = await turnEngine.ReadAsync(
+            repositories => repositories.WritingCoachConversations,
+            conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
+            cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, CoachSystemPrompt) };
         foreach (var persistedMessage in history)
         {
@@ -179,7 +191,7 @@ public sealed class WritingCoachService(
                 Content = string.Empty,
                 Status = WritingCoachMessageStatus.Pending,
             };
-            await turnEngine.AddMessageAsync(conversations, activeAssistant, cancellationToken);
+            await turnEngine.AddMessageAsync(repositories => repositories.WritingCoachConversations, activeAssistant, cancellationToken);
 
             ChatRoundCompleted? completedRound = null;
             await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
@@ -227,8 +239,6 @@ public sealed class WritingCoachService(
                 activeAssistant.Content = textBuilder.ToString();
                 activeAssistant.Status = WritingCoachMessageStatus.Completed;
                 await SafePersistAsync(activeAssistant);
-                conversation.UpdatedAt = DateTime.UtcNow;
-                await conversations.SaveChangesAsync(CancellationToken.None);
                 yield return new WritingCoachAssistantMessageCompleted(activeAssistant.Id);
                 yield break;
             }
@@ -276,7 +286,7 @@ public sealed class WritingCoachService(
                     Status = toolError is null ? WritingCoachMessageStatus.Completed : WritingCoachMessageStatus.Failed,
                     ErrorMessage = toolError,
                 };
-                await turnEngine.AddMessageAsync(conversations, toolMessage, CancellationToken.None);
+                await turnEngine.AddMessageAsync(repositories => repositories.WritingCoachConversations, toolMessage, CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
                 yield return new WritingCoachToolCallCompleted(
@@ -298,7 +308,7 @@ public sealed class WritingCoachService(
                 activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
                 await SafePersistAsync(activeAssistant);
 
-                await turnEngine.AddMessageAsync(conversations, new WritingCoachMessage
+                await turnEngine.AddMessageAsync(repositories => repositories.WritingCoachConversations, new WritingCoachMessage
                 {
                     ConversationId = conversation.Id,
                     Order = nextOrder++,
@@ -333,6 +343,9 @@ public sealed class WritingCoachService(
 
     private async Task PersistFailedAssistantAsync(Guid conversationId, int order, string error)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var conversations = databaseOperation.Repositories.WritingCoachConversations;
         try
         {
             var message = new WritingCoachMessage
@@ -344,7 +357,7 @@ public sealed class WritingCoachService(
                 ErrorMessage = error,
             };
             await conversations.AddMessageAsync(message, CancellationToken.None);
-            await conversations.SaveChangesAsync(CancellationToken.None);
+            await databaseOperation.SaveChangesAsync(CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -356,7 +369,7 @@ public sealed class WritingCoachService(
     {
         try
         {
-            await turnEngine.UpdateMessageAsync(conversations, message, CancellationToken.None);
+            await turnEngine.UpdateMessageAsync(repositories => repositories.WritingCoachConversations, message, CancellationToken.None);
         }
         catch (Exception ex)
         {

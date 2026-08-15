@@ -1,9 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Lorekeeper.Ingest;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.Ingest;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Search;
 using Microsoft.Extensions.Options;
@@ -11,8 +12,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Research;
 
 public sealed class WebIngestCandidateService(
-    IWebIngestCandidateRepository candidates,
-    IWebPageReader pageReader,
+IAppDatabaseOperationFactory database, IWebPageReader pageReader,
     IIngestService ingest,
     IEntityVisualExampleService entityVisualExamples,
     IOptions<WebResearchOptions> webOptions) : IWebIngestCandidateService
@@ -24,21 +24,37 @@ public sealed class WebIngestCandidateService(
         - Include evidence from the page for each fact. Skip unsupported, absent, or merely similar subjects instead of recording process rationale.
         """;
 
-    public async Task<IReadOnlyList<WebIngestCandidateView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        (await candidates.ListByProjectAsync(projectId, cancellationToken)).Select(ToView).ToList();
-
-    public async Task<IReadOnlyList<WebIngestCandidateView>> ListResearchAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        (await candidates.ListResearchByProjectAsync(projectId, cancellationToken)).Select(ToView).ToList();
-
-    public async Task<IReadOnlyList<WebIngestCandidateView>> ListStagedAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        (await candidates.ListStagedByProjectAsync(projectId, cancellationToken)).Select(ToView).ToList();
-
-    public async Task<IReadOnlyList<WebIngestCandidateView>> ListStagedAsync(Guid projectId, Guid? researchConversationId, CancellationToken cancellationToken = default) =>
-        (await candidates.ListStagedByProjectAsync(projectId, researchConversationId, cancellationToken)).Select(ToView).ToList();
-
+    public async Task<IReadOnlyList<WebIngestCandidateView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var candidates = databaseOperation.Repositories.WebIngestCandidates;
+        return (await candidates.ListByProjectAsync(projectId, cancellationToken)).Select(ToView).ToList();
+    }
+    public async Task<IReadOnlyList<WebIngestCandidateView>> ListResearchAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var candidates = databaseOperation.Repositories.WebIngestCandidates;
+        return (await candidates.ListResearchByProjectAsync(projectId, cancellationToken)).Select(ToView).ToList();
+    }
+    public async Task<IReadOnlyList<WebIngestCandidateView>> ListStagedAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var candidates = databaseOperation.Repositories.WebIngestCandidates;
+        return (await candidates.ListStagedByProjectAsync(projectId, cancellationToken)).Select(ToView).ToList();
+    }
+    public async Task<IReadOnlyList<WebIngestCandidateView>> ListStagedAsync(Guid projectId, Guid? researchConversationId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var candidates = databaseOperation.Repositories.WebIngestCandidates;
+        return (await candidates.ListStagedByProjectAsync(projectId, researchConversationId, cancellationToken)).Select(ToView).ToList();
+    }
     public async Task<ResearchSourceDetail?> GetCachedDetailAsync(Guid projectId, Guid candidateId, CancellationToken cancellationToken = default)
     {
-        var candidate = await candidates.GetByIdAsync(candidateId, cancellationToken);
+        WebIngestCandidate? candidate;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            candidate = await readOperation.Repositories.WebIngestCandidates.GetByIdAsync(candidateId, cancellationToken);
+        }
         if (candidate is null || candidate.ProjectId != projectId) return null;
         return ToDetail(candidate, await entityVisualExamples.ListWebCandidatesAsync(projectId, candidateId, cancellationToken));
     }
@@ -52,6 +68,9 @@ public sealed class WebIngestCandidateService(
         WebSearchResult result,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var candidates = databaseOperation.Repositories.WebIngestCandidates;
         var normalizedUrl = NormalizeUrl(result.Url);
         var candidate = await candidates.FindByUrlAsync(projectId, normalizedUrl, cancellationToken);
         var isNew = candidate is null;
@@ -83,7 +102,7 @@ public sealed class WebIngestCandidateService(
             await candidates.AddAsync(candidate, cancellationToken);
         else
             candidates.Update(candidate);
-        await candidates.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return candidate;
     }
 
@@ -97,8 +116,12 @@ public sealed class WebIngestCandidateService(
         Guid? conversationId,
         CancellationToken cancellationToken = default)
     {
-        var candidate = await candidates.GetByIdAsync(candidateId, cancellationToken)
-            ?? throw new InvalidOperationException($"Web ingest candidate {candidateId} was not found.");
+        WebIngestCandidate candidate;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            candidate = await readOperation.Repositories.WebIngestCandidates.GetByIdAsync(candidateId, cancellationToken)
+                ?? throw new InvalidOperationException($"Web ingest candidate {candidateId} was not found.");
+        }
         AssignConversation(candidate, conversationId);
         return await ReadIntoCandidateAsync(candidate, candidate.Url, cancellationToken);
     }
@@ -115,22 +138,27 @@ public sealed class WebIngestCandidateService(
         CancellationToken cancellationToken = default)
     {
         var normalizedUrl = NormalizeUrl(url);
-        var candidate = await candidates.FindByUrlAsync(projectId, normalizedUrl, cancellationToken);
-        if (candidate is null)
+        WebIngestCandidate candidate;
+        await using (var writeOperation = await database.OpenWriteAsync(cancellationToken))
         {
-            candidate = new WebIngestCandidate
+            var candidates = writeOperation.Repositories.WebIngestCandidates;
+            candidate = await candidates.FindByUrlAsync(projectId, normalizedUrl, cancellationToken)
+                ?? new WebIngestCandidate
+                {
+                    ProjectId = projectId,
+                    ResearchConversationId = conversationId,
+                    DiscoveryKind = discoveryKind,
+                    Url = normalizedUrl,
+                    SearchQuery = searchQuery?.Trim() ?? string.Empty,
+                    SearchRank = searchRank,
+                    ParentUrl = parentUrl?.Trim() ?? string.Empty,
+                    CrawlDepth = crawlDepth,
+                };
+            if (writeOperation.Db.Entry(candidate).State == Microsoft.EntityFrameworkCore.EntityState.Detached)
             {
-                ProjectId = projectId,
-                ResearchConversationId = conversationId,
-                DiscoveryKind = discoveryKind,
-                Url = normalizedUrl,
-                SearchQuery = searchQuery?.Trim() ?? string.Empty,
-                SearchRank = searchRank,
-                ParentUrl = parentUrl?.Trim() ?? string.Empty,
-                CrawlDepth = crawlDepth,
-            };
-            await candidates.AddAsync(candidate, cancellationToken);
-            await candidates.SaveChangesAsync(cancellationToken);
+                await candidates.AddAsync(candidate, cancellationToken);
+                await writeOperation.SaveChangesAsync(cancellationToken);
+            }
         }
 
         AssignConversation(candidate, conversationId);
@@ -144,6 +172,9 @@ public sealed class WebIngestCandidateService(
 
     public async Task<WebIngestCandidate> StageAsync(Guid candidateId, string rationale, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var candidates = databaseOperation.Repositories.WebIngestCandidates;
         var candidate = await candidates.GetByIdAsync(candidateId, cancellationToken)
             ?? throw new InvalidOperationException($"Web ingest candidate {candidateId} was not found.");
         if (string.IsNullOrWhiteSpace(candidate.ExtractedText))
@@ -156,12 +187,15 @@ public sealed class WebIngestCandidateService(
         candidate.StagedAt = DateTime.UtcNow;
         candidate.UpdatedAt = DateTime.UtcNow;
         candidates.Update(candidate);
-        await candidates.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return candidate;
     }
 
     public async Task<WebIngestCandidate> UnstageAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var candidates = databaseOperation.Repositories.WebIngestCandidates;
         var candidate = await candidates.GetByIdAsync(candidateId, cancellationToken)
             ?? throw new InvalidOperationException($"Web ingest candidate {candidateId} was not found.");
         if (candidate.Status == WebIngestCandidateStatus.Queued) return candidate;
@@ -173,14 +207,18 @@ public sealed class WebIngestCandidateService(
         candidate.StagedAt = null;
         candidate.UpdatedAt = DateTime.UtcNow;
         candidates.Update(candidate);
-        await candidates.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return candidate;
     }
 
     public async Task<IngestJob> QueueAsync(Guid candidateId, int? providerId, string? instructions, CancellationToken cancellationToken = default)
     {
-        var candidate = await candidates.GetByIdAsync(candidateId, cancellationToken)
-            ?? throw new InvalidOperationException($"Web ingest candidate {candidateId} was not found.");
+        WebIngestCandidate candidate;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            candidate = await readOperation.Repositories.WebIngestCandidates.GetByIdAsync(candidateId, cancellationToken)
+                ?? throw new InvalidOperationException($"Web ingest candidate {candidateId} was not found.");
+        }
         if (candidate.Status == WebIngestCandidateStatus.Queued && candidate.IngestJobId is not null)
         {
             var existingJob = await ingest.GetJobDetailAsync(candidate.IngestJobId.Value, cancellationToken);
@@ -209,8 +247,7 @@ public sealed class WebIngestCandidateService(
         candidate.IngestJobId = job.Id;
         candidate.QueuedAt = DateTime.UtcNow;
         candidate.UpdatedAt = DateTime.UtcNow;
-        candidates.Update(candidate);
-        await candidates.SaveChangesAsync(cancellationToken);
+        await SaveCandidateAsync(candidate, cancellationToken);
         return job;
     }
 
@@ -226,7 +263,11 @@ public sealed class WebIngestCandidateService(
         if (distinctIds.Length == 0)
             throw new InvalidOperationException("Choose at least one webpage to queue.");
 
-        var batchCandidates = await candidates.ListByIdsAsync(distinctIds, cancellationToken);
+        IReadOnlyList<WebIngestCandidate> batchCandidates;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            batchCandidates = await readOperation.Repositories.WebIngestCandidates.ListByIdsAsync(distinctIds, cancellationToken);
+        }
         if (batchCandidates.Count == 0)
             throw new InvalidOperationException("No webpage candidates were found to queue.");
         if (batchCandidates.Any(candidate => candidate.ProjectId != projectId))
@@ -282,21 +323,23 @@ public sealed class WebIngestCandidateService(
             candidate.IngestJobId = job.Id;
             candidate.QueuedAt = now;
             candidate.UpdatedAt = now;
-            candidates.Update(candidate);
         }
-        await candidates.SaveChangesAsync(cancellationToken);
+        await SaveCandidatesAsync(candidatesToQueue, cancellationToken);
         return job;
     }
 
     public async Task DeleteAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var candidates = databaseOperation.Repositories.WebIngestCandidates;
         var candidate = await candidates.GetByIdAsync(candidateId, cancellationToken)
             ?? throw new InvalidOperationException($"Web ingest candidate {candidateId} was not found.");
         if (candidate.Status == WebIngestCandidateStatus.Queued)
             throw new InvalidOperationException("Queued webpages cannot be removed from the research list.");
 
         candidates.Remove(candidate);
-        await candidates.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<WebIngestCandidateReadResult> ReadIntoCandidateAsync(WebIngestCandidate candidate, string url, CancellationToken cancellationToken)
@@ -306,8 +349,7 @@ public sealed class WebIngestCandidateService(
             if (string.IsNullOrWhiteSpace(candidate.ContentHash))
                 candidate.ContentHash = ContentHash(candidate.ExtractedText);
             candidate.UpdatedAt = DateTime.UtcNow;
-            candidates.Update(candidate);
-            await candidates.SaveChangesAsync(cancellationToken);
+            await SaveCandidateAsync(candidate, cancellationToken);
             return new WebIngestCandidateReadResult(candidate, ReadCachedLinks(candidate.CachedLinksJson), ReadCachedImages(candidate.CachedImagesJson), FromCache: true);
         }
 
@@ -315,8 +357,7 @@ public sealed class WebIngestCandidateService(
         {
             candidate.Diagnostics = cooldownDiagnostics;
             candidate.UpdatedAt = DateTime.UtcNow;
-            candidates.Update(candidate);
-            await candidates.SaveChangesAsync(cancellationToken);
+            await SaveCandidateAsync(candidate, cancellationToken);
             return new WebIngestCandidateReadResult(candidate, ReadCachedLinks(candidate.CachedLinksJson), ReadCachedImages(candidate.CachedImagesJson), FromCache: true);
         }
 
@@ -344,9 +385,23 @@ public sealed class WebIngestCandidateService(
             candidate.Status = WebIngestCandidateStatus.Failed;
         }
 
-        candidates.Update(candidate);
-        await candidates.SaveChangesAsync(cancellationToken);
+        await SaveCandidateAsync(candidate, cancellationToken);
         return new WebIngestCandidateReadResult(candidate, result.Links, result.Images, FromCache: false);
+    }
+
+    private async Task SaveCandidateAsync(WebIngestCandidate candidate, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        operation.Repositories.WebIngestCandidates.Update(candidate);
+        await operation.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task SaveCandidatesAsync(IEnumerable<WebIngestCandidate> candidates, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        foreach (var candidate in candidates)
+            operation.Repositories.WebIngestCandidates.Update(candidate);
+        await operation.SaveChangesAsync(cancellationToken);
     }
 
     private bool ShouldReuseRecentFailure(WebIngestCandidate candidate, out string diagnostics)

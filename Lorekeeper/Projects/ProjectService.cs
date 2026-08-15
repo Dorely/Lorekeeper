@@ -2,26 +2,35 @@ using System.Text;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Search;
 
 namespace Lorekeeper.Projects;
 
 public class ProjectService(
-    IProjectRepository repo,
-    IVectorStore vectors,
+IAppDatabaseOperationFactory database, IVectorStore vectors,
     IProjectSearchIndex projectSearch,
     IOutlineGraphSync outlineGraphSync,
     IBookBriefService bookBriefs) : IProjectService
 {
-    public async Task<IReadOnlyList<Project>> ListAsync(CancellationToken cancellationToken = default) =>
-        await repo.ListAsync(cancellationToken);
-
-    public Task<Project?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default) =>
-        repo.GetBySlugAsync(slug, cancellationToken);
-
+    public async Task<IReadOnlyList<Project>> ListAsync(CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var repo = databaseOperation.Repositories.Projects;
+        return await repo.ListAsync(cancellationToken);
+    }
+    public async Task<Project?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var repo = databaseOperation.Repositories.Projects;
+        return await repo.GetBySlugAsync(slug, cancellationToken);
+    }
     public async Task<Project> CreateAsync(string name, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Projects;
         var trimmed = (name ?? string.Empty).Trim();
         if (trimmed.Length == 0)
             throw new ArgumentException("Project name is required.", nameof(name));
@@ -35,7 +44,7 @@ public class ProjectService(
             PageSetup = new ProjectPageSetup(),
         };
         await repo.AddAsync(project, cancellationToken);
-        await repo.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         project.BookBrief = await bookBriefs.GetOrCreateAsync(project.Id, cancellationToken);
         await outlineGraphSync.EnsureProjectAsync(project, cancellationToken);
         return project;
@@ -43,6 +52,9 @@ public class ProjectService(
 
     public async Task<Project> RenameAsync(Guid id, string newName, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Projects;
         var trimmed = (newName ?? string.Empty).Trim();
         if (trimmed.Length == 0)
             throw new ArgumentException("Project name is required.", nameof(newName));
@@ -53,25 +65,31 @@ public class ProjectService(
         project.Name = trimmed;
         project.UpdatedAt = DateTime.UtcNow;
         repo.Update(project);
-        await repo.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.EnsureProjectAsync(project, cancellationToken);
         return project;
     }
 
     public async Task<Project> UpdateProjectGuidanceAsync(Guid id, string projectGuidance, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Projects;
         var project = await repo.GetByIdAsync(id, cancellationToken)
             ?? throw new InvalidOperationException($"Project {id} not found.");
 
         project.ProjectGuidance = (projectGuidance ?? string.Empty).Trim();
         project.UpdatedAt = DateTime.UtcNow;
         repo.Update(project);
-        await repo.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return project;
     }
 
     public async Task<Project> SetIncludeCurrentChapterAsync(Guid id, bool include, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Projects;
         var project = await repo.GetByIdAsync(id, cancellationToken)
             ?? throw new InvalidOperationException($"Project {id} not found.");
 
@@ -80,13 +98,16 @@ public class ProjectService(
             project.IncludeCurrentChapterInContext = include;
             project.UpdatedAt = DateTime.UtcNow;
             repo.Update(project);
-            await repo.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
         }
         return project;
     }
 
     public async Task<Project> SetAiChangeApprovalAsync(Guid id, bool enabled, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Projects;
         var project = await repo.GetByIdAsync(id, cancellationToken)
             ?? throw new InvalidOperationException($"Project {id} not found.");
 
@@ -95,13 +116,16 @@ public class ProjectService(
             project.AiChangeApprovalEnabled = enabled;
             project.UpdatedAt = DateTime.UtcNow;
             repo.Update(project);
-            await repo.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
         }
         return project;
     }
 
     public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Projects;
         var project = await repo.GetByIdAsync(id, cancellationToken);
         if (project is null) return;
 
@@ -112,11 +136,13 @@ public class ProjectService(
         await projectSearch.DeleteByScopeAsync(scopeKey, cancellationToken);
 
         repo.Remove(project);
-        await repo.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<string> GenerateUniqueSlugAsync(string name, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var repo = databaseOperation.Repositories.Projects;
         var baseSlug = Slugify(name);
         if (baseSlug.Length == 0) baseSlug = "project";
 

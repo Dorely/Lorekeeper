@@ -1,6 +1,6 @@
 using System.Text.Json;
-using Lorekeeper.Composition;
 using Lorekeeper.Authoring;
+using Lorekeeper.Composition;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -96,8 +96,7 @@ public sealed record PublicationCoverHistoryResult(
     string SelectionJson);
 
 public sealed class PublicationBookService(
-    AppDbContext db,
-    IProjectMutationCoordinator projectMutations,
+    IAppDatabaseOperationFactory database,
     IAuthoringHistoryService? authoringHistory = null,
     IAuthoringMutationContextAccessor? authoringMutationContext = null) : IPublicationBookService
 {
@@ -113,14 +112,29 @@ public sealed class PublicationBookService(
 
     public async Task<string> GetSourceFingerprintAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         _ = await GetOrCreateAsync(projectId, cancellationToken);
         var core = await db.PublicationBooks.AsNoTracking().Where(item => item.ProjectId == projectId)
             .Select(item => new
             {
-                item.Revision, item.Title, item.Subtitle, item.Author, item.Language, item.Publisher,
-                item.Copyright, item.Description, item.IncludeTableOfContents, item.IncludeVisibleTableOfContents,
-                item.IncludeActSynopses, item.IncludeChapterSynopses, item.IncludeActHeadings,
-                item.IncludeChapterHeadings, item.NumberActs, item.NumberChapters, item.TitlePageMode,
+                item.Revision,
+                item.Title,
+                item.Subtitle,
+                item.Author,
+                item.Language,
+                item.Publisher,
+                item.Copyright,
+                item.Description,
+                item.IncludeTableOfContents,
+                item.IncludeVisibleTableOfContents,
+                item.IncludeActSynopses,
+                item.IncludeChapterSynopses,
+                item.IncludeActHeadings,
+                item.IncludeChapterHeadings,
+                item.NumberActs,
+                item.NumberChapters,
+                item.TitlePageMode,
             }).SingleAsync(cancellationToken);
         var pdfPresentation = await db.PublicationBookPdfPresentations.AsNoTracking()
             .Where(item => item.ProjectId == projectId)
@@ -136,8 +150,18 @@ public sealed class PublicationBookService(
             .OrderBy(item => item.Anchor).ThenBy(item => item.TargetId).ThenBy(item => item.LocalOrder).ThenBy(item => item.Id)
             .Select(item => new
             {
-                item.Id, item.Revision, item.Title, item.Kind, item.SystemRole, item.Anchor,
-                item.TargetKind, item.TargetId, item.InclusionMode, item.StartSide, item.LocalOrder, item.ManuscriptJson,
+                item.Id,
+                item.Revision,
+                item.Title,
+                item.Kind,
+                item.SystemRole,
+                item.Anchor,
+                item.TargetKind,
+                item.TargetId,
+                item.InclusionMode,
+                item.StartSide,
+                item.LocalOrder,
+                item.ManuscriptJson,
             }).ToListAsync(cancellationToken);
         var compositions = await db.PageCompositions.AsNoTracking()
             .Where(item => item.ProjectId == projectId && item.EditionId == null && item.DetachedAt == null)
@@ -151,8 +175,13 @@ public sealed class PublicationBookService(
             }).ToListAsync(cancellationToken);
         var assetRows = await db.PublishAssets.AsNoTracking().Where(item => item.ProjectId == projectId)
             .OrderBy(item => item.Id).Select(item => new { item.Id, item.UpdatedAt, item.FileName, item.Data }).ToListAsync(cancellationToken);
-        var assets = assetRows.Select(item => new { item.Id, item.UpdatedAt, item.FileName,
-            Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(item.Data)) }).ToList();
+        var assets = assetRows.Select(item => new
+        {
+            item.Id,
+            item.UpdatedAt,
+            item.FileName,
+            Hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(item.Data))
+        }).ToList();
         var styles = await db.ManuscriptStyleDefinitions.AsNoTracking()
             .Where(item => item.ProjectId == projectId)
             .OrderBy(item => item.Id)
@@ -213,11 +242,13 @@ public sealed class PublicationBookService(
 
     public async Task<PublicationBookView> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var existing = await ReadViewAsync(projectId, cancellationToken);
         if (existing is not null)
             return await EnsureOutlineCurrentAsync(projectId, existing, cancellationToken);
 
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         existing = await ReadViewAsync(projectId, cancellationToken);
         if (existing is not null)
             return existing;
@@ -272,11 +303,13 @@ public sealed class PublicationBookService(
         PublicationBookView existing,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var targetCount = await db.Acts.AsNoTracking().CountAsync(item => item.ProjectId == projectId, cancellationToken)
             + await db.Chapters.AsNoTracking().CountAsync(item => item.ProjectId == projectId, cancellationToken);
         if (await db.PublicationBookOutlineItems.AsNoTracking().CountAsync(item => item.ProjectId == projectId, cancellationToken) == targetCount)
             return existing;
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var currentRows = await db.PublicationBookOutlineItems.AsNoTracking()
             .Where(item => item.ProjectId == projectId).ToListAsync(cancellationToken);
         var known = currentRows.Select(item => (item.TargetKind, item.TargetId)).ToHashSet();
@@ -307,7 +340,9 @@ public sealed class PublicationBookService(
         PublicationBookPatch patch,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var book = await GetTrackedBookAsync(projectId, patch.ExpectedRevision, cancellationToken);
 
         var clear = (patch.ClearFields ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -380,6 +415,8 @@ public sealed class PublicationBookService(
         Guid projectId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var chapters = await db.Chapters.AsNoTracking().Where(item => item.ProjectId == projectId)
             .ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
         return (await db.PublicationBookOutlineItems.AsNoTracking()
@@ -399,7 +436,9 @@ public sealed class PublicationBookService(
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var book = await GetTrackedBookAsync(projectId, expectedRevision, cancellationToken);
         if (updates.Any(item => item.TargetKind != PublishOutlineTargetKind.Chapter))
             throw new InvalidOperationException("Core Book content inclusion applies to chapters; act presentation is controlled by the act heading and summary settings.");
@@ -423,8 +462,10 @@ public sealed class PublicationBookService(
         Guid projectId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         _ = await GetOrCreateAsync(projectId, cancellationToken);
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var book = await db.PublicationBooks.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         var design = await db.PublicationBookCoverDesigns.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         var setup = await db.ProjectPageSetups.AsNoTracking().SingleAsync(item => item.ProjectId == projectId, cancellationToken);
@@ -461,8 +502,10 @@ public sealed class PublicationBookService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var book = await db.PublicationBooks.SingleOrDefaultAsync(
             item => item.ProjectId == projectId,
@@ -534,9 +577,11 @@ public sealed class PublicationBookService(
         bool redo,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (authoringHistory is null)
             throw new NotSupportedException("Persistent Core-cover history is unavailable.");
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var book = await db.PublicationBooks.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         var design = await db.PublicationBookCoverDesigns.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         var current = CaptureCoreCover(book, design);
@@ -581,11 +626,13 @@ public sealed class PublicationBookService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         if (conversationId == Guid.Empty)
             throw new ArgumentException("A conversation is required for staged Core cover changes.", nameof(conversationId));
         _ = await GetOrCreateAsync(projectId, cancellationToken);
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await db.CompositionMutationStages.Where(item => item.ProjectId == projectId
             && (item.ExpiresAt <= DateTime.UtcNow || item.AppliedAt != null)).ExecuteDeleteAsync(cancellationToken);
         var book = await db.PublicationBooks.AsNoTracking().SingleAsync(item => item.ProjectId == projectId, cancellationToken);
@@ -618,7 +665,9 @@ public sealed class PublicationBookService(
         long expectedCoverRevision,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var stage = await db.CompositionMutationStages.SingleOrDefaultAsync(item => item.Id == stageId
             && item.ProjectId == projectId && item.ConversationId == conversationId
@@ -667,6 +716,8 @@ public sealed class PublicationBookService(
 
     private async Task<CompositionScene> ValidateCoreSceneAsync(Guid projectId, CompositionScene scene, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var setup = await db.ProjectPageSetups.AsNoTracking().SingleAsync(
             item => item.ProjectId == projectId, cancellationToken);
         var edition = CoreCoverEdition(projectId, setup);
@@ -788,6 +839,9 @@ public sealed class PublicationBookService(
 
     private async Task AddMissingOutlineAsync(PublicationBook book, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var order = 0;
         foreach (var act in await db.Acts.Where(item => item.ProjectId == book.ProjectId).OrderBy(item => item.Order).ToListAsync(cancellationToken))
             book.OutlineItems.Add(NewOutline(book.ProjectId, PublishOutlineTargetKind.Act, act.Id, order++));
@@ -800,20 +854,22 @@ public sealed class PublicationBookService(
         PublishOutlineTargetKind kind,
         Guid targetId,
         int order) => new()
-    {
-        ProjectId = projectId,
-        TargetKind = kind,
-        TargetId = targetId,
-        ActId = kind == PublishOutlineTargetKind.Act ? targetId : null,
-        ChapterId = kind == PublishOutlineTargetKind.Chapter ? targetId : null,
-        SortOrder = order,
-    };
+        {
+            ProjectId = projectId,
+            TargetKind = kind,
+            TargetId = targetId,
+            ActId = kind == PublishOutlineTargetKind.Act ? targetId : null,
+            ChapterId = kind == PublishOutlineTargetKind.Chapter ? targetId : null,
+            SortOrder = order,
+        };
 
     private async Task<PublicationBook> GetTrackedBookAsync(
         Guid projectId,
         long expectedRevision,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var book = await db.PublicationBooks.SingleOrDefaultAsync(
             item => item.ProjectId == projectId,
             cancellationToken) ?? throw new InvalidOperationException("Core Book was not found.");
@@ -830,6 +886,8 @@ public sealed class PublicationBookService(
 
     private async Task<PublicationBookView?> ReadViewAsync(Guid projectId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var book = await db.PublicationBooks.AsNoTracking().SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
         if (book is null)
             return null;
@@ -901,7 +959,7 @@ public interface IPublicationEffectiveConfigurationResolver
 }
 
 public sealed class PublicationEffectiveConfigurationResolver(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     bool readPdfPresentation = true,
     bool readPublicationSections = true) : IPublicationEffectiveConfigurationResolver
 {
@@ -909,6 +967,17 @@ public sealed class PublicationEffectiveConfigurationResolver(
         Guid projectId,
         Guid editionId,
         CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await ResolveReleaseAsync(db, projectId, editionId, cancellationToken);
+    }
+
+    internal async Task<EffectivePublicationRelease> ResolveReleaseAsync(
+        AppDbContext db,
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken)
     {
         var stored = await db.PublicationEditions.AsNoTracking().SingleAsync(
             item => item.ProjectId == projectId && item.Id == editionId,
@@ -950,9 +1019,10 @@ public sealed class PublicationEffectiveConfigurationResolver(
             book,
             effective,
             fields,
-            await ResolveOutlineAsync(projectId, editionId, cancellationToken),
+            await ResolveOutlineAsync(db, projectId, editionId, cancellationToken),
             readPublicationSections
                 ? await ResolveSectionsAsync(
+                    db,
                     projectId,
                     editionId,
                     stored.PublicationSectionOrderJson,
@@ -961,6 +1031,7 @@ public sealed class PublicationEffectiveConfigurationResolver(
     }
 
     private async Task<IReadOnlyList<PublicationSection>> ResolveSectionsAsync(
+        AppDbContext db,
         Guid projectId,
         Guid editionId,
         string publicationSectionOrderJson,
@@ -998,7 +1069,11 @@ public sealed class PublicationEffectiveConfigurationResolver(
         }
     }
 
-    private async Task<IReadOnlyList<PublicationEditionOutlineItem>> ResolveOutlineAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<PublicationEditionOutlineItem>> ResolveOutlineAsync(
+        AppDbContext db,
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken)
     {
         var core = await db.PublicationBookOutlineItems.AsNoTracking().Where(item => item.ProjectId == projectId).ToListAsync(cancellationToken);
         var overrides = await db.PublicationEditionOutlineItems.AsNoTracking().Where(item => item.EditionId == editionId).ToDictionaryAsync(item => (item.TargetKind, item.TargetId), cancellationToken);
@@ -1006,8 +1081,14 @@ public sealed class PublicationEffectiveConfigurationResolver(
             ? value
             : new PublicationEditionOutlineItem
             {
-                Id = item.Id, EditionId = editionId, TargetKind = item.TargetKind, TargetId = item.TargetId,
-                ActId = item.ActId, ChapterId = item.ChapterId, IsIncluded = item.IsIncluded, SortOrder = item.SortOrder,
+                Id = item.Id,
+                EditionId = editionId,
+                TargetKind = item.TargetKind,
+                TargetId = item.TargetId,
+                ActId = item.ActId,
+                ChapterId = item.ChapterId,
+                IsIncluded = item.IsIncluded,
+                SortOrder = item.SortOrder,
             }).OrderBy(item => item.SortOrder).ToList();
     }
 
@@ -1016,24 +1097,49 @@ public sealed class PublicationEffectiveConfigurationResolver(
 
     private static PublicationEdition Copy(PublicationEdition source) => new()
     {
-        Id = source.Id, ProjectId = source.ProjectId, Name = source.Name, Format = source.Format,
-        Vendor = source.Vendor, VendorProfileVersion = source.VendorProfileVersion, Status = source.Status,
-        Revision = source.Revision, OverrideFieldsJson = source.OverrideFieldsJson,
-        TitleOverride = source.TitleOverride, Subtitle = source.Subtitle, Author = source.Author, Language = source.Language,
-        Publisher = source.Publisher, Copyright = source.Copyright, Isbn = source.Isbn, Description = source.Description,
-        IncludeTableOfContents = source.IncludeTableOfContents, IncludeVisibleTableOfContents = source.IncludeVisibleTableOfContents,
-        IncludeActSynopses = source.IncludeActSynopses, IncludeChapterSynopses = source.IncludeChapterSynopses,
-        IncludeActHeadings = source.IncludeActHeadings, IncludeChapterHeadings = source.IncludeChapterHeadings,
-        NumberActs = source.NumberActs, NumberChapters = source.NumberChapters, TitlePageMode = source.TitlePageMode,
-        PrintRegistryVersion = source.PrintRegistryVersion, PrintProductKey = source.PrintProductKey,
-        PrintFinish = source.PrintFinish, PrintCoverMode = source.PrintCoverMode,
-        GenericPrintTemplateJson = source.GenericPrintTemplateJson, Bleed = source.Bleed,
-        PageWidthInches = source.PageWidthInches, PageHeightInches = source.PageHeightInches,
-        PageMarginInches = source.PageMarginInches, BodyFontSizePoints = source.BodyFontSizePoints,
-        BodyLineHeight = source.BodyLineHeight, SelectedCoverImageId = source.SelectedCoverImageId,
-        AllowDesignedPageOverrides = source.AllowDesignedPageOverrides, InheritsCoreCover = source.InheritsCoreCover,
+        Id = source.Id,
+        ProjectId = source.ProjectId,
+        Name = source.Name,
+        Format = source.Format,
+        Vendor = source.Vendor,
+        VendorProfileVersion = source.VendorProfileVersion,
+        Status = source.Status,
+        Revision = source.Revision,
+        OverrideFieldsJson = source.OverrideFieldsJson,
+        TitleOverride = source.TitleOverride,
+        Subtitle = source.Subtitle,
+        Author = source.Author,
+        Language = source.Language,
+        Publisher = source.Publisher,
+        Copyright = source.Copyright,
+        Isbn = source.Isbn,
+        Description = source.Description,
+        IncludeTableOfContents = source.IncludeTableOfContents,
+        IncludeVisibleTableOfContents = source.IncludeVisibleTableOfContents,
+        IncludeActSynopses = source.IncludeActSynopses,
+        IncludeChapterSynopses = source.IncludeChapterSynopses,
+        IncludeActHeadings = source.IncludeActHeadings,
+        IncludeChapterHeadings = source.IncludeChapterHeadings,
+        NumberActs = source.NumberActs,
+        NumberChapters = source.NumberChapters,
+        TitlePageMode = source.TitlePageMode,
+        PrintRegistryVersion = source.PrintRegistryVersion,
+        PrintProductKey = source.PrintProductKey,
+        PrintFinish = source.PrintFinish,
+        PrintCoverMode = source.PrintCoverMode,
+        GenericPrintTemplateJson = source.GenericPrintTemplateJson,
+        Bleed = source.Bleed,
+        PageWidthInches = source.PageWidthInches,
+        PageHeightInches = source.PageHeightInches,
+        PageMarginInches = source.PageMarginInches,
+        BodyFontSizePoints = source.BodyFontSizePoints,
+        BodyLineHeight = source.BodyLineHeight,
+        SelectedCoverImageId = source.SelectedCoverImageId,
+        AllowDesignedPageOverrides = source.AllowDesignedPageOverrides,
+        InheritsCoreCover = source.InheritsCoreCover,
         EditionSpecificContentEnabled = source.EditionSpecificContentEnabled,
         PublicationSectionOrderJson = source.PublicationSectionOrderJson,
-        CreatedAt = source.CreatedAt, UpdatedAt = source.UpdatedAt,
+        CreatedAt = source.CreatedAt,
+        UpdatedAt = source.UpdatedAt,
     };
 }

@@ -5,17 +5,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public sealed class IngestRepository(AppDbContext db) : IIngestRepository
+public sealed class IngestRepository(AppDatabaseReadOperation operation) : IIngestRepository
 {
     public Task<List<IngestJob>> ListJobsByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.IngestJobs
+        operation.Db.IngestJobs
             .Include(job => job.Source)
             .Where(job => job.ProjectId == projectId)
             .OrderByDescending(job => job.CreatedAt)
             .ToListAsync(cancellationToken);
 
     public Task<List<IngestJobListItem>> ListJobSummariesByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.IngestJobs
+        operation.Db.IngestJobs
             .AsNoTracking()
             .Where(job => job.ProjectId == projectId)
             .OrderByDescending(job => job.CreatedAt)
@@ -39,10 +39,10 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
             .ToListAsync(cancellationToken);
 
     public Task<IngestJob?> GetJobAsync(Guid jobId, CancellationToken cancellationToken = default) =>
-        db.IngestJobs.FirstOrDefaultAsync(job => job.Id == jobId, cancellationToken);
+        operation.Db.IngestJobs.FirstOrDefaultAsync(job => job.Id == jobId, cancellationToken);
 
     public Task<IngestJob?> GetJobDetailAsync(Guid jobId, CancellationToken cancellationToken = default) =>
-        db.IngestJobs
+        operation.Db.IngestJobs
             .Include(job => job.Source)
             .Include(job => job.Chunks.OrderBy(chunk => chunk.SourceChunkIndex))
                 .ThenInclude(chunk => chunk.SourceChunk)
@@ -53,7 +53,7 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
             .FirstOrDefaultAsync(job => job.Id == jobId, cancellationToken);
 
     public Task<IngestJob?> GetJobProcessorDetailAsync(Guid jobId, CancellationToken cancellationToken = default) =>
-        db.IngestJobs
+        operation.Db.IngestJobs
             .Include(job => job.Source)
             .Include(job => job.Chunks.OrderBy(chunk => chunk.SourceChunkIndex))
                 .ThenInclude(chunk => chunk.SourceChunk)
@@ -61,7 +61,7 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
             .FirstOrDefaultAsync(job => job.Id == jobId, cancellationToken);
 
     public Task<IngestJob?> GetJobResumeDetailAsync(Guid jobId, CancellationToken cancellationToken = default) =>
-        db.IngestJobs
+        operation.Db.IngestJobs
             .Include(job => job.Chunks.OrderBy(chunk => chunk.SourceChunkIndex))
                 .ThenInclude(chunk => chunk.SourceChunk)
             .AsSplitQuery()
@@ -69,7 +69,7 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
 
     public async Task<IngestJobDetailView?> GetJobDetailViewAsync(Guid jobId, int eventLimit = 20, CancellationToken cancellationToken = default)
     {
-        var job = await db.IngestJobs
+        var job = await operation.Db.IngestJobs
             .AsNoTracking()
             .Where(job => job.Id == jobId)
             .Select(job => new
@@ -97,7 +97,7 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
             .FirstOrDefaultAsync(cancellationToken);
         if (job is null) return null;
 
-        var chunks = await db.IngestJobChunks
+        var chunks = await operation.Db.IngestJobChunks
             .AsNoTracking()
             .Where(chunk => chunk.JobId == jobId)
             .OrderBy(chunk => chunk.SourceChunkIndex)
@@ -126,7 +126,7 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
                 chunk.SourceChunk.AgentNotes))
             .ToListAsync(cancellationToken);
 
-        var events = await db.IngestJobEvents
+        var events = await operation.Db.IngestJobEvents
             .AsNoTracking()
             .Where(jobEvent => jobEvent.JobId == jobId && (jobEvent.Level == IngestJobEventLevel.Warning || jobEvent.Level == IngestJobEventLevel.Error))
             .OrderByDescending(jobEvent => jobEvent.CreatedAt)
@@ -140,7 +140,7 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
                 jobEvent.CreatedAt))
             .ToListAsync(cancellationToken);
 
-        var finalizationRecords = await db.IngestStagingRecords
+        var finalizationRecords = await operation.Db.IngestStagingRecords
             .AsNoTracking()
             .Where(item => item.JobId == jobId && item.Status != IngestStagingRecordStatus.Deleted)
             .Select(item => new FinalizationStagingRecord(
@@ -182,32 +182,32 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
     }
 
     public Task<IngestSource?> GetSourceAsync(Guid sourceId, CancellationToken cancellationToken = default) =>
-        db.IngestSources.FirstOrDefaultAsync(source => source.Id == sourceId, cancellationToken);
+        operation.Db.IngestSources.FirstOrDefaultAsync(source => source.Id == sourceId, cancellationToken);
 
     public Task<IngestSourceChunk?> GetSourceChunkAsync(Guid sourceChunkId, CancellationToken cancellationToken = default) =>
-        db.IngestSourceChunks.FirstOrDefaultAsync(chunk => chunk.Id == sourceChunkId, cancellationToken);
+        operation.Db.IngestSourceChunks.FirstOrDefaultAsync(chunk => chunk.Id == sourceChunkId, cancellationToken);
 
     public Task<List<IngestSource>> ListSourcesByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.IngestSources
+        operation.Db.IngestSources
             .Where(source => source.ProjectId == projectId)
             .OrderBy(source => source.Title)
             .ThenBy(source => source.Id)
             .ToListAsync(cancellationToken);
 
     public Task<List<IngestSourcePage>> ListSourcePagesAsync(Guid sourceId, CancellationToken cancellationToken = default) =>
-        db.IngestSourcePages
+        operation.Db.IngestSourcePages
             .Where(page => page.SourceId == sourceId)
             .OrderBy(page => page.PageNumber)
             .ToListAsync(cancellationToken);
 
     public Task<List<IngestSourceBlock>> ListSourceBlocksAsync(Guid sourceId, CancellationToken cancellationToken = default) =>
-        db.IngestSourceBlocks
+        operation.Db.IngestSourceBlocks
             .Where(block => block.SourceId == sourceId)
             .OrderBy(block => block.Index)
             .ToListAsync(cancellationToken);
 
     public Task<IngestStagingRecord?> GetStagingRecordAsync(Guid stagingRecordId, CancellationToken cancellationToken = default) =>
-        db.IngestStagingRecords
+        operation.Db.IngestStagingRecords
             .Include(item => item.Job)
             .Include(item => item.Source)
             .Include(item => item.SourceChunk)
@@ -216,7 +216,7 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
     public async Task<IngestSourceChunkExcerpt?> GetSourceChunkExcerptAsync(Guid sourceChunkId, int maxChars = 8_000, CancellationToken cancellationToken = default)
     {
         maxChars = Math.Clamp(maxChars, 1, 100_000);
-        var excerpt = await db.IngestSourceChunks
+        var excerpt = await operation.Db.IngestSourceChunks
             .AsNoTracking()
             .Where(chunk => chunk.Id == sourceChunkId)
             .Select(chunk => new
@@ -235,44 +235,44 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
     }
 
     public Task<IngestReportItem?> GetReportItemAsync(Guid reportItemId, CancellationToken cancellationToken = default) =>
-        db.IngestReportItems
+        operation.Db.IngestReportItems
             .Include(item => item.Job)
             .Include(item => item.SourceChunk)
             .FirstOrDefaultAsync(item => item.Id == reportItemId, cancellationToken);
 
     public Task<List<IngestSourceChunk>> ListSourceChunksAsync(Guid sourceId, CancellationToken cancellationToken = default) =>
-        db.IngestSourceChunks
+        operation.Db.IngestSourceChunks
             .Where(chunk => chunk.SourceId == sourceId)
             .OrderBy(chunk => chunk.Index)
             .ToListAsync(cancellationToken);
 
     public Task<List<IngestVectorFragment>> ListVectorFragmentsAsync(Guid sourceId, CancellationToken cancellationToken = default) =>
-        db.IngestVectorFragments
+        operation.Db.IngestVectorFragments
             .Where(fragment => fragment.SourceId == sourceId)
             .OrderBy(fragment => fragment.Index)
             .ToListAsync(cancellationToken);
 
     public Task<List<IngestStagingRecord>> ListStagingRecordsAsync(Guid jobId, CancellationToken cancellationToken = default) =>
-        db.IngestStagingRecords
+        operation.Db.IngestStagingRecords
             .Where(item => item.JobId == jobId)
             .OrderBy(item => item.CreatedAt)
             .ToListAsync(cancellationToken);
 
     public Task<List<IngestStagingRecord>> ListStagingRecordsBySourceAsync(Guid sourceId, CancellationToken cancellationToken = default) =>
-        db.IngestStagingRecords
+        operation.Db.IngestStagingRecords
             .Where(item => item.SourceId == sourceId)
             .OrderBy(item => item.CreatedAt)
             .ToListAsync(cancellationToken);
 
     public Task<List<IngestReportItem>> ListReportItemsAsync(Guid jobId, CancellationToken cancellationToken = default) =>
-        db.IngestReportItems
+        operation.Db.IngestReportItems
             .Where(item => item.JobId == jobId)
             .OrderBy(item => item.CreatedAt)
             .ToListAsync(cancellationToken);
 
     public async Task<List<IngestReportItemView>> ListReportItemViewsAsync(Guid jobId, Guid? sourceChunkId = null, CancellationToken cancellationToken = default)
     {
-        var query = db.IngestStagingRecords
+        var query = operation.Db.IngestStagingRecords
             .AsNoTracking()
             .Where(item => item.JobId == jobId && item.Status != IngestStagingRecordStatus.Deleted);
 
@@ -309,13 +309,13 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
     }
 
     public Task<List<IngestJob>> ListQueuedJobsAsync(CancellationToken cancellationToken = default) =>
-        db.IngestJobs
+        operation.Db.IngestJobs
             .Where(job => job.Status == IngestJobStatus.Queued)
             .OrderBy(job => job.CreatedAt)
             .ToListAsync(cancellationToken);
 
     public Task<List<IngestJob>> ListInterruptedJobsAsync(CancellationToken cancellationToken = default) =>
-        db.IngestJobs
+        operation.Db.IngestJobs
             .Include(job => job.Chunks)
             .Where(job => job.Status == IngestJobStatus.Running || job.Status == IngestJobStatus.StopRequested)
             .OrderBy(job => job.UpdatedAt)
@@ -323,40 +323,40 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
             .ToListAsync(cancellationToken);
 
     public async Task AddSourceAsync(IngestSource source, CancellationToken cancellationToken = default) =>
-        await db.IngestSources.AddAsync(source, cancellationToken);
+        await operation.Db.IngestSources.AddAsync(source, cancellationToken);
 
     public async Task AddSourcePageAsync(IngestSourcePage sourcePage, CancellationToken cancellationToken = default) =>
-        await db.IngestSourcePages.AddAsync(sourcePage, cancellationToken);
+        await operation.Db.IngestSourcePages.AddAsync(sourcePage, cancellationToken);
 
     public async Task AddSourceBlockAsync(IngestSourceBlock sourceBlock, CancellationToken cancellationToken = default) =>
-        await db.IngestSourceBlocks.AddAsync(sourceBlock, cancellationToken);
+        await operation.Db.IngestSourceBlocks.AddAsync(sourceBlock, cancellationToken);
 
     public async Task AddJobAsync(IngestJob job, CancellationToken cancellationToken = default) =>
-        await db.IngestJobs.AddAsync(job, cancellationToken);
+        await operation.Db.IngestJobs.AddAsync(job, cancellationToken);
 
     public async Task AddSourceChunkAsync(IngestSourceChunk sourceChunk, CancellationToken cancellationToken = default) =>
-        await db.IngestSourceChunks.AddAsync(sourceChunk, cancellationToken);
+        await operation.Db.IngestSourceChunks.AddAsync(sourceChunk, cancellationToken);
 
     public async Task AddVectorFragmentAsync(IngestVectorFragment vectorFragment, CancellationToken cancellationToken = default) =>
-        await db.IngestVectorFragments.AddAsync(vectorFragment, cancellationToken);
+        await operation.Db.IngestVectorFragments.AddAsync(vectorFragment, cancellationToken);
 
     public async Task AddJobChunkAsync(IngestJobChunk jobChunk, CancellationToken cancellationToken = default) =>
-        await db.IngestJobChunks.AddAsync(jobChunk, cancellationToken);
+        await operation.Db.IngestJobChunks.AddAsync(jobChunk, cancellationToken);
 
     public async Task AddStagingRecordAsync(IngestStagingRecord item, CancellationToken cancellationToken = default) =>
-        await db.IngestStagingRecords.AddAsync(item, cancellationToken);
+        await operation.Db.IngestStagingRecords.AddAsync(item, cancellationToken);
 
     public async Task AddReportItemAsync(IngestReportItem item, CancellationToken cancellationToken = default) =>
-        await db.IngestReportItems.AddAsync(item, cancellationToken);
+        await operation.Db.IngestReportItems.AddAsync(item, cancellationToken);
 
     public async Task AddEventAsync(IngestJobEvent jobEvent, CancellationToken cancellationToken = default) =>
-        await db.IngestJobEvents.AddAsync(jobEvent, cancellationToken);
+        await operation.Db.IngestJobEvents.AddAsync(jobEvent, cancellationToken);
 
     public void UpdateSource(IngestSource source) => MarkModified(source);
 
     public void UpdateSourceChunk(IngestSourceChunk sourceChunk) => MarkModified(sourceChunk);
 
-    public void RemoveVectorFragment(IngestVectorFragment vectorFragment) => db.IngestVectorFragments.Remove(vectorFragment);
+    public void RemoveVectorFragment(IngestVectorFragment vectorFragment) => operation.Db.MarkDeleted(vectorFragment);
 
     public void UpdateJob(IngestJob job) => MarkModified(job);
 
@@ -366,17 +366,14 @@ public sealed class IngestRepository(AppDbContext db) : IIngestRepository
 
     public void UpdateReportItem(IngestReportItem item) => MarkModified(item);
 
-    public void RemoveSource(IngestSource source) => db.IngestSources.Remove(source);
+    public void RemoveSource(IngestSource source) => operation.Db.MarkDeleted(source);
 
-    public void RemoveJob(IngestJob job) => db.IngestJobs.Remove(job);
-
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        db.SaveChangesAsync(cancellationToken);
+    public void RemoveJob(IngestJob job) => operation.Db.MarkDeleted(job);
 
     private void MarkModified<TEntity>(TEntity entity)
         where TEntity : class
     {
-        var entry = db.Entry(entity);
+        var entry = operation.Db.Entry(entity);
         if (entry.State == EntityState.Detached)
             entry.State = EntityState.Modified;
     }

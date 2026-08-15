@@ -10,8 +10,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Lorekeeper.Publish;
 
 public sealed class PublicationEditionService(
-    AppDbContext db,
-    IProjectMutationCoordinator projectMutations,
+    IAppDatabaseOperationFactory database,
     IPublicationBookService books,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IPublicationReleasePresetService releasePresets,
@@ -19,36 +18,40 @@ public sealed class PublicationEditionService(
     IPublicationActorContext actorContext) : IPublicationEditionService
 {
     public PublicationEditionService(
-        AppDbContext db,
-        IProjectMutationCoordinator projectMutations,
+        IAppDatabaseOperationFactory database,
         IPublicationActorContext actorContext)
-        : this(db, projectMutations, new PublicationBookService(db, projectMutations),
-            new PublicationEffectiveConfigurationResolver(db),
-            new PublicationReleasePresetService(db, new PrintProductRegistry()),
+        : this(database, new PublicationBookService(database),
+            new PublicationEffectiveConfigurationResolver(database),
+            new PublicationReleasePresetService(database, new PrintProductRegistry()),
             new PrintProductRegistry(), actorContext)
     {
     }
 
     public async Task<IReadOnlyList<PublicationEditionSummary>> ListAsync(
         Guid projectId,
-        CancellationToken cancellationToken = default) =>
-        await db.PublicationEditions
-            .AsNoTracking()
-            .Where(edition => edition.ProjectId == projectId)
-            .OrderBy(edition => edition.Status)
-            .ThenBy(edition => edition.Name)
-            .Select(edition => Summary(edition))
-            .ToListAsync(cancellationToken);
-
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.PublicationEditions
+                    .AsNoTracking()
+                    .Where(edition => edition.ProjectId == projectId)
+                    .OrderBy(edition => edition.Status)
+                    .ThenBy(edition => edition.Name)
+                    .Select(edition => Summary(edition))
+                    .ToListAsync(cancellationToken);
+    }
     public async Task<PublicationEditionView> CreateAsync(
         Guid projectId,
         PublicationEditionCreate input,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         ValidateIdentity(input.Name, input.Format, input.Vendor);
         var core = await books.GetOrCreateAsync(projectId, cancellationToken);
         var preset = await releasePresets.ResolveAsync(projectId, input.Format, input.Vendor, cancellationToken);
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var project = await GetProjectAsync(projectId, cancellationToken);
         var name = await AllocateUniqueNameAsync(projectId, input.Name.Trim(), null, cancellationToken);
         var edition = new PublicationEdition
@@ -90,7 +93,9 @@ public sealed class PublicationEditionService(
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var project = await GetProjectAsync(projectId, cancellationToken);
         var source = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(source, expectedRevision);
@@ -170,7 +175,8 @@ public sealed class PublicationEditionService(
         PublicationReleaseOverridePatch patch,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
         var project = await GetProjectAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, patch.ExpectedRevision);
@@ -271,7 +277,8 @@ public sealed class PublicationEditionService(
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedRevision);
         EnsureDraft(edition);
@@ -287,7 +294,9 @@ public sealed class PublicationEditionService(
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var project = await GetProjectAsync(projectId, cancellationToken);
         var edition = await GetTrackedAsync(projectId, editionId, cancellationToken);
         EnsureRevision(edition, expectedRevision);
@@ -342,6 +351,8 @@ public sealed class PublicationEditionService(
         Guid rightEditionId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var editions = await db.PublicationEditions.AsNoTracking()
             .Where(edition => edition.ProjectId == projectId
                 && (edition.Id == leftEditionId || edition.Id == rightEditionId))
@@ -376,6 +387,8 @@ public sealed class PublicationEditionService(
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         _ = await GetReadOnlyAsync(projectId, editionId, cancellationToken);
         return await db.PublicationEditionAuditEntries.AsNoTracking()
             .Where(entry => entry.EditionId == editionId)
@@ -410,6 +423,9 @@ public sealed class PublicationEditionService(
         object detail,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(edition.ProjectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         edition.Revision++;
         edition.UpdatedAt = DateTime.UtcNow;
@@ -436,6 +452,8 @@ public sealed class PublicationEditionService(
         CancellationToken cancellationToken,
         bool includeCover = true)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var effective = await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken);
         var edition = effective.Edition;
         var items = effective.OutlineItems
@@ -818,6 +836,8 @@ public sealed class PublicationEditionService(
         Guid editionId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var projectId = await db.PublicationEditions.AsNoTracking().Where(item => item.Id == editionId)
             .Select(item => item.ProjectId).SingleAsync(cancellationToken);
         var effective = await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken);
@@ -827,8 +847,16 @@ public sealed class PublicationEditionService(
             .OrderBy(item => item.Anchor).ThenBy(item => item.TargetId).ThenBy(item => item.LocalOrder).ThenBy(item => item.Id)
             .Select(item => new
             {
-                item.CoreSectionId, item.Title, item.Kind, item.SystemRole, item.Anchor,
-                item.TargetKind, item.TargetId, item.InclusionMode, item.StartSide, item.LocalOrder,
+                item.CoreSectionId,
+                item.Title,
+                item.Kind,
+                item.SystemRole,
+                item.Anchor,
+                item.TargetKind,
+                item.TargetId,
+                item.InclusionMode,
+                item.StartSide,
+                item.LocalOrder,
                 Content = CanonicalManuscriptContent(ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision)),
             });
         var canonical = JsonSerializer.Serialize(
@@ -841,6 +869,8 @@ public sealed class PublicationEditionService(
         PublicationEdition edition,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (string.IsNullOrWhiteSpace(edition.Isbn))
             return;
         if (await db.PublicationEditions.AsNoTracking().AnyAsync(candidate =>
@@ -863,6 +893,8 @@ public sealed class PublicationEditionService(
         IReadOnlyList<PublicationEditionOutlineItemUpdate> updates,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var actIds = updates.Where(update => update.TargetKind == PublishOutlineTargetKind.Act).Select(update => update.TargetId).Distinct().ToList();
         var chapterIds = updates.Where(update => update.TargetKind == PublishOutlineTargetKind.Chapter).Select(update => update.TargetId).Distinct().ToList();
         if (actIds.Count != await db.Acts.CountAsync(act => act.ProjectId == projectId && actIds.Contains(act.Id), cancellationToken)
@@ -886,6 +918,8 @@ public sealed class PublicationEditionService(
         Guid? excludedEditionId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var names = await db.PublicationEditions.AsNoTracking()
                 .Where(edition => edition.ProjectId == projectId
                     && (!excludedEditionId.HasValue || edition.Id != excludedEditionId.Value))
@@ -938,25 +972,34 @@ public sealed class PublicationEditionService(
             throw new InvalidOperationException("Choose English, English (United States), or English (United Kingdom) as the release language.");
     }
 
-    private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken cancellationToken) =>
-        await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
-        ?? throw new InvalidOperationException($"Project {projectId:N} was not found.");
-
+    private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectId:N} was not found.");
+    }
     private async Task<PublicationEdition> GetTrackedAsync(
         Guid projectId,
         Guid editionId,
         CancellationToken cancellationToken)
-        => await db.PublicationEditions.FirstOrDefaultAsync(
-            edition => edition.ProjectId == projectId && edition.Id == editionId,
-            cancellationToken)
-            ?? throw new InvalidOperationException("Publication release was not found.");
-
-    private async Task<PublicationEdition> GetReadOnlyAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken) =>
-        await db.PublicationEditions.AsNoTracking().FirstOrDefaultAsync(
-            edition => edition.ProjectId == projectId && edition.Id == editionId,
-            cancellationToken)
-        ?? throw new InvalidOperationException("Publication release was not found.");
-
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.PublicationEditions.AsTracking().FirstOrDefaultAsync(
+                    edition => edition.ProjectId == projectId && edition.Id == editionId,
+                    cancellationToken)
+                    ?? throw new InvalidOperationException("Publication release was not found.");
+    }
+    private async Task<PublicationEdition> GetReadOnlyAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.PublicationEditions.AsNoTracking().FirstOrDefaultAsync(
+                    edition => edition.ProjectId == projectId && edition.Id == editionId,
+                    cancellationToken)
+                ?? throw new InvalidOperationException("Publication release was not found.");
+    }
     private static void EnsureRevision(PublicationEdition edition, long expectedRevision)
     {
         if (edition.Revision != expectedRevision)

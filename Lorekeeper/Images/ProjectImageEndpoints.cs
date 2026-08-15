@@ -1,5 +1,6 @@
-using Lorekeeper.Persistence;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -76,14 +77,17 @@ public static class ProjectImageEndpoints
                 Guid visualId,
                 [FromQuery] int? maxEdge,
                 IProjectImageService images,
-                AppDbContext db,
+                IAppDatabaseOperationFactory database,
                 CancellationToken cancellationToken) =>
             {
-                var visual = await db.EditorMessageVisuals
-                    .AsNoTracking()
-                    .Include(item => item.Message)
-                    .ThenInclude(message => message.Conversation)
-                    .FirstOrDefaultAsync(item => item.Id == visualId && item.Message.Conversation.ProjectId == projectId, cancellationToken);
+                EditorMessageVisual? visual;
+                await using (var operation = await database.OpenReadAsync(cancellationToken))
+                {
+                    visual = await operation.Db.EditorMessageVisuals
+                        .Include(item => item.Message)
+                        .ThenInclude(message => message.Conversation)
+                        .FirstOrDefaultAsync(item => item.Id == visualId && item.Message.Conversation.ProjectId == projectId, cancellationToken);
+                }
                 if (visual is null)
                     return Results.NotFound();
 
@@ -123,14 +127,17 @@ public static class ProjectImageEndpoints
                 Guid visualId,
                 [FromQuery] int? maxEdge,
                 IProjectImageService images,
-                AppDbContext db,
+                IAppDatabaseOperationFactory database,
                 CancellationToken cancellationToken) =>
             {
-                var visual = await db.ProjectImageMessageVisuals
-                    .AsNoTracking()
-                    .Include(item => item.Message)
-                    .ThenInclude(message => message.Conversation)
-                    .FirstOrDefaultAsync(item => item.Id == visualId && item.Message.Conversation.ProjectId == projectId, cancellationToken);
+                ProjectImageMessageVisual? visual;
+                await using (var operation = await database.OpenReadAsync(cancellationToken))
+                {
+                    visual = await operation.Db.ProjectImageMessageVisuals
+                        .Include(item => item.Message)
+                        .ThenInclude(message => message.Conversation)
+                        .FirstOrDefaultAsync(item => item.Id == visualId && item.Message.Conversation.ProjectId == projectId, cancellationToken);
+                }
                 if (visual is null)
                     return Results.NotFound();
 
@@ -169,14 +176,17 @@ public static class ProjectImageEndpoints
                 Guid projectId,
                 Guid visualId,
                 [FromQuery] int? maxEdge,
-                AppDbContext db,
+                IAppDatabaseOperationFactory database,
                 CancellationToken cancellationToken) =>
             {
-                var visual = await db.PublishMessageVisuals
-                    .AsNoTracking()
-                    .Include(item => item.Message)
-                    .ThenInclude(message => message.Conversation)
-                    .FirstOrDefaultAsync(item => item.Id == visualId && item.Message.Conversation.ProjectId == projectId, cancellationToken);
+                PublishMessageVisual? visual;
+                await using (var operation = await database.OpenReadAsync(cancellationToken))
+                {
+                    visual = await operation.Db.PublishMessageVisuals
+                        .Include(item => item.Message)
+                        .ThenInclude(message => message.Conversation)
+                        .FirstOrDefaultAsync(item => item.Id == visualId && item.Message.Conversation.ProjectId == projectId, cancellationToken);
+                }
                 if (visual is null || visual.Data.Length == 0)
                     return Results.NotFound();
 

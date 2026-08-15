@@ -10,26 +10,14 @@ using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
-using Microsoft.Extensions.AI;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.ImagesChat;
 
 public sealed class ImagesChatService(
-    IProjectRepository projects,
-    IProjectImageConversationRepository conversations,
-    IChatImageAttachmentService imageAttachments,
-    AppDbContext db,
-    IContextBuilder contextBuilder,
-    ILlmProviderService providerService,
-    IChatClientFactory chatClientFactory,
-    IProjectImageService projectImages,
-    IEntityVisualContextService entityVisualContext,
-    ImagesChatTools tools,
-    ChatTurnEngine turnEngine,
-    IOptions<AgentOptions> options,
-    ILogger<ImagesChatService> logger) : IImagesChatService
+    IChatImageAttachmentService imageAttachments, IAppDatabaseOperationFactory database, IContextBuilder contextBuilder, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IProjectImageService projectImages, IEntityVisualContextService entityVisualContext, ImagesChatTools tools, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<ImagesChatService> logger) : IImagesChatService
 {
     public const string ImagesWorkflowInstructions = """
         You are Lorekeeper's Images assistant: the concept-art and visual-canon workspace for a long-form writing project.
@@ -58,6 +46,10 @@ public sealed class ImagesChatService(
 
     public async Task<ProjectImageConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
+        var conversations = databaseOperation.Repositories.ProjectImageConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is not null) return existing;
 
@@ -74,15 +66,20 @@ public sealed class ImagesChatService(
             Content = InitialAssistantGreeting,
             Status = ProjectImageMessageStatus.Completed,
         }, cancellationToken);
-        await conversations.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return conversation;
     }
 
-    public async Task<IReadOnlyList<ProjectImageMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        await conversations.LoadMessagesAsync(conversationId, cancellationToken);
-
+    public async Task<IReadOnlyList<ProjectImageMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var conversations = databaseOperation.Repositories.ProjectImageConversations;
+        return await conversations.LoadMessagesAsync(conversationId, cancellationToken);
+    }
     public async Task<IReadOnlyList<ProjectImageChatAttachmentView>> ListAttachmentsAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var attachments = await db.ProjectImageChatAttachments
             .AsNoTracking()
             .Include(attachment => attachment.Image)
@@ -95,6 +92,10 @@ public sealed class ImagesChatService(
 
     public async Task<ProjectImageChatAttachmentView> AttachImageAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var projects = databaseOperation.Repositories.Projects;
         _ = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
@@ -134,6 +135,9 @@ public sealed class ImagesChatService(
 
     public async Task RemoveAttachmentAsync(Guid projectId, Guid attachmentId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var attachment = await db.ProjectImageChatAttachments
             .FirstOrDefaultAsync(item => item.ProjectId == projectId && item.Id == attachmentId, cancellationToken);
         if (attachment is null)
@@ -145,6 +149,9 @@ public sealed class ImagesChatService(
 
     public async Task ClearAttachmentsAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var attachments = await db.ProjectImageChatAttachments
             .Where(attachment => attachment.ProjectId == projectId)
             .ToListAsync(cancellationToken);
@@ -157,6 +164,8 @@ public sealed class ImagesChatService(
 
     public async Task<string> GetSystemPromptAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         return await BuildSystemPromptAsync(project, cancellationToken);
@@ -165,11 +174,14 @@ public sealed class ImagesChatService(
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Images, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var conversations = databaseOperation.Repositories.ProjectImageConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
 
         conversations.RemoveConversation(existing);
-        await conversations.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async IAsyncEnumerable<ImagesChatTurnUpdate> SendAsync(
@@ -199,7 +211,10 @@ public sealed class ImagesChatService(
         await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);
         var turnAttachments = await ListAttachmentsAsync(projectId, cancellationToken);
         var allTurnImageIds = imageIds.Concat(turnAttachments.Select(attachment => attachment.ImageId)).Distinct().ToList();
-        var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
+        var nextOrder = await turnEngine.ReadAsync(
+            repositories => repositories.ProjectImageConversations,
+            conversations => conversations.GetMaxOrderAsync(conversation.Id, cancellationToken),
+            cancellationToken) + 1;
         var userMessage = new ProjectImageMessage
         {
             ConversationId = conversation.Id,
@@ -209,7 +224,7 @@ public sealed class ImagesChatService(
             Status = ProjectImageMessageStatus.Completed,
         };
         conversation.UpdatedAt = DateTime.UtcNow;
-        await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
+        await turnEngine.AddMessageAsync(repositories => repositories.ProjectImageConversations, userMessage, cancellationToken);
         await imageAttachments.PersistAsync(projectId, ChatTurnSurface.Images, userMessage.Id, imageIds, cancellationToken);
         var additionalContextAttachments = turnAttachments.Where(attachment => !imageIds.Contains(attachment.ImageId)).ToList();
         if (additionalContextAttachments.Count > 0)
@@ -223,7 +238,10 @@ public sealed class ImagesChatService(
         string? setupError = null;
         try
         {
-            var project = await projects.GetByIdAsync(projectId, cancellationToken)
+            var project = await turnEngine.ReadAsync(
+                repositories => repositories.Projects,
+                projects => projects.GetByIdAsync(projectId, cancellationToken),
+                cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
             initialAssembly = await contextBuilder.BuildAsync(
                 new ContextBuildRequest(
@@ -255,7 +273,10 @@ public sealed class ImagesChatService(
             ToolMode = ChatToolMode.Auto,
         };
 
-        var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
+        var history = await turnEngine.ReadAsync(
+            repositories => repositories.ProjectImageConversations,
+            conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
+            cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
         if (initialAssembly is not null)
         {
@@ -302,7 +323,7 @@ public sealed class ImagesChatService(
                 Content = string.Empty,
                 Status = ProjectImageMessageStatus.Pending,
             };
-            await turnEngine.AddMessageAsync(conversations, activeAssistant, cancellationToken);
+            await turnEngine.AddMessageAsync(repositories => repositories.ProjectImageConversations, activeAssistant, cancellationToken);
 
             ChatRoundCompleted? completedRound = null;
             await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
@@ -351,8 +372,6 @@ public sealed class ImagesChatService(
                 activeAssistant.Content = textBuilder.ToString();
                 activeAssistant.Status = ProjectImageMessageStatus.Completed;
                 await SafePersistAsync(activeAssistant);
-                conversation.UpdatedAt = DateTime.UtcNow;
-                await conversations.SaveChangesAsync(CancellationToken.None);
                 yield return new ImagesChatAssistantMessageCompleted(activeAssistant.Id);
                 yield break;
             }
@@ -404,7 +423,7 @@ public sealed class ImagesChatService(
                     Status = toolError is null ? ProjectImageMessageStatus.Completed : ProjectImageMessageStatus.Failed,
                     ErrorMessage = toolError,
                 };
-                await turnEngine.AddMessageAsync(conversations, toolMessage, CancellationToken.None);
+                await turnEngine.AddMessageAsync(repositories => repositories.ProjectImageConversations, toolMessage, CancellationToken.None);
                 await PersistVisualsAsync(toolMessage.Id, pendingCall.CallId, visuals);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
@@ -438,7 +457,7 @@ public sealed class ImagesChatService(
                 activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
                 await SafePersistAsync(activeAssistant);
 
-                await turnEngine.AddMessageAsync(conversations, new ProjectImageMessage
+                await turnEngine.AddMessageAsync(repositories => repositories.ProjectImageConversations, new ProjectImageMessage
                 {
                     ConversationId = conversation.Id,
                     Order = nextOrder++,
@@ -524,6 +543,9 @@ public sealed class ImagesChatService(
 
     private async Task PersistVisualsAsync(Guid messageId, string? toolCallId, IReadOnlyList<ImagesChatVisualAttachment> visuals)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var conversations = databaseOperation.Repositories.ProjectImageConversations;
         if (visuals.Count == 0)
             return;
 
@@ -543,7 +565,7 @@ public sealed class ImagesChatService(
             Height = visual.Height,
             Data = visual.Data,
         }), CancellationToken.None);
-        await conversations.SaveChangesAsync(CancellationToken.None);
+        await databaseOperation.SaveChangesAsync(CancellationToken.None);
     }
 
     private async Task<ChatMessage> BuildUserMessageWithAttachmentsAsync(
@@ -607,7 +629,7 @@ public sealed class ImagesChatService(
     {
         try
         {
-            await turnEngine.UpdateMessageAsync(conversations, message, CancellationToken.None);
+            await turnEngine.UpdateMessageAsync(repositories => repositories.ProjectImageConversations, message, CancellationToken.None);
         }
         catch (Exception ex)
         {

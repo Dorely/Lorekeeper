@@ -1,11 +1,11 @@
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Llm;
 
 public sealed class ProviderEmbeddingService(
-    IEmbeddingConfigurationRepository configurations,
-    IEmbeddingClient client,
+IAppDatabaseOperationFactory database, IEmbeddingClient client,
     IConfiguration configuration,
     ILogger<ProviderEmbeddingService> logger) : IEmbeddingService
 {
@@ -15,6 +15,8 @@ public sealed class ProviderEmbeddingService(
 
     public async Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var configurations = databaseOperation.Repositories.EmbeddingConfigurations;
         var active = await configurations.GetAsync(cancellationToken);
         return active is not null
             && active.Provider is not null
@@ -30,8 +32,12 @@ public sealed class ProviderEmbeddingService(
 
     public async Task<IList<float[]>> GenerateEmbeddingsAsync(IList<string> texts, CancellationToken cancellationToken = default)
     {
-        var active = await configurations.GetAsync(cancellationToken)
-            ?? throw new InvalidOperationException("No active embedding model is configured.");
+        EmbeddingConfiguration active;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            active = await readOperation.Repositories.EmbeddingConfigurations.GetAsync(cancellationToken)
+                ?? throw new InvalidOperationException("No active embedding model is configured.");
+        }
 
         var prepared = new List<string>(texts.Count);
         for (var i = 0; i < texts.Count; i++)

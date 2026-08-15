@@ -1,29 +1,43 @@
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Search;
 
 public sealed class SearchProviderService(
-    ISearchProviderRepository providers,
-    IWebSearchProviderFactory factory) : ISearchProviderService
+IAppDatabaseOperationFactory database, IWebSearchProviderFactory factory) : ISearchProviderService
 {
-    public Task<List<SearchProvider>> GetAllAsync(CancellationToken cancellationToken = default) =>
-        providers.GetAllAsync(cancellationToken);
-
-    public Task<SearchProvider?> GetByIdAsync(int id, CancellationToken cancellationToken = default) =>
-        providers.GetByIdAsync(id, cancellationToken);
-
-    public Task<SearchProvider?> GetActiveAsync(CancellationToken cancellationToken = default) =>
-        providers.GetActiveAsync(cancellationToken);
-
+    public async Task<List<SearchProvider>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var providers = databaseOperation.Repositories.SearchProviders;
+        return await providers.GetAllAsync(cancellationToken);
+    }
+    public async Task<SearchProvider?> GetByIdAsync(int id, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var providers = databaseOperation.Repositories.SearchProviders;
+        return await providers.GetByIdAsync(id, cancellationToken);
+    }
+    public async Task<SearchProvider?> GetActiveAsync(CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var providers = databaseOperation.Repositories.SearchProviders;
+        return await providers.GetActiveAsync(cancellationToken);
+    }
     public async Task<bool> HasActiveProviderAsync(CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var providers = databaseOperation.Repositories.SearchProviders;
         var active = await providers.GetActiveAsync(cancellationToken);
         return active is not null && !string.IsNullOrWhiteSpace(active.ApiKey);
     }
 
     public async Task<SearchProvider> CreateAsync(SearchProvider provider, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var providers = databaseOperation.Repositories.SearchProviders;
         Normalize(provider);
         Validate(provider);
         var shouldActivate = provider.IsActive;
@@ -31,7 +45,7 @@ public sealed class SearchProviderService(
         provider.CreatedAt = DateTime.UtcNow;
         provider.UpdatedAt = DateTime.UtcNow;
         await providers.AddAsync(provider, cancellationToken);
-        await providers.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
 
         if (shouldActivate)
             await SetActiveAsync(provider.Id, cancellationToken);
@@ -41,6 +55,9 @@ public sealed class SearchProviderService(
 
     public async Task<SearchProvider> UpdateAsync(SearchProvider provider, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var providers = databaseOperation.Repositories.SearchProviders;
         Normalize(provider);
         Validate(provider);
         var shouldActivate = provider.IsActive;
@@ -48,35 +65,41 @@ public sealed class SearchProviderService(
         if (!shouldActivate)
         {
             providers.Update(provider);
-            await providers.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
             return provider;
         }
 
         provider.IsActive = false;
         providers.Update(provider);
-        await providers.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await SetActiveAsync(provider.Id, cancellationToken);
         return provider;
     }
 
     public async Task DeleteAsync(int id, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var providers = databaseOperation.Repositories.SearchProviders;
         var provider = await providers.GetByIdAsync(id, cancellationToken);
         if (provider is null) return;
 
         providers.Remove(provider);
-        await providers.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task SetActiveAsync(int id, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var providers = databaseOperation.Repositories.SearchProviders;
         var provider = await providers.GetByIdAsync(id, cancellationToken)
             ?? throw new InvalidOperationException($"Search provider {id} was not found.");
         if (string.IsNullOrWhiteSpace(provider.ApiKey))
             throw new InvalidOperationException("Search provider API key is required before it can be active.");
 
         await providers.SetActiveAsync(id, cancellationToken);
-        await providers.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<SearchProviderTestResult> TestAsync(SearchProvider provider, CancellationToken cancellationToken = default)
@@ -99,8 +122,12 @@ public sealed class SearchProviderService(
 
     public async Task<WebSearchResponse> SearchAsync(WebSearchRequest request, CancellationToken cancellationToken = default)
     {
-        var active = await providers.GetActiveAsync(cancellationToken)
-            ?? throw new InvalidOperationException("No active search provider is configured.");
+        SearchProvider active;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            active = await readOperation.Repositories.SearchProviders.GetActiveAsync(cancellationToken)
+                ?? throw new InvalidOperationException("No active search provider is configured.");
+        }
         if (string.IsNullOrWhiteSpace(active.ApiKey))
             throw new InvalidOperationException("The active search provider does not have an API key.");
 

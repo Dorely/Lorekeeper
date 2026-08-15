@@ -1,8 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Lorekeeper.Manuscripts;
 using Lorekeeper.Authoring;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Publish;
@@ -53,11 +53,10 @@ public sealed record CompositionHistoryMutationResult(
     string SelectionJson);
 
 public sealed class CompositionService(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     IManuscriptService manuscripts,
     IPublicationCoverService covers,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
-    IProjectMutationCoordinator projectMutations,
     IAuthoringHistoryService authoringHistory,
     IAuthoringMutationContextAccessor authoringMutationContext) : ICompositionService
 {
@@ -90,8 +89,9 @@ public sealed class CompositionService(
         bool redo,
         CancellationToken cancellationToken)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        PrepareFreshCompositionMutation(compositionId);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var current = await AuthoringSnapshotCodec.CaptureCompositionAsync(db, projectId, compositionId, "", cancellationToken);
         var historyTarget = CompositionHistoryTarget(projectId, compositionId);
         async Task Apply(string payload, CancellationToken ct)
@@ -167,12 +167,15 @@ public sealed class CompositionService(
     public async Task<IReadOnlyList<PageComposition>> ListAsync(
         Guid projectId,
         Guid chapterId,
-        CancellationToken cancellationToken = default) =>
-        await db.PageCompositions.AsNoTracking()
-            .Where(item => item.ProjectId == projectId && item.ChapterId == chapterId && item.DetachedAt == null)
-            .OrderBy(item => item.CreatedAt)
-            .ToListAsync(cancellationToken);
-
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.PageCompositions.AsNoTracking()
+                    .Where(item => item.ProjectId == projectId && item.ChapterId == chapterId && item.DetachedAt == null)
+                    .OrderBy(item => item.CreatedAt)
+                    .ToListAsync(cancellationToken);
+    }
     public async Task<DesignedPageCreationResult> CreateDesignedPageAsync(
         EditorContentTarget target,
         Guid projectId,
@@ -207,7 +210,9 @@ public sealed class CompositionService(
         DesignedPageInitialContent? initialContent,
         CancellationToken cancellationToken)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var chapter = await db.Chapters.AsNoTracking().SingleOrDefaultAsync(item => item.Id == chapterId && item.ProjectId == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Chapter was not found in this project.");
@@ -265,6 +270,8 @@ public sealed class CompositionService(
         DesignedPageInitialContent? initialContent,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var layoutMode = initialContent?.LayoutMode ?? DesignedPageLayoutMode.SinglePage;
         var scene = CreatePageScene(edition, layoutMode);
         if (initialContent?.ImageId is not Guid imageId)
@@ -316,6 +323,8 @@ public sealed class CompositionService(
         DesignedPageInitialContent? initialContent,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var scene = CreatePageScene(setup, initialContent?.LayoutMode ?? DesignedPageLayoutMode.SinglePage);
         if (initialContent?.ImageId is not Guid imageId)
             return scene;
@@ -359,6 +368,8 @@ public sealed class CompositionService(
         Guid compositionId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         return await db.PageCompositions.AsNoTracking()
             .Include(item => item.Variants.Where(variant => variant.DetachedAt == null).OrderBy(variant => variant.GeometryKey))
             .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId && item.DetachedAt == null, cancellationToken);
@@ -369,6 +380,9 @@ public sealed class CompositionService(
         Guid compositionId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var current = await db.PageCompositions.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId && item.DetachedAt == null, cancellationToken)
             ?? throw new KeyNotFoundException("Page composition was not found in this project.");
@@ -394,8 +408,6 @@ public sealed class CompositionService(
             }
         }
 
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        PrepareFreshCompositionMutation(compositionId);
         var composition = await db.PageCompositions
             .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
             .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId && item.DetachedAt == null, cancellationToken)
@@ -433,6 +445,9 @@ public sealed class CompositionService(
         ProjectPageSetup setup,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(composition.ProjectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var scene = JsonSerializer.Deserialize<CompositionScene>(source.SceneJson, JsonOptions)
             ?? throw new InvalidDataException("The composition scene is empty.");
         var adapted = AdaptAuthoringScene(scene, setup.PageWidthInches, setup.PageHeightInches, setup.PageMarginInches);
@@ -470,6 +485,9 @@ public sealed class CompositionService(
         Guid projectId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var setup = await db.ProjectPageSetups.SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
         if (setup is not null)
             return setup;
@@ -482,6 +500,9 @@ public sealed class CompositionService(
         PageComposition composition,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(composition.ProjectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (composition.EditionId is Guid editionId)
         {
             var edition = (await effectiveConfigurations.ResolveReleaseAsync(
@@ -511,8 +532,8 @@ public sealed class CompositionService(
         Guid variantId,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        PrepareFreshCompositionMutation(compositionId);
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var composition = await db.PageCompositions
             .Include(item => item.Variants.Where(variant => variant.DetachedAt == null)).SingleOrDefaultAsync(
             item => item.Id == compositionId && item.ProjectId == projectId && item.DetachedAt == null,
@@ -529,8 +550,9 @@ public sealed class CompositionService(
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        PrepareFreshCompositionMutation(compositionId);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var composition = await db.PageCompositions.SingleOrDefaultAsync(
             item => item.Id == compositionId && item.ProjectId == projectId && item.DetachedAt == null,
             cancellationToken) ?? throw new KeyNotFoundException("Page composition was not found in this project.");
@@ -607,6 +629,8 @@ public sealed class CompositionService(
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var composition = await db.PageCompositions.AsNoTracking()
             .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
             .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId && item.DetachedAt == null, cancellationToken)
@@ -637,19 +661,24 @@ public sealed class CompositionService(
     public async Task<IReadOnlyList<PageCompositionVariant>> ListVariantsAsync(
         Guid projectId,
         Guid compositionId,
-        CancellationToken cancellationToken = default) =>
-        await db.PageCompositionVariants.AsNoTracking()
-            .Where(item => item.CompositionId == compositionId && item.DetachedAt == null
-                && item.Composition.ProjectId == projectId && item.Composition.DetachedAt == null)
-            .OrderByDescending(item => item.UpdatedAt)
-            .ToListAsync(cancellationToken);
-
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.PageCompositionVariants.AsNoTracking()
+                    .Where(item => item.CompositionId == compositionId && item.DetachedAt == null
+                        && item.Composition.ProjectId == projectId && item.Composition.DetachedAt == null)
+                    .OrderByDescending(item => item.UpdatedAt)
+                    .ToListAsync(cancellationToken);
+    }
     public async Task<IReadOnlyList<PageCompositionVariant>> ListVariantsAsync(
         Guid projectId,
         Guid compositionId,
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
         return (await db.PageCompositionVariants.AsNoTracking()
             .Where(item => item.CompositionId == compositionId && item.DetachedAt == null
@@ -663,12 +692,15 @@ public sealed class CompositionService(
     public async Task<PageCompositionVariant> ReadVariantAsync(
         Guid projectId,
         Guid variantId,
-        CancellationToken cancellationToken = default) =>
-        await db.PageCompositionVariants.AsNoTracking().Include(item => item.Composition)
-            .SingleOrDefaultAsync(item => item.Id == variantId && item.DetachedAt == null
-                && item.Composition.ProjectId == projectId && item.Composition.DetachedAt == null, cancellationToken)
-        ?? throw new KeyNotFoundException("Composition variant was not found in this project.");
-
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.PageCompositionVariants.AsNoTracking().Include(item => item.Composition)
+                    .SingleOrDefaultAsync(item => item.Id == variantId && item.DetachedAt == null
+                        && item.Composition.ProjectId == projectId && item.Composition.DetachedAt == null, cancellationToken)
+                ?? throw new KeyNotFoundException("Composition variant was not found in this project.");
+    }
     public async Task<PageCompositionVariant> SelectVariantAsync(
         Guid projectId,
         Guid compositionId,
@@ -676,8 +708,9 @@ public sealed class CompositionService(
         Guid variantId,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        PrepareFreshCompositionMutation(compositionId);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
         var variant = await db.PageCompositionVariants.Include(item => item.Composition)
             .SingleOrDefaultAsync(item => item.Id == variantId && item.CompositionId == compositionId
@@ -776,9 +809,10 @@ public sealed class CompositionService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         scene = scene with { Guides = [] };
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        await PrepareFreshVariantCompositionMutationAsync(variantId, cancellationToken);
         var beforeHistory = await AuthoringSnapshotCodec.CaptureCompositionAsync(db, projectId, compositionId: await db.PageCompositionVariants.AsNoTracking()
             .Where(item => item.Id == variantId && item.DetachedAt == null && item.Composition.DetachedAt == null)
             .Select(item => item.CompositionId)
@@ -820,6 +854,9 @@ public sealed class CompositionService(
         string sceneJson,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(composition.ProjectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var existing = await db.PageCompositionVariants.SingleOrDefaultAsync(
             item => item.CompositionId == composition.Id && item.GeometryKey == geometryKey,
             cancellationToken);
@@ -879,6 +916,8 @@ public sealed class CompositionService(
         int? readingOrder = null,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (imageId == Guid.Empty)
             throw new ArgumentException("A project image is required.", nameof(imageId));
         if (!decorative && string.IsNullOrWhiteSpace(altText))
@@ -1064,9 +1103,10 @@ public sealed class CompositionService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        PrepareFreshCompositionMutation(compositionId);
         var beforeHistory = await AuthoringSnapshotCodec.CaptureCompositionAsync(db, projectId, compositionId, "", cancellationToken);
         var variant = await db.PageCompositionVariants.Include(item => item.Composition)
             .ThenInclude(item => item.Variants.Where(other => other.DetachedAt == null))
@@ -1132,8 +1172,10 @@ public sealed class CompositionService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         scene = scene with { Guides = [] };
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await db.CompositionMutationStages
             .Where(item => item.ProjectId == projectId
                 && (item.ExpiresAt <= DateTime.UtcNow || item.AppliedAt != null))
@@ -1175,7 +1217,9 @@ public sealed class CompositionService(
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var stage = await db.CompositionMutationStages.SingleOrDefaultAsync(
             item => item.Id == stageId
@@ -1194,7 +1238,6 @@ public sealed class CompositionService(
         var payloadHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(stage.OperationsJson)));
         if (!string.Equals(payloadHash, stage.PayloadSha256, StringComparison.Ordinal))
             throw new InvalidDataException("The staged composition payload failed its integrity check.");
-        await PrepareFreshVariantCompositionMutationAsync(stage.TargetId, cancellationToken);
         var variant = await db.PageCompositionVariants.Include(item => item.Composition)
             .ThenInclude(item => item.Variants.Where(other => other.DetachedAt == null)).SingleAsync(
             item => item.Id == stage.TargetId && item.DetachedAt == null
@@ -1243,9 +1286,11 @@ public sealed class CompositionService(
         IReadOnlyList<ManuscriptOperationInput> operations,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (operations.Count is < 1 or > 200)
             throw new ArgumentException("A semantic composition stage requires 1 to 200 focused manuscript operations.");
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await db.CompositionMutationStages
             .Where(item => item.ProjectId == projectId && (item.ExpiresAt <= DateTime.UtcNow || item.AppliedAt != null))
             .ExecuteDeleteAsync(cancellationToken);
@@ -1294,7 +1339,9 @@ public sealed class CompositionService(
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var stage = await db.CompositionMutationStages.SingleOrDefaultAsync(item => item.Id == stageId
             && item.ProjectId == projectId && item.ConversationId == conversationId
@@ -1311,7 +1358,6 @@ public sealed class CompositionService(
         var payloadHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(stage.OperationsJson)));
         if (!string.Equals(payloadHash, stage.PayloadSha256, StringComparison.Ordinal))
             throw new InvalidDataException("The staged composition payload failed its integrity check.");
-        PrepareFreshCompositionMutation(stage.TargetId);
         var composition = await db.PageCompositions
             .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
             .SingleAsync(item => item.Id == stage.TargetId && item.ProjectId == projectId
@@ -1357,10 +1403,12 @@ public sealed class CompositionService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         scene = scene with { Guides = [] };
         if (semanticOperations.Count > 200)
             throw new ArgumentException("A composition workspace stage accepts at most 200 focused semantic operations.");
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await db.CompositionMutationStages
             .Where(item => item.ProjectId == projectId && (item.ExpiresAt <= DateTime.UtcNow || item.AppliedAt != null))
             .ExecuteDeleteAsync(cancellationToken);
@@ -1424,7 +1472,9 @@ public sealed class CompositionService(
         long expectedCompositionRevision,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var stage = await db.CompositionMutationStages.SingleOrDefaultAsync(item => item.Id == stageId
             && item.ProjectId == projectId && item.ConversationId == conversationId
@@ -1441,7 +1491,6 @@ public sealed class CompositionService(
             throw new InvalidDataException("The staged composition workspace payload failed its integrity check.");
         var payload = JsonSerializer.Deserialize<CompositionWorkspaceStagePayload>(stage.OperationsJson, JsonOptions)
             ?? throw new InvalidDataException("The staged composition workspace payload is empty.");
-        PrepareFreshCompositionMutation(stage.TargetId);
         var variant = await db.PageCompositionVariants.Include(item => item.Composition)
             .ThenInclude(item => item.Variants.Where(other => other.DetachedAt == null))
             .SingleOrDefaultAsync(item => item.Id == payload.VariantId && item.CompositionId == stage.TargetId
@@ -1636,12 +1685,15 @@ public sealed class CompositionService(
         return new CompositionEditionGeometry(setup.PageWidthInches * 72, setup.PageHeightInches * 72, false);
     }
 
-    private async Task<ProjectPageSetup> ReadPageSetupAsync(Guid projectId, CancellationToken cancellationToken) =>
-        await db.ProjectPageSetups.AsNoTracking().SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken)
-        ?? (await db.Projects.AsNoTracking().AnyAsync(item => item.Id == projectId, cancellationToken)
-            ? new ProjectPageSetup { ProjectId = projectId }
-            : throw new KeyNotFoundException("Project was not found."));
-
+    private async Task<ProjectPageSetup> ReadPageSetupAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.ProjectPageSetups.AsNoTracking().SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken)
+                ?? (await db.Projects.AsNoTracking().AnyAsync(item => item.Id == projectId, cancellationToken)
+                    ? new ProjectPageSetup { ProjectId = projectId }
+                    : throw new KeyNotFoundException("Project was not found."));
+    }
     private static string NormalizeGenerationTargetKind(string value)
     {
         var key = new string(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
@@ -1678,6 +1730,9 @@ public sealed class CompositionService(
         Guid variantId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var edition = editionId is Guid requestedEditionId
             ? await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
                 item => item.Id == requestedEditionId && item.ProjectId == projectId,
@@ -1815,6 +1870,8 @@ public sealed class CompositionService(
         Guid targetId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var blockId = targetId.ToString("N");
         var chapters = await db.Chapters.AsNoTracking().Where(item => item.ProjectId == projectId)
             .Select(item => item.ManuscriptJson).ToListAsync(cancellationToken);
@@ -1910,6 +1967,8 @@ public sealed class CompositionService(
         Guid variantId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var variant = await db.PageCompositionVariants.AsNoTracking().Include(item => item.Composition)
             .SingleOrDefaultAsync(item => item.Id == variantId && item.DetachedAt == null
                 && item.Composition.ProjectId == projectId && item.Composition.DetachedAt == null, cancellationToken)
@@ -1944,6 +2003,8 @@ public sealed class CompositionService(
 
     private async Task<CompositionScene> ReadCoreCoverSceneAsync(Guid projectId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var sceneJson = await db.PublicationBookCoverDesigns.AsNoTracking()
             .Where(item => item.ProjectId == projectId)
             .Select(item => item.CompositionSceneJson)
@@ -1973,6 +2034,8 @@ public sealed class CompositionService(
         Guid targetId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (targetId != edition.Id)
         {
             var ownedCover = await db.PublicationCoverDesigns.AsNoTracking()
@@ -2188,37 +2251,37 @@ public sealed class CompositionService(
     public static CompositionScene CreatePageScene(
         PublicationEdition edition,
         DesignedPageLayoutMode layoutMode = DesignedPageLayoutMode.SinglePage) => new()
-    {
-        Surface = new CompositionSurface
         {
-            Kind = layoutMode == DesignedPageLayoutMode.FacingSpread
+            Surface = new CompositionSurface
+            {
+                Kind = layoutMode == DesignedPageLayoutMode.FacingSpread
                 ? CompositionSurfaceKind.FacingSpread
                 : CompositionSurfaceKind.SinglePage,
-            WidthPoints = edition.PageWidthInches * 72 * (layoutMode == DesignedPageLayoutMode.FacingSpread ? 2 : 1),
-            HeightPoints = edition.PageHeightInches * 72,
-            BleedPoints = edition.Bleed ? 9 : 0,
-            SafeInsetPoints = edition.PageMarginInches * 72,
-            AllowIndependentPdfPage = edition.Format == PublicationEditionFormat.DigitalPdf
+                WidthPoints = edition.PageWidthInches * 72 * (layoutMode == DesignedPageLayoutMode.FacingSpread ? 2 : 1),
+                HeightPoints = edition.PageHeightInches * 72,
+                BleedPoints = edition.Bleed ? 9 : 0,
+                SafeInsetPoints = edition.PageMarginInches * 72,
+                AllowIndependentPdfPage = edition.Format == PublicationEditionFormat.DigitalPdf
                 && edition.AllowDesignedPageOverrides,
-        },
-        Layers = [new CompositionLayer(Guid.NewGuid(), "Content", 0)],
-    };
+            },
+            Layers = [new CompositionLayer(Guid.NewGuid(), "Content", 0)],
+        };
 
     public static CompositionScene CreatePageScene(
         ProjectPageSetup setup,
         DesignedPageLayoutMode layoutMode = DesignedPageLayoutMode.SinglePage) => new()
-    {
-        Surface = new CompositionSurface
         {
-            Kind = layoutMode == DesignedPageLayoutMode.FacingSpread
+            Surface = new CompositionSurface
+            {
+                Kind = layoutMode == DesignedPageLayoutMode.FacingSpread
                 ? CompositionSurfaceKind.FacingSpread
                 : CompositionSurfaceKind.SinglePage,
-            WidthPoints = setup.PageWidthInches * 72 * (layoutMode == DesignedPageLayoutMode.FacingSpread ? 2 : 1),
-            HeightPoints = setup.PageHeightInches * 72,
-            SafeInsetPoints = setup.PageMarginInches * 72,
-        },
-        Layers = [new CompositionLayer(Guid.NewGuid(), "Content", 0)],
-    };
+                WidthPoints = setup.PageWidthInches * 72 * (layoutMode == DesignedPageLayoutMode.FacingSpread ? 2 : 1),
+                HeightPoints = setup.PageHeightInches * 72,
+                SafeInsetPoints = setup.PageMarginInches * 72,
+            },
+            Layers = [new CompositionLayer(Guid.NewGuid(), "Content", 0)],
+        };
 
     private static string SerializeAndValidate(CompositionScene scene, string semanticJson)
     {
@@ -2231,6 +2294,8 @@ public sealed class CompositionService(
         CompositionScene scene,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var imageIds = scene.Objects
             .Where(item => item.Visible && item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
             .Select(item => item.ImageId!.Value)
@@ -2449,28 +2514,10 @@ public sealed class CompositionService(
 
     private async Task TouchProjectAsync(Guid projectId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var project = await db.Projects.SingleAsync(item => item.Id == projectId, cancellationToken);
         project.UpdatedAt = DateTime.UtcNow;
-    }
-
-    private void PrepareFreshCompositionMutation(Guid compositionId)
-    {
-        db.PrepareFreshMutation<PageCompositionVariant>(item => item.CompositionId == compositionId);
-        db.PrepareFreshMutation<PageComposition>(item => item.Id == compositionId);
-    }
-
-    private async Task PrepareFreshVariantCompositionMutationAsync(
-        Guid variantId,
-        CancellationToken cancellationToken)
-    {
-        var compositionId = db.PageCompositionVariants.Local
-            .FirstOrDefault(item => item.Id == variantId)?.CompositionId
-            ?? await db.PageCompositionVariants.AsNoTracking()
-                .Where(item => item.Id == variantId)
-                .Select(item => (Guid?)item.CompositionId)
-                .SingleOrDefaultAsync(cancellationToken);
-        if (compositionId is Guid id)
-            PrepareFreshCompositionMutation(id);
     }
 
 }

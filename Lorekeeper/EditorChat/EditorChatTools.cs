@@ -12,9 +12,10 @@ using Lorekeeper.Llm;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
+using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Publish;
 using Lorekeeper.Search;
-using Lorekeeper.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -23,7 +24,7 @@ using SkiaSharp;
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorChatTools(
-    IActService acts,
+IAppDatabaseOperationFactory database, IActService acts,
     IChapterService chapters,
     IManuscriptService manuscripts,
     IManuscriptMigrationService manuscriptMigrations,
@@ -36,7 +37,6 @@ public sealed class EditorChatTools(
     IEntityRelationContextService entityRelations,
     IProjectSearchService projectSearch,
     IEditorRevisionAgentService revisionAgents,
-    IAiChangeRepository aiChanges,
     OutlineCollaborationTools outlineTools,
     IProjectImageService projectImages,
     IEntityVisualExampleService entityVisualExamples,
@@ -1379,6 +1379,8 @@ public sealed class EditorChatTools(
 
     private async Task<string> StartRevisionAgentsAsync(EditorChatContext ctx, EditorRevisionAgentAssignmentInput[] assignments)
     {
+        await using var databaseOperation = await database.OpenReadAsync(default);
+        var aiChanges = databaseOperation.Repositories.AiChanges;
         if (assignments is null || assignments.Length == 0)
             return "Error: chapters is required.";
 

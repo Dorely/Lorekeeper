@@ -12,7 +12,7 @@ public interface IChapterSemanticProjectionService
         CancellationToken cancellationToken = default);
 }
 
-public sealed class ChapterSemanticProjectionService(AppDbContext db) : IChapterSemanticProjectionService
+public sealed class ChapterSemanticProjectionService(IAppDatabaseOperationFactory database) : IChapterSemanticProjectionService
 {
     public async Task<string> ExpandPlainTextAsync(
         Chapter chapter,
@@ -23,6 +23,9 @@ public sealed class ChapterSemanticProjectionService(AppDbContext db) : IChapter
         IReadOnlyCollection<Chapter> chapters,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (chapters.Count == 0)
             return new Dictionary<Guid, string>();
         var compositionIds = chapters.SelectMany(chapter => chapter.Manuscript.Content)

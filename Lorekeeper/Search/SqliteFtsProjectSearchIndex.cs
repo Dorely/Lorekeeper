@@ -6,6 +6,7 @@ namespace Lorekeeper.Search;
 
 public sealed partial class SqliteFtsProjectSearchIndex(
     IConfiguration configuration,
+    IAppDatabaseWriteCoordinator writes,
     ILogger<SqliteFtsProjectSearchIndex> logger) : IProjectSearchIndex
 {
     private const string TableName = "project_search_fts";
@@ -17,6 +18,7 @@ public sealed partial class SqliteFtsProjectSearchIndex(
     {
         if (string.IsNullOrWhiteSpace(chunk.Content)) return;
 
+        await using var writeLease = await writes.AcquireAsync(cancellationToken);
         await using var connection = await OpenAsync(cancellationToken);
         await using var cmd = connection.CreateCommand();
         cmd.CommandText =
@@ -43,6 +45,7 @@ public sealed partial class SqliteFtsProjectSearchIndex(
         var list = chunks.Where(chunk => !string.IsNullOrWhiteSpace(chunk.Content)).ToList();
         if (list.Count == 0) return;
 
+        await using var writeLease = await writes.AcquireAsync(cancellationToken);
         await using var connection = await OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         foreach (var chunk in list)
@@ -147,6 +150,7 @@ public sealed partial class SqliteFtsProjectSearchIndex(
         string scopeKey,
         CancellationToken cancellationToken = default)
     {
+        await using var writeLease = await writes.AcquireAsync(cancellationToken);
         await using var connection = await OpenAsync(cancellationToken);
         await using var cmd = connection.CreateCommand();
         cmd.CommandText =
@@ -164,6 +168,7 @@ public sealed partial class SqliteFtsProjectSearchIndex(
 
     public async Task DeleteByScopeAsync(string scopeKey, CancellationToken cancellationToken = default)
     {
+        await using var writeLease = await writes.AcquireAsync(cancellationToken);
         await using var connection = await OpenAsync(cancellationToken);
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = $"DELETE FROM {TableName} WHERE scope_key = @scopeKey";
@@ -197,7 +202,6 @@ public sealed partial class SqliteFtsProjectSearchIndex(
         var connection = new SqliteConnection(ConnectionString);
         await connection.OpenAsync(cancellationToken);
         SqliteConnectionSettings.ConfigureDatabase(connection);
-        Initialize(connection);
         return connection;
     }
 

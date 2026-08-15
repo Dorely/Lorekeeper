@@ -18,5 +18,4 @@ public interface IProjectImportRepository
     void UpdateJob(ProjectImportJob job);
     void UpdateReportItem(ProjectImportReportItem item);
     void RemoveJob(ProjectImportJob job);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

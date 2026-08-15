@@ -3,14 +3,14 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Authoring;
-using Lorekeeper.ChatTurns;
 using Lorekeeper.Chapters;
+using Lorekeeper.ChatTurns;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Images;
 using Lorekeeper.Llm;
-using Lorekeeper.Models;
 using Lorekeeper.Manuscripts;
+using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
@@ -21,36 +21,17 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorChatService(
-    AppDbContext db,
-    IProjectRepository projects,
-    IChapterService chapters,
-    IEditorConversationRepository conversations,
-    IChatImageAttachmentService imageAttachments,
-    IContextBuilder contextBuilder,
-    IProjectImageService projectImages,
-    IEntityVisualContextService entityVisualContext,
-    IProjectImageGenerationRuntime imageRuntime,
-    ILlmProviderService providerService,
-    IChatClientFactory chatClientFactory,
-    EditorChatTools tools,
-    OutlineCollaborationTools outlineTools,
-    IEditorContestService contestService,
-    IEditorRevisionJobNotifier revisionJobNotifier,
-    IEditorRevisionAgentService revisionAgents,
-    IAiChangeApprovalService changeApproval,
-    IAiChangeRepository changes,
-    IServiceScopeFactory scopeFactory,
-    ChatTurnEngine turnEngine,
-    IAuthoringHistoryService authoringHistory,
-    IAuthoringMutationContextAccessor authoringMutationContext,
-    IOptions<AgentOptions> options,
-    ILogger<EditorChatService> logger) : IEditorChatService
+    IAppDatabaseOperationFactory database, IChapterService chapters, IChatImageAttachmentService imageAttachments, IContextBuilder contextBuilder, IProjectImageService projectImages, IEntityVisualContextService entityVisualContext, IProjectImageGenerationRuntime imageRuntime, ILlmProviderService providerService, IChatClientFactory chatClientFactory, EditorChatTools tools, OutlineCollaborationTools outlineTools, IEditorContestService contestService, IEditorRevisionJobNotifier revisionJobNotifier, IEditorRevisionAgentService revisionAgents, IAiChangeApprovalService changeApproval, IServiceScopeFactory scopeFactory, ChatTurnEngine turnEngine, IAuthoringHistoryService authoringHistory, IAuthoringMutationContextAccessor authoringMutationContext, IOptions<AgentOptions> options, ILogger<EditorChatService> logger) : IEditorChatService
 {
     private const string _initialAssistantGreeting =
         "I'm ready to work on the draft with you. Tell me what you want to shape, revise, or check in the current chapter.";
 
     public async Task<EditorConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
+        var conversations = databaseOperation.Repositories.EditorConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is not null) return existing;
 
@@ -68,15 +49,20 @@ public sealed class EditorChatService(
             Content = _initialAssistantGreeting,
             Status = EditorMessageStatus.Completed,
         }, cancellationToken);
-        await conversations.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return conversation;
     }
 
-    public async Task<IReadOnlyList<EditorMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        await conversations.LoadTranscriptMessagesAsync(conversationId, cancellationToken);
-
+    public async Task<IReadOnlyList<EditorMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var conversations = databaseOperation.Repositories.EditorConversations;
+        return await conversations.LoadTranscriptMessagesAsync(conversationId, cancellationToken);
+    }
     public async Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         return project.AiChangeApprovalEnabled;
@@ -84,13 +70,16 @@ public sealed class EditorChatService(
 
     public async Task SetAiChangeApprovalEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         if (project.AiChangeApprovalEnabled == enabled) return;
         project.AiChangeApprovalEnabled = enabled;
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
-        await projects.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public Task<EditorContestSettings> GetContestSettingsAsync(Guid projectId, CancellationToken cancellationToken = default) =>
@@ -125,10 +114,13 @@ public sealed class EditorChatService(
     {
         await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Editor, cancellationToken);
         await contestService.DiscardInactiveContestBatchesAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var conversations = databaseOperation.Repositories.EditorConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
         conversations.RemoveConversation(existing);
-        await conversations.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(
@@ -180,7 +172,10 @@ public sealed class EditorChatService(
         }
         await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);
 
-        var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
+        var nextOrder = await turnEngine.ReadAsync(
+            repositories => repositories.EditorConversations,
+            conversations => conversations.GetMaxOrderAsync(conversation.Id, cancellationToken),
+            cancellationToken) + 1;
         var userMessage = new EditorMessage
         {
             ConversationId = conversation.Id,
@@ -192,7 +187,7 @@ public sealed class EditorChatService(
             ContentTargetEditionId = contentTarget.EditionId,
         };
         conversation.UpdatedAt = DateTime.UtcNow;
-        await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
+        await turnEngine.AddMessageAsync(repositories => repositories.EditorConversations, userMessage, cancellationToken);
         await imageAttachments.PersistAsync(projectId, ChatTurnSurface.Editor, userMessage.Id, imageIds, cancellationToken);
         await using var authoringTurn = new AuthoringTurnHistoryScope(
             authoringHistory,
@@ -210,7 +205,10 @@ public sealed class EditorChatService(
         string? setupError = null;
         try
         {
-            var project = await projects.GetByIdAsync(projectId, cancellationToken)
+            var project = await turnEngine.ReadAsync(
+                repositories => repositories.Projects,
+                projects => projects.GetByIdAsync(projectId, cancellationToken),
+                cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
             if (currentChapterId is { } chapterId)
@@ -228,13 +226,15 @@ public sealed class EditorChatService(
             systemPrompt = assembly.Assemble();
             if (!contentTarget.IsCore)
             {
-                var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
-                    item => item.Id == contentTarget.EditionId && item.ProjectId == projectId && item.EditionSpecificContentEnabled,
+                var edition = await turnEngine.ReadAsync(
+                    db => db.PublicationEditions.SingleOrDefaultAsync(
+                        item => item.Id == contentTarget.EditionId && item.ProjectId == projectId && item.EditionSpecificContentEnabled,
+                        cancellationToken),
                     cancellationToken) ?? throw new InvalidOperationException("The selected edition content target is unavailable.");
                 systemPrompt += $"\n\n## Selected Editor content target\nYou are editing the publication release '{edition.Name}' ({edition.Id:D}). All manuscript, Figure, Designed Page, review, contest, and revision operations apply only to this selected release. Do not mutate the shared outline, Book Brief, canon, entities, links, or project facts. Saved Book Text Styles are shared project resources: you may create and apply a new style, but never update or delete an existing shared style from this edition turn. The release ID is protected context and must not be requested from the user or supplied as a tool argument.";
             }
             userMessage.ContextSnapshotJson = assembly.SnapshotJson();
-            await turnEngine.UpdateMessageAsync(conversations, userMessage, cancellationToken);
+            await turnEngine.UpdateMessageAsync(repositories => repositories.EditorConversations, userMessage, cancellationToken);
 
             chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
 
@@ -247,7 +247,7 @@ public sealed class EditorChatService(
                     conversation.Id,
                     AiChangeConversationKind.Editor,
                     OnToolMutated);
-                editorStaging = new EditorChatChangeStagingContext(projectId, conversation.Id, contentTarget, changes);
+                editorStaging = new EditorChatChangeStagingContext(database, projectId, conversation.Id, contentTarget);
             }
 
             editorContext = new EditorChatContext(
@@ -284,7 +284,10 @@ public sealed class EditorChatService(
             ToolMode = ChatToolMode.Auto,
         };
 
-        var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
+        var history = await turnEngine.ReadAsync(
+            repositories => repositories.EditorConversations,
+            conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
+            cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
         if (await entityVisualContext.BuildVisionMessageAsync(
             projectId,
@@ -317,7 +320,7 @@ public sealed class EditorChatService(
                 Content = string.Empty,
                 Status = EditorMessageStatus.Pending,
             };
-            await turnEngine.AddMessageAsync(conversations, activeAssistant, cancellationToken);
+            await turnEngine.AddMessageAsync(repositories => repositories.EditorConversations, activeAssistant, cancellationToken);
 
             ChatRoundCompleted? completedRound = null;
             await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
@@ -369,8 +372,6 @@ public sealed class EditorChatService(
                 activeAssistant.Status = EditorMessageStatus.Completed;
                 await SafePersistAsync(activeAssistant);
 
-                conversation.UpdatedAt = DateTime.UtcNow;
-                await conversations.SaveChangesAsync(CancellationToken.None);
                 authoringTurn.Complete();
                 yield return new EditorChatAssistantMessageCompleted(activeAssistant.Id);
                 yield break;
@@ -575,7 +576,7 @@ public sealed class EditorChatService(
                     Status = toolError is null ? EditorMessageStatus.Completed : EditorMessageStatus.Failed,
                     ErrorMessage = toolError,
                 };
-                await turnEngine.AddMessageAsync(conversations, toolMessage, CancellationToken.None);
+                await turnEngine.AddMessageAsync(repositories => repositories.EditorConversations, toolMessage, CancellationToken.None);
                 await PersistVisualsAsync(toolMessage.Id, pendingCall.CallId, visuals);
 
                 resultContents.Add(new FunctionResultContent(
@@ -655,8 +656,6 @@ public sealed class EditorChatService(
                         }
                     }
 
-                    conversation.UpdatedAt = DateTime.UtcNow;
-                    await conversations.SaveChangesAsync(CancellationToken.None);
                     authoringTurn.Complete();
                     yield return new EditorChatAssistantMessageCompleted(activeAssistant.Id);
                     yield break;
@@ -680,7 +679,7 @@ public sealed class EditorChatService(
                 activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
                 await SafePersistAsync(activeAssistant);
 
-                await turnEngine.AddMessageAsync(conversations, new EditorMessage
+                await turnEngine.AddMessageAsync(repositories => repositories.EditorConversations, new EditorMessage
                 {
                     ConversationId = conversation.Id,
                     Order = nextOrder++,
@@ -726,7 +725,7 @@ public sealed class EditorChatService(
     {
         try
         {
-            await turnEngine.UpdateMessageAsync(conversations, message, CancellationToken.None);
+            await turnEngine.UpdateMessageAsync(repositories => repositories.EditorConversations, message, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -739,6 +738,9 @@ public sealed class EditorChatService(
         string? toolCallId,
         IReadOnlyList<EditorChatVisualAttachment> visuals)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var conversations = databaseOperation.Repositories.EditorConversations;
         if (visuals.Count == 0)
             return;
 
@@ -758,7 +760,7 @@ public sealed class EditorChatService(
             Height = visual.Height,
             Data = visual.Data,
         }), CancellationToken.None);
-        await conversations.SaveChangesAsync(CancellationToken.None);
+        await databaseOperation.SaveChangesAsync(CancellationToken.None);
     }
 
     private async Task<ChatMessage> BuildModelOnlyImageMessageAsync(

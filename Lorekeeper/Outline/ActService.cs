@@ -1,23 +1,31 @@
 using Lorekeeper.Context;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Outline;
 
 public class ActService(
-    IActRepository repo,
-    IProjectRepository projects,
-    IOutlineGraphSync outlineGraphSync,
-    IContextIndexingService contextIndexing) : IActService
+IAppDatabaseOperationFactory database, IOutlineGraphSync outlineGraphSync, IContextIndexingService contextIndexing) : IActService
 {
-    public async Task<IReadOnlyList<Act>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await repo.ListByProjectAsync(projectId, cancellationToken);
-
-    public Task<Act?> GetAsync(Guid actId, CancellationToken cancellationToken = default) =>
-        repo.GetByIdAsync(actId, cancellationToken);
-
+    public async Task<IReadOnlyList<Act>> ListAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var repo = databaseOperation.Repositories.Acts;
+        return await repo.ListByProjectAsync(projectId, cancellationToken);
+    }
+    public async Task<Act?> GetAsync(Guid actId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var repo = databaseOperation.Repositories.Acts;
+        return await repo.GetByIdAsync(actId, cancellationToken);
+    }
     public async Task<Act> CreateAsync(Guid projectId, string? title = null, string? synopsis = null, Guid? id = null, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Acts;
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
@@ -38,7 +46,7 @@ public class ActService(
         await repo.AddAsync(act, cancellationToken);
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
-        await repo.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.EnsureActAsync(act, cancellationToken);
         await contextIndexing.ReindexActAsync(act.Id, cancellationToken);
         return act;
@@ -46,6 +54,10 @@ public class ActService(
 
     public async Task<Act> UpdateAsync(Guid actId, string? title = null, string? synopsis = null, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Acts;
+        var projects = databaseOperation.Repositories.Projects;
         var act = await repo.GetByIdAsync(actId, cancellationToken)
             ?? throw new InvalidOperationException($"Act {actId} not found.");
 
@@ -62,7 +74,7 @@ public class ActService(
             projects.Update(project);
         }
 
-        await repo.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.EnsureActAsync(act, cancellationToken);
         await contextIndexing.ReindexActAsync(act.Id, cancellationToken);
         return act;
@@ -70,6 +82,10 @@ public class ActService(
 
     public async Task DeleteAsync(Guid actId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Acts;
+        var projects = databaseOperation.Repositories.Projects;
         var act = await repo.GetByIdAsync(actId, cancellationToken);
         if (act is null) return;
         var projectId = act.ProjectId;
@@ -84,13 +100,17 @@ public class ActService(
             projects.Update(project);
         }
 
-        await repo.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.RemoveActAsync(projectId, act.Id, cancellationToken);
         await outlineGraphSync.RepairProjectAsync(projectId, cancellationToken);
     }
 
     public async Task ReorderAsync(Guid projectId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Acts;
+        var projects = databaseOperation.Repositories.Projects;
         await repo.ReorderAsync(projectId, orderedIds, cancellationToken);
 
         var project = await projects.GetByIdAsync(projectId, cancellationToken);
@@ -100,7 +120,7 @@ public class ActService(
             projects.Update(project);
         }
 
-        await repo.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.RepairProjectAsync(projectId, cancellationToken);
         foreach (var actId in orderedIds)
             await contextIndexing.ReindexActAsync(actId, cancellationToken);

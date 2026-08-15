@@ -3,16 +3,13 @@ using Lorekeeper.Graph;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Outline;
 
 public sealed class EntityService(
-    IGraphStore graph,
-    IGraphNodeRepository nodes,
-    IGraphEdgeRepository edges,
-    IContextIndexingService contextIndexing,
-    IGraphAutoLinkService autoLinks) : IEntityService
+IAppDatabaseOperationFactory database, IGraphStore graph, IContextIndexingService contextIndexing, IGraphAutoLinkService autoLinks) : IEntityService
 {
     /// <summary>Canonical chapter <see cref="GraphNode.NodeType"/> for parent links.</summary>
     public const string ChapterNodeType = "Chapter";
@@ -38,6 +35,9 @@ public sealed class EntityService(
         Guid? parentId = null,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         if (parentId is null)
         {
             var all = await nodes.ListByTypeAsync(projectId, nodeType, cancellationToken);
@@ -125,6 +125,9 @@ public sealed class EntityService(
         IReadOnlyCollection<string>? propertiesToRemove = null,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var node = await ResolveEntityNodeAsync(projectId, entityId, cancellationToken)
             ?? throw new InvalidOperationException($"Entity {entityId} not found in project {projectId}.");
 
@@ -153,7 +156,7 @@ public sealed class EntityService(
 
         node.UpdatedAt = DateTime.UtcNow;
         nodes.Update(node);
-        await nodes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
 
         var parent = await FindParentAsync(node.Id, cancellationToken);
         var entity = Project(node, parent);
@@ -179,6 +182,10 @@ public sealed class EntityService(
         IReadOnlyList<Guid> orderedEntityIds,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         var parent = await ResolveEntityNodeAsync(projectId, parentId, cancellationToken)
             ?? throw new InvalidOperationException($"Parent entity {parentId} not found in project {projectId}.");
 
@@ -209,7 +216,7 @@ public sealed class EntityService(
             edges.Update(edge);
         }
 
-        await edges.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task MoveParentAsync(
@@ -218,6 +225,10 @@ public sealed class EntityService(
         Guid? parentId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         var node = await ResolveEntityNodeAsync(projectId, entityId, cancellationToken)
             ?? throw new InvalidOperationException($"Entity {entityId} not found in project {projectId}.");
 
@@ -308,6 +319,9 @@ public sealed class EntityService(
         IDictionary<string, string?>? properties = null,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var edges = databaseOperation.Repositories.GraphEdges;
         var (edge, fromNode, toNode) = await GetRequiredProjectEdgeAsync(projectId, edgeId, cancellationToken);
         if (IsReadOnlyLink(edge))
             throw new InvalidOperationException("Managed and auto-generated links cannot be edited directly.");
@@ -316,7 +330,7 @@ public sealed class EntityService(
         edge.Properties = ToObjectDict(properties);
         edge.UpdatedAt = DateTime.UtcNow;
         edges.Update(edge);
-        await edges.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
 
         await ReindexEntitiesAsync(projectId, EndpointEntityIds(fromNode, toNode), cancellationToken);
     }
@@ -337,6 +351,9 @@ public sealed class EntityService(
         string childNodeType,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         var parent = await ResolveEntityNodeAsync(projectId, parentId, cancellationToken);
         if (parent is null) return 0;
 
@@ -357,6 +374,10 @@ public sealed class EntityService(
         Guid entityId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         var node = await ResolveEntityNodeAsync(projectId, entityId, cancellationToken);
         if (node is null) return [];
 
@@ -418,6 +439,8 @@ public sealed class EntityService(
     /// </summary>
     private async Task<GraphNode?> ResolveEntityNodeAsync(Guid projectId, Guid id, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var key = id.ToString("N");
         var existing = await nodes.FindByKeyAsync(projectId, key, cancellationToken);
         return existing;
@@ -430,6 +453,9 @@ public sealed class EntityService(
     /// </summary>
     private async Task<GraphNode?> EnsureParentNodeAsync(Guid projectId, Guid parentId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var existing = await nodes.FindByKeyAsync(projectId, parentId.ToString("N"), cancellationToken);
         if (existing is not null) return existing;
 
@@ -448,6 +474,9 @@ public sealed class EntityService(
 
     private async Task<Guid?> FindParentAsync(long childNodeId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         var incoming = await edges.GetAdjacentAsync(
             childNodeId,
             EdgeDirection.Incoming,
@@ -464,6 +493,9 @@ public sealed class EntityService(
         long edgeId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         var edge = await edges.GetByIdAsync(edgeId, cancellationToken)
             ?? throw new InvalidOperationException("Graph relationship not found.");
         var fromNode = await nodes.GetByIdAsync(edge.FromNodeId, cancellationToken)
@@ -477,6 +509,9 @@ public sealed class EntityService(
 
     private async Task<HashSet<Guid>> ListAdjacentContextEntityIdsAsync(Guid projectId, long nodeId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         var adjacent = await edges.GetAdjacentAsync(nodeId, EdgeDirection.Both, edgeTypes: null, maxResults: null, cancellationToken);
         var otherIds = adjacent
             .Select(edge => edge.FromNodeId == nodeId ? edge.ToNodeId : edge.FromNodeId)

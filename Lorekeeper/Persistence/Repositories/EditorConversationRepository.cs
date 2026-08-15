@@ -3,13 +3,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public sealed class EditorConversationRepository(AppDbContext db) : IEditorConversationRepository
+public sealed class EditorConversationRepository(AppDatabaseReadOperation operation) : IEditorConversationRepository
 {
     public Task<EditorConversation?> GetByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.EditorConversations.FirstOrDefaultAsync(conversation => conversation.ProjectId == projectId, cancellationToken);
+        operation.Db.EditorConversations.FirstOrDefaultAsync(conversation => conversation.ProjectId == projectId, cancellationToken);
 
     public Task<List<EditorMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        db.EditorMessages
+        operation.Db.EditorMessages
             .AsNoTracking()
             .Where(message => message.ConversationId == conversationId)
             .OrderBy(message => message.Order)
@@ -23,7 +23,7 @@ public sealed class EditorConversationRepository(AppDbContext db) : IEditorConve
         if (messages.Count == 0)
             return messages;
 
-        var visuals = await db.EditorMessageVisuals
+        var visuals = await operation.Db.EditorMessageVisuals
             .AsNoTracking()
             .Where(visual => visual.Message.ConversationId == conversationId)
             .OrderBy(visual => visual.Message.Order)
@@ -58,28 +58,41 @@ public sealed class EditorConversationRepository(AppDbContext db) : IEditorConve
     }
 
     public Task<bool> ExistsAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        db.EditorConversations.AnyAsync(conversation => conversation.Id == conversationId, cancellationToken);
+        operation.Db.EditorConversations.AnyAsync(conversation => conversation.Id == conversationId, cancellationToken);
 
     public async Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
-        var any = await db.EditorMessages.AnyAsync(message => message.ConversationId == conversationId, cancellationToken);
+        var any = await operation.Db.EditorMessages.AnyAsync(message => message.ConversationId == conversationId, cancellationToken);
         if (!any) return -1;
-        return await db.EditorMessages.Where(message => message.ConversationId == conversationId).MaxAsync(message => message.Order, cancellationToken);
+        return await operation.Db.EditorMessages.Where(message => message.ConversationId == conversationId).MaxAsync(message => message.Order, cancellationToken);
     }
 
     public async Task AddConversationAsync(EditorConversation conversation, CancellationToken cancellationToken = default) =>
-        await db.EditorConversations.AddAsync(conversation, cancellationToken);
+        await operation.Db.EditorConversations.AddAsync(conversation, cancellationToken);
 
-    public async Task AddMessageAsync(EditorMessage message, CancellationToken cancellationToken = default) =>
-        await db.EditorMessages.AddAsync(message, cancellationToken);
+    public async Task AddMessageAsync(EditorMessage message, CancellationToken cancellationToken = default)
+    {
+        TouchConversation(message.ConversationId);
+        await operation.Db.EditorMessages.AddAsync(message, cancellationToken);
+    }
+
+    private void TouchConversation(Guid conversationId)
+    {
+        var conversation = operation.Db.EditorConversations.Local.FirstOrDefault(item => item.Id == conversationId);
+        if (conversation is null)
+        {
+            conversation = new EditorConversation { Id = conversationId };
+            operation.Db.Attach(conversation);
+            operation.Db.Entry(conversation).Property(item => item.UpdatedAt).IsModified = true;
+        }
+
+        conversation.UpdatedAt = DateTime.UtcNow;
+    }
 
     public async Task AddMessageVisualsAsync(IEnumerable<EditorMessageVisual> visuals, CancellationToken cancellationToken = default) =>
-        await db.EditorMessageVisuals.AddRangeAsync(visuals, cancellationToken);
+        await operation.Db.EditorMessageVisuals.AddRangeAsync(visuals, cancellationToken);
 
-    public void UpdateMessage(EditorMessage message) => db.EditorMessages.Update(message);
+    public void UpdateMessage(EditorMessage message) => operation.Db.MarkModified(message);
 
-    public void RemoveConversation(EditorConversation conversation) => db.EditorConversations.Remove(conversation);
-
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        db.SaveChangesAsync(cancellationToken);
+    public void RemoveConversation(EditorConversation conversation) => operation.Db.MarkDeleted(conversation);
 }

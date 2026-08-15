@@ -47,7 +47,7 @@ public interface IChatImageAttachmentService
 }
 
 public sealed class ChatImageAttachmentService(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     IProjectImageService images) : IChatImageAttachmentService
 {
     public async Task<IReadOnlyList<ChatTurnImageAttachment>> ResolveAsync(
@@ -72,6 +72,8 @@ public sealed class ChatImageAttachmentService(
         ChatTurnSurface surface,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var rows = await db.ChatMessageImageAttachments
             .AsNoTracking()
             .Include(attachment => attachment.Image)
@@ -96,6 +98,9 @@ public sealed class ChatImageAttachmentService(
         IReadOnlyList<Guid> imageIds,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var orderedIds = NormalizeIds(imageIds);
         if (orderedIds.Count == 0)
             return;
@@ -150,6 +155,9 @@ public sealed class ChatImageAttachmentService(
         ChatTurnSurface surface,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var attachments = await db.ChatMessageImageAttachments
             .Where(attachment => attachment.ProjectId == projectId && attachment.Surface == surface)
             .ToListAsync(cancellationToken);

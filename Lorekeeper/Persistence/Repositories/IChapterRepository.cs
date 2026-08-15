@@ -25,6 +25,4 @@ public interface IChapterRepository
     /// Pass <c>null</c> for <paramref name="actId"/> to reorder the unassigned bucket.
     /// </summary>
     Task ReorderAsync(Guid projectId, Guid? actId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default);
-
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

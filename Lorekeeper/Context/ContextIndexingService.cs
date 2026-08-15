@@ -3,8 +3,8 @@ using Lorekeeper.Graph;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
-using Lorekeeper.Models;
 using Lorekeeper.Manuscripts;
+using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
@@ -14,92 +14,94 @@ using Microsoft.EntityFrameworkCore;
 namespace Lorekeeper.Context;
 
 public sealed class ContextIndexingService(
-    IVectorStore vectors,
-    IEmbeddingService embeddings,
-    ITextChunker chunker,
-    IProjectSearchIndex projectSearch,
-    IGraphAutoLinkService autoLinks,
-    IGraphNodeRepository nodes,
-    IGraphEdgeRepository edges,
-    IActRepository acts,
-    IChapterRepository chapters,
-    IIngestRepository ingest,
-    AppDbContext db,
-    IChapterSemanticProjectionService semanticProjection,
-    IVectorIndexWorkCoordinator indexWork,
-    ILogger<ContextIndexingService> logger) : IContextIndexingService
+    IVectorStore vectors, IEmbeddingService embeddings, ITextChunker chunker, IProjectSearchIndex projectSearch, IGraphAutoLinkService autoLinks, IAppDatabaseOperationFactory database, IChapterSemanticProjectionService semanticProjection, IVectorIndexWorkCoordinator indexWork, ILogger<ContextIndexingService> logger) : IContextIndexingService
 {
     private const int MaxEntityLinks = 30;
     private const int MaxSourceChunkExcerptChars = 6_000;
 
-    public Task ReindexEntityAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default) =>
-        indexWork.QueueOrRunAsync(
-            VectorIndexWorkKind.ContextEntity,
-            $"{projectId:N}:{entityId:N}",
-            async ct =>
-            {
-                try
-                {
-                    var node = await nodes.FindByKeyAsync(projectId, entityId.ToString("N"), ct);
-                    if (node is null || !IsContextEntityNode(node))
+    public async Task ReindexEntityAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default)
+    {
+        await indexWork.QueueOrRunAsync(
+                    VectorIndexWorkKind.ContextEntity,
+                    $"{projectId:N}:{entityId:N}",
+                    async ct =>
                     {
-                        await DeleteEntityAsync(projectId, entityId, ct);
-                        return;
-                    }
+                        try
+                        {
+                            GraphNode? node;
+                            await using (var operation = await database.OpenReadAsync(ct))
+                            {
+                                node = await operation.Repositories.GraphNodes.FindByKeyAsync(projectId, entityId.ToString("N"), ct);
+                            }
+                            if (node is null || !IsContextEntityNode(node))
+                            {
+                                await DeleteEntityAsync(projectId, entityId, ct);
+                                return;
+                            }
 
-                    await ReindexEntityNodeAsync(node, ct);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    logger.LogWarning(ex, "Failed to reindex context entity {EntityId}", entityId);
-                }
-            },
-            cancellationToken);
-
+                            await ReindexEntityNodeAsync(node, ct);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            logger.LogWarning(ex, "Failed to reindex context entity {EntityId}", entityId);
+                        }
+                    },
+                    cancellationToken);
+    }
     public Task DeleteEntityAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken = default) =>
         DeleteBySourceAsync(projectId, ContextVectorSourceTypes.Entity, entityId, cancellationToken);
 
-    public Task ReindexChapterAsync(Guid chapterId, CancellationToken cancellationToken = default) =>
-        indexWork.QueueOrRunAsync(
-            VectorIndexWorkKind.ContextChapter,
-            chapterId.ToString("N"),
-            async ct =>
-            {
-                try
-                {
-                    var chapter = await chapters.GetByIdAsync(chapterId, ct);
-                    if (chapter is not null)
-                        await ReindexChapterCoreAsync(chapter, ct);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    logger.LogWarning(ex, "Failed to reindex context chapter {ChapterId}", chapterId);
-                }
-            },
-            cancellationToken);
-
+    public async Task ReindexChapterAsync(Guid chapterId, CancellationToken cancellationToken = default)
+    {
+        await indexWork.QueueOrRunAsync(
+                    VectorIndexWorkKind.ContextChapter,
+                    chapterId.ToString("N"),
+                    async ct =>
+                    {
+                        try
+                        {
+                            Chapter? chapter;
+                            await using (var operation = await database.OpenReadAsync(ct))
+                            {
+                                chapter = await operation.Repositories.Chapters.GetByIdAsync(chapterId, ct);
+                            }
+                            if (chapter is not null)
+                                await ReindexChapterCoreAsync(chapter, ct);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            logger.LogWarning(ex, "Failed to reindex context chapter {ChapterId}", chapterId);
+                        }
+                    },
+                    cancellationToken);
+    }
     public Task DeleteChapterAsync(Guid projectId, Guid chapterId, CancellationToken cancellationToken = default) =>
         DeleteBySourceAsync(projectId, ContextVectorSourceTypes.Chapter, chapterId, cancellationToken);
 
-    public Task ReindexActAsync(Guid actId, CancellationToken cancellationToken = default) =>
-        indexWork.QueueOrRunAsync(
-            VectorIndexWorkKind.ContextAct,
-            actId.ToString("N"),
-            async ct =>
-            {
-                try
-                {
-                    var act = await acts.GetByIdAsync(actId, ct);
-                    if (act is not null)
-                        await ReindexActCoreAsync(act, ct);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    logger.LogWarning(ex, "Failed to reindex context act {ActId}", actId);
-                }
-            },
-            cancellationToken);
-
+    public async Task ReindexActAsync(Guid actId, CancellationToken cancellationToken = default)
+    {
+        await indexWork.QueueOrRunAsync(
+                    VectorIndexWorkKind.ContextAct,
+                    actId.ToString("N"),
+                    async ct =>
+                    {
+                        try
+                        {
+                            Act? act;
+                            await using (var operation = await database.OpenReadAsync(ct))
+                            {
+                                act = await operation.Repositories.Acts.GetByIdAsync(actId, ct);
+                            }
+                            if (act is not null)
+                                await ReindexActCoreAsync(act, ct);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            logger.LogWarning(ex, "Failed to reindex context act {ActId}", actId);
+                        }
+                    },
+                    cancellationToken);
+    }
     public Task DeleteActAsync(Guid projectId, Guid actId, CancellationToken cancellationToken = default) =>
         DeleteBySourceAsync(projectId, ContextVectorSourceTypes.Act, actId, cancellationToken);
 
@@ -107,7 +109,11 @@ public sealed class ContextIndexingService(
     {
         try
         {
-            var source = await ingest.GetSourceAsync(sourceId, cancellationToken);
+            IngestSource? source;
+            await using (var operation = await database.OpenReadAsync(cancellationToken))
+            {
+                source = await operation.Repositories.Ingest.GetSourceAsync(sourceId, cancellationToken);
+            }
             if (source is not null)
                 await ReindexIngestSourceCoreAsync(source, cancellationToken);
         }
@@ -121,7 +127,12 @@ public sealed class ContextIndexingService(
     {
         try
         {
-            foreach (var sourceChunk in await ingest.ListSourceChunksAsync(sourceId, cancellationToken))
+            IReadOnlyList<IngestSourceChunk> sourceChunks;
+            await using (var operation = await database.OpenReadAsync(cancellationToken))
+            {
+                sourceChunks = await operation.Repositories.Ingest.ListSourceChunksAsync(sourceId, cancellationToken);
+            }
+            foreach (var sourceChunk in sourceChunks)
                 await DeleteIngestSourceChunkAsync(projectId, sourceChunk.Id, cancellationToken);
 
             await DeleteBySourceAsync(projectId, ContextVectorSourceTypes.IngestSource, sourceId, cancellationToken);
@@ -136,7 +147,11 @@ public sealed class ContextIndexingService(
     {
         try
         {
-            var sourceChunk = await ingest.GetSourceChunkAsync(sourceChunkId, cancellationToken);
+            IngestSourceChunk? sourceChunk;
+            await using (var operation = await database.OpenReadAsync(cancellationToken))
+            {
+                sourceChunk = await operation.Repositories.Ingest.GetSourceChunkAsync(sourceChunkId, cancellationToken);
+            }
             if (sourceChunk is null) return;
 
             await ReindexIngestSourceChunkCoreAsync(sourceChunk, cancellationToken);
@@ -199,6 +214,11 @@ public sealed class ContextIndexingService(
 
     private async Task ReindexIngestSourceCoreAsync(IngestSource source, CancellationToken cancellationToken)
     {
+        IReadOnlyList<IngestSourceChunk> sourceChunks;
+        await using (var operation = await database.OpenReadAsync(cancellationToken))
+        {
+            sourceChunks = await operation.Repositories.Ingest.ListSourceChunksAsync(source.Id, cancellationToken);
+        }
         var text = await BuildIngestSourceTextAsync(source, cancellationToken);
         await StoreChunksAsync(
             source.ProjectId,
@@ -209,13 +229,17 @@ public sealed class ContextIndexingService(
             source.Id,
             cancellationToken);
 
-        foreach (var sourceChunk in await ingest.ListSourceChunksAsync(source.Id, cancellationToken))
+        foreach (var sourceChunk in sourceChunks)
             await ReindexIngestSourceChunkCoreAsync(sourceChunk, cancellationToken);
     }
 
     private async Task ReindexIngestSourceChunkCoreAsync(IngestSourceChunk sourceChunk, CancellationToken cancellationToken)
     {
-        var source = await ingest.GetSourceAsync(sourceChunk.SourceId, cancellationToken);
+        IngestSource? source;
+        await using (var operation = await database.OpenReadAsync(cancellationToken))
+        {
+            source = await operation.Repositories.Ingest.GetSourceAsync(sourceChunk.SourceId, cancellationToken);
+        }
         if (source is null) return;
 
         var text = await BuildIngestSourceChunkTextAsync(source, sourceChunk, cancellationToken);
@@ -305,6 +329,10 @@ public sealed class ContextIndexingService(
 
     private async Task<string> BuildEntityTextAsync(GraphNode node, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        var edges = databaseOperation.Repositories.GraphEdges;
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var sb = new StringBuilder();
         sb.Append("Type: ").AppendLine(node.NodeType);
         sb.Append("Name: ").AppendLine(node.Label ?? node.Key);
@@ -385,6 +413,8 @@ public sealed class ContextIndexingService(
 
     private async Task<string> BuildActTextAsync(Act act, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var chapters = databaseOperation.Repositories.Chapters;
         var sb = new StringBuilder();
         sb.Append("Type: Act\n");
         sb.Append("Title: ").AppendLine(act.Title);
@@ -409,6 +439,8 @@ public sealed class ContextIndexingService(
 
     private async Task<string> BuildIngestSourceTextAsync(IngestSource source, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         var sb = new StringBuilder();
         sb.Append("Type: Ingest source\n");
         sb.Append("Title: ").AppendLine(source.Title);
@@ -435,6 +467,8 @@ public sealed class ContextIndexingService(
 
     private async Task<string> BuildIngestSourceChunkTextAsync(IngestSource source, IngestSourceChunk sourceChunk, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         var sb = new StringBuilder();
         sb.Append("Type: Ingest source chunk\n");
         sb.Append("Source: ").AppendLine(source.Title);

@@ -4,16 +4,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public sealed class ProjectImportRepository(AppDbContext db) : IProjectImportRepository
+public sealed class ProjectImportRepository(AppDatabaseReadOperation operation) : IProjectImportRepository
 {
     public Task<List<ProjectImportJob>> ListJobsByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.ProjectImportJobs
+        operation.Db.ProjectImportJobs
             .Where(job => job.ProjectId == projectId)
             .OrderByDescending(job => job.CreatedAt)
             .ToListAsync(cancellationToken);
 
     public Task<List<ProjectImportJobListItem>> ListJobSummariesByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.ProjectImportJobs
+        operation.Db.ProjectImportJobs
             .AsNoTracking()
             .Where(job => job.ProjectId == projectId)
             .OrderByDescending(job => job.CreatedAt)
@@ -40,16 +40,16 @@ public sealed class ProjectImportRepository(AppDbContext db) : IProjectImportRep
             .ToListAsync(cancellationToken);
 
     public Task<ProjectImportJob?> GetJobAsync(Guid jobId, CancellationToken cancellationToken = default) =>
-        db.ProjectImportJobs.FirstOrDefaultAsync(job => job.Id == jobId, cancellationToken);
+        operation.Db.ProjectImportJobs.FirstOrDefaultAsync(job => job.Id == jobId, cancellationToken);
 
     public Task<ProjectImportJob?> GetJobDetailAsync(Guid jobId, CancellationToken cancellationToken = default) =>
-        db.ProjectImportJobs
+        operation.Db.ProjectImportJobs
             .Include(job => job.ReportItems.OrderBy(item => item.CreatedAt))
             .FirstOrDefaultAsync(job => job.Id == jobId, cancellationToken);
 
     public async Task<ProjectImportJobDetailView?> GetJobDetailViewAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
-        var job = await db.ProjectImportJobs
+        var job = await operation.Db.ProjectImportJobs
             .AsNoTracking()
             .Where(job => job.Id == jobId)
             .Select(job => new
@@ -81,7 +81,7 @@ public sealed class ProjectImportRepository(AppDbContext db) : IProjectImportRep
             .FirstOrDefaultAsync(cancellationToken);
         if (job is null) return null;
 
-        var reportItems = await db.ProjectImportReportItems
+        var reportItems = await operation.Db.ProjectImportReportItems
             .AsNoTracking()
             .Where(item => item.JobId == jobId)
             .OrderBy(item => item.CreatedAt)
@@ -131,35 +131,32 @@ public sealed class ProjectImportRepository(AppDbContext db) : IProjectImportRep
     }
 
     public Task<List<ProjectImportJob>> ListQueuedJobsAsync(CancellationToken cancellationToken = default) =>
-        db.ProjectImportJobs
+        operation.Db.ProjectImportJobs
             .Where(job => job.Status == ProjectImportJobStatus.Queued)
             .OrderBy(job => job.CreatedAt)
             .ToListAsync(cancellationToken);
 
     public Task<List<ProjectImportJob>> ListInterruptedJobsAsync(CancellationToken cancellationToken = default) =>
-        db.ProjectImportJobs
+        operation.Db.ProjectImportJobs
             .Where(job => job.Status == ProjectImportJobStatus.Running)
             .OrderBy(job => job.UpdatedAt)
             .ToListAsync(cancellationToken);
 
     public Task<List<ProjectImportReportItem>> ListReportItemsAsync(Guid jobId, CancellationToken cancellationToken = default) =>
-        db.ProjectImportReportItems
+        operation.Db.ProjectImportReportItems
             .Where(item => item.JobId == jobId)
             .OrderBy(item => item.CreatedAt)
             .ToListAsync(cancellationToken);
 
     public async Task AddJobAsync(ProjectImportJob job, CancellationToken cancellationToken = default) =>
-        await db.ProjectImportJobs.AddAsync(job, cancellationToken);
+        await operation.Db.ProjectImportJobs.AddAsync(job, cancellationToken);
 
     public async Task AddReportItemAsync(ProjectImportReportItem item, CancellationToken cancellationToken = default) =>
-        await db.ProjectImportReportItems.AddAsync(item, cancellationToken);
+        await operation.Db.ProjectImportReportItems.AddAsync(item, cancellationToken);
 
-    public void UpdateJob(ProjectImportJob job) => db.ProjectImportJobs.Update(job);
+    public void UpdateJob(ProjectImportJob job) => operation.Db.MarkModified(job);
 
-    public void UpdateReportItem(ProjectImportReportItem item) => db.ProjectImportReportItems.Update(item);
+    public void UpdateReportItem(ProjectImportReportItem item) => operation.Db.MarkModified(item);
 
-    public void RemoveJob(ProjectImportJob job) => db.ProjectImportJobs.Remove(job);
-
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        db.SaveChangesAsync(cancellationToken);
+    public void RemoveJob(ProjectImportJob job) => operation.Db.MarkDeleted(job);
 }

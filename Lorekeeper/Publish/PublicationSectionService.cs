@@ -1,8 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Lorekeeper.Composition;
 using Lorekeeper.Authoring;
+using Lorekeeper.Composition;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -76,16 +76,18 @@ public interface IPublicationSectionService
 }
 
 public sealed class PublicationSectionService(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     IPublicationBookService books,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IManuscriptStyleService manuscriptStyles,
-    IProjectMutationCoordinator projectMutations,
     IAuthoringHistoryService authoringHistory,
     IAuthoringMutationContextAccessor authoringMutationContext) : IPublicationSectionService
 {
     public async Task EnsureSystemSectionsAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         _ = await books.GetOrCreateAsync(projectId, cancellationToken);
         var existing = await db.PublicationSections.AsNoTracking()
             .Where(item => item.ProjectId == projectId && item.EditionId == null && item.SystemRole != PublicationSectionSystemRole.None)
@@ -94,7 +96,6 @@ public sealed class PublicationSectionService(
         if (existing.Count == 3)
             return;
 
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var roles = (await db.PublicationSections.AsNoTracking()
             .Where(item => item.ProjectId == projectId && item.EditionId == null && item.SystemRole != PublicationSectionSystemRole.None)
             .Select(item => item.SystemRole)
@@ -129,6 +130,9 @@ public sealed class PublicationSectionService(
         PublicationSectionTarget target,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(target.ProjectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await EnsureSystemSectionsAsync(target.ProjectId, cancellationToken);
         var core = await db.PublicationSections.AsNoTracking()
             .Where(item => item.ProjectId == target.ProjectId && item.EditionId == null)
@@ -178,6 +182,9 @@ public sealed class PublicationSectionService(
         PublicationSectionInput input,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(target.ProjectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await EnsureSystemSectionsAsync(target.ProjectId, cancellationToken);
         ValidateAnchor(input.Anchor, input.TargetKind, input.TargetId);
         if (input.Kind is PublicationSectionKind.TitlePage or PublicationSectionKind.Copyright or PublicationSectionKind.Contents
@@ -190,7 +197,6 @@ public sealed class PublicationSectionService(
         ValidateSectionMode(document);
         await ValidateDocumentAsync(target, document, cancellationToken);
 
-        await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
         PublicationSection row;
         string? beforeHistory = null;
         if (input.Id is Guid id)
@@ -275,7 +281,9 @@ public sealed class PublicationSectionService(
         bool redo,
         CancellationToken cancellationToken)
     {
-        await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(target.ProjectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var row = await db.PublicationSections.SingleOrDefaultAsync(
             item => item.ProjectId == target.ProjectId && item.EditionId == target.EditionId && item.Id == sectionId,
             cancellationToken) ?? throw new KeyNotFoundException("Publication section was not found.");
@@ -343,8 +351,10 @@ public sealed class PublicationSectionService(
         Guid coreSectionId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await EnsureSystemSectionsAsync(projectId, cancellationToken);
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var core = await db.PublicationSections.AsNoTracking()
             .SingleOrDefaultAsync(item => item.ProjectId == projectId && item.EditionId == null && item.Id == coreSectionId, cancellationToken)
             ?? throw new KeyNotFoundException("Core publication section was not found.");
@@ -365,7 +375,9 @@ public sealed class PublicationSectionService(
         Guid sectionId,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(target.ProjectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var section = await db.PublicationSections.SingleOrDefaultAsync(item => item.ProjectId == target.ProjectId
             && item.EditionId == target.EditionId && item.Id == sectionId, cancellationToken)
             ?? throw new KeyNotFoundException("Publication section was not found for this book target.");
@@ -488,7 +500,9 @@ public sealed class PublicationSectionService(
 
     public async Task ResetAsync(Guid projectId, Guid editionId, Guid sectionId, CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var row = await db.PublicationSections.Include(item => item.PageCompositions)
             .SingleOrDefaultAsync(item => item.ProjectId == projectId && item.EditionId == editionId && item.Id == sectionId, cancellationToken)
             ?? throw new KeyNotFoundException("Release publication section was not found.");
@@ -502,7 +516,9 @@ public sealed class PublicationSectionService(
 
     public async Task DeleteAsync(PublicationSectionTarget target, Guid sectionId, CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(target.ProjectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var row = await db.PublicationSections.SingleOrDefaultAsync(item => item.ProjectId == target.ProjectId && item.Id == sectionId, cancellationToken);
         if (row is null)
@@ -554,6 +570,8 @@ public sealed class PublicationSectionService(
 
     private async Task ClearOwnedHistoryAsync(PublicationSection row, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         await authoringHistory.DeleteDocumentHistoryAsync(
             row.ProjectId,
             AuthoringHistoryDocumentKind.PublicationSection,
@@ -573,6 +591,9 @@ public sealed class PublicationSectionService(
         IReadOnlyList<Guid> orderedSectionIds,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(target.ProjectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (orderedSectionIds.Count == 0 || orderedSectionIds.Count != orderedSectionIds.Distinct().Count())
             throw new InvalidOperationException("Section order must contain unique section IDs.");
         var effective = await ListAsync(target, cancellationToken);
@@ -583,7 +604,6 @@ public sealed class PublicationSectionService(
         if (selected.Any(item => item.Anchor != first.Anchor || item.TargetId != first.TargetId)
             || effective.Count(item => item.Anchor == first.Anchor && item.TargetId == first.TargetId) != selected.Count)
             throw new InvalidOperationException("Reorder every section at one anchor together.");
-        await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
         if (target.EditionId is Guid editionId)
         {
             var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(item => item.Id == editionId
@@ -630,6 +650,8 @@ public sealed class PublicationSectionService(
         PublicationBoundField field,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (target.EditionId is null)
         {
             var book = await db.PublicationBooks.AsNoTracking()
@@ -669,7 +691,9 @@ public sealed class PublicationSectionService(
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(target.ProjectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(target.ProjectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var section = await db.PublicationSections.SingleOrDefaultAsync(item => item.ProjectId == target.ProjectId && item.Id == sectionId, cancellationToken)
             ?? throw new KeyNotFoundException("Publication section was not found.");
         if (section.EditionId != target.EditionId)
@@ -802,6 +826,8 @@ public sealed class PublicationSectionService(
         IReadOnlyList<(PublicationSection Row, bool Inherited, int EffectiveOrder, bool OrderOverridden)> rows,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var actTitles = await db.Acts.AsNoTracking().Where(item => item.ProjectId == target.ProjectId)
             .OrderBy(item => item.Order)
             .ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
@@ -898,6 +924,9 @@ public sealed class PublicationSectionService(
         ManuscriptDocument document,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var clone = await CloneSectionAsync(core, editionId, cancellationToken);
         if (clone.Anchor != input.Anchor || clone.TargetKind != input.TargetKind || clone.TargetId != input.TargetId)
             clone.LocalOrder = await NextOrderAsync(new(projectId, editionId), input.Anchor, input.TargetId, cancellationToken);
@@ -913,6 +942,8 @@ public sealed class PublicationSectionService(
         Guid sectionId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var row = await db.PublicationSections.AsNoTracking()
             .SingleOrDefaultAsync(item => item.ProjectId == target.ProjectId
                 && item.EditionId == target.EditionId
@@ -923,12 +954,27 @@ public sealed class PublicationSectionService(
 
     private async Task<PublicationSection> CloneSectionAsync(PublicationSection core, Guid editionId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var clone = new PublicationSection
         {
-            Id = Guid.NewGuid(), ProjectId = core.ProjectId, EditionId = editionId, CoreSectionId = core.Id,
-            Title = core.Title, Kind = core.Kind, SystemRole = core.SystemRole, Anchor = core.Anchor,
-            TargetKind = core.TargetKind, TargetId = core.TargetId, ActId = core.ActId, ChapterId = core.ChapterId,
-            InclusionMode = core.InclusionMode, StartSide = core.StartSide, LocalOrder = core.LocalOrder, Revision = core.Revision,
+            Id = Guid.NewGuid(),
+            ProjectId = core.ProjectId,
+            EditionId = editionId,
+            CoreSectionId = core.Id,
+            Title = core.Title,
+            Kind = core.Kind,
+            SystemRole = core.SystemRole,
+            Anchor = core.Anchor,
+            TargetKind = core.TargetKind,
+            TargetId = core.TargetId,
+            ActId = core.ActId,
+            ChapterId = core.ChapterId,
+            InclusionMode = core.InclusionMode,
+            StartSide = core.StartSide,
+            LocalOrder = core.LocalOrder,
+            Revision = core.Revision,
         };
         var document = ManuscriptCodec.Deserialize(core.ManuscriptJson, core.Id, core.Revision);
         var sourceIds = document.Content.Where(item => item.PageCompositionId.HasValue).Select(item => item.PageCompositionId!.Value).Distinct().ToList();
@@ -942,8 +988,12 @@ public sealed class PublicationSectionService(
             remap[source.Id] = compositionId;
             var composition = new PageComposition
             {
-                Id = compositionId, ProjectId = core.ProjectId, PublicationSectionId = clone.Id,
-                EditionId = editionId, SourceCompositionId = source.Id, Name = source.Name,
+                Id = compositionId,
+                ProjectId = core.ProjectId,
+                PublicationSectionId = clone.Id,
+                EditionId = editionId,
+                SourceCompositionId = source.Id,
+                Name = source.Name,
                 SemanticManuscriptJson = RemapDocumentId(source.SemanticManuscriptJson, compositionId),
                 Revision = source.Revision,
             };
@@ -951,8 +1001,11 @@ public sealed class PublicationSectionService(
             {
                 var copy = new PageCompositionVariant
                 {
-                    Id = Guid.NewGuid(), CompositionId = compositionId, GeometryKey = variant.GeometryKey,
-                    SceneJson = variant.SceneJson, Revision = variant.Revision,
+                    Id = Guid.NewGuid(),
+                    CompositionId = compositionId,
+                    GeometryKey = variant.GeometryKey,
+                    SceneJson = variant.SceneJson,
+                    Revision = variant.Revision,
                 };
                 composition.Variants.Add(copy);
                 if (source.ActiveAuthoringVariantId == variant.Id)
@@ -972,6 +1025,8 @@ public sealed class PublicationSectionService(
 
     private async Task ValidateDocumentAsync(PublicationSectionTarget target, ManuscriptDocument document, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         ManuscriptStyleService.ValidateDocumentReferences(
             document, await manuscriptStyles.ListAsync(target.ProjectId, cancellationToken));
         var imageIds = document.Content
@@ -1074,6 +1129,8 @@ public sealed class PublicationSectionService(
         Guid? targetId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var localMaximum = await db.PublicationSections
             .Where(item => item.ProjectId == target.ProjectId && item.EditionId == target.EditionId
                 && item.Anchor == anchor && item.TargetId == targetId)
@@ -1091,6 +1148,8 @@ public sealed class PublicationSectionService(
 
     private async Task RequireEditionAsync(Guid projectId, Guid editionId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (!await db.PublicationEditions.AsNoTracking().AnyAsync(item => item.Id == editionId && item.ProjectId == projectId && item.Status != PublicationEditionStatus.Archived, cancellationToken))
             throw new KeyNotFoundException("Publication release was not found or is archived.");
     }
@@ -1103,16 +1162,24 @@ public sealed class PublicationSectionService(
             await TouchBookAsync(target.ProjectId, cancellationToken);
     }
 
-    private async Task TouchBookAsync(Guid projectId, CancellationToken cancellationToken) =>
+    private async Task TouchBookAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await db.PublicationBooks.Where(item => item.ProjectId == projectId).ExecuteUpdateAsync(setters => setters
-            .SetProperty(item => item.Revision, item => item.Revision + 1)
-            .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), cancellationToken);
-
-    private async Task TouchEditionAsync(Guid editionId, CancellationToken cancellationToken) =>
+                    .SetProperty(item => item.Revision, item => item.Revision + 1)
+                    .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), cancellationToken);
+    }
+    private async Task TouchEditionAsync(Guid editionId, CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await db.PublicationEditions.Where(item => item.Id == editionId).ExecuteUpdateAsync(setters => setters
-            .SetProperty(item => item.Revision, item => item.Revision + 1)
-            .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), cancellationToken);
-
+                    .SetProperty(item => item.Revision, item => item.Revision + 1)
+                    .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), cancellationToken);
+    }
     private static string RemapDocumentId(string json, Guid id)
     {
         var document = ManuscriptCodec.Deserialize(json);

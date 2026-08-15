@@ -3,22 +3,14 @@ using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
 
 namespace Lorekeeper.Graph;
 
 public sealed class ProjectGraphService(
-    IGraphStore graph,
-    IGraphNodeRepository nodes,
-    IGraphEdgeRepository edges,
-    IProjectRepository projects,
-    IProjectService projectService,
-    IActService actService,
-    IChapterService chapterService,
-    IProjectFactService projectFacts,
-    IEntityService entities,
-    IEntityTypeService entityTypes) : IProjectGraphService
+IAppDatabaseOperationFactory database, IGraphStore graph, IProjectService projectService, IActService actService, IChapterService chapterService, IProjectFactService projectFacts, IEntityService entities, IEntityTypeService entityTypes) : IProjectGraphService
 {
     private const string HasChildEdgeType = EntityService.HasChildEdgeType;
 
@@ -30,6 +22,9 @@ public sealed class ProjectGraphService(
 
     public async Task<ProjectGraphSnapshot> GetSnapshotAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         var allNodes = await nodes.ListByProjectAsync(projectId, cancellationToken);
         var allEdges = await edges.ListByProjectAsync(projectId, cancellationToken);
         var typeDefinitions = await entityTypes.ListAsync(projectId, includeStructural: true, cancellationToken);
@@ -144,6 +139,9 @@ public sealed class ProjectGraphService(
 
     public async Task UpdateNodeAsync(Guid projectId, ProjectGraphNodeUpdateRequest request, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var node = await GetRequiredProjectNodeAsync(projectId, request.NodeId, cancellationToken);
         var nextLabel = string.IsNullOrWhiteSpace(request.Label) ? null : request.Label.Trim();
         var nextProperties = CleanProperties(request.Properties);
@@ -207,7 +205,7 @@ public sealed class ProjectGraphService(
         node.Properties = ToObjectDictionary(nextProperties);
         node.UpdatedAt = DateTime.UtcNow;
         nodes.Update(node);
-        await nodes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await TouchProjectAsync(projectId, cancellationToken);
     }
 
@@ -248,6 +246,9 @@ public sealed class ProjectGraphService(
 
     public async Task MoveParentAsync(Guid projectId, ProjectGraphMoveParentRequest request, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var edges = databaseOperation.Repositories.GraphEdges;
         var node = await GetRequiredProjectNodeAsync(projectId, request.NodeId, cancellationToken);
         if (request.ParentNodeId == node.Id)
             throw new InvalidOperationException("A node cannot be its own parent.");
@@ -459,6 +460,8 @@ public sealed class ProjectGraphService(
 
     private async Task<GraphNode> GetRequiredProjectNodeAsync(Guid projectId, long nodeId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var node = await nodes.GetByIdAsync(nodeId, cancellationToken)
             ?? throw new InvalidOperationException("Graph node not found.");
         if (node.ProjectId != projectId)
@@ -468,6 +471,8 @@ public sealed class ProjectGraphService(
 
     private async Task<GraphEdge> GetRequiredProjectEdgeAsync(Guid projectId, long edgeId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var edges = databaseOperation.Repositories.GraphEdges;
         var edge = await edges.GetByIdAsync(edgeId, cancellationToken)
             ?? throw new InvalidOperationException("Graph relationship not found.");
         var from = await GetRequiredProjectNodeAsync(projectId, edge.FromNodeId, cancellationToken);
@@ -502,11 +507,14 @@ public sealed class ProjectGraphService(
 
     private async Task TouchProjectAsync(Guid projectId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken);
         if (project is null) return;
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
-        await projects.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     private static Guid ReadNodeGuid(GraphNode node) =>

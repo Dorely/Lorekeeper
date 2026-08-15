@@ -1,10 +1,10 @@
-using Lorekeeper.Knowledge;
 using Lorekeeper.Authoring;
-using Lorekeeper.Llm;
 using Lorekeeper.Context;
 using Lorekeeper.Graph;
-using Lorekeeper.Models;
+using Lorekeeper.Knowledge;
+using Lorekeeper.Llm;
 using Lorekeeper.Manuscripts;
+using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
@@ -14,35 +14,32 @@ using Microsoft.EntityFrameworkCore;
 namespace Lorekeeper.Chapters;
 
 public class ChapterService(
-    IChapterRepository repo,
-    IProjectRepository projects,
-    IVectorStore vectors,
-    IEmbeddingService embeddings,
-    ITextChunker chunker,
-    IProjectSearchIndex projectSearch,
-    IGraphAutoLinkService autoLinks,
-    IOutlineGraphSync outlineGraphSync,
-    IContextIndexingService contextIndexing,
-    IVectorIndexWorkCoordinator indexWork,
-    AppDbContext db,
-    IManuscriptStyleService manuscriptStyles,
-    IChapterSemanticProjectionService semanticProjection,
-    IProjectMutationCoordinator projectMutations,
-    IAuthoringHistoryService authoringHistory,
-    IAuthoringMutationContextAccessor authoringMutationContext,
-    ILogger<ChapterService> logger) : IChapterService, IManuscriptService
+    IVectorStore vectors, IEmbeddingService embeddings, ITextChunker chunker, IProjectSearchIndex projectSearch, IGraphAutoLinkService autoLinks, IOutlineGraphSync outlineGraphSync, IContextIndexingService contextIndexing, IVectorIndexWorkCoordinator indexWork, IAppDatabaseOperationFactory database, IManuscriptStyleService manuscriptStyles, IChapterSemanticProjectionService semanticProjection, IProjectMutationCoordinator projectMutations, IAuthoringHistoryService authoringHistory, IAuthoringMutationContextAccessor authoringMutationContext, ILogger<ChapterService> logger) : IChapterService, IManuscriptService
 {
-    public async Task<IReadOnlyList<Chapter>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await repo.ListByProjectAsync(projectId, cancellationToken);
-
-    public Task<Chapter?> GetAsync(Guid chapterId, CancellationToken cancellationToken = default) =>
-        repo.GetByIdAsync(chapterId, cancellationToken);
-
-    public Task<Chapter?> ReloadFromStoreAsync(Guid chapterId, CancellationToken cancellationToken = default) =>
-        repo.ReloadFromStoreAsync(chapterId, cancellationToken);
-
+    public async Task<IReadOnlyList<Chapter>> ListAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var repo = databaseOperation.Repositories.Chapters;
+        return await repo.ListByProjectAsync(projectId, cancellationToken);
+    }
+    public async Task<Chapter?> GetAsync(Guid chapterId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var repo = databaseOperation.Repositories.Chapters;
+        return await repo.GetByIdAsync(chapterId, cancellationToken);
+    }
+    public async Task<Chapter?> ReloadFromStoreAsync(Guid chapterId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var repo = databaseOperation.Repositories.Chapters;
+        return await repo.ReloadFromStoreAsync(chapterId, cancellationToken);
+    }
     public async Task<Chapter> CreateAsync(Guid projectId, Guid? actId = null, string? title = null, string? synopsis = null, Guid? id = null, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Chapters;
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
@@ -68,7 +65,8 @@ public class ChapterService(
         await repo.AddAsync(chapter, cancellationToken);
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
-        await repo.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+        await databaseOperation.DisposeAsync();
         await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
         await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
         if (chapter.ActId is Guid createdActId)
@@ -83,6 +81,11 @@ public class ChapterService(
         ChapterActAssignment? actId = null,
         CancellationToken cancellationToken = default)
     {
+        var projectId = await GetChapterProjectIdAsync(chapterId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Chapters;
+        var projects = databaseOperation.Repositories.Projects;
         var chapter = await repo.GetByIdAsync(chapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
         var previousActId = chapter.ActId;
@@ -120,7 +123,8 @@ public class ChapterService(
             projects.Update(project);
         }
 
-        await repo.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+        await databaseOperation.DisposeAsync();
 
         await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
 
@@ -145,6 +149,8 @@ public class ChapterService(
         Guid chapterId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var repo = databaseOperation.Repositories.Chapters;
         var chapter = await repo.GetByIdAsync(chapterId, cancellationToken);
         if (chapter is null)
             return null;
@@ -158,6 +164,8 @@ public class ChapterService(
         Guid chapterId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var repo = databaseOperation.Repositories.Chapters;
         var chapter = await repo.GetByIdAsync(chapterId, cancellationToken)
             ?? throw new KeyNotFoundException("The chapter was not found.");
         return await authoringHistory.ReadStateAsync(HistoryTarget(target, chapter), cancellationToken);
@@ -181,9 +189,13 @@ public class ChapterService(
         bool redo,
         CancellationToken cancellationToken)
     {
+        var projectId = await GetChapterProjectIdAsync(chapterId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var repo = databaseOperation.Repositories.Chapters;
         var chapter = await repo.GetByIdAsync(chapterId, cancellationToken)
             ?? throw new KeyNotFoundException("The chapter was not found.");
-        await using var mutation = await projectMutations.AcquireAsync(chapter.ProjectId, cancellationToken);
         EditionManuscriptState? editionState = null;
         var current = target.IsCore
             ? ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision)
@@ -209,6 +221,10 @@ public class ChapterService(
         string payload,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var repo = databaseOperation.Repositories.Chapters;
         var snapshot = AuthoringSnapshotCodec.ReadManuscript(payload);
         var source = ManuscriptCodec.Deserialize(snapshot.ManuscriptJson);
         long nextRevision;
@@ -293,6 +309,9 @@ public class ChapterService(
         IReadOnlyList<AuthoringCompositionSnapshot> desired,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var current = await db.PageCompositions
             .IgnoreQueryFilters()
             .Include(item => item.Variants)
@@ -441,13 +460,19 @@ public class ChapterService(
         Guid chapterId,
         CancellationToken cancellationToken = default)
     {
+        var projectId = await GetChapterProjectIdAsync(chapterId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Chapters;
         if (!target.IsCore)
         {
+            await databaseOperation.DisposeAsync();
             await TryReindexEditionBodyAsync(target, chapterId, cancellationToken);
             return;
         }
         var chapter = await repo.ReloadFromStoreAsync(chapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
+        await databaseOperation.DisposeAsync();
         await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
         await TryReindexBodyAsync(chapter.Id, cancellationToken);
     }
@@ -459,6 +484,8 @@ public class ChapterService(
         IReadOnlyList<ManuscriptStyleView>? styleCatalog = null,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var repo = databaseOperation.Repositories.Chapters;
         var chapter = await repo.GetByIdAsync(chapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
         await ValidateFigureAssetsAsync(chapter.ProjectId, document, cancellationToken);
@@ -475,6 +502,8 @@ public class ChapterService(
         long expectedRevision,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var repo = databaseOperation.Repositories.Chapters;
         var chapter = await repo.GetByIdAsync(chapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
         if (chapter.ManuscriptRevision != expectedRevision)
@@ -542,6 +571,11 @@ public class ChapterService(
         IReadOnlyList<string> changedBlockIds,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var projects = databaseOperation.Repositories.Projects;
+        var repo = databaseOperation.Repositories.Chapters;
         await ValidateFigureAssetsAsync(chapter.ProjectId, document, cancellationToken);
         await ValidateStyleReferencesAsync(chapter.ProjectId, document, null, cancellationToken);
         await ValidateDesignedPageReferencesAsync(chapter, document, EditorContentTarget.Core, cancellationToken);
@@ -608,6 +642,8 @@ public class ChapterService(
         ManuscriptDocument document,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var imageIds = document.Content
             .Where(block => block.Type == ManuscriptBlockType.Figure)
             .Select(block => block.ImageId!.Value)
@@ -634,6 +670,8 @@ public class ChapterService(
         EditorContentTarget target,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var ids = DesignedPageIds(document);
         if (ids.Count != document.Content.Count(block => block.Type == ManuscriptBlockType.DesignedPage))
             throw new InvalidDataException("Each Designed Page composition may be referenced exactly once in its chapter.");
@@ -661,6 +699,8 @@ public class ChapterService(
         IReadOnlyList<ManuscriptStyleView>? styleCatalog,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var styles = styleCatalog
             ?? await manuscriptStyles.ListAsync(projectId, cancellationToken);
         ManuscriptStyleService.ValidateDocumentReferences(document, styles);
@@ -705,6 +745,8 @@ public class ChapterService(
         Chapter chapter,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var edition = await RequireEditableEditionAsync(target, chapter.ProjectId, cancellationToken);
         var chapterOverride = await db.PublicationEditionChapterOverrides.AsNoTracking()
             .SingleOrDefaultAsync(item => item.EditionId == edition.Id && item.ChapterId == chapter.Id, cancellationToken);
@@ -737,9 +779,12 @@ public class ChapterService(
         ManuscriptDocument requested,
         CancellationToken cancellationToken)
     {
+        var projectId = await GetChapterProjectIdAsync(chapterId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Chapters;
         var chapter = await repo.GetByIdAsync(chapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
-        await using var mutation = await projectMutations.AcquireAsync(chapter.ProjectId, cancellationToken);
         var current = await GetRequiredEditionStateAsync(target, chapter, expectedRevision, cancellationToken);
         var normalizedRequested = requested with { ManuscriptId = chapter.Id, Revision = current.Document.Revision };
         ManuscriptCodec.Validate(normalizedRequested, chapter.Id, normalizedRequested.Revision);
@@ -758,11 +803,14 @@ public class ChapterService(
         bool acquireLease,
         CancellationToken cancellationToken)
     {
+        var projectId = await GetChapterProjectIdAsync(chapterId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Chapters;
         var chapter = await repo.GetByIdAsync(chapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
         if (acquireLease)
         {
-            await using var mutation = await projectMutations.AcquireAsync(chapter.ProjectId, cancellationToken);
             return await ApplyEditionUnderLeaseAsync(target, chapter, expectedRevision, operations, cancellationToken);
         }
         return await ApplyEditionUnderLeaseAsync(target, chapter, expectedRevision, operations, cancellationToken);
@@ -791,6 +839,9 @@ public class ChapterService(
         IReadOnlyList<string> changedBlockIds,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var edition = await RequireEditableEditionAsync(target, chapter.ProjectId, cancellationToken);
         var document = requested with { ManuscriptId = chapter.Id };
         var wasInherited = chapterOverride is null;
@@ -858,6 +909,7 @@ public class ChapterService(
                 .SingleOrDefaultAsync(cancellationToken) ?? chapter.ManuscriptRevision;
             throw new ManuscriptRevisionConflictException(checked(document.Revision - 1), currentRevision);
         }
+        await databaseOperation.DisposeAsync();
         await TryReindexEditionBodyAsync(target, chapter.Id, cancellationToken);
         return new ManuscriptMutationResult(
             (await EditionSnapshotAsync(target, chapter, cancellationToken)),
@@ -870,6 +922,9 @@ public class ChapterService(
         ManuscriptDocument document,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var sourceIds = DesignedPageIds(document);
         if (sourceIds.Count == 0)
             return [];
@@ -938,11 +993,15 @@ public class ChapterService(
         Guid sourceCompositionId,
         CancellationToken cancellationToken = default)
     {
+        var projectId = await GetChapterProjectIdAsync(chapterId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var repo = databaseOperation.Repositories.Chapters;
         if (target.EditionId is not Guid editionId)
             throw new InvalidOperationException("A Core Designed Page does not require an edition snapshot.");
         var chapter = await repo.GetByIdAsync(chapterId, cancellationToken)
             ?? throw new KeyNotFoundException("The chapter was not found.");
-        await using var mutation = await projectMutations.AcquireAsync(chapter.ProjectId, cancellationToken);
         var edition = await RequireEditableEditionAsync(target, chapter.ProjectId, cancellationToken);
         var existingComposition = await db.PageCompositions.AsNoTracking().SingleOrDefaultAsync(
             item => item.Id == sourceCompositionId && item.ProjectId == chapter.ProjectId
@@ -987,6 +1046,7 @@ public class ChapterService(
         edition.Revision = checked(edition.Revision + 1);
         edition.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        await databaseOperation.DisposeAsync();
         await TryReindexEditionBodyAsync(target, chapterId, cancellationToken);
         return remap[sourceCompositionId];
     }
@@ -1008,6 +1068,8 @@ public class ChapterService(
         long expectedRevision,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var edition = await RequireEditableEditionAsync(target, chapter.ProjectId, cancellationToken);
         var chapterOverride = await db.PublicationEditionChapterOverrides
             .SingleOrDefaultAsync(item => item.EditionId == edition.Id && item.ChapterId == chapter.Id, cancellationToken);
@@ -1027,6 +1089,8 @@ public class ChapterService(
         Chapter chapter,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var edition = await RequireEditableEditionAsync(target, chapter.ProjectId, cancellationToken);
         var chapterOverride = await db.PublicationEditionChapterOverrides
             .SingleOrDefaultAsync(item => item.EditionId == edition.Id && item.ChapterId == chapter.Id, cancellationToken);
@@ -1044,6 +1108,8 @@ public class ChapterService(
         Guid projectId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (target.EditionId is not Guid editionId)
             throw new InvalidOperationException("An edition content target requires an edition ID.");
         var edition = await db.PublicationEditions.SingleOrDefaultAsync(
@@ -1093,6 +1159,8 @@ public class ChapterService(
         Guid chapterId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (target.EditionId is not Guid editionId)
             return;
         var chapterOverride = await db.PublicationEditionChapterOverrides.AsNoTracking()
@@ -1119,6 +1187,8 @@ public class ChapterService(
 
     private async Task ReindexEditionAsync(Guid overrideId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var chapterOverride = await db.PublicationEditionChapterOverrides.AsNoTracking()
             .Include(item => item.Chapter)
             .Include(item => item.Edition)
@@ -1165,7 +1235,9 @@ public class ChapterService(
 
     public async Task DeleteAsync(Guid chapterId, CancellationToken cancellationToken = default)
     {
-        var chapter = await repo.GetByIdAsync(chapterId, cancellationToken);
+        Chapter? chapter;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+            chapter = await readOperation.Repositories.Chapters.GetByIdAsync(chapterId, cancellationToken);
         if (chapter is null) return;
         var projectId = chapter.ProjectId;
         var actId = chapter.ActId;
@@ -1194,6 +1266,9 @@ public class ChapterService(
 
         await contextIndexing.DeleteChapterAsync(projectId, chapter.Id, cancellationToken);
 
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var ownedCompositions = await db.PageCompositions.IgnoreQueryFilters().AsNoTracking()
             .Where(item => item.ProjectId == projectId && item.ChapterId == chapter.Id)
@@ -1209,15 +1284,21 @@ public class ChapterService(
         foreach (var compositionId in ownedCompositions)
             await authoringHistory.DeleteDocumentHistoryAsync(projectId, AuthoringHistoryDocumentKind.PageComposition, compositionId, cancellationToken: cancellationToken);
 
-        repo.Remove(chapter);
-        await repo.SaveChangesAsync(cancellationToken);
+        databaseOperation.Repositories.Chapters.Remove(chapter);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await transaction.DisposeAsync();
+        await databaseOperation.DisposeAsync();
         if (actId is Guid deletedFromActId)
             await contextIndexing.ReindexActAsync(deletedFromActId, cancellationToken);
     }
 
     public async Task ReorderAsync(Guid projectId, Guid? actId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var repo = databaseOperation.Repositories.Chapters;
+        var projects = databaseOperation.Repositories.Projects;
         await repo.ReorderAsync(projectId, actId, orderedIds, cancellationToken);
 
         var project = await projects.GetByIdAsync(projectId, cancellationToken);
@@ -1227,7 +1308,8 @@ public class ChapterService(
             projects.Update(project);
         }
 
-        await repo.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+        await databaseOperation.DisposeAsync();
         await outlineGraphSync.RepairProjectAsync(projectId, cancellationToken);
         foreach (var chapterId in orderedIds)
             await contextIndexing.ReindexChapterAsync(chapterId, cancellationToken);
@@ -1237,7 +1319,9 @@ public class ChapterService(
 
     public async Task ReindexAsync(Guid chapterId, CancellationToken cancellationToken = default)
     {
-        var chapter = await repo.GetByIdAsync(chapterId, cancellationToken);
+        Chapter? chapter;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+            chapter = await readOperation.Repositories.Chapters.GetByIdAsync(chapterId, cancellationToken);
         if (chapter is null) return;
 
         var scopeKey = Project.ScopeKey(chapter.ProjectId);
@@ -1266,8 +1350,7 @@ public class ChapterService(
                 chapter.VectorIndexState = VectorIndexState.Disabled;
                 chapter.VectorIndexedAt = null;
                 chapter.VectorIndexError = null;
-                repo.Update(chapter);
-                await repo.SaveChangesAsync(cancellationToken);
+                await UpdateVectorIndexStateAsync(chapter, cancellationToken);
                 await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
                 await autoLinks.RefreshSourceAsync(chapter.ProjectId, ProjectSearchSourceTypes.Chapter, chapter.Id, cancellationToken);
                 await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
@@ -1300,8 +1383,7 @@ public class ChapterService(
             chapter.VectorIndexState = VectorIndexState.UpToDate;
             chapter.VectorIndexedAt = DateTime.UtcNow;
             chapter.VectorIndexError = null;
-            repo.Update(chapter);
-            await repo.SaveChangesAsync(cancellationToken);
+            await UpdateVectorIndexStateAsync(chapter, cancellationToken);
             await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
             await autoLinks.RefreshSourceAsync(chapter.ProjectId, ProjectSearchSourceTypes.Chapter, chapter.Id, cancellationToken);
             await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
@@ -1317,11 +1399,36 @@ public class ChapterService(
             logger.LogWarning(ex, "Failed to reindex chapter {ChapterId}", chapter.Id);
             chapter.VectorIndexState = VectorIndexState.Failed;
             chapter.VectorIndexError = ex.Message;
-            repo.Update(chapter);
-            try { await repo.SaveChangesAsync(cancellationToken); }
+            try { await UpdateVectorIndexStateAsync(chapter, cancellationToken); }
             catch (Exception saveEx) { logger.LogError(saveEx, "Failed to persist reindex failure for chapter {ChapterId}", chapter.Id); }
             throw;
         }
+    }
+
+    private async Task<Guid> GetChapterProjectIdAsync(Guid chapterId, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        var projectId = await operation.Db.Chapters.AsNoTracking()
+            .Where(item => item.Id == chapterId)
+            .Select(item => item.ProjectId)
+            .SingleOrDefaultAsync(cancellationToken);
+        return projectId != Guid.Empty
+            ? projectId
+            : throw new KeyNotFoundException("The chapter was not found.");
+    }
+
+    private async Task UpdateVectorIndexStateAsync(Chapter chapter, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(chapter.ProjectId, cancellationToken);
+        var stored = await operation.Repositories.Chapters.GetByIdAsync(chapter.Id, cancellationToken);
+        if (stored is null)
+            return;
+
+        stored.VectorIndexState = chapter.VectorIndexState;
+        stored.VectorIndexedAt = chapter.VectorIndexedAt;
+        stored.VectorIndexError = chapter.VectorIndexError;
+        operation.Repositories.Chapters.Update(stored);
+        await operation.SaveChangesAsync(cancellationToken);
     }
 
     private static string BuildChapterSearchText(Chapter chapter, string expandedText)

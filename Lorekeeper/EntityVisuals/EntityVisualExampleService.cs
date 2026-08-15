@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.EntityVisuals;
 
-public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexingService contextIndexing) : IEntityVisualExampleService
+public sealed class EntityVisualExampleService(IAppDatabaseOperationFactory database, IContextIndexingService contextIndexing) : IEntityVisualExampleService
 {
     public async Task<EntityVisualExampleView?> GetAsync(Guid projectId, Guid exampleId, CancellationToken cancellationToken = default)
     {
@@ -49,6 +49,9 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
         IReadOnlyCollection<EntityVisualTarget>? targets,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var normalized = (targets ?? [])
             .Where(target => target.EntityId != Guid.Empty)
             .Select(target => new EntityVisualTarget(target.EntityId, target.Label?.Trim() ?? string.Empty))
@@ -84,6 +87,9 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
         Guid? sourceVisualCandidateId = null,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var node = await GetRequiredEntityNodeAsync(projectId, entityId, cancellationToken);
         var image = await db.PublishAssets.FirstOrDefaultAsync(asset => asset.ProjectId == projectId && asset.Id == imageId, cancellationToken)
             ?? throw new InvalidOperationException($"Image {imageId} was not found in this project.");
@@ -126,6 +132,9 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
 
     public async Task<EntityVisualExampleView> UpdateAsync(Guid projectId, Guid exampleId, string label, int? sortOrder = null, EntityVisualExampleOrigin? origin = null, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var example = await QueryExamples(projectId, tracking: true).FirstOrDefaultAsync(item => item.Id == exampleId, cancellationToken)
             ?? throw new InvalidOperationException("Entity canonical visual reference was not found.");
         example.Label = label?.Trim() ?? string.Empty;
@@ -150,6 +159,9 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
 
     public async Task ReorderAsync(Guid projectId, Guid entityId, IReadOnlyList<Guid> orderedExampleIds, bool markManual = true, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var node = await GetRequiredEntityNodeAsync(projectId, entityId, cancellationToken);
         var examples = await db.EntityVisualExamples.Where(example => example.GraphNodeId == node.Id).ToListAsync(cancellationToken);
         if (!orderedExampleIds.ToHashSet().SetEquals(examples.Select(example => example.Id)))
@@ -168,6 +180,9 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
 
     public async Task DetachAsync(Guid projectId, Guid exampleId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var example = await db.EntityVisualExamples.Include(item => item.GraphNode).FirstOrDefaultAsync(item => item.ProjectId == projectId && item.Id == exampleId, cancellationToken);
         if (example is null) return;
         var entityId = Guid.ParseExact(example.GraphNode.Key, "N");
@@ -185,6 +200,9 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
 
     public async Task<SourceVisualCandidateView> CreateCandidateAsync(SourceVisualCandidateCreateRequest request, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         _ = await db.Projects.AsNoTracking().FirstOrDefaultAsync(project => project.Id == request.ProjectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {request.ProjectId} was not found.");
         var normalized = ProjectImageBinary.Normalize(request.Data, request.ContentType, request.FileName);
@@ -224,12 +242,16 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
 
     public async Task<SourceVisualCandidateView?> GetCandidateAsync(Guid projectId, Guid candidateId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var candidate = await db.SourceVisualCandidates.AsNoTracking().Include(item => item.EntityVisualExamples).FirstOrDefaultAsync(item => item.ProjectId == projectId && item.Id == candidateId, cancellationToken);
         return candidate is null ? null : ToView(candidate);
     }
 
     public async Task<SourceVisualCandidateData?> GetCandidateDataAsync(Guid projectId, Guid candidateId, int? maxEdge = null, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var candidate = await db.SourceVisualCandidates.AsNoTracking().FirstOrDefaultAsync(item => item.ProjectId == projectId && item.Id == candidateId, cancellationToken);
         if (candidate is null) return null;
         var data = maxEdge is int edge && edge > 0 ? ProjectImageResize.Resize(candidate.Data, candidate.ContentType, edge) : candidate.Data;
@@ -238,18 +260,25 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
 
     public async Task<IReadOnlyList<SourceVisualCandidateView>> ListIngestCandidatesAsync(Guid projectId, Guid ingestSourceId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var candidates = await db.SourceVisualCandidates.AsNoTracking().Include(candidate => candidate.EntityVisualExamples).Where(candidate => candidate.ProjectId == projectId && candidate.IngestSourceId == ingestSourceId).OrderBy(candidate => candidate.StartChar).ThenBy(candidate => candidate.CreatedAt).ToListAsync(cancellationToken);
         return candidates.Select(ToView).ToList();
     }
 
     public async Task<IReadOnlyList<SourceVisualCandidateView>> ListWebCandidatesAsync(Guid projectId, Guid webCandidateId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var candidates = await db.SourceVisualCandidates.AsNoTracking().Include(candidate => candidate.EntityVisualExamples).Where(candidate => candidate.ProjectId == projectId && candidate.WebIngestCandidateId == webCandidateId).OrderBy(candidate => candidate.CreatedAt).ToListAsync(cancellationToken);
         return candidates.Select(ToView).ToList();
     }
 
     public async Task<ProjectImageView> PromoteCandidateAsync(Guid projectId, Guid candidateId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var candidate = await db.SourceVisualCandidates.FirstOrDefaultAsync(item => item.ProjectId == projectId && item.Id == candidateId, cancellationToken)
             ?? throw new InvalidOperationException("Source visual candidate was not found.");
         if (candidate.Data.Length == 0) throw new InvalidOperationException("Source visual candidate has no cached image data.");
@@ -286,6 +315,9 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
         string? errorMessage = null,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var candidate = await db.SourceVisualCandidates.Include(item => item.EntityVisualExamples)
             .FirstOrDefaultAsync(item => item.ProjectId == projectId && item.Id == candidateId, cancellationToken)
             ?? throw new InvalidOperationException("Source visual candidate was not found.");
@@ -298,6 +330,9 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
 
     public async Task RemoveIngestOwnedAsync(Guid projectId, Guid ingestSourceId, bool deleteCandidates = true, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var candidates = await db.SourceVisualCandidates.Where(candidate => candidate.ProjectId == projectId && candidate.IngestSourceId == ingestSourceId).ToListAsync(cancellationToken);
         var candidateIds = candidates.Select(candidate => candidate.Id).ToList();
         var examples = await db.EntityVisualExamples.Include(example => example.GraphNode)
@@ -350,6 +385,8 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
 
     private async Task<bool> IsImageOtherwiseReferencedAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (await db.EntityVisualExamples.AnyAsync(example => example.ProjectId == projectId && example.ImageId == imageId, cancellationToken)) return true;
         if (await db.ProjectImageMasks.AnyAsync(mask => mask.ProjectId == projectId && mask.ImageId == imageId, cancellationToken)) return true;
         var idN = imageId.ToString("N");
@@ -374,12 +411,16 @@ public sealed class EntityVisualExampleService(AppDbContext db, IContextIndexing
 
     private IQueryable<EntityVisualExample> QueryExamples(Guid projectId, bool tracking = false)
     {
+        using var databaseOperation = database.OpenRead();
+        var db = databaseOperation.Db;
         var query = db.EntityVisualExamples.Include(example => example.GraphNode).Include(example => example.Image).Where(example => example.ProjectId == projectId).OrderBy(example => example.SortOrder).ThenBy(example => example.CreatedAt);
         return tracking ? query : query.AsNoTracking();
     }
 
     private async Task<GraphNode?> FindEntityNodeAsync(Guid projectId, Guid entityId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var node = await db.GraphNodes.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Key == entityId.ToString("N"), cancellationToken);
         return node is not null && IsEligible(node) ? node : null;
     }

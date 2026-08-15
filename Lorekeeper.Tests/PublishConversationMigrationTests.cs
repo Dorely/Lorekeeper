@@ -22,6 +22,7 @@ public sealed class PublishConversationMigrationTests
         {
             var options = new DbContextOptionsBuilder<AppDbContext>()
                 .UseSqlite($"Data Source={Path.Combine(directory, "publish-chat.db")}")
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
                 .Options;
             var projectId = Guid.NewGuid();
             var editionId = Guid.NewGuid();

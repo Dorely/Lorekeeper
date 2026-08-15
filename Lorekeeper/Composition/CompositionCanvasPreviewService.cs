@@ -69,7 +69,7 @@ public interface ICompositionCanvasPreviewService
 }
 
 public sealed partial class CompositionCanvasPreviewService(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     IProjectFontService projectFonts,
     IOptions<PublicationPressOptions> options) : ICompositionCanvasPreviewService
 {
@@ -84,6 +84,8 @@ public sealed partial class CompositionCanvasPreviewService(
         CompositionCanvasPreviewMode mode,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var variant = await db.PageCompositionVariants
             .AsNoTracking()
             .Include(item => item.Composition)
@@ -151,6 +153,8 @@ public sealed partial class CompositionCanvasPreviewService(
         CompositionCanvasPreviewMode mode,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         ArgumentNullException.ThrowIfNull(scene);
         ArgumentNullException.ThrowIfNull(semantic);
         var imageIds = CompositionSceneResolver.Flatten(scene)

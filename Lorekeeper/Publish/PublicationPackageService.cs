@@ -1,5 +1,5 @@
-using System.IO.Compression;
 using System.Data;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -62,11 +62,10 @@ public interface IPublicationPackageService
 }
 
 public sealed class PublicationPackageService(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     IPublishService publishing,
     IPublicationEditionService editions,
     IPublicationCoverService covers,
-    IProjectMutationCoordinator projectMutations,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IPrintProductRegistry printProducts,
     IPrintGeometryService printGeometry,
@@ -150,6 +149,8 @@ public sealed class PublicationPackageService(
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
         edition.Language = PublicationLanguage.Normalize(edition.Language);
         var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
@@ -386,23 +387,28 @@ public sealed class PublicationPackageService(
         PublicationPreflightReport report,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         if (!report.CanPackage)
             throw new InvalidOperationException("Publication package is blocked by preflight errors.");
-        var edition = await db.PublicationEditions.AsNoTracking().SingleAsync(
-            candidate => candidate.Id == editionId && candidate.ProjectId == projectId,
-            cancellationToken);
-        PublicationEditionService.EnsureDraft(edition);
-        var validatedArtifactIds = report.ValidatedArtifactIds;
-        var sourceArtifacts = await db.PublicationArtifacts.AsNoTracking()
-            .Where(artifact => artifact.EditionId == editionId
-                && !artifact.IsLegacy
-                && validatedArtifactIds.Contains(artifact.Id))
-            .ToListAsync(cancellationToken);
-        if (sourceArtifacts.Count != validatedArtifactIds.Count
-            || sourceArtifacts.Any(artifact => !ArtifactBytesMatch(artifact)))
+        PublicationEdition edition;
+        List<PublicationArtifact> sourceArtifacts;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
         {
-            throw new InvalidOperationException("A preflighted press artifact is missing or failed its hash check.");
+            var readDb = readOperation.Db;
+            edition = await readDb.PublicationEditions.AsNoTracking().SingleAsync(
+                candidate => candidate.Id == editionId && candidate.ProjectId == projectId,
+                cancellationToken);
+            PublicationEditionService.EnsureDraft(edition);
+            var validatedArtifactIds = report.ValidatedArtifactIds;
+            sourceArtifacts = await readDb.PublicationArtifacts.AsNoTracking()
+                .Where(artifact => artifact.EditionId == editionId
+                    && !artifact.IsLegacy
+                    && validatedArtifactIds.Contains(artifact.Id))
+                .ToListAsync(cancellationToken);
+            if (sourceArtifacts.Count != validatedArtifactIds.Count
+                || sourceArtifacts.Any(artifact => !ArtifactBytesMatch(artifact)))
+            {
+                throw new InvalidOperationException("A preflighted press artifact is missing or failed its hash check.");
+            }
         }
         var interiorArtifact = sourceArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.InteriorPdf);
         var physicalArtifacts = sourceArtifacts.Where(artifact => artifact.Kind is
@@ -517,6 +523,9 @@ public sealed class PublicationPackageService(
         var manifestData = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
         files["manifest.json"] = (PublicationArtifactKind.Manifest, "application/json", manifestData);
         var packageData = CreateDeterministicZip(files);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(
             IsolationLevel.Serializable,
             cancellationToken);
@@ -1323,6 +1332,8 @@ public sealed class PublicationPackageService(
         List<PublicationPreflightItem> items,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (interior?.RenderJobId is not Guid renderJobId
             || physicalArtifacts.Count == 0
             || physicalArtifacts.Any(item => item.RenderJobId != renderJobId))
@@ -1492,6 +1503,8 @@ public sealed class PublicationPackageService(
         List<PublicationPreflightItem> items,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (book?.RenderJobId is not Guid renderJobId)
         {
             items.Add(Error("PRESS_EVIDENCE_REQUIRED", "The current book PDF must come from a completed Lorekeeper Press render.", PublicationArtifactKind.BookPdf));
@@ -1658,18 +1671,18 @@ public sealed class PublicationPackageService(
         string fingerprint,
         string rendererVersion,
         string profileId) => new()
-    {
-        EditionId = editionId,
-        Kind = kind,
-        FileName = fileName,
-        MediaType = mediaType,
-        Data = data,
-        Sha256 = Convert.ToHexStringLower(SHA256.HashData(data)),
-        ByteLength = data.LongLength,
-        SourceFingerprint = fingerprint,
-        RendererVersion = rendererVersion,
-        ProfileId = profileId,
-    };
+        {
+            EditionId = editionId,
+            Kind = kind,
+            FileName = fileName,
+            MediaType = mediaType,
+            Data = data,
+            Sha256 = Convert.ToHexStringLower(SHA256.HashData(data)),
+            ByteLength = data.LongLength,
+            SourceFingerprint = fingerprint,
+            RendererVersion = rendererVersion,
+            ProfileId = profileId,
+        };
 
     private static PublicationPreflightItem Error(
         string code,

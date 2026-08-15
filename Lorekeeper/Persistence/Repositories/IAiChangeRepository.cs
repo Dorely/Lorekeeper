@@ -17,5 +17,4 @@ public interface IAiChangeRepository
     Task AddChangeAsync(AiChange change, CancellationToken cancellationToken = default);
     void UpdateBatch(AiChangeBatch batch);
     void UpdateChange(AiChange change);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

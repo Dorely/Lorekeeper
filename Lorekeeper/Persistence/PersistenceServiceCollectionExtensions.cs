@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Lorekeeper.Persistence;
 
@@ -19,10 +20,9 @@ public static class PersistenceServiceCollectionExtensions
             configuration,
             usePerUserDataDirectory);
 
-        services.AddSingleton<IAppDbContextStateCoordinator, AppDbContextStateCoordinator>();
-        services.AddSingleton<AppDbContextCommandInterceptor>();
-        services.AddSingleton<AppDbContextTransactionInterceptor>();
-        services.AddDbContext<AppDbContext>((serviceProvider, options) =>
+        services.AddSingleton<IAppDatabaseWriteCoordinator, AppDatabaseWriteCoordinator>();
+        services.AddSingleton<IAppDatabaseOperationFactory, AppDatabaseOperationFactory>();
+        services.AddDbContextFactory<AppDbContext>((serviceProvider, options) =>
         {
             switch (providerName)
             {
@@ -37,10 +37,12 @@ public static class PersistenceServiceCollectionExtensions
                         $"Unsupported persistence provider '{providerName}'. " +
                         "Supported values: Sqlite.");
             }
-            options.AddInterceptors(
-                serviceProvider.GetRequiredService<AppDbContextCommandInterceptor>(),
-                serviceProvider.GetRequiredService<AppDbContextTransactionInterceptor>());
+            options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
         });
+        // AddDbContextFactory also registers AppDbContext as scoped for convenience.
+        // Lorekeeper deliberately forbids that Blazor-circuit lifetime; consumers must
+        // create an operation-bounded context through IAppDatabaseOperationFactory.
+        services.RemoveAll<AppDbContext>();
 
         return services;
     }

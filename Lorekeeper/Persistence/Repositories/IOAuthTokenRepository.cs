@@ -11,5 +11,4 @@ public interface IOAuthTokenRepository
     Task ReplaceForProviderAsync(int providerId, OAuthToken newToken, CancellationToken cancellationToken = default);
 
     Task DeleteForProviderAsync(int providerId, CancellationToken cancellationToken = default);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

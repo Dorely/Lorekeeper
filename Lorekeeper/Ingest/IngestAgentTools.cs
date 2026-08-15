@@ -6,20 +6,14 @@ using Lorekeeper.Images;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.AI;
 
 namespace Lorekeeper.Ingest;
 
 public sealed class IngestAgentTools(
-    IIngestRepository ingest,
-    IEntityService entities,
-    IGraphStore graph,
-    IGraphNodeRepository nodes,
-    IEntityTypeService entityTypes,
-    IContextIndexingService contextIndexing,
-    IEntityVisualExampleService entityVisualExamples,
-    IProjectImageService projectImages)
+IAppDatabaseOperationFactory database, IEntityService entities, IGraphStore graph, IEntityTypeService entityTypes, IContextIndexingService contextIndexing, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages)
 {
     public IList<AITool> Build(IngestAgentContext context) =>
     [
@@ -146,6 +140,9 @@ public sealed class IngestAgentTools(
 
     private async Task<string> ListProjectEntityIndexAsync(IngestAgentContext context, string? type, string? cursor, int? limit)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var searchTypes = await ResolveSearchTypesAsync(context.ProjectId, type);
         var offset = int.TryParse(cursor, out var parsedCursor) ? Math.Max(0, parsedCursor) : 0;
         var take = Math.Clamp(limit ?? 100, 1, 200);
@@ -187,6 +184,9 @@ public sealed class IngestAgentTools(
 
     private async Task<string> ResolveProjectEntityMentionsAsync(IngestAgentContext context, IngestEntityMentionInput[]? mentions)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var requestedMentions = (mentions ?? [])
             .Where(mention => !string.IsNullOrWhiteSpace(mention.Mention)
                 || mention.Variants is { Length: > 0 }
@@ -301,6 +301,9 @@ public sealed class IngestAgentTools(
         string? type,
         string? name)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         if (!string.IsNullOrWhiteSpace(entityId))
         {
             if (!Guid.TryParse(entityId, out var parsed))
@@ -401,6 +404,9 @@ public sealed class IngestAgentTools(
 
     private async Task<string> ReadIngestEntitySourceObservationsAsync(IngestFinalReviewContext context)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, context.EntityId);
         if (node is null) return $"Error: entity {context.EntityId} is not a non-structural project entity.";
 
@@ -474,6 +480,9 @@ public sealed class IngestAgentTools(
         string body,
         string? notes)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         if (string.IsNullOrWhiteSpace(body))
             return "Error: body is required.";
 
@@ -489,7 +498,7 @@ public sealed class IngestAgentTools(
             body);
         node.UpdatedAt = DateTime.UtcNow;
         nodes.Update(node);
-        await nodes.SaveChangesAsync();
+        await databaseOperation.SaveChangesAsync();
         context.OnMutated();
         await contextIndexing.ReindexEntityAsync(context.ProjectId, context.EntityId);
 
@@ -526,6 +535,9 @@ public sealed class IngestAgentTools(
         string sourceSynopsis,
         string? notes)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var source = await ingest.GetSourceAsync(context.SourceId);
         if (source is null) return $"Error: source {context.SourceId} not found.";
         var sourceChunk = await ingest.GetSourceChunkAsync(context.SourceChunkId);
@@ -578,7 +590,7 @@ public sealed class IngestAgentTools(
             ingest.UpdateStagingRecord(existingNote);
         }
 
-        await ingest.SaveChangesAsync();
+        await databaseOperation.SaveChangesAsync();
         context.OnMutated();
         await contextIndexing.ReindexIngestSourceChunkAsync(context.SourceChunkId);
         return JsonSerializer.Serialize(new
@@ -600,6 +612,9 @@ public sealed class IngestAgentTools(
         IReadOnlyList<IngestWikiSectionInput>? wikiSections,
         string? notes)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var title = node?.Label ?? entityId.ToString("N");
         var resourceType = node?.NodeType ?? string.Empty;
         var aliasesForPayload = node is null
@@ -644,7 +659,7 @@ public sealed class IngestAgentTools(
             ingest.UpdateStagingRecord(existing);
         }
 
-        await ingest.SaveChangesAsync();
+        await databaseOperation.SaveChangesAsync();
     }
 
     private async Task UpsertRelationshipObservationStagingRecordAsync(
@@ -656,6 +671,9 @@ public sealed class IngestAgentTools(
         string fromTitle,
         string toTitle)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var payloadJson = BuildRelationshipReportPayload(existing?.PayloadJson, context, IngestSourceAssertions.ObservedRelationshipAction, from, to);
         if (existing is null)
         {
@@ -689,39 +707,51 @@ public sealed class IngestAgentTools(
             ingest.UpdateStagingRecord(existing);
         }
 
-        await ingest.SaveChangesAsync();
+        await databaseOperation.SaveChangesAsync();
     }
 
-    private async Task<IngestStagingRecord?> FindActiveEntityStagingRecordAsync(Guid jobId, Guid entityId, Guid? sourceChunkId = null) =>
-        (await ingest.ListStagingRecordsAsync(jobId)).FirstOrDefault(item =>
-            item.Kind == IngestStagingRecordKind.Entity
-            && item.Status == IngestStagingRecordStatus.Active
-            && item.EntityId == entityId
-            && (sourceChunkId is null || item.SourceChunkId == sourceChunkId));
-
+    private async Task<IngestStagingRecord?> FindActiveEntityStagingRecordAsync(Guid jobId, Guid entityId, Guid? sourceChunkId = null)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(default);
+        var ingest = databaseOperation.Repositories.Ingest;
+        return (await ingest.ListStagingRecordsAsync(jobId)).FirstOrDefault(item =>
+                    item.Kind == IngestStagingRecordKind.Entity
+                    && item.Status == IngestStagingRecordStatus.Active
+                    && item.EntityId == entityId
+                    && (sourceChunkId is null || item.SourceChunkId == sourceChunkId));
+    }
     private async Task<IngestStagingRecord?> FindActiveRelationshipObservationStagingRecordAsync(
         Guid jobId,
         Guid sourceChunkId,
         Guid from,
         Guid to,
-        string edgeType) =>
-        (await ingest.ListStagingRecordsAsync(jobId)).FirstOrDefault(item =>
-            item.Kind == IngestStagingRecordKind.Relationship
-            && item.Status == IngestStagingRecordStatus.Active
-            && item.SourceChunkId == sourceChunkId
-            && string.Equals(item.EdgeType, edgeType, StringComparison.OrdinalIgnoreCase)
-            && TryReadRelationshipEndpoints(item, out var existingFrom, out var existingTo)
-            && existingFrom == from
-            && existingTo == to);
-
-    private async Task<bool> IsEntityTouchedByJobAsync(Guid jobId, Guid entityId) =>
-        (await ingest.ListStagingRecordsAsync(jobId)).Any(item =>
-            item.Kind == IngestStagingRecordKind.Entity
-            && item.Status == IngestStagingRecordStatus.Active
-            && item.EntityId == entityId);
-
+        string edgeType)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(default);
+        var ingest = databaseOperation.Repositories.Ingest;
+        return (await ingest.ListStagingRecordsAsync(jobId)).FirstOrDefault(item =>
+                    item.Kind == IngestStagingRecordKind.Relationship
+                    && item.Status == IngestStagingRecordStatus.Active
+                    && item.SourceChunkId == sourceChunkId
+                    && string.Equals(item.EdgeType, edgeType, StringComparison.OrdinalIgnoreCase)
+                    && TryReadRelationshipEndpoints(item, out var existingFrom, out var existingTo)
+                    && existingFrom == from
+                    && existingTo == to);
+    }
+    private async Task<bool> IsEntityTouchedByJobAsync(Guid jobId, Guid entityId)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(default);
+        var ingest = databaseOperation.Repositories.Ingest;
+        return (await ingest.ListStagingRecordsAsync(jobId)).Any(item =>
+                    item.Kind == IngestStagingRecordKind.Entity
+                    && item.Status == IngestStagingRecordStatus.Active
+                    && item.EntityId == entityId);
+    }
     private async Task AddExtractedFromAsync(IngestAgentContext context, GraphNode entityNode)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var sourceChunkNode = await nodes.FindAsync(context.ProjectId, IngestGraphSync.SourceChunkNodeType, context.SourceChunkId.ToString("N"));
         var targetNode = sourceChunkNode
             ?? await nodes.FindAsync(context.ProjectId, IngestGraphSync.SourceNodeType, context.SourceId.ToString("N"));
@@ -793,6 +823,8 @@ public sealed class IngestAgentTools(
         string name,
         long? excludeNodeId = null)
     {
+        await using var databaseOperation = await database.OpenReadAsync(default);
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var normalizedName = NormalizeEntityName(name);
         if (normalizedName.Length == 0) return null;
 
@@ -837,6 +869,8 @@ public sealed class IngestAgentTools(
 
     private async Task<GraphNode?> ResolveAllowedEntityNodeAsync(Guid projectId, Guid entityId)
     {
+        await using var databaseOperation = await database.OpenReadAsync(default);
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var node = await nodes.FindByKeyAsync(projectId, entityId.ToString("N"));
         if (node is null || IsDisallowedEntityType(node.NodeType)) return null;
         var allowedTypes = await GetAllowedEntityTypesAsync(projectId);
@@ -966,12 +1000,15 @@ public sealed class IngestAgentTools(
         }
     }
 
-    private async Task<int> CountActiveEntityStagingRecordsAsync(Guid jobId, Guid entityId) =>
-        (await ingest.ListStagingRecordsAsync(jobId))
-            .Count(item => item.Kind == IngestStagingRecordKind.Entity
-                && item.Status == IngestStagingRecordStatus.Active
-                && item.EntityId == entityId);
-
+    private async Task<int> CountActiveEntityStagingRecordsAsync(Guid jobId, Guid entityId)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(default);
+        var ingest = databaseOperation.Repositories.Ingest;
+        return (await ingest.ListStagingRecordsAsync(jobId))
+                    .Count(item => item.Kind == IngestStagingRecordKind.Entity
+                        && item.Status == IngestStagingRecordStatus.Active
+                        && item.EntityId == entityId);
+    }
     private static bool TryReadRelationshipEndpoints(IngestStagingRecord item, out Guid from, out Guid to)
     {
         from = item.FromEntityId ?? Guid.Empty;

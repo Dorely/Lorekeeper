@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
@@ -13,9 +14,9 @@ using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
 using Lorekeeper.Publish;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 using SkiaSharp;
@@ -24,6 +25,32 @@ namespace Lorekeeper.Tests;
 
 public sealed class ProjectImportJobIntegrationTests
 {
+    private static readonly ConditionalWeakTable<AppDbContext, IAppDatabaseOperationFactory> Databases = new();
+
+    private sealed class TestDbContextFactory(AppDbContext source) : IDbContextFactory<AppDbContext>
+    {
+        private readonly DbContextOptions<AppDbContext> _options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(source.Database.GetDbConnection())
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
+            .Options;
+
+        public AppDbContext CreateDbContext() => new(_options, NullLogger<AppDbContext>.Instance);
+    }
+
+    private static IAppDatabaseOperationFactory Database(
+        AppDbContext db,
+        IProjectMutationCoordinator? projectMutations = null) => projectMutations is null
+            ? Databases.GetValue(
+                db,
+                source => new AppDatabaseOperationFactory(
+                    new TestDbContextFactory(source),
+                    new AppDatabaseWriteCoordinator(),
+                    new ProjectMutationCoordinator()))
+            : new AppDatabaseOperationFactory(
+                new TestDbContextFactory(db),
+                new AppDatabaseWriteCoordinator(),
+                projectMutations);
+
     private sealed class TestWebHostEnvironment(string webRootPath) : IWebHostEnvironment
     {
         public string ApplicationName { get; set; } = "Lorekeeper.Tests";
@@ -39,7 +66,8 @@ public sealed class ProjectImportJobIntegrationTests
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
-        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
         await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
         await db.Database.MigrateAsync();
         var project = new Project { Name = "Legacy import", Slug = $"legacy-{Guid.NewGuid():N}" };
@@ -109,7 +137,7 @@ public sealed class ProjectImportJobIntegrationTests
         Assert.All(images, image => Assert.Equal(imageBytes, image.Data));
         var importedValidChapter = await db.Chapters.AsNoTracking().SingleAsync(chapter => chapter.Title == "Legacy cover");
         var importedAmbiguousChapter = await db.Chapters.AsNoTracking().SingleAsync(chapter => chapter.Title == "Ambiguous cover");
-        var resolver = new PublicationEffectiveConfigurationResolver(db);
+        var resolver = new PublicationEffectiveConfigurationResolver(Database(db));
         var convertedOutline = (await resolver.ResolveReleaseAsync(project.Id, converted.Id)).OutlineItems;
         var ambiguousOutline = (await resolver.ResolveReleaseAsync(project.Id, ambiguous.Id)).OutlineItems;
         Assert.False(convertedOutline.Single(item => item.ChapterId == importedValidChapter.Id).IsIncluded);
@@ -125,7 +153,8 @@ public sealed class ProjectImportJobIntegrationTests
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
-        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
         await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
         await db.Database.MigrateAsync();
         var project = new Project { Name = "Current import", Slug = $"current-{Guid.NewGuid():N}" };
@@ -164,7 +193,8 @@ public sealed class ProjectImportJobIntegrationTests
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
-        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
         await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
         await db.Database.MigrateAsync();
         var project = new Project { Name = "V9 import", Slug = $"v9-{Guid.NewGuid():N}" };
@@ -207,7 +237,7 @@ public sealed class ProjectImportJobIntegrationTests
         var completed = await db.ProjectImportJobs.AsNoTracking().SingleAsync();
         Assert.True(completed.Status == ProjectImportJobStatus.Completed, completed.ErrorMessage);
         var edition = await db.PublicationEditions.AsNoTracking().SingleAsync();
-        var outline = Assert.Single((await new PublicationEffectiveConfigurationResolver(db)
+        var outline = Assert.Single((await new PublicationEffectiveConfigurationResolver(Database(db))
             .ResolveReleaseAsync(project.Id, edition.Id)).OutlineItems);
         Assert.NotNull(edition.SelectedCoverImageId);
         Assert.False(outline.IsIncluded);
@@ -218,7 +248,8 @@ public sealed class ProjectImportJobIntegrationTests
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
-        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
         await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
         await db.Database.MigrateAsync();
 
@@ -251,22 +282,10 @@ public sealed class ProjectImportJobIntegrationTests
         db.AddRange(project, existingEdition);
         await db.SaveChangesAsync();
 
-        var projectRepo = new ProjectRepository(db);
-        var chapterRepo = new ChapterRepository(db);
-        var nodeRepo = new GraphNodeRepository(db);
-        var edgeRepo = new GraphEdgeRepository(db);
-        var entityTypeRepo = new GraphEntityTypeRepository(db);
-        var actRepo = new ActRepository(db);
-        var graph = new RelationalGraphStore(nodeRepo, edgeRepo);
-        var entityTypeService = new EntityTypeService(entityTypeRepo, nodeRepo);
-        var outline = new OutlineGraphSync(
-            graph,
-            nodeRepo,
-            edgeRepo,
-            projectRepo,
-            actRepo,
-            chapterRepo,
-            entityTypeService);
+        var database = Database(db);
+        var graph = new RelationalGraphStore(database);
+        var entityTypeService = new EntityTypeService(database);
+        var outline = new OutlineGraphSync(database, graph, entityTypeService);
         await outline.EnsureProjectAsync(project);
         var imageId = Guid.NewGuid();
         var export = new ProjectExportDocument
@@ -358,25 +377,18 @@ public sealed class ProjectImportJobIntegrationTests
         var mutations = new ProjectMutationCoordinator();
         var indexWork = new VectorIndexWorkCoordinator(NullLogger<VectorIndexWorkCoordinator>.Instance);
         var processor = new ProjectImportJobProcessor(
-            new ProjectImportRepository(db),
-            db,
-            projectRepo,
-            nodeRepo,
-            edgeRepo,
-            entityTypeRepo,
+            database,
             graph,
             DefaultProxy<IActService>(),
-            new ImportChapterService(chapterRepo),
-            chapterRepo,
+            new ImportChapterService(database),
             DefaultProxy<IProjectFactService>(),
             entityTypeService,
             outline,
             DefaultProxy<IContextIndexingService>(),
             DefaultProxy<IEntityVisualExampleService>(),
-            new BookBriefService(db),
-            new ManuscriptStyleService(db, mutations),
+            new BookBriefService(database),
+            new ManuscriptStyleService(database),
             indexWork,
-            mutations,
             new ProjectImportJobNotifier(),
             NullLogger<ProjectImportJobProcessor>.Instance);
 
@@ -402,7 +414,8 @@ public sealed class ProjectImportJobIntegrationTests
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
-        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
         await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
         await db.Database.MigrateAsync();
 
@@ -414,25 +427,13 @@ public sealed class ProjectImportJobIntegrationTests
         db.Projects.Add(project);
         await db.SaveChangesAsync();
 
-        var projectRepo = new ProjectRepository(db);
-        var chapterRepo = new ChapterRepository(db);
-        var nodeRepo = new GraphNodeRepository(db);
-        var edgeRepo = new GraphEdgeRepository(db);
-        var entityTypeRepo = new GraphEntityTypeRepository(db);
-        var actRepo = new ActRepository(db);
-        var graph = new RelationalGraphStore(nodeRepo, edgeRepo);
-        var entityTypeService = new EntityTypeService(entityTypeRepo, nodeRepo);
-        var outline = new OutlineGraphSync(
-            graph,
-            nodeRepo,
-            edgeRepo,
-            projectRepo,
-            actRepo,
-            chapterRepo,
-            entityTypeService);
-        await outline.EnsureProjectAsync(project);
         var mutations = new ProjectMutationCoordinator();
         var gatedMutations = new GateMutationCoordinator(mutations);
+        var database = Database(db, gatedMutations);
+        var graph = new RelationalGraphStore(database);
+        var entityTypeService = new EntityTypeService(database);
+        var outline = new OutlineGraphSync(database, graph, entityTypeService);
+        await outline.EnsureProjectAsync(project);
         var indexWork = new VectorIndexWorkCoordinator(NullLogger<VectorIndexWorkCoordinator>.Instance);
         var contextIndexing = new ObservingContextIndexingService(indexWork, db);
 
@@ -549,25 +550,18 @@ public sealed class ProjectImportJobIntegrationTests
         await db.SaveChangesAsync();
 
         var processor = new ProjectImportJobProcessor(
-            new ProjectImportRepository(db),
-            db,
-            projectRepo,
-            nodeRepo,
-            edgeRepo,
-            entityTypeRepo,
+            database,
             graph,
             DefaultProxy<IActService>(),
-            new ImportChapterService(chapterRepo, contextIndexing),
-            chapterRepo,
+            new ImportChapterService(database, contextIndexing),
             DefaultProxy<IProjectFactService>(),
             entityTypeService,
             outline,
             contextIndexing,
             DefaultProxy<IEntityVisualExampleService>(),
-            new BookBriefService(db),
-            new ManuscriptStyleService(db, gatedMutations),
+            new BookBriefService(database),
+            new ManuscriptStyleService(database),
             indexWork,
-            gatedMutations,
             new ProjectImportJobNotifier(),
             NullLogger<ProjectImportJobProcessor>.Instance);
 
@@ -599,7 +593,7 @@ public sealed class ProjectImportJobIntegrationTests
             importedFigure.ImageId);
         Assert.Equal("A regional map", importedFigure.AltText);
         Assert.Equal("Eastern road", ManuscriptCodec.Text(importedFigure));
-        var styles = await new ManuscriptStyleService(db, mutations).ListAsync(project.Id);
+        var styles = await new ManuscriptStyleService(Database(db)).ListAsync(project.Id);
         Assert.Equal(2, styles.Count);
         ManuscriptStyleService.ValidateDocumentReferences(imported.Manuscript, styles);
         Assert.Contains(
@@ -612,43 +606,25 @@ public sealed class ProjectImportJobIntegrationTests
 
     private static async Task<ProjectImportJobProcessor> CreateProcessorAsync(AppDbContext db, Project project)
     {
-        var projectRepo = new ProjectRepository(db);
-        var chapterRepo = new ChapterRepository(db);
-        var nodeRepo = new GraphNodeRepository(db);
-        var edgeRepo = new GraphEdgeRepository(db);
-        var entityTypeRepo = new GraphEntityTypeRepository(db);
-        var graph = new RelationalGraphStore(nodeRepo, edgeRepo);
-        var entityTypes = new EntityTypeService(entityTypeRepo, nodeRepo);
-        var outline = new OutlineGraphSync(
-            graph,
-            nodeRepo,
-            edgeRepo,
-            projectRepo,
-            new ActRepository(db),
-            chapterRepo,
-            entityTypes);
+        var database = Database(db);
+        var graph = new RelationalGraphStore(database);
+        var entityTypes = new EntityTypeService(database);
+        var outline = new OutlineGraphSync(database, graph, entityTypes);
         await outline.EnsureProjectAsync(project);
         var mutations = new ProjectMutationCoordinator();
         return new ProjectImportJobProcessor(
-            new ProjectImportRepository(db),
-            db,
-            projectRepo,
-            nodeRepo,
-            edgeRepo,
-            entityTypeRepo,
+            database,
             graph,
             DefaultProxy<IActService>(),
-            new ImportChapterService(chapterRepo),
-            chapterRepo,
+            new ImportChapterService(database),
             DefaultProxy<IProjectFactService>(),
             entityTypes,
             outline,
             DefaultProxy<IContextIndexingService>(),
             DefaultProxy<IEntityVisualExampleService>(),
-            new BookBriefService(db),
-            new ManuscriptStyleService(db, mutations),
+            new BookBriefService(database),
+            new ManuscriptStyleService(database),
             new VectorIndexWorkCoordinator(NullLogger<VectorIndexWorkCoordinator>.Instance),
-            mutations,
             new ProjectImportJobNotifier(),
             NullLogger<ProjectImportJobProcessor>.Instance);
     }
@@ -866,7 +842,7 @@ public sealed class ProjectImportJobIntegrationTests
     }
 
     private sealed class ImportChapterService(
-        IChapterRepository chapters,
+        IAppDatabaseOperationFactory database,
         IContextIndexingService? contextIndexing = null) : IChapterService
     {
         public Task<IReadOnlyList<Chapter>> ListAsync(
@@ -874,13 +850,19 @@ public sealed class ProjectImportJobIntegrationTests
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public Task<Chapter?> GetAsync(Guid chapterId, CancellationToken cancellationToken = default) =>
-            chapters.GetByIdAsync(chapterId, cancellationToken);
+        public async Task<Chapter?> GetAsync(Guid chapterId, CancellationToken cancellationToken = default)
+        {
+            await using var operation = await database.OpenReadAsync(cancellationToken);
+            return await operation.Repositories.Chapters.GetByIdAsync(chapterId, cancellationToken);
+        }
 
-        public Task<Chapter?> ReloadFromStoreAsync(
+        public async Task<Chapter?> ReloadFromStoreAsync(
             Guid chapterId,
-            CancellationToken cancellationToken = default) =>
-            chapters.ReloadFromStoreAsync(chapterId, cancellationToken);
+            CancellationToken cancellationToken = default)
+        {
+            await using var operation = await database.OpenReadAsync(cancellationToken);
+            return await operation.Repositories.Chapters.ReloadFromStoreAsync(chapterId, cancellationToken);
+        }
 
         public async Task<Chapter> CreateAsync(
             Guid projectId,
@@ -890,6 +872,8 @@ public sealed class ProjectImportJobIntegrationTests
             Guid? id = null,
             CancellationToken cancellationToken = default)
         {
+            await using var operation = await database.OpenWriteAsync(cancellationToken);
+            var chapters = operation.Repositories.Chapters;
             var order = await chapters.GetMaxOrderAsync(projectId, actId, cancellationToken) + 1;
             var chapter = new Chapter
             {
@@ -905,7 +889,7 @@ public sealed class ProjectImportJobIntegrationTests
             chapter.ManuscriptJson = ManuscriptCodec.Serialize(
                 ManuscriptCodec.CreateEmpty(chapter.Id, chapter.ManuscriptRevision));
             await chapters.AddAsync(chapter, cancellationToken);
-            await chapters.SaveChangesAsync(cancellationToken);
+            await operation.SaveChangesAsync(cancellationToken);
             if (contextIndexing is not null)
                 await contextIndexing.ReindexChapterAsync(chapter.Id, cancellationToken);
             return chapter;

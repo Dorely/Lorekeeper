@@ -1,27 +1,17 @@
-using Lorekeeper.Context;
 using Lorekeeper.Chapters;
+using Lorekeeper.Context;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Llm;
 
 public sealed class EmbeddingRebuildService(
-    IEmbeddingConfigurationService configurations,
-    IVectorStoreMaintenance vectorMaintenance,
-    IProjectRepository projects,
-    IChapterRepository chapters,
-    IActRepository acts,
-    IGraphNodeRepository nodes,
-    IIngestRepository ingest,
-    IChapterService chapterService,
-    IContextIndexingService contextIndexing,
-    IIngestVectorIndexingService ingestVectorIndexing,
-    IOptions<EmbeddingRebuildOptions> options,
-    ILogger<EmbeddingRebuildService> logger)
+IAppDatabaseOperationFactory database, IEmbeddingConfigurationService configurations, IVectorStoreMaintenance vectorMaintenance, IChapterService chapterService, IContextIndexingService contextIndexing, IIngestVectorIndexingService ingestVectorIndexing, IOptions<EmbeddingRebuildOptions> options, ILogger<EmbeddingRebuildService> logger)
 {
     private int _itemsSinceDelay;
 
@@ -41,18 +31,37 @@ public sealed class EmbeddingRebuildService(
 
         await vectorMaintenance.RecreateAsync(active.Dimensions, cancellationToken);
 
-        foreach (var project in await projects.ListAsync(cancellationToken))
+        IReadOnlyList<Project> projects;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            projects = await readOperation.Repositories.Projects.ListAsync(cancellationToken);
+        }
+
+        foreach (var project in projects)
         {
             cancellationToken.ThrowIfCancellationRequested();
             await MarkProjectIndexesStaleAsync(project.Id, cancellationToken);
 
-            foreach (var chapter in await chapters.ListByProjectAsync(project.Id, cancellationToken))
+            IReadOnlyList<Chapter> chapters;
+            IReadOnlyList<IngestSource> sources;
+            IReadOnlyList<GraphNode> nodes;
+            IReadOnlyList<Act> acts;
+            await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+            {
+                var repositories = readOperation.Repositories;
+                chapters = await repositories.Chapters.ListByProjectAsync(project.Id, cancellationToken);
+                sources = await repositories.Ingest.ListSourcesByProjectAsync(project.Id, cancellationToken);
+                nodes = await repositories.GraphNodes.ListByProjectAsync(project.Id, cancellationToken);
+                acts = await repositories.Acts.ListByProjectAsync(project.Id, cancellationToken);
+            }
+
+            foreach (var chapter in chapters)
                 await RunThrottledAsync(() => chapterService.ReindexAsync(chapter.Id, cancellationToken), cancellationToken);
 
-            foreach (var source in await ingest.ListSourcesByProjectAsync(project.Id, cancellationToken))
+            foreach (var source in sources)
                 await RunThrottledAsync(() => ingestVectorIndexing.EnsureVectorFragmentsAsync(source, force: true, cancellationToken), cancellationToken);
 
-            foreach (var node in await nodes.ListByProjectAsync(project.Id, cancellationToken))
+            foreach (var node in nodes)
             {
                 if (!Guid.TryParseExact(node.Key, "N", out var entityId) || !IsContextEntityType(node.NodeType))
                     continue;
@@ -60,13 +69,18 @@ public sealed class EmbeddingRebuildService(
                 await RunThrottledAsync(() => contextIndexing.ReindexEntityAsync(project.Id, entityId, cancellationToken), cancellationToken);
             }
 
-            foreach (var act in await acts.ListByProjectAsync(project.Id, cancellationToken))
+            foreach (var act in acts)
                 await RunThrottledAsync(() => contextIndexing.ReindexActAsync(act.Id, cancellationToken), cancellationToken);
 
-            foreach (var source in await ingest.ListSourcesByProjectAsync(project.Id, cancellationToken))
+            foreach (var source in sources)
             {
                 await RunThrottledAsync(() => contextIndexing.ReindexIngestSourceAsync(source.Id, cancellationToken), cancellationToken);
-                foreach (var sourceChunk in await ingest.ListSourceChunksAsync(source.Id, cancellationToken))
+                IReadOnlyList<IngestSourceChunk> sourceChunks;
+                await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+                {
+                    sourceChunks = await readOperation.Repositories.Ingest.ListSourceChunksAsync(source.Id, cancellationToken);
+                }
+                foreach (var sourceChunk in sourceChunks)
                     await RunThrottledAsync(() => contextIndexing.ReindexIngestSourceChunkAsync(sourceChunk.Id, cancellationToken), cancellationToken);
             }
         }
@@ -76,6 +90,10 @@ public sealed class EmbeddingRebuildService(
 
     private async Task MarkProjectIndexesStaleAsync(Guid projectId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var chapters = databaseOperation.Repositories.Chapters;
+        var ingest = databaseOperation.Repositories.Ingest;
         foreach (var chapter in await chapters.ListByProjectAsync(projectId, cancellationToken))
         {
             chapter.VectorIndexState = string.IsNullOrWhiteSpace(chapter.PlainText)
@@ -95,8 +113,7 @@ public sealed class EmbeddingRebuildService(
             ingest.UpdateSource(source);
         }
 
-        await chapters.SaveChangesAsync(cancellationToken);
-        await ingest.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     private async Task RunThrottledAsync(Func<Task> work, CancellationToken cancellationToken)

@@ -1,5 +1,5 @@
-using Lorekeeper.Models;
 using Lorekeeper.ChatTurns;
+using Lorekeeper.Models;
 
 namespace Lorekeeper.Persistence.Repositories;
 

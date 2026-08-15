@@ -1,13 +1,13 @@
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Ingest;
 
 public sealed class IngestGraphSync(
-    IGraphStore graph,
-    IGraphNodeRepository nodes,
+IAppDatabaseOperationFactory database, IGraphStore graph,
     ILogger<IngestGraphSync> logger) : IIngestGraphSync
 {
     public const string SourceNodeType = EntityTypeService.SourceNodeType;
@@ -21,6 +21,9 @@ public sealed class IngestGraphSync(
         IReadOnlyList<IngestSourceBlock>? sourceBlocks = null,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var orderedChunks = sourceChunks.OrderBy(chunk => chunk.Index).ToList();
         var orderedBlocks = (sourceBlocks ?? []).OrderBy(block => block.Index).ToList();
         var isSingleChunkSource = orderedChunks.Count == 1;
@@ -87,6 +90,9 @@ public sealed class IngestGraphSync(
 
     public async Task RemoveSourceAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var sourceKey = sourceId.ToString("N");
         var blockNodes = await nodes.ListByTypeAsync(projectId, SourceBlockNodeType, cancellationToken);
         foreach (var blockNode in blockNodes.Where(node => HasSourceId(node, sourceKey)).ToList())

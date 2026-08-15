@@ -3,19 +3,19 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public class GraphNodeRepository(AppDbContext db) : IGraphNodeRepository
+public class GraphNodeRepository(AppDatabaseReadOperation operation) : IGraphNodeRepository
 {
     public Task<GraphNode?> GetByIdAsync(long id, CancellationToken cancellationToken = default) =>
-        db.GraphNodes.FirstOrDefaultAsync(n => n.Id == id, cancellationToken);
+        operation.Db.GraphNodes.FirstOrDefaultAsync(n => n.Id == id, cancellationToken);
 
     public Task<GraphNode?> FindAsync(Guid projectId, string nodeType, string key, CancellationToken cancellationToken = default) =>
-        db.GraphNodes.FirstOrDefaultAsync(n => n.ProjectId == projectId && n.NodeType == nodeType && n.Key == key, cancellationToken);
+        operation.Db.GraphNodes.FirstOrDefaultAsync(n => n.ProjectId == projectId && n.NodeType == nodeType && n.Key == key, cancellationToken);
 
     public Task<GraphNode?> FindByKeyAsync(Guid projectId, string key, CancellationToken cancellationToken = default) =>
-        db.GraphNodes.SingleOrDefaultAsync(n => n.ProjectId == projectId && n.Key == key, cancellationToken);
+        operation.Db.GraphNodes.SingleOrDefaultAsync(n => n.ProjectId == projectId && n.Key == key, cancellationToken);
 
     public async Task<List<GraphNode>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await db.GraphNodes
+        await operation.Db.GraphNodes
             .AsNoTracking()
             .Where(n => n.ProjectId == projectId)
             .OrderBy(n => n.NodeType)
@@ -24,7 +24,7 @@ public class GraphNodeRepository(AppDbContext db) : IGraphNodeRepository
             .ToListAsync(cancellationToken);
 
     public async Task<List<GraphNode>> ListByTypeAsync(Guid projectId, string nodeType, CancellationToken cancellationToken = default) =>
-        await db.GraphNodes
+        await operation.Db.GraphNodes
             .AsNoTracking()
             .Where(n => n.ProjectId == projectId && n.NodeType == nodeType)
             .OrderBy(n => n.Label ?? n.Key)
@@ -32,7 +32,7 @@ public class GraphNodeRepository(AppDbContext db) : IGraphNodeRepository
             .ToListAsync(cancellationToken);
 
     public Task<List<string>> ListTypesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.GraphNodes
+        operation.Db.GraphNodes
             .Where(n => n.ProjectId == projectId)
             .Select(n => n.NodeType)
             .Distinct()
@@ -43,16 +43,13 @@ public class GraphNodeRepository(AppDbContext db) : IGraphNodeRepository
     {
         var idList = ids.ToList();
         if (idList.Count == 0) return [];
-        return await db.GraphNodes.AsNoTracking().Where(n => idList.Contains(n.Id)).ToListAsync(cancellationToken);
+        return await operation.Db.GraphNodes.AsNoTracking().Where(n => idList.Contains(n.Id)).ToListAsync(cancellationToken);
     }
 
     public async Task AddAsync(GraphNode node, CancellationToken cancellationToken = default) =>
-        await db.GraphNodes.AddAsync(node, cancellationToken);
+        await operation.Db.GraphNodes.AddAsync(node, cancellationToken);
 
-    public void Update(GraphNode node) => db.GraphNodes.Update(node);
+    public void Update(GraphNode node) => operation.Db.MarkModified(node);
 
-    public void Remove(GraphNode node) => db.GraphNodes.Remove(node);
-
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        db.SaveChangesAsync(cancellationToken);
+    public void Remove(GraphNode node) => operation.Db.MarkDeleted(node);
 }

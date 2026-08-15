@@ -1,21 +1,21 @@
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Outline;
 
 public sealed class ProjectFactService(
-    IGraphStore graph,
-    IGraphNodeRepository nodes,
-    IProjectRepository projects,
-    IOutlineGraphSync outlineGraphSync,
-    IEntityService entities) : IProjectFactService
+IAppDatabaseOperationFactory database, IGraphStore graph, IOutlineGraphSync outlineGraphSync, IEntityService entities) : IProjectFactService
 {
     private const string KeyProperty = "key";
     private const string ValueProperty = "value";
 
     public async Task<IReadOnlyList<ProjectFact>> ListAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var factNodes = await nodes.ListByTypeAsync(projectId, EntityTypeService.ProjectFactNodeType, cancellationToken);
         var facts = new List<ProjectFact>(factNodes.Count);
         foreach (var node in factNodes)
@@ -45,6 +45,10 @@ public sealed class ProjectFactService(
         Guid? id = null,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var projects = databaseOperation.Repositories.Projects;
         var normalized = NormalizeKey(key);
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
@@ -81,13 +85,13 @@ public sealed class ProjectFactService(
             existing.Properties[ValueProperty] = value ?? string.Empty;
             existing.UpdatedAt = DateTime.UtcNow;
             nodes.Update(existing);
-            await nodes.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
             node = existing;
         }
 
         await EnsureProjectParentEdgeAsync(project, node, cancellationToken);
         TouchProject(project);
-        await projects.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
 
         var nodeId = Guid.ParseExact(node.Key, "N");
         return await ProjectAsync(projectId, node, nodeId, cancellationToken);
@@ -95,6 +99,10 @@ public sealed class ProjectFactService(
 
     public async Task DeleteAsync(Guid projectId, Guid factId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var projects = databaseOperation.Repositories.Projects;
         var node = await nodes.FindByKeyAsync(projectId, factId.ToString("N"), cancellationToken);
         if (node is null || node.NodeType != EntityTypeService.ProjectFactNodeType) return;
 
@@ -102,11 +110,13 @@ public sealed class ProjectFactService(
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         await graph.RemoveNodeAsync(node.Id, cancellationToken);
         TouchProject(project);
-        await projects.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<GraphNode?> FindByFactKeyAsync(Guid projectId, string key, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var factNodes = await nodes.ListByTypeAsync(projectId, EntityTypeService.ProjectFactNodeType, cancellationToken);
         return factNodes.FirstOrDefault(node =>
             string.Equals(ReadString(node.Properties, KeyProperty), key, StringComparison.OrdinalIgnoreCase));

@@ -1,9 +1,9 @@
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Lorekeeper.Models;
 using Lorekeeper.Composition;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -12,7 +12,7 @@ using SkiaSharp;
 namespace Lorekeeper.Images;
 
 public sealed class ProjectImageJobService(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     IEntityVisualExampleService entityVisualExamples,
     IOptions<ProjectImageGenerationOptions> options) : IProjectImageJobService
 {
@@ -21,17 +21,22 @@ public sealed class ProjectImageJobService(
         WriteIndented = true,
     };
 
-    public async Task<IReadOnlyList<ProjectImageJobView>> ListJobsAsync(Guid projectId, int take = 25, CancellationToken cancellationToken = default) =>
-        await db.ProjectImageGenerationJobs
-            .AsNoTracking()
-            .Where(job => job.ProjectId == projectId)
-            .OrderByDescending(job => job.CreatedAt)
-            .Take(Math.Clamp(take, 1, 100))
-            .Select(job => ToView(job))
-            .ToListAsync(cancellationToken);
-
+    public async Task<IReadOnlyList<ProjectImageJobView>> ListJobsAsync(Guid projectId, int take = 25, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.ProjectImageGenerationJobs
+                    .AsNoTracking()
+                    .Where(job => job.ProjectId == projectId)
+                    .OrderByDescending(job => job.CreatedAt)
+                    .Take(Math.Clamp(take, 1, 100))
+                    .Select(job => ToView(job))
+                    .ToListAsync(cancellationToken);
+    }
     public async Task<ProjectImageJobView?> GetJobAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var job = await db.ProjectImageGenerationJobs
             .AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == jobId, cancellationToken);
@@ -40,6 +45,8 @@ public sealed class ProjectImageJobService(
 
     public async Task<ProjectImageJobView?> GetJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var job = await db.ProjectImageGenerationJobs
             .AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.Id == jobId, cancellationToken);
@@ -51,6 +58,9 @@ public sealed class ProjectImageJobService(
         ProjectImageGenerateJobRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var project = await GetProjectAsync(projectId, cancellationToken);
         var prompt = CleanRequired(request.Prompt, "Image prompt is required.");
         var referenceIds = await ValidateReferenceIdsAsync(projectId, request.ReferenceImageIds, sourceImageId: null, cancellationToken);
@@ -95,6 +105,9 @@ public sealed class ProjectImageJobService(
         ProjectImageEditJobRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var project = await GetProjectAsync(projectId, cancellationToken);
         var prompt = CleanRequired(request.Prompt, "Image edit prompt is required.");
         var source = await GetImageAssetAsync(projectId, request.SourceImageId, cancellationToken);
@@ -164,6 +177,9 @@ public sealed class ProjectImageJobService(
 
     public async Task<ProjectImageGenerationWorkItem?> TryStartNextQueuedJobAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var job = await db.ProjectImageGenerationJobs
             .Where(candidate => candidate.ProjectId == projectId && candidate.Status == ProjectImageGenerationJobStatus.Queued)
             .OrderBy(candidate => candidate.CreatedAt)
@@ -179,16 +195,22 @@ public sealed class ProjectImageJobService(
         return ToWorkItem(job);
     }
 
-    public async Task<IReadOnlyList<Guid>> ListProjectsWithQueuedJobsAsync(CancellationToken cancellationToken = default) =>
-        await db.ProjectImageGenerationJobs
-            .AsNoTracking()
-            .Where(job => job.Status == ProjectImageGenerationJobStatus.Queued)
-            .Select(job => job.ProjectId)
-            .Distinct()
-            .ToListAsync(cancellationToken);
-
+    public async Task<IReadOnlyList<Guid>> ListProjectsWithQueuedJobsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.ProjectImageGenerationJobs
+                    .AsNoTracking()
+                    .Where(job => job.Status == ProjectImageGenerationJobStatus.Queued)
+                    .Select(job => job.ProjectId)
+                    .Distinct()
+                    .ToListAsync(cancellationToken);
+    }
     public async Task CancelJobAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var job = await db.ProjectImageGenerationJobs.FirstOrDefaultAsync(
             candidate => candidate.ProjectId == projectId && candidate.Id == jobId,
             cancellationToken);
@@ -225,6 +247,9 @@ public sealed class ProjectImageJobService(
 
     public async Task MarkOutputStateAsync(Guid projectId, Guid jobId, ProjectImageOutputStateView outputState, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var job = await db.ProjectImageGenerationJobs.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == jobId, cancellationToken);
         if (job is null
             || job.Status == ProjectImageGenerationJobStatus.Cancelled
@@ -242,6 +267,9 @@ public sealed class ProjectImageJobService(
 
     public async Task MarkOutputFailedAsync(Guid projectId, Guid jobId, ProjectImageOutputErrorView outputError, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var job = await db.ProjectImageGenerationJobs.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == jobId, cancellationToken);
         if (job is null
             || job.Status == ProjectImageGenerationJobStatus.Cancelled
@@ -282,6 +310,9 @@ public sealed class ProjectImageJobService(
         ProjectImageProviderImage image,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var job = await db.ProjectImageGenerationJobs.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == jobId, cancellationToken)
             ?? throw new InvalidOperationException("Image generation job was not found.");
         if (job.Status == ProjectImageGenerationJobStatus.Cancelled)
@@ -399,6 +430,9 @@ public sealed class ProjectImageJobService(
 
     public async Task CompleteJobAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var job = await db.ProjectImageGenerationJobs.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == jobId, cancellationToken)
             ?? throw new InvalidOperationException("Image generation job was not found.");
         if (job.Status == ProjectImageGenerationJobStatus.Cancelled)
@@ -425,6 +459,9 @@ public sealed class ProjectImageJobService(
 
     public async Task MarkInterruptedRunningJobsFailedAsync(CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var running = await db.ProjectImageGenerationJobs
             .Where(job => job.Status == ProjectImageGenerationJobStatus.Running)
             .ToListAsync(cancellationToken);
@@ -445,12 +482,16 @@ public sealed class ProjectImageJobService(
 
     public async Task<ProjectImageMaskView?> GetMaskAsync(Guid projectId, Guid maskId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var mask = await db.ProjectImageMasks.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == maskId, cancellationToken);
         return mask is null ? null : ToMaskView(mask);
     }
 
     public async Task<ProjectImageData?> GetMaskDataAsync(Guid projectId, Guid maskId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var mask = await db.ProjectImageMasks.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == maskId, cancellationToken);
         return mask is null
             ? null
@@ -466,6 +507,9 @@ public sealed class ProjectImageJobService(
         Guid ownerId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var source = await GetImageAssetAsync(projectId, imageId, cancellationToken);
         var payload = ParsePngDataUrl(maskPngDataUrl, "Mask must be a PNG data URL.");
         var sourceSize = ReadImageSize(source.Data, source.ContentType);
@@ -519,6 +563,8 @@ public sealed class ProjectImageJobService(
         Guid? sourceImageId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var ids = requestedIds.Where(id => id != Guid.Empty && id != sourceImageId).Distinct().ToList();
         if (ids.Count > Math.Max(0, options.Value.MaxReferenceImages))
             throw new InvalidOperationException($"Select no more than {Math.Max(0, options.Value.MaxReferenceImages)} reference images.");
@@ -539,12 +585,17 @@ public sealed class ProjectImageJobService(
         return ids;
     }
 
-    private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken cancellationToken) =>
-        await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
-        ?? throw new InvalidOperationException($"Project {projectId} not found.");
-
+    private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectId} not found.");
+    }
     private async Task<PublishAsset> GetImageAssetAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var asset = await db.PublishAssets.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == imageId, cancellationToken)
             ?? throw new InvalidOperationException("Image was not found.");
         if (NormalizeImageContentType(asset.ContentType) is null)
@@ -554,6 +605,8 @@ public sealed class ProjectImageJobService(
 
     private async Task TouchProjectAsync(Guid projectId, DateTime now, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var project = await db.Projects.FirstOrDefaultAsync(candidate => candidate.Id == projectId, cancellationToken);
         if (project is not null)
             project.UpdatedAt = now;

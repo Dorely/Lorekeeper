@@ -3,13 +3,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public sealed class ProjectImageConversationRepository(AppDbContext db) : IProjectImageConversationRepository
+public sealed class ProjectImageConversationRepository(AppDatabaseReadOperation operation) : IProjectImageConversationRepository
 {
     public Task<ProjectImageConversation?> GetByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.ProjectImageConversations.FirstOrDefaultAsync(conversation => conversation.ProjectId == projectId, cancellationToken);
+        operation.Db.ProjectImageConversations.FirstOrDefaultAsync(conversation => conversation.ProjectId == projectId, cancellationToken);
 
     public Task<List<ProjectImageMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        db.ProjectImageMessages
+        operation.Db.ProjectImageMessages
             .AsNoTracking()
             .Include(message => message.Visuals)
             .Where(message => message.ConversationId == conversationId)
@@ -17,25 +17,38 @@ public sealed class ProjectImageConversationRepository(AppDbContext db) : IProje
             .ToListAsync(cancellationToken);
 
     public async Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        await db.ProjectImageMessages
+        await operation.Db.ProjectImageMessages
             .Where(message => message.ConversationId == conversationId)
             .Select(message => (int?)message.Order)
             .MaxAsync(cancellationToken) ?? -1;
 
     public async Task AddConversationAsync(ProjectImageConversation conversation, CancellationToken cancellationToken = default) =>
-        await db.ProjectImageConversations.AddAsync(conversation, cancellationToken);
+        await operation.Db.ProjectImageConversations.AddAsync(conversation, cancellationToken);
 
-    public async Task AddMessageAsync(ProjectImageMessage message, CancellationToken cancellationToken = default) =>
-        await db.ProjectImageMessages.AddAsync(message, cancellationToken);
+    public async Task AddMessageAsync(ProjectImageMessage message, CancellationToken cancellationToken = default)
+    {
+        TouchConversation(message.ConversationId);
+        await operation.Db.ProjectImageMessages.AddAsync(message, cancellationToken);
+    }
+
+    private void TouchConversation(Guid conversationId)
+    {
+        var conversation = operation.Db.ProjectImageConversations.Local.FirstOrDefault(item => item.Id == conversationId);
+        if (conversation is null)
+        {
+            conversation = new ProjectImageConversation { Id = conversationId };
+            operation.Db.Attach(conversation);
+            operation.Db.Entry(conversation).Property(item => item.UpdatedAt).IsModified = true;
+        }
+
+        conversation.UpdatedAt = DateTime.UtcNow;
+    }
 
     public async Task AddMessageVisualsAsync(IEnumerable<ProjectImageMessageVisual> visuals, CancellationToken cancellationToken = default) =>
-        await db.ProjectImageMessageVisuals.AddRangeAsync(visuals, cancellationToken);
+        await operation.Db.ProjectImageMessageVisuals.AddRangeAsync(visuals, cancellationToken);
 
-    public void UpdateMessage(ProjectImageMessage message) => db.ProjectImageMessages.Update(message);
+    public void UpdateMessage(ProjectImageMessage message) => operation.Db.MarkModified(message);
 
     public void RemoveConversation(ProjectImageConversation conversation) =>
-        db.ProjectImageConversations.Remove(conversation);
-
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        db.SaveChangesAsync(cancellationToken);
+        operation.Db.MarkDeleted(conversation);
 }

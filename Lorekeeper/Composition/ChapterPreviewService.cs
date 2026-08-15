@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -136,7 +136,7 @@ public interface IChapterPreviewService
 }
 
 public sealed class ChapterPreviewService(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     IPublicationPressRuntime press,
     IProjectFontService projectFonts,
     IOptions<PublicationPressOptions> options) : IChapterPreviewService
@@ -224,6 +224,9 @@ public sealed class ChapterPreviewService(
         EditorContentTarget target,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var project = await db.Projects.AsNoTracking().SingleOrDefaultAsync(item => item.Id == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Project was not found.");
         var setup = await db.ProjectPageSetups.AsNoTracking().SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken)
@@ -613,6 +616,9 @@ public sealed class ChapterPreviewService(
         ChapterPreviewPage page,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var maxEdge = Math.Clamp(options.Value.PreviewImageMaxEdge, 320, 4096);
         var scale = Math.Min(1d, maxEdge / Math.Max(page.WidthPoints, page.HeightPoints));
         scale = Math.Max(scale, 0.25d);

@@ -5,17 +5,17 @@ using Lorekeeper.Llm;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Context;
 
 public sealed class ContextRecommendationService(
-    IEditorContextService editorContext,
+IAppDatabaseOperationFactory database, IEditorContextService editorContext,
     IEntityService entities,
     IEntityTypeService entityTypes,
     IChapterService chapters,
     IActService acts,
-    IIngestRepository ingest,
     IConfiguration configuration,
     IEmbeddingService embeddings,
     IVectorStore vectors,
@@ -213,6 +213,8 @@ public sealed class ContextRecommendationService(
         string query,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         foreach (var (entity, searchRank) in await SearchEntitiesAsync(projectId, query, cancellationToken))
         {
             var recommendation = ProjectEntity(entity, ["Matched manual search"], isSearchResult: true);
@@ -339,6 +341,8 @@ public sealed class ContextRecommendationService(
         double? distance,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         var source = await ingest.GetSourceAsync(sourceId, cancellationToken);
         return source is null || source.ProjectId != projectId
             ? null
@@ -353,6 +357,8 @@ public sealed class ContextRecommendationService(
         double? distance,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         var sourceChunk = await ingest.GetSourceChunkAsync(sourceChunkId, cancellationToken);
         if (sourceChunk is null) return null;
         var source = await ingest.GetSourceAsync(sourceChunk.SourceId, cancellationToken);

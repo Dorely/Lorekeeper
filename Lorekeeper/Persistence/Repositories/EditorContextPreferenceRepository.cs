@@ -3,13 +3,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public sealed class EditorContextPreferenceRepository(AppDbContext db) : IEditorContextPreferenceRepository
+public sealed class EditorContextPreferenceRepository(AppDatabaseReadOperation operation) : IEditorContextPreferenceRepository
 {
     public Task<List<EditorContextPreference>> ListForChapterAsync(
         Guid projectId,
         Guid chapterId,
         CancellationToken cancellationToken = default) =>
-        db.EditorContextPreferences
+        operation.Db.EditorContextPreferences
             .AsNoTracking()
             .Where(preference => preference.ProjectId == projectId && preference.ChapterId == chapterId)
             .OrderBy(preference => preference.SortOrder ?? int.MaxValue)
@@ -23,7 +23,7 @@ public sealed class EditorContextPreferenceRepository(AppDbContext db) : IEditor
         string kind,
         string key,
         CancellationToken cancellationToken = default) =>
-        db.EditorContextPreferences.FirstOrDefaultAsync(
+        operation.Db.EditorContextPreferences.FirstOrDefaultAsync(
             preference => preference.ProjectId == projectId
                 && preference.ChapterId == chapterId
                 && preference.Kind == kind
@@ -31,12 +31,9 @@ public sealed class EditorContextPreferenceRepository(AppDbContext db) : IEditor
             cancellationToken);
 
     public async Task AddAsync(EditorContextPreference preference, CancellationToken cancellationToken = default) =>
-        await db.EditorContextPreferences.AddAsync(preference, cancellationToken);
+        await operation.Db.EditorContextPreferences.AddAsync(preference, cancellationToken);
 
-    public void Update(EditorContextPreference preference) => db.EditorContextPreferences.Update(preference);
+    public void Update(EditorContextPreference preference) => operation.Db.MarkModified(preference);
 
-    public void Remove(EditorContextPreference preference) => db.EditorContextPreferences.Remove(preference);
-
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        db.SaveChangesAsync(cancellationToken);
+    public void Remove(EditorContextPreference preference) => operation.Db.MarkDeleted(preference);
 }

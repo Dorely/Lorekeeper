@@ -3,9 +3,10 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.ChatTurns;
-using Lorekeeper.Llm;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
 using Microsoft.Extensions.AI;
@@ -14,19 +15,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Outline;
 
 public sealed class OutlineCollaborationService(
-    IProjectRepository projects,
-    IOutlineConversationRepository conversations,
-    IChatImageAttachmentService imageAttachments,
-    ILlmProviderService providerService,
-    IChatClientFactory chatClientFactory,
-    OutlineCollaborationTools tools,
-    IEntityVisualContextService entityVisualContext,
-    IAiChangeApprovalService changeApproval,
-    IBookBriefService bookBriefs,
-    ISystemPromptComposer systemPrompts,
-    ChatTurnEngine turnEngine,
-    IOptions<AgentOptions> options,
-    ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
+IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, OutlineCollaborationTools tools, IEntityVisualContextService entityVisualContext, IAiChangeApprovalService changeApproval, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
 {
     /// <summary>
     /// Code-owned operating rules composed with the professional charter, Project Guidance,
@@ -133,6 +122,10 @@ they commit to a direction, act on it without a second confirmation.
 
     public async Task<OutlineConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
+        var conversations = databaseOperation.Repositories.OutlineConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is not null) return existing;
 
@@ -151,15 +144,20 @@ they commit to a direction, act on it without a second confirmation.
             Status = OutlineMessageStatus.Completed,
         };
         await conversations.AddMessageAsync(greeting, cancellationToken);
-        await conversations.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return conversation;
     }
 
-    public async Task<IReadOnlyList<OutlineMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        await conversations.LoadMessagesAsync(conversationId, cancellationToken);
-
+    public async Task<IReadOnlyList<OutlineMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var conversations = databaseOperation.Repositories.OutlineConversations;
+        return await conversations.LoadMessagesAsync(conversationId, cancellationToken);
+    }
     public async Task<string> GetSystemPromptAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         var brief = await bookBriefs.GetOrCreateAsync(projectId, cancellationToken);
@@ -172,6 +170,8 @@ they commit to a direction, act on it without a second confirmation.
 
     public async Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         return project.AiChangeApprovalEnabled;
@@ -179,13 +179,16 @@ they commit to a direction, act on it without a second confirmation.
 
     public async Task SetAiChangeApprovalEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         if (project.AiChangeApprovalEnabled == enabled) return;
         project.AiChangeApprovalEnabled = enabled;
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
-        await projects.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<AiChangeBatch>> ListPendingChangesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
@@ -206,10 +209,13 @@ they commit to a direction, act on it without a second confirmation.
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Outline, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var conversations = databaseOperation.Repositories.OutlineConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
         conversations.RemoveConversation(existing);
-        await conversations.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async IAsyncEnumerable<OutlineTurnUpdate> SendAsync(
@@ -246,7 +252,10 @@ they commit to a direction, act on it without a second confirmation.
         await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);
 
         // Persist the user message immediately so it appears in history even if the LLM call fails.
-        var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
+        var nextOrder = await turnEngine.ReadAsync(
+            repositories => repositories.OutlineConversations,
+            conversations => conversations.GetMaxOrderAsync(conversation.Id, cancellationToken),
+            cancellationToken) + 1;
         var userMsg = new OutlineMessage
         {
             ConversationId = conversation.Id,
@@ -256,7 +265,7 @@ they commit to a direction, act on it without a second confirmation.
             Status = OutlineMessageStatus.Completed,
         };
         conversation.UpdatedAt = DateTime.UtcNow;
-        await turnEngine.AddMessageAsync(conversations, userMsg, cancellationToken);
+        await turnEngine.AddMessageAsync(repositories => repositories.OutlineConversations, userMsg, cancellationToken);
         await imageAttachments.PersistAsync(projectId, ChatTurnSurface.Outline, userMsg.Id, imageIds, cancellationToken);
 
         // Resolve the chat client + tools up front so any wiring failure surfaces before we start streaming.
@@ -268,7 +277,10 @@ they commit to a direction, act on it without a second confirmation.
         string? setupError = null;
         try
         {
-            var project = await projects.GetByIdAsync(projectId, cancellationToken)
+            var project = await turnEngine.ReadAsync(
+                repositories => repositories.Projects,
+                projects => projects.GetByIdAsync(projectId, cancellationToken),
+                cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
             var brief = await bookBriefs.GetOrCreateAsync(projectId, cancellationToken);
             systemPrompt = systemPrompts.Compose(new(
@@ -303,7 +315,10 @@ they commit to a direction, act on it without a second confirmation.
         };
 
         // Build the running message list from persisted history (already includes the user msg above).
-        var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
+        var history = await turnEngine.ReadAsync(
+            repositories => repositories.OutlineConversations,
+            conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
+            cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
         foreach (var persistedMessage in history)
         {
@@ -330,7 +345,7 @@ they commit to a direction, act on it without a second confirmation.
                 Content = string.Empty,
                 Status = OutlineMessageStatus.Pending,
             };
-            await turnEngine.AddMessageAsync(conversations, activeAssistant, cancellationToken);
+            await turnEngine.AddMessageAsync(repositories => repositories.OutlineConversations, activeAssistant, cancellationToken);
 
             ChatRoundCompleted? completedRound = null;
             await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
@@ -380,8 +395,6 @@ they commit to a direction, act on it without a second confirmation.
                 activeAssistant.Content = textBuilder.ToString();
                 activeAssistant.Status = OutlineMessageStatus.Completed;
                 await SafePersistAsync(activeAssistant);
-                conversation.UpdatedAt = DateTime.UtcNow;
-                await conversations.SaveChangesAsync(CancellationToken.None);
                 yield return new AssistantMessageCompleted(activeAssistant.Id);
                 yield break;
             }
@@ -434,7 +447,7 @@ they commit to a direction, act on it without a second confirmation.
                     Status = toolError is null ? OutlineMessageStatus.Completed : OutlineMessageStatus.Failed,
                     ErrorMessage = toolError,
                 };
-                await turnEngine.AddMessageAsync(conversations, toolMsg, CancellationToken.None);
+                await turnEngine.AddMessageAsync(repositories => repositories.OutlineConversations, toolMsg, CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
                 if (staging is not null)
@@ -477,7 +490,7 @@ they commit to a direction, act on it without a second confirmation.
                 activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
                 await SafePersistAsync(activeAssistant);
 
-                await turnEngine.AddMessageAsync(conversations, new OutlineMessage
+                await turnEngine.AddMessageAsync(repositories => repositories.OutlineConversations, new OutlineMessage
                 {
                     ConversationId = conversation.Id,
                     Order = nextOrder++,
@@ -523,7 +536,7 @@ they commit to a direction, act on it without a second confirmation.
     {
         try
         {
-            await turnEngine.UpdateMessageAsync(conversations, message, CancellationToken.None);
+            await turnEngine.UpdateMessageAsync(repositories => repositories.OutlineConversations, message, CancellationToken.None);
         }
         catch (Exception ex)
         {

@@ -1,7 +1,7 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Lorekeeper.Chapters;
 using Lorekeeper.Composition;
 using Lorekeeper.Context;
@@ -9,8 +9,8 @@ using Lorekeeper.EntityVisuals;
 using Lorekeeper.Fonts;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
-using Lorekeeper.Models;
 using Lorekeeper.Manuscripts;
+using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
@@ -21,27 +21,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Lorekeeper.ImportExport;
 
 public sealed class ProjectImportJobProcessor(
-    IProjectImportRepository imports,
-    AppDbContext db,
-    IProjectRepository projects,
-    IGraphNodeRepository nodes,
-    IGraphEdgeRepository edges,
-    IGraphEntityTypeRepository entityTypes,
-    IGraphStore graph,
-    IActService acts,
-    IChapterService chapters,
-    IChapterRepository chapterRepo,
-    IProjectFactService projectFacts,
-    IEntityTypeService entityTypeService,
-    IOutlineGraphSync outlineGraphSync,
-    IContextIndexingService contextIndexing,
-    IEntityVisualExampleService entityVisualExamples,
-    IBookBriefService bookBriefs,
-    IManuscriptStyleService manuscriptStyles,
-    IVectorIndexWorkCoordinator indexWork,
-    IProjectMutationCoordinator projectMutations,
-    IProjectImportJobNotifier notifier,
-    ILogger<ProjectImportJobProcessor> logger)
+    IAppDatabaseOperationFactory database, IGraphStore graph, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IEntityTypeService entityTypeService, IOutlineGraphSync outlineGraphSync, IContextIndexingService contextIndexing, IEntityVisualExampleService entityVisualExamples, IBookBriefService bookBriefs, IManuscriptStyleService manuscriptStyles, IVectorIndexWorkCoordinator indexWork, IProjectImportJobNotifier notifier, ILogger<ProjectImportJobProcessor> logger)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -82,21 +62,30 @@ public sealed class ProjectImportJobProcessor(
 
     public async Task RunAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
-        var job = await imports.GetJobAsync(jobId, cancellationToken);
+        ProjectImportJob? job;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+            job = await readOperation.Repositories.ProjectImports.GetJobAsync(jobId, cancellationToken);
         if (job is null || job.Status != ProjectImportJobStatus.Queued) return;
 
         try
         {
             await MarkRunningAsync(job, cancellationToken);
             var document = await ReadAndValidateAsync(job, cancellationToken);
-            var project = await projects.GetByIdAsync(job.ProjectId, cancellationToken)
-                ?? throw new InvalidOperationException($"Project {job.ProjectId} not found.");
             await ValidateManuscriptStyleCompatibilityAsync(
-                project.Id,
+                job.ProjectId,
                 document,
                 cancellationToken);
 
             var state = new ImportState();
+            await using var databaseOperation = await database.OpenWriteAsync(job.ProjectId, cancellationToken);
+            databaseOperation.ShareWithNestedOperations();
+            var db = databaseOperation.Db;
+            var projects = databaseOperation.Repositories.Projects;
+            var imports = databaseOperation.Repositories.ProjectImports;
+            job = await imports.GetJobAsync(jobId, cancellationToken)
+                ?? throw new InvalidOperationException($"Import job {jobId:N} disappeared before execution.");
+            var project = await projects.GetByIdAsync(job.ProjectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {job.ProjectId} not found.");
             await using (var indexDeferral = indexWork.BeginDeferral())
             await using (var importTransaction = await db.Database.BeginTransactionAsync(cancellationToken))
             {
@@ -112,9 +101,6 @@ public sealed class ProjectImportJobProcessor(
 
                 if (document.ExportKind == ProjectExportKind.Full)
                 {
-                    await using var mutationLease = await projectMutations.AcquireAsync(
-                        job.ProjectId,
-                        cancellationToken);
                     await ImportProjectImagesAsync(job, document, state, cancellationToken);
                     await StepAsync(job, "Imported project images.", cancellationToken);
                     await ImportProjectFontsAsync(job, document, state, cancellationToken);
@@ -184,7 +170,7 @@ public sealed class ProjectImportJobProcessor(
                 job.CompletedAt = DateTime.UtcNow;
                 job.UpdatedAt = DateTime.UtcNow;
                 imports.UpdateJob(job);
-                await imports.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
                 await importTransaction.CommitAsync(cancellationToken);
             }
 
@@ -193,9 +179,11 @@ public sealed class ProjectImportJobProcessor(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            db.ChangeTracker.Clear();
-            job = await imports.GetJobAsync(jobId, cancellationToken)
-                ?? throw new InvalidOperationException($"Import job {jobId:N} disappeared during rollback.", ex);
+            await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+            {
+                job = await readOperation.Repositories.ProjectImports.GetJobAsync(jobId, cancellationToken)
+                    ?? throw new InvalidOperationException($"Import job {jobId:N} disappeared during rollback.", ex);
+            }
             var failure = ex is DbUpdateConcurrencyException concurrency
                 ? new InvalidOperationException(
                     $"Import concurrency failure ({string.Join(", ", concurrency.Entries.Select(entry => $"{entry.Metadata.ClrType.Name}:{entry.State}"))}).",
@@ -210,13 +198,16 @@ public sealed class ProjectImportJobProcessor(
         ProjectExportDocument document,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
         if (string.IsNullOrWhiteSpace(project.ProjectGuidance)
             && !string.IsNullOrWhiteSpace(document.Project.EffectiveProjectGuidance))
         {
             project.ProjectGuidance = document.Project.EffectiveProjectGuidance.Trim();
             project.UpdatedAt = DateTime.UtcNow;
             projects.Update(project);
-            await projects.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
         }
 
         if (document.BookBrief is not { } imported)
@@ -259,6 +250,9 @@ public sealed class ProjectImportJobProcessor(
         ProjectExportDocument document,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var setup = await db.ProjectPageSetups.SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
         if (setup is null)
         {
@@ -282,6 +276,9 @@ public sealed class ProjectImportJobProcessor(
 
     private async Task<ProjectExportDocument> ReadAndValidateAsync(ProjectImportJob job, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var imports = databaseOperation.Repositories.ProjectImports;
         ProjectExportDocument document;
         try
         {
@@ -323,7 +320,7 @@ public sealed class ProjectImportJobProcessor(
         job.FormatVersion = document.FormatVersion;
         job.ExportKind = document.ExportKind.ToString();
         imports.UpdateJob(job);
-        await imports.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
 
         await AddReportAsync(
             job,
@@ -780,13 +777,13 @@ public sealed class ProjectImportJobProcessor(
             }
             if (document.FormatVersion < 16)
             {
-            ValidateImportedLegacyOutlineOrder(
-                    edition.OutlineItems
-                        .OrderBy(item => item.SortOrder)
-                        .Select(item => (item.TargetKind, item.TargetId))
-                        .ToList(),
-                    actIds,
-                    chapterParents);
+                ValidateImportedLegacyOutlineOrder(
+                        edition.OutlineItems
+                            .OrderBy(item => item.SortOrder)
+                            .Select(item => (item.TargetKind, item.TargetId))
+                            .ToList(),
+                        actIds,
+                        chapterParents);
             }
             foreach (var item in edition.OutlineItems)
             {
@@ -859,6 +856,9 @@ public sealed class ProjectImportJobProcessor(
         ImportState state,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (document.FormatVersion < 12 || document.FontFamilies.Count == 0)
             return;
 
@@ -1244,6 +1244,8 @@ public sealed class ProjectImportJobProcessor(
         ImportState state,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var projectNode = await nodes.FindAsync(
             project.Id,
             EntityTypeService.ProjectNodeType,
@@ -1259,6 +1261,9 @@ public sealed class ProjectImportJobProcessor(
         ProjectExportDocument document,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var entityTypes = databaseOperation.Repositories.GraphEntityTypes;
         foreach (var importedType in document.EntityTypes)
         {
             if (string.Equals(importedType.Type, EntityTypeService.ProjectNodeType, StringComparison.Ordinal)
@@ -1285,7 +1290,7 @@ public sealed class ProjectImportJobProcessor(
                     SortOrder = importedType.SortOrder,
                     DefaultProperties = NormalizeProperties(importedType.DefaultProperties),
                 }, cancellationToken);
-                await entityTypes.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
                 await AddReportAsync(job, ProjectImportReportItemKind.EntityType, $"Created type {importedType.Type}", importedType.PluralLabel, "GraphEntityType", importedType.Type, cancellationToken: cancellationToken);
                 continue;
             }
@@ -1306,7 +1311,7 @@ public sealed class ProjectImportJobProcessor(
             {
                 existing.UpdatedAt = DateTime.UtcNow;
                 entityTypes.Update(existing);
-                await entityTypes.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
             }
             await AddReportAsync(job, ProjectImportReportItemKind.EntityType, $"Merged type {importedType.Type}", importedType.PluralLabel, "GraphEntityType", importedType.Type, cancellationToken: cancellationToken);
         }
@@ -1318,6 +1323,11 @@ public sealed class ProjectImportJobProcessor(
         ImportState state,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var chapterRepo = databaseOperation.Repositories.Chapters;
         var actMap = state.ActMap;
         var assetAltById = await db.PublishAssets.AsNoTracking()
             .Where(asset => asset.ProjectId == job.ProjectId)
@@ -1412,7 +1422,7 @@ public sealed class ProjectImportJobProcessor(
             tracked.VectorIndexError = null;
             tracked.UpdatedAt = DateTime.UtcNow;
             chapterRepo.Update(tracked);
-            await chapterRepo.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
             await AddImageContextPreferencesAsync(
                 job.ProjectId,
                 tracked.Id,
@@ -1475,6 +1485,9 @@ public sealed class ProjectImportJobProcessor(
         ImportState state,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var importedAssets = new Dictionary<Guid, PublishAsset>();
         foreach (var importedImage in document.Images)
         {
@@ -1548,6 +1561,9 @@ public sealed class ProjectImportJobProcessor(
         ImportState state,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         foreach (var imported in document.PublicationSections
             .OrderBy(section => section.EditionId.HasValue)
             .ThenBy(section => section.LocalOrder))
@@ -1619,13 +1635,13 @@ public sealed class ProjectImportJobProcessor(
     private static PublicationSectionStartSide RecommendedStartSide(
         PublicationSectionSystemRole role,
         PublicationSectionKind kind) => role switch
-    {
-        PublicationSectionSystemRole.Title or PublicationSectionSystemRole.Contents => PublicationSectionStartSide.Recto,
-        PublicationSectionSystemRole.Copyright => PublicationSectionStartSide.Verso,
-        _ when kind is PublicationSectionKind.Dedication or PublicationSectionKind.AboutAuthor or PublicationSectionKind.References
-            => PublicationSectionStartSide.Recto,
-        _ => PublicationSectionStartSide.Next,
-    };
+        {
+            PublicationSectionSystemRole.Title or PublicationSectionSystemRole.Contents => PublicationSectionStartSide.Recto,
+            PublicationSectionSystemRole.Copyright => PublicationSectionStartSide.Verso,
+            _ when kind is PublicationSectionKind.Dedication or PublicationSectionKind.AboutAuthor or PublicationSectionKind.References
+                => PublicationSectionStartSide.Recto,
+            _ => PublicationSectionStartSide.Next,
+        };
 
     private async Task ImportPageCompositionsAsync(
         ProjectImportJob job,
@@ -1633,6 +1649,9 @@ public sealed class ProjectImportJobProcessor(
         ImportState state,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         foreach (var imported in document.PageCompositions)
         {
             if (!state.CompositionMap.TryGetValue(imported.Id, out var localId))
@@ -1929,6 +1948,9 @@ public sealed class ProjectImportJobProcessor(
         IReadOnlyList<ProjectExportChapter> importedChapters,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (!Enum.IsDefined(importedEdition.TitlePageMode)
             || !Enum.IsDefined(importedEdition.PrintPicturePageSpreadMode)
             || !Enum.IsDefined(importedEdition.EpubPicturePageSpreadMode))
@@ -2218,6 +2240,9 @@ public sealed class ProjectImportJobProcessor(
         ImportState state,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var setup = await db.ProjectPageSetups.AsNoTracking().SingleAsync(
             item => item.ProjectId == projectId, cancellationToken);
         foreach (var importedEdition in document.PublicationEditions)
@@ -2314,6 +2339,9 @@ public sealed class ProjectImportJobProcessor(
         ManuscriptStyleProperties definition,
         ICollection<ManuscriptStyleDefinition> styles)
     {
+        using var databaseOperation = database.OpenWrite();
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var sourceRole = source?.SemanticRole ?? ManuscriptStyleRoles.Body;
         var roleStem = $"{sourceRole}-edition-{edition.Id:N}";
         var role = roleStem[..Math.Min(72, roleStem.Length)];
@@ -2348,6 +2376,9 @@ public sealed class ProjectImportJobProcessor(
         IReadOnlyDictionary<string, string> roles,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var sourceIds = document.Content.Where(item => item.Type == ManuscriptBlockType.DesignedPage && item.PageCompositionId.HasValue)
             .Select(item => item.PageCompositionId!.Value).Distinct().ToList();
         if (sourceIds.Count == 0)
@@ -2396,19 +2427,19 @@ public sealed class ProjectImportJobProcessor(
     private static ManuscriptDocument ReplaceImportedStyleRoles(
         ManuscriptDocument document,
         IReadOnlyDictionary<string, string> roles) => document with
-    {
-        Content = document.Content.Select(block => block with
         {
-            StyleRole = ReplacementImportedRole(block, roles),
-            Content = block.Content.Select(inline => inline with
+            Content = document.Content.Select(block => block with
             {
-                Marks = inline.Marks.Select(mark => mark.Type == ManuscriptMarkType.CharacterStyle
-                    && mark.Value is { } value && roles.TryGetValue(value, out var replacement)
-                        ? mark with { Value = replacement }
-                        : mark).ToList(),
+                StyleRole = ReplacementImportedRole(block, roles),
+                Content = block.Content.Select(inline => inline with
+                {
+                    Marks = inline.Marks.Select(mark => mark.Type == ManuscriptMarkType.CharacterStyle
+                        && mark.Value is { } value && roles.TryGetValue(value, out var replacement)
+                            ? mark with { Value = replacement }
+                            : mark).ToList(),
+                }).ToList(),
             }).ToList(),
-        }).ToList(),
-    };
+        };
 
     private static string ReplacementImportedRole(
         ManuscriptBlock block,
@@ -2424,22 +2455,22 @@ public sealed class ProjectImportJobProcessor(
     private static ManuscriptStyleProperties MergeImportedStyle(
         ManuscriptStyleProperties inherited,
         ManuscriptStyleProperties value) => inherited with
-    {
-        FontFamilyKey = value.FontFamilyKey ?? inherited.FontFamilyKey,
-        FontSizePoints = value.FontSizePoints ?? inherited.FontSizePoints,
-        FontWeight = value.FontWeight ?? inherited.FontWeight,
-        Italic = value.Italic ?? inherited.Italic,
-        SmallCaps = value.SmallCaps ?? inherited.SmallCaps,
-        LineHeight = value.LineHeight ?? inherited.LineHeight,
-        SpaceBeforePoints = value.SpaceBeforePoints ?? inherited.SpaceBeforePoints,
-        SpaceAfterPoints = value.SpaceAfterPoints ?? inherited.SpaceAfterPoints,
-        KeepWithNext = value.KeepWithNext ?? inherited.KeepWithNext,
-        TextAlign = value.TextAlign ?? inherited.TextAlign,
-        LeftIndentEm = value.LeftIndentEm ?? inherited.LeftIndentEm,
-        RightIndentEm = value.RightIndentEm ?? inherited.RightIndentEm,
-        FirstLineIndentEm = value.FirstLineIndentEm ?? inherited.FirstLineIndentEm,
-        StartOnNewPage = value.StartOnNewPage ?? inherited.StartOnNewPage,
-    };
+        {
+            FontFamilyKey = value.FontFamilyKey ?? inherited.FontFamilyKey,
+            FontSizePoints = value.FontSizePoints ?? inherited.FontSizePoints,
+            FontWeight = value.FontWeight ?? inherited.FontWeight,
+            Italic = value.Italic ?? inherited.Italic,
+            SmallCaps = value.SmallCaps ?? inherited.SmallCaps,
+            LineHeight = value.LineHeight ?? inherited.LineHeight,
+            SpaceBeforePoints = value.SpaceBeforePoints ?? inherited.SpaceBeforePoints,
+            SpaceAfterPoints = value.SpaceAfterPoints ?? inherited.SpaceAfterPoints,
+            KeepWithNext = value.KeepWithNext ?? inherited.KeepWithNext,
+            TextAlign = value.TextAlign ?? inherited.TextAlign,
+            LeftIndentEm = value.LeftIndentEm ?? inherited.LeftIndentEm,
+            RightIndentEm = value.RightIndentEm ?? inherited.RightIndentEm,
+            FirstLineIndentEm = value.FirstLineIndentEm ?? inherited.FirstLineIndentEm,
+            StartOnNewPage = value.StartOnNewPage ?? inherited.StartOnNewPage,
+        };
 
     private async Task ImportPublicationBookAsync(
         Guid projectId,
@@ -2447,6 +2478,9 @@ public sealed class ProjectImportJobProcessor(
         ImportState state,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (await db.PublicationBooks.AnyAsync(item => item.ProjectId == projectId, cancellationToken)) return;
         var book = new PublicationBook
         {
@@ -2482,10 +2516,13 @@ public sealed class ProjectImportJobProcessor(
             if (targetId == Guid.Empty) continue;
             book.OutlineItems.Add(new PublicationBookOutlineItem
             {
-                ProjectId = projectId, TargetKind = row.TargetKind, TargetId = targetId,
+                ProjectId = projectId,
+                TargetKind = row.TargetKind,
+                TargetId = targetId,
                 ActId = row.TargetKind == PublishOutlineTargetKind.Act ? targetId : null,
                 ChapterId = row.TargetKind == PublishOutlineTargetKind.Chapter ? targetId : null,
-                IsIncluded = row.IsIncluded, SortOrder = row.SortOrder,
+                IsIncluded = row.IsIncluded,
+                SortOrder = row.SortOrder,
             });
         }
         foreach (var row in imported.LegacyMatter)
@@ -2493,8 +2530,13 @@ public sealed class ProjectImportJobProcessor(
             var document = ManuscriptCodec.Deserialize(row.ManuscriptJson, row.Id, row.Revision);
             var matter = new PublicationBookMatter
             {
-                ProjectId = projectId, Location = row.Location, Kind = row.Kind, Title = row.Title,
-                Revision = row.Revision, IsIncluded = row.IsIncluded, SortOrder = row.SortOrder,
+                ProjectId = projectId,
+                Location = row.Location,
+                Kind = row.Kind,
+                Title = row.Title,
+                Revision = row.Revision,
+                IsIncluded = row.IsIncluded,
+                SortOrder = row.SortOrder,
             };
             matter.ManuscriptJson = ManuscriptCodec.Serialize(RemapManuscriptFigures(document, matter.Id, state.ImageMap, state.EditionMap));
             book.Matter.Add(matter);
@@ -2509,12 +2551,18 @@ public sealed class ProjectImportJobProcessor(
             if (targetId == Guid.Empty || assetId == Guid.Empty) continue;
             var placement = new PublicationBookImagePlacement
             {
-                ProjectId = projectId, AssetId = assetId, TargetKind = row.TargetKind, TargetId = targetId,
+                ProjectId = projectId,
+                AssetId = assetId,
+                TargetKind = row.TargetKind,
+                TargetId = targetId,
                 ActId = row.TargetKind == PublishOutlineTargetKind.Act ? targetId : null,
                 ChapterId = row.TargetKind == PublishOutlineTargetKind.Chapter ? targetId : null,
-                PlacementKind = row.PlacementKind, Caption = row.Caption, SortOrder = row.SortOrder,
+                PlacementKind = row.PlacementKind,
+                Caption = row.Caption,
+                SortOrder = row.SortOrder,
                 PresentationJson = JsonSerializer.Serialize(row.Presentation ?? new FigurePresentation(), ManuscriptCodec.JsonOptions),
-                AltText = row.AltText, Decorative = row.Decorative,
+                AltText = row.AltText,
+                Decorative = row.Decorative,
                 Language = string.IsNullOrWhiteSpace(row.Language) ? "en" : row.Language,
                 AccessibilityRole = row.AccessibilityRole,
             };
@@ -2543,6 +2591,9 @@ public sealed class ProjectImportJobProcessor(
         ImportState state,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (await db.PublicationBooks.AnyAsync(item => item.ProjectId == projectId, cancellationToken)) return;
         var sourceExport = document.PublicationEditions.OrderByDescending(item => item.IsDefault).ThenBy(item => item.Name).FirstOrDefault();
         var sourceId = sourceExport is null ? Guid.Empty : state.EditionMap.GetValueOrDefault(sourceExport.Id);
@@ -2552,15 +2603,23 @@ public sealed class ProjectImportJobProcessor(
         var project = await db.Projects.AsNoTracking().SingleAsync(item => item.Id == projectId, cancellationToken);
         var book = new PublicationBook
         {
-            ProjectId = projectId, Revision = 1, Title = string.IsNullOrWhiteSpace(source?.TitleOverride) ? project.Name : source.TitleOverride,
-            Subtitle = source?.Subtitle ?? string.Empty, Author = source?.Author ?? string.Empty,
+            ProjectId = projectId,
+            Revision = 1,
+            Title = string.IsNullOrWhiteSpace(source?.TitleOverride) ? project.Name : source.TitleOverride,
+            Subtitle = source?.Subtitle ?? string.Empty,
+            Author = source?.Author ?? string.Empty,
             Language = string.IsNullOrWhiteSpace(source?.Language) ? "en" : source.Language,
-            Publisher = source?.Publisher ?? string.Empty, Copyright = source?.Copyright ?? string.Empty,
-            Description = source?.Description ?? string.Empty, IncludeTableOfContents = source?.IncludeTableOfContents ?? true,
+            Publisher = source?.Publisher ?? string.Empty,
+            Copyright = source?.Copyright ?? string.Empty,
+            Description = source?.Description ?? string.Empty,
+            IncludeTableOfContents = source?.IncludeTableOfContents ?? true,
             IncludeVisibleTableOfContents = source?.IncludeVisibleTableOfContents ?? false,
-            IncludeActSynopses = source?.IncludeActSynopses ?? false, IncludeChapterSynopses = source?.IncludeChapterSynopses ?? false,
-            IncludeActHeadings = source?.IncludeActHeadings ?? true, IncludeChapterHeadings = source?.IncludeChapterHeadings ?? true,
-            NumberActs = source?.NumberActs ?? false, NumberChapters = source?.NumberChapters ?? false,
+            IncludeActSynopses = source?.IncludeActSynopses ?? false,
+            IncludeChapterSynopses = source?.IncludeChapterSynopses ?? false,
+            IncludeActHeadings = source?.IncludeActHeadings ?? true,
+            IncludeChapterHeadings = source?.IncludeChapterHeadings ?? true,
+            NumberActs = source?.NumberActs ?? false,
+            NumberChapters = source?.NumberChapters ?? false,
             TitlePageMode = source?.TitlePageMode ?? PublishTitlePageMode.Automatic,
             PdfPresentation = new PublicationBookPdfPresentation
             {
@@ -2629,6 +2688,8 @@ public sealed class ProjectImportJobProcessor(
         string sceneJson,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var setup = await db.ProjectPageSetups.AsNoTracking().SingleAsync(
             item => item.ProjectId == projectId,
             cancellationToken);
@@ -2660,6 +2721,9 @@ public sealed class ProjectImportJobProcessor(
         ImportState state,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         foreach (var importedNode in document.Nodes)
         {
             var importedStableKey = StableKey(importedNode.NodeType, importedNode.Key);
@@ -2696,7 +2760,7 @@ public sealed class ProjectImportJobProcessor(
             {
                 existing.UpdatedAt = DateTime.UtcNow;
                 nodes.Update(existing);
-                await nodes.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
             }
 
             state.NodeMap[importedStableKey] = existing;
@@ -2712,6 +2776,9 @@ public sealed class ProjectImportJobProcessor(
         ImportState state,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var importedProperties = NormalizeProperties(importedNode.Properties);
         var key = ReadString(importedProperties, "key") ?? importedNode.Label ?? importedNode.Key;
         var value = ReadString(importedProperties, "value") ?? string.Empty;
@@ -2727,7 +2794,7 @@ public sealed class ProjectImportJobProcessor(
         {
             node.UpdatedAt = DateTime.UtcNow;
             nodes.Update(node);
-            await nodes.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
         }
 
         state.NodeMap[StableKey(importedNode.NodeType, importedNode.Key)] = node;
@@ -2741,6 +2808,9 @@ public sealed class ProjectImportJobProcessor(
         ImportState state,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var edges = databaseOperation.Repositories.GraphEdges;
         foreach (var importedEdge in document.Edges)
         {
             if (!state.NodeMap.TryGetValue(importedEdge.From.StableKey, out var fromNode)
@@ -2773,7 +2843,7 @@ public sealed class ProjectImportJobProcessor(
             {
                 existing.UpdatedAt = DateTime.UtcNow;
                 edges.Update(existing);
-                await edges.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
             }
 
             job.MergedEdgeCount++;
@@ -2852,6 +2922,8 @@ public sealed class ProjectImportJobProcessor(
         ProjectExportNode importedNode,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var byStableKey = await nodes.FindAsync(projectId, importedNode.NodeType, importedNode.Key, cancellationToken);
         if (byStableKey is not null) return byStableKey;
 
@@ -2880,6 +2952,9 @@ public sealed class ProjectImportJobProcessor(
         IReadOnlyDictionary<Guid, Guid> imageMap,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         foreach (var exportedImageId in exportedImageIds.Distinct())
         {
             if (!imageMap.TryGetValue(exportedImageId, out var localImageId))
@@ -3212,6 +3287,9 @@ public sealed class ProjectImportJobProcessor(
         Guid projectId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var editions = await db.PublicationEditions.AsNoTracking()
             .Where(item => item.ProjectId == projectId)
             .ToListAsync(cancellationToken);
@@ -3397,23 +3475,23 @@ public sealed class ProjectImportJobProcessor(
         PublicationVendor vendor,
         LegacyPublicationPaper paper,
         LegacyPublicationInk ink) => (format, vendor, paper, ink) switch
-    {
-        (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp, LegacyPublicationPaper.Cream, _) => "kdp-pb-bw-cream",
-        (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp, _, LegacyPublicationInk.Color) => "kdp-pb-premium-color",
-        (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp, _, _) => "kdp-pb-bw-white",
-        (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-pb-bw-cream50",
-        (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-pb-premium70",
-        (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, _) => "ingram-pb-bw-white50",
-        (PublicationEditionFormat.Paperback, _, _, _) => "generic-perfectbound-template",
-        (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, LegacyPublicationPaper.Cream, _) => "kdp-hc-bw-cream",
-        (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, LegacyPublicationInk.Color) => "kdp-hc-premium-color",
-        (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, _) => "kdp-hc-bw-white",
-        (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-hc-case-bw-cream50",
-        (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-hc-case-premium70",
-        (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, _) => "ingram-hc-case-bw-white50",
-        (PublicationEditionFormat.Hardcover, _, _, _) => "generic-casebound-template",
-        _ => string.Empty,
-    };
+        {
+            (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp, LegacyPublicationPaper.Cream, _) => "kdp-pb-bw-cream",
+            (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp, _, LegacyPublicationInk.Color) => "kdp-pb-premium-color",
+            (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp, _, _) => "kdp-pb-bw-white",
+            (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-pb-bw-cream50",
+            (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-pb-premium70",
+            (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, _) => "ingram-pb-bw-white50",
+            (PublicationEditionFormat.Paperback, _, _, _) => "generic-perfectbound-template",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, LegacyPublicationPaper.Cream, _) => "kdp-hc-bw-cream",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, LegacyPublicationInk.Color) => "kdp-hc-premium-color",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, _) => "kdp-hc-bw-white",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-hc-case-bw-cream50",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-hc-case-premium70",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, _) => "ingram-hc-case-bw-white50",
+            (PublicationEditionFormat.Hardcover, _, _, _) => "generic-casebound-template",
+            _ => string.Empty,
+        };
 
     private async Task<bool> ImportedBibliographicContentMatchesAsync(
         Guid existingEditionId,
@@ -3424,6 +3502,8 @@ public sealed class ProjectImportJobProcessor(
         IReadOnlyDictionary<Guid, Guid> editionMap,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var existingOutline = await db.PublicationEditionOutlineItems.AsNoTracking()
             .Where(item => item.EditionId == existingEditionId)
             .OrderBy(item => item.SortOrder)
@@ -3527,43 +3607,55 @@ public sealed class ProjectImportJobProcessor(
 
     private async Task MarkRunningAsync(ProjectImportJob job, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var imports = databaseOperation.Repositories.ProjectImports;
         job.Status = ProjectImportJobStatus.Running;
         job.StartedAt = DateTime.UtcNow;
         job.UpdatedAt = DateTime.UtcNow;
         job.CurrentMessage = "Starting import.";
         imports.UpdateJob(job);
-        await imports.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         Notify(job.ProjectId, job.Id, ProjectImportJobUpdateKind.Progress);
     }
 
     private async Task StepAsync(ProjectImportJob job, string message, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var imports = databaseOperation.Repositories.ProjectImports;
         job.CompletedSteps = Math.Min(job.TotalSteps, job.CompletedSteps + 1);
         job.CurrentMessage = message;
         job.UpdatedAt = DateTime.UtcNow;
         imports.UpdateJob(job);
-        await imports.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         Notify(job.ProjectId, job.Id, ProjectImportJobUpdateKind.Progress);
     }
 
     private async Task MarkFailedAsync(ProjectImportJob job, Exception exception, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var imports = databaseOperation.Repositories.ProjectImports;
         job.Status = ProjectImportJobStatus.Failed;
         job.CurrentMessage = "Import failed.";
         job.ErrorMessage = exception.Message;
         job.CompletedAt = DateTime.UtcNow;
         job.UpdatedAt = DateTime.UtcNow;
         imports.UpdateJob(job);
-        await imports.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await AddReportAsync(job, ProjectImportReportItemKind.Validation, "Import failed", exception.Message, status: ProjectImportReportItemStatus.Failed, errorMessage: exception.Message, cancellationToken: cancellationToken);
         Notify(job.ProjectId, job.Id, ProjectImportJobUpdateKind.Failed);
     }
 
     private async Task AddWarningAsync(ProjectImportJob job, string title, string summary, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var imports = databaseOperation.Repositories.ProjectImports;
         job.WarningCount++;
         imports.UpdateJob(job);
-        await imports.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await AddReportAsync(job, ProjectImportReportItemKind.Warning, title, summary, cancellationToken: cancellationToken);
     }
 
@@ -3582,6 +3674,9 @@ public sealed class ProjectImportJobProcessor(
         string errorMessage = "",
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var imports = databaseOperation.Repositories.ProjectImports;
         await imports.AddReportItemAsync(new ProjectImportReportItem
         {
             JobId = job.Id,
@@ -3597,7 +3692,7 @@ public sealed class ProjectImportJobProcessor(
             PayloadJson = payloadJson,
             ErrorMessage = errorMessage,
         }, cancellationToken);
-        await imports.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         Notify(job.ProjectId, job.Id, ProjectImportJobUpdateKind.Report);
     }
 

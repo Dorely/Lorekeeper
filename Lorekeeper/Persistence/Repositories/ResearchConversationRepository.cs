@@ -3,38 +3,51 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public sealed class ResearchConversationRepository(AppDbContext db) : IResearchConversationRepository
+public sealed class ResearchConversationRepository(AppDatabaseReadOperation operation) : IResearchConversationRepository
 {
     public Task<ResearchConversation?> GetByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.ResearchConversations.FirstOrDefaultAsync(conversation => conversation.ProjectId == projectId, cancellationToken);
+        operation.Db.ResearchConversations.FirstOrDefaultAsync(conversation => conversation.ProjectId == projectId, cancellationToken);
 
     public Task<List<ResearchMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        db.ResearchMessages.AsNoTracking().Where(message => message.ConversationId == conversationId)
+        operation.Db.ResearchMessages.AsNoTracking().Where(message => message.ConversationId == conversationId)
                            .OrderBy(message => message.Order)
                            .ToListAsync(cancellationToken);
 
     public Task<bool> ExistsAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        db.ResearchConversations.AnyAsync(conversation => conversation.Id == conversationId, cancellationToken);
+        operation.Db.ResearchConversations.AnyAsync(conversation => conversation.Id == conversationId, cancellationToken);
 
     public async Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
-        var any = await db.ResearchMessages.AnyAsync(message => message.ConversationId == conversationId, cancellationToken);
+        var any = await operation.Db.ResearchMessages.AnyAsync(message => message.ConversationId == conversationId, cancellationToken);
         if (!any) return -1;
 
-        return await db.ResearchMessages.Where(message => message.ConversationId == conversationId)
+        return await operation.Db.ResearchMessages.Where(message => message.ConversationId == conversationId)
                                         .MaxAsync(message => message.Order, cancellationToken);
     }
 
     public async Task AddConversationAsync(ResearchConversation conversation, CancellationToken cancellationToken = default) =>
-        await db.ResearchConversations.AddAsync(conversation, cancellationToken);
+        await operation.Db.ResearchConversations.AddAsync(conversation, cancellationToken);
 
-    public async Task AddMessageAsync(ResearchMessage message, CancellationToken cancellationToken = default) =>
-        await db.ResearchMessages.AddAsync(message, cancellationToken);
+    public async Task AddMessageAsync(ResearchMessage message, CancellationToken cancellationToken = default)
+    {
+        TouchConversation(message.ConversationId);
+        await operation.Db.ResearchMessages.AddAsync(message, cancellationToken);
+    }
 
-    public void UpdateMessage(ResearchMessage message) => db.ResearchMessages.Update(message);
+    private void TouchConversation(Guid conversationId)
+    {
+        var conversation = operation.Db.ResearchConversations.Local.FirstOrDefault(item => item.Id == conversationId);
+        if (conversation is null)
+        {
+            conversation = new ResearchConversation { Id = conversationId };
+            operation.Db.Attach(conversation);
+            operation.Db.Entry(conversation).Property(item => item.UpdatedAt).IsModified = true;
+        }
 
-    public void RemoveConversation(ResearchConversation conversation) => db.ResearchConversations.Remove(conversation);
+        conversation.UpdatedAt = DateTime.UtcNow;
+    }
 
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        db.SaveChangesAsync(cancellationToken);
+    public void UpdateMessage(ResearchMessage message) => operation.Db.MarkModified(message);
+
+    public void RemoveConversation(ResearchConversation conversation) => operation.Db.MarkDeleted(conversation);
 }

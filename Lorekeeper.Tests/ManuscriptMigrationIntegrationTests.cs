@@ -85,7 +85,7 @@ public sealed class ManuscriptMigrationIntegrationTests
             item => item.Path.Contains("pre-manuscript", StringComparison.Ordinal));
         await using (var changedDb = fixture.CreateDbContext())
         {
-            var chapter = await changedDb.Chapters.SingleAsync();
+            var chapter = await changedDb.Chapters.AsTracking().SingleAsync();
             var changed = ManuscriptCodec.ReparsePreservingBlockIds(chapter.Manuscript, "Changed after backup");
             chapter.ManuscriptJson = ManuscriptCodec.Serialize(changed);
             chapter.ManuscriptRevision = changed.Revision;
@@ -539,7 +539,7 @@ public sealed class ManuscriptMigrationIntegrationTests
         Assert.True(
             await verification.Projects.AnyAsync(),
             string.Join(" | ", journals.Select(journal => journal.ErrorDetail)));
-        var chapter = await verification.Chapters.SingleAsync();
+        var chapter = await verification.Chapters.AsTracking().SingleAsync();
         Assert.Equal(ManuscriptDocument.CurrentSchemaVersion, chapter.Manuscript.SchemaVersion);
         var style = await verification.ManuscriptStyleDefinitions.AsNoTracking().SingleAsync();
         Assert.Equal(style.SemanticRole, chapter.Manuscript.Content[0].StyleRole);
@@ -622,6 +622,7 @@ public sealed class ManuscriptMigrationIntegrationTests
         {
             var options = new DbContextOptionsBuilder<AppDbContext>()
                 .UseSqlite(ConnectionString)
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
                 .Options;
             return new AppDbContext(options, NullLogger<AppDbContext>.Instance);
         }

@@ -1,17 +1,12 @@
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Outline;
 
 public sealed class OutlineGraphSync(
-    IGraphStore graph,
-    IGraphNodeRepository nodes,
-    IGraphEdgeRepository edges,
-    IProjectRepository projects,
-    IActRepository acts,
-    IChapterRepository chapters,
-    IEntityTypeService entityTypes) : IOutlineGraphSync
+IAppDatabaseOperationFactory database, IGraphStore graph, IEntityTypeService entityTypes) : IOutlineGraphSync
 {
     public const string HasChildEdgeType = "HasChild";
 
@@ -35,6 +30,9 @@ public sealed class OutlineGraphSync(
 
     public async Task EnsureActAsync(Act act, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(act.ProjectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {act.ProjectId} not found.");
         await EnsureProjectAsync(project, cancellationToken);
@@ -68,6 +66,10 @@ public sealed class OutlineGraphSync(
 
     public async Task EnsureChapterAsync(Chapter chapter, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
+        var acts = databaseOperation.Repositories.Acts;
         var project = await projects.GetByIdAsync(chapter.ProjectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {chapter.ProjectId} not found.");
         await EnsureProjectAsync(project, cancellationToken);
@@ -108,6 +110,10 @@ public sealed class OutlineGraphSync(
 
     public async Task RemoveChapterAsync(Guid projectId, Guid chapterId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         var chapterNode = await graph.FindNodeAsync(projectId, EntityTypeService.ChapterNodeType, chapterId.ToString("N"), cancellationToken);
         if (chapterNode is null) return;
 
@@ -130,6 +136,10 @@ public sealed class OutlineGraphSync(
 
     public async Task RepairProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var projects = databaseOperation.Repositories.Projects;
+        var acts = databaseOperation.Repositories.Acts;
+        var chapters = databaseOperation.Repositories.Chapters;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         await EnsureProjectAsync(project, cancellationToken);
@@ -147,6 +157,9 @@ public sealed class OutlineGraphSync(
         int sortOrder,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var edges = databaseOperation.Repositories.GraphEdges;
         var incomingParents = await edges.GetAdjacentAsync(
             childNodeId,
             EdgeDirection.Incoming,

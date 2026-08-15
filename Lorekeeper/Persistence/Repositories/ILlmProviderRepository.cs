@@ -14,6 +14,4 @@ public interface ILlmProviderRepository
 
     /// <summary>Atomically clears <see cref="LlmProvider.IsDefault"/> on all rows, then sets it on <paramref name="id"/>.</summary>
     Task SetDefaultAsync(int id, CancellationToken cancellationToken = default);
-
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

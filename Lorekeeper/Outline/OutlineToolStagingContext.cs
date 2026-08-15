@@ -1,27 +1,18 @@
 using System.Text.Json;
-using Lorekeeper.ChatTurns;
 using System.Text.Json.Nodes;
-using Lorekeeper.Context;
 using Lorekeeper.Chapters;
+using Lorekeeper.ChatTurns;
+using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Ingest;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Outline;
 
 public sealed class OutlineToolStagingContext(
-    Guid projectId,
-    Guid conversationId,
-    AiChangeConversationKind conversationKind,
-    IAiChangeRepository changes,
-    IProjectRepository projects,
-    IActService acts,
-    IChapterService chapters,
-    IEntityService entities,
-    IEntityTypeService entityTypes,
-    IEntityVisualExampleService entityVisualExamples,
-    Action? onDirectMutationApplied = null)
+IAppDatabaseOperationFactory database, Guid projectId, Guid conversationId, AiChangeConversationKind conversationKind, IActService acts, IChapterService chapters, IEntityService entities, IEntityTypeService entityTypes, IEntityVisualExampleService entityVisualExamples, Action? onDirectMutationApplied = null)
 {
     private const string _eventNodeType = "Event";
 
@@ -775,6 +766,8 @@ public sealed class OutlineToolStagingContext(
 
     private async Task EnsureLoadedAsync(CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var projects = databaseOperation.Repositories.Projects;
         if (_loaded) return;
 
         _ = await projects.GetByIdAsync(ProjectId, cancellationToken)
@@ -837,6 +830,9 @@ public sealed class OutlineToolStagingContext(
         IReadOnlyCollection<string> referencedResources,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         var beforeJson = Serialize(before);
         var afterJson = Serialize(after);
         if (string.Equals(beforeJson, afterJson, StringComparison.Ordinal))
@@ -868,7 +864,7 @@ public sealed class OutlineToolStagingContext(
         };
 
         await changes.AddChangeAsync(change, cancellationToken);
-        await changes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         _newChanges.Add(change);
 
         foreach (var resource in createdResources)
@@ -877,6 +873,9 @@ public sealed class OutlineToolStagingContext(
 
     private async Task<AiChangeBatch> EnsureBatchAsync(CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         if (_batch is not null) return _batch;
 
         _batch = new AiChangeBatch
@@ -887,7 +886,7 @@ public sealed class OutlineToolStagingContext(
             AssistantMessageId = _currentAssistantMessageId,
         };
         await changes.AddBatchAsync(_batch, cancellationToken);
-        await changes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         _nextOrder = 0;
         return _batch;
     }

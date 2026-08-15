@@ -8,6 +8,7 @@ using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
@@ -16,22 +17,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Research;
 
 public sealed class ResearchService(
-    IProjectRepository projects,
-    IResearchConversationRepository conversations,
-    IChatImageAttachmentService imageAttachments,
-    ISearchProviderService searchProviders,
-    ILlmProviderService providerService,
-    IChatClientFactory chatClientFactory,
-    IContextBuilder contextBuilder,
-    OutlineCollaborationTools outlineTools,
-    IAiChangeApprovalService changeApproval,
-    IWebIngestCandidateService webCandidates,
-    IEntityService entities,
-    ResearchTools tools,
-    IEntityVisualContextService entityVisualContext,
-    ChatTurnEngine turnEngine,
-    IOptions<AgentOptions> options,
-    ILogger<ResearchService> logger) : IResearchService
+IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ISearchProviderService searchProviders, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IContextBuilder contextBuilder, OutlineCollaborationTools outlineTools, IAiChangeApprovalService changeApproval, IWebIngestCandidateService webCandidates, IEntityService entities, ResearchTools tools, IEntityVisualContextService entityVisualContext, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<ResearchService> logger) : IResearchService
 {
     public const string ResearchWorkflowInstructions = """
         You are Lorekeeper's Research Mode: a factual research agent for a long-form writing project.
@@ -67,6 +53,10 @@ public sealed class ResearchService(
 
     public async Task<ResearchConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
+        var conversations = databaseOperation.Repositories.ResearchConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is not null) return existing;
 
@@ -83,15 +73,20 @@ public sealed class ResearchService(
             Content = InitialAssistantGreeting,
             Status = ResearchMessageStatus.Completed,
         }, cancellationToken);
-        await conversations.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return conversation;
     }
 
-    public async Task<IReadOnlyList<ResearchMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        await conversations.LoadMessagesAsync(conversationId, cancellationToken);
-
+    public async Task<IReadOnlyList<ResearchMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var conversations = databaseOperation.Repositories.ResearchConversations;
+        return await conversations.LoadMessagesAsync(conversationId, cancellationToken);
+    }
     public async Task<string> GetSystemPromptAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         return await BuildSystemPromptAsync(project, cancellationToken);
@@ -99,6 +94,8 @@ public sealed class ResearchService(
 
     public async Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         return project.AiChangeApprovalEnabled;
@@ -106,6 +103,9 @@ public sealed class ResearchService(
 
     public async Task SetAiChangeApprovalEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         if (project.AiChangeApprovalEnabled == enabled) return;
@@ -113,7 +113,7 @@ public sealed class ResearchService(
         project.AiChangeApprovalEnabled = enabled;
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
-        await projects.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public Task<IReadOnlyList<AiChangeBatch>> ListPendingChangesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
@@ -121,6 +121,9 @@ public sealed class ResearchService(
 
     public async Task<ResearchActivity> GetActivityAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var conversations = databaseOperation.Repositories.ResearchConversations;
         var conversation = await GetOrCreateAsync(projectId, cancellationToken);
         var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
         var toolCalls = BuildToolCallLookup(history);
@@ -194,11 +197,14 @@ public sealed class ResearchService(
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Research, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var conversations = databaseOperation.Repositories.ResearchConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
 
         conversations.RemoveConversation(existing);
-        await conversations.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async IAsyncEnumerable<ResearchTurnUpdate> SendAsync(
@@ -216,7 +222,10 @@ public sealed class ResearchService(
         string? preflightError = null;
         try
         {
-            project = await projects.GetByIdAsync(projectId, cancellationToken)
+            project = await turnEngine.ReadAsync(
+                repositories => repositories.Projects,
+                projects => projects.GetByIdAsync(projectId, cancellationToken),
+                cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
             if (!await searchProviders.HasActiveProviderAsync(cancellationToken))
                 throw new InvalidOperationException("No active search provider is configured.");
@@ -246,7 +255,10 @@ public sealed class ResearchService(
         }
         await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);
 
-        var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
+        var nextOrder = await turnEngine.ReadAsync(
+            repositories => repositories.ResearchConversations,
+            conversations => conversations.GetMaxOrderAsync(conversation.Id, cancellationToken),
+            cancellationToken) + 1;
         var userMessage = new ResearchMessage
         {
             ConversationId = conversation.Id,
@@ -256,7 +268,7 @@ public sealed class ResearchService(
             Status = ResearchMessageStatus.Completed,
         };
         conversation.UpdatedAt = DateTime.UtcNow;
-        await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
+        await turnEngine.AddMessageAsync(repositories => repositories.ResearchConversations, userMessage, cancellationToken);
         await imageAttachments.PersistAsync(projectId, ChatTurnSurface.Research, userMessage.Id, imageIds, cancellationToken);
 
         IChatClient chat = null!;
@@ -306,7 +318,10 @@ public sealed class ResearchService(
             Tools = aiTools,
             ToolMode = ChatToolMode.Auto,
         };
-        var history = await conversations.LoadMessagesAsync(conversation.Id, cancellationToken);
+        var history = await turnEngine.ReadAsync(
+            repositories => repositories.ResearchConversations,
+            conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
+            cancellationToken);
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
         if (initialAssembly is not null && toolContext is not null)
         {
@@ -337,7 +352,7 @@ public sealed class ResearchService(
                 Content = string.Empty,
                 Status = ResearchMessageStatus.Pending,
             };
-            await turnEngine.AddMessageAsync(conversations, activeAssistant, cancellationToken);
+            await turnEngine.AddMessageAsync(repositories => repositories.ResearchConversations, activeAssistant, cancellationToken);
 
             ChatRoundCompleted? completedRound = null;
             await foreach (var update in turnEngine.StreamRoundAsync(chat, messages, chatOptions, cancellationToken))
@@ -386,8 +401,6 @@ public sealed class ResearchService(
                 activeAssistant.Content = textBuilder.ToString();
                 activeAssistant.Status = ResearchMessageStatus.Completed;
                 await SafePersistAsync(activeAssistant);
-                conversation.UpdatedAt = DateTime.UtcNow;
-                await conversations.SaveChangesAsync(CancellationToken.None);
                 yield return new ResearchAssistantMessageCompleted(activeAssistant.Id);
                 yield break;
             }
@@ -435,7 +448,7 @@ public sealed class ResearchService(
                     Status = toolError is null ? ResearchMessageStatus.Completed : ResearchMessageStatus.Failed,
                     ErrorMessage = toolError,
                 };
-                await turnEngine.AddMessageAsync(conversations, toolMessage, CancellationToken.None);
+                await turnEngine.AddMessageAsync(repositories => repositories.ResearchConversations, toolMessage, CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
                 if (staging is not null)
@@ -492,7 +505,7 @@ public sealed class ResearchService(
                 activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
                 await SafePersistAsync(activeAssistant);
 
-                await turnEngine.AddMessageAsync(conversations, new ResearchMessage
+                await turnEngine.AddMessageAsync(repositories => repositories.ResearchConversations, new ResearchMessage
                 {
                     ConversationId = conversation.Id,
                     Order = nextOrder++,
@@ -984,6 +997,9 @@ public sealed class ResearchService(
 
     private async Task PersistFailedAssistantAsync(Guid conversationId, int order, string error)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var conversations = databaseOperation.Repositories.ResearchConversations;
         try
         {
             await conversations.AddMessageAsync(new ResearchMessage
@@ -994,7 +1010,7 @@ public sealed class ResearchService(
                 Status = ResearchMessageStatus.Failed,
                 ErrorMessage = error,
             }, CancellationToken.None);
-            await conversations.SaveChangesAsync(CancellationToken.None);
+            await databaseOperation.SaveChangesAsync(CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -1006,7 +1022,7 @@ public sealed class ResearchService(
     {
         try
         {
-            await turnEngine.UpdateMessageAsync(conversations, message, CancellationToken.None);
+            await turnEngine.UpdateMessageAsync(repositories => repositories.ResearchConversations, message, CancellationToken.None);
         }
         catch (Exception ex)
         {

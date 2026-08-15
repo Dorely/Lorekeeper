@@ -6,10 +6,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Projects;
 
-public sealed class BookBriefService(AppDbContext db) : IBookBriefService
+public sealed class BookBriefService(IAppDatabaseOperationFactory database) : IBookBriefService
 {
     public async Task<BookBrief> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var existing = await db.BookBriefs
             .SingleOrDefaultAsync(brief => brief.ProjectId == projectId, cancellationToken);
         if (existing is not null)
@@ -29,6 +32,9 @@ public sealed class BookBriefService(AppDbContext db) : IBookBriefService
         BookBriefPatch patch,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         ArgumentNullException.ThrowIfNull(patch);
         var existing = await db.BookBriefs
             .SingleOrDefaultAsync(candidate => candidate.ProjectId == projectId, cancellationToken);
@@ -56,6 +62,9 @@ public sealed class BookBriefService(AppDbContext db) : IBookBriefService
         string visualDirection,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         ArgumentNullException.ThrowIfNull(expectedCurrentVisualDirection);
         ArgumentNullException.ThrowIfNull(visualDirection);
 

@@ -8,15 +8,16 @@ using Microsoft.EntityFrameworkCore;
 namespace Lorekeeper.Fonts;
 
 public sealed class ProjectFontService(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     IWebHostEnvironment environment,
-    IAuthoringHistoryService authoringHistory,
-    IProjectMutationCoordinator projectMutations) : IProjectFontService
+    IAuthoringHistoryService authoringHistory) : IProjectFontService
 {
     public async Task<IReadOnlyList<ProjectFontFamilyView>> ListAsync(
         Guid projectId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var custom = await db.ProjectFontFamilies
             .AsNoTracking()
             .Include(family => family.Faces)
@@ -34,6 +35,9 @@ public sealed class ProjectFontService(
         ProjectFontUpload upload,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var project = await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
             ?? throw new InvalidOperationException("Project was not found.");
         if (!upload.EmbeddingRightsConfirmed || string.IsNullOrWhiteSpace(upload.RightsDeclaration))
@@ -89,7 +93,9 @@ public sealed class ProjectFontService(
         bool clearAffectedHistory = false,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var family = await db.ProjectFontFamilies
             .Include(candidate => candidate.Faces)
@@ -202,6 +208,8 @@ public sealed class ProjectFontService(
         Guid faceId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var face = await db.ProjectFontFaces
             .AsNoTracking()
             .Include(candidate => candidate.Family)
@@ -217,6 +225,8 @@ public sealed class ProjectFontService(
         bool requireExact = false,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (PublicationBuiltInFonts.Find(familyKey) is { } builtIn)
         {
             var face = SelectFace(builtIn.Faces, weight, italic, requireExact);

@@ -1,11 +1,11 @@
-using Lorekeeper.Manuscripts;
+using System.Text.Json;
 using Lorekeeper.Authoring;
 using Lorekeeper.Knowledge;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Search;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace Lorekeeper.Publish;
 
@@ -56,8 +56,7 @@ public interface IEditionContentService
 }
 
 public sealed class EditionContentService(
-    AppDbContext db,
-    IProjectMutationCoordinator projectMutations,
+    IAppDatabaseOperationFactory database,
     IProjectSearchIndex projectSearch,
     IVectorStore vectors,
     IAuthoringHistoryService? authoringHistory = null) : IEditionContentService
@@ -66,6 +65,8 @@ public sealed class EditionContentService(
         Guid projectId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var rows = await db.PublicationEditions.AsNoTracking()
             .Where(item => item.ProjectId == projectId)
             .OrderBy(item => item.CreatedAt)
@@ -94,7 +95,9 @@ public sealed class EditionContentService(
         bool confirmDiscard,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var edition = await db.PublicationEditions
             .Include(item => item.ChapterOverrides)
             .SingleOrDefaultAsync(item => item.Id == editionId && item.ProjectId == projectId, cancellationToken)
@@ -164,6 +167,8 @@ public sealed class EditionContentService(
         Guid chapterId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var edition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
             item => item.Id == editionId && item.ProjectId == projectId && item.EditionSpecificContentEnabled,
             cancellationToken) ?? throw new KeyNotFoundException("The enabled publication release was not found.");
@@ -190,9 +195,11 @@ public sealed class EditionContentService(
         bool confirmed,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (!confirmed)
             throw new InvalidOperationException("Resetting this chapter permanently discards its edition manuscript and layouts. Confirmation is required.");
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await db.PublicationEditions.SingleOrDefaultAsync(
             item => item.Id == editionId && item.ProjectId == projectId && item.EditionSpecificContentEnabled,
             cancellationToken) ?? throw new KeyNotFoundException("The enabled publication release was not found.");
@@ -230,6 +237,8 @@ public sealed class EditionContentService(
         int limit = 50,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         limit = Math.Clamp(limit, 1, 100);
         offset = Math.Max(0, offset);
         var rows = await db.PublicationEditionChapterOverrides.AsNoTracking()
@@ -324,6 +333,8 @@ public sealed class EditionContentService(
         ManuscriptDocument document,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var compositionIds = document.Content
             .Where(block => block.Type == ManuscriptBlockType.DesignedPage && block.PageCompositionId.HasValue)
             .Select(block => block.PageCompositionId!.Value)
@@ -348,10 +359,10 @@ public sealed class EditionContentService(
             var expectedLeafWidth = release.PageWidthInches * 72;
             var expectedHeight = release.PageHeightInches * 72;
             var exact = composition.Variants.Select(item => new
-                {
-                    Variant = item,
-                    Scene = JsonSerializer.Deserialize<CompositionScene>(item.SceneJson, ManuscriptCodec.JsonOptions),
-                })
+            {
+                Variant = item,
+                Scene = JsonSerializer.Deserialize<CompositionScene>(item.SceneJson, ManuscriptCodec.JsonOptions),
+            })
                 .FirstOrDefault(item => item.Scene is { } scene
                     && Math.Abs(scene.Surface.HeightPoints - expectedHeight) < 0.5
                     && Math.Abs(scene.Surface.WidthPoints - expectedLeafWidth * (scene.Surface.Kind == CompositionSurfaceKind.FacingSpread ? 2 : 1)) < 0.5);

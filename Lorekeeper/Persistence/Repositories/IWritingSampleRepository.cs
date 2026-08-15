@@ -10,5 +10,4 @@ public interface IWritingSampleRepository
     Task AddAsync(WritingSample sample, CancellationToken cancellationToken = default);
     void Update(WritingSample sample);
     void Remove(WritingSample sample);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

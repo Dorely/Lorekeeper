@@ -23,7 +23,6 @@ public interface IGraphEdgeRepository
     Task AddAsync(GraphEdge edge, CancellationToken cancellationToken = default);
     void Update(GraphEdge edge);
     void Remove(GraphEdge edge);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }
 
 public enum EdgeDirection

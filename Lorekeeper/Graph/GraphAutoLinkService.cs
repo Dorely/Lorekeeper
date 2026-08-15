@@ -3,18 +3,14 @@ using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Search;
 
 namespace Lorekeeper.Graph;
 
 public sealed partial class GraphAutoLinkService(
-    IGraphStore graph,
-    IGraphNodeRepository nodes,
-    IGraphEdgeRepository edges,
-    IProjectSearchService search,
-    IIngestRepository ingest,
-    ILogger<GraphAutoLinkService> logger) : IGraphAutoLinkService
+IAppDatabaseOperationFactory database, IGraphStore graph, IProjectSearchService search, ILogger<GraphAutoLinkService> logger) : IGraphAutoLinkService
 {
     public const string AutoMentionEdgeType = "AutoMention";
     public const string AutoFlagProperty = "autoLink";
@@ -44,6 +40,8 @@ public sealed partial class GraphAutoLinkService(
         Guid entityId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var targetNode = await nodes.FindByKeyAsync(projectId, entityId.ToString("N"), cancellationToken);
         if (targetNode is null || !IsMentionTargetNode(targetNode)) return [];
 
@@ -88,6 +86,9 @@ public sealed partial class GraphAutoLinkService(
         Guid sourceId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var normalizedType = ProjectSearchSourceTypes.Normalize(sourceType);
         var sourceNode = await ResolveSourceNodeAsync(projectId, normalizedType, sourceId, null, cancellationToken);
         if (sourceNode is null) return [];
@@ -128,6 +129,10 @@ public sealed partial class GraphAutoLinkService(
         int maxResults = 12,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         var node = await nodes.FindByKeyAsync(projectId, entityId.ToString("N"), cancellationToken);
         if (node is null) return [];
 
@@ -176,6 +181,9 @@ public sealed partial class GraphAutoLinkService(
 
     private async Task RemoveIncomingAutoMentionsAsync(long targetNodeId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var edges = databaseOperation.Repositories.GraphEdges;
         var incoming = await edges.GetAdjacentAsync(targetNodeId, EdgeDirection.Incoming, [AutoMentionEdgeType], null, cancellationToken);
         foreach (var edge in incoming.Where(IsAutoMentionEdge))
             await graph.RemoveEdgeAsync(edge.Id, cancellationToken);
@@ -183,6 +191,9 @@ public sealed partial class GraphAutoLinkService(
 
     private async Task RemoveOutgoingAutoMentionsAsync(long sourceNodeId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var edges = databaseOperation.Repositories.GraphEdges;
         var outgoing = await edges.GetAdjacentAsync(sourceNodeId, EdgeDirection.Outgoing, [AutoMentionEdgeType], null, cancellationToken);
         foreach (var edge in outgoing.Where(IsAutoMentionEdge))
             await graph.RemoveEdgeAsync(edge.Id, cancellationToken);
@@ -226,6 +237,9 @@ public sealed partial class GraphAutoLinkService(
         Guid? containerSourceId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var ingest = databaseOperation.Repositories.Ingest;
         var key = sourceId.ToString("N");
         var normalizedType = ProjectSearchSourceTypes.Normalize(sourceType);
         var node = normalizedType switch
@@ -288,6 +302,9 @@ public sealed partial class GraphAutoLinkService(
         Guid projectId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var result = new List<AutoLinkSourceRef>();
         foreach (var node in await nodes.ListByProjectAsync(projectId, cancellationToken))
         {

@@ -142,12 +142,11 @@ public sealed class PublicationRenderQueue : IPublicationRenderQueue
 }
 
 public sealed class PublicationRenderService(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     IPublicationEditionService editions,
     IPublicationBookService books,
     IPublicationRenderQueue queue,
-    IPublicationPressRuntime pressRuntime,
-    IProjectMutationCoordinator projectMutations) : IPublicationRenderService
+    IPublicationPressRuntime pressRuntime) : IPublicationRenderService
 {
     private static readonly Expression<Func<PublicationArtifact, PublicationArtifact>> ArtifactMetadataProjection =
         artifact => new PublicationArtifact
@@ -172,12 +171,11 @@ public sealed class PublicationRenderService(
         };
 
     public PublicationRenderService(
-        AppDbContext db,
+        IAppDatabaseOperationFactory database,
         IPublicationEditionService editions,
         IPublicationRenderQueue queue,
-        IPublicationPressRuntime pressRuntime,
-        IProjectMutationCoordinator projectMutations)
-        : this(db, editions, new PublicationBookService(db, projectMutations), queue, pressRuntime, projectMutations)
+        IPublicationPressRuntime pressRuntime)
+        : this(database, editions, new PublicationBookService(database), queue, pressRuntime)
     {
     }
 
@@ -202,8 +200,10 @@ public sealed class PublicationRenderService(
         Guid projectId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         _ = await books.GetOrCreateAsync(projectId, cancellationToken);
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var runtimeReadiness = GetRuntimeReadiness(PublicationEditionFormat.DigitalPdf, PublicationVendor.Generic);
         if (!runtimeReadiness.IsReady)
             throw new InvalidOperationException(runtimeReadiness.Message);
@@ -231,6 +231,8 @@ public sealed class PublicationRenderService(
 
     public async Task<IReadOnlyList<PublicationRenderJobView>> ListCoreAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var fingerprint = await books.GetSourceFingerprintAsync(projectId, cancellationToken);
         var jobs = await db.PublicationRenderJobs.AsNoTracking()
             .Where(job => job.ProjectId == projectId && job.TargetKind == PublicationTargetKind.CoreBook)
@@ -241,6 +243,9 @@ public sealed class PublicationRenderService(
 
     public async Task<PublicationRenderJobView> CancelCoreAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var job = await db.PublicationRenderJobs.Include(item => item.Artifacts).SingleAsync(
             item => item.ProjectId == projectId && item.TargetKind == PublicationTargetKind.CoreBook && item.Id == jobId,
             cancellationToken);
@@ -260,7 +265,9 @@ public sealed class PublicationRenderService(
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var edition = await db.PublicationEditions.AsNoTracking().FirstOrDefaultAsync(
             candidate => candidate.ProjectId == projectId && candidate.Id == editionId,
             cancellationToken) ?? throw new KeyNotFoundException("Publication release not found.");
@@ -300,6 +307,9 @@ public sealed class PublicationRenderService(
         Guid jobId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var job = await GetTrackedAsync(projectId, editionId, jobId, cancellationToken);
         if (job.Status is PublicationRenderStatus.Completed or PublicationRenderStatus.Failed or PublicationRenderStatus.Cancelled)
             return await GetAsync(projectId, editionId, jobId, cancellationToken);
@@ -320,6 +330,8 @@ public sealed class PublicationRenderService(
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
         var jobs = await db.PublicationRenderJobs
             .AsNoTracking()
@@ -337,6 +349,8 @@ public sealed class PublicationRenderService(
         Guid jobId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
         var job = await db.PublicationRenderJobs
             .AsNoTracking()
@@ -357,6 +371,8 @@ public sealed class PublicationRenderService(
         Guid jobId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         await EnsureJobAsync(projectId, editionId, jobId, cancellationToken);
         return await db.PublicationPageMapEntries.AsNoTracking()
             .Where(entry => entry.RenderJobId == jobId)
@@ -406,6 +422,8 @@ public sealed class PublicationRenderService(
         Guid artifactId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var artifact = await db.PublicationArtifacts.AsNoTracking().FirstOrDefaultAsync(
             artifact => artifact.Id == artifactId && artifact.ProjectId == projectId,
             cancellationToken);
@@ -426,6 +444,8 @@ public sealed class PublicationRenderService(
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var fingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken);
         var rendererVersion = CurrentRendererVersion();
         var editionFormat = await db.PublicationEditions.AsNoTracking()
@@ -446,6 +466,8 @@ public sealed class PublicationRenderService(
         IEnumerable<Guid> jobIds,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var ids = jobIds.ToList();
         if (ids.Count == 0)
             return new Dictionary<Guid, IReadOnlyList<PublicationArtifact>>();
@@ -465,13 +487,18 @@ public sealed class PublicationRenderService(
         Guid projectId,
         Guid editionId,
         Guid jobId,
-        CancellationToken cancellationToken) =>
-        await db.PublicationRenderJobs.FirstOrDefaultAsync(
-            job => job.Id == jobId && job.EditionId == editionId && job.ProjectId == projectId,
-            cancellationToken) ?? throw new KeyNotFoundException("Publication render job not found.");
-
+        CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.PublicationRenderJobs.FirstOrDefaultAsync(
+                    job => job.Id == jobId && job.EditionId == editionId && job.ProjectId == projectId,
+                    cancellationToken) ?? throw new KeyNotFoundException("Publication render job not found.");
+    }
     private async Task EnsureJobAsync(Guid projectId, Guid editionId, Guid jobId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (!await db.PublicationRenderJobs.AnyAsync(
             job => job.Id == jobId && job.EditionId == editionId && job.ProjectId == projectId,
             cancellationToken))
@@ -555,6 +582,7 @@ public sealed class PublicationRenderService(
 public sealed class PublicationRenderWorker(
     IPublicationRenderQueue queue,
     IServiceScopeFactory scopeFactory,
+    IAppDatabaseOperationFactory database,
     ILogger<PublicationRenderWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -612,8 +640,8 @@ public sealed class PublicationRenderWorker(
         Guid jobId,
         CancellationToken cancellationToken)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        var db = operation.Db;
         return await db.PublicationRenderJobs.AsNoTracking()
             .Where(job => job.Id == jobId)
             .Select(job => job.CancellationRequested
@@ -623,8 +651,9 @@ public sealed class PublicationRenderWorker(
 
     private async Task RecoverInterruptedJobsAsync(CancellationToken cancellationToken)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        List<Guid> recoveredIds = [];
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var db = operation.Db;
         var jobs = await db.PublicationRenderJobs
             .Where(job => job.Status == PublicationRenderStatus.Queued
                 || job.Status == PublicationRenderStatus.Rendering)
@@ -642,15 +671,18 @@ public sealed class PublicationRenderWorker(
             job.ProgressPercent = 0;
             job.ProgressMessage = "Recovered after restart";
             job.StartedAt = null;
-            await queue.EnqueueAsync(job.Id, cancellationToken);
+            recoveredIds.Add(job.Id);
         }
         await db.SaveChangesAsync(cancellationToken);
+        await operation.DisposeAsync();
+        foreach (var jobId in recoveredIds)
+            await queue.EnqueueAsync(jobId, cancellationToken);
     }
 
     private async Task MarkCancelledAsync(Guid jobId, CancellationToken cancellationToken)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var db = operation.Db;
         var job = await db.PublicationRenderJobs.FirstOrDefaultAsync(candidate => candidate.Id == jobId, cancellationToken);
         if (job is null || job.Status == PublicationRenderStatus.Completed)
             return;
@@ -662,8 +694,8 @@ public sealed class PublicationRenderWorker(
 
     private async Task MarkFailedAsync(Guid jobId, Exception exception, CancellationToken cancellationToken)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var db = operation.Db;
         var job = await db.PublicationRenderJobs.FirstOrDefaultAsync(candidate => candidate.Id == jobId, cancellationToken);
         if (job is null)
             return;
@@ -690,7 +722,7 @@ public sealed class PublicationRenderWorker(
 }
 
 public sealed class PublicationRenderProcessor(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     IPublishService publishing,
     IPublicationEditionService editions,
     IPublicationBookService books,
@@ -701,14 +733,14 @@ public sealed class PublicationRenderProcessor(
     IOptions<PublicationPressOptions> options)
 {
     public PublicationRenderProcessor(
-        AppDbContext db,
+        IAppDatabaseOperationFactory database,
         IPublishService publishing,
         IPublicationEditionService editions,
         IPublicationCoverService covers,
         IProjectFontService projectFonts,
         IPublicationPressRuntime pressRuntime,
         IOptions<PublicationPressOptions> options)
-        : this(db, publishing, editions, null!, covers, projectFonts, pressRuntime,
+        : this(database, publishing, editions, null!, covers, projectFonts, pressRuntime,
             new PrintProductRegistry(), options)
     {
     }
@@ -730,6 +762,9 @@ public sealed class PublicationRenderProcessor(
 
     public async Task ProcessAsync(Guid jobId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var job = await db.PublicationRenderJobs
             .Include(candidate => candidate.Edition)
             .FirstOrDefaultAsync(candidate => candidate.Id == jobId, cancellationToken)

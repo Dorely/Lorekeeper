@@ -17,6 +17,4 @@ public interface IEditorRevisionRepository
     void UpdateJob(EditorRevisionJob job);
     void UpdateSession(EditorRevisionSession session);
     void UpdateMessage(EditorRevisionMessage message);
-
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

@@ -3,10 +3,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public sealed class ContestRepository(AppDbContext db) : IContestRepository
+public sealed class ContestRepository(AppDatabaseReadOperation operation) : IContestRepository
 {
     public Task<List<ContestBatch>> ListCurrentByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.ContestBatches
+        operation.Db.ContestBatches
             .AsNoTracking()
             .Include(batch => batch.Candidates.OrderBy(candidate => candidate.Order))
             .Where(batch => batch.ProjectId == projectId
@@ -17,7 +17,7 @@ public sealed class ContestRepository(AppDbContext db) : IContestRepository
 
     public async Task DeleteInactiveByProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
-        var batches = await db.ContestBatches
+        var batches = await operation.Db.ContestBatches
             .Include(batch => batch.Candidates.OrderBy(candidate => candidate.Order))
             .Where(batch => batch.ProjectId == projectId
                 && batch.Status != ContestBatchStatus.Running
@@ -26,31 +26,27 @@ public sealed class ContestRepository(AppDbContext db) : IContestRepository
 
         if (batches.Count == 0) return;
 
-        db.ContestBatches.RemoveRange(batches);
-        await db.SaveChangesAsync(cancellationToken);
+        operation.Db.ContestBatches.RemoveRange(batches);
     }
 
     public Task<ContestBatch?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default) =>
-        db.ContestBatches
+        operation.Db.ContestBatches
             .Include(batch => batch.Candidates.OrderBy(candidate => candidate.Order))
             .FirstOrDefaultAsync(batch => batch.Id == batchId, cancellationToken);
 
     public Task<ContestCandidate?> GetCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default) =>
-        db.ContestCandidates
+        operation.Db.ContestCandidates
             .Include(candidate => candidate.Batch)
                 .ThenInclude(batch => batch.Candidates.OrderBy(candidate => candidate.Order))
             .FirstOrDefaultAsync(candidate => candidate.Id == candidateId, cancellationToken);
 
     public async Task AddBatchAsync(ContestBatch batch, CancellationToken cancellationToken = default) =>
-        await db.ContestBatches.AddAsync(batch, cancellationToken);
+        await operation.Db.ContestBatches.AddAsync(batch, cancellationToken);
 
     public async Task AddCandidateAsync(ContestCandidate candidate, CancellationToken cancellationToken = default) =>
-        await db.ContestCandidates.AddAsync(candidate, cancellationToken);
+        await operation.Db.ContestCandidates.AddAsync(candidate, cancellationToken);
 
-    public void UpdateBatch(ContestBatch batch) => db.ContestBatches.Update(batch);
+    public void UpdateBatch(ContestBatch batch) => operation.Db.MarkModified(batch);
 
-    public void UpdateCandidate(ContestCandidate candidate) => db.ContestCandidates.Update(candidate);
-
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        db.SaveChangesAsync(cancellationToken);
+    public void UpdateCandidate(ContestCandidate candidate) => operation.Db.MarkModified(candidate);
 }

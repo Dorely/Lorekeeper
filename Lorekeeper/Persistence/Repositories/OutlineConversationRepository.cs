@@ -3,36 +3,49 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public class OutlineConversationRepository(AppDbContext db) : IOutlineConversationRepository
+public class OutlineConversationRepository(AppDatabaseReadOperation operation) : IOutlineConversationRepository
 {
     public Task<OutlineConversation?> GetByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.OutlineConversations.FirstOrDefaultAsync(c => c.ProjectId == projectId, cancellationToken);
+        operation.Db.OutlineConversations.FirstOrDefaultAsync(c => c.ProjectId == projectId, cancellationToken);
 
     public Task<List<OutlineMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        db.OutlineMessages.AsNoTracking().Where(m => m.ConversationId == conversationId)
+        operation.Db.OutlineMessages.AsNoTracking().Where(m => m.ConversationId == conversationId)
                           .OrderBy(m => m.Order)
                           .ToListAsync(cancellationToken);
 
     public Task<bool> ExistsAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
-        db.OutlineConversations.AnyAsync(conversation => conversation.Id == conversationId, cancellationToken);
+        operation.Db.OutlineConversations.AnyAsync(conversation => conversation.Id == conversationId, cancellationToken);
 
     public async Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
-        var any = await db.OutlineMessages.AnyAsync(m => m.ConversationId == conversationId, cancellationToken);
+        var any = await operation.Db.OutlineMessages.AnyAsync(m => m.ConversationId == conversationId, cancellationToken);
         if (!any) return -1;
-        return await db.OutlineMessages.Where(m => m.ConversationId == conversationId).MaxAsync(m => m.Order, cancellationToken);
+        return await operation.Db.OutlineMessages.Where(m => m.ConversationId == conversationId).MaxAsync(m => m.Order, cancellationToken);
     }
 
     public async Task AddConversationAsync(OutlineConversation conversation, CancellationToken cancellationToken = default) =>
-        await db.OutlineConversations.AddAsync(conversation, cancellationToken);
+        await operation.Db.OutlineConversations.AddAsync(conversation, cancellationToken);
 
-    public async Task AddMessageAsync(OutlineMessage message, CancellationToken cancellationToken = default) =>
-        await db.OutlineMessages.AddAsync(message, cancellationToken);
+    public async Task AddMessageAsync(OutlineMessage message, CancellationToken cancellationToken = default)
+    {
+        TouchConversation(message.ConversationId);
+        await operation.Db.OutlineMessages.AddAsync(message, cancellationToken);
+    }
 
-    public void UpdateMessage(OutlineMessage message) => db.OutlineMessages.Update(message);
+    private void TouchConversation(Guid conversationId)
+    {
+        var conversation = operation.Db.OutlineConversations.Local.FirstOrDefault(item => item.Id == conversationId);
+        if (conversation is null)
+        {
+            conversation = new OutlineConversation { Id = conversationId };
+            operation.Db.Attach(conversation);
+            operation.Db.Entry(conversation).Property(item => item.UpdatedAt).IsModified = true;
+        }
 
-    public void RemoveConversation(OutlineConversation conversation) => db.OutlineConversations.Remove(conversation);
+        conversation.UpdatedAt = DateTime.UtcNow;
+    }
 
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        db.SaveChangesAsync(cancellationToken);
+    public void UpdateMessage(OutlineMessage message) => operation.Db.MarkModified(message);
+
+    public void RemoveConversation(OutlineConversation conversation) => operation.Db.MarkDeleted(conversation);
 }

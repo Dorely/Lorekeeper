@@ -3,37 +3,34 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public sealed class SearchProviderRepository(AppDbContext db) : ISearchProviderRepository
+public sealed class SearchProviderRepository(AppDatabaseReadOperation operation) : ISearchProviderRepository
 {
     public Task<List<SearchProvider>> GetAllAsync(CancellationToken cancellationToken = default) =>
-        db.SearchProviders.OrderBy(provider => provider.Name).ToListAsync(cancellationToken);
+        operation.Db.SearchProviders.OrderBy(provider => provider.Name).ToListAsync(cancellationToken);
 
     public Task<SearchProvider?> GetByIdAsync(int id, CancellationToken cancellationToken = default) =>
-        db.SearchProviders.FirstOrDefaultAsync(provider => provider.Id == id, cancellationToken);
+        operation.Db.SearchProviders.FirstOrDefaultAsync(provider => provider.Id == id, cancellationToken);
 
     public Task<SearchProvider?> GetByNameAsync(string name, CancellationToken cancellationToken = default) =>
-        db.SearchProviders.FirstOrDefaultAsync(provider => provider.Name == name, cancellationToken);
+        operation.Db.SearchProviders.FirstOrDefaultAsync(provider => provider.Name == name, cancellationToken);
 
     public Task<SearchProvider?> GetActiveAsync(CancellationToken cancellationToken = default) =>
-        db.SearchProviders.FirstOrDefaultAsync(provider => provider.IsActive, cancellationToken);
+        operation.Db.SearchProviders.FirstOrDefaultAsync(provider => provider.IsActive, cancellationToken);
 
     public async Task AddAsync(SearchProvider provider, CancellationToken cancellationToken = default) =>
-        await db.SearchProviders.AddAsync(provider, cancellationToken);
+        await operation.Db.SearchProviders.AddAsync(provider, cancellationToken);
 
-    public void Update(SearchProvider provider) => db.SearchProviders.Update(provider);
+    public void Update(SearchProvider provider) => operation.Db.MarkModified(provider);
 
-    public void Remove(SearchProvider provider) => db.SearchProviders.Remove(provider);
+    public void Remove(SearchProvider provider) => operation.Db.MarkDeleted(provider);
 
     public async Task SetActiveAsync(int id, CancellationToken cancellationToken = default)
     {
-        var all = await db.SearchProviders.ToListAsync(cancellationToken);
+        var all = await operation.Db.SearchProviders.ToListAsync(cancellationToken);
         foreach (var provider in all)
         {
             provider.IsActive = provider.Id == id;
             provider.UpdatedAt = DateTime.UtcNow;
         }
     }
-
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        db.SaveChangesAsync(cancellationToken);
 }

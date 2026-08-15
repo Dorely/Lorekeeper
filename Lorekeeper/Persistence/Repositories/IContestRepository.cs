@@ -12,5 +12,4 @@ public interface IContestRepository
     Task AddCandidateAsync(ContestCandidate candidate, CancellationToken cancellationToken = default);
     void UpdateBatch(ContestBatch batch);
     void UpdateCandidate(ContestCandidate candidate);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

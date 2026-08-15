@@ -31,8 +31,7 @@ public interface IManuscriptStyleService
 }
 
 public sealed class ManuscriptStyleService(
-    AppDbContext db,
-    IProjectMutationCoordinator projectMutations) : IManuscriptStyleService
+    IAppDatabaseOperationFactory database) : IManuscriptStyleService
 {
     public static readonly IReadOnlySet<string> BuiltInParagraphRoles = new HashSet<string>(
         [
@@ -66,20 +65,26 @@ public sealed class ManuscriptStyleService(
 
     public async Task<IReadOnlyList<ManuscriptStyleView>> ListAsync(
         Guid projectId,
-        CancellationToken cancellationToken = default) =>
-        (await db.ManuscriptStyleDefinitions
-            .AsNoTracking()
-            .Where(style => style.ProjectId == projectId)
-            .OrderBy(style => style.Kind)
-            .ThenBy(style => style.Name)
-            .ToListAsync(cancellationToken))
-        .Select(ToView)
-        .ToList();
-
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return (await db.ManuscriptStyleDefinitions
+                    .AsNoTracking()
+                    .Where(style => style.ProjectId == projectId)
+                    .OrderBy(style => style.Kind)
+                    .ThenBy(style => style.Name)
+                    .ToListAsync(cancellationToken))
+                .Select(ToView)
+                .ToList();
+    }
     public async Task<IReadOnlyDictionary<Guid, int>> GetUsageCountsAsync(
         Guid projectId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var styles = await db.ManuscriptStyleDefinitions.AsNoTracking()
             .Where(item => item.ProjectId == projectId)
             .Select(item => new { item.Id, item.SemanticRole })
@@ -122,6 +127,9 @@ public sealed class ManuscriptStyleService(
         ManuscriptStyleInput input,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         input = input with { Definition = NormalizeDefinition(input.Definition) };
         ValidateInput(input);
         await ValidateFontFamilyAsync(projectId, input.Definition.FontFamilyKey, cancellationToken);
@@ -227,6 +235,8 @@ public sealed class ManuscriptStyleService(
         ManuscriptStyleInput input,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         await ValidateFontFamilyAsync(projectId, input.Definition.FontFamilyKey, cancellationToken);
         var styles = await db.ManuscriptStyleDefinitions
             .AsNoTracking()
@@ -344,7 +354,9 @@ public sealed class ManuscriptStyleService(
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var style = await RequireDeletableAsync(
             projectId,
             styleId,
@@ -385,6 +397,8 @@ public sealed class ManuscriptStyleService(
         bool tracking,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var query = tracking
             ? db.ManuscriptStyleDefinitions.AsQueryable()
             : db.ManuscriptStyleDefinitions.AsNoTracking();
@@ -445,6 +459,8 @@ public sealed class ManuscriptStyleService(
         Guid styleId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         return await db.ManuscriptStyleDefinitions
             .AsNoTracking()
             .Where(style => style.ProjectId == projectId && style.Id == styleId)
@@ -552,6 +568,8 @@ public sealed class ManuscriptStyleService(
         string? fontFamilyKey,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (string.IsNullOrWhiteSpace(fontFamilyKey)
             || !fontFamilyKey.StartsWith("project:", StringComparison.OrdinalIgnoreCase))
             return;

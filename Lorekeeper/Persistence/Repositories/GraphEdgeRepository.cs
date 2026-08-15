@@ -3,10 +3,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public class GraphEdgeRepository(AppDbContext db) : IGraphEdgeRepository
+public class GraphEdgeRepository(AppDatabaseReadOperation operation) : IGraphEdgeRepository
 {
     public Task<GraphEdge?> GetByIdAsync(long id, CancellationToken cancellationToken = default) =>
-        db.GraphEdges.FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
+        operation.Db.GraphEdges.FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
 
     public async Task<List<GraphEdge>> GetAdjacentAsync(
         long nodeId,
@@ -15,7 +15,7 @@ public class GraphEdgeRepository(AppDbContext db) : IGraphEdgeRepository
         int? maxResults,
         CancellationToken cancellationToken = default)
     {
-        IQueryable<GraphEdge> query = db.GraphEdges.AsNoTracking();
+        IQueryable<GraphEdge> query = operation.Db.GraphEdges.AsNoTracking();
 
         query = direction switch
         {
@@ -43,7 +43,7 @@ public class GraphEdgeRepository(AppDbContext db) : IGraphEdgeRepository
     }
 
     public async Task<List<GraphEdge>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await db.GraphEdges
+        await operation.Db.GraphEdges
             .AsNoTracking()
             .Where(e => e.FromNode.ProjectId == projectId && e.ToNode.ProjectId == projectId)
             .OrderBy(e => e.EdgeType)
@@ -53,17 +53,14 @@ public class GraphEdgeRepository(AppDbContext db) : IGraphEdgeRepository
             .ToListAsync(cancellationToken);
 
     public Task<GraphEdge?> FindAsync(long fromId, long toId, string edgeType, CancellationToken cancellationToken = default) =>
-        db.GraphEdges.FirstOrDefaultAsync(
+        operation.Db.GraphEdges.FirstOrDefaultAsync(
             e => e.FromNodeId == fromId && e.ToNodeId == toId && e.EdgeType == edgeType,
             cancellationToken);
 
     public async Task AddAsync(GraphEdge edge, CancellationToken cancellationToken = default) =>
-        await db.GraphEdges.AddAsync(edge, cancellationToken);
+        await operation.Db.GraphEdges.AddAsync(edge, cancellationToken);
 
-    public void Update(GraphEdge edge) => db.GraphEdges.Update(edge);
+    public void Update(GraphEdge edge) => operation.Db.MarkModified(edge);
 
-    public void Remove(GraphEdge edge) => db.GraphEdges.Remove(edge);
-
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        db.SaveChangesAsync(cancellationToken);
+    public void Remove(GraphEdge edge) => operation.Db.MarkDeleted(edge);
 }

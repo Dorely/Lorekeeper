@@ -1,4 +1,5 @@
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Knowledge;
@@ -20,8 +21,7 @@ namespace Lorekeeper.Knowledge;
 /// </para>
 /// </summary>
 public class RelationalGraphStore(
-    IGraphNodeRepository nodes,
-    IGraphEdgeRepository edges) : IGraphStore
+IAppDatabaseOperationFactory database) : IGraphStore
 {
     public async Task<GraphNode> UpsertNodeAsync(
         Guid projectId,
@@ -31,6 +31,9 @@ public class RelationalGraphStore(
         IDictionary<string, object?>? properties = null,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var existing = await nodes.FindAsync(projectId, nodeType, key, cancellationToken);
         if (existing is null)
         {
@@ -43,7 +46,7 @@ public class RelationalGraphStore(
                 Properties = properties is null ? new Dictionary<string, object?>() : new Dictionary<string, object?>(properties),
             };
             await nodes.AddAsync(node, cancellationToken);
-            await nodes.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
             return node;
         }
 
@@ -52,7 +55,7 @@ public class RelationalGraphStore(
             existing.Properties = new Dictionary<string, object?>(properties);
         existing.UpdatedAt = DateTime.UtcNow;
         nodes.Update(existing);
-        await nodes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return existing;
     }
 
@@ -64,6 +67,9 @@ public class RelationalGraphStore(
         int? sortOrder = null,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var edges = databaseOperation.Repositories.GraphEdges;
         var existing = await edges.FindAsync(fromNodeId, toNodeId, edgeType, cancellationToken);
         if (existing is null)
         {
@@ -76,7 +82,7 @@ public class RelationalGraphStore(
                 SortOrder = sortOrder,
             };
             await edges.AddAsync(edge, cancellationToken);
-            await edges.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
             return edge;
         }
 
@@ -85,37 +91,53 @@ public class RelationalGraphStore(
         existing.SortOrder = sortOrder ?? existing.SortOrder;
         existing.UpdatedAt = DateTime.UtcNow;
         edges.Update(existing);
-        await edges.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return existing;
     }
 
     public async Task RemoveNodeAsync(long nodeId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var node = await nodes.GetByIdAsync(nodeId, cancellationToken);
         if (node is null) return;
         nodes.Remove(node);
-        await nodes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task RemoveEdgeAsync(long edgeId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var edges = databaseOperation.Repositories.GraphEdges;
         var edge = await edges.GetByIdAsync(edgeId, cancellationToken);
         if (edge is null) return;
         edges.Remove(edge);
-        await edges.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
-    public Task<GraphNode?> GetNodeAsync(long nodeId, CancellationToken cancellationToken = default) =>
-        nodes.GetByIdAsync(nodeId, cancellationToken);
-
-    public Task<GraphNode?> FindNodeAsync(Guid projectId, string nodeType, string key, CancellationToken cancellationToken = default) =>
-        nodes.FindAsync(projectId, nodeType, key, cancellationToken);
-
+    public async Task<GraphNode?> GetNodeAsync(long nodeId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        return await nodes.GetByIdAsync(nodeId, cancellationToken);
+    }
+    public async Task<GraphNode?> FindNodeAsync(Guid projectId, string nodeType, string key, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        return await nodes.FindAsync(projectId, nodeType, key, cancellationToken);
+    }
     public async Task<IReadOnlyList<GraphNode>> GetNeighborsAsync(
         long nodeId,
         GraphTraversalOptions options,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         var direction = ToEdgeDirection(options.Direction);
         var visitedNodeIds = new HashSet<long> { nodeId };
         var resultIds = new List<long>();
@@ -154,6 +176,10 @@ public class RelationalGraphStore(
         GraphTraversalOptions options,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         var start = await nodes.GetByIdAsync(fromNodeId, cancellationToken);
         if (start is null) return [];
 

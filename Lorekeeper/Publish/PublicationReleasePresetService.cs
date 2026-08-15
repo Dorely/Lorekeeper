@@ -24,7 +24,7 @@ public interface IPublicationReleasePresetService
         CancellationToken cancellationToken = default);
 }
 
-public sealed class PublicationReleasePresetService(AppDbContext db, IPrintProductRegistry printProducts) : IPublicationReleasePresetService
+public sealed class PublicationReleasePresetService(IAppDatabaseOperationFactory database, IPrintProductRegistry printProducts) : IPublicationReleasePresetService
 {
     public async Task<PublicationReleasePreset> ResolveAsync(
         Guid projectId,
@@ -32,6 +32,8 @@ public sealed class PublicationReleasePresetService(AppDbContext db, IPrintProdu
         PublicationVendor destination,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (!Enum.IsDefined(format) || !Enum.IsDefined(destination))
             throw new ArgumentException("Release type or destination is invalid.");
         var isPrint = format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover;

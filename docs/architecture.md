@@ -249,10 +249,10 @@ surface and the manual UI continue to use the unrestricted chapter service.
 
 `AiChangeRepository` keeps pending-review reads no-tracking, but its mutation
 methods update only the root `AiChange` or `AiChangeBatch` row. They reuse a
-locally tracked instance when one exists and copy scalar values onto it;
-otherwise they mark only the supplied root entry modified. Detached
-`Batch.Changes` graphs are never attached during review updates, which keeps
-long-lived Blazor scopes from tracking two instances of the same change.
+locally tracked instance inside the current write operation and copy scalar
+values onto it; otherwise they attach only the supplied root entry as modified.
+Detached `Batch.Changes` graphs are never attached during review updates, and
+the operation is disposed immediately after its commit.
 
 Editor review routing follows the fidelity of the proposed manuscript change.
 Only chapters whose current and proposed manuscripts are plain body paragraphs
@@ -590,18 +590,13 @@ composition/variant, revision, changed IDs, and selected object. A newly
 created Designed Page opens Pages mode automatically, and each later placement
 or layout mutation reloads the mounted canvas and follows the affected object
 without replacing dirty manual state. Authoring-variant refreshes use fresh
-no-tracking reads so mutations performed by a background assistant scope cannot
-be hidden by an older variant already tracked in the Blazor circuit. Before a
-revision-checked composition mutation loads its writable entity graph, it also
-asks the central context-state coordinator to discard any unchanged locally
-tracked copy of that composition and its variants. The expected revisions are
-therefore compared with current persisted state rather than a stale long-lived
-circuit snapshot. Project mutation leases prevent an active composition save
-from overlapping the next one. If a rejected, cancelled, or otherwise failed
-operation left uncommitted composition entries in a circuit's tracker, the next
-serialized mutation clears that failed operation's complete tracked residue
-before reloading the saved aggregate; it is neither surfaced as a false
-concurrent-save error nor partially persisted by a later edit.
+no-tracking operations, so mutations performed by a background assistant cannot
+be hidden by a previously materialized value. Revision-checked mutations acquire the
+project mutation lease and then a short database write operation, load the
+current aggregate with explicit tracking, and commit before either lease is
+released. A rejected, cancelled, or failed mutation disposes that operation;
+none of its entities can survive into the next edit. The next request performs a
+complete reread and fails closed when its expected revision is stale.
 
 `LayoutGenerationTargetDescriptor` is the server-owned geometry boundary for a
 project page, Figure, page surface/frame, or publication cover surface/frame.
@@ -1238,40 +1233,35 @@ binary assets. SQLite startup applies a busy timeout and WAL journal mode.
 sqlite-vec and internal FTS5 structures are initialized outside normal EF
 migrations.
 
-All dependency-injection-created contexts participate in the singleton
-`IAppDbContextStateCoordinator`. It versions tracked state per relational table,
-invalidates unchanged entities before a query can reuse data superseded by
-another application context, and observes bulk update/delete commands as well
-as ordinary `SaveChanges` operations. Explicit transactions publish their
-invalidations only after commit. A process-wide mutation gate serializes tracked
-saves and direct EF mutation commands. This matches Lorekeeper's single-user
-database ownership and prevents UI, assistant, and background contexts from
-racing one another while a stale row is being refreshed. Table generations
-remain cache-invalidation hints rather than user-facing conflicts. This boundary
-is required because Blazor circuit scopes outlive an individual UI operation.
+Runtime code receives `IAppDatabaseOperationFactory`, never a circuit-scoped
+`AppDbContext`. `OpenReadAsync` creates a no-tracking context for one database
+block, and callers fully materialize entities or DTOs before disposal.
+`OpenWriteAsync` acquires the singleton process-wide database write lease and
+creates a short tracking context whose operation owns `SaveChanges` and
+disposal. Project-scoped writes use its project-aware overload, which acquires
+the project mutation lease before the database lease. Its
+`DatabaseRepositories` bundle lets multi-repository work share the same unit of
+work. Internal helpers entered by an active write operation borrow that
+operation instead of opening another SQLite writer. The required lock order is
+project mutation lease, database write lease, then SQLite transaction.
 
-`AppDbContext` centrally resolves a genuine affected-row concurrency miss. It
-reloads the conflicting row, rebases only the properties marked modified by the
-pending operation, advances numeric revision tokens from the persisted value,
-and retries the save while retaining the process mutation gate. Repeated deletes
-are idempotent. A stale update whose aggregate was already removed is detached
-rather than resurrecting deleted data. An entryless provider failure or a conflict
-that cannot settle within the bounded retry count still fails closed. This row-level policy applies
-to every repository and service using the registered context, so feature code
-does not implement ad hoc EF retries. Revision-checked aggregate services may
-still reject an obsolete user/tool request before mutation when its explicit
-expected revision no longer matches.
+Repositories stage inserts and root-only updates/deletes; they do not commit.
+Detached mutations attach only the intended root, while mutation queries use
+explicit tracking inside the write operation. Raw FTS5 and sqlite-vec mutations
+use the same write coordinator. Chat append/update/reset checkpoints and worker
+progress checkpoints each open a fresh write operation, and no context remains
+alive across model streaming, provider/network calls, render waits, retry
+delays, or background polling.
 
-Services that need an authoritative aggregate read identify their mutation
-target through `AppDbContext.PrepareFreshMutation`; the coordinator alone
-validates and refreshes that tracked state. It detaches unchanged stale reads and,
-when the requested authoritative aggregate reveals an already-ended failed
-operation, clears that operation's complete uncommitted tracker residue. An active
-save remains protected by the process-wide mutation lease. Feature code therefore
-does not clear the tracker or accidentally carry part of a rejected mutation into
-a later save. Protected startup migrations
-retain their explicit transaction, backup, and validation boundaries while
-using the same registered context configuration.
+Application-managed revision tokens remain the concurrency contract. Explicit
+revision predicates treat zero affected rows as conflicts, and EF concurrency
+misses fail closed with a reread/retry message. Lorekeeper does not merge stale
+property values or silently rebase a failed save. The only bounded save retry in
+`AppDbContext` is for transient SQLite lock errors. Protected startup migrations
+retain one intentionally bounded tracking context across their explicit schema,
+transaction, backup, validation, and tracker-clear phases; guarded import
+transactions likewise share one operation but do not retain tracker state after
+rollback.
 
 `IDatabaseMigrationRecoveryService` owns provider-specific backup paths,
 owner-only permissions, SQLite Online Backup creation, expiring restore

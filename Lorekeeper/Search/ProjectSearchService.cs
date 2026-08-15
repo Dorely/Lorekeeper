@@ -8,20 +8,13 @@ using Lorekeeper.Llm;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Search;
 
 public sealed class ProjectSearchService(
-    IProjectSearchIndex index,
-    IVectorStore vectors,
-    IEmbeddingService embeddings,
-    IChapterRepository chapters,
-    IActRepository acts,
-    IGraphNodeRepository nodes,
-    IIngestRepository ingest,
-    IChapterSemanticProjectionService semanticProjection,
-    ILogger<ProjectSearchService> logger) : IProjectSearchService
+IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore vectors, IEmbeddingService embeddings, IChapterSemanticProjectionService semanticProjection, ILogger<ProjectSearchService> logger) : IProjectSearchService
 {
     private const int RrfK = 60;
     private const int ReadPageMaxChars = 12_000;
@@ -128,6 +121,12 @@ public sealed class ProjectSearchService(
         int topK = 10,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var chapters = databaseOperation.Repositories.Chapters;
+        var acts = databaseOperation.Repositories.Acts;
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var ingest = databaseOperation.Repositories.Ingest;
         var types = NormalizeSourceTypes(sourceTypes);
         var limit = Math.Clamp(topK, 1, 50);
         var results = new List<ProjectSearchSource>();
@@ -302,7 +301,12 @@ public sealed class ProjectSearchService(
         if (containerSourceId is Guid container)
         {
             var containerKey = container.ToString("N");
-            var chunkIds = (await ingest.ListSourceChunksAsync(container, cancellationToken))
+            IReadOnlyList<IngestSourceChunk> sourceChunks;
+            await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+            {
+                sourceChunks = await readOperation.Repositories.Ingest.ListSourceChunksAsync(container, cancellationToken);
+            }
+            var chunkIds = sourceChunks
                 .Select(chunk => chunk.Id.ToString("N"))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             results = results
@@ -333,7 +337,12 @@ public sealed class ProjectSearchService(
             || sourceTypes.Contains(ProjectSearchSourceTypes.IngestSource);
         if (includeChunks)
         {
-            foreach (var chunk in await ingest.ListSourceChunksAsync(containerSourceId, cancellationToken))
+            IReadOnlyList<IngestSourceChunk> chunks;
+            await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+            {
+                chunks = await readOperation.Repositories.Ingest.ListSourceChunksAsync(containerSourceId, cancellationToken);
+            }
+            foreach (var chunk in chunks)
                 expanded.Add(chunk.Id.ToString("N"));
         }
 
@@ -345,7 +354,11 @@ public sealed class ProjectSearchService(
         Guid chapterId,
         CancellationToken cancellationToken)
     {
-        var chapter = await chapters.GetByIdAsync(chapterId, cancellationToken);
+        Chapter? chapter;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            chapter = await readOperation.Repositories.Chapters.GetByIdAsync(chapterId, cancellationToken);
+        }
         if (chapter is null || chapter.ProjectId != projectId) return (null, null, null);
         var plainText = await semanticProjection.ExpandPlainTextAsync(chapter, cancellationToken);
         var sb = new StringBuilder();
@@ -360,12 +373,18 @@ public sealed class ProjectSearchService(
         Guid actId,
         CancellationToken cancellationToken)
     {
-        var act = await acts.GetByIdAsync(actId, cancellationToken);
+        Act? act;
+        IReadOnlyList<Chapter> projectChapters;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            act = await readOperation.Repositories.Acts.GetByIdAsync(actId, cancellationToken);
+            projectChapters = await readOperation.Repositories.Chapters.ListByProjectAsync(projectId, cancellationToken);
+        }
         if (act is null || act.ProjectId != projectId) return (null, null, null);
         var sb = new StringBuilder();
         sb.Append("# ").AppendLine(act.Title);
         AppendOptional(sb, "Synopsis", act.Synopsis);
-        var actChapters = (await chapters.ListByProjectAsync(projectId, cancellationToken))
+        var actChapters = projectChapters
             .Where(chapter => chapter.ActId == act.Id)
             .OrderBy(chapter => chapter.Order);
         foreach (var chapter in actChapters)
@@ -378,6 +397,8 @@ public sealed class ProjectSearchService(
         Guid entityId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var node = await nodes.FindByKeyAsync(projectId, entityId.ToString("N"), cancellationToken);
         if (node is null) return (null, null, null);
         var title = $"{node.NodeType}: {node.Label ?? node.Key}";
@@ -389,6 +410,8 @@ public sealed class ProjectSearchService(
         Guid sourceId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         var source = await ingest.GetSourceAsync(sourceId, cancellationToken);
         if (source is null || source.ProjectId != projectId) return (null, null, null);
         var sb = new StringBuilder();
@@ -405,6 +428,8 @@ public sealed class ProjectSearchService(
         Guid sourceChunkId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         var chunk = await ingest.GetSourceChunkAsync(sourceChunkId, cancellationToken);
         if (chunk is null) return (null, null, null);
         var source = await ingest.GetSourceAsync(chunk.SourceId, cancellationToken);

@@ -17,6 +17,7 @@ public interface IPublicationCoreMigrationService
 }
 
 public sealed class PublicationCoreMigrationService(
+    IAppDatabaseOperationFactory database,
     IDatabaseMigrationRecoveryService recovery,
     ILogger<PublicationCoreMigrationService> logger) : IPublicationCoreMigrationService
 {
@@ -51,7 +52,7 @@ public sealed class PublicationCoreMigrationService(
             await SaveMigrationChangesAsync(db, "migration journal initialization", cancellationToken);
 
             var artifactState = await ArtifactStateAsync(db, cancellationToken);
-            var releaseProjectionState = await ReleaseProjectionStateAsync(db, useCoreInheritance: false, cancellationToken);
+            var releaseProjectionState = await ReleaseProjectionStateAsync(database, db, useCoreInheritance: false, cancellationToken);
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             var projects = await db.Projects.OrderBy(item => item.Id).ToListAsync(cancellationToken);
             foreach (var project in projects)
@@ -64,7 +65,7 @@ public sealed class PublicationCoreMigrationService(
                 throw new InvalidDataException("Core Book migration did not create exactly one Core Book per project.");
             if (!string.Equals(artifactState, await ArtifactStateAsync(db, cancellationToken), StringComparison.Ordinal))
                 throw new InvalidDataException("Core Book migration changed publication artifact bytes or hashes.");
-            if (!string.Equals(releaseProjectionState, await ReleaseProjectionStateAsync(db, useCoreInheritance: true, cancellationToken), StringComparison.Ordinal))
+            if (!string.Equals(releaseProjectionState, await ReleaseProjectionStateAsync(database, db, useCoreInheritance: true, cancellationToken), StringComparison.Ordinal))
                 throw new InvalidDataException("Core Book migration changed the effective configuration of an existing publication release.");
             if (await HasForeignKeyViolationsAsync(db, cancellationToken))
                 throw new InvalidDataException("Core Book migration left invalid foreign keys.");
@@ -133,20 +134,44 @@ public sealed class PublicationCoreMigrationService(
         {
             book.OutlineItems = source.OutlineItems.Select(item => new PublicationBookOutlineItem
             {
-                Id = item.Id, ProjectId = project.Id, TargetKind = item.TargetKind, TargetId = item.TargetId,
-                ActId = item.ActId, ChapterId = item.ChapterId, IsIncluded = item.IsIncluded, SortOrder = item.SortOrder,
+                Id = item.Id,
+                ProjectId = project.Id,
+                TargetKind = item.TargetKind,
+                TargetId = item.TargetId,
+                ActId = item.ActId,
+                ChapterId = item.ChapterId,
+                IsIncluded = item.IsIncluded,
+                SortOrder = item.SortOrder,
             }).ToList();
             book.Matter = source.Matter.Select(item => new PublicationBookMatter
             {
-                Id = item.Id, ProjectId = project.Id, Location = item.Location, Kind = item.Kind, Title = item.Title,
-                ManuscriptJson = item.ManuscriptJson, Revision = item.Revision, IsIncluded = item.IsIncluded, SortOrder = item.SortOrder,
+                Id = item.Id,
+                ProjectId = project.Id,
+                Location = item.Location,
+                Kind = item.Kind,
+                Title = item.Title,
+                ManuscriptJson = item.ManuscriptJson,
+                Revision = item.Revision,
+                IsIncluded = item.IsIncluded,
+                SortOrder = item.SortOrder,
             }).ToList();
             book.ImagePlacements = source.ImagePlacements.Select(item => new PublicationBookImagePlacement
             {
-                Id = item.Id, ProjectId = project.Id, AssetId = item.AssetId, TargetKind = item.TargetKind, TargetId = item.TargetId,
-                ActId = item.ActId, ChapterId = item.ChapterId, PlacementKind = item.PlacementKind, SortOrder = item.SortOrder,
-                Caption = item.Caption, PresentationJson = item.PresentationJson, AltText = item.AltText,
-                Decorative = item.Decorative, Language = item.Language, AccessibilityRole = item.AccessibilityRole,
+                Id = item.Id,
+                ProjectId = project.Id,
+                AssetId = item.AssetId,
+                TargetKind = item.TargetKind,
+                TargetId = item.TargetId,
+                ActId = item.ActId,
+                ChapterId = item.ChapterId,
+                PlacementKind = item.PlacementKind,
+                SortOrder = item.SortOrder,
+                Caption = item.Caption,
+                PresentationJson = item.PresentationJson,
+                AltText = item.AltText,
+                Decorative = item.Decorative,
+                Language = item.Language,
+                AccessibilityRole = item.AccessibilityRole,
             }).ToList();
         }
         book.CoverDesign = new PublicationBookCoverDesign
@@ -400,6 +425,7 @@ public sealed class PublicationCoreMigrationService(
     }
 
     private static async Task<string> ReleaseProjectionStateAsync(
+        IAppDatabaseOperationFactory database,
         AppDbContext db,
         bool useCoreInheritance,
         CancellationToken cancellationToken)
@@ -407,14 +433,14 @@ public sealed class PublicationCoreMigrationService(
         var releases = await db.PublicationEditions.AsNoTracking().OrderBy(item => item.Id).ToListAsync(cancellationToken);
         await ApplyLegacyTypographyAsync(db, releases, cancellationToken);
         var resolver = new PublicationEffectiveConfigurationResolver(
-            db,
+            database,
             readPdfPresentation: false,
             readPublicationSections: false);
         var projections = new List<object>(releases.Count);
         foreach (var stored in releases)
         {
             var resolved = useCoreInheritance
-                ? await resolver.ResolveReleaseAsync(stored.ProjectId, stored.Id, cancellationToken)
+                ? await resolver.ResolveReleaseAsync(db, stored.ProjectId, stored.Id, cancellationToken)
                 : new EffectivePublicationRelease(
                     new PublicationBook(), stored, new HashSet<PublicationEditionOverrideField>(),
                     await db.PublicationEditionOutlineItems.AsNoTracking().Where(item => item.EditionId == stored.Id).ToListAsync(cancellationToken),
@@ -429,26 +455,77 @@ public sealed class PublicationCoreMigrationService(
             var cover = await db.PublicationCoverDesigns.AsNoTracking().SingleOrDefaultAsync(item => item.EditionId == stored.Id, cancellationToken);
             projections.Add(new
             {
-                edition.Id, edition.ProjectId, edition.Name, edition.Format, edition.Vendor, edition.VendorProfileVersion,
-                edition.Status, edition.Revision, edition.TitleOverride, edition.Subtitle, edition.Author, edition.Language,
-                edition.Publisher, edition.Copyright, edition.Isbn, edition.Description,
-                edition.IncludeTableOfContents, edition.IncludeVisibleTableOfContents,
-                edition.IncludeActSynopses, edition.IncludeChapterSynopses, edition.IncludeActHeadings,
-                edition.IncludeChapterHeadings, edition.NumberActs, edition.NumberChapters, edition.TitlePageMode,
-                edition.PrintRegistryVersion, edition.PrintProductKey, edition.PrintFinish,
-                edition.PrintCoverMode, edition.GenericPrintTemplateJson, edition.Bleed, edition.PageWidthInches,
-                edition.PageHeightInches, edition.PageMarginInches, edition.BodyFontSizePoints,
-                edition.BodyLineHeight, edition.SelectedCoverImageId, edition.AllowDesignedPageOverrides,
+                edition.Id,
+                edition.ProjectId,
+                edition.Name,
+                edition.Format,
+                edition.Vendor,
+                edition.VendorProfileVersion,
+                edition.Status,
+                edition.Revision,
+                edition.TitleOverride,
+                edition.Subtitle,
+                edition.Author,
+                edition.Language,
+                edition.Publisher,
+                edition.Copyright,
+                edition.Isbn,
+                edition.Description,
+                edition.IncludeTableOfContents,
+                edition.IncludeVisibleTableOfContents,
+                edition.IncludeActSynopses,
+                edition.IncludeChapterSynopses,
+                edition.IncludeActHeadings,
+                edition.IncludeChapterHeadings,
+                edition.NumberActs,
+                edition.NumberChapters,
+                edition.TitlePageMode,
+                edition.PrintRegistryVersion,
+                edition.PrintProductKey,
+                edition.PrintFinish,
+                edition.PrintCoverMode,
+                edition.GenericPrintTemplateJson,
+                edition.Bleed,
+                edition.PageWidthInches,
+                edition.PageHeightInches,
+                edition.PageMarginInches,
+                edition.BodyFontSizePoints,
+                edition.BodyLineHeight,
+                edition.SelectedCoverImageId,
+                edition.AllowDesignedPageOverrides,
                 Outline = resolved.OutlineItems.Where(item => item.IsIncluded).OrderBy(item => item.SortOrder)
                     .Select(item => new { item.TargetKind, item.TargetId, item.IsIncluded, item.SortOrder }),
                 Matter = matter.OrderBy(item => item.Location).ThenBy(item => item.SortOrder)
                     .Select(item => new { item.Location, item.Kind, item.Title, item.ManuscriptJson, item.Revision, item.IsIncluded, item.SortOrder }),
                 Placements = placements.OrderBy(item => item.SortOrder)
-                    .Select(item => new { item.AssetId, item.TargetKind, item.TargetId, item.PlacementKind, item.SortOrder,
-                        item.Caption, item.PresentationJson, item.AltText, item.Decorative, item.Language, item.AccessibilityRole }),
-                Cover = cover is null ? null : new { cover.Title, cover.Subtitle, cover.Author, cover.SpineText,
-                    cover.BackCopy, cover.BackgroundColor, cover.BarcodeMode, cover.ImageCropXPercent,
-                    cover.ImageCropYPercent, cover.CompositionSceneJson, cover.Revision },
+                    .Select(item => new
+                    {
+                        item.AssetId,
+                        item.TargetKind,
+                        item.TargetId,
+                        item.PlacementKind,
+                        item.SortOrder,
+                        item.Caption,
+                        item.PresentationJson,
+                        item.AltText,
+                        item.Decorative,
+                        item.Language,
+                        item.AccessibilityRole
+                    }),
+                Cover = cover is null ? null : new
+                {
+                    cover.Title,
+                    cover.Subtitle,
+                    cover.Author,
+                    cover.SpineText,
+                    cover.BackCopy,
+                    cover.BackgroundColor,
+                    cover.BarcodeMode,
+                    cover.ImageCropXPercent,
+                    cover.ImageCropYPercent,
+                    cover.CompositionSceneJson,
+                    cover.Revision
+                },
             });
         }
         var json = JsonSerializer.Serialize(projections, ManuscriptCodec.JsonOptions);

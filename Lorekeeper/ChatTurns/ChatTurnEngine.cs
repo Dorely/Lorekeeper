@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Llm;
+using Lorekeeper.Persistence;
+using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.AI;
 
 namespace Lorekeeper.ChatTurns;
@@ -93,6 +95,7 @@ public sealed record ChatToolInvocationOutcome(string Result, string? Error, boo
 /// persistence mapping, tool-specific progress hooks, and terminal feature behavior.
 /// </summary>
 public sealed class ChatTurnEngine(
+    IAppDatabaseOperationFactory database,
     ILogger<ChatTurnEngine> logger,
     IChatContextCompactionService contextCompaction)
 {
@@ -109,21 +112,52 @@ public sealed class ChatTurnEngine(
         ChatContextCompaction.MarkToolContext(message);
 
     public async Task AddMessageAsync<TMessage>(
-        IChatMessageStore<TMessage> store,
+        Func<DatabaseRepositories, IChatMessageStore<TMessage>> selectStore,
         TMessage message,
         CancellationToken cancellationToken)
     {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var store = selectStore(operation.Repositories);
         await store.AddMessageAsync(message, cancellationToken);
-        await store.SaveChangesAsync(cancellationToken);
+        await operation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task UpdateMessageAsync<TMessage>(
-        IChatMessageStore<TMessage> store,
+        Func<DatabaseRepositories, IChatMessageStore<TMessage>> selectStore,
         TMessage message,
         CancellationToken cancellationToken)
     {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var store = selectStore(operation.Repositories);
         store.UpdateMessage(message);
-        await store.SaveChangesAsync(cancellationToken);
+        await operation.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<TResult> ReadAsync<TStore, TResult>(
+        Func<DatabaseRepositories, TStore> selectStore,
+        Func<TStore, Task<TResult>> read,
+        CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        return await read(selectStore(operation.Repositories));
+    }
+
+    public async Task<TResult> ReadAsync<TResult>(
+        Func<AppDbContext, Task<TResult>> read,
+        CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        return await read(operation.Db);
+    }
+
+    public async Task WriteAsync<TStore>(
+        Func<DatabaseRepositories, TStore> selectStore,
+        Func<TStore, Task> write,
+        CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        await write(selectStore(operation.Repositories));
+        await operation.SaveChangesAsync(cancellationToken);
     }
 
     public async IAsyncEnumerable<ChatRoundUpdate> StreamRoundAsync(

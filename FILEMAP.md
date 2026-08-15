@@ -349,12 +349,12 @@
 
 | File | Description |
 |------|-------------|
-| `AppDbContext.cs` | EF Core context for projects, page setup, providers, chats, writing, graph, ingest/import, publishing, composition, fonts, and Book Text Styles. Configures relationships/indexes, JSON property bags, bounded row-level stale-state rebasing, revision advancement, idempotent stale-delete handling, and transient SQLite lock retries. |
-| `AppDbContextStateCoordinator.cs` | Process-wide single-writer/table-generation coordinator and EF command/transaction interceptors that serialize database mutations, invalidate stale tracked reads, clear complete uncommitted tracker residue from ended operations before authoritative aggregate reloads, and observe committed bulk or tracked mutations. |
+| `AppDatabaseOperations.cs` | Per-operation EF context factory, no-tracking read lifetimes, project-aware/process-wide write leases in fixed lock order, and nested-operation sharing for intentionally atomic multi-service work. Short write units opt into tracking and own commit/disposal. |
+| `AppDbContext.cs` | EF Core model for projects, page setup, providers, chats, writing, graph, ingest/import, publishing, composition, fonts, and Book Text Styles. Configures relationships/indexes, JSON property bags, revision advancement, fail-closed concurrency reporting, publication-target normalization, and bounded transient SQLite lock retries. |
 | `DatabaseMigrationRecoveryService.cs` | Shared protected SQLite backup/restore, recovery-shell, expiring confirmation, backup discovery, and reference-aware pruning boundary for guarded migrations. |
 | `DatabaseStartupMigrationService.cs` | Single application-startup schema/data migration orchestrator shared by the real host and installed-database migration fixtures so verification cannot drift from startup order. |
 | `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |
-| `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); applies shared SQLite timeout settings and the mandatory tracking/transaction interceptors. |
+| `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); registers the no-tracking `IDbContextFactory`, database-operation factory, and singleton write coordinator. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
 | `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, publication-release, Publish-chat, Press, authoring-page, Core Book, edition-content, physical-product/cover-surface, persistent authoring-history, and cleanup migrations with the current model snapshot. |
 
@@ -362,17 +362,18 @@
 
 | File | Description |
 |------|-------------|
+| `DatabaseRepositories.cs` | Operation-owned repository bundle. Repository contracts stage changes on their context; the enclosing write operation alone commits, so multi-repository mutations share one unit of work. |
 | `ILlmProviderRepository.cs` / `LlmProviderRepository.cs` | CRUD + atomic `SetDefaultAsync` for `LlmProvider`. |
 | `IEmbeddingConfigurationRepository.cs` / `EmbeddingConfigurationRepository.cs` | Persistence for the singleton active embedding configuration, eager-loading its selected provider connection. |
 | `IOAuthTokenRepository.cs` / `OAuthTokenRepository.cs` | Fresh no-tracking latest/valid OAuth token reads plus atomic replace-for-provider persistence. |
-| `IProjectRepository.cs` / `ProjectRepository.cs` | Project CRUD plus fresh no-tracking UI lists/slug reads and an explicit id snapshot; slug uniqueness check; ordered list by `UpdatedAt`. |
-| `IGraphNodeRepository.cs` / `GraphNodeRepository.cs` | Node CRUD plus tracked command lookups and fresh no-tracking project/type/id-list projections for graph/entity/fact/beat UI reads. |
+| `IProjectRepository.cs` / `ProjectRepository.cs` | Project CRUD plus materialized UI lists/slug reads and an explicit id snapshot; slug uniqueness check; ordered list by `UpdatedAt`. |
+| `IGraphNodeRepository.cs` / `GraphNodeRepository.cs` | Node CRUD plus project/type/id-list projections for graph/entity/fact/beat reads. |
 | `IGraphEdgeRepository.cs` / `GraphEdgeRepository.cs` | Edge CRUD plus fresh no-tracking directional/project read projections. Defines `EdgeDirection` enum. |
 | `IGraphEntityTypeRepository.cs` / `GraphEntityTypeRepository.cs` | Project-scoped CRUD for lightweight graph type registry rows. |
-| `IChapterRepository.cs` / `ChapterRepository.cs` | Chapter CRUD ordered by `Order`, including authoritative tracked-entry reloads for cross-scope updates; max-order and reorder operations are scoped to one act bucket. |
+| `IChapterRepository.cs` / `ChapterRepository.cs` | Chapter CRUD ordered by `Order`; max-order and reorder operations are scoped to one act bucket and writes are staged on the owning database operation. |
 | `IActRepository.cs` / `ActRepository.cs` | Act CRUD ordered by `Order` per project; `ReorderAsync` rewrites the act ordering in one save. |
 | `IOutlineConversationRepository.cs` / `OutlineConversationRepository.cs` | Persistence for `OutlineConversation` + ordered `OutlineMessage`s: `GetByProjectIdAsync`, `LoadMessagesAsync`, `GetMaxOrderAsync`, `AddConversationAsync`, `AddMessageAsync`, `UpdateMessage`, `RemoveConversation`. |
-| `IEditorConversationRepository.cs` / `EditorConversationRepository.cs` | Persistence for project-wide Editor Chat: lean model-history messages, metadata-only UI transcript visuals (binary data stays endpoint-loaded), order lookup, add/update/remove, and save. |
+| `IEditorConversationRepository.cs` / `EditorConversationRepository.cs` | Persistence for project-wide Editor Chat: lean model-history messages, metadata-only UI transcript visuals (binary data stays endpoint-loaded), order lookup, and add/update/remove staging. |
 | `IEditorRevisionRepository.cs` / `EditorRevisionRepository.cs` | Persistence for Editor Revision jobs, per-chapter worker sessions, and ordered worker transcript/tool-result messages. |
 | `IWritingSampleRepository.cs` / `WritingSampleRepository.cs` | Project-scoped writing sample persistence: list by project (newest updated first), get/count, add/update/remove, and save. |
 | `IWritingCoachConversationRepository.cs` / `WritingCoachConversationRepository.cs` | Persistence for the resettable project-level Writing Coach conversation + ordered messages, including assistant tool-call manifests and tool result rows. |

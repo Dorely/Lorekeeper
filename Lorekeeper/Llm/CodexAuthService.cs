@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Llm;
@@ -14,8 +15,7 @@ namespace Lorekeeper.Llm;
 /// dev and the desktop shell's default port.
 /// </summary>
 public class CodexAuthService(
-    IOAuthTokenRepository tokens,
-    IHttpClientFactory httpClientFactory,
+IAppDatabaseOperationFactory database, IHttpClientFactory httpClientFactory,
     IConfiguration configuration,
     ILogger<CodexAuthService> logger) : ICodexAuthService
 {
@@ -105,6 +105,8 @@ public class CodexAuthService(
             var refreshToken = json.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null;
             var scope = json.TryGetProperty("scope", out var sc) ? sc.GetString() : null;
 
+            await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+            var tokens = databaseOperation.Repositories.OAuthTokens;
             await tokens.ReplaceForProviderAsync(pkce.ProviderId, new OAuthToken
             {
                 ProviderId = pkce.ProviderId,
@@ -113,7 +115,7 @@ public class CodexAuthService(
                 ExpiresAt = DateTime.UtcNow.AddSeconds(expiresIn),
                 Scope = scope
             }, cancellationToken);
-            await tokens.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
             ClearRejectedRefreshTokens(pkce.ProviderId);
 
             return pkce.ProviderId;
@@ -130,9 +132,11 @@ public class CodexAuthService(
         await providerLock.WaitAsync(cancellationToken);
         try
         {
-            // Serialize the scoped repository read with refresh so concurrent callers
-            // cannot race a rotating refresh token or use the DbContext concurrently.
-            var token = await tokens.GetLatestForProviderAsync(providerId, cancellationToken);
+            OAuthToken? token;
+            await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+            {
+                token = await readOperation.Repositories.OAuthTokens.GetLatestForProviderAsync(providerId, cancellationToken);
+            }
             if (token is null)
                 return null;
             if (token.ExpiresAt > DateTime.UtcNow)
@@ -163,12 +167,15 @@ public class CodexAuthService(
 
     public async Task RevokeTokenAsync(int providerId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var tokens = databaseOperation.Repositories.OAuthTokens;
         var providerLock = _providerLocks.GetOrAdd(providerId, _ => new SemaphoreSlim(1, 1));
         await providerLock.WaitAsync(cancellationToken);
         try
         {
             await tokens.DeleteForProviderAsync(providerId, cancellationToken);
-            await tokens.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
             ClearRejectedRefreshTokens(providerId);
         }
         finally
@@ -229,8 +236,10 @@ public class CodexAuthService(
                     : token.Scope,
             CreatedAt = DateTime.UtcNow,
         };
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        var tokens = databaseOperation.Repositories.OAuthTokens;
         await tokens.ReplaceForProviderAsync(token.ProviderId, refreshed, cancellationToken);
-        await tokens.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return refreshed;
     }
 

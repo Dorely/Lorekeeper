@@ -3,10 +3,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public sealed class WebIngestCandidateRepository(AppDbContext db) : IWebIngestCandidateRepository
+public sealed class WebIngestCandidateRepository(AppDatabaseReadOperation operation) : IWebIngestCandidateRepository
 {
     public Task<List<WebIngestCandidate>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.WebIngestCandidates
+        operation.Db.WebIngestCandidates
             .AsNoTracking()
             .Where(candidate => candidate.ProjectId == projectId)
             .OrderByDescending(candidate => candidate.UpdatedAt)
@@ -14,7 +14,7 @@ public sealed class WebIngestCandidateRepository(AppDbContext db) : IWebIngestCa
             .ToListAsync(cancellationToken);
 
     public Task<List<WebIngestCandidate>> ListResearchByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.WebIngestCandidates
+        operation.Db.WebIngestCandidates
             .AsNoTracking()
             .Where(candidate => candidate.ProjectId == projectId && candidate.ResearchConversationId != null)
             .OrderByDescending(candidate => candidate.UpdatedAt)
@@ -22,7 +22,7 @@ public sealed class WebIngestCandidateRepository(AppDbContext db) : IWebIngestCa
             .ToListAsync(cancellationToken);
 
     public Task<List<WebIngestCandidate>> ListStagedByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.WebIngestCandidates
+        operation.Db.WebIngestCandidates
             .AsNoTracking()
             .Where(candidate => candidate.ProjectId == projectId && candidate.Status == WebIngestCandidateStatus.Staged)
             .OrderByDescending(candidate => candidate.StagedAt)
@@ -30,7 +30,7 @@ public sealed class WebIngestCandidateRepository(AppDbContext db) : IWebIngestCa
             .ToListAsync(cancellationToken);
 
     public Task<List<WebIngestCandidate>> ListStagedByProjectAsync(Guid projectId, Guid? researchConversationId, CancellationToken cancellationToken = default) =>
-        db.WebIngestCandidates
+        operation.Db.WebIngestCandidates
             .AsNoTracking()
             .Where(candidate => candidate.ProjectId == projectId
                 && candidate.ResearchConversationId == researchConversationId
@@ -42,7 +42,7 @@ public sealed class WebIngestCandidateRepository(AppDbContext db) : IWebIngestCa
     public Task<List<WebIngestCandidate>> ListByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken cancellationToken = default) =>
         ids.Count == 0
             ? Task.FromResult(new List<WebIngestCandidate>())
-            : db.WebIngestCandidates
+            : operation.Db.WebIngestCandidates
                 .AsNoTracking()
                 .Where(candidate => ids.Contains(candidate.Id))
                 .OrderBy(candidate => candidate.CrawlDepth)
@@ -51,21 +51,18 @@ public sealed class WebIngestCandidateRepository(AppDbContext db) : IWebIngestCa
                 .ToListAsync(cancellationToken);
 
     public Task<WebIngestCandidate?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
-        db.WebIngestCandidates.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
+        operation.Db.WebIngestCandidates.FirstOrDefaultAsync(candidate => candidate.Id == id, cancellationToken);
 
     public Task<WebIngestCandidate?> FindByUrlAsync(Guid projectId, string url, CancellationToken cancellationToken = default) =>
-        db.WebIngestCandidates.FirstOrDefaultAsync(
+        operation.Db.WebIngestCandidates.FirstOrDefaultAsync(
             candidate => candidate.ProjectId == projectId
                 && (candidate.Url == url || candidate.FinalUrl == url || candidate.CanonicalUrl == url),
             cancellationToken);
 
     public async Task AddAsync(WebIngestCandidate candidate, CancellationToken cancellationToken = default) =>
-        await db.WebIngestCandidates.AddAsync(candidate, cancellationToken);
+        await operation.Db.WebIngestCandidates.AddAsync(candidate, cancellationToken);
 
-    public void Update(WebIngestCandidate candidate) => db.WebIngestCandidates.Update(candidate);
+    public void Update(WebIngestCandidate candidate) => operation.Db.MarkModified(candidate);
 
-    public void Remove(WebIngestCandidate candidate) => db.WebIngestCandidates.Remove(candidate);
-
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        db.SaveChangesAsync(cancellationToken);
+    public void Remove(WebIngestCandidate candidate) => operation.Db.MarkDeleted(candidate);
 }

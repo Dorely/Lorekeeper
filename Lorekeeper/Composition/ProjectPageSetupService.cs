@@ -20,18 +20,19 @@ public sealed record ProjectPageSetupInput(
     double BodyLineHeight);
 
 public sealed class ProjectPageSetupService(
-    AppDbContext db,
-    IProjectMutationCoordinator projectMutations) : IProjectPageSetupService
+    IAppDatabaseOperationFactory database) : IProjectPageSetupService
 {
     public async Task<ProjectPageSetup> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var existing = await db.ProjectPageSetups.AsNoTracking().SingleOrDefaultAsync(
             item => item.ProjectId == projectId,
             cancellationToken);
         if (existing is not null)
             return existing;
 
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         existing = await db.ProjectPageSetups.SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
         if (existing is not null)
             return existing;
@@ -50,8 +51,10 @@ public sealed class ProjectPageSetupService(
         ProjectPageSetupInput input,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         Validate(input);
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var setup = await db.ProjectPageSetups.SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken)
             ?? throw new KeyNotFoundException("Project page setup was not found.");
@@ -85,6 +88,8 @@ public sealed class ProjectPageSetupService(
         ProjectPageSetupInput input,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var book = await db.PublicationBooks.SingleOrDefaultAsync(
             item => item.ProjectId == projectId,
             cancellationToken);
@@ -128,6 +133,8 @@ public sealed class ProjectPageSetupService(
         ProjectPageSetupInput input,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var compositions = await db.PageCompositions
             .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
             .Where(item => item.ProjectId == projectId && item.DetachedAt == null

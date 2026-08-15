@@ -3,18 +3,21 @@ using Lorekeeper.Chapters;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorChatChangeStagingContext(
-    Guid projectId,
+IAppDatabaseOperationFactory database, Guid projectId,
     Guid conversationId,
-    EditorContentTarget contentTarget,
-    IAiChangeRepository changes)
+    EditorContentTarget contentTarget)
 {
-    public EditorChatChangeStagingContext(Guid projectId, Guid conversationId, IAiChangeRepository changes)
-        : this(projectId, conversationId, EditorContentTarget.Core, changes)
+    public EditorChatChangeStagingContext(
+        IAppDatabaseOperationFactory database,
+        Guid projectId,
+        Guid conversationId)
+        : this(database, projectId, conversationId, EditorContentTarget.Core)
     {
     }
 
@@ -230,6 +233,9 @@ public sealed class EditorChatChangeStagingContext(
         IReadOnlyCollection<string>? createdResources = null,
         IReadOnlyCollection<Guid>? dependsOnChangeIds = null)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         var beforeJson = Serialize(before);
         var afterJson = Serialize(after);
         if (string.Equals(beforeJson, afterJson, StringComparison.Ordinal))
@@ -255,13 +261,16 @@ public sealed class EditorChatChangeStagingContext(
         };
 
         await changes.AddChangeAsync(change, cancellationToken);
-        await changes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         _newChanges.Add(change);
         return change;
     }
 
     private async Task<AiChangeBatch> EnsureBatchAsync(CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         if (_batch is not null) return _batch;
 
         _batch = new AiChangeBatch
@@ -274,7 +283,7 @@ public sealed class EditorChatChangeStagingContext(
             ContentTargetEditionId = contentTarget.EditionId,
         };
         await changes.AddBatchAsync(_batch, cancellationToken);
-        await changes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         _nextOrder = 0;
         return _batch;
     }

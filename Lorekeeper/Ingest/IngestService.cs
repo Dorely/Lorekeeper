@@ -6,60 +6,64 @@ using Lorekeeper.EntityVisuals;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Ingest;
 
 public sealed class IngestService(
-    IIngestRepository ingest,
-    IProjectRepository projects,
-    IIngestSourceStructureBuilder structureBuilder,
-    IBookArtifactPreprocessor artifactPreprocessor,
-    IEntityVisualExampleService entityVisualExamples,
-    IIngestGraphSync graphSync,
-    IIngestJobQueue queue,
-    ILlmProviderService providers,
-    IIngestJobNotifier notifier,
-    IIngestGraphCleanup graphCleanup,
-    IGraphStore graphStore,
-    IGraphNodeRepository nodes,
-    IGraphEdgeRepository edges,
-    IVectorStore vectors,
-    IContextIndexingService contextIndexing,
-    ILogger<IngestService> logger) : IIngestService
+IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBuilder, IBookArtifactPreprocessor artifactPreprocessor, IEntityVisualExampleService entityVisualExamples, IIngestGraphSync graphSync, IIngestJobQueue queue, ILlmProviderService providers, IIngestJobNotifier notifier, IIngestGraphCleanup graphCleanup, IGraphStore graphStore, IVectorStore vectors, IContextIndexingService contextIndexing, ILogger<IngestService> logger) : IIngestService
 {
     public async Task<IReadOnlyList<IngestJob>> ListJobsAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         await RecoverInactiveRunningJobsAsync(projectId, jobId: null, cancellationToken);
         return await ingest.ListJobsByProjectAsync(projectId, cancellationToken);
     }
 
     public async Task<IReadOnlyList<IngestJobListItem>> ListJobSummariesAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         await RecoverInactiveRunningJobsAsync(projectId, jobId: null, cancellationToken);
         return await ingest.ListJobSummariesByProjectAsync(projectId, cancellationToken);
     }
 
     public async Task<IngestJob?> GetJobDetailAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         await RecoverInactiveRunningJobsAsync(projectId: null, jobId, cancellationToken);
         return await ingest.GetJobDetailAsync(jobId, cancellationToken);
     }
 
     public async Task<IngestJobDetailView?> GetJobViewAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         await RecoverInactiveRunningJobsAsync(projectId: null, jobId, cancellationToken);
         return await ingest.GetJobDetailViewAsync(jobId, cancellationToken: cancellationToken);
     }
 
-    public async Task<IReadOnlyList<IngestReportItemView>> ListReportItemViewsAsync(Guid jobId, Guid? sourceChunkId = null, CancellationToken cancellationToken = default) =>
-        await ingest.ListReportItemViewsAsync(jobId, sourceChunkId, cancellationToken);
-
-    public Task<IngestSourceChunkExcerpt?> GetSourceChunkExcerptAsync(Guid sourceChunkId, int maxChars = 8_000, CancellationToken cancellationToken = default) =>
-        ingest.GetSourceChunkExcerptAsync(sourceChunkId, maxChars, cancellationToken);
-
+    public async Task<IReadOnlyList<IngestReportItemView>> ListReportItemViewsAsync(Guid jobId, Guid? sourceChunkId = null, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
+        return await ingest.ListReportItemViewsAsync(jobId, sourceChunkId, cancellationToken);
+    }
+    public async Task<IngestSourceChunkExcerpt?> GetSourceChunkExcerptAsync(Guid sourceChunkId, int maxChars = 8_000, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
+        return await ingest.GetSourceChunkExcerptAsync(sourceChunkId, maxChars, cancellationToken);
+    }
     public async Task<IngestJob> CreateJobAsync(Guid projectId, IngestCreateJobRequest request, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
@@ -235,7 +239,7 @@ public sealed class IngestService(
 
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
-        await ingest.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await graphSync.EnsureSourceAsync(source, sourceChunks, blockDrafts.Select(draft => new IngestSourceBlock
         {
             Id = draft.Id,
@@ -258,6 +262,9 @@ public sealed class IngestService(
 
     public async Task RequestStopAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var job = await ingest.GetJobAsync(jobId, cancellationToken)
             ?? throw new InvalidOperationException($"Ingest job {jobId} not found.");
 
@@ -281,12 +288,15 @@ public sealed class IngestService(
 
         job.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateJob(job);
-        await ingest.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         Notify(job.ProjectId, job.Id, job.Status == IngestJobStatus.Stopped ? IngestJobUpdateKind.Stopped : IngestJobUpdateKind.Progress);
     }
 
     public async Task ResumeAsync(Guid jobId, IngestResumeRequest? request = null, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var job = await ingest.GetJobResumeDetailAsync(jobId, cancellationToken)
             ?? throw new InvalidOperationException($"Ingest job {jobId} not found.");
 
@@ -344,13 +354,16 @@ public sealed class IngestService(
         job.CompletedAt = null;
         job.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateJob(job);
-        await ingest.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         queue.Enqueue(job.Id);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Queued);
     }
 
     public async Task RestartAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var job = await ingest.GetJobDetailAsync(jobId, cancellationToken)
             ?? throw new InvalidOperationException($"Ingest job {jobId} not found.");
 
@@ -403,7 +416,7 @@ public sealed class IngestService(
         job.CompletedAt = null;
         job.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateJob(job);
-        await ingest.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await contextIndexing.ReindexIngestSourceAsync(job.SourceId, cancellationToken);
         queue.Enqueue(job.Id);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Queued);
@@ -411,6 +424,9 @@ public sealed class IngestService(
 
     public async Task DeleteJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var job = await ingest.GetJobDetailAsync(jobId, cancellationToken);
         if (job is null) return;
 
@@ -424,7 +440,7 @@ public sealed class IngestService(
         await graphSync.RemoveSourceAsync(job.ProjectId, job.SourceId, cancellationToken);
 
         ingest.RemoveSource(job.Source);
-        await ingest.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         Notify(projectId, job.Id, IngestJobUpdateKind.Deleted);
     }
 
@@ -440,6 +456,9 @@ public sealed class IngestService(
 
     private async Task RecoverInactiveRunningJobsAsync(Guid? projectId, Guid? jobId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var interrupted = await ingest.ListInterruptedJobsAsync(cancellationToken);
         var repairedJobs = new List<(Guid ProjectId, Guid JobId)>();
 
@@ -475,7 +494,7 @@ public sealed class IngestService(
 
         if (repairedJobs.Count == 0) return;
 
-        await ingest.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         foreach (var repairedJob in repairedJobs)
             Notify(repairedJob.ProjectId, repairedJob.JobId, IngestJobUpdateKind.Stopped);
     }
@@ -492,6 +511,9 @@ public sealed class IngestService(
 
     public async Task<IngestStagingRecord> UpdateReportItemAsync(Guid reportItemId, IngestReportItemUpdateRequest request, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var item = await ingest.GetStagingRecordAsync(reportItemId, cancellationToken)
             ?? throw new InvalidOperationException($"Ingest staging record {reportItemId} not found.");
         if (item.Status != IngestStagingRecordStatus.Active)
@@ -517,7 +539,7 @@ public sealed class IngestService(
 
         await SyncStagingEditAsync(item, cancellationToken);
         ingest.UpdateStagingRecord(item);
-        await ingest.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await ReindexStagingRecordContextAsync(item, cancellationToken);
         Notify(item.Job.ProjectId, item.JobId, IngestJobUpdateKind.Report);
         return item;
@@ -525,6 +547,9 @@ public sealed class IngestService(
 
     public async Task DeleteReportItemAsync(Guid reportItemId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var item = await ingest.GetStagingRecordAsync(reportItemId, cancellationToken)
             ?? throw new InvalidOperationException($"Ingest staging record {reportItemId} not found.");
         if (item.Status == IngestStagingRecordStatus.Deleted) return;
@@ -534,9 +559,9 @@ public sealed class IngestService(
         var affectedEntityIds = await RemoveSingleStagingGraphItemAsync(item, cancellationToken);
         MarkStagingRecordDeleted(item);
         ingest.UpdateStagingRecord(item);
-        await ingest.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await RefreshJobCountsAsync(item.JobId, cancellationToken);
-        await ingest.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         await ReindexStagingRecordContextAsync(item, cancellationToken);
         foreach (var entityId in affectedEntityIds)
             await contextIndexing.ReindexEntityAsync(item.Job.ProjectId, entityId, cancellationToken);
@@ -564,6 +589,9 @@ public sealed class IngestService(
 
     private async Task SyncStagingEditAsync(IngestStagingRecord item, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         switch (item.Kind)
         {
             case IngestStagingRecordKind.Entity:
@@ -587,6 +615,9 @@ public sealed class IngestService(
 
     private async Task<IReadOnlyCollection<Guid>> RemoveSingleStagingGraphItemAsync(IngestStagingRecord item, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var affectedEntityIds = new HashSet<Guid>();
         switch (item.Kind)
         {
@@ -619,6 +650,9 @@ public sealed class IngestService(
 
     private async Task RefreshJobCountsAsync(Guid jobId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var job = await ingest.GetJobAsync(jobId, cancellationToken);
         if (job is null) return;
 
@@ -649,6 +683,9 @@ public sealed class IngestService(
 
     private async Task RemoveEntityShellIfOrphanedAsync(IngestStagingRecord item, Guid projectId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var edges = databaseOperation.Repositories.GraphEdges;
         var node = await FindStagingNodeAsync(item, projectId, cancellationToken);
         if (node is null || item.EntityId is not Guid entityId) return;
 
@@ -669,6 +706,9 @@ public sealed class IngestService(
 
     private async Task RemoveStagingRelationshipEdgeIfOrphanedAsync(IngestStagingRecord item, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var edges = databaseOperation.Repositories.GraphEdges;
         if (item.GraphEdgeId is null) return;
 
         var edge = await edges.GetByIdAsync(item.GraphEdgeId.Value, cancellationToken);
@@ -685,6 +725,8 @@ public sealed class IngestService(
 
     private async Task<GraphNode?> FindStagingNodeAsync(IngestStagingRecord item, Guid projectId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
         if (item.GraphNodeId is not null)
         {
             var node = await nodes.GetByIdAsync(item.GraphNodeId.Value, cancellationToken);
@@ -702,6 +744,8 @@ public sealed class IngestService(
         Guid excludedStagingRecordId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         var records = await ingest.ListStagingRecordsAsync(jobId, cancellationToken);
         return records.Any(item =>
             item.Id != excludedStagingRecordId
@@ -731,6 +775,9 @@ public sealed class IngestService(
 
     private async Task RemoveRelationshipGraphEdgeAsync(IngestReportItem item, Guid fallbackSourceId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var edges = databaseOperation.Repositories.GraphEdges;
         _ = ResolveRequiredReportSourceChunkId(item);
         if (item.GraphEdgeId is null) return;
 
@@ -754,7 +801,7 @@ public sealed class IngestService(
             {
                 edge.UpdatedAt = DateTime.UtcNow;
                 edges.Update(edge);
-                await edges.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
             }
         }
         catch (Exception ex)
@@ -766,6 +813,9 @@ public sealed class IngestService(
 
     private async Task RemoveEntityGraphContributionAsync(IngestReportItem item, Guid projectId, Guid fallbackSourceId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
         try
         {
             var node = await FindReportNodeAsync(item, projectId, cancellationToken);
@@ -784,7 +834,7 @@ public sealed class IngestService(
             {
                 node.UpdatedAt = DateTime.UtcNow;
                 nodes.Update(node);
-                await nodes.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
             }
             else if (await CanRemoveGraphNodeAfterSourceSubtractionAsync(node, graphAction, cancellationToken))
             {
@@ -794,7 +844,7 @@ public sealed class IngestService(
             {
                 node.UpdatedAt = DateTime.UtcNow;
                 nodes.Update(node);
-                await nodes.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
             }
         }
         catch (Exception ex)
@@ -806,6 +856,9 @@ public sealed class IngestService(
 
     private async Task RemoveExtractedFromEdgeForChunkAsync(GraphNode node, Guid sourceId, Guid sourceChunkId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var edges = databaseOperation.Repositories.GraphEdges;
         var extractedFromEdges = await edges.GetAdjacentAsync(
             node.Id,
             EdgeDirection.Outgoing,
@@ -822,6 +875,8 @@ public sealed class IngestService(
 
     private async Task<bool> EdgeTargetsSourceChunkAsync(GraphEdge edge, Guid sourceId, Guid sourceChunkId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var sourceKey = sourceId.ToString("N");
         var sourceChunkKey = sourceChunkId.ToString("N");
         if (edge.Properties.TryGetValue("sourceChunkId", out var edgeSourceChunkId)
@@ -842,6 +897,9 @@ public sealed class IngestService(
 
     private async Task<bool> CanRemoveGraphNodeAfterSourceSubtractionAsync(GraphNode node, string? graphAction, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var edges = databaseOperation.Repositories.GraphEdges;
         if (!CanRemovePotentiallyIngestCreatedObject(node.Properties, graphAction, IngestSourceAssertions.CreatedEntityAction))
             return false;
         if (IngestSourceAssertions.CountEntitySources(node.Properties) > 0)
@@ -904,6 +962,8 @@ public sealed class IngestService(
 
     private async Task<GraphNode?> FindReportNodeAsync(IngestReportItem item, Guid projectId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var nodes = databaseOperation.Repositories.GraphNodes;
         if (item.GraphNodeId is not null)
         {
             var node = await nodes.GetByIdAsync(item.GraphNodeId.Value, cancellationToken);
@@ -928,6 +988,9 @@ public sealed class IngestService(
         Guid excludedReportItemId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var reportItems = await ingest.ListReportItemsAsync(jobId, cancellationToken);
         return reportItems.Any(item =>
             item.Id != excludedReportItemId

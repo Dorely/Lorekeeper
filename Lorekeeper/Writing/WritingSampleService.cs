@@ -1,20 +1,30 @@
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Writing;
 
 public sealed class WritingSampleService(
-    IWritingSampleRepository samples,
-    IProjectRepository projects) : IWritingSampleService
+IAppDatabaseOperationFactory database) : IWritingSampleService
 {
-    public async Task<IReadOnlyList<WritingSample>> ListAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await samples.ListByProjectAsync(projectId, cancellationToken);
-
-    public Task<WritingSample?> GetAsync(Guid sampleId, CancellationToken cancellationToken = default) =>
-        samples.GetByIdAsync(sampleId, cancellationToken);
-
+    public async Task<IReadOnlyList<WritingSample>> ListAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var samples = databaseOperation.Repositories.WritingSamples;
+        return await samples.ListByProjectAsync(projectId, cancellationToken);
+    }
+    public async Task<WritingSample?> GetAsync(Guid sampleId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var samples = databaseOperation.Repositories.WritingSamples;
+        return await samples.GetByIdAsync(sampleId, cancellationToken);
+    }
     public async Task<WritingSample> CreateAsync(Guid projectId, string? title = null, string? body = null, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var samples = databaseOperation.Repositories.WritingSamples;
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
@@ -36,12 +46,16 @@ public sealed class WritingSampleService(
         await samples.AddAsync(sample, cancellationToken);
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
-        await samples.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return sample;
     }
 
     public async Task<WritingSample> UpdateAsync(Guid sampleId, string? title = null, string? body = null, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var samples = databaseOperation.Repositories.WritingSamples;
+        var projects = databaseOperation.Repositories.Projects;
         var sample = await samples.GetByIdAsync(sampleId, cancellationToken)
             ?? throw new InvalidOperationException($"Writing sample {sampleId} not found.");
 
@@ -76,12 +90,16 @@ public sealed class WritingSampleService(
             projects.Update(project);
         }
 
-        await samples.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return sample;
     }
 
     public async Task DeleteAsync(Guid sampleId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var samples = databaseOperation.Repositories.WritingSamples;
+        var projects = databaseOperation.Repositories.Projects;
         var sample = await samples.GetByIdAsync(sampleId, cancellationToken);
         if (sample is null) return;
 
@@ -95,6 +113,6 @@ public sealed class WritingSampleService(
             projects.Update(project);
         }
 
-        await samples.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 }

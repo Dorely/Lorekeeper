@@ -10,6 +10,7 @@ using Lorekeeper.Llm;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
@@ -18,25 +19,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorRevisionAgentProcessor(
-    IProjectRepository projects,
-    IChapterService chapters,
-    IManuscriptService manuscripts,
-    IEditorConversationRepository conversations,
-    IEditorRevisionRepository revisions,
-    IContextBuilder contextBuilder,
-    IEntityVisualContextService entityVisualContext,
-    ILlmProviderService providerService,
-    IChatClientFactory chatClientFactory,
-    IProjectSearchService projectSearch,
-    IAiChangeRepository changes,
-    IProjectFactService projectFacts,
-    IEntityService entities,
-    IEntityTypeService entityTypes,
-    IEntityRelationContextService entityRelations,
-    IEntityVisualExampleService entityVisualExamples,
-    IOptions<EditorChatOptions> options,
-    IEditorRevisionJobNotifier notifier,
-    ILogger<EditorRevisionAgentProcessor> logger)
+IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, IContextBuilder contextBuilder, IEntityVisualContextService entityVisualContext, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IProjectSearchService projectSearch, IProjectFactService projectFacts, IEntityService entities, IEntityTypeService entityTypes, IEntityRelationContextService entityRelations, IEntityVisualExampleService entityVisualExamples, IOptions<EditorChatOptions> options, IEditorRevisionJobNotifier notifier, ILogger<EditorRevisionAgentProcessor> logger)
 {
     private static EditorContentTarget JobTarget(EditorRevisionJob job) => EditorContentTarget.From(
         Enum.TryParse<EditorContentTargetKind>(job.ContentTargetKind, out var kind) ? kind : EditorContentTargetKind.Core,
@@ -57,15 +40,20 @@ public sealed class EditorRevisionAgentProcessor(
 
     public async Task RunSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
-        var session = await revisions.GetSessionAsync(sessionId, cancellationToken)
-            ?? throw new InvalidOperationException($"Revision session {sessionId} not found.");
+        EditorRevisionSession session;
+        Project project;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            session = await readOperation.Repositories.EditorRevisions.GetSessionAsync(sessionId, cancellationToken)
+                ?? throw new InvalidOperationException($"Revision session {sessionId} not found.");
+            project = await readOperation.Repositories.Projects.GetByIdAsync(session.Job.ProjectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {session.Job.ProjectId} not found.");
+        }
         var job = session.Job;
 
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var project = await projects.GetByIdAsync(job.ProjectId, cancellationToken)
-                ?? throw new InvalidOperationException($"Project {job.ProjectId} not found.");
             var chapter = await chapters.GetAsync(session.ChapterId, cancellationToken)
                 ?? throw new InvalidOperationException($"Chapter {session.ChapterId} not found.");
             if (chapter.ProjectId != job.ProjectId)
@@ -83,8 +71,7 @@ public sealed class EditorRevisionAgentProcessor(
             session.ProviderName = provider.DisplayName ?? provider.Name;
             session.ModelName = provider.ModelId;
             session.UpdatedAt = DateTime.UtcNow;
-            revisions.UpdateSession(session);
-            await revisions.SaveChangesAsync(cancellationToken);
+            await SaveSessionAsync(session, cancellationToken);
             NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Progress);
 
             var userPrompt = await BuildWorkerUserPromptAsync(job, session, cancellationToken);
@@ -92,24 +79,24 @@ public sealed class EditorRevisionAgentProcessor(
                 new ContextBuildRequest(project, chapter, userPrompt, ContextBuildPurpose.EditorRevision),
                 cancellationToken);
             var systemPrompt = contextAssembly.Assemble();
-            var nextOrder = await revisions.GetMaxMessageOrderAsync(session.Id, cancellationToken) + 1;
-            await revisions.AddMessageAsync(new EditorRevisionMessage
+            var nextOrder = await GetMaxMessageOrderAsync(session.Id, cancellationToken) + 1;
+            var systemMessage = new EditorRevisionMessage
             {
                 SessionId = session.Id,
                 Order = nextOrder++,
                 Role = EditorRevisionMessageRole.System,
                 Content = systemPrompt,
                 Status = EditorRevisionMessageStatus.Completed,
-            }, cancellationToken);
-            await revisions.AddMessageAsync(new EditorRevisionMessage
+            };
+            var userMessage = new EditorRevisionMessage
             {
                 SessionId = session.Id,
                 Order = nextOrder++,
                 Role = EditorRevisionMessageRole.User,
                 Content = userPrompt,
                 Status = EditorRevisionMessageStatus.Completed,
-            }, cancellationToken);
-            await revisions.SaveChangesAsync(cancellationToken);
+            };
+            await AddMessagesAsync([systemMessage, userMessage], cancellationToken);
             NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Progress);
 
             var edit = new CapturedChapterEdit();
@@ -145,8 +132,7 @@ public sealed class EditorRevisionAgentProcessor(
                     Content = string.Empty,
                     Status = EditorRevisionMessageStatus.Pending,
                 };
-                await revisions.AddMessageAsync(assistant, cancellationToken);
-                await revisions.SaveChangesAsync(cancellationToken);
+                await AddMessageAsync(assistant, cancellationToken);
 
                 var textBuilder = new StringBuilder();
                 var pendingCalls = new List<PendingToolCall>();
@@ -181,15 +167,13 @@ public sealed class EditorRevisionAgentProcessor(
                     pendingCalls.Select(call => new PersistedToolCall(call.CallId, call.Name, call.ArgumentsJson, call.TextOffset)),
                     JsonSerializerOptions.Default);
                 assistant.Status = EditorRevisionMessageStatus.Completed;
-                revisions.UpdateMessage(assistant);
-                await revisions.SaveChangesAsync(cancellationToken);
+                await SaveMessageAsync(assistant, cancellationToken);
                 NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Progress);
 
                 if (pendingCalls.Count == 0)
                 {
                     MarkInvalid(session, "Worker finished without editing the assigned chapter.", textBuilder.ToString(), stopwatch);
-                    revisions.UpdateSession(session);
-                    await revisions.SaveChangesAsync(cancellationToken);
+                    await SaveSessionAsync(session, cancellationToken);
                     NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.SessionCompleted);
                     return;
                 }
@@ -219,7 +203,7 @@ public sealed class EditorRevisionAgentProcessor(
                     if (string.Equals(pendingCall.Name, "apply_assigned_manuscript_operations", StringComparison.Ordinal) && toolError is null)
                         toolResult = await ApplyCapturedEditAsync(project, session, edit, pendingCall, stopwatch, cancellationToken);
 
-                    await revisions.AddMessageAsync(new EditorRevisionMessage
+                    await AddMessageAsync(new EditorRevisionMessage
                     {
                         SessionId = session.Id,
                         Order = nextOrder++,
@@ -230,7 +214,6 @@ public sealed class EditorRevisionAgentProcessor(
                         Status = toolError is null ? EditorRevisionMessageStatus.Completed : EditorRevisionMessageStatus.Failed,
                         ErrorMessage = toolError,
                     }, cancellationToken);
-                    await revisions.SaveChangesAsync(cancellationToken);
                     NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Progress);
 
                     resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult));
@@ -239,8 +222,7 @@ public sealed class EditorRevisionAgentProcessor(
                         if (toolError is not null)
                         {
                             MarkInvalid(session, toolError, JsonSerializer.Serialize(edit, JsonOptions), stopwatch);
-                            revisions.UpdateSession(session);
-                            await revisions.SaveChangesAsync(cancellationToken);
+                            await SaveSessionAsync(session, cancellationToken);
                         }
                         NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.SessionCompleted);
                         return;
@@ -251,8 +233,7 @@ public sealed class EditorRevisionAgentProcessor(
             }
 
             MarkInvalid(session, $"Worker exceeded {maxIterations} tool iterations without editing the assigned chapter.", string.Empty, stopwatch);
-            revisions.UpdateSession(session);
-            await revisions.SaveChangesAsync(cancellationToken);
+            await SaveSessionAsync(session, cancellationToken);
             NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.SessionCompleted);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -261,8 +242,7 @@ public sealed class EditorRevisionAgentProcessor(
             session.ErrorMessage = "Cancelled.";
             session.CompletedAt = DateTime.UtcNow;
             session.UpdatedAt = DateTime.UtcNow;
-            revisions.UpdateSession(session);
-            await revisions.SaveChangesAsync(CancellationToken.None);
+            await SaveSessionAsync(session, CancellationToken.None);
             NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Cancelled);
             throw;
         }
@@ -274,10 +254,44 @@ public sealed class EditorRevisionAgentProcessor(
             session.CompletedAt = DateTime.UtcNow;
             session.UpdatedAt = DateTime.UtcNow;
             session.DurationMs = stopwatch.Elapsed.TotalMilliseconds;
-            revisions.UpdateSession(session);
-            await revisions.SaveChangesAsync(CancellationToken.None);
+            await SaveSessionAsync(session, CancellationToken.None);
             NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.SessionCompleted);
         }
+    }
+
+    private async Task<int> GetMaxMessageOrderAsync(Guid sessionId, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        return await operation.Repositories.EditorRevisions.GetMaxMessageOrderAsync(sessionId, cancellationToken);
+    }
+
+    private async Task AddMessageAsync(EditorRevisionMessage message, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        await operation.Repositories.EditorRevisions.AddMessageAsync(message, cancellationToken);
+        await operation.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task AddMessagesAsync(IEnumerable<EditorRevisionMessage> messages, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        foreach (var message in messages)
+            await operation.Repositories.EditorRevisions.AddMessageAsync(message, cancellationToken);
+        await operation.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task SaveMessageAsync(EditorRevisionMessage message, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        operation.Repositories.EditorRevisions.UpdateMessage(message);
+        await operation.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task SaveSessionAsync(EditorRevisionSession session, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        operation.Repositories.EditorRevisions.UpdateSession(session);
+        await operation.SaveChangesAsync(cancellationToken);
     }
 
     private void NotifyJob(EditorRevisionJob job, Guid? sessionId, EditorRevisionJobUpdateKind kind) =>
@@ -395,6 +409,8 @@ public sealed class EditorRevisionAgentProcessor(
 
     private async Task<string> BuildWorkerUserPromptAsync(EditorRevisionJob job, EditorRevisionSession session, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var conversations = databaseOperation.Repositories.EditorConversations;
         var history = await conversations.LoadMessagesAsync(job.ConversationId, cancellationToken);
         var sb = new StringBuilder();
         sb.AppendLine("# Chapter Revision Assignment");
@@ -422,6 +438,8 @@ public sealed class EditorRevisionAgentProcessor(
 
     private async Task<string> ReadParentEditorHistoryAsync(Guid conversationId, int? pageNumber)
     {
+        await using var databaseOperation = await database.OpenReadAsync(default);
+        var conversations = databaseOperation.Repositories.EditorConversations;
         var history = await conversations.LoadMessagesAsync(conversationId);
         return BuildParentEditorHistoryPage(conversationId, history, pageNumber);
     }
@@ -813,12 +831,15 @@ public sealed class EditorRevisionAgentProcessor(
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var revisions = databaseOperation.Repositories.EditorRevisions;
         var validationError = ValidateEdit(session, edit);
         if (validationError is not null)
         {
             MarkInvalid(session, validationError, JsonSerializer.Serialize(edit, JsonOptions), stopwatch);
             revisions.UpdateSession(session);
-            await revisions.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
             return $"Error: {validationError}";
         }
 
@@ -830,7 +851,7 @@ public sealed class EditorRevisionAgentProcessor(
             var error = "The assigned manuscript changed after this worker session started. No worker edit was applied.";
             MarkInvalid(session, error, JsonSerializer.Serialize(edit, JsonOptions), stopwatch);
             revisions.UpdateSession(session);
-            await revisions.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
             return $"Error: {error}";
         }
 
@@ -871,7 +892,7 @@ public sealed class EditorRevisionAgentProcessor(
         session.CompletedAt = DateTime.UtcNow;
         session.UpdatedAt = DateTime.UtcNow;
         revisions.UpdateSession(session);
-        await revisions.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return result;
     }
 
@@ -884,6 +905,9 @@ public sealed class EditorRevisionAgentProcessor(
         string result,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         var batch = new AiChangeBatch
         {
             ProjectId = project.Id,
@@ -894,7 +918,7 @@ public sealed class EditorRevisionAgentProcessor(
             ContentTargetEditionId = session.Job.ContentTargetEditionId,
         };
         await changes.AddBatchAsync(batch, cancellationToken);
-        await changes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
 
         var change = new AiChange
         {
@@ -922,7 +946,7 @@ public sealed class EditorRevisionAgentProcessor(
             DependsOnChangeIdsJson = "[]",
         };
         await changes.AddChangeAsync(change, cancellationToken);
-        await changes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return change.Id;
     }
 

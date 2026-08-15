@@ -8,6 +8,7 @@ using Lorekeeper.Llm;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
 using Lorekeeper.Search;
@@ -17,30 +18,15 @@ using Lorekeeper.Writing;
 namespace Lorekeeper.Context;
 
 public sealed class ContextBuilder(
-    IEditorContextPreferenceRepository preferences,
-    IActService acts,
-    IChapterService chapters,
-    IProjectFactService projectFacts,
-    IWritingSampleService writingSamples,
-    IEntityService entities,
-    IIngestRepository ingest,
-    IProjectImageService images,
-    IEntityVisualExampleService entityVisualExamples,
-    IManuscriptService manuscripts,
-    IChapterSemanticProjectionService semanticProjection,
-    IManuscriptStyleService manuscriptStyles,
-    ICompositionService compositions,
-    IProjectPageSetupService pageSetups,
-    IEmbeddingService embeddings,
-    IBookBriefService bookBriefs,
-    ISystemPromptComposer systemPrompts,
-    IProjectSearchService projectSearch,
-    ITokenCounter tokenCounter) : IEditorContextService
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, ICompositionService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
         ContextBuildRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var preferences = databaseOperation.Repositories.EditorContextPreferences;
         ArgumentNullException.ThrowIfNull(request);
         var project = request.Project;
         var currentChapter = request.ActiveChapter;
@@ -284,6 +270,9 @@ public sealed class ContextBuilder(
         bool isIncluded,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var preferences = databaseOperation.Repositories.EditorContextPreferences;
         if (string.IsNullOrWhiteSpace(key))
             throw new ArgumentException("Context item key is required.", nameof(key));
 
@@ -313,7 +302,7 @@ public sealed class ContextBuilder(
             preferences.Update(preference);
         }
 
-        await preferences.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<StoryEntity>> ListAutoRelatedEntitiesAsync(
@@ -340,6 +329,8 @@ public sealed class ContextBuilder(
         Guid chapterId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var preferences = databaseOperation.Repositories.EditorContextPreferences;
         var preferenceMap = (await preferences.ListForChapterAsync(projectId, chapterId, cancellationToken))
             .ToDictionary(preference => PreferenceKey(preference.Kind, preference.Key), StringComparer.Ordinal);
         var entitiesForContext = await ListContextEntitiesAsync(projectId, chapterId, preferenceMap, cancellationToken);
@@ -351,6 +342,9 @@ public sealed class ContextBuilder(
         Guid chapterId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var preferences = databaseOperation.Repositories.EditorContextPreferences;
         var preferenceMap = (await preferences.ListForChapterAsync(projectId, chapterId, cancellationToken))
             .ToDictionary(preference => PreferenceKey(preference.Kind, preference.Key), StringComparer.Ordinal);
         var keys = preferenceMap.Values
@@ -723,6 +717,8 @@ public sealed class ContextBuilder(
 
     private async Task<ContextItem?> BuildIngestSourceReferenceItemAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         var source = await ingest.GetSourceAsync(sourceId, cancellationToken);
         if (source is null || source.ProjectId != projectId) return null;
 
@@ -757,6 +753,8 @@ public sealed class ContextBuilder(
 
     private async Task<ContextItem?> BuildIngestSourceChunkReferenceItemAsync(Guid projectId, Guid sourceChunkId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         var sourceChunk = await ingest.GetSourceChunkAsync(sourceChunkId, cancellationToken);
         if (sourceChunk is null) return null;
 

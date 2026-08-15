@@ -1,14 +1,13 @@
 using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Ingest;
 
 public sealed class IngestGraphCleanup(
-    IGraphStore graphStore,
-    IGraphNodeRepository nodes,
-    IGraphEdgeRepository edges) : IIngestGraphCleanup
+IAppDatabaseOperationFactory database, IGraphStore graphStore) : IIngestGraphCleanup
 {
     public async Task<IngestGraphCleanupResult> RemoveSourceGraphContributionsAsync(
         Guid projectId,
@@ -16,6 +15,10 @@ public sealed class IngestGraphCleanup(
         IEnumerable<IngestStagingRecord> stagingRecords,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         var stagingRecordList = stagingRecords.ToList();
         var sourceKey = IngestSourceAssertions.SourceKey(sourceId);
         var projectNodes = await nodes.ListByProjectAsync(projectId, cancellationToken);
@@ -71,7 +74,7 @@ public sealed class IngestGraphCleanup(
                 AddEdgeEndpointContextEntityIds(edge, nodeById, entityIdsToReindex);
                 edge.UpdatedAt = DateTime.UtcNow;
                 edges.Update(edge);
-                await edges.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
                 edgesUpdated++;
             }
         }
@@ -100,7 +103,7 @@ public sealed class IngestGraphCleanup(
                 AddContextEntityId(node, entityIdsToReindex);
                 node.UpdatedAt = DateTime.UtcNow;
                 nodes.Update(node);
-                await nodes.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
                 nodesUpdated++;
             }
         }
@@ -187,6 +190,9 @@ public sealed class IngestGraphCleanup(
         string? graphAction,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var edges = databaseOperation.Repositories.GraphEdges;
         if (!CanRemovePotentiallyIngestCreatedObject(node.Properties, graphAction, IngestSourceAssertions.CreatedEntityAction))
             return false;
         if (IngestSourceAssertions.CountEntitySources(node.Properties) > 0)

@@ -1,13 +1,15 @@
+using ElectronNET.API;
+using ElectronNET.API.Entities;
 using Lorekeeper.Auth;
 using Lorekeeper.Chapters;
+using Lorekeeper.ChatTurns;
 using Lorekeeper.Components;
 using Lorekeeper.Context;
 using Lorekeeper.Desktop;
 using Lorekeeper.EditorChat;
 using Lorekeeper.EntityVisuals;
-using Lorekeeper.Graph;
 using Lorekeeper.Fonts;
-using Lorekeeper.ChatTurns;
+using Lorekeeper.Graph;
 using Lorekeeper.Images;
 using Lorekeeper.ImagesChat;
 using Lorekeeper.ImportExport;
@@ -24,8 +26,6 @@ using Lorekeeper.Research;
 using Lorekeeper.Search;
 using Lorekeeper.Tokens;
 using Lorekeeper.Writing;
-using ElectronNET.API;
-using ElectronNET.API.Entities;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -88,30 +88,6 @@ else
 builder.Services.AddLorekeeperPersistence(builder.Configuration);
 builder.Services.AddSingleton<IProjectMutationCoordinator>(
     _ => new ProjectMutationCoordinator(databaseConnectionString));
-builder.Services.AddScoped<ILlmProviderRepository, LlmProviderRepository>();
-builder.Services.AddScoped<IEmbeddingConfigurationRepository, EmbeddingConfigurationRepository>();
-builder.Services.AddScoped<ISearchProviderRepository, SearchProviderRepository>();
-builder.Services.AddScoped<IOAuthTokenRepository, OAuthTokenRepository>();
-builder.Services.AddScoped<IProjectRepository, ProjectRepository>();
-builder.Services.AddScoped<IGraphNodeRepository, GraphNodeRepository>();
-builder.Services.AddScoped<IGraphEdgeRepository, GraphEdgeRepository>();
-builder.Services.AddScoped<IGraphEntityTypeRepository, GraphEntityTypeRepository>();
-builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
-builder.Services.AddScoped<IActRepository, ActRepository>();
-builder.Services.AddScoped<IOutlineConversationRepository, OutlineConversationRepository>();
-builder.Services.AddScoped<IEditorConversationRepository, EditorConversationRepository>();
-builder.Services.AddScoped<IWritingSampleRepository, WritingSampleRepository>();
-builder.Services.AddScoped<IWritingCoachConversationRepository, WritingCoachConversationRepository>();
-builder.Services.AddScoped<IResearchConversationRepository, ResearchConversationRepository>();
-builder.Services.AddScoped<IPublishConversationRepository, PublishConversationRepository>();
-builder.Services.AddScoped<IProjectImageConversationRepository, ProjectImageConversationRepository>();
-builder.Services.AddScoped<IAiChangeRepository, AiChangeRepository>();
-builder.Services.AddScoped<IContestRepository, ContestRepository>();
-builder.Services.AddScoped<IEditorContextPreferenceRepository, EditorContextPreferenceRepository>();
-builder.Services.AddScoped<IEditorRevisionRepository, EditorRevisionRepository>();
-builder.Services.AddScoped<IIngestRepository, IngestRepository>();
-builder.Services.AddScoped<IWebIngestCandidateRepository, WebIngestCandidateRepository>();
-builder.Services.AddScoped<IProjectImportRepository, ProjectImportRepository>();
 
 // Knowledge
 builder.Services.AddScoped<SqliteVecVectorStore>();
@@ -331,21 +307,28 @@ app.Lifetime.ApplicationStopping.Register(desktopUpdateMonitorCancellation.Cance
 // Apply EF Core migrations + initialise sqlite-vec tables.
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
     var startupMigration = scope.ServiceProvider.GetRequiredService<IDatabaseStartupMigrationService>();
     if (await startupMigration.ApplyAsync())
     {
         await scope.ServiceProvider.GetRequiredService<Lorekeeper.Authoring.IAuthoringHistoryService>()
             .FinalizeAbandonedBatchesAsync();
-        var embeddingConfiguration = await db.EmbeddingConfigurations.AsNoTracking().FirstOrDefaultAsync();
-        var vectorMaintenance = scope.ServiceProvider.GetRequiredService<IVectorStoreMaintenance>();
-        vectorMaintenance.Initialize(embeddingConfiguration?.Dimensions);
+        var database = scope.ServiceProvider.GetRequiredService<IAppDatabaseOperationFactory>();
+        int? embeddingDimensions;
+        IReadOnlyList<Guid> projectIds;
+        await using (var read = await database.OpenReadAsync())
+        {
+            embeddingDimensions = await read.Db.EmbeddingConfigurations
+                .Select(configuration => (int?)configuration.Dimensions)
+                .FirstOrDefaultAsync();
+            projectIds = (await read.Repositories.Projects.ListAsync()).Select(project => project.Id).ToList();
+        }
 
-        var projectRepository = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+        var vectorMaintenance = scope.ServiceProvider.GetRequiredService<IVectorStoreMaintenance>();
+        vectorMaintenance.Initialize(embeddingDimensions);
+
         var outlineGraphSync = scope.ServiceProvider.GetRequiredService<IOutlineGraphSync>();
-        foreach (var project in await projectRepository.ListAsync())
-            await outlineGraphSync.RepairProjectAsync(project.Id);
+        foreach (var projectId in projectIds)
+            await outlineGraphSync.RepairProjectAsync(projectId);
     }
 }
 

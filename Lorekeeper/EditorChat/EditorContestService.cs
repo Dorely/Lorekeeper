@@ -11,6 +11,7 @@ using Lorekeeper.Llm;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
 using Microsoft.Extensions.AI;
@@ -18,16 +19,7 @@ using Microsoft.Extensions.AI;
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorContestService(
-    IProjectRepository projects,
-    IChapterService chapters,
-    IManuscriptService manuscripts,
-    ILlmProviderService providerService,
-    IChatClientFactory chatClientFactory,
-    IEntityVisualContextService entityVisualContext,
-    IContestRepository contests,
-    IBookBriefService bookBriefs,
-    ISystemPromptComposer systemPrompts,
-    ILogger<EditorContestService> logger) : IEditorContestService
+IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IEntityVisualContextService entityVisualContext, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, ILogger<EditorContestService> logger) : IEditorContestService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -49,6 +41,8 @@ public sealed class EditorContestService(
 
     public async Task<EditorContestSettings> GetSettingsAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
 
@@ -61,6 +55,9 @@ public sealed class EditorContestService(
 
     public async Task SetContestModeEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         if (project.ContestModeEnabled == enabled) return;
@@ -68,11 +65,14 @@ public sealed class EditorContestService(
         project.ContestModeEnabled = enabled;
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
-        await projects.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task SetContestProviderAsync(Guid projectId, int slot, int? providerId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
         if (slot is < 1 or > 3)
             throw new ArgumentOutOfRangeException(nameof(slot), "Contest provider slot must be 1, 2, or 3.");
 
@@ -98,15 +98,23 @@ public sealed class EditorContestService(
         if (!changed) return;
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
-        await projects.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyList<ContestBatch>> ListCurrentContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await contests.ListCurrentByProjectAsync(projectId, cancellationToken);
-
-    public Task DiscardInactiveContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        contests.DeleteInactiveByProjectAsync(projectId, cancellationToken);
-
+    public async Task<IReadOnlyList<ContestBatch>> ListCurrentContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var contests = databaseOperation.Repositories.Contests;
+        return await contests.ListCurrentByProjectAsync(projectId, cancellationToken);
+    }
+    public async Task DiscardInactiveContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var contests = databaseOperation.Repositories.Contests;
+        await contests.DeleteInactiveByProjectAsync(projectId, cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+    }
     public async IAsyncEnumerable<EditorContestRunUpdate> StartContestAsync(
         Guid projectId,
         Guid conversationId,
@@ -115,8 +123,13 @@ public sealed class EditorContestService(
         ContestTurnSnapshot snapshot,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var project = await projects.GetByIdAsync(projectId, cancellationToken)
-            ?? throw new InvalidOperationException($"Project {projectId} not found.");
+        Project project;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            project = await readOperation.Repositories.Projects.GetByIdAsync(projectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectId} not found.");
+        }
+
         var chapter = await chapters.GetAsync(request.ChapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {request.ChapterId} not found.");
         if (chapter.ProjectId != projectId)
@@ -145,8 +158,6 @@ public sealed class EditorContestService(
             ContextSnapshotJson = JsonSerializer.Serialize(snapshot, JsonOptions),
             Status = ContestBatchStatus.Running,
         };
-        await contests.AddBatchAsync(batch, cancellationToken);
-
         var candidateRows = providers.Select((provider, index) => new ContestCandidate
         {
             BatchId = batch.Id,
@@ -156,9 +167,14 @@ public sealed class EditorContestService(
             ModelName = provider.ModelName,
             Status = ContestCandidateStatus.Pending,
         }).ToList();
-        foreach (var candidate in candidateRows)
-            await contests.AddCandidateAsync(candidate, cancellationToken);
-        await contests.SaveChangesAsync(cancellationToken);
+        await using (var writeOperation = await database.OpenWriteAsync(cancellationToken))
+        {
+            var contests = writeOperation.Repositories.Contests;
+            await contests.AddBatchAsync(batch, cancellationToken);
+            foreach (var candidate in candidateRows)
+                await contests.AddCandidateAsync(candidate, cancellationToken);
+            await writeOperation.SaveChangesAsync(cancellationToken);
+        }
 
         yield return new EditorContestStarted(batch.Id);
 
@@ -189,16 +205,14 @@ public sealed class EditorContestService(
             if (setupError is not null || chat is null)
             {
                 MarkCandidateFailed(candidate, setupError ?? "Could not create chat client.", invalid: false);
-                contests.UpdateCandidate(candidate);
-                await contests.SaveChangesAsync(cancellationToken);
+                await SaveCandidateAsync(candidate, cancellationToken);
                 yield return new EditorContestCandidateUpdated(batch.Id, candidate.Id, candidate.Status);
                 continue;
             }
 
             candidate.Status = ContestCandidateStatus.Running;
             candidate.UpdatedAt = DateTime.UtcNow;
-            contests.UpdateCandidate(candidate);
-            await contests.SaveChangesAsync(cancellationToken);
+            await SaveCandidateAsync(candidate, cancellationToken);
             yield return new EditorContestCandidateUpdated(batch.Id, candidate.Id, candidate.Status);
 
             tasks[RunCandidateAsync(chat, batch, candidate, snapshot, progressChannel.Writer, cancellationToken)] = candidate;
@@ -232,8 +246,7 @@ public sealed class EditorContestService(
                     || DateTime.UtcNow - lastRawSaveAt[progress.CandidateId] >= CandidateRawResponseSaveInterval;
                 if (saveDue)
                 {
-                    contests.UpdateCandidate(progressCandidate);
-                    await contests.SaveChangesAsync(CancellationToken.None);
+                    await SaveCandidateAsync(progressCandidate, CancellationToken.None);
                     lastRawSaveLength[progress.CandidateId] = progressCandidate.RawResponse.Length;
                     lastRawSaveAt[progress.CandidateId] = DateTime.UtcNow;
                 }
@@ -278,8 +291,7 @@ public sealed class EditorContestService(
                 MarkCandidateFailed(candidate, ex.Message, invalid: false);
             }
 
-            contests.UpdateCandidate(candidate);
-            await contests.SaveChangesAsync(CancellationToken.None);
+            await SaveCandidateAsync(candidate, CancellationToken.None);
             yield return new EditorContestCandidateUpdated(batch.Id, candidate.Id, candidate.Status);
         }
 
@@ -290,8 +302,7 @@ public sealed class EditorContestService(
         batch.UpdatedAt = DateTime.UtcNow;
         if (batch.Status == ContestBatchStatus.Failed)
             batch.ErrorMessage = "No contest candidate completed successfully.";
-        contests.UpdateBatch(batch);
-        await contests.SaveChangesAsync(CancellationToken.None);
+        await SaveBatchAsync(batch, CancellationToken.None);
         yield return new EditorContestCompleted(batch.Id, batch.Status);
     }
 
@@ -301,6 +312,9 @@ public sealed class EditorContestService(
         ContestCandidateReviewLineResolution request,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var contests = databaseOperation.Repositories.Contests;
         var candidate = await contests.GetCandidateAsync(request.CandidateId, cancellationToken)
             ?? throw new InvalidOperationException($"Contest candidate {request.CandidateId} not found.");
         if (candidate.Status != ContestCandidateStatus.Completed)
@@ -367,11 +381,14 @@ public sealed class EditorContestService(
                 acceptedDocument,
                 cancellationToken);
 
-        await contests.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task KeepCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var contests = databaseOperation.Repositories.Contests;
         var candidate = await contests.GetCandidateAsync(candidateId, cancellationToken)
             ?? throw new InvalidOperationException($"Contest candidate {candidateId} not found.");
         if (candidate.Status != ContestCandidateStatus.Completed)
@@ -411,11 +428,14 @@ public sealed class EditorContestService(
                 proposedDocument,
                 cancellationToken);
 
-        await contests.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task FinishContestBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var contests = databaseOperation.Repositories.Contests;
         var batch = await contests.GetBatchAsync(batchId, cancellationToken)
             ?? throw new InvalidOperationException($"Contest batch {batchId} not found.");
         if (batch.Status == ContestBatchStatus.Running)
@@ -442,7 +462,7 @@ public sealed class EditorContestService(
         batch.UpdatedAt = now;
         batch.CompletedAt ??= now;
         contests.UpdateBatch(batch);
-        await contests.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     private static string EffectiveAcceptedBody(ContestBatch batch) =>
@@ -808,6 +828,20 @@ public sealed class EditorContestService(
         return normalized;
     }
 
+    private async Task SaveCandidateAsync(ContestCandidate candidate, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        operation.Repositories.Contests.UpdateCandidate(candidate);
+        await operation.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task SaveBatchAsync(ContestBatch batch, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        operation.Repositories.Contests.UpdateBatch(batch);
+        await operation.SaveChangesAsync(cancellationToken);
+    }
+
 
     private async Task<IReadOnlyList<ContestCandidateProvider>> ResolveContestProvidersAsync(Project project, CancellationToken cancellationToken)
     {
@@ -846,8 +880,13 @@ public sealed class EditorContestService(
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        var project = await projects.GetByIdAsync(batch.ProjectId, cancellationToken)
-            ?? throw new InvalidOperationException($"Project {batch.ProjectId} not found.");
+        Project project;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            project = await readOperation.Repositories.Projects.GetByIdAsync(batch.ProjectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {batch.ProjectId} not found.");
+        }
+
         var brief = await bookBriefs.GetOrCreateAsync(batch.ProjectId, cancellationToken);
         var chapter = await chapters.GetAsync(batch.ChapterId, cancellationToken);
         var systemPrompt = systemPrompts.Compose(new(

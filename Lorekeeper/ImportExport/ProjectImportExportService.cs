@@ -1,8 +1,8 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using Lorekeeper.Context;
-using Lorekeeper.Models;
 using Lorekeeper.Manuscripts;
+using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
@@ -12,17 +12,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Lorekeeper.ImportExport;
 
 public sealed class ProjectImportExportService(
-    AppDbContext db,
-    IProjectRepository projects,
-    IActRepository acts,
-    IChapterRepository chapters,
-    IGraphNodeRepository nodes,
-    IGraphEdgeRepository edges,
-    IGraphEntityTypeRepository entityTypes,
-    IEntityTypeService entityTypeService,
-    IProjectImportRepository imports,
-    IProjectImportJobQueue importQueue,
-    IProjectImportJobNotifier notifier) : IProjectImportExportService
+    IAppDatabaseOperationFactory database, IEntityTypeService entityTypeService, IProjectImportJobQueue importQueue, IProjectImportJobNotifier notifier) : IProjectImportExportService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -42,6 +32,15 @@ public sealed class ProjectImportExportService(
         ProjectExportKind kind,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var acts = databaseOperation.Repositories.Acts;
+        var chapters = databaseOperation.Repositories.Chapters;
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
+        var entityTypes = databaseOperation.Repositories.GraphEntityTypes;
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         await entityTypeService.EnsureDefaultsAsync(projectId, cancellationToken);
@@ -299,6 +298,10 @@ public sealed class ProjectImportExportService(
         string contentJson,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
+        var imports = databaseOperation.Repositories.ProjectImports;
         _ = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         if (string.IsNullOrWhiteSpace(contentJson))
@@ -319,7 +322,7 @@ public sealed class ProjectImportExportService(
         };
 
         await imports.AddJobAsync(job, cancellationToken);
-        await imports.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         importQueue.Enqueue(job.Id);
         Notify(job.ProjectId, job.Id, ProjectImportJobUpdateKind.Created);
         Notify(job.ProjectId, job.Id, ProjectImportJobUpdateKind.Queued);
@@ -330,14 +333,23 @@ public sealed class ProjectImportExportService(
 
     public async Task<IReadOnlyList<ProjectImportJobListItem>> ListImportJobsAsync(
         Guid projectId,
-        CancellationToken cancellationToken = default) =>
-        await imports.ListJobSummariesByProjectAsync(projectId, cancellationToken);
-
-    public Task<ProjectImportJobDetailView?> GetImportJobDetailAsync(Guid jobId, CancellationToken cancellationToken = default) =>
-        imports.GetJobDetailViewAsync(jobId, cancellationToken);
-
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var imports = databaseOperation.Repositories.ProjectImports;
+        return await imports.ListJobSummariesByProjectAsync(projectId, cancellationToken);
+    }
+    public async Task<ProjectImportJobDetailView?> GetImportJobDetailAsync(Guid jobId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var imports = databaseOperation.Repositories.ProjectImports;
+        return await imports.GetJobDetailViewAsync(jobId, cancellationToken);
+    }
     public async Task DeleteImportJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var imports = databaseOperation.Repositories.ProjectImports;
         var job = await imports.GetJobAsync(jobId, cancellationToken);
         if (job is null) return;
         if (job.Status == ProjectImportJobStatus.Running)
@@ -345,7 +357,7 @@ public sealed class ProjectImportExportService(
 
         var projectId = job.ProjectId;
         imports.RemoveJob(job);
-        await imports.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         Notify(projectId, jobId, ProjectImportJobUpdateKind.Deleted);
     }
 
@@ -544,6 +556,8 @@ public sealed class ProjectImportExportService(
         Guid projectId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var preferences = await db.EditorContextPreferences
             .AsNoTracking()
             .Where(preference =>

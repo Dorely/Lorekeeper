@@ -19,5 +19,4 @@ public interface IEditorContextPreferenceRepository
     Task AddAsync(EditorContextPreference preference, CancellationToken cancellationToken = default);
     void Update(EditorContextPreference preference);
     void Remove(EditorContextPreference preference);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

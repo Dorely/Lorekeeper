@@ -40,12 +40,11 @@ public sealed class PublicationPreparationQueue : IPublicationPreparationQueue
 }
 
 public sealed class PublicationPreparationService(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     IPublicationPreparationQueue queue,
     IPublicationBookService books,
     IPublicationEditionService editions,
-    IPublicationRenderService renders,
-    IProjectMutationCoordinator projectMutations) : IPublicationPreparationService
+    IPublicationRenderService renders) : IPublicationPreparationService
 {
     internal static JsonSerializerOptions DiagnosticsJsonOptions { get; } = new(JsonSerializerDefaults.Web);
 
@@ -61,11 +60,13 @@ public sealed class PublicationPreparationService(
         Guid? editionId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         _ = await books.GetOrCreateAsync(projectId, cancellationToken);
         var fingerprint = targetKind == PublicationTargetKind.CoreBook
             ? await books.GetSourceFingerprintAsync(projectId, cancellationToken)
             : await editions.GetSourceFingerprintAsync(projectId, editionId!.Value, cancellationToken);
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         if (targetKind == PublicationTargetKind.Release
             && !await db.PublicationEditions.AnyAsync(item => item.ProjectId == projectId && item.Id == editionId, cancellationToken))
             throw new KeyNotFoundException("Publication release not found.");
@@ -92,15 +93,21 @@ public sealed class PublicationPreparationService(
         Guid projectId,
         PublicationTargetKind targetKind,
         Guid? editionId = null,
-        CancellationToken cancellationToken = default) =>
-        (await db.PublicationPreparationJobs.AsNoTracking()
-            .Include(item => item.RenderJob)
-            .Where(item => item.ProjectId == projectId
-            && item.TargetKind == targetKind && item.EditionId == editionId)
-            .OrderByDescending(item => item.CreatedAt).ToListAsync(cancellationToken)).Select(View).ToList();
-
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return (await db.PublicationPreparationJobs.AsNoTracking()
+                    .Include(item => item.RenderJob)
+                    .Where(item => item.ProjectId == projectId
+                    && item.TargetKind == targetKind && item.EditionId == editionId)
+                    .OrderByDescending(item => item.CreatedAt).ToListAsync(cancellationToken)).Select(View).ToList();
+    }
     public async Task<PublicationPreparationJobView> CancelAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var job = await db.PublicationPreparationJobs.SingleAsync(item => item.ProjectId == projectId && item.Id == jobId, cancellationToken);
         if (job.Status is PublicationPreparationStatus.Queued or PublicationPreparationStatus.Preparing)
         {
@@ -171,6 +178,7 @@ public sealed class PublicationPreparationService(
 
 public sealed class PublicationPreparationWorker(
     IServiceScopeFactory scopeFactory,
+    IAppDatabaseOperationFactory database,
     IPublicationPreparationQueue queue,
     ILogger<PublicationPreparationWorker> logger) : BackgroundService
 {
@@ -196,26 +204,34 @@ public sealed class PublicationPreparationWorker(
     private async Task ProcessAsync(Guid jobId, CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var job = await db.PublicationPreparationJobs.Include(item => item.Edition).SingleAsync(item => item.Id == jobId, cancellationToken);
-        if (job.CancellationRequested || job.Status == PublicationPreparationStatus.Cancelled) return;
-        job.Status = PublicationPreparationStatus.Preparing;
-        job.Step = "Checking readiness";
-        job.ProgressPercent = 5;
-        job.StartedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
-        var preparationDiagnostics = new List<PublicationPreflightItem>();
-
-        var blockers = await ReadinessBlockersAsync(db, job, cancellationToken);
-        if (blockers.Count > 0)
+        PublicationPreparationJob job;
+        await using (var operation = await database.OpenWriteAsync(cancellationToken))
         {
-            job.Status = PublicationPreparationStatus.Blocked;
-            job.Message = blockers[0].Message;
-            job.DiagnosticsJson = JsonSerializer.Serialize(blockers, PublicationPreparationService.DiagnosticsJsonOptions);
-            job.CompletedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync(cancellationToken);
-            return;
+            var db = operation.Db;
+            job = await db.PublicationPreparationJobs.Include(item => item.Edition)
+                .SingleAsync(item => item.Id == jobId, cancellationToken);
+            if (job.CancellationRequested || job.Status == PublicationPreparationStatus.Cancelled)
+                return;
+            job.Status = PublicationPreparationStatus.Preparing;
+            job.Step = "Checking readiness";
+            job.ProgressPercent = 5;
+            job.StartedAt = DateTime.UtcNow;
+
+            var blockers = await ReadinessBlockersAsync(database, db, job, cancellationToken);
+            if (blockers.Count > 0)
+            {
+                job.Status = PublicationPreparationStatus.Blocked;
+                job.Message = blockers[0].Message;
+                job.DiagnosticsJson = JsonSerializer.Serialize(blockers, PublicationPreparationService.DiagnosticsJsonOptions);
+                job.CompletedAt = DateTime.UtcNow;
+                await operation.SaveChangesAsync(cancellationToken);
+                return;
+            }
+
+            await operation.SaveChangesAsync(cancellationToken);
         }
+
+        var preparationDiagnostics = new List<PublicationPreflightItem>();
 
         if (job.TargetKind == PublicationTargetKind.CoreBook)
         {
@@ -224,22 +240,30 @@ public sealed class PublicationPreparationWorker(
                 item.Status == PublicationRenderStatus.Completed && item.Artifacts.Any(artifact => artifact.Kind == PublicationArtifactKind.ReadingPdf && !artifact.IsStale));
             var render = current ?? await renders.RequestCoreAsync(job.ProjectId, cancellationToken);
             job.RenderJobId = render.Id;
-            job.Step = "Typesetting and validating reading PDF";
-            job.ProgressPercent = 10;
-            await db.SaveChangesAsync(cancellationToken);
-            preparationDiagnostics.AddRange(await WaitForRenderAsync(db, job, cancellationToken));
+            await UpdateJobAsync(jobId, candidate =>
+            {
+                candidate.RenderJobId = render.Id;
+                candidate.Step = "Typesetting and validating reading PDF";
+                candidate.ProgressPercent = 10;
+            }, cancellationToken);
+            preparationDiagnostics.AddRange(await WaitForRenderAsync(job, cancellationToken));
         }
         else if (job.Edition!.Format == PublicationEditionFormat.Epub)
         {
-            job.Step = "Exporting and validating EPUB";
-            job.ProgressPercent = 35;
-            await db.SaveChangesAsync(cancellationToken);
+            await UpdateJobAsync(jobId, candidate =>
+            {
+                candidate.Step = "Exporting and validating EPUB";
+                candidate.ProgressPercent = 35;
+            }, cancellationToken);
             var packages = scope.ServiceProvider.GetRequiredService<IPublicationPackageService>();
-            var report = await PreflightOrBlockAsync(db, job, packages, cancellationToken);
-            if (report is null) return;
-            job.Step = "Building EPUB package";
-            job.ProgressPercent = 92;
-            await db.SaveChangesAsync(cancellationToken);
+            var report = await PreflightOrBlockAsync(job, packages, cancellationToken);
+            if (report is null)
+                return;
+            await UpdateJobAsync(jobId, candidate =>
+            {
+                candidate.Step = "Building EPUB package";
+                candidate.ProgressPercent = 92;
+            }, cancellationToken);
             await packages.BuildFromPreflightAsync(job.ProjectId, job.EditionId!.Value, report, cancellationToken);
         }
         else
@@ -249,39 +273,46 @@ public sealed class PublicationPreparationWorker(
                 item.Status == PublicationRenderStatus.Completed && item.Artifacts.Any() && item.Artifacts.All(artifact => !artifact.IsStale));
             var render = current ?? await renders.RequestAsync(job.ProjectId, job.EditionId.Value, cancellationToken);
             job.RenderJobId = render.Id;
-            job.Step = "Rendering and validating publication files";
-            job.ProgressPercent = 10;
-            await db.SaveChangesAsync(cancellationToken);
-            preparationDiagnostics.AddRange(await WaitForRenderAsync(db, job, cancellationToken));
-            job = await db.PublicationPreparationJobs.Include(item => item.Edition).SingleAsync(item => item.Id == jobId, cancellationToken);
-            job.Step = "Checking publication files";
-            job.ProgressPercent = 88;
-            await db.SaveChangesAsync(cancellationToken);
+            await UpdateJobAsync(jobId, candidate =>
+            {
+                candidate.RenderJobId = render.Id;
+                candidate.Step = "Rendering and validating publication files";
+                candidate.ProgressPercent = 10;
+            }, cancellationToken);
+            preparationDiagnostics.AddRange(await WaitForRenderAsync(job, cancellationToken));
+            await UpdateJobAsync(jobId, candidate =>
+            {
+                candidate.Step = "Checking publication files";
+                candidate.ProgressPercent = 88;
+            }, cancellationToken);
             var packages = scope.ServiceProvider.GetRequiredService<IPublicationPackageService>();
-            var report = await PreflightOrBlockAsync(db, job, packages, cancellationToken);
-            if (report is null) return;
-            job.Step = "Building publication package";
-            job.ProgressPercent = 92;
-            await db.SaveChangesAsync(cancellationToken);
+            var report = await PreflightOrBlockAsync(job, packages, cancellationToken);
+            if (report is null)
+                return;
+            await UpdateJobAsync(jobId, candidate =>
+            {
+                candidate.Step = "Building publication package";
+                candidate.ProgressPercent = 92;
+            }, cancellationToken);
             await packages.BuildFromPreflightAsync(job.ProjectId, job.EditionId!.Value, report, cancellationToken);
         }
 
-        job = await db.PublicationPreparationJobs.SingleAsync(item => item.Id == jobId, cancellationToken);
-        if (job.CancellationRequested || job.Status == PublicationPreparationStatus.Cancelled)
-            return;
-        job.Status = PublicationPreparationStatus.Ready;
-        job.Step = "Ready";
-        job.ProgressPercent = 100;
-        job.Message = job.TargetKind == PublicationTargetKind.CoreBook
-            ? preparationDiagnostics.Count > 0 ? "Reading PDF ready with warnings" : "Reading PDF ready"
-            : "Publication files ready";
-        job.DiagnosticsJson = JsonSerializer.Serialize(preparationDiagnostics, PublicationPreparationService.DiagnosticsJsonOptions);
-        job.CompletedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
+        await UpdateJobAsync(jobId, candidate =>
+        {
+            if (candidate.CancellationRequested || candidate.Status == PublicationPreparationStatus.Cancelled)
+                return;
+            candidate.Status = PublicationPreparationStatus.Ready;
+            candidate.Step = "Ready";
+            candidate.ProgressPercent = 100;
+            candidate.Message = candidate.TargetKind == PublicationTargetKind.CoreBook
+                ? preparationDiagnostics.Count > 0 ? "Reading PDF ready with warnings" : "Reading PDF ready"
+                : "Publication files ready";
+            candidate.DiagnosticsJson = JsonSerializer.Serialize(preparationDiagnostics, PublicationPreparationService.DiagnosticsJsonOptions);
+            candidate.CompletedAt = DateTime.UtcNow;
+        }, cancellationToken);
     }
 
-    private static async Task<PublicationPreflightReport?> PreflightOrBlockAsync(
-        AppDbContext db,
+    private async Task<PublicationPreflightReport?> PreflightOrBlockAsync(
         PublicationPreparationJob job,
         IPublicationPackageService packages,
         CancellationToken cancellationToken)
@@ -290,21 +321,24 @@ public sealed class PublicationPreparationWorker(
         var blockers = report.Items.Where(item => item.Severity == "error").ToList();
         if (blockers.Count == 0) return report;
 
-        job.Status = PublicationPreparationStatus.Blocked;
-        job.Message = blockers[0].Message;
-        job.DiagnosticsJson = JsonSerializer.Serialize(blockers, PublicationPreparationService.DiagnosticsJsonOptions);
-        job.CompletedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
+        await UpdateJobAsync(job.Id, candidate =>
+        {
+            candidate.Status = PublicationPreparationStatus.Blocked;
+            candidate.Message = blockers[0].Message;
+            candidate.DiagnosticsJson = JsonSerializer.Serialize(blockers, PublicationPreparationService.DiagnosticsJsonOptions);
+            candidate.CompletedAt = DateTime.UtcNow;
+        }, cancellationToken);
         return null;
     }
 
-    private static async Task<IReadOnlyList<PublicationPreflightItem>> WaitForRenderAsync(
-        AppDbContext db,
+    private async Task<IReadOnlyList<PublicationPreflightItem>> WaitForRenderAsync(
         PublicationPreparationJob preparation,
         CancellationToken cancellationToken)
     {
         while (true)
         {
+            await using var operation = await database.OpenWriteAsync(cancellationToken);
+            var db = operation.Db;
             var state = await db.PublicationRenderJobs.AsNoTracking().SingleAsync(item => item.Id == preparation.RenderJobId, cancellationToken);
             var diagnostics = JsonSerializer.Deserialize<List<PublicationRenderDiagnostic>>(
                 state.DiagnosticsJson,
@@ -332,11 +366,16 @@ public sealed class PublicationPreparationWorker(
                     ? state.ProgressMessage
                     : details);
             }
+            await operation.DisposeAsync();
             await Task.Delay(250, cancellationToken);
         }
     }
 
-    private static async Task<List<PublicationPreflightItem>> ReadinessBlockersAsync(AppDbContext db, PublicationPreparationJob job, CancellationToken cancellationToken)
+    private static async Task<List<PublicationPreflightItem>> ReadinessBlockersAsync(
+        IAppDatabaseOperationFactory database,
+        AppDbContext db,
+        PublicationPreparationJob job,
+        CancellationToken cancellationToken)
     {
         string title; string author; string language;
         if (job.TargetKind == PublicationTargetKind.CoreBook)
@@ -346,8 +385,8 @@ public sealed class PublicationPreparationWorker(
         }
         else
         {
-            var resolver = new PublicationEffectiveConfigurationResolver(db);
-            var effective = await resolver.ResolveReleaseAsync(job.ProjectId, job.EditionId!.Value, cancellationToken);
+            var resolver = new PublicationEffectiveConfigurationResolver(database);
+            var effective = await resolver.ResolveReleaseAsync(db, job.ProjectId, job.EditionId!.Value, cancellationToken);
             (title, author, language) = (effective.Edition.TitleOverride, effective.Edition.Author, effective.Edition.Language);
         }
         var result = new List<PublicationPreflightItem>();
@@ -361,18 +400,27 @@ public sealed class PublicationPreparationWorker(
 
     private async Task RecoverAsync(CancellationToken cancellationToken)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var recoveredIds = new List<Guid>();
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var db = operation.Db;
         var jobs = await db.PublicationPreparationJobs.Where(item => item.Status == PublicationPreparationStatus.Queued
             || item.Status == PublicationPreparationStatus.Preparing).ToListAsync(cancellationToken);
-        foreach (var job in jobs) { job.Status = PublicationPreparationStatus.Queued; job.Message = "Recovered after restart"; await queue.EnqueueAsync(job.Id, cancellationToken); }
-        await db.SaveChangesAsync(cancellationToken);
+        foreach (var job in jobs)
+        {
+            job.Status = PublicationPreparationStatus.Queued;
+            job.Message = "Recovered after restart";
+            recoveredIds.Add(job.Id);
+        }
+        await operation.SaveChangesAsync(cancellationToken);
+        await operation.DisposeAsync();
+        foreach (var jobId in recoveredIds)
+            await queue.EnqueueAsync(jobId, cancellationToken);
     }
 
     private async Task FailAsync(Guid jobId, Exception exception, CancellationToken cancellationToken)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var db = operation.Db;
         var job = await db.PublicationPreparationJobs.SingleOrDefaultAsync(item => item.Id == jobId, cancellationToken);
         if (job is null || job.Status == PublicationPreparationStatus.Cancelled) return;
         job.Status = PublicationPreparationStatus.Blocked;
@@ -381,6 +429,18 @@ public sealed class PublicationPreparationWorker(
             new[] { new PublicationPreflightItem("error", "PREPARATION_FAILED", exception.Message) },
             PublicationPreparationService.DiagnosticsJsonOptions);
         job.CompletedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
+        await operation.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task UpdateJobAsync(
+        Guid jobId,
+        Action<PublicationPreparationJob> update,
+        CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var job = await operation.Db.PublicationPreparationJobs
+            .SingleAsync(candidate => candidate.Id == jobId, cancellationToken);
+        update(job);
+        await operation.SaveChangesAsync(cancellationToken);
     }
 }

@@ -44,7 +44,7 @@ public interface IPublicationDiagnosticPresentationService
         CancellationToken cancellationToken = default);
 }
 
-public sealed partial class PublicationDiagnosticPresentationService(AppDbContext db)
+public sealed partial class PublicationDiagnosticPresentationService(IAppDatabaseOperationFactory database)
     : IPublicationDiagnosticPresentationService
 {
     public async Task<IReadOnlyList<PublicationDiagnosticPresentation>> ResolveAsync(
@@ -53,6 +53,9 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
         IReadOnlyList<PublicationPreflightItem> diagnostics,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (diagnostics.Count == 0)
             return [];
 
@@ -97,6 +100,8 @@ public sealed partial class PublicationDiagnosticPresentationService(AppDbContex
         IReadOnlyDictionary<Guid, int> chapterOrdinals,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var candidateIds = ExtractIds(diagnostic).ToList();
         foreach (var candidateId in candidateIds)
         {

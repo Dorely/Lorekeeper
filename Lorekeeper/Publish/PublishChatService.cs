@@ -8,6 +8,7 @@ using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -30,22 +31,7 @@ public interface IPublishChatService
 }
 
 public sealed class PublishChatService(
-    IProjectRepository projects,
-    IPublishConversationRepository conversations,
-    IChatImageAttachmentService imageAttachments,
-    ILlmProviderService providers,
-    IChatClientFactory clients,
-    IContextBuilder contextBuilder,
-    IPublishAssistantTools tools,
-    IPublicationActorContext actorContext,
-    ChatTurnRuntime turnRuntime,
-    ChatTurnEngine turnEngine,
-    IAuthoringHistoryService authoringHistory,
-    IAuthoringMutationContextAccessor authoringMutationContext,
-    IOptions<AgentOptions> options,
-    ILogger<PublishChatService> logger,
-    IEntityVisualContextService? entityVisualContext = null,
-    ICompositionService? compositions = null) : IPublishChatService
+IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providers, IChatClientFactory clients, IContextBuilder contextBuilder, IPublishAssistantTools tools, IPublicationActorContext actorContext, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IAuthoringHistoryService authoringHistory, IAuthoringMutationContextAccessor authoringMutationContext, IOptions<AgentOptions> options, ILogger<PublishChatService> logger, IEntityVisualContextService? entityVisualContext = null, ICompositionService? compositions = null) : IPublishChatService
 {
     internal const string WorkflowInstructions = """
         You are Lorekeeper's conversational Publish assistant. You maintain Core Book and prepare optional publication releases through the supplied tools.
@@ -154,6 +140,10 @@ public sealed class PublishChatService(
         Guid projectId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
+        var conversations = databaseOperation.Repositories.PublishConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is not null)
             return existing;
@@ -169,21 +159,26 @@ public sealed class PublishChatService(
             Role = PublishMessageRole.Assistant,
             Content = InitialGreeting,
         }, cancellationToken);
-        await conversations.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return conversation;
     }
 
     public async Task<IReadOnlyList<PublishMessage>> LoadMessagesAsync(
         Guid conversationId,
-        CancellationToken cancellationToken = default) =>
-        await conversations.LoadMessagesAsync(conversationId, cancellationToken);
-
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var conversations = databaseOperation.Repositories.PublishConversations;
+        return await conversations.LoadMessagesAsync(conversationId, cancellationToken);
+    }
     public async Task<string> GetSystemPromptAsync(
         Guid projectId,
         Guid? selectedEditionId,
         PublishAssistantWorkspaceContext? workspaceContext = null,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
         var selection = selectedEditionId is { } editionId
@@ -264,11 +259,14 @@ public sealed class PublishChatService(
         if (maintenance is null)
             throw new InvalidOperationException("Publish Assistant is still working in another window. Stop or wait for that turn before resetting the conversation.");
         await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Publish, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var conversations = databaseOperation.Repositories.PublishConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null)
             return;
         conversations.RemoveConversation(existing);
-        await conversations.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async IAsyncEnumerable<PublishTurnUpdate> SendAsync(
@@ -300,7 +298,10 @@ public sealed class PublishChatService(
         }
         await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);
 
-        var nextOrder = await conversations.GetMaxOrderAsync(conversation.Id, cancellationToken) + 1;
+        var nextOrder = await turnEngine.ReadAsync(
+            repositories => repositories.PublishConversations,
+            conversations => conversations.GetMaxOrderAsync(conversation.Id, cancellationToken),
+            cancellationToken) + 1;
         var userMessage = new PublishMessage
         {
             ConversationId = conversation.Id,
@@ -309,7 +310,7 @@ public sealed class PublishChatService(
             Content = userText.Trim(),
         };
         conversation.UpdatedAt = DateTime.UtcNow;
-        await turnEngine.AddMessageAsync(conversations, userMessage, cancellationToken);
+        await turnEngine.AddMessageAsync(repositories => repositories.PublishConversations, userMessage, cancellationToken);
         await imageAttachments.PersistAsync(
             projectId,
             ChatTurnSurface.Publish,
@@ -367,7 +368,11 @@ public sealed class PublishChatService(
         var readyTools = aiTools!;
 
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt!) };
-        foreach (var persisted in await conversations.LoadMessagesAsync(conversation.Id, cancellationToken))
+        var persistedMessages = await turnEngine.ReadAsync(
+            repositories => repositories.PublishConversations,
+            conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
+            cancellationToken);
+        foreach (var persisted in persistedMessages)
         {
             if (persisted.Id == userMessage.Id && imageIds.Count > 0)
             {
@@ -398,7 +403,7 @@ public sealed class PublishChatService(
                     Role = PublishMessageRole.Assistant,
                     Status = PublishMessageStatus.Pending,
                 };
-                await turnEngine.AddMessageAsync(conversations, activeAssistant, cancellationToken);
+                await turnEngine.AddMessageAsync(repositories => repositories.PublishConversations, activeAssistant, cancellationToken);
 
                 ChatRoundCompleted? completedRound = null;
                 await foreach (var update in turnEngine.StreamRoundAsync(readyChat, messages, chatOptions, cancellationToken))
@@ -452,8 +457,6 @@ public sealed class PublishChatService(
                     activeAssistant.Content = completedRound.Text;
                     activeAssistant.Status = PublishMessageStatus.Completed;
                     await SafePersistAsync(activeAssistant);
-                    conversation.UpdatedAt = DateTime.UtcNow;
-                    await conversations.SaveChangesAsync(CancellationToken.None);
                     authoringTurn.Complete();
                     yield return new PublishAssistantMessageCompleted(activeAssistant.Id);
                     yield break;
@@ -508,7 +511,7 @@ public sealed class PublishChatService(
                         Status = outcome.Error is null ? PublishMessageStatus.Completed : PublishMessageStatus.Failed,
                         ErrorMessage = outcome.Error,
                     };
-                    await turnEngine.AddMessageAsync(conversations, toolMessage, CancellationToken.None);
+                    await turnEngine.AddMessageAsync(repositories => repositories.PublishConversations, toolMessage, CancellationToken.None);
                     var transientVisuals = assistantContext?.DrainTransientVisuals() ?? [];
                     roundTransientVisuals.AddRange(transientVisuals);
                     var visualAttachments = transientVisuals
@@ -516,25 +519,27 @@ public sealed class PublishChatService(
                         .ToList();
                     if (visualAttachments.Count > 0)
                     {
-                        await conversations.AddMessageVisualsAsync(
-                            visualAttachments.Select((visual, index) => new PublishMessageVisual
-                            {
-                                Id = visual.Id,
-                                MessageId = toolMessage.Id,
-                                SortOrder = index,
-                                ToolCallId = visual.ToolCallId,
-                                Title = visual.Title,
-                                Caption = visual.Caption,
-                                SourceKind = visual.SourceKind,
-                                SourceRefId = visual.SourceRefId,
-                                ContentType = visual.ContentType,
-                                FileName = visual.FileName,
-                                Width = visual.Width,
-                                Height = visual.Height,
-                                Data = visual.Data ?? [],
-                            }),
+                        await turnEngine.WriteAsync(
+                            repositories => repositories.PublishConversations,
+                            conversations => conversations.AddMessageVisualsAsync(
+                                visualAttachments.Select((visual, index) => new PublishMessageVisual
+                                {
+                                    Id = visual.Id,
+                                    MessageId = toolMessage.Id,
+                                    SortOrder = index,
+                                    ToolCallId = visual.ToolCallId,
+                                    Title = visual.Title,
+                                    Caption = visual.Caption,
+                                    SourceKind = visual.SourceKind,
+                                    SourceRefId = visual.SourceRefId,
+                                    ContentType = visual.ContentType,
+                                    FileName = visual.FileName,
+                                    Width = visual.Width,
+                                    Height = visual.Height,
+                                    Data = visual.Data ?? [],
+                                }),
+                                CancellationToken.None),
                             CancellationToken.None);
-                        await conversations.SaveChangesAsync(CancellationToken.None);
                     }
                     resultContents.Add(new FunctionResultContent(pendingCall.CallId, outcome.Result));
                     yield return new PublishToolCallCompleted(
@@ -590,7 +595,7 @@ public sealed class PublishChatService(
                     activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
                     await SafePersistAsync(activeAssistant);
 
-                    await turnEngine.AddMessageAsync(conversations, new PublishMessage
+                    await turnEngine.AddMessageAsync(repositories => repositories.PublishConversations, new PublishMessage
                     {
                         ConversationId = conversation.Id,
                         Order = nextOrder++,
@@ -795,6 +800,9 @@ public sealed class PublishChatService(
         PublishMessageStatus status,
         string error)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var conversations = databaseOperation.Repositories.PublishConversations;
         await conversations.AddMessageAsync(new PublishMessage
         {
             ConversationId = conversationId,
@@ -803,14 +811,14 @@ public sealed class PublishChatService(
             Status = status,
             ErrorMessage = error,
         }, CancellationToken.None);
-        await conversations.SaveChangesAsync(CancellationToken.None);
+        await databaseOperation.SaveChangesAsync(CancellationToken.None);
     }
 
     private async Task SafePersistAsync(PublishMessage message)
     {
         try
         {
-            await turnEngine.UpdateMessageAsync(conversations, message, CancellationToken.None);
+            await turnEngine.UpdateMessageAsync(repositories => repositories.PublishConversations, message, CancellationToken.None);
         }
         catch (Exception exception)
         {

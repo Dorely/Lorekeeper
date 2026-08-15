@@ -8,5 +8,4 @@ public interface IGraphEntityTypeRepository
     Task<GraphEntityType?> FindAsync(Guid projectId, string type, CancellationToken cancellationToken = default);
     Task AddAsync(GraphEntityType entityType, CancellationToken cancellationToken = default);
     void Update(GraphEntityType entityType);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

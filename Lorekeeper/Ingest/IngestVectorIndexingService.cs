@@ -1,15 +1,15 @@
+using Lorekeeper.Graph;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
-using Lorekeeper.Graph;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Search;
 
 namespace Lorekeeper.Ingest;
 
 public sealed class IngestVectorIndexingService(
-    IIngestRepository ingest,
-    IVectorStore vectors,
+IAppDatabaseOperationFactory database, IVectorStore vectors,
     IEmbeddingService embeddings,
     ITextChunker chunker,
     IProjectSearchIndex projectSearch,
@@ -17,7 +17,14 @@ public sealed class IngestVectorIndexingService(
 {
     public async Task EnsureVectorFragmentsAsync(IngestSource source, bool force = false, CancellationToken cancellationToken = default)
     {
-        var existingFragments = await ingest.ListVectorFragmentsAsync(source.Id, cancellationToken);
+        IReadOnlyList<IngestVectorFragment> existingFragments;
+        IReadOnlyList<IngestSourceBlock> sourceBlocks;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            var ingest = readOperation.Repositories.Ingest;
+            existingFragments = await ingest.ListVectorFragmentsAsync(source.Id, cancellationToken);
+            sourceBlocks = await ingest.ListSourceBlocksAsync(source.Id, cancellationToken);
+        }
         if (!force && source.VectorIndexState == VectorIndexState.UpToDate && existingFragments.Count > 0)
             return;
 
@@ -31,15 +38,14 @@ public sealed class IngestVectorIndexingService(
             source.VectorIndexedAt = null;
             source.VectorIndexError = null;
             source.UpdatedAt = DateTime.UtcNow;
-            ingest.UpdateSource(source);
-            await ingest.SaveChangesAsync(cancellationToken);
+            await SaveSourceAsync(source, [], cancellationToken);
             return;
         }
 
         try
         {
             var chunks = chunker.Chunk(source.SourceText);
-            var sourceBlocks = await ingest.ListSourceBlocksAsync(source.Id, cancellationToken);
+            var fragments = new List<IngestVectorFragment>();
             if (chunks.Count > 0)
             {
                 var contents = chunks.Select(item => item.Content).ToList();
@@ -62,7 +68,7 @@ public sealed class IngestVectorIndexingService(
                         chunkIndex: index,
                         cancellationToken: cancellationToken);
 
-                    await ingest.AddVectorFragmentAsync(new IngestVectorFragment
+                    fragments.Add(new IngestVectorFragment
                     {
                         SourceId = source.Id,
                         Index = index,
@@ -70,7 +76,7 @@ public sealed class IngestVectorIndexingService(
                         StartChar = start,
                         EndChar = end,
                         Metadata = metadata,
-                    }, cancellationToken);
+                    });
                 }
             }
 
@@ -78,8 +84,7 @@ public sealed class IngestVectorIndexingService(
             source.VectorIndexedAt = DateTime.UtcNow;
             source.VectorIndexError = null;
             source.UpdatedAt = DateTime.UtcNow;
-            ingest.UpdateSource(source);
-            await ingest.SaveChangesAsync(cancellationToken);
+            await SaveSourceAsync(source, fragments, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -90,8 +95,7 @@ public sealed class IngestVectorIndexingService(
             source.VectorIndexState = VectorIndexState.Failed;
             source.VectorIndexError = ex.Message;
             source.UpdatedAt = DateTime.UtcNow;
-            ingest.UpdateSource(source);
-            await ingest.SaveChangesAsync(CancellationToken.None);
+            await SaveSourceAsync(source, [], CancellationToken.None);
             throw;
         }
     }
@@ -104,9 +108,24 @@ public sealed class IngestVectorIndexingService(
         var scopeKey = Project.ScopeKey(source.ProjectId);
         await vectors.DeleteBySourceAsync("ingest_source", source.VectorSourceId, scopeKey, cancellationToken);
         await projectSearch.DeleteBySourceAsync(ProjectSearchSourceTypes.RawIngestSource, source.VectorSourceId, scopeKey, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         foreach (var fragment in existingFragments)
             ingest.RemoveVectorFragment(fragment);
-        await ingest.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task SaveSourceAsync(
+        IngestSource source,
+        IEnumerable<IngestVectorFragment> fragments,
+        CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var ingest = operation.Repositories.Ingest;
+        foreach (var fragment in fragments)
+            await ingest.AddVectorFragmentAsync(fragment, cancellationToken);
+        ingest.UpdateSource(source);
+        await operation.SaveChangesAsync(cancellationToken);
     }
 
     private async Task StoreLexicalFragmentsAsync(IngestSource source, CancellationToken cancellationToken)

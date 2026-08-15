@@ -1,36 +1,22 @@
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Runtime.ExceptionServices;
+using Lorekeeper.Authoring;
 using Lorekeeper.Chapters;
 using Lorekeeper.Composition;
 using Lorekeeper.Context;
-using Lorekeeper.Authoring;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Images;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Outline;
 
 public sealed class AiChangeApprovalService(
-    IAiChangeRepository changes,
-    IOutlineConversationRepository outlineConversations,
-    IEditorConversationRepository editorConversations,
-    IResearchConversationRepository researchConversations,
-    IActService acts,
-    IChapterService chapters,
-    IManuscriptService manuscripts,
-    ICompositionService compositions,
-    IManuscriptStyleService manuscriptStyles,
-    IEntityService entities,
-    IVectorIndexWorkCoordinator indexWork,
-    IEntityVisualExampleService entityVisualExamples,
-    IProjectImageService projectImages,
-    IAuthoringHistoryService authoringHistory,
-    IAuthoringMutationContextAccessor authoringMutationContext,
-    ILogger<AiChangeApprovalService> logger) : IAiChangeApprovalService
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IManuscriptService manuscripts, ICompositionService compositions, IManuscriptStyleService manuscriptStyles, IEntityService entities, IVectorIndexWorkCoordinator indexWork, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages, IAuthoringHistoryService authoringHistory, IAuthoringMutationContextAccessor authoringMutationContext, ILogger<AiChangeApprovalService> logger) : IAiChangeApprovalService
 {
     private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
     {
@@ -38,14 +24,23 @@ public sealed class AiChangeApprovalService(
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public async Task<IReadOnlyList<AiChangeBatch>> ListPendingBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await changes.ListPendingBatchesAsync(projectId, cancellationToken);
-
-    public Task<AiChangeBatch?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default) =>
-        changes.GetBatchAsync(batchId, cancellationToken);
-
+    public async Task<IReadOnlyList<AiChangeBatch>> ListPendingBatchesAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var changes = databaseOperation.Repositories.AiChanges;
+        return await changes.ListPendingBatchesAsync(projectId, cancellationToken);
+    }
+    public async Task<AiChangeBatch?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var changes = databaseOperation.Repositories.AiChanges;
+        return await changes.GetBatchAsync(batchId, cancellationToken);
+    }
     public async Task SaveReviewDraftAsync(Guid changeId, string? draftAfterJson, string? reviewStateJson, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         var change = await changes.GetChangeAsync(changeId, cancellationToken)
             ?? throw new InvalidOperationException($"AI change {changeId} not found.");
         if (change.Status != AiChangeStatus.Pending)
@@ -67,7 +62,7 @@ public sealed class AiChangeApprovalService(
 
         change.UpdatedAt = DateTime.UtcNow;
         changes.UpdateChange(change);
-        await changes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public Task ClearReviewDraftAsync(Guid changeId, CancellationToken cancellationToken = default) =>
@@ -75,6 +70,9 @@ public sealed class AiChangeApprovalService(
 
     public async Task PrepareChapterBodyLineReviewAsync(Guid projectId, Guid chapterId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         var chapter = await chapters.GetAsync(chapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
         if (chapter.ProjectId != projectId)
@@ -137,7 +135,7 @@ public sealed class AiChangeApprovalService(
         foreach (var batch in chapterBodyChanges.Select(change => change.Batch).DistinctBy(batch => batch.Id))
             UpdateBatchStatus(batch);
 
-        await changes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task ResolveChapterBodyReviewLineAsync(
@@ -146,6 +144,9 @@ public sealed class AiChangeApprovalService(
         ChapterBodyReviewLineResolution request,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         await PrepareChapterBodyLineReviewAsync(projectId, chapterId, cancellationToken);
 
         var pendingBatches = await changes.ListPendingBatchesAsync(projectId, cancellationToken);
@@ -241,11 +242,14 @@ public sealed class AiChangeApprovalService(
             await AppendLineRejectionSystemMessageAsync(aggregate, chapter, target, request.RejectionMessage, cancellationToken);
 
         UpdateBatchStatus(aggregate.Batch);
-        await changes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task ApplyBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         var batch = await changes.GetBatchAsync(batchId, cancellationToken)
             ?? throw new InvalidOperationException($"AI change batch {batchId} not found.");
         var conflict = batch.Changes.FirstOrDefault(change => change.Status == AiChangeStatus.Conflict);
@@ -273,7 +277,7 @@ public sealed class AiChangeApprovalService(
         {
             if (capturedException is null) authoringTurn?.Complete(); else authoringTurn?.Fail();
             UpdateBatchStatus(batch);
-            await changes.SaveChangesAsync(CancellationToken.None);
+            await databaseOperation.SaveChangesAsync(CancellationToken.None);
             await indexDeferral.FlushAsync(CancellationToken.None);
         }
 
@@ -282,6 +286,9 @@ public sealed class AiChangeApprovalService(
 
     public async Task ApplyChangeAsync(Guid changeId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         var change = await changes.GetChangeAsync(changeId, cancellationToken)
             ?? throw new InvalidOperationException($"AI change {changeId} not found.");
 
@@ -300,7 +307,7 @@ public sealed class AiChangeApprovalService(
         {
             if (capturedException is null) authoringTurn?.Complete(); else authoringTurn?.Fail();
             UpdateBatchStatus(change.Batch);
-            await changes.SaveChangesAsync(CancellationToken.None);
+            await databaseOperation.SaveChangesAsync(CancellationToken.None);
             await indexDeferral.FlushAsync(CancellationToken.None);
         }
 
@@ -309,6 +316,9 @@ public sealed class AiChangeApprovalService(
 
     public async Task ApplyChangesAsync(IReadOnlyCollection<Guid> changeIds, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         if (changeIds.Count == 0) return;
 
         var selectedChanges = new List<AiChange>();
@@ -363,7 +373,7 @@ public sealed class AiChangeApprovalService(
         {
             foreach (var batch in touchedBatches)
                 UpdateBatchStatus(batch);
-            await changes.SaveChangesAsync(CancellationToken.None);
+            await databaseOperation.SaveChangesAsync(CancellationToken.None);
             await indexDeferral.FlushAsync(CancellationToken.None);
         }
 
@@ -374,6 +384,8 @@ public sealed class AiChangeApprovalService(
         AiChangeBatch batch,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var editorConversations = databaseOperation.Repositories.EditorConversations;
         if (batch.ConversationKind != AiChangeConversationKind.Editor)
             return null;
         var messages = await editorConversations.LoadMessagesAsync(batch.ConversationId, cancellationToken);
@@ -399,6 +411,9 @@ public sealed class AiChangeApprovalService(
 
     public async Task RejectBatchAsync(Guid batchId, string? message, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         var batch = await changes.GetBatchAsync(batchId, cancellationToken)
             ?? throw new InvalidOperationException($"AI change batch {batchId} not found.");
 
@@ -413,11 +428,14 @@ public sealed class AiChangeApprovalService(
             await AppendRejectionSystemMessageAsync(batch, rejected, message, cancellationToken);
 
         UpdateBatchStatus(batch);
-        await changes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task RejectChangeAsync(Guid changeId, string? message, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         var change = await changes.GetChangeAsync(changeId, cancellationToken)
             ?? throw new InvalidOperationException($"AI change {changeId} not found.");
         if (!IsUnresolvedReviewChange(change))
@@ -429,11 +447,14 @@ public sealed class AiChangeApprovalService(
 
         await AppendRejectionSystemMessageAsync(change.Batch, rejected, message, cancellationToken);
         UpdateBatchStatus(change.Batch);
-        await changes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     private async Task ApplyChangeCoreAsync(AiChangeBatch batch, AiChange change, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         if (change.Status is AiChangeStatus.Applied or AiChangeStatus.Superseded or AiChangeStatus.Resolved) return;
         if (change.Status == AiChangeStatus.Rejected)
             throw new InvalidOperationException($"AI change {change.Id} was rejected and cannot be applied.");
@@ -476,227 +497,227 @@ public sealed class AiChangeApprovalService(
         switch (change.ToolName)
         {
             case "create_act":
-            {
-                var after = ReadRequired<OutlineActChange>(afterJson);
-                await acts.CreateAsync(projectId, after.Title, after.Synopsis, after.Id, cancellationToken);
-                break;
-            }
+                {
+                    var after = ReadRequired<OutlineActChange>(afterJson);
+                    await acts.CreateAsync(projectId, after.Title, after.Synopsis, after.Id, cancellationToken);
+                    break;
+                }
             case "update_act":
-            {
-                var after = ReadRequired<OutlineActChange>(afterJson);
-                await acts.UpdateAsync(after.Id, after.Title, after.Synopsis, cancellationToken);
-                break;
-            }
+                {
+                    var after = ReadRequired<OutlineActChange>(afterJson);
+                    await acts.UpdateAsync(after.Id, after.Title, after.Synopsis, cancellationToken);
+                    break;
+                }
             case "delete_act":
                 await acts.DeleteAsync(ParseResourceGuid(change), cancellationToken);
                 break;
             case "reorder_acts":
-            {
-                var after = ReadRequired<OutlineReorderChange>(afterJson);
-                await acts.ReorderAsync(projectId, after.OrderedIds, cancellationToken);
-                break;
-            }
+                {
+                    var after = ReadRequired<OutlineReorderChange>(afterJson);
+                    await acts.ReorderAsync(projectId, after.OrderedIds, cancellationToken);
+                    break;
+                }
             case "create_chapter":
-            {
-                var after = ReadRequired<OutlineChapterChange>(afterJson);
-                await chapters.CreateAsync(projectId, after.ActId, after.Title, after.Synopsis, after.Id, cancellationToken);
-                break;
-            }
+                {
+                    var after = ReadRequired<OutlineChapterChange>(afterJson);
+                    await chapters.CreateAsync(projectId, after.ActId, after.Title, after.Synopsis, after.Id, cancellationToken);
+                    break;
+                }
             case "update_chapter":
-            {
-                var after = ReadRequired<OutlineChapterChange>(afterJson);
-                await chapters.UpdateAsync(after.Id, after.Title, after.Synopsis, new ChapterActAssignment(after.ActId), cancellationToken);
-                break;
-            }
+                {
+                    var after = ReadRequired<OutlineChapterChange>(afterJson);
+                    await chapters.UpdateAsync(after.Id, after.Title, after.Synopsis, new ChapterActAssignment(after.ActId), cancellationToken);
+                    break;
+                }
             case "insert_manuscript_designed_page":
-            {
-                var before = ReadRequired<ChapterManuscriptChange>(change.BeforeJson);
-                var after = ReadRequired<ChapterManuscriptChange>(afterJson);
-                var current = await manuscripts.GetManuscriptAsync(contentTarget, after.Id, cancellationToken)
-                    ?? throw new InvalidOperationException($"Chapter {after.Id} not found.");
-                if (!CurrentManuscriptMatches(current, before))
                 {
-                    throw new InvalidOperationException("The chapter body changed after this Designed Page was staged. Reject this change and rerun it against the current manuscript.");
-                }
+                    var before = ReadRequired<ChapterManuscriptChange>(change.BeforeJson);
+                    var after = ReadRequired<ChapterManuscriptChange>(afterJson);
+                    var current = await manuscripts.GetManuscriptAsync(contentTarget, after.Id, cancellationToken)
+                        ?? throw new InvalidOperationException($"Chapter {after.Id} not found.");
+                    if (!CurrentManuscriptMatches(current, before))
+                    {
+                        throw new InvalidOperationException("The chapter body changed after this Designed Page was staged. Reject this change and rerun it against the current manuscript.");
+                    }
 
-                var arguments = ReadRequired<DesignedPageToolArguments>(change.ArgumentsJson);
-                if (arguments.ChapterId != after.Id
-                    || arguments.ExpectedRevision != before.Revision)
-                {
-                    throw new InvalidOperationException("The staged Designed Page arguments do not match the reviewed manuscript revision.");
-                }
+                    var arguments = ReadRequired<DesignedPageToolArguments>(change.ArgumentsJson);
+                    if (arguments.ChapterId != after.Id
+                        || arguments.ExpectedRevision != before.Revision)
+                    {
+                        throw new InvalidOperationException("The staged Designed Page arguments do not match the reviewed manuscript revision.");
+                    }
 
-                var beforeIds = before.Manuscript.Content.Select(block => block.Id).ToHashSet(StringComparer.Ordinal);
-                var addedBlocks = after.Manuscript.Content
-                    .Where(block => !beforeIds.Contains(block.Id))
-                    .ToList();
-                if (addedBlocks is not [var added]
-                    || added.Type != ManuscriptBlockType.DesignedPage
-                    || added.PageCompositionId is not Guid compositionId)
-                {
-                    throw new InvalidOperationException("The reviewed change must add exactly one valid Designed Page block.");
-                }
+                    var beforeIds = before.Manuscript.Content.Select(block => block.Id).ToHashSet(StringComparer.Ordinal);
+                    var addedBlocks = after.Manuscript.Content
+                        .Where(block => !beforeIds.Contains(block.Id))
+                        .ToList();
+                    if (addedBlocks is not [var added]
+                        || added.Type != ManuscriptBlockType.DesignedPage
+                        || added.PageCompositionId is not Guid compositionId)
+                    {
+                        throw new InvalidOperationException("The reviewed change must add exactly one valid Designed Page block.");
+                    }
 
-                var projected = ManuscriptOperations.Apply(
-                    before.Manuscript,
-                    [new InsertManuscriptBlock(
+                    var projected = ManuscriptOperations.Apply(
+                        before.Manuscript,
+                        [new InsertManuscriptBlock(
                         arguments.BlockIndex,
                         ManuscriptBlockType.DesignedPage,
                         string.Empty,
                         ManuscriptStyleRoles.DesignedPage,
                         PageCompositionId: compositionId,
                         BlockId: added.Id)]).Document;
-                if (projected.Revision != after.Revision
-                    || !ManuscriptCodec.ContentEquals(projected, after.Manuscript))
-                {
-                    throw new InvalidOperationException("The reviewed Designed Page structure no longer matches its staged creation request.");
-                }
-
-                await compositions.CreateDesignedPageAsync(
-                    contentTarget,
-                    projectId,
-                    after.Id,
-                    arguments.BlockIndex,
-                    arguments.Name,
-                    before.Revision,
-                    new DesignedPageIdentity(compositionId, added.Id),
-                    new DesignedPageInitialContent
+                    if (projected.Revision != after.Revision
+                        || !ManuscriptCodec.ContentEquals(projected, after.Manuscript))
                     {
-                        LayoutMode = arguments.LayoutMode,
-                        ImageId = arguments.ImageId,
-                        AltText = arguments.AltText ?? string.Empty,
-                        Decorative = arguments.Decorative,
-                        ImageFit = arguments.ImageFit,
-                        CropXPercent = arguments.CropXPercent,
-                        CropYPercent = arguments.CropYPercent,
-                    },
-                    cancellationToken);
-                break;
-            }
+                        throw new InvalidOperationException("The reviewed Designed Page structure no longer matches its staged creation request.");
+                    }
+
+                    await compositions.CreateDesignedPageAsync(
+                        contentTarget,
+                        projectId,
+                        after.Id,
+                        arguments.BlockIndex,
+                        arguments.Name,
+                        before.Revision,
+                        new DesignedPageIdentity(compositionId, added.Id),
+                        new DesignedPageInitialContent
+                        {
+                            LayoutMode = arguments.LayoutMode,
+                            ImageId = arguments.ImageId,
+                            AltText = arguments.AltText ?? string.Empty,
+                            Decorative = arguments.Decorative,
+                            ImageFit = arguments.ImageFit,
+                            CropXPercent = arguments.CropXPercent,
+                            CropYPercent = arguments.CropYPercent,
+                        },
+                        cancellationToken);
+                    break;
+                }
             case "apply_manuscript_operations":
             case "apply_manuscript_style":
             case "apply_assigned_manuscript_operations":
             case "insert_manuscript_figure":
             case "patch_manuscript_figure":
-            {
-                var before = ReadOptional<ChapterManuscriptChange>(change.BeforeJson);
-                var after = ReadRequired<ChapterManuscriptChange>(afterJson);
-                if (before is not null)
                 {
-                    var current = await manuscripts.GetManuscriptAsync(contentTarget, after.Id, cancellationToken)
-                        ?? throw new InvalidOperationException($"Chapter {after.Id} not found.");
-                    if (!CurrentManuscriptMatches(current, before))
-                        throw new InvalidOperationException("The chapter body changed after this AI edit was staged. Reject this change and rerun the edit against the current chapter text.");
+                    var before = ReadOptional<ChapterManuscriptChange>(change.BeforeJson);
+                    var after = ReadRequired<ChapterManuscriptChange>(afterJson);
+                    if (before is not null)
+                    {
+                        var current = await manuscripts.GetManuscriptAsync(contentTarget, after.Id, cancellationToken)
+                            ?? throw new InvalidOperationException($"Chapter {after.Id} not found.");
+                        if (!CurrentManuscriptMatches(current, before))
+                            throw new InvalidOperationException("The chapter body changed after this AI edit was staged. Reject this change and rerun the edit against the current chapter text.");
+                    }
+                    await manuscripts.ReplaceDocumentAsync(
+                        contentTarget,
+                        after.Id,
+                        before?.Revision ?? checked(after.Revision - 1),
+                        after.Manuscript,
+                        cancellationToken);
+                    break;
                 }
-                await manuscripts.ReplaceDocumentAsync(
-                    contentTarget,
-                    after.Id,
-                    before?.Revision ?? checked(after.Revision - 1),
-                    after.Manuscript,
-                    cancellationToken);
-                break;
-            }
             case "upsert_manuscript_style":
             case "create_paragraph_style_from_block":
-            {
-                var staged = ReadRequired<ManuscriptStyleChange>(afterJson);
-                var input = staged.After
-                    ?? throw new InvalidOperationException("The staged Book Text Style update has no target state.");
-                await manuscriptStyles.UpsertAsync(projectId, input, cancellationToken);
-                break;
-            }
+                {
+                    var staged = ReadRequired<ManuscriptStyleChange>(afterJson);
+                    var input = staged.After
+                        ?? throw new InvalidOperationException("The staged Book Text Style update has no target state.");
+                    await manuscriptStyles.UpsertAsync(projectId, input, cancellationToken);
+                    break;
+                }
             case "delete_manuscript_style":
-            {
-                var staged = ReadRequired<ManuscriptStyleChange>(afterJson);
-                var before = staged.Before
-                    ?? throw new InvalidOperationException("The staged Book Text Style deletion has no source state.");
-                await manuscriptStyles.DeleteAsync(
-                    projectId,
-                    before.Id,
-                    before.Revision,
-                    cancellationToken);
-                break;
-            }
+                {
+                    var staged = ReadRequired<ManuscriptStyleChange>(afterJson);
+                    var before = staged.Before
+                        ?? throw new InvalidOperationException("The staged Book Text Style deletion has no source state.");
+                    await manuscriptStyles.DeleteAsync(
+                        projectId,
+                        before.Id,
+                        before.Revision,
+                        cancellationToken);
+                    break;
+                }
             case "delete_chapter":
                 await chapters.DeleteAsync(ParseResourceGuid(change), cancellationToken);
                 break;
             case "reorder_chapters":
-            {
-                var after = ReadRequired<OutlineReorderChange>(afterJson);
-                await chapters.ReorderAsync(projectId, after.ParentId, after.OrderedIds, cancellationToken);
-                break;
-            }
+                {
+                    var after = ReadRequired<OutlineReorderChange>(afterJson);
+                    await chapters.ReorderAsync(projectId, after.ParentId, after.OrderedIds, cancellationToken);
+                    break;
+                }
             case "create_entity":
-            {
-                var after = ReadRequired<OutlineEntityChange>(afterJson);
-                await entities.CreateAsync(projectId, after.Type, after.Name, after.Properties, after.ParentId, after.Order, after.Id, cancellationToken);
-                break;
-            }
+                {
+                    var after = ReadRequired<OutlineEntityChange>(afterJson);
+                    await entities.CreateAsync(projectId, after.Type, after.Name, after.Properties, after.ParentId, after.Order, after.Id, cancellationToken);
+                    break;
+                }
             case "update_entity":
-            {
-                var before = ReadOptional<OutlineEntityChange>(change.BeforeJson);
-                var after = ReadRequired<OutlineEntityChange>(afterJson);
-                var propertiesToRemove = before?.Properties.Keys
-                    .Where(key => !after.Properties.ContainsKey(key))
-                    .ToArray();
-                await entities.UpdateAsync(projectId, after.Id, after.Name, after.Properties, propertiesToRemove, cancellationToken);
-                break;
-            }
+                {
+                    var before = ReadOptional<OutlineEntityChange>(change.BeforeJson);
+                    var after = ReadRequired<OutlineEntityChange>(afterJson);
+                    var propertiesToRemove = before?.Properties.Keys
+                        .Where(key => !after.Properties.ContainsKey(key))
+                        .ToArray();
+                    await entities.UpdateAsync(projectId, after.Id, after.Name, after.Properties, propertiesToRemove, cancellationToken);
+                    break;
+                }
             case "delete_entity":
                 await entities.DeleteAsync(projectId, ParseResourceGuid(change), cancellationToken);
                 break;
             case "reorder_entities":
-            {
-                var after = ReadRequired<OutlineEntityReorderChange>(afterJson);
-                await entities.ReorderAsync(projectId, after.Type, after.ParentId, after.OrderedIds, cancellationToken);
-                break;
-            }
+                {
+                    var after = ReadRequired<OutlineEntityReorderChange>(afterJson);
+                    await entities.ReorderAsync(projectId, after.Type, after.ParentId, after.OrderedIds, cancellationToken);
+                    break;
+                }
             case "link_entities":
-            {
-                var after = ReadRequired<OutlineEntityLinkChange>(afterJson);
-                await entities.LinkAsync(projectId, after.FromId, after.ToId, after.EdgeType, after.Properties, cancellationToken);
-                break;
-            }
+                {
+                    var after = ReadRequired<OutlineEntityLinkChange>(afterJson);
+                    await entities.LinkAsync(projectId, after.FromId, after.ToId, after.EdgeType, after.Properties, cancellationToken);
+                    break;
+                }
             case "attach_entity_canonical_reference":
             case "crop_project_image":
-            {
-                var after = ReadRequired<EntityVisualChange>(afterJson);
-                await entityVisualExamples.AttachAsync(projectId, after.EntityId!.Value, after.ImageId!.Value, after.Label, EntityVisualExampleOrigin.Agent, cancellationToken: cancellationToken);
-                break;
-            }
+                {
+                    var after = ReadRequired<EntityVisualChange>(afterJson);
+                    await entityVisualExamples.AttachAsync(projectId, after.EntityId!.Value, after.ImageId!.Value, after.Label, EntityVisualExampleOrigin.Agent, cancellationToken: cancellationToken);
+                    break;
+                }
             case "update_entity_canonical_reference":
-            {
-                var after = ReadRequired<EntityVisualChange>(afterJson);
-                await entityVisualExamples.UpdateAsync(projectId, after.ExampleId!.Value, after.Label, after.SortOrder, cancellationToken: cancellationToken);
-                break;
-            }
+                {
+                    var after = ReadRequired<EntityVisualChange>(afterJson);
+                    await entityVisualExamples.UpdateAsync(projectId, after.ExampleId!.Value, after.Label, after.SortOrder, cancellationToken: cancellationToken);
+                    break;
+                }
             case "detach_entity_canonical_reference":
-            {
-                var before = ReadRequired<EntityVisualChange>(change.BeforeJson);
-                await entityVisualExamples.DetachAsync(projectId, before.ExampleId!.Value, cancellationToken);
-                break;
-            }
+                {
+                    var before = ReadRequired<EntityVisualChange>(change.BeforeJson);
+                    await entityVisualExamples.DetachAsync(projectId, before.ExampleId!.Value, cancellationToken);
+                    break;
+                }
             case "import_web_image_as_entity_reference":
-            {
-                var after = ReadRequired<EntityVisualChange>(afterJson);
-                var sourceImage = await entityVisualExamples.PromoteCandidateAsync(projectId, after.CandidateId!.Value, cancellationToken);
-                var referenceImage = after.Crop is null
-                    ? sourceImage
-                    : await projectImages.CropAsync(projectId, sourceImage.Id, new ProjectImageCropRequest(
-                        after.Crop,
-                        after.CropFileName,
-                        after.CropAltText), cancellationToken);
-                foreach (var target in after.Targets ?? [])
-                    await entityVisualExamples.AttachAsync(
-                        projectId,
-                        target.EntityId,
-                        referenceImage.Id,
-                        target.Label,
-                        EntityVisualExampleOrigin.Research,
-                        after.CandidateId,
-                        cancellationToken);
-                break;
-            }
+                {
+                    var after = ReadRequired<EntityVisualChange>(afterJson);
+                    var sourceImage = await entityVisualExamples.PromoteCandidateAsync(projectId, after.CandidateId!.Value, cancellationToken);
+                    var referenceImage = after.Crop is null
+                        ? sourceImage
+                        : await projectImages.CropAsync(projectId, sourceImage.Id, new ProjectImageCropRequest(
+                            after.Crop,
+                            after.CropFileName,
+                            after.CropAltText), cancellationToken);
+                    foreach (var target in after.Targets ?? [])
+                        await entityVisualExamples.AttachAsync(
+                            projectId,
+                            target.EntityId,
+                            referenceImage.Id,
+                            target.Label,
+                            EntityVisualExampleOrigin.Research,
+                            after.CandidateId,
+                            cancellationToken);
+                    break;
+                }
             default:
                 throw new InvalidOperationException($"Unsupported AI change tool '{change.ToolName}'.");
         }
@@ -1117,65 +1138,71 @@ public sealed class AiChangeApprovalService(
         string correction,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
+        var outlineConversations = databaseOperation.Repositories.OutlineConversations;
+        var editorConversations = databaseOperation.Repositories.EditorConversations;
+        var researchConversations = databaseOperation.Repositories.ResearchConversations;
         switch (batch.ConversationKind)
         {
             case AiChangeConversationKind.Outline:
-            {
-                if (await outlineConversations.ExistsAsync(batch.ConversationId, cancellationToken))
                 {
-                    await AddOutlineRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
+                    if (await outlineConversations.ExistsAsync(batch.ConversationId, cancellationToken))
+                    {
+                        await AddOutlineRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
+                        break;
+                    }
+
+                    if (await editorConversations.ExistsAsync(batch.ConversationId, cancellationToken))
+                    {
+                        logger.LogWarning(
+                            "AI change batch {BatchId} was marked as Outline but conversation {ConversationId} is an editor conversation; routing rejection feedback to editor chat.",
+                            batch.Id,
+                            batch.ConversationId);
+                        batch.ConversationKind = AiChangeConversationKind.Editor;
+                        changes.UpdateBatch(batch);
+                        await AddEditorRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
+                        break;
+                    }
+
+                    LogMissingConversation(batch);
                     break;
                 }
-
-                if (await editorConversations.ExistsAsync(batch.ConversationId, cancellationToken))
-                {
-                    logger.LogWarning(
-                        "AI change batch {BatchId} was marked as Outline but conversation {ConversationId} is an editor conversation; routing rejection feedback to editor chat.",
-                        batch.Id,
-                        batch.ConversationId);
-                    batch.ConversationKind = AiChangeConversationKind.Editor;
-                    changes.UpdateBatch(batch);
-                    await AddEditorRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
-                    break;
-                }
-
-                LogMissingConversation(batch);
-                break;
-            }
             case AiChangeConversationKind.Editor:
-            {
-                if (await editorConversations.ExistsAsync(batch.ConversationId, cancellationToken))
                 {
-                    await AddEditorRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
+                    if (await editorConversations.ExistsAsync(batch.ConversationId, cancellationToken))
+                    {
+                        await AddEditorRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
+                        break;
+                    }
+
+                    if (await outlineConversations.ExistsAsync(batch.ConversationId, cancellationToken))
+                    {
+                        logger.LogWarning(
+                            "AI change batch {BatchId} was marked as Editor but conversation {ConversationId} is an outline conversation; routing rejection feedback to outline chat.",
+                            batch.Id,
+                            batch.ConversationId);
+                        batch.ConversationKind = AiChangeConversationKind.Outline;
+                        changes.UpdateBatch(batch);
+                        await AddOutlineRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
+                        break;
+                    }
+
+                    LogMissingConversation(batch);
                     break;
                 }
-
-                if (await outlineConversations.ExistsAsync(batch.ConversationId, cancellationToken))
-                {
-                    logger.LogWarning(
-                        "AI change batch {BatchId} was marked as Editor but conversation {ConversationId} is an outline conversation; routing rejection feedback to outline chat.",
-                        batch.Id,
-                        batch.ConversationId);
-                    batch.ConversationKind = AiChangeConversationKind.Outline;
-                    changes.UpdateBatch(batch);
-                    await AddOutlineRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
-                    break;
-                }
-
-                LogMissingConversation(batch);
-                break;
-            }
             case AiChangeConversationKind.Research:
-            {
-                if (await researchConversations.ExistsAsync(batch.ConversationId, cancellationToken))
                 {
-                    await AddResearchRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
+                    if (await researchConversations.ExistsAsync(batch.ConversationId, cancellationToken))
+                    {
+                        await AddResearchRejectionMessageAsync(batch.ConversationId, correction, cancellationToken);
+                        break;
+                    }
+
+                    LogMissingConversation(batch);
                     break;
                 }
-
-                LogMissingConversation(batch);
-                break;
-            }
             default:
                 throw new InvalidOperationException($"Unsupported AI change conversation kind '{batch.ConversationKind}'.");
         }
@@ -1186,6 +1213,9 @@ public sealed class AiChangeApprovalService(
         string correction,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var outlineConversations = databaseOperation.Repositories.OutlineConversations;
         var order = await outlineConversations.GetMaxOrderAsync(conversationId, cancellationToken) + 1;
         await outlineConversations.AddMessageAsync(new OutlineMessage
         {
@@ -1202,6 +1232,9 @@ public sealed class AiChangeApprovalService(
         string correction,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var editorConversations = databaseOperation.Repositories.EditorConversations;
         var order = await editorConversations.GetMaxOrderAsync(conversationId, cancellationToken) + 1;
         await editorConversations.AddMessageAsync(new EditorMessage
         {
@@ -1218,6 +1251,9 @@ public sealed class AiChangeApprovalService(
         string correction,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var researchConversations = databaseOperation.Repositories.ResearchConversations;
         var order = await researchConversations.GetMaxOrderAsync(conversationId, cancellationToken) + 1;
         await researchConversations.AddMessageAsync(new ResearchMessage
         {
@@ -1238,6 +1274,9 @@ public sealed class AiChangeApprovalService(
 
     private void UpdateBatchStatus(AiChangeBatch batch)
     {
+        using var databaseOperation = database.OpenWrite();
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
         if (batch.Changes.Any(IsUnresolvedReviewChange))
         {
             batch.Status = AiChangeBatchStatus.Pending;

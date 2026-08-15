@@ -11,5 +11,4 @@ public interface IActRepository
     void Update(Act act);
     void Remove(Act act);
     Task ReorderAsync(Guid projectId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

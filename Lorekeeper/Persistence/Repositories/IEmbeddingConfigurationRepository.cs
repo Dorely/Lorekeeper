@@ -8,6 +8,5 @@ public interface IEmbeddingConfigurationRepository
     Task AddAsync(EmbeddingConfiguration configuration, CancellationToken cancellationToken = default);
     void Update(EmbeddingConfiguration configuration);
     void Remove(EmbeddingConfiguration configuration);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }
 

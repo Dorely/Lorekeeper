@@ -16,7 +16,8 @@ public sealed class DatabaseMigrationRecoveryTests
         try
         {
             var connectionString = $"Data Source={Path.Combine(directory, "fixture.db")}";
-            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connectionString).Options;
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connectionString)
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
             var configuration = new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?>
                 {
@@ -60,7 +61,8 @@ public sealed class DatabaseMigrationRecoveryTests
         try
         {
             var connectionString = $"Data Source={Path.Combine(directory, "fixture.db")}";
-            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connectionString).Options;
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connectionString)
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
                 await db.Database.EnsureCreatedAsync();
             var configuration = new ConfigurationBuilder()

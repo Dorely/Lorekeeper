@@ -1,10 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Lorekeeper.Models;
-using Lorekeeper.Manuscripts;
-using Lorekeeper.Composition;
 using Lorekeeper.Authoring;
+using Lorekeeper.Composition;
+using Lorekeeper.Manuscripts;
+using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -78,8 +78,7 @@ public interface IPublicationCoverService
 }
 
 public sealed class PublicationCoverService(
-    AppDbContext db,
-    IProjectMutationCoordinator projectMutations,
+    IAppDatabaseOperationFactory database,
     IPublicationEditionService editions,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IPublicationPressRuntime pressRuntime,
@@ -89,11 +88,10 @@ public sealed class PublicationCoverService(
     IAuthoringMutationContextAccessor? authoringMutationContext = null) : IPublicationCoverService
 {
     public PublicationCoverService(
-        AppDbContext db,
-        IProjectMutationCoordinator projectMutations,
+        IAppDatabaseOperationFactory database,
         IPublicationEditionService editions,
         IPublicationPressRuntime pressRuntime)
-        : this(db, projectMutations, editions, new PublicationEffectiveConfigurationResolver(db), pressRuntime,
+        : this(database, editions, new PublicationEffectiveConfigurationResolver(database), pressRuntime,
             new PrintGeometryService(new PrintProductRegistry()), new PrintProductRegistry(), null, null)
     {
     }
@@ -113,6 +111,8 @@ public sealed class PublicationCoverService(
         Guid editionId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var edition = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
         var design = await db.PublicationCoverDesigns.AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.EditionId == editionId, cancellationToken)
@@ -126,6 +126,8 @@ public sealed class PublicationCoverService(
         string surfaceRole,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var edition = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
         var design = await db.PublicationCoverDesigns.AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.EditionId == editionId, cancellationToken)
@@ -139,7 +141,9 @@ public sealed class PublicationCoverService(
         long expectedEditionRevision,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var stored = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
         PublicationEditionService.EnsureDraft(stored);
         if (stored.Revision != expectedEditionRevision)
@@ -166,7 +170,9 @@ public sealed class PublicationCoverService(
         long expectedEditionRevision,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var stored = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
         PublicationEditionService.EnsureDraft(stored);
         if (stored.Revision != expectedEditionRevision)
@@ -189,8 +195,10 @@ public sealed class PublicationCoverService(
         PublicationCoverDesignUpdate update,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         Validate(update);
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var storedEdition = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
         var edition = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
         ValidateProduct(update, edition);
@@ -306,9 +314,11 @@ public sealed class PublicationCoverService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         ValidateAuthoringUpdate(update);
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var storedEdition = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
         var edition = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
@@ -383,9 +393,11 @@ public sealed class PublicationCoverService(
         bool redo,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (authoringHistory is null)
             throw new NotSupportedException("Persistent cover history is unavailable.");
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var edition = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
         var storedEdition = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
         var design = await db.PublicationCoverDesigns.SingleAsync(item => item.EditionId == editionId, cancellationToken);
@@ -457,10 +469,12 @@ public sealed class PublicationCoverService(
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var scene = System.Text.Json.JsonSerializer.Deserialize<CompositionScene>(sceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("Cover composition is empty.");
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         var storedEdition = await GetEditionAsync(projectId, editionId, cancellationToken, tracked: true);
         var edition = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
         PublicationEditionService.EnsureDraft(storedEdition);
@@ -499,10 +513,12 @@ public sealed class PublicationCoverService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         if (conversationId == Guid.Empty)
             throw new ArgumentException("A conversation is required for staged cover changes.", nameof(conversationId));
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
         await db.CompositionMutationStages
             .Where(item => item.ProjectId == projectId
                 && (item.ExpiresAt <= DateTime.UtcNow || item.AppliedAt != null))
@@ -541,7 +557,9 @@ public sealed class PublicationCoverService(
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var stage = await db.CompositionMutationStages.SingleOrDefaultAsync(item =>
             item.Id == stageId
@@ -609,6 +627,8 @@ public sealed class PublicationCoverService(
         CompositionScene scene,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var imageIds = scene.Objects.Where(item => item.ImageId is not null)
             .Select(item => item.ImageId!.Value).Distinct().ToList();
         var ownedImages = await db.PublishAssets.AsNoTracking()
@@ -799,6 +819,8 @@ public sealed class PublicationCoverService(
         CancellationToken cancellationToken,
         string? surfaceRole = null)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var currentFingerprint = await editions.GetPaginationFingerprintAsync(edition.ProjectId, edition.Id, cancellationToken);
         string currentRendererVersion;
         try
@@ -835,6 +857,8 @@ public sealed class PublicationCoverService(
         CancellationToken cancellationToken,
         bool tracked = false)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var editions = tracked ? db.PublicationEditions : db.PublicationEditions.AsNoTracking();
         return await editions.FirstOrDefaultAsync(
             edition => edition.Id == editionId && edition.ProjectId == projectId,
@@ -878,6 +902,8 @@ public sealed class PublicationCoverService(
         bool lockCoreLayers,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var design = Default(edition);
         if (!edition.InheritsCoreCover)
             return design;

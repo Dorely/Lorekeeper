@@ -2,21 +2,14 @@ using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorRevisionAgentService(
-    IProjectRepository projects,
-    IChapterService chapters,
-    IManuscriptService manuscripts,
-    IEditorRevisionRepository revisions,
-    IAiChangeRepository changes,
-    IOptions<EditorChatOptions> options,
-    IServiceScopeFactory scopeFactory,
-    IEditorRevisionJobNotifier notifier,
-    ILogger<EditorRevisionAgentService> logger) : IEditorRevisionAgentService
+IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, IOptions<EditorChatOptions> options, IServiceScopeFactory scopeFactory, IEditorRevisionJobNotifier notifier, ILogger<EditorRevisionAgentService> logger) : IEditorRevisionAgentService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -27,6 +20,10 @@ public sealed class EditorRevisionAgentService(
         EditorRevisionAgentRunRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var projects = databaseOperation.Repositories.Projects;
+        var revisions = databaseOperation.Repositories.EditorRevisions;
         var assignments = NormalizeAssignments(request.Chapters);
         if (assignments.Count == 0)
             throw new InvalidOperationException("At least one chapter assignment is required.");
@@ -80,7 +77,7 @@ public sealed class EditorRevisionAgentService(
             }, cancellationToken);
         }
 
-        await revisions.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         notifier.Notify(new EditorRevisionJobUpdate(
             request.ProjectId,
             request.ConversationId,
@@ -116,17 +113,24 @@ public sealed class EditorRevisionAgentService(
 
     public async Task<EditorRevisionJobDetail?> GetJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var revisions = databaseOperation.Repositories.EditorRevisions;
         var job = await revisions.GetJobAsync(jobId, cancellationToken);
         return job is null ? null : ToDetail(job);
     }
 
-    public async Task<IReadOnlyList<EditorRevisionJobDetail>> ListCurrentJobsAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        (await revisions.ListCurrentByProjectAsync(projectId, cancellationToken))
-            .Select(ToDetail)
-            .ToList();
-
+    public async Task<IReadOnlyList<EditorRevisionJobDetail>> ListCurrentJobsAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var revisions = databaseOperation.Repositories.EditorRevisions;
+        return (await revisions.ListCurrentByProjectAsync(projectId, cancellationToken))
+                    .Select(ToDetail)
+                    .ToList();
+    }
     public async Task<EditorRevisionSessionTranscript?> GetSessionTranscriptAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var revisions = databaseOperation.Repositories.EditorRevisions;
         var session = await revisions.GetSessionAsync(sessionId, cancellationToken);
         if (session is null) return null;
 
@@ -173,8 +177,8 @@ public sealed class EditorRevisionAgentService(
 
     private async Task MarkSessionFailedAsync(Guid sessionId, string error, CancellationToken cancellationToken)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IEditorRevisionRepository>();
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var repo = operation.Repositories.EditorRevisions;
         var session = await repo.GetSessionAsync(sessionId, cancellationToken);
         if (session is null) return;
 
@@ -183,7 +187,7 @@ public sealed class EditorRevisionAgentService(
         session.CompletedAt = DateTime.UtcNow;
         session.UpdatedAt = DateTime.UtcNow;
         repo.UpdateSession(session);
-        await repo.SaveChangesAsync(cancellationToken);
+        await operation.SaveChangesAsync(cancellationToken);
         notifier.Notify(new EditorRevisionJobUpdate(
             session.Job.ProjectId,
             session.Job.ConversationId,
@@ -196,9 +200,10 @@ public sealed class EditorRevisionAgentService(
 
     private async Task<EditorRevisionAgentRunResult> FinalizeJobAsync(Guid jobId, bool cancelled, CancellationToken cancellationToken)
     {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IEditorRevisionRepository>();
-        var scopedNotifier = scope.ServiceProvider.GetRequiredService<IEditorRevisionJobNotifier>();
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var changes = databaseOperation.Repositories.AiChanges;
+        var repo = databaseOperation.Repositories.EditorRevisions;
         var job = await repo.GetJobAsync(jobId, cancellationToken)
             ?? throw new InvalidOperationException($"Revision job {jobId} not found.");
 
@@ -228,7 +233,7 @@ public sealed class EditorRevisionAgentService(
         job.CompletedAt = DateTime.UtcNow;
         job.UpdatedAt = DateTime.UtcNow;
         repo.UpdateJob(job);
-        await repo.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
 
         var updateKind = job.Status switch
         {
@@ -236,7 +241,7 @@ public sealed class EditorRevisionAgentService(
             EditorRevisionJobStatus.Cancelled => EditorRevisionJobUpdateKind.Cancelled,
             _ => EditorRevisionJobUpdateKind.Failed,
         };
-        scopedNotifier.Notify(new EditorRevisionJobUpdate(
+        notifier.Notify(new EditorRevisionJobUpdate(
             job.ProjectId,
             job.ConversationId,
             job.ToolCallId,

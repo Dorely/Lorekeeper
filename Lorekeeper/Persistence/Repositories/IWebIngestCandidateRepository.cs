@@ -14,5 +14,4 @@ public interface IWebIngestCandidateRepository
     Task AddAsync(WebIngestCandidate candidate, CancellationToken cancellationToken = default);
     void Update(WebIngestCandidate candidate);
     void Remove(WebIngestCandidate candidate);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

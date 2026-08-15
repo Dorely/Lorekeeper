@@ -60,7 +60,7 @@ public interface IAuthoringHistoryService
     Task UpdateSelectionAsync(AuthoringHistoryTarget target, string selectionJson, CancellationToken cancellationToken = default);
 }
 
-public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistoryService
+public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory database) : IAuthoringHistoryService
 {
     private const int MaxActions = 100;
 
@@ -90,6 +90,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
         string selectionJson = "",
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (turnId == Guid.Empty)
             throw new ArgumentException("An assistant turn ID is required.", nameof(turnId));
 
@@ -167,6 +170,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
         AuthoringTurnHistoryBatchStatus status,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (status == AuthoringTurnHistoryBatchStatus.Open)
             throw new ArgumentOutOfRangeException(nameof(status));
 
@@ -187,6 +193,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
 
     public async Task FinalizeAssistantTurnAsync(Guid turnId, AuthoringTurnHistoryBatchStatus status, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (status == AuthoringTurnHistoryBatchStatus.Open)
             throw new ArgumentOutOfRangeException(nameof(status));
         var batches = await db.AuthoringTurnHistoryBatches
@@ -206,6 +215,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
 
     public async Task FinalizeAbandonedBatchesAsync(CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var batches = await db.AuthoringTurnHistoryBatches
             .Include(item => item.Stream)
             .Include(item => item.Dependencies)
@@ -238,6 +250,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
 
     public async Task ClearAsync(AuthoringHistoryTarget target, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var stream = await QueryStream(target).SingleOrDefaultAsync(cancellationToken);
         if (stream is null)
             return;
@@ -260,6 +275,8 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
         Guid resourceId,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var entryStreams = db.AuthoringHistoryDependencies.AsNoTracking()
             .Where(item => item.Kind == kind && item.ResourceId == resourceId && item.EntryId != null
                 && item.Entry!.Stream.ProjectId == projectId)
@@ -291,6 +308,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
         string selectionJson,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var stream = await QueryStream(target).SingleOrDefaultAsync(cancellationToken);
         if (stream is null)
             return;
@@ -321,6 +341,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
         string selectionJson,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (FixedEquals(Hash(beforeSnapshot), Hash(afterSnapshot)))
             return await ReadStateAsync(target, cancellationToken);
 
@@ -339,6 +362,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
         Func<string, CancellationToken, Task> applySnapshot,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(target.ProjectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var stream = await QueryStream(target).SingleOrDefaultAsync(cancellationToken)
             ?? throw new InvalidOperationException(moveForward ? "Nothing is available to redo." : "Nothing is available to undo.");
         if (await db.AuthoringTurnHistoryBatches.AnyAsync(item => item.StreamId == stream.Id && item.Status == AuthoringTurnHistoryBatchStatus.Open, cancellationToken))
@@ -383,6 +409,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
 
     private async Task<AuthoringHistoryStream> GetOrCreateStreamAsync(AuthoringHistoryTarget target, string baseline, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var stream = await QueryStream(target).SingleOrDefaultAsync(cancellationToken);
         if (stream is not null)
             return stream;
@@ -405,9 +434,12 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
         return stream;
     }
 
-    private IQueryable<AuthoringHistoryStream> QueryStream(AuthoringHistoryTarget target) =>
-        db.AuthoringHistoryStreams.Where(item => item.ProjectId == target.ProjectId && item.StreamKey == target.StreamKey);
-
+    private IQueryable<AuthoringHistoryStream> QueryStream(AuthoringHistoryTarget target)
+    {
+        using var databaseOperation = database.OpenRead();
+        var db = databaseOperation.Db;
+        return db.AuthoringHistoryStreams.Where(item => item.ProjectId == target.ProjectId && item.StreamKey == target.StreamKey);
+    }
     private async Task AppendEntryAsync(
         AuthoringHistoryStream stream,
         string afterSnapshot,
@@ -417,6 +449,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
         string selectionJson,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var redo = await db.AuthoringHistoryEntries
             .Where(item => item.StreamId == stream.Id && item.Sequence > stream.CursorSequence)
             .ToListAsync(cancellationToken);
@@ -454,6 +489,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
         AuthoringTurnHistoryBatchStatus status,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         if (!FixedEquals(batch.BeforeHash, batch.AfterHash))
             await AppendEntryAsync(stream, Decompress(batch.AfterSnapshot), batch.ActionLabel, AuthoringHistoryOrigin.Assistant, batch.AssistantTurnId, batch.SelectionJson, cancellationToken);
         db.AuthoringHistoryDependencies.RemoveRange(batch.Dependencies);
@@ -467,6 +505,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
 
     private async Task PruneAsync(AuthoringHistoryStream stream, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var entries = await db.AuthoringHistoryEntries
             .Include(item => item.Dependencies)
             .Where(item => item.StreamId == stream.Id)
@@ -495,6 +536,8 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
 
     private async Task<string> CurrentResultHashAsync(AuthoringHistoryStream stream, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         if (stream.CursorSequence < stream.FirstSequence)
             return stream.BaselineHash;
         return await db.AuthoringHistoryEntries
@@ -505,6 +548,8 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
 
     private async Task<AuthoringHistoryState> BuildStateAsync(AuthoringHistoryStream stream, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var entries = await db.AuthoringHistoryEntries
             .AsNoTracking()
             .Where(item => item.StreamId == stream.Id)
@@ -551,6 +596,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
 
     private void ReplaceDependencies(AuthoringHistoryEntry entry, params string[] snapshots)
     {
+        using var databaseOperation = database.OpenWrite();
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         db.AuthoringHistoryDependencies.RemoveRange(entry.Dependencies);
         entry.Dependencies.Clear();
         foreach (var dependency in AuthoringSnapshotCodec.FindDependencies(snapshots))
@@ -565,6 +613,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
 
     private void ReplaceDependencies(AuthoringTurnHistoryBatch batch, params string[] snapshots)
     {
+        using var databaseOperation = database.OpenWrite();
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         db.AuthoringHistoryDependencies.RemoveRange(batch.Dependencies);
         batch.Dependencies.Clear();
         foreach (var dependency in AuthoringSnapshotCodec.FindDependencies(snapshots))
@@ -609,6 +660,9 @@ public sealed class AuthoringHistoryService(AppDbContext db) : IAuthoringHistory
 
     private async Task CleanupDetachedCompositionsAsync(Guid projectId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var retainedIds = await db.AuthoringHistoryDependencies.AsNoTracking()
             .Where(item => item.Kind == AuthoringHistoryDependencyKind.PageComposition)
             .Select(item => item.ResourceId)

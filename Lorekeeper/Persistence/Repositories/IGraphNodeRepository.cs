@@ -23,5 +23,4 @@ public interface IGraphNodeRepository
     Task AddAsync(GraphNode node, CancellationToken cancellationToken = default);
     void Update(GraphNode node);
     void Remove(GraphNode node);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

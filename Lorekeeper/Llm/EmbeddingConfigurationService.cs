@@ -1,27 +1,35 @@
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Llm;
 
 public sealed class EmbeddingConfigurationService(
-    IEmbeddingConfigurationRepository configurations,
-    ILlmProviderRepository providers,
-    IEmbeddingClient client,
-    IEmbeddingRebuildQueue rebuildQueue) : IEmbeddingConfigurationService
+IAppDatabaseOperationFactory database, IEmbeddingClient client, IEmbeddingRebuildQueue rebuildQueue) : IEmbeddingConfigurationService
 {
-    public Task<EmbeddingConfiguration?> GetActiveAsync(CancellationToken cancellationToken = default) =>
-        configurations.GetAsync(cancellationToken);
-
-    public async Task<IReadOnlyList<LlmProvider>> ListConnectionProvidersAsync(CancellationToken cancellationToken = default) =>
-        (await providers.GetAllAsync(cancellationToken))
-            .Where(provider => provider.CredentialSourceId is null)
-            .OrderBy(provider => provider.DisplayName ?? provider.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
+    public async Task<EmbeddingConfiguration?> GetActiveAsync(CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var configurations = databaseOperation.Repositories.EmbeddingConfigurations;
+        return await configurations.GetAsync(cancellationToken);
+    }
+    public async Task<IReadOnlyList<LlmProvider>> ListConnectionProvidersAsync(CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var providers = databaseOperation.Repositories.LlmProviders;
+        return (await providers.GetAllAsync(cancellationToken))
+                    .Where(provider => provider.CredentialSourceId is null)
+                    .OrderBy(provider => provider.DisplayName ?? provider.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+    }
     public async Task<EmbeddingTestResult> TestAsync(EmbeddingTestRequest request, CancellationToken cancellationToken = default)
     {
-        var provider = await providers.GetByIdAsync(request.ProviderId, cancellationToken)
-            ?? throw new InvalidOperationException($"Provider connection {request.ProviderId} was not found.");
+        LlmProvider provider;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            provider = await readOperation.Repositories.LlmProviders.GetByIdAsync(request.ProviderId, cancellationToken)
+                ?? throw new InvalidOperationException($"Provider connection {request.ProviderId} was not found.");
+        }
         if (provider.CredentialSourceId is not null)
             throw new InvalidOperationException("Embeddings must use a top-level provider connection, not a child model row.");
         ValidateProviderApiKind(provider, request.ApiKind);
@@ -39,21 +47,26 @@ public sealed class EmbeddingConfigurationService(
     {
         ValidateTestedDraft(draft);
 
-        var provider = await providers.GetByIdAsync(draft.ProviderId, cancellationToken)
-            ?? throw new InvalidOperationException($"Provider connection {draft.ProviderId} was not found.");
-        if (provider.CredentialSourceId is not null)
-            throw new InvalidOperationException("Embeddings must use a top-level provider connection, not a child model row.");
-        ValidateProviderApiKind(provider, draft.ApiKind);
+        bool changed;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            var provider = await readOperation.Repositories.LlmProviders.GetByIdAsync(draft.ProviderId, cancellationToken)
+                ?? throw new InvalidOperationException($"Provider connection {draft.ProviderId} was not found.");
+            if (provider.CredentialSourceId is not null)
+                throw new InvalidOperationException("Embeddings must use a top-level provider connection, not a child model row.");
+            ValidateProviderApiKind(provider, draft.ApiKind);
 
-        var existing = await configurations.GetAsync(cancellationToken);
-        var changed = existing is null
-            || existing.ProviderId != draft.ProviderId
-            || existing.ApiKind != draft.ApiKind
-            || !string.Equals(existing.ModelId, draft.ModelId.Trim(), StringComparison.Ordinal)
-            || existing.Dimensions != draft.TestedDimensions;
+            var snapshot = await readOperation.Repositories.EmbeddingConfigurations.GetAsync(cancellationToken);
+            changed = HasChanged(snapshot, draft);
+        }
 
         if (changed)
             await rebuildQueue.CancelActiveAndClearPendingAsync(cancellationToken);
+
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        var configurations = databaseOperation.Repositories.EmbeddingConfigurations;
+        var existing = await configurations.GetAsync(cancellationToken);
+        changed = HasChanged(existing, draft);
 
         var now = DateTime.UtcNow;
         var configuration = existing ?? new EmbeddingConfiguration
@@ -86,7 +99,7 @@ public sealed class EmbeddingConfigurationService(
         else
             configurations.Update(configuration);
 
-        await configurations.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
 
         if (changed)
             rebuildQueue.Enqueue(new EmbeddingRebuildRequest(configuration.Id, now));
@@ -96,11 +109,14 @@ public sealed class EmbeddingConfigurationService(
 
     public async Task<bool> ConfigureCodexDefaultIfUnsetAsync(int providerId, CancellationToken cancellationToken = default)
     {
-        if (await configurations.GetAsync(cancellationToken) is not null)
-            return false;
-
-        var provider = await providers.GetByIdAsync(providerId, cancellationToken)
-            ?? throw new InvalidOperationException($"Provider connection {providerId} was not found.");
+        LlmProvider provider;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            if (await readOperation.Repositories.EmbeddingConfigurations.GetAsync(cancellationToken) is not null)
+                return false;
+            provider = await readOperation.Repositories.LlmProviders.GetByIdAsync(providerId, cancellationToken)
+                ?? throw new InvalidOperationException($"Provider connection {providerId} was not found.");
+        }
         if (provider.CredentialSourceId is not null)
             throw new InvalidOperationException("Embeddings must use a top-level provider connection, not a child model row.");
         if (!CodexProvider.IsCodex(provider))
@@ -110,8 +126,11 @@ public sealed class EmbeddingConfigurationService(
             new EmbeddingTestRequest(provider.Id, EmbeddingApiKind.OpenAICompatible, CodexProvider.DefaultEmbeddingModel),
             cancellationToken);
 
-        if (await configurations.GetAsync(cancellationToken) is not null)
-            return false;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            if (await readOperation.Repositories.EmbeddingConfigurations.GetAsync(cancellationToken) is not null)
+                return false;
+        }
 
         await SaveAsync(
             new EmbeddingConfigurationDraft(
@@ -129,20 +148,29 @@ public sealed class EmbeddingConfigurationService(
 
     public async Task<EmbeddingUnsetResult> UnsetAsync(CancellationToken cancellationToken = default)
     {
-        var existing = await configurations.GetAsync(cancellationToken);
-        if (existing is null)
-            return new EmbeddingUnsetResult(Removed: false);
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            if (await readOperation.Repositories.EmbeddingConfigurations.GetAsync(cancellationToken) is null)
+                return new EmbeddingUnsetResult(Removed: false);
+        }
 
         await rebuildQueue.CancelActiveAndClearPendingAsync(cancellationToken);
 
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        var configurations = databaseOperation.Repositories.EmbeddingConfigurations;
+        var existing = await configurations.GetAsync(cancellationToken);
+        if (existing is null)
+            return new EmbeddingUnsetResult(Removed: false);
         configurations.Remove(existing);
-        await configurations.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
 
         return new EmbeddingUnsetResult(Removed: true);
     }
 
     public async Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var configurations = databaseOperation.Repositories.EmbeddingConfigurations;
         var active = await configurations.GetAsync(cancellationToken);
         return active is not null
             && active.Provider is not null
@@ -167,6 +195,13 @@ public sealed class EmbeddingConfigurationService(
         string.IsNullOrWhiteSpace(modelId)
             ? throw new InvalidOperationException("Embedding model id is required.")
             : modelId.Trim();
+
+    private static bool HasChanged(EmbeddingConfiguration? existing, EmbeddingConfigurationDraft draft) =>
+        existing is null
+        || existing.ProviderId != draft.ProviderId
+        || existing.ApiKind != draft.ApiKind
+        || !string.Equals(existing.ModelId, draft.ModelId.Trim(), StringComparison.Ordinal)
+        || existing.Dimensions != draft.TestedDimensions;
 
     private static void ValidateProviderApiKind(LlmProvider provider, EmbeddingApiKind apiKind)
     {

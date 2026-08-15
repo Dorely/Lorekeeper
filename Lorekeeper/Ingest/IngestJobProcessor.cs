@@ -9,6 +9,7 @@ using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Tokens;
 using Microsoft.Extensions.AI;
@@ -17,23 +18,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Ingest;
 
 public sealed class IngestJobProcessor(
-    IIngestRepository ingest,
-    ILlmProviderService providerService,
-    IChatClientFactory chatClientFactory,
-    ITokenCounter tokenCounter,
-    IngestAgentTools tools,
-    IEntityTypeService entityTypes,
-    IIngestVectorIndexingService ingestVectorIndexing,
-    IIngestGraphSync graphSync,
-    IIngestJobNotifier notifier,
-    IContextIndexingService contextIndexing,
-    IGraphNodeRepository nodes,
-    IGraphEdgeRepository edges,
-    IOptions<AgentOptions> options,
-    IOptions<EntityVisualContextOptions> visualOptions,
-    IEntityVisualExampleService entityVisualExamples,
-    IEntityVisualContextService entityVisualContext,
-    ILogger<IngestJobProcessor> logger)
+IAppDatabaseOperationFactory database, ILlmProviderService providerService, IChatClientFactory chatClientFactory, ITokenCounter tokenCounter, IngestAgentTools tools, IEntityTypeService entityTypes, IIngestVectorIndexingService ingestVectorIndexing, IIngestGraphSync graphSync, IIngestJobNotifier notifier, IContextIndexingService contextIndexing, IOptions<AgentOptions> options, IOptions<EntityVisualContextOptions> visualOptions, IEntityVisualExampleService entityVisualExamples, IEntityVisualContextService entityVisualContext, ILogger<IngestJobProcessor> logger)
 {
     private const string _systemPrompt = """
         You are an ingestion extraction agent for Lorekeeper.
@@ -78,27 +63,30 @@ public sealed class IngestJobProcessor(
 
         try
         {
-            var job = await ingest.GetJobProcessorDetailAsync(jobId, cancellationToken)
-                ?? throw new InvalidOperationException($"Ingest job {jobId} not found.");
-
-            if (job.Status is not (IngestJobStatus.Queued or IngestJobStatus.Running or IngestJobStatus.StopRequested))
-                return;
-
-            job.Status = IngestJobStatus.Running;
-            job.StartedAt ??= DateTime.UtcNow;
-            job.CompletedAt = null;
-            job.ErrorMessage = null;
-            job.CurrentMessage = "Preparing source.";
-            job.UpdatedAt = DateTime.UtcNow;
-            ingest.UpdateJob(job);
-            await ingest.SaveChangesAsync(cancellationToken);
+            IngestJob job;
+            await using (var operation = await database.OpenWriteAsync(cancellationToken))
+            {
+                var ingest = operation.Repositories.Ingest;
+                job = await ingest.GetJobProcessorDetailAsync(jobId, cancellationToken)
+                    ?? throw new InvalidOperationException($"Ingest job {jobId} not found.");
+                if (job.Status is not (IngestJobStatus.Queued or IngestJobStatus.Running or IngestJobStatus.StopRequested))
+                    return;
+                job.Status = IngestJobStatus.Running;
+                job.StartedAt ??= DateTime.UtcNow;
+                job.CompletedAt = null;
+                job.ErrorMessage = null;
+                job.CurrentMessage = "Preparing source.";
+                job.UpdatedAt = DateTime.UtcNow;
+                ingest.UpdateJob(job);
+                await operation.SaveChangesAsync(cancellationToken);
+            }
             Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
 
             var provider = await ResolveJobProviderAsync(job, cancellationToken);
 
             await ingestVectorIndexing.EnsureVectorFragmentsAsync(job.Source, cancellationToken: cancellationToken);
             var sourceChunks = job.Chunks.Select(chunk => chunk.SourceChunk).OrderBy(chunk => chunk.Index).ToList();
-            var sourceBlocks = await ingest.ListSourceBlocksAsync(job.SourceId, cancellationToken);
+            var sourceBlocks = await ReadSourceBlocksAsync(job.SourceId, cancellationToken);
             await graphSync.EnsureSourceAsync(job.Source, sourceChunks, sourceBlocks, cancellationToken);
 
             var chat = await chatClientFactory.CreateChatClientAsync(provider.Id, cancellationToken);
@@ -107,7 +95,7 @@ public sealed class IngestJobProcessor(
             foreach (var jobChunk in job.Chunks.OrderBy(chunk => chunk.SourceChunkIndex))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var latestJob = await ingest.GetJobAsync(job.Id, cancellationToken)
+                var latestJob = await ReadJobAsync(job.Id, cancellationToken)
                     ?? throw new InvalidOperationException($"Ingest job {job.Id} not found.");
                 if (latestJob.Status == IngestJobStatus.StopRequested)
                 {
@@ -122,13 +110,12 @@ public sealed class IngestJobProcessor(
                 activeChunk = null;
 
                 job.CompletedSourceChunks = job.Chunks.Count(chunk => chunk.Status == IngestJobChunkStatus.Completed);
-                var reportItems = await ingest.ListStagingRecordsAsync(job.Id, cancellationToken);
+                var reportItems = await ReadStagingRecordsAsync(job.Id, cancellationToken);
                 job.CreatedEntityCount = CountDistinctEntities(reportItems);
                 job.CreatedRelationshipCount = CountDistinctRelationships(reportItems);
                 job.CurrentMessage = $"Completed source chunk {jobChunk.SourceChunkIndex + 1} of {job.TotalSourceChunks}.";
                 job.UpdatedAt = DateTime.UtcNow;
-                ingest.UpdateJob(job);
-                await ingest.SaveChangesAsync(cancellationToken);
+                await SaveJobAsync(job, cancellationToken);
                 Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
             }
 
@@ -140,8 +127,7 @@ public sealed class IngestJobProcessor(
             job.CurrentMessage = "Completed.";
             job.CompletedAt = DateTime.UtcNow;
             job.UpdatedAt = DateTime.UtcNow;
-            ingest.UpdateJob(job);
-            await ingest.SaveChangesAsync(CancellationToken.None);
+            await SaveJobAsync(job, CancellationToken.None);
             Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Completed);
         }
         catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
@@ -170,12 +156,9 @@ public sealed class IngestJobProcessor(
         jobChunk.ErrorMessage = null;
         ResetLlmTokenCount(jobChunk);
         jobChunk.UpdatedAt = DateTime.UtcNow;
-        ingest.UpdateJobChunk(jobChunk);
-
         job.CurrentMessage = $"Processing source chunk {jobChunk.SourceChunkIndex + 1} of {job.TotalSourceChunks}: {sourceChunk.Title}";
         job.UpdatedAt = DateTime.UtcNow;
-        ingest.UpdateJob(job);
-        await ingest.SaveChangesAsync(cancellationToken);
+        await SaveJobAndChunkAsync(job, jobChunk, cancellationToken);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
 
         string? finalText = null;
@@ -206,7 +189,7 @@ public sealed class IngestJobProcessor(
             {
                 var delayMs = RetryDelayMs(attempt);
                 logger.LogWarning(ex, "Transient ingest LLM failure for job {JobId}, source chunk {SourceChunkIndex}, attempt {Attempt}/{MaxAttempts}. Retrying in {DelayMs} ms.", job.Id, jobChunk.SourceChunkIndex, attempt, maxAttempts, delayMs);
-                await ingest.AddEventAsync(new IngestJobEvent
+                await AddEventAsync(new IngestJobEvent
                 {
                     JobId = job.Id,
                     Level = IngestJobEventLevel.Warning,
@@ -224,7 +207,6 @@ public sealed class IngestJobProcessor(
                         error = ex.Message,
                     }),
                 }, cancellationToken);
-                await ingest.SaveChangesAsync(cancellationToken);
                 Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Event);
                 NotifyLive(job.ProjectId, job.Id, new IngestLiveRetryScheduled(sourceChunk.Id, sourceChunk.Index, sourceChunk.Title, attempt, maxAttempts, delayMs, ex.Message));
                 await Task.Delay(delayMs, cancellationToken);
@@ -242,25 +224,23 @@ public sealed class IngestJobProcessor(
         {
             sourceChunk.Summary = Truncate(finalText, 800);
             sourceChunk.UpdatedAt = DateTime.UtcNow;
-            ingest.UpdateSourceChunk(sourceChunk);
             sourceGraphChanged = true;
         }
 
-        var reportItems = await ingest.ListStagingRecordsAsync(job.Id, cancellationToken);
+        var reportItems = await ReadStagingRecordsAsync(job.Id, cancellationToken);
         jobChunk.Status = IngestJobChunkStatus.Completed;
         jobChunk.Summary = sourceChunk.Summary;
         jobChunk.CreatedEntityCount = reportItems.Count(item => item.SourceChunkId == sourceChunk.Id && item.Kind == IngestStagingRecordKind.Entity && item.Status == IngestStagingRecordStatus.Active);
         jobChunk.CreatedRelationshipCount = reportItems.Count(item => item.SourceChunkId == sourceChunk.Id && item.Kind == IngestStagingRecordKind.Relationship && item.Status == IngestStagingRecordStatus.Active);
         jobChunk.CompletedAt = DateTime.UtcNow;
         jobChunk.UpdatedAt = DateTime.UtcNow;
-        ingest.UpdateJobChunk(jobChunk);
-        await ingest.SaveChangesAsync(cancellationToken);
+        await SaveSourceAndJobChunkAsync(sourceGraphChanged ? sourceChunk : null, jobChunk, cancellationToken);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
 
         if (mutated || sourceGraphChanged)
         {
-            var sourceChunks = await ingest.ListSourceChunksAsync(job.SourceId, cancellationToken);
-            var sourceBlocks = await ingest.ListSourceBlocksAsync(job.SourceId, cancellationToken);
+            var sourceChunks = await ReadSourceChunksAsync(job.SourceId, cancellationToken);
+            var sourceBlocks = await ReadSourceBlocksAsync(job.SourceId, cancellationToken);
             await graphSync.EnsureSourceAsync(job.Source, sourceChunks, sourceBlocks, cancellationToken);
             if (sourceGraphChanged)
                 await contextIndexing.ReindexIngestSourceChunkAsync(sourceChunk.Id, cancellationToken);
@@ -273,7 +253,7 @@ public sealed class IngestJobProcessor(
         int maxIterations,
         CancellationToken cancellationToken)
     {
-        var reportItems = await ingest.ListStagingRecordsAsync(job.Id, cancellationToken);
+        var reportItems = await ReadStagingRecordsAsync(job.Id, cancellationToken);
         var touchedEntities = reportItems
             .Where(item => item.Status == IngestStagingRecordStatus.Active
                 && item.Kind == IngestStagingRecordKind.Entity
@@ -292,7 +272,7 @@ public sealed class IngestJobProcessor(
             return true;
         }
 
-        await ingest.AddEventAsync(new IngestJobEvent
+        await AddEventAsync(new IngestJobEvent
         {
             JobId = job.Id,
             Level = IngestJobEventLevel.Info,
@@ -300,14 +280,13 @@ public sealed class IngestJobProcessor(
             Message = $"Starting final source review for {touchedEntities.Count} touched entities.",
             PayloadJson = JsonSerializer.Serialize(new { entityCount = touchedEntities.Count }),
         }, cancellationToken);
-        await ingest.SaveChangesAsync(cancellationToken);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Event);
 
         var maxAttempts = Math.Max(1, options.Value.IngestMaxTransientRetries);
         for (var index = 0; index < touchedEntities.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var latestJob = await ingest.GetJobAsync(job.Id, cancellationToken)
+            var latestJob = await ReadJobAsync(job.Id, cancellationToken)
                 ?? throw new InvalidOperationException($"Ingest job {job.Id} not found.");
             if (latestJob.Status == IngestJobStatus.StopRequested)
             {
@@ -322,8 +301,7 @@ public sealed class IngestJobProcessor(
 
             job.CurrentMessage = $"Final source review {index + 1} of {touchedEntities.Count}: {entityTitle}";
             job.UpdatedAt = DateTime.UtcNow;
-            ingest.UpdateJob(job);
-            await ingest.SaveChangesAsync(cancellationToken);
+            await SaveJobAsync(job, cancellationToken);
             Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
 
             for (var attempt = 1; attempt <= maxAttempts; attempt++)
@@ -359,7 +337,7 @@ public sealed class IngestJobProcessor(
                 {
                     var delayMs = RetryDelayMs(attempt);
                     logger.LogWarning(ex, "Transient final ingest review failure for job {JobId}, entity {EntityId}, attempt {Attempt}/{MaxAttempts}. Retrying in {DelayMs} ms.", job.Id, entityId, attempt, maxAttempts, delayMs);
-                    await ingest.AddEventAsync(new IngestJobEvent
+                    await AddEventAsync(new IngestJobEvent
                     {
                         JobId = job.Id,
                         Level = IngestJobEventLevel.Warning,
@@ -377,7 +355,6 @@ public sealed class IngestJobProcessor(
                             error = ex.Message,
                         }),
                     }, cancellationToken);
-                    await ingest.SaveChangesAsync(cancellationToken);
                     Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Event);
                     NotifyLive(job.ProjectId, job.Id, new IngestLiveRetryScheduled(entityId, -1, liveTitle, attempt, maxAttempts, delayMs, ex.Message));
                     await Task.Delay(delayMs, cancellationToken);
@@ -393,7 +370,7 @@ public sealed class IngestJobProcessor(
         await PromoteFinalizedRelationshipStagingRecordsAsync(job, cancellationToken);
         await MarkRemainingStagingRecordsFinalizedAsync(job.Id, cancellationToken);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
-        await ingest.AddEventAsync(new IngestJobEvent
+        await AddEventAsync(new IngestJobEvent
         {
             JobId = job.Id,
             Level = IngestJobEventLevel.Info,
@@ -401,9 +378,66 @@ public sealed class IngestJobProcessor(
             Message = $"Completed final source review for {touchedEntities.Count} touched entities.",
             PayloadJson = JsonSerializer.Serialize(new { entityCount = touchedEntities.Count }),
         }, cancellationToken);
-        await ingest.SaveChangesAsync(cancellationToken);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Event);
         return true;
+    }
+
+    private async Task<IngestJob?> ReadJobAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        return await operation.Repositories.Ingest.GetJobAsync(jobId, cancellationToken);
+    }
+
+    private async Task<List<IngestStagingRecord>> ReadStagingRecordsAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        return await operation.Repositories.Ingest.ListStagingRecordsAsync(jobId, cancellationToken);
+    }
+
+    private async Task<List<IngestSourceChunk>> ReadSourceChunksAsync(Guid sourceId, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        return await operation.Repositories.Ingest.ListSourceChunksAsync(sourceId, cancellationToken);
+    }
+
+    private async Task<List<IngestSourceBlock>> ReadSourceBlocksAsync(Guid sourceId, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        return await operation.Repositories.Ingest.ListSourceBlocksAsync(sourceId, cancellationToken);
+    }
+
+    private async Task SaveJobAsync(IngestJob job, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        operation.Repositories.Ingest.UpdateJob(job);
+        await operation.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task SaveJobAndChunkAsync(IngestJob job, IngestJobChunk chunk, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        operation.Repositories.Ingest.UpdateJob(job);
+        operation.Repositories.Ingest.UpdateJobChunk(chunk);
+        await operation.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task SaveSourceAndJobChunkAsync(
+        IngestSourceChunk? sourceChunk,
+        IngestJobChunk jobChunk,
+        CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        if (sourceChunk is not null)
+            operation.Repositories.Ingest.UpdateSourceChunk(sourceChunk);
+        operation.Repositories.Ingest.UpdateJobChunk(jobChunk);
+        await operation.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task AddEventAsync(IngestJobEvent jobEvent, CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        await operation.Repositories.Ingest.AddEventAsync(jobEvent, cancellationToken);
+        await operation.SaveChangesAsync(cancellationToken);
     }
 
     private async Task MarkFinalizedEntityStagingRecordsAsync(
@@ -411,6 +445,9 @@ public sealed class IngestJobProcessor(
         Guid entityId,
         CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var reportItems = await ingest.ListStagingRecordsAsync(jobId, cancellationToken);
         var changed = false;
 
@@ -424,11 +461,16 @@ public sealed class IngestJobProcessor(
         }
 
         if (changed)
-            await ingest.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     private async Task PromoteFinalizedRelationshipStagingRecordsAsync(IngestJob job, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
+        var nodes = databaseOperation.Repositories.GraphNodes;
+        var edges = databaseOperation.Repositories.GraphEdges;
         var reportItems = await ingest.ListStagingRecordsAsync(job.Id, cancellationToken);
         var relationshipItems = reportItems
             .Where(item => item.Status == IngestStagingRecordStatus.Active && item.Kind == IngestStagingRecordKind.Relationship)
@@ -447,7 +489,7 @@ public sealed class IngestJobProcessor(
             job.CurrentMessage = $"Building relationship links {index + 1} of {relationshipItems.Count}: {RelationshipPromotionLabel(item)}";
             job.UpdatedAt = DateTime.UtcNow;
             ingest.UpdateJob(job);
-            await ingest.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
             Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
 
             if (!TryReadRelationshipPromotionInput(item, job, out var input, out var skipReason))
@@ -456,7 +498,7 @@ public sealed class IngestJobProcessor(
                 logger.LogWarning("Skipping ingest relationship staging record {StagingRecordId} during finalization: {Reason}", item.Id, skipReason);
                 MarkStagingRecordFailed(item, skipReason);
                 ingest.UpdateStagingRecord(item);
-                await ingest.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
                 Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
                 continue;
             }
@@ -469,7 +511,7 @@ public sealed class IngestJobProcessor(
                 logger.LogWarning("Skipping ingest relationship staging record {StagingRecordId} during finalization because one or both endpoints could not be resolved.", item.Id);
                 MarkStagingRecordFailed(item, "one or both endpoints could not be resolved");
                 ingest.UpdateStagingRecord(item);
-                await ingest.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
                 Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
                 continue;
             }
@@ -480,7 +522,7 @@ public sealed class IngestJobProcessor(
                 logger.LogWarning("Skipping ingest relationship staging record {StagingRecordId} during finalization because one or both endpoints are structural graph nodes.", item.Id);
                 MarkStagingRecordFailed(item, "one or both endpoints are structural graph nodes");
                 ingest.UpdateStagingRecord(item);
-                await ingest.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
                 Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
                 continue;
             }
@@ -512,7 +554,7 @@ public sealed class IngestJobProcessor(
             if (created)
             {
                 await edges.AddAsync(edge, cancellationToken);
-                await edges.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
             }
             else
             {
@@ -529,7 +571,7 @@ public sealed class IngestJobProcessor(
             affectedEntityIds.Add(input.FromEntityId);
             affectedEntityIds.Add(input.ToEntityId);
             promoted++;
-            await ingest.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
             Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
         }
 
@@ -547,7 +589,7 @@ public sealed class IngestJobProcessor(
             }, cancellationToken);
         }
 
-        await ingest.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Report);
 
         foreach (var entityId in affectedEntityIds)
@@ -556,6 +598,9 @@ public sealed class IngestJobProcessor(
 
     private async Task MarkRemainingStagingRecordsFinalizedAsync(Guid jobId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var reportItems = await ingest.ListStagingRecordsAsync(jobId, cancellationToken);
         var changed = false;
         foreach (var item in reportItems.Where(item => item.Status == IngestStagingRecordStatus.Active))
@@ -565,7 +610,7 @@ public sealed class IngestJobProcessor(
         }
 
         if (changed)
-            await ingest.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<string?> RunChunkConversationAsync(
@@ -1027,6 +1072,9 @@ public sealed class IngestJobProcessor(
         string? streamExceptionMessage,
         bool? streamCancellationRequested)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         try
         {
             await ingest.AddEventAsync(new IngestJobEvent
@@ -1050,7 +1098,7 @@ public sealed class IngestJobProcessor(
                     streamCancellationRequested,
                 }),
             }, CancellationToken.None);
-            await ingest.SaveChangesAsync(CancellationToken.None);
+            await databaseOperation.SaveChangesAsync(CancellationToken.None);
             Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Event);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -1106,6 +1154,9 @@ public sealed class IngestJobProcessor(
 
     private async Task<string> InvokeToolAsync(IList<AITool> aiTools, FunctionCallContent functionCall, Guid projectId, Guid jobId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var argsJson = ToolCallArguments.Serialize(functionCall.Arguments);
         var startedAt = DateTime.UtcNow;
         try
@@ -1123,7 +1174,7 @@ public sealed class IngestJobProcessor(
                     Message = functionCall.Name,
                     PayloadJson = JsonSerializer.Serialize(new { arguments = argsJson, error = unknownToolMessage, startedAt, completedAt = DateTime.UtcNow }),
                 }, cancellationToken);
-                await ingest.SaveChangesAsync(cancellationToken);
+                await databaseOperation.SaveChangesAsync(cancellationToken);
                 Notify(projectId, jobId, IngestJobUpdateKind.Event);
                 return $"Error: {unknownToolMessage}";
             }
@@ -1142,7 +1193,7 @@ public sealed class IngestJobProcessor(
                 Message = functionCall.Name,
                 PayloadJson = JsonSerializer.Serialize(new { arguments = argsJson, result = text, startedAt, completedAt = DateTime.UtcNow }),
             }, cancellationToken);
-            await ingest.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
             Notify(projectId, jobId, returnedError ? IngestJobUpdateKind.Event : IngestJobUpdateKind.Report);
             return text;
         }
@@ -1161,7 +1212,7 @@ public sealed class IngestJobProcessor(
                 Message = functionCall.Name,
                 PayloadJson = JsonSerializer.Serialize(new { arguments = argsJson, error = ex.Message, startedAt, completedAt = DateTime.UtcNow }),
             }, cancellationToken);
-            await ingest.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
             Notify(projectId, jobId, IngestJobUpdateKind.Event);
             return $"Error: {ex.Message}";
         }
@@ -1169,6 +1220,9 @@ public sealed class IngestJobProcessor(
 
     private async Task<LlmProvider> ResolveJobProviderAsync(IngestJob job, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         if (job.ProviderId is int providerId)
         {
             var provider = await providerService.GetByIdAsync(providerId, cancellationToken);
@@ -1199,7 +1253,7 @@ public sealed class IngestJobProcessor(
             job.ModelName = fallback.ModelId;
             job.UpdatedAt = DateTime.UtcNow;
             ingest.UpdateJob(job);
-            await ingest.SaveChangesAsync(cancellationToken);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
             Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Event);
             return fallback;
         }
@@ -1213,7 +1267,7 @@ public sealed class IngestJobProcessor(
         job.ModelName = defaultProvider.ModelId;
         job.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateJob(job);
-        await ingest.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Progress);
         return defaultProvider;
     }
@@ -1328,6 +1382,8 @@ public sealed class IngestJobProcessor(
 
     private async Task<string> BuildTouchedEntityIndexAsync(Guid jobId, Guid? sourceChunkId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var ingest = databaseOperation.Repositories.Ingest;
         var reportItems = await ingest.ListStagingRecordsAsync(jobId, cancellationToken);
         var entities = reportItems
             .Where(item => item.Kind == IngestStagingRecordKind.Entity && item.Status == IngestStagingRecordStatus.Active)
@@ -1563,6 +1619,9 @@ public sealed class IngestJobProcessor(
 
     private async Task MarkStoppedAsync(Guid jobId, IngestJobChunk? activeChunk)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var job = await ingest.GetJobAsync(jobId, CancellationToken.None);
         if (job is null) return;
 
@@ -1578,7 +1637,7 @@ public sealed class IngestJobProcessor(
         job.CompletedAt = DateTime.UtcNow;
         job.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateJob(job);
-        await ingest.SaveChangesAsync(CancellationToken.None);
+        await databaseOperation.SaveChangesAsync(CancellationToken.None);
         if (activeChunk is not null)
             NotifyLiveTokenCount(job.ProjectId, job.Id, activeChunk);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Stopped);
@@ -1586,6 +1645,9 @@ public sealed class IngestJobProcessor(
 
     private async Task MarkFailedAsync(Guid jobId, IngestJobChunk? activeChunk, string errorMessage)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(default);
+        databaseOperation.ShareWithNestedOperations();
+        var ingest = databaseOperation.Repositories.Ingest;
         var job = await ingest.GetJobAsync(jobId, CancellationToken.None);
         if (job is null) return;
 
@@ -1603,7 +1665,7 @@ public sealed class IngestJobProcessor(
         job.CompletedAt = DateTime.UtcNow;
         job.UpdatedAt = DateTime.UtcNow;
         ingest.UpdateJob(job);
-        await ingest.SaveChangesAsync(CancellationToken.None);
+        await databaseOperation.SaveChangesAsync(CancellationToken.None);
         if (activeChunk is not null)
             NotifyLiveTokenCount(job.ProjectId, job.Id, activeChunk);
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Failed);

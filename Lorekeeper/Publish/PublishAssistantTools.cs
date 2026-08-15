@@ -93,10 +93,10 @@ public sealed class PublishAssistantTools(
     IProjectImageService projectImages,
     IPrintProductRegistry printProducts,
     IPrintGeometryService printGeometry,
+    IAppDatabaseOperationFactory database,
     IEditionContentService? editionContent = null,
     ICompositionCanvasPreviewService? canvasPreviews = null,
     ICompositionService? compositions = null,
-    AppDbContext? db = null,
     IAgentProjectImageWorkflow? imageWorkflow = null,
     IProjectSearchService? projectSearch = null) : IPublishAssistantTools
 {
@@ -1060,10 +1060,14 @@ public sealed class PublishAssistantTools(
     {
         offset = Math.Max(0, offset);
         limit = Math.Clamp(limit, 1, 50);
-        var projectSlug = await (db ?? throw new InvalidOperationException("Project lookup is unavailable.")).Projects.AsNoTracking()
-            .Where(item => item.Id == context.ProjectId)
-            .Select(item => item.Slug)
-            .SingleAsync(context.TurnCancellationToken);
+        string projectSlug;
+        await using (var operation = await database.OpenReadAsync(context.TurnCancellationToken))
+        {
+            projectSlug = await operation.Db.Projects
+                .Where(item => item.Id == context.ProjectId)
+                .Select(item => item.Slug)
+                .SingleAsync(context.TurnCancellationToken);
+        }
         var releases = await RequireEditionContent().ListReleasesAsync(context.ProjectId, context.TurnCancellationToken);
         var release = releases.SingleOrDefault(item => item.EditionId == releaseId)
             ?? throw new KeyNotFoundException("Publication release not found.");
@@ -1712,9 +1716,20 @@ public sealed class PublishAssistantTools(
     {
         var start = Math.Max(0, offset);
         var take = Math.Clamp(limit, 1, 80);
-        var store = db ?? throw new InvalidOperationException("Publication visual storage is unavailable.");
-        var chapters = await store.Chapters.AsNoTracking().Where(item => item.ProjectId == context.ProjectId)
-            .OrderBy(item => item.Order).Select(item => new { item.Id, item.Title, item.ManuscriptJson }).ToListAsync(context.TurnCancellationToken);
+        IReadOnlyList<Chapter> chapters;
+        await using (var operation = await database.OpenReadAsync(context.TurnCancellationToken))
+        {
+            chapters = await operation.Db.Chapters
+                .Where(item => item.ProjectId == context.ProjectId)
+                .OrderBy(item => item.Order)
+                .Select(item => new Chapter
+                {
+                    Id = item.Id,
+                    Title = item.Title,
+                    ManuscriptJson = item.ManuscriptJson,
+                })
+                .ToListAsync(context.TurnCancellationToken);
+        }
         var visuals = chapters.SelectMany(chapter => ManuscriptCodec.Deserialize(chapter.ManuscriptJson).Content
             .Where(block => block.Type is ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage)
             .Select(block => new

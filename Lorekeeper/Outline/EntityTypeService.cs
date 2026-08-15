@@ -1,11 +1,11 @@
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Outline;
 
 public sealed class EntityTypeService(
-    IGraphEntityTypeRepository entityTypes,
-    IGraphNodeRepository nodes) : IEntityTypeService
+IAppDatabaseOperationFactory database) : IEntityTypeService
 {
     public const string ProjectNodeType = "Project";
     public const string ActNodeType = "Act";
@@ -44,6 +44,8 @@ public sealed class EntityTypeService(
         bool includeStructural = false,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var entityTypes = databaseOperation.Repositories.GraphEntityTypes;
         await EnsureDefaultsAsync(projectId, cancellationToken);
         await EnsureDiscoveredTypesAsync(projectId, cancellationToken);
 
@@ -61,6 +63,9 @@ public sealed class EntityTypeService(
         bool isChapterScoped = false,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var entityTypes = databaseOperation.Repositories.GraphEntityTypes;
         var type = NormalizeTypeKey(labelOrType);
         var existing = await entityTypes.FindAsync(projectId, type, cancellationToken);
         if (existing is not null)
@@ -79,12 +84,15 @@ public sealed class EntityTypeService(
         };
 
         await entityTypes.AddAsync(entityType, cancellationToken);
-        await entityTypes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return Project(entityType);
     }
 
     public async Task EnsureDefaultsAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var entityTypes = databaseOperation.Repositories.GraphEntityTypes;
         foreach (var seed in Defaults)
         {
             var existing = await entityTypes.FindAsync(projectId, seed.Type, cancellationToken);
@@ -104,11 +112,15 @@ public sealed class EntityTypeService(
             }
         }
 
-        await entityTypes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     private async Task EnsureDiscoveredTypesAsync(Guid projectId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var entityTypes = databaseOperation.Repositories.GraphEntityTypes;
+        var nodes = databaseOperation.Repositories.GraphNodes;
         var registered = (await entityTypes.ListByProjectAsync(projectId, cancellationToken))
             .Select(t => t.Type)
             .ToHashSet(StringComparer.Ordinal);
@@ -146,11 +158,13 @@ public sealed class EntityTypeService(
             }, cancellationToken);
         }
 
-        await entityTypes.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<int> NextSortOrderAsync(Guid projectId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var entityTypes = databaseOperation.Repositories.GraphEntityTypes;
         var list = await entityTypes.ListByProjectAsync(projectId, cancellationToken);
         var nonStructural = list.Where(t => !t.IsStructural).ToList();
         return nonStructural.Count == 0 ? 100 : nonStructural.Max(t => t.SortOrder) + 100;

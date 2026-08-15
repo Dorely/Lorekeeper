@@ -12,5 +12,4 @@ public interface ISearchProviderRepository
     void Update(SearchProvider provider);
     void Remove(SearchProvider provider);
     Task SetActiveAsync(int id, CancellationToken cancellationToken = default);
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

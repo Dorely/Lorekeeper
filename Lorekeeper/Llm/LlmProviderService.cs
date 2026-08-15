@@ -1,27 +1,39 @@
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Llm;
 
 public class LlmProviderService(
-    ILlmProviderRepository providers,
-    ICodexAuthService codexAuth) : ILlmProviderService
+IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProviderService
 {
-    public Task<List<LlmProvider>> GetAllAsync(CancellationToken cancellationToken = default) =>
-        providers.GetAllAsync(cancellationToken);
-
-    public Task<LlmProvider?> GetByIdAsync(int id, CancellationToken cancellationToken = default) =>
-        providers.GetByIdAsync(id, cancellationToken);
-
-    public Task<LlmProvider?> GetByNameAsync(string name, CancellationToken cancellationToken = default) =>
-        providers.GetByNameAsync(name, cancellationToken);
-
-    public Task<LlmProvider?> GetDefaultAsync(CancellationToken cancellationToken = default) =>
-        providers.GetDefaultAsync(cancellationToken);
-
+    public async Task<List<LlmProvider>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var providers = databaseOperation.Repositories.LlmProviders;
+        return await providers.GetAllAsync(cancellationToken);
+    }
+    public async Task<LlmProvider?> GetByIdAsync(int id, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var providers = databaseOperation.Repositories.LlmProviders;
+        return await providers.GetByIdAsync(id, cancellationToken);
+    }
+    public async Task<LlmProvider?> GetByNameAsync(string name, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var providers = databaseOperation.Repositories.LlmProviders;
+        return await providers.GetByNameAsync(name, cancellationToken);
+    }
+    public async Task<LlmProvider?> GetDefaultAsync(CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var providers = databaseOperation.Repositories.LlmProviders;
+        return await providers.GetDefaultAsync(cancellationToken);
+    }
     public async Task<ChatProviderAvailability> GetDefaultChatProviderAvailabilityAsync(CancellationToken cancellationToken = default)
     {
-        var all = await providers.GetAllAsync(cancellationToken);
+        var all = await GetAllAsync(cancellationToken);
         if (all.Count == 0)
             return ChatProviderAvailability.Unavailable("Configure and test a chat provider in Settings > Providers to enable LLM features.");
 
@@ -44,7 +56,7 @@ public class LlmProviderService(
 
     public async Task<VisionProviderAvailability> GetDefaultVisionProviderAvailabilityAsync(CancellationToken cancellationToken = default)
     {
-        var all = await providers.GetAllAsync(cancellationToken);
+        var all = await GetAllAsync(cancellationToken);
         if (all.Count == 0)
             return VisionProviderAvailability.Unavailable("Configure and test a vision-capable provider in Settings > Providers to enable PDF image reading.");
 
@@ -67,7 +79,7 @@ public class LlmProviderService(
 
     public async Task<List<LlmProvider>> ListWorkingChatProvidersAsync(CancellationToken cancellationToken = default)
     {
-        var all = await providers.GetAllAsync(cancellationToken);
+        var all = await GetAllAsync(cancellationToken);
         var working = new List<LlmProvider>();
         foreach (var provider in all)
         {
@@ -80,7 +92,7 @@ public class LlmProviderService(
 
     public async Task<List<LlmProvider>> ListWorkingVisionProvidersAsync(CancellationToken cancellationToken = default)
     {
-        var all = await providers.GetAllAsync(cancellationToken);
+        var all = await GetAllAsync(cancellationToken);
         var working = new List<LlmProvider>();
         foreach (var provider in all)
         {
@@ -93,19 +105,19 @@ public class LlmProviderService(
 
     public async Task<bool> IsChatProviderWorkingAsync(int providerId, CancellationToken cancellationToken = default)
     {
-        var provider = await providers.GetByIdAsync(providerId, cancellationToken);
+        var provider = await GetByIdAsync(providerId, cancellationToken);
         return provider is not null && await IsChatProviderWorkingAsync(provider, cancellationToken);
     }
 
     public async Task<bool> IsVisionProviderWorkingAsync(int providerId, CancellationToken cancellationToken = default)
     {
-        var provider = await providers.GetByIdAsync(providerId, cancellationToken);
+        var provider = await GetByIdAsync(providerId, cancellationToken);
         return provider is not null && await IsVisionProviderWorkingAsync(provider, cancellationToken);
     }
 
     public async Task<bool> IsCodexConnectedAsync(CancellationToken cancellationToken = default)
     {
-        var provider = await providers.GetByNameAsync(CodexProvider.Name, cancellationToken);
+        var provider = await GetByNameAsync(CodexProvider.Name, cancellationToken);
         if (provider is null || !CodexProvider.IsCodex(provider))
             return false;
 
@@ -121,23 +133,32 @@ public class LlmProviderService(
 
     public async Task<LlmProvider> CreateAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var providers = databaseOperation.Repositories.LlmProviders;
         provider.CreatedAt = DateTime.UtcNow;
         provider.UpdatedAt = DateTime.UtcNow;
         await providers.AddAsync(provider, cancellationToken);
-        await providers.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return provider;
     }
 
     public async Task<LlmProvider> UpdateAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var providers = databaseOperation.Repositories.LlmProviders;
         provider.UpdatedAt = DateTime.UtcNow;
         providers.Update(provider);
-        await providers.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return provider;
     }
 
     public async Task UpdateConnectionAsync(LlmConnectionUpdate update, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var providers = databaseOperation.Repositories.LlmProviders;
         var all = await providers.GetAllAsync(cancellationToken);
         var connection = all.FirstOrDefault(provider => provider.Id == update.Id)
             ?? throw new InvalidOperationException("Provider connection was not found.");
@@ -164,15 +185,18 @@ public class LlmProviderService(
             providers.Update(provider);
         }
 
-        await providers.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task DeleteAsync(int id, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var providers = databaseOperation.Repositories.LlmProviders;
         var provider = await providers.GetByIdAsync(id, cancellationToken);
         if (provider is null) return;
         providers.Remove(provider);
-        await providers.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task SetDefaultAsync(int id, CancellationToken cancellationToken = default)
@@ -180,12 +204,17 @@ public class LlmProviderService(
         if (!await IsChatProviderWorkingAsync(id, cancellationToken))
             throw new InvalidOperationException("Run Test successfully before setting this provider as the default chat provider.");
 
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        var providers = databaseOperation.Repositories.LlmProviders;
         await providers.SetDefaultAsync(id, cancellationToken);
-        await providers.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task DeleteConnectionAsync(int id, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var providers = databaseOperation.Repositories.LlmProviders;
         var all = await providers.GetAllAsync(cancellationToken);
         var connection = all.FirstOrDefault(provider => provider.Id == id);
         if (connection is null)
@@ -196,11 +225,14 @@ public class LlmProviderService(
         foreach (var child in all.Where(provider => provider.CredentialSourceId == id))
             providers.Remove(child);
         providers.Remove(connection);
-        await providers.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<LlmProvider> MarkChatTestSucceededAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var providers = databaseOperation.Repositories.LlmProviders;
         var target = await ResolvePersistedProviderForTestAsync(provider, cancellationToken);
         target.MarkChatTestSucceeded(DateTime.UtcNow);
         if (target.Id == 0)
@@ -208,12 +240,15 @@ public class LlmProviderService(
 
         target.UpdatedAt = DateTime.UtcNow;
         providers.Update(target);
-        await providers.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return target;
     }
 
     public async Task<LlmProvider> MarkChatTestFailedAsync(LlmProvider provider, string error, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var providers = databaseOperation.Repositories.LlmProviders;
         var target = await ResolvePersistedProviderForTestAsync(provider, cancellationToken);
         target.MarkChatTestFailed(error, DateTime.UtcNow);
         if (target.Id == 0)
@@ -221,12 +256,15 @@ public class LlmProviderService(
 
         target.UpdatedAt = DateTime.UtcNow;
         providers.Update(target);
-        await providers.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return target;
     }
 
     public async Task<LlmProvider> MarkVisionTestSucceededAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var providers = databaseOperation.Repositories.LlmProviders;
         var target = await ResolvePersistedProviderForTestAsync(provider, cancellationToken);
         target.MarkVisionTestSucceeded(DateTime.UtcNow);
         if (target.Id == 0)
@@ -234,12 +272,15 @@ public class LlmProviderService(
 
         target.UpdatedAt = DateTime.UtcNow;
         providers.Update(target);
-        await providers.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return target;
     }
 
     public async Task<LlmProvider> MarkVisionTestFailedAsync(LlmProvider provider, string error, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var providers = databaseOperation.Repositories.LlmProviders;
         var target = await ResolvePersistedProviderForTestAsync(provider, cancellationToken);
         target.MarkVisionTestFailed(error, DateTime.UtcNow);
         if (target.Id == 0)
@@ -247,19 +288,23 @@ public class LlmProviderService(
 
         target.UpdatedAt = DateTime.UtcNow;
         providers.Update(target);
-        await providers.SaveChangesAsync(cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
         return target;
     }
 
     public async Task<string?> GetEffectiveApiKeyAsync(int providerId, CancellationToken cancellationToken = default)
     {
-        var provider = await providers.GetByIdAsync(providerId, cancellationToken);
-        if (provider is null) return null;
-
-        var credentialProviderId = provider.EffectiveCredentialProviderId;
-        var credentialProvider = credentialProviderId == providerId
-            ? provider
-            : await providers.GetByIdAsync(credentialProviderId, cancellationToken);
+        LlmProvider? credentialProvider;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            var providers = readOperation.Repositories.LlmProviders;
+            var provider = await providers.GetByIdAsync(providerId, cancellationToken);
+            if (provider is null) return null;
+            var credentialProviderId = provider.EffectiveCredentialProviderId;
+            credentialProvider = credentialProviderId == providerId
+                ? provider
+                : await providers.GetByIdAsync(credentialProviderId, cancellationToken);
+        }
 
         if (credentialProvider is null) return null;
 
@@ -267,7 +312,7 @@ public class LlmProviderService(
             return credentialProvider.ApiKey;
 
         if (credentialProvider.AuthType == AuthType.OAuth)
-            return await codexAuth.GetValidTokenAsync(credentialProviderId, cancellationToken);
+            return await codexAuth.GetValidTokenAsync(credentialProvider.Id, cancellationToken);
 
         return null;
     }
@@ -328,10 +373,14 @@ public class LlmProviderService(
 
     private async Task<CredentialStatus> GetCredentialStatusAsync(LlmProvider provider, CancellationToken cancellationToken)
     {
-        var credentialProviderId = provider.EffectiveCredentialProviderId;
-        var credentialProvider = credentialProviderId == provider.Id
-            ? provider
-            : await providers.GetByIdAsync(credentialProviderId, cancellationToken);
+        LlmProvider? credentialProvider;
+        await using (var readOperation = await database.OpenReadAsync(cancellationToken))
+        {
+            var credentialProviderId = provider.EffectiveCredentialProviderId;
+            credentialProvider = credentialProviderId == provider.Id
+                ? provider
+                : await readOperation.Repositories.LlmProviders.GetByIdAsync(credentialProviderId, cancellationToken);
+        }
 
         if (credentialProvider is null)
             return new CredentialStatus(false, "The credential source for this provider no longer exists.");
@@ -365,6 +414,8 @@ public class LlmProviderService(
 
     private async Task<LlmProvider> ResolvePersistedProviderForTestAsync(LlmProvider provider, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var providers = databaseOperation.Repositories.LlmProviders;
         if (provider.Id == 0)
             return provider;
 

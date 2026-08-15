@@ -6,10 +6,11 @@ using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Graph;
+using Lorekeeper.Images;
 using Lorekeeper.Ingest;
 using Lorekeeper.Manuscripts;
-using Lorekeeper.Images;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
 using Lorekeeper.Search;
@@ -75,21 +76,7 @@ public sealed class OutlineCollaborationContext(
 /// without ambient state.
 /// </summary>
 public sealed class OutlineCollaborationTools(
-    IActService acts,
-    IChapterService chapters,
-    IEntityService entities,
-    IEntityTypeService entityTypes,
-    IProjectFactService projectFacts,
-    IAiChangeRepository changes,
-    IProjectRepository projectRepository,
-    IEntityRelationContextService entityRelations,
-    IProjectSearchService projectSearch,
-    IEntityVisualExampleService entityVisualExamples,
-    IProjectImageService projectImages,
-    IManuscriptService manuscripts,
-    IBookBriefService bookBriefs,
-    IBookFormatGuidanceService formatGuidance,
-    IAgentProjectImageWorkflow? imageWorkflow = null)
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IEntityService entities, IEntityTypeService entityTypes, IProjectFactService projectFacts, IEntityRelationContextService entityRelations, IProjectSearchService projectSearch, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages, IManuscriptService manuscripts, IBookBriefService bookBriefs, IBookFormatGuidanceService formatGuidance, IAgentProjectImageWorkflow? imageWorkflow = null)
 {
     private const string UnassignedSentinel = "unassigned";
     /// <summary>Canonical entity type for chapter-scoped beats.</summary>
@@ -125,8 +112,8 @@ public sealed class OutlineCollaborationTools(
         Guid conversationId,
         AiChangeConversationKind conversationKind = AiChangeConversationKind.Outline,
         Action? onDirectMutationApplied = null) =>
-        new(projectId, conversationId, conversationKind, changes, projectRepository, acts, chapters, entities, entityTypes, entityVisualExamples, onDirectMutationApplied);
-
+        new(database, projectId, conversationId, conversationKind, acts, chapters, entities, entityTypes,
+            entityVisualExamples, onDirectMutationApplied);
     public Task<IList<AITool>> BuildAsync(
         OutlineCollaborationContext context,
         CancellationToken cancellationToken = default)
@@ -722,7 +709,11 @@ public sealed class OutlineCollaborationTools(
 
     private static object VisualPayload(EntityVisualExampleView example) => new
     {
-        example.Id, example.EntityId, example.Label, example.SortOrder, example.Origin,
+        example.Id,
+        example.EntityId,
+        example.Label,
+        example.SortOrder,
+        example.Origin,
         image = new { example.Image.Id, example.Image.FileName, example.Image.AltText, example.Image.Prompt, example.Image.PreviewUrl },
     };
 

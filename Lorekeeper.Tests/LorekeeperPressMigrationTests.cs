@@ -19,6 +19,11 @@ public sealed class LorekeeperPressMigrationTests
 {
     private const string PreviousMigration = "20260801022548_PublicationCoverImagesV14";
 
+    private sealed class TestDbContextFactory(DbContextOptions<AppDbContext> options) : IDbContextFactory<AppDbContext>
+    {
+        public AppDbContext CreateDbContext() => new(options, NullLogger<AppDbContext>.Instance);
+    }
+
     [Fact]
     public async Task InstalledPopulatedDatabaseRunsActualStartupMigrationWithoutDataLossOrRecovery()
     {
@@ -29,6 +34,7 @@ public sealed class LorekeeperPressMigrationTests
             var databasePath = Path.Combine(directory, "press-cutover.db");
             var options = new DbContextOptionsBuilder<AppDbContext>()
                 .UseSqlite($"Data Source={databasePath}")
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
                 .Options;
             var projectId = Guid.NewGuid();
             var pictureProjectId = Guid.NewGuid();
@@ -335,10 +341,14 @@ public sealed class LorekeeperPressMigrationTests
             var recovery = new DatabaseMigrationRecoveryService(
                 configuration,
                 NullLogger<DatabaseMigrationRecoveryService>.Instance);
+            var database = new AppDatabaseOperationFactory(
+                new TestDbContextFactory(options),
+                new AppDatabaseWriteCoordinator(),
+                new ProjectMutationCoordinator());
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 var startupMigration = new DatabaseStartupMigrationService(
-                    db,
+                    database,
                     new ManuscriptMigrationService(
                         configuration,
                         recovery,
@@ -358,6 +368,7 @@ public sealed class LorekeeperPressMigrationTests
                         recovery,
                         NullLogger<AuthoringPageMigrationService>.Instance),
                     new PublicationCoreMigrationService(
+                        database,
                         recovery,
                         NullLogger<PublicationCoreMigrationService>.Instance),
                     new EditionContentMigrationService(
@@ -373,7 +384,7 @@ public sealed class LorekeeperPressMigrationTests
                         NullLogger<PrintProductMigrationService>.Instance),
                     recovery);
                 Assert.True(await startupMigration.ApplyAsync(), (await recovery.GetStateAsync()).Error);
-                var picturePdfPresentation = await db.PublicationBookPdfPresentations
+                var picturePdfPresentation = await db.PublicationBookPdfPresentations.AsTracking()
                     .SingleAsync(item => item.ProjectId == pictureProjectId);
                 picturePdfPresentation.AllowDesignedPageOverrides = true;
                 await db.SaveChangesAsync();
@@ -458,7 +469,7 @@ public sealed class LorekeeperPressMigrationTests
                     .SingleAsync(item => item.MigrationName == PublicationCoreMigrationService.MigrationName);
                 Assert.Equal(ManuscriptMigrationStatus.Completed, coreJournal.Status);
                 Assert.True(File.Exists(coreJournal.BackupPath));
-                var resolver = new PublicationEffectiveConfigurationResolver(db);
+                var resolver = new PublicationEffectiveConfigurationResolver(database);
                 Assert.Equal(5, (await resolver.ResolveReleaseAsync(projectId, editionId)).PublicationSections.Count);
                 Assert.Equal(3, (await resolver.ResolveReleaseAsync(projectId, unknownEditionId)).PublicationSections.Count);
                 Assert.Equal(7, await db.PublicationSections.AsNoTracking().CountAsync(item => item.ProjectId == projectId));
@@ -504,7 +515,7 @@ public sealed class LorekeeperPressMigrationTests
                 Assert.Equal(pictureBlockId, Assert.Single(text.ContentReferences).BlockId);
                 Assert.Equal(32, text.FontSizePoints);
                 Assert.Equal(CompositionTextShadow.Soft, text.TextShadow);
-                var history = new AuthoringHistoryService(db);
+                var history = new AuthoringHistoryService(database);
                 var historyTarget = new AuthoringHistoryTarget(
                     pictureProjectId,
                     AuthoringHistoryDocumentKind.PageComposition,
@@ -547,7 +558,8 @@ public sealed class LorekeeperPressMigrationTests
         {
             var databasePath = Path.Combine(directory, "already-v15.db");
             var connectionString = $"Data Source={databasePath}";
-            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connectionString).Options;
+            var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connectionString)
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
                 await db.GetService<IMigrator>().MigrateAsync(PublicationPressMigrationService.EfMigrationId);
 
@@ -593,6 +605,7 @@ public sealed class LorekeeperPressMigrationTests
             var databasePath = Path.Combine(directory, "malformed-marker.db");
             var options = new DbContextOptionsBuilder<AppDbContext>()
                 .UseSqlite($"Data Source={databasePath}")
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
                 .Options;
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
                 await db.GetService<IMigrator>().MigrateAsync(PreviousMigration);
@@ -633,6 +646,7 @@ public sealed class LorekeeperPressMigrationTests
             var databasePath = Path.Combine(directory, "cross-process-lock.db");
             var options = new DbContextOptionsBuilder<AppDbContext>()
                 .UseSqlite($"Data Source={databasePath}")
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
                 .Options;
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
                 await db.GetService<IMigrator>().MigrateAsync(PublicationEditionMigrationService.EfMigrationId);
@@ -680,6 +694,7 @@ public sealed class LorekeeperPressMigrationTests
             var databasePath = Path.Combine(directory, "clean-install.db");
             var options = new DbContextOptionsBuilder<AppDbContext>()
                 .UseSqlite($"Data Source={databasePath}")
+                .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
                 .Options;
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
                 await db.GetService<IMigrator>().MigrateAsync(PublicationEditionMigrationService.EfMigrationId);

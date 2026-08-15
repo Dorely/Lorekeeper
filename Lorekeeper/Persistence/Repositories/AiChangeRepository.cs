@@ -3,10 +3,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Persistence.Repositories;
 
-public sealed class AiChangeRepository(AppDbContext db) : IAiChangeRepository
+public sealed class AiChangeRepository(AppDatabaseReadOperation operation) : IAiChangeRepository
 {
     public Task<List<AiChangeBatch>> ListPendingBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        db.AiChangeBatches
+        operation.Db.AiChangeBatches
             .AsNoTracking()
             .Include(b => b.Changes.OrderBy(c => c.Order))
             .Where(b => b.ProjectId == projectId && b.Status == AiChangeBatchStatus.Pending)
@@ -19,7 +19,7 @@ public sealed class AiChangeRepository(AppDbContext db) : IAiChangeRepository
         Guid? assistantMessageId,
         string toolCallId,
         CancellationToken cancellationToken = default) =>
-        db.AiChanges
+        operation.Db.AiChanges
             .AsNoTracking()
             .Include(change => change.Batch)
             .Where(change =>
@@ -34,54 +34,51 @@ public sealed class AiChangeRepository(AppDbContext db) : IAiChangeRepository
             .ToListAsync(cancellationToken);
 
     public Task<AiChangeBatch?> GetBatchAsync(Guid batchId, CancellationToken cancellationToken = default) =>
-        db.AiChangeBatches
+        operation.Db.AiChangeBatches
             .Include(b => b.Changes.OrderBy(c => c.Order))
             .FirstOrDefaultAsync(b => b.Id == batchId, cancellationToken);
 
     public Task<AiChange?> GetChangeAsync(Guid changeId, CancellationToken cancellationToken = default) =>
-        db.AiChanges
+        operation.Db.AiChanges
             .Include(c => c.Batch)
                 .ThenInclude(b => b.Changes.OrderBy(c => c.Order))
             .FirstOrDefaultAsync(c => c.Id == changeId, cancellationToken);
 
     public async Task AddBatchAsync(AiChangeBatch batch, CancellationToken cancellationToken = default) =>
-        await db.AiChangeBatches.AddAsync(batch, cancellationToken);
+        await operation.Db.AiChangeBatches.AddAsync(batch, cancellationToken);
 
     public async Task AddChangeAsync(AiChange change, CancellationToken cancellationToken = default) =>
-        await db.AiChanges.AddAsync(change, cancellationToken);
+        await operation.Db.AiChanges.AddAsync(change, cancellationToken);
 
     public void UpdateBatch(AiChangeBatch batch)
     {
-        var tracked = db.AiChangeBatches.Local.FirstOrDefault(item => item.Id == batch.Id);
+        var tracked = operation.Db.AiChangeBatches.Local.FirstOrDefault(item => item.Id == batch.Id);
         if (tracked is not null && !ReferenceEquals(tracked, batch))
         {
-            db.Entry(tracked).CurrentValues.SetValues(batch);
-            db.Entry(tracked).State = EntityState.Modified;
+            operation.Db.Entry(tracked).CurrentValues.SetValues(batch);
+            operation.Db.Entry(tracked).State = EntityState.Modified;
             return;
         }
 
         // Update only the batch row. Detached batches can carry a detached Changes graph
         // from a no-tracking read, and attaching that graph can introduce duplicate
         // AiChange instances into the context.
-        db.Entry(batch).State = EntityState.Modified;
+        operation.Db.Entry(batch).State = EntityState.Modified;
     }
 
     public void UpdateChange(AiChange change)
     {
-        var tracked = db.AiChanges.Local.FirstOrDefault(item => item.Id == change.Id);
+        var tracked = operation.Db.AiChanges.Local.FirstOrDefault(item => item.Id == change.Id);
         if (tracked is not null && !ReferenceEquals(tracked, change))
         {
-            db.Entry(tracked).CurrentValues.SetValues(change);
-            db.Entry(tracked).State = EntityState.Modified;
+            operation.Db.Entry(tracked).CurrentValues.SetValues(change);
+            operation.Db.Entry(tracked).State = EntityState.Modified;
             return;
         }
 
         // Update only the change row. Do not use DbSet.Update here: a detached change
         // loaded with its batch would otherwise attach the entire detached navigation
         // graph and can conflict with an existing tracked AiChange.
-        db.Entry(change).State = EntityState.Modified;
+        operation.Db.Entry(change).State = EntityState.Modified;
     }
-
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        db.SaveChangesAsync(cancellationToken);
 }

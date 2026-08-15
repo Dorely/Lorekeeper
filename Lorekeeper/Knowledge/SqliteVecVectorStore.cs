@@ -12,6 +12,7 @@ namespace Lorekeeper.Knowledge;
 /// </summary>
 public class SqliteVecVectorStore(
     IConfiguration configuration,
+    IAppDatabaseWriteCoordinator writes,
     ILogger<SqliteVecVectorStore> logger) : IVectorStore, IVectorStoreMaintenance
 {
     private string ConnectionString =>
@@ -21,6 +22,7 @@ public class SqliteVecVectorStore(
         string scopeKey, string? sourceId = null, string? metadata = null, int? chunkIndex = null,
         CancellationToken cancellationToken = default)
     {
+        await using var writeLease = await writes.AcquireAsync(cancellationToken);
         await using var connection = new SqliteConnection(ConnectionString);
         await connection.OpenAsync(cancellationToken);
         connection.LoadVector();
@@ -148,6 +150,7 @@ public class SqliteVecVectorStore(
     public async Task DeleteBySourceAsync(string sourceType, string sourceId, string scopeKey,
         CancellationToken cancellationToken = default)
     {
+        await using var writeLease = await writes.AcquireAsync(cancellationToken);
         await using var connection = new SqliteConnection(ConnectionString);
         await connection.OpenAsync(cancellationToken);
         connection.LoadVector();
@@ -175,6 +178,7 @@ public class SqliteVecVectorStore(
 
     public async Task DeleteByScopeAsync(string scopeKey, CancellationToken cancellationToken = default)
     {
+        await using var writeLease = await writes.AcquireAsync(cancellationToken);
         await using var connection = new SqliteConnection(ConnectionString);
         await connection.OpenAsync(cancellationToken);
         connection.LoadVector();
@@ -197,14 +201,18 @@ public class SqliteVecVectorStore(
         logger.LogDebug("Deleted {Count} chunks for scope {ScopeKey}", ids.Count, scopeKey);
     }
 
-    public void Initialize(int? dimensions) =>
+    public void Initialize(int? dimensions)
+    {
+        using var writeLease = writes.Acquire();
         VectorStoreInitializer.Initialize(configuration, logger, dimensions);
+    }
 
     public async Task RecreateAsync(int dimensions, CancellationToken cancellationToken = default)
     {
         if (dimensions <= 0)
             throw new ArgumentOutOfRangeException(nameof(dimensions), "Embedding dimensions must be greater than zero.");
 
+        await using var writeLease = await writes.AcquireAsync(cancellationToken);
         await using var connection = new SqliteConnection(ConnectionString);
         await connection.OpenAsync(cancellationToken);
         SqliteConnectionSettings.ConfigureDatabase(connection);

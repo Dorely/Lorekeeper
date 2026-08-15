@@ -1,7 +1,7 @@
-using Lorekeeper.Context;
 using Lorekeeper.Authoring;
-using Lorekeeper.Models;
+using Lorekeeper.Context;
 using Lorekeeper.Manuscripts;
+using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -10,16 +10,17 @@ using SkiaSharp;
 namespace Lorekeeper.Images;
 
 public sealed class ProjectImageService(
-    AppDbContext db,
+    IAppDatabaseOperationFactory database,
     IProjectImageJobService imageJobs,
     IProjectImageGenerationRuntime imageRuntime,
     IOptions<ProjectImageGenerationOptions> imageOptions,
     IContextIndexingService contextIndexing,
-    IProjectMutationCoordinator projectMutations,
     IAuthoringHistoryService authoringHistory) : IProjectImageService
 {
     public async Task<IReadOnlyList<ProjectImageView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var rows = await db.PublishAssets
             .AsNoTracking()
             .Where(asset => asset.ProjectId == projectId)
@@ -60,6 +61,8 @@ public sealed class ProjectImageService(
         IReadOnlyCollection<Guid> imageIds,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var requestedIds = imageIds
             .Where(imageId => imageId != Guid.Empty)
             .Distinct()
@@ -104,6 +107,8 @@ public sealed class ProjectImageService(
 
     public async Task<ProjectImageView?> GetAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var asset = await db.PublishAssets
             .AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == imageId, cancellationToken);
@@ -117,6 +122,8 @@ public sealed class ProjectImageService(
         int? maxEdge = null,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var asset = await db.PublishAssets
             .AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == imageId, cancellationToken);
@@ -131,6 +138,9 @@ public sealed class ProjectImageService(
 
     public async Task<ProjectImageView> UploadAsync(Guid projectId, ProjectImageUpload upload, CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var project = await GetProjectAsync(projectId, cancellationToken);
         var normalized = ProjectImageBinary.Normalize(upload.Data, upload.ContentType, upload.FileName);
 
@@ -156,6 +166,9 @@ public sealed class ProjectImageService(
         ProjectImageCropRequest request,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var project = await GetProjectAsync(projectId, cancellationToken);
         var source = await db.PublishAssets
             .FirstOrDefaultAsync(asset => asset.ProjectId == projectId && asset.Id == sourceImageId, cancellationToken)
@@ -273,6 +286,9 @@ public sealed class ProjectImageService(
         ProjectImageUpdate update,
         CancellationToken cancellationToken = default)
     {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         var project = await GetProjectAsync(projectId, cancellationToken);
         var asset = await db.PublishAssets.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == imageId, cancellationToken)
             ?? throw new InvalidOperationException("Image was not found.");
@@ -284,14 +300,18 @@ public sealed class ProjectImageService(
         asset.UpdatedAt = DateTime.UtcNow;
         project.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
-        foreach (var entityId in await AttachedEntityIdsAsync(projectId, imageId, cancellationToken))
+        var entityIds = await AttachedEntityIdsAsync(projectId, imageId, cancellationToken);
+        await databaseOperation.DisposeAsync();
+        foreach (var entityId in entityIds)
             await contextIndexing.ReindexEntityAsync(projectId, entityId, cancellationToken);
         return ToView(projectId, asset);
     }
 
     public async Task DeleteAsync(Guid projectId, Guid imageId, bool clearAffectedHistory = false, CancellationToken cancellationToken = default)
     {
-        await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var project = await GetProjectAsync(projectId, cancellationToken);
         var asset = await db.PublishAssets.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == imageId, cancellationToken);
@@ -380,14 +400,19 @@ public sealed class ProjectImageService(
         project.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await transaction.DisposeAsync();
+        await databaseOperation.DisposeAsync();
         foreach (var entityId in entityIds)
             await contextIndexing.ReindexEntityAsync(projectId, entityId, cancellationToken);
     }
 
-    private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken cancellationToken) =>
-        await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
-        ?? throw new InvalidOperationException($"Project {projectId} not found.");
-
+    private async Task<Project> GetProjectAsync(Guid projectId, CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        return await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectId} not found.");
+    }
     public static ProjectImageView ToView(Guid projectId, PublishAsset asset) =>
         new(
             asset.Id,
@@ -405,6 +430,8 @@ public sealed class ProjectImageService(
 
     private async Task<IReadOnlyList<Guid>> AttachedEntityIdsAsync(Guid projectId, Guid imageId, CancellationToken cancellationToken)
     {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
         var keys = await db.EntityVisualExamples
             .AsNoTracking()
             .Where(example => example.ProjectId == projectId && example.ImageId == imageId)

@@ -9,11 +9,9 @@ namespace Lorekeeper.Persistence;
 
 public class AppDbContext(
     DbContextOptions<AppDbContext> options,
-    ILogger<AppDbContext> logger,
-    IAppDbContextStateCoordinator? stateCoordinator = null) : DbContext(options)
+    ILogger<AppDbContext> logger) : DbContext(options)
 {
     private const int _maxLockedSaveAttempts = 6;
-    private const int _maxConcurrencySaveAttempts = 4;
 
     public DbSet<LlmProvider> LlmProviders => Set<LlmProvider>();
     public DbSet<EmbeddingConfiguration> EmbeddingConfigurations => Set<EmbeddingConfiguration>();
@@ -102,9 +100,22 @@ public class AppDbContext(
     public DbSet<AuthoringTurnHistoryBatch> AuthoringTurnHistoryBatches => Set<AuthoringTurnHistoryBatch>();
     public DbSet<AuthoringHistoryDependency> AuthoringHistoryDependencies => Set<AuthoringHistoryDependency>();
 
-    public void PrepareFreshMutation<TEntity>(Func<TEntity, bool> predicate)
-        where TEntity : class =>
-        stateCoordinator?.PrepareFreshMutation(this, predicate);
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
+        optionsBuilder.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
+
+    internal void MarkModified<TEntity>(TEntity entity)
+        where TEntity : class
+    {
+        var entry = Entry(entity);
+        if (entry.State == EntityState.Detached)
+            entry.State = EntityState.Modified;
+    }
+
+    internal void MarkDeleted<TEntity>(TEntity entity)
+        where TEntity : class
+    {
+        Entry(entity).State = EntityState.Deleted;
+    }
 
     public override int SaveChanges() => SaveChanges(acceptAllChangesOnSuccess: true);
 
@@ -113,34 +124,14 @@ public class AppDbContext(
         NormalizePublicationTargetOwnership();
         try
         {
-            stateCoordinator?.BeginSave(this);
-            for (var attempt = 1; ; attempt++)
-            {
-                try
-                {
-                    var saved = base.SaveChanges(acceptAllChangesOnSuccess);
-                    stateCoordinator?.CompleteSave(this, saved);
-                    return saved;
-                }
-                catch (DbUpdateConcurrencyException exception)
-                    when (attempt < _maxConcurrencySaveAttempts && TryRebaseConcurrencyConflict(exception))
-                {
-                    LogRebasedConcurrencyConflict(exception, attempt);
-                }
-            }
+            return base.SaveChanges(acceptAllChangesOnSuccess);
         }
         catch (DbUpdateConcurrencyException exception)
         {
             LogConcurrencyConflict(exception);
-            stateCoordinator?.FailSave(this);
             throw new DbUpdateConcurrencyException(
                 "The data changed while this operation was being saved. Nothing was overwritten; reload the current state and try again.",
                 exception);
-        }
-        catch
-        {
-            stateCoordinator?.FailSave(this);
-            throw;
         }
     }
 
@@ -156,27 +147,11 @@ public class AppDbContext(
         var delay = TimeSpan.FromMilliseconds(100);
         try
         {
-            if (stateCoordinator is not null)
-                await stateCoordinator.BeginSaveAsync(this, cancellationToken);
-            var concurrencyAttempt = 1;
             for (var attempt = 1; ; attempt++)
             {
                 try
                 {
-                    var saved = await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
-                    stateCoordinator?.CompleteSave(this, saved);
-                    return saved;
-                }
-                catch (DbUpdateConcurrencyException exception)
-                {
-                    if (concurrencyAttempt >= _maxConcurrencySaveAttempts
-                        || !await TryRebaseConcurrencyConflictAsync(exception, cancellationToken))
-                    {
-                        throw;
-                    }
-                    LogRebasedConcurrencyConflict(exception, concurrencyAttempt);
-                    concurrencyAttempt++;
-                    attempt--;
+                    return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
                 }
                 catch (DbUpdateException ex) when (IsSqliteLocked(ex) && attempt < _maxLockedSaveAttempts && !cancellationToken.IsCancellationRequested)
                 {
@@ -195,15 +170,9 @@ public class AppDbContext(
         catch (DbUpdateConcurrencyException exception)
         {
             LogConcurrencyConflict(exception);
-            stateCoordinator?.FailSave(this);
             throw new DbUpdateConcurrencyException(
                 "The data changed while this operation was being saved. Nothing was overwritten; reload the current state and try again.",
                 exception);
-        }
-        catch
-        {
-            stateCoordinator?.FailSave(this);
-            throw;
         }
     }
 
@@ -219,102 +188,6 @@ public class AppDbContext(
             "Optimistic database concurrency conflict while saving {Entries}.",
             entries.Length == 0 ? "an unidentified tracked entity" : string.Join("; ", entries));
     }
-
-    private void LogRebasedConcurrencyConflict(DbUpdateConcurrencyException exception, int attempt)
-    {
-        logger.LogInformation(
-            "Refreshed {Count} stale tracked row(s) and will retry database save attempt {Attempt}/{MaxAttempts}.",
-            exception.Entries.Count,
-            attempt + 1,
-            _maxConcurrencySaveAttempts);
-    }
-
-    private bool TryRebaseConcurrencyConflict(DbUpdateConcurrencyException exception)
-    {
-        if (exception.Entries.Count == 0)
-            return false;
-
-        var databaseValues = new List<(EntityEntry Entry, PropertyValues? Values)>();
-        foreach (var entry in exception.Entries)
-            databaseValues.Add((entry, entry.GetDatabaseValues()));
-        return TryRebaseConcurrencyEntries(databaseValues);
-    }
-
-    private async Task<bool> TryRebaseConcurrencyConflictAsync(
-        DbUpdateConcurrencyException exception,
-        CancellationToken cancellationToken)
-    {
-        if (exception.Entries.Count == 0)
-            return false;
-
-        var databaseValues = new List<(EntityEntry Entry, PropertyValues? Values)>();
-        foreach (var entry in exception.Entries)
-        {
-            databaseValues.Add((
-                entry,
-                await entry.GetDatabaseValuesAsync(cancellationToken)));
-        }
-        return TryRebaseConcurrencyEntries(databaseValues);
-    }
-
-    private static bool TryRebaseConcurrencyEntries(
-        IReadOnlyList<(EntityEntry Entry, PropertyValues? Values)> entries)
-    {
-        foreach (var (entry, databaseValues) in entries)
-        {
-            if (databaseValues is null)
-            {
-                // The aggregate was already removed by another completed application
-                // operation. Never resurrect it from a stale tracked instance.
-                entry.State = EntityState.Detached;
-                continue;
-            }
-
-            if (entry.State == EntityState.Deleted)
-            {
-                entry.OriginalValues.SetValues(databaseValues);
-                continue;
-            }
-
-            var intendedChanges = entry.Properties
-                .Where(property => property.IsModified)
-                .Select(property => new IntendedPropertyChange(
-                    property.Metadata.Name,
-                    property.CurrentValue,
-                    property.Metadata.IsConcurrencyToken))
-                .ToArray();
-            if (intendedChanges.Length == 0)
-            {
-                entry.OriginalValues.SetValues(databaseValues);
-                entry.CurrentValues.SetValues(databaseValues);
-                entry.State = EntityState.Unchanged;
-                continue;
-            }
-
-            entry.OriginalValues.SetValues(databaseValues);
-            entry.CurrentValues.SetValues(databaseValues);
-            foreach (var change in intendedChanges)
-            {
-                var property = entry.Property(change.Name);
-                property.CurrentValue = change.IsConcurrencyToken
-                    ? AdvanceConcurrencyToken(change.Value, databaseValues[change.Name])
-                    : change.Value;
-                property.IsModified = true;
-            }
-        }
-
-        return true;
-    }
-
-    private static object? AdvanceConcurrencyToken(object? intended, object? persisted) =>
-        (intended, persisted) switch
-        {
-            (long intendedValue, long persistedValue) when intendedValue <= persistedValue => checked(persistedValue + 1),
-            (int intendedValue, int persistedValue) when intendedValue <= persistedValue => checked(persistedValue + 1),
-            _ => intended
-        };
-
-    private sealed record IntendedPropertyChange(string Name, object? Value, bool IsConcurrencyToken);
 
     private static bool IsSqliteLocked(Exception exception)
     {
