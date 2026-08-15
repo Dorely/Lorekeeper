@@ -73,7 +73,7 @@ jobs:
         run: ./scripts/build-macos-release.ps1 -Version $env:RELEASE_VERSION -RuntimeIdentifier $env:RUNTIME_IDENTIFIER
 
       - name: Upload architecture artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-${{ inputs.correlation_id }}-${{ matrix.artifact_arch }}
           path: publish/${{ matrix.runtime }}/Lorekeeper-${{ inputs.version }}-${{ matrix.artifact_arch }}.dmg
