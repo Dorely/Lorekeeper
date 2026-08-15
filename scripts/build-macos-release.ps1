@@ -35,6 +35,9 @@ $outputDirectory = Join-Path $repoRoot "publish/$RuntimeIdentifier"
 $semanticEditorDirectory = Join-Path $repoRoot 'tools/semantic-editor'
 $semanticEditorBundle = Join-Path $repoRoot 'Lorekeeper/wwwroot/js/semantic-editor.bundle.js'
 $semanticEditorNotice = Join-Path $repoRoot 'Lorekeeper/wwwroot/js/semantic-editor.NOTICES.txt'
+$dependencyAuditScript = Join-Path $repoRoot 'eng/ReleaseDependencyAudit.ps1'
+
+. $dependencyAuditScript
 $profileName = $RuntimeIdentifier
 $artifactArchitecture = if ($RuntimeIdentifier -eq 'osx-arm64') { 'arm64' } else { 'x64' }
 $machArchitecture = if ($RuntimeIdentifier -eq 'osx-arm64') { 'arm64' } else { 'x86_64' }
@@ -240,10 +243,10 @@ try
 
     $severityRank = @{ info = 0; low = 1; moderate = 2; high = 3; critical = 4 }
     $productionAudit = Invoke-NpmAuditJson -WorkingDirectory $stageDirectory -OmitDev
-    $productionBlocking = @(
-        $productionAudit.vulnerabilities.PSObject.Properties |
-            Where-Object { $severityRank[$_.Value.severity] -ge $severityRank.high }
-    )
+    $productionBlocking = @(Get-ReleaseProductionAuditBlockingFindings `
+        -Audit $productionAudit `
+        -SeverityRank $severityRank `
+        -StageDirectory $stageDirectory)
     if ($productionBlocking.Count -gt 0)
     {
         throw "Production npm dependency audit failed: $(($productionBlocking.Name) -join ', ')."
@@ -300,7 +303,10 @@ try
         }
     }
     $pressDescription = (& $pressExecutable describe --json | ConvertFrom-Json)
-    if ($LASTEXITCODE -ne 0 -or $pressDescription.protocolVersion -ne 4)
+    if ($LASTEXITCODE -ne 0 -or $pressDescription.protocolVersion -ne 7 -or
+        [string]::IsNullOrWhiteSpace($pressDescription.rendererVersion) -or
+        [string]::IsNullOrWhiteSpace($pressDescription.printProductRegistryVersion) -or
+        [string]::IsNullOrWhiteSpace($pressDescription.printProductRegistrySha256))
     {
         throw 'The packaged Lorekeeper Press executable failed its capability probe.'
     }

@@ -20,6 +20,9 @@ $outputDirectory = Join-Path $repoRoot 'publish\win-x64'
 $semanticEditorDirectory = Join-Path $repoRoot 'tools\semantic-editor'
 $semanticEditorBundle = Join-Path $repoRoot 'Lorekeeper\wwwroot\js\semantic-editor.bundle.js'
 $semanticEditorNotice = Join-Path $repoRoot 'Lorekeeper\wwwroot\js\semantic-editor.NOTICES.txt'
+$dependencyAuditScript = Join-Path $repoRoot 'eng\ReleaseDependencyAudit.ps1'
+
+. $dependencyAuditScript
 
 if ([string]::IsNullOrWhiteSpace($Version))
 {
@@ -226,14 +229,26 @@ try
         "-p:Version=$Version"
     )
 
-    Invoke-CheckedCommand dotnet @(
-        'publish',
-        $projectPath,
-        '-c', 'Release',
-        '-p:PublishProfile=win-x64',
-        "-p:Version=$Version",
-        '--no-restore'
-    )
+    $previousCi = $env:CI
+    try
+    {
+        # Electron.NET does not expose electron-builder's --publish flag. Disable
+        # CI auto-detection so this artifact builder can never publish implicitly.
+        $env:CI = 'false'
+        Invoke-CheckedCommand dotnet @(
+            'publish',
+            $projectPath,
+            '-c', 'Release',
+            '-p:PublishProfile=win-x64',
+            "-p:Version=$Version",
+            '--no-restore'
+        )
+    }
+    finally
+    {
+        if ($null -eq $previousCi) { Remove-Item Env:CI -ErrorAction SilentlyContinue }
+        else { $env:CI = $previousCi }
+    }
 
     $packagedPressRoot = Join-Path $outputDirectory 'win-unpacked\resources\bin\press-runtime'
     $packagedPressExecutable = Join-Path $packagedPressRoot 'lorekeeper-press.exe'
@@ -250,7 +265,10 @@ try
         }
     }
     $pressDescription = (& $packagedPressExecutable describe --json | ConvertFrom-Json)
-    if ($LASTEXITCODE -ne 0 -or $pressDescription.protocolVersion -ne 4)
+    if ($LASTEXITCODE -ne 0 -or $pressDescription.protocolVersion -ne 7 -or
+        [string]::IsNullOrWhiteSpace($pressDescription.rendererVersion) -or
+        [string]::IsNullOrWhiteSpace($pressDescription.printProductRegistryVersion) -or
+        [string]::IsNullOrWhiteSpace($pressDescription.printProductRegistrySha256))
     {
         throw 'The packaged Lorekeeper Press executable failed its capability probe.'
     }
@@ -293,11 +311,10 @@ try
     }
 
     $productionAudit = Invoke-NpmAuditJson -WorkingDirectory $stageDirectory -OmitDev
-    $productionBlocking = @(
-        $productionAudit.vulnerabilities.PSObject.Properties |
-            ForEach-Object { [pscustomobject]@{ Name = $_.Name; Finding = $_.Value } } |
-            Where-Object { $severityRank[$_.Finding.severity] -ge $severityRank.high }
-    )
+    $productionBlocking = @(Get-ReleaseProductionAuditBlockingFindings `
+        -Audit $productionAudit `
+        -SeverityRank $severityRank `
+        -StageDirectory $stageDirectory)
     if ($productionBlocking.Count -gt 0)
     {
         $details = ($productionBlocking | ForEach-Object { "$($_.Name) ($($_.Finding.severity))" }) -join ', '

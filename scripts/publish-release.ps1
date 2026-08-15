@@ -38,8 +38,9 @@ foreach ($commandName in @('git', 'gh', 'dotnet', 'node', 'npm.cmd'))
 }
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$releaseRepository = 'Dorely/Lorekeeper-Releases'
 $sourceRepository = 'Dorely/Lorekeeper'
+$publicReleaseRepository = 'Dorely/Lorekeeper-Releases'
+$releaseRepositories = @($sourceRepository, $publicReleaseRepository)
 $workflowName = 'build-macos-release.yml'
 $windowsOutputDirectory = Join-Path $repoRoot 'publish\win-x64'
 $releaseDirectory = Join-Path $repoRoot "publish\release-$Version"
@@ -51,6 +52,7 @@ $macWorkflowArtifactNames = @(
 )
 $buildScript = Join-Path $PSScriptRoot 'build-windows-release.ps1'
 $macRunId = $null
+$createdReleaseRepositories = [System.Collections.Generic.List[string]]::new()
 
 if ($NotesFile)
 {
@@ -90,6 +92,130 @@ function Invoke-Gh
     if ($LASTEXITCODE -ne 0)
     {
         throw "GitHub CLI failed with exit code $LASTEXITCODE."
+    }
+}
+
+function Assert-GitHubApiResourceMissing
+{
+    param(
+        [Parameter(Mandatory)][string]$ApiPath,
+        [Parameter(Mandatory)][string]$ExistingMessage,
+        [Parameter(Mandatory)][string]$LookupFailureMessage
+    )
+
+    $lookupOutputPath = [System.IO.Path]::GetTempFileName()
+    $lookupErrorPath = [System.IO.Path]::GetTempFileName()
+    try
+    {
+        $lookupProcess = Start-Process -FilePath (Get-Command gh).Source -ArgumentList @(
+            'api', '--include', $ApiPath
+        ) -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput $lookupOutputPath `
+            -RedirectStandardError $lookupErrorPath
+        $lookupExitCode = $lookupProcess.ExitCode
+        $lookupOutput = @([System.IO.File]::ReadAllLines($lookupOutputPath))
+        $lookupError = [System.IO.File]::ReadAllText($lookupErrorPath).Trim()
+    }
+    finally
+    {
+        Remove-Item -LiteralPath $lookupOutputPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $lookupErrorPath -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($lookupExitCode -eq 0)
+    {
+        throw $ExistingMessage
+    }
+
+    $statusLine = if ($lookupOutput.Count -gt 0) { [string]$lookupOutput[0] } else { '' }
+    if (($statusLine -notmatch '^HTTP/\S+ 404 ') -and ($lookupError -notmatch '\(HTTP 404\)'))
+    {
+        throw "$LookupFailureMessage GitHub returned: $statusLine $lookupError"
+    }
+}
+
+function Assert-ReleaseTagUnused
+{
+    param(
+        [Parameter(Mandatory)][string]$Repository,
+        [Parameter(Mandatory)][string]$Tag
+    )
+
+    Assert-GitHubApiResourceMissing `
+        -ApiPath "repos/$Repository/releases/tags/$Tag" `
+        -ExistingMessage "Release $Tag already exists in $Repository. Release versions are immutable; choose a newer version." `
+        -LookupFailureMessage "Could not confirm that release $Tag is unused in $Repository."
+    Assert-GitHubApiResourceMissing `
+        -ApiPath "repos/$Repository/git/ref/tags/$Tag" `
+        -ExistingMessage "Tag $Tag already exists in $Repository without a matching release. Refusing to reuse it; choose a newer version." `
+        -LookupFailureMessage "Could not confirm that tag $Tag is unused in $Repository."
+}
+
+function Remove-CreatedReleases
+{
+    param([Parameter(Mandatory)][string]$Tag)
+
+    foreach ($repository in @($createdReleaseRepositories))
+    {
+        & gh release view $Tag --repo $repository 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0)
+        {
+            continue
+        }
+        Write-Warning "Removing incomplete release $Tag from $repository."
+        & gh release delete $Tag --repo $repository --yes --cleanup-tag 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0)
+        {
+            Write-Warning "Could not remove incomplete release $Tag from $repository; inspect it manually."
+        }
+    }
+}
+
+function Assert-ReleaseAssets
+{
+    param(
+        [Parameter(Mandatory)][string]$Repository,
+        [Parameter(Mandatory)][string]$Tag,
+        [Parameter(Mandatory)][string[]]$ArtifactPaths
+    )
+
+    $releaseJson = & gh release view $Tag --repo $Repository --json isDraft,assets
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "Could not inspect draft release $Tag in $Repository."
+    }
+    $release = ($releaseJson -join [Environment]::NewLine) | ConvertFrom-Json
+    if (-not $release.isDraft)
+    {
+        throw "Release $Tag in $Repository was published before dual-repository verification completed."
+    }
+
+    $expectedAssets = @($ArtifactPaths | ForEach-Object {
+        $item = Get-Item -LiteralPath $_
+        [pscustomobject]@{
+            Name = $item.Name
+            Size = $item.Length
+            Digest = "sha256:$((Get-FileHash -Algorithm SHA256 -LiteralPath $item.FullName).Hash.ToLowerInvariant())"
+        }
+    })
+    $actualNames = @($release.assets | ForEach-Object { [string]$_.name } | Sort-Object)
+    $expectedNames = @($expectedAssets | ForEach-Object { $_.Name } | Sort-Object)
+    if ($actualNames.Count -ne $expectedNames.Count -or
+        @(Compare-Object -ReferenceObject $expectedNames -DifferenceObject $actualNames).Count -ne 0)
+    {
+        throw "Release $Tag in $Repository has an unexpected asset set. Expected: $($expectedNames -join ', '). Actual: $($actualNames -join ', ')."
+    }
+
+    foreach ($expected in $expectedAssets)
+    {
+        $actual = @($release.assets | Where-Object { $_.name -eq $expected.Name })
+        if ($actual.Count -ne 1 -or
+            [string]$actual[0].state -ne 'uploaded' -or
+            [long]$actual[0].size -ne $expected.Size -or
+            ([string]$actual[0].digest).ToLowerInvariant() -ne $expected.Digest)
+        {
+            throw "Release asset '$($expected.Name)' in $Repository does not match the staged file's uploaded state, length, and SHA-256 digest."
+        }
     }
 }
 
@@ -141,10 +267,15 @@ try
 {
     Invoke-Gh @('auth', 'status', '--hostname', 'github.com')
 
-    $visibility = (& gh repo view $releaseRepository --json visibility --jq '.visibility').Trim()
+    $visibility = (& gh repo view $publicReleaseRepository --json visibility --jq '.visibility').Trim()
     if ($LASTEXITCODE -ne 0 -or $visibility -ne 'PUBLIC')
     {
-        throw "$releaseRepository must exist and be public; reported visibility was '$visibility'."
+        throw "$publicReleaseRepository must exist and be public; reported visibility was '$visibility'."
+    }
+    & gh repo view $sourceRepository --json nameWithOwner | Out-Null
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "$sourceRepository must be accessible to publish its matching release."
     }
     if (-not $WindowsOnly)
     {
@@ -187,32 +318,9 @@ try
     }
 
     $tag = "v$Version"
-    $releaseLookupOutputPath = [System.IO.Path]::GetTempFileName()
-    $releaseLookupErrorPath = [System.IO.Path]::GetTempFileName()
-    try
+    foreach ($repository in $releaseRepositories)
     {
-        $releaseLookupProcess = Start-Process -FilePath (Get-Command gh).Source -ArgumentList @(
-            'api', '--include', "repos/$releaseRepository/releases/tags/$tag"
-        ) -NoNewWindow -Wait -PassThru `
-            -RedirectStandardOutput $releaseLookupOutputPath `
-            -RedirectStandardError $releaseLookupErrorPath
-        $releaseLookupExitCode = $releaseLookupProcess.ExitCode
-        $releaseLookup = @([System.IO.File]::ReadAllLines($releaseLookupOutputPath))
-        $releaseLookupError = [System.IO.File]::ReadAllText($releaseLookupErrorPath).Trim()
-    }
-    finally
-    {
-        Remove-Item -LiteralPath $releaseLookupOutputPath -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $releaseLookupErrorPath -Force -ErrorAction SilentlyContinue
-    }
-    if ($releaseLookupExitCode -eq 0)
-    {
-        throw "Release $tag already exists in $releaseRepository. Release versions are immutable; choose a newer version."
-    }
-    $releaseStatusLine = if ($releaseLookup.Count -gt 0) { [string]$releaseLookup[0] } else { '' }
-    if (($releaseStatusLine -notmatch '^HTTP/\S+ 404 ') -and ($releaseLookupError -notmatch '\(HTTP 404\)'))
-    {
-        throw "Could not confirm that release $tag is unused. GitHub returned: $releaseStatusLine $releaseLookupError"
+        Assert-ReleaseTagUnused -Repository $repository -Tag $tag
     }
 
     if (-not $WindowsOnly)
@@ -337,46 +445,62 @@ try
             Select-Object -ExpandProperty FullName
     )
 
-    $releaseArguments = @(
-        'release', 'create', $tag,
-        '--repo', $releaseRepository,
-        '--target', 'main',
-        '--title', "Lorekeeper $Version",
-        '--draft'
-    )
+    $releaseNotesArguments = @()
     if ($NotesFile)
     {
-        $releaseArguments += @('--notes-file', $NotesFile)
+        $releaseNotesArguments += @('--notes-file', $NotesFile)
     }
     elseif ($Notes)
     {
-        $releaseArguments += @('--notes', $Notes)
+        $releaseNotesArguments += @('--notes', $Notes)
     }
     else
     {
         $sourceUrl = "https://github.com/$sourceRepository/commit/$sourceCommit"
         $platformDescription = if ($WindowsOnly) { 'Windows-only' } else { 'Windows and macOS' }
-        $releaseArguments += @('--notes', "Automated Lorekeeper $platformDescription release built from [$sourceCommit]($sourceUrl).")
+        $releaseNotesArguments += @('--notes', "Automated Lorekeeper $platformDescription release built from [$sourceCommit]($sourceUrl).")
     }
+    $releaseTypeArguments = @()
     if ($Prerelease -or $Version.Contains('-'))
     {
-        $releaseArguments += '--prerelease'
+        $releaseTypeArguments += '--prerelease'
     }
-    $releaseArguments += $artifactPaths
-    Invoke-Gh $releaseArguments
 
-    $publishArguments = @('release', 'edit', $tag, '--repo', $releaseRepository, '--draft=false')
-    if (-not ($Prerelease -or $Version.Contains('-')))
-    {
-        $publishArguments += '--latest'
-    }
     try
     {
-        Invoke-Gh $publishArguments
+        foreach ($repository in $releaseRepositories)
+        {
+            $target = if ($repository -eq $sourceRepository) { $sourceCommit } else { 'main' }
+            $releaseArguments = @(
+                'release', 'create', $tag,
+                '--repo', $repository,
+                '--target', $target,
+                '--title', "Lorekeeper $Version",
+                '--draft'
+            ) + $releaseNotesArguments + $releaseTypeArguments + $artifactPaths
+            $createdReleaseRepositories.Add($repository)
+            Invoke-Gh $releaseArguments
+        }
+
+        foreach ($repository in $releaseRepositories)
+        {
+            Assert-ReleaseAssets -Repository $repository -Tag $tag -ArtifactPaths $artifactPaths
+        }
+
+        foreach ($repository in $releaseRepositories)
+        {
+            $publishArguments = @('release', 'edit', $tag, '--repo', $repository, '--draft=false')
+            if (-not ($Prerelease -or $Version.Contains('-')))
+            {
+                $publishArguments += '--latest'
+            }
+            Invoke-Gh $publishArguments
+        }
     }
     catch
     {
-        throw "Artifacts were uploaded, but $tag remains a draft. Inspect it before publishing manually."
+        Remove-CreatedReleases -Tag $tag
+        throw "Dual-repository publication failed and Lorekeeper attempted to remove every release and tag created for $tag. $($_.Exception.Message)"
     }
 
     if (-not $WindowsOnly)
@@ -384,7 +508,11 @@ try
         Remove-MacRunArtifacts
         Remove-GeneratedDirectory $macDownloadDirectory
     }
-    Write-Host "`nPublished https://github.com/$releaseRepository/releases/tag/$tag" -ForegroundColor Green
+    Write-Host "`nPublished matching releases:" -ForegroundColor Green
+    foreach ($repository in $releaseRepositories)
+    {
+        Write-Host "  https://github.com/$repository/releases/tag/$tag"
+    }
     Write-Host "Release staging retained at $releaseDirectory"
 }
 finally

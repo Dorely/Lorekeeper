@@ -212,15 +212,21 @@ OAuth unless that redirect URI is also accepted by the OAuth provider.
 
 ## Desktop Packaging
 
-Build Windows packages without publishing them:
+Build the current Windows packages without publishing them:
 
 ```powershell
-.\scripts\build-windows-release.ps1 -Version 0.2.0
+.\scripts\build-windows-release.ps1
 ```
 
-Omit `-Version` to use the version in `Lorekeeper.csproj`. This build-only
-script verifies the solution, audits NuGet and the shipped npm/Electron runtime,
-and produces the installer and portable executable under `publish/win-x64/`.
+The project version is currently `0.3.0`. Pass `-Version <version>` only when
+validating a different future SemVer. This build-only script verifies the
+solution, audits NuGet and the shipped npm/Electron runtime, probes the packaged
+Press protocol/registry contract, and produces the installer and portable
+executable under `publish/win-x64/`. Electron.NET currently ships
+`image-size@1.2.1` solely for its optional splash-image path. Lorekeeper has no
+splash image; the release audit accepts only the two exact known advisories when
+that path remains unreachable and fails for any changed package, usage,
+configuration, or advisory.
 
 The underlying packaging command is:
 
@@ -238,7 +244,7 @@ install and authenticate [GitHub CLI](https://cli.github.com/), then run:
 
 ```powershell
 gh auth login
-.\scripts\publish-release.ps1 -Version 0.2.1 -WindowsOnly
+.\scripts\publish-release.ps1 -Version 0.3.0 -WindowsOnly
 ```
 
 The Windows-only path builds locally, does not dispatch the macOS workflow, and
@@ -253,7 +259,7 @@ release, run the same command without `-WindowsOnly`:
 
 ```powershell
 gh auth login
-.\scripts\publish-release.ps1 -Version 0.2.0
+.\scripts\publish-release.ps1 -Version 0.3.0
 ```
 
 The publisher requires a clean local `main` that exactly matches `origin/main`.
@@ -263,13 +269,18 @@ Windows locally at the same time, waits for the correlated Actions run,
 downloads the verified DMGs, and publishes every artifact together only if all
 builds succeeded. The workflow must already be committed and pushed to `main`;
 it uses the source repository's read-only `GITHUB_TOKEN` and never publishes a
-release itself.
+release itself. The orchestrator uploads the same verified artifact set and
+release notes to draft releases in both the private `Dorely/Lorekeeper` source
+repository and the public `Dorely/Lorekeeper-Releases` repository. It verifies
+both asset sets before publishing either release and removes releases/tags it
+created if dual publication fails. It warns if GitHub prevents compensating
+cleanup. The public repository remains the updater and user-download authority.
 
-The completed release contains the Windows installer, portable executable,
+Each completed release contains the Windows installer, portable executable,
 updater metadata and blockmap, `Lorekeeper-<version>-arm64.dmg`,
 `Lorekeeper-<version>-x64.dmg`, and one checksum file covering every asset. Add
 `-Notes "..."` or `-NotesFile .\release-notes.md` for custom notes. SemVer
-prereleases such as `0.2.0-beta.1` are published as GitHub prereleases.
+prereleases such as `0.3.0-beta.1` are published as GitHub prereleases.
 Published versions are immutable; fixes require a higher version.
 
 Installed Windows builds use automatic updates and require the Setup executable,
@@ -290,10 +301,11 @@ for Intel), drag Lorekeeper into Applications, then use **Open Anyway** in
 System Settings > Privacy & Security if Gatekeeper blocks the first launch.
 These packages are intended for trusted testers.
 
-The `/publish/` directory is git-ignored. Release binaries live on the public
+The `/publish/` directory is git-ignored. Release binaries are mirrored as
+GitHub Release assets in the private source repository and the public
 [`Dorely/Lorekeeper-Releases`](https://github.com/Dorely/Lorekeeper-Releases)
-repository rather than in source control. The private source repository consumes
-GitHub Actions minutes for its two hosted macOS jobs.
+repository rather than committed to source control. The private source
+repository also consumes GitHub Actions minutes for its two hosted macOS jobs.
 
 ## Local Data
 

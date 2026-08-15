@@ -28,8 +28,9 @@
 | `.github/workflows/build-macos-release.yml` | Dispatch-only Apple Silicon/Intel macOS release builder and verifier; uploads one correlated DMG per architecture for the Windows release orchestrator. |
 | `scripts/build-windows-release.ps1` | Clean Windows x64 release builder: validates tooling/version, audits NuGet plus shipped npm/Electron dependencies, rebuilds isolated staging/output, verifies installer/updater artifacts, and writes GitHub Release checksums. |
 | `scripts/build-macos-release.ps1` | Native macOS release builder for one RID: audits dependencies, packages an ad-hoc-signed DMG, verifies signatures/architectures, mounts and smoke-tests the app, and writes a checksum. |
-| `scripts/publish-release.ps1` | Windows release orchestrator with a local Windows-only mode or an optional correlated macOS Actions build; downloads each architecture, atomically publishes the selected platforms, and removes temporary Actions artifacts after publication. |
+| `scripts/publish-release.ps1` | Windows release orchestrator with a local Windows-only mode or correlated native macOS builds; verifies one staged artifact set, coordinates matching source/public-repository releases with compensating cleanup, and removes temporary Actions artifacts after success. |
 | `eng/BuildPressRuntime.ps1` | Locked Rust build, license-expression audit, and exact native Press runtime packager used by Debug, Release, and platform packaging. |
+| `eng/ReleaseDependencyAudit.ps1` | Shared fail-closed Electron production-audit policy, including the exact dormant-splash exception for Electron.NET's currently unpatched `image-size` dependency. |
 | `eng/ReviewPrintProductRegistry.ps1` | Maintainer-only candidate validator, exact frozen-measurement coverage check, hash/evidence report, and explicit canonical-registry installer. |
 | `scripts/generate-brand-assets.py` | Deterministically exports browser PNG sizes and the multi-resolution Windows ICO from the 1024px Lorekeeper icon master. |
 | `docs/research/README.md` | Index and maintenance policy for Lorekeeper's sourced editorial, image-prompting, and composition research briefs. |

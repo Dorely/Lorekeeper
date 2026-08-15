@@ -1212,9 +1212,15 @@ newer release in the system browser.
 Release tooling is split between clean Windows and native macOS builders plus a
 Windows release orchestrator. The cross-platform publisher requires a clean
 local `main` matching `origin/main`, dispatches correlated macOS jobs, builds
-Windows locally, validates all requested artifacts, publishes atomically, and
-removes temporary Actions artifacts afterward. Packaging and updater changes
-must be validated through the relevant scripts and target operating system.
+Windows locally, validates all requested artifacts, creates matching drafts in
+the private source and public release repositories, verifies both asset sets,
+then publishes both releases. A failed dual publication removes the exact
+releases/tags created by that run when GitHub permits compensating cleanup and
+reports any resource that requires manual inspection.
+The public release repository remains the automatic/manual update authority.
+Temporary Actions artifacts are removed only after publication succeeds.
+Packaging and updater changes must be validated through the relevant scripts
+and target operating system.
 
 ## Persistence, Configuration, and Security
 
@@ -1474,7 +1480,13 @@ loads the current saved manuscript. Clearing site data removes it.
 Windows and macOS release builders run the semantic-editor locked install,
 dependency audit, and deterministic rebuild, fail if the committed bundle is
 stale, and verify that exactly one matching bundle and shipped notice reached
-the release stage.
+the release stage. They also probe the packaged Press protocol-v7 renderer and
+physical-product registry identity. Electron.NET's generated host currently has
+one direct `image-size@1.2.1` dependency for an optional splash-image dimension
+probe. Lorekeeper configures no splash image. The shared release-audit policy
+accepts only the two exact known parser advisories while that generated call is
+provably confined to the unreachable splash path; a changed version, call site,
+configuration, or advisory fails closed.
 
 Applied EF Core migration files are immutable schema history. Never edit,
 reorder, or delete an applied migration to make the migration directory resemble
