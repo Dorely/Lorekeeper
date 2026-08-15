@@ -12,7 +12,7 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <Title>Lorekeeper</Title>
     <Description>AI-assisted narrative coherence engine.</Description>
-    <Version>0.3.0</Version>
+    <Version>0.3.1</Version>
     <PackageId>Lorekeeper</PackageId>
     <ElectronVersion>43.1.0</ElectronVersion>
     <ElectronBuilderVersion>26.15.3</ElectronBuilderVersion>
