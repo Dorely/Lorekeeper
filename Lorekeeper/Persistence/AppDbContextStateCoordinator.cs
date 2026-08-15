@@ -10,10 +10,13 @@ namespace Lorekeeper.Persistence;
 public interface IAppDbContextStateCoordinator
 {
     void BeforeCommand(AppDbContext db, string commandText);
+    ValueTask BeforeCommandAsync(AppDbContext db, string commandText, CancellationToken cancellationToken);
     void CompleteDirectMutation(AppDbContext db, string commandText);
+    void FailCommand(AppDbContext db);
     void PrepareFreshMutation<TEntity>(AppDbContext db, Func<TEntity, bool> predicate)
         where TEntity : class;
     void BeginSave(AppDbContext db);
+    ValueTask BeginSaveAsync(AppDbContext db, CancellationToken cancellationToken);
     void CompleteSave(AppDbContext db, int savedEntries);
     void FailSave(AppDbContext db);
     void CompleteTransaction(AppDbContext db);
@@ -39,9 +42,49 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
     private readonly ConcurrentDictionary<string, long> _tableGenerations =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ConditionalWeakTable<AppDbContext, ContextState> _contexts = new();
+    private readonly SemaphoreSlim _mutationGate = new(1, 1);
     private long _generation;
 
     public void BeforeCommand(AppDbContext db, string commandText)
+    {
+        var mutationTables = MutationTables(commandText);
+        var enteredMutation = mutationTables.Count > 0 && !IsSaving(db);
+        if (enteredMutation)
+            EnterDirectMutation(db);
+        try
+        {
+            PrepareCommand(db, commandText);
+        }
+        catch
+        {
+            if (enteredMutation)
+                FailCommand(db);
+            throw;
+        }
+    }
+
+    public async ValueTask BeforeCommandAsync(
+        AppDbContext db,
+        string commandText,
+        CancellationToken cancellationToken)
+    {
+        var mutationTables = MutationTables(commandText);
+        var enteredMutation = mutationTables.Count > 0 && !IsSaving(db);
+        if (enteredMutation)
+            await EnterDirectMutationAsync(db, cancellationToken);
+        try
+        {
+            PrepareCommand(db, commandText);
+        }
+        catch
+        {
+            if (enteredMutation)
+                FailCommand(db);
+            throw;
+        }
+    }
+
+    private void PrepareCommand(AppDbContext db, string commandText)
     {
         var state = State(db);
         lock (state.Gate)
@@ -58,6 +101,7 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
         if (tables.Count == 0)
             return;
         var state = State(db);
+        var releaseLease = false;
         lock (state.Gate)
         {
             if (state.IsSaving)
@@ -70,7 +114,27 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
                 else
                     state.SeenGenerations[table] = NextGeneration(table);
             }
+            releaseLease = state.HasDirectMutationLease;
+            state.HasDirectMutationLease = false;
         }
+        if (releaseLease)
+            _mutationGate.Release();
+    }
+
+    public void FailCommand(AppDbContext db)
+    {
+        var state = State(db);
+        var releaseLease = false;
+        lock (state.Gate)
+        {
+            if (!state.IsSaving && state.HasDirectMutationLease)
+            {
+                state.HasDirectMutationLease = false;
+                releaseLease = true;
+            }
+        }
+        if (releaseLease)
+            _mutationGate.Release();
     }
 
     public void PrepareFreshMutation<TEntity>(AppDbContext db, Func<TEntity, bool> predicate)
@@ -107,6 +171,34 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
 
     public void BeginSave(AppDbContext db)
     {
+        _mutationGate.Wait();
+        try
+        {
+            BeginSaveWithLease(db);
+        }
+        catch
+        {
+            _mutationGate.Release();
+            throw;
+        }
+    }
+
+    public async ValueTask BeginSaveAsync(AppDbContext db, CancellationToken cancellationToken)
+    {
+        await _mutationGate.WaitAsync(cancellationToken);
+        try
+        {
+            BeginSaveWithLease(db);
+        }
+        catch
+        {
+            _mutationGate.Release();
+            throw;
+        }
+    }
+
+    private void BeginSaveWithLease(AppDbContext db)
+    {
         var state = State(db);
         lock (state.Gate)
         {
@@ -116,12 +208,14 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
             RefreshTrackedReads(db, state, tables);
             state.SavingTables = tables;
             state.IsSaving = true;
+            state.HasSaveLease = true;
         }
     }
 
     public void CompleteSave(AppDbContext db, int savedEntries)
     {
         var state = State(db);
+        var releaseLease = false;
         lock (state.Gate)
         {
             if (savedEntries > 0)
@@ -136,18 +230,27 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
             }
             state.SavingTables = [];
             state.IsSaving = false;
+            releaseLease = state.HasSaveLease;
+            state.HasSaveLease = false;
         }
+        if (releaseLease)
+            _mutationGate.Release();
     }
 
     public void FailSave(AppDbContext db)
     {
         var state = State(db);
+        var releaseLease = false;
         lock (state.Gate)
         {
             state.SavingTables = [];
             state.IsSaving = false;
+            releaseLease = state.HasSaveLease;
+            state.HasSaveLease = false;
             db.ChangeTracker.Clear();
         }
+        if (releaseLease)
+            _mutationGate.Release();
     }
 
     public void CompleteTransaction(AppDbContext db)
@@ -246,6 +349,41 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
 
     private ContextState State(AppDbContext db) => _contexts.GetValue(db, _ => new ContextState());
 
+    private bool IsSaving(AppDbContext db)
+    {
+        var state = State(db);
+        lock (state.Gate)
+            return state.IsSaving;
+    }
+
+    private void EnterDirectMutation(AppDbContext db)
+    {
+        _mutationGate.Wait();
+        MarkDirectMutationLease(db);
+    }
+
+    private async ValueTask EnterDirectMutationAsync(AppDbContext db, CancellationToken cancellationToken)
+    {
+        await _mutationGate.WaitAsync(cancellationToken);
+        MarkDirectMutationLease(db);
+    }
+
+    private void MarkDirectMutationLease(AppDbContext db)
+    {
+        var state = State(db);
+        lock (state.Gate)
+        {
+            if (state.IsSaving || state.HasDirectMutationLease)
+            {
+                _mutationGate.Release();
+                if (state.HasDirectMutationLease)
+                    throw new InvalidOperationException("A direct database mutation is already active on this persistence context.");
+                return;
+            }
+            state.HasDirectMutationLease = true;
+        }
+    }
+
     private sealed class ContextState
     {
         public object Gate { get; } = new();
@@ -253,6 +391,8 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
         public HashSet<string> SavingTables { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> PendingTransactionTables { get; } = new(StringComparer.OrdinalIgnoreCase);
         public bool IsSaving { get; set; }
+        public bool HasSaveLease { get; set; }
+        public bool HasDirectMutationLease { get; set; }
     }
 }
 
@@ -304,14 +444,14 @@ public sealed class AppDbContextCommandInterceptor(IAppDbContextStateCoordinator
         return result;
     }
 
-    public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+    public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
         DbCommand command,
         CommandEventData eventData,
         InterceptionResult<DbDataReader> result,
         CancellationToken cancellationToken = default)
     {
-        Before(eventData, command);
-        return ValueTask.FromResult(result);
+        await BeforeAsync(eventData, command, cancellationToken);
+        return result;
     }
 
     public override DbDataReader ReaderExecuted(
@@ -342,14 +482,14 @@ public sealed class AppDbContextCommandInterceptor(IAppDbContextStateCoordinator
         return result;
     }
 
-    public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+    public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
         DbCommand command,
         CommandEventData eventData,
         InterceptionResult<int> result,
         CancellationToken cancellationToken = default)
     {
-        Before(eventData, command);
-        return ValueTask.FromResult(result);
+        await BeforeAsync(eventData, command, cancellationToken);
+        return result;
     }
 
     public override int NonQueryExecuted(DbCommand command, CommandExecutedEventData eventData, int result)
@@ -377,14 +517,14 @@ public sealed class AppDbContextCommandInterceptor(IAppDbContextStateCoordinator
         return result;
     }
 
-    public override ValueTask<InterceptionResult<object>> ScalarExecutingAsync(
+    public override async ValueTask<InterceptionResult<object>> ScalarExecutingAsync(
         DbCommand command,
         CommandEventData eventData,
         InterceptionResult<object> result,
         CancellationToken cancellationToken = default)
     {
-        Before(eventData, command);
-        return ValueTask.FromResult(result);
+        await BeforeAsync(eventData, command, cancellationToken);
+        return result;
     }
 
     public override object? ScalarExecuted(DbCommand command, CommandExecutedEventData eventData, object? result)
@@ -414,4 +554,28 @@ public sealed class AppDbContextCommandInterceptor(IAppDbContextStateCoordinator
         if (eventData.Context is AppDbContext db)
             coordinator.CompleteDirectMutation(db, command.CommandText);
     }
+
+    public override void CommandFailed(DbCommand command, CommandErrorEventData eventData)
+    {
+        if (eventData.Context is AppDbContext db)
+            coordinator.FailCommand(db);
+    }
+
+    public override Task CommandFailedAsync(
+        DbCommand command,
+        CommandErrorEventData eventData,
+        CancellationToken cancellationToken = default)
+    {
+        if (eventData.Context is AppDbContext db)
+            coordinator.FailCommand(db);
+        return Task.CompletedTask;
+    }
+
+    private ValueTask BeforeAsync(
+        CommandEventData eventData,
+        DbCommand command,
+        CancellationToken cancellationToken) =>
+        eventData.Context is AppDbContext db
+            ? coordinator.BeforeCommandAsync(db, command.CommandText, cancellationToken)
+            : ValueTask.CompletedTask;
 }

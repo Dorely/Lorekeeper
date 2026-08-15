@@ -1238,18 +1238,20 @@ All dependency-injection-created contexts participate in the singleton
 invalidates unchanged entities before a query can reuse data superseded by
 another application context, and observes bulk update/delete commands as well
 as ordinary `SaveChanges` operations. Explicit transactions publish their
-invalidations only after commit. Table generations are cache-invalidation hints,
-not write locks: unrelated rows in the same table may be updated by UI and
-background work without producing a false conflict. This boundary is required
-because Blazor circuit scopes outlive an individual UI operation.
+invalidations only after commit. A process-wide mutation gate serializes tracked
+saves and direct EF mutation commands. This matches Lorekeeper's single-user
+database ownership and prevents UI, assistant, and background contexts from
+racing one another while a stale row is being refreshed. Table generations
+remain cache-invalidation hints rather than user-facing conflicts. This boundary
+is required because Blazor circuit scopes outlive an individual UI operation.
 
 `AppDbContext` centrally resolves a genuine affected-row concurrency miss. It
 reloads the conflicting row, rebases only the properties marked modified by the
 pending operation, advances numeric revision tokens from the persisted value,
-and retries the save. Repeated deletes are idempotent. A modified row that was
-actually deleted, an entryless provider failure, or a conflict that cannot settle
-within the bounded retry count still fails closed; the context never recreates a
-missing aggregate or discards unknown pending data. This row-level policy applies
+and retries the save while retaining the process mutation gate. Repeated deletes
+are idempotent. A stale update whose aggregate was already removed is detached
+rather than resurrecting deleted data. An entryless provider failure or a conflict
+that cannot settle within the bounded retry count still fails closed. This row-level policy applies
 to every repository and service using the registered context, so feature code
 does not implement ad hoc EF retries. Revision-checked aggregate services may
 still reject an obsolete user/tool request before mutation when its explicit

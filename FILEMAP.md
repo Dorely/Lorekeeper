@@ -349,8 +349,8 @@
 
 | File | Description |
 |------|-------------|
-| `AppDbContext.cs` | EF Core context for projects, page setup, providers, chats, writing, graph, ingest/import, publishing, composition, fonts, and Book Text Styles. Configures relationships/indexes, JSON property bags, bounded row-level stale-state rebasing, revision advancement, and transient SQLite lock retries. |
-| `AppDbContextStateCoordinator.cs` | Process-wide table-generation coordinator and EF command/transaction interceptors that invalidate stale tracked reads, centrally refresh declared mutation aggregates without discarding pending work, and observe committed bulk or tracked mutations without treating unrelated rows as conflicts. |
+| `AppDbContext.cs` | EF Core context for projects, page setup, providers, chats, writing, graph, ingest/import, publishing, composition, fonts, and Book Text Styles. Configures relationships/indexes, JSON property bags, bounded row-level stale-state rebasing, revision advancement, idempotent stale-delete handling, and transient SQLite lock retries. |
+| `AppDbContextStateCoordinator.cs` | Process-wide single-writer/table-generation coordinator and EF command/transaction interceptors that serialize database mutations, invalidate stale tracked reads, centrally refresh declared mutation aggregates without discarding pending work, and observe committed bulk or tracked mutations. |
 | `DatabaseMigrationRecoveryService.cs` | Shared protected SQLite backup/restore, recovery-shell, expiring confirmation, backup discovery, and reference-aware pruning boundary for guarded migrations. |
 | `DatabaseStartupMigrationService.cs` | Single application-startup schema/data migration orchestrator shared by the real host and installed-database migration fixtures so verification cannot drift from startup order. |
 | `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |

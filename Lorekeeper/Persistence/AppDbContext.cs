@@ -156,7 +156,8 @@ public class AppDbContext(
         var delay = TimeSpan.FromMilliseconds(100);
         try
         {
-            stateCoordinator?.BeginSave(this);
+            if (stateCoordinator is not null)
+                await stateCoordinator.BeginSaveAsync(this, cancellationToken);
             var concurrencyAttempt = 1;
             for (var attempt = 1; ; attempt++)
             {
@@ -259,14 +260,12 @@ public class AppDbContext(
     private static bool TryRebaseConcurrencyEntries(
         IReadOnlyList<(EntityEntry Entry, PropertyValues? Values)> entries)
     {
-        if (entries.Any(item => item.Values is null && item.Entry.State != EntityState.Deleted))
-            return false;
-
         foreach (var (entry, databaseValues) in entries)
         {
             if (databaseValues is null)
             {
-                // A repeated delete is already in the requested final state.
+                // The aggregate was already removed by another completed application
+                // operation. Never resurrect it from a stale tracked instance.
                 entry.State = EntityState.Detached;
                 continue;
             }
@@ -285,7 +284,12 @@ public class AppDbContext(
                     property.Metadata.IsConcurrencyToken))
                 .ToArray();
             if (intendedChanges.Length == 0)
-                return false;
+            {
+                entry.OriginalValues.SetValues(databaseValues);
+                entry.CurrentValues.SetValues(databaseValues);
+                entry.State = EntityState.Unchanged;
+                continue;
+            }
 
             entry.OriginalValues.SetValues(databaseValues);
             entry.CurrentValues.SetValues(databaseValues);
