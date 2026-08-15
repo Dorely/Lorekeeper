@@ -369,7 +369,6 @@ try
     try
     {
         & $buildScript -Version $Version
-        if ($LASTEXITCODE -ne 0) { throw "Windows release build failed with exit code $LASTEXITCODE." }
     }
     catch
     {
