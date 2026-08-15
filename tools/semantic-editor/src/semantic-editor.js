@@ -1943,13 +1943,11 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     let savedGeneration = 0;
     let requestedReadOnly = false;
     let readOnly = false;
-    let conflictDraftJson = null;
-    const conflictStorageKey = `lorekeeper.manuscript-conflict.${manuscriptId}`;
     let updateFormattingControls = () => {};
     let persistentHistoryState = {canUndo: false, canRedo: false, undoLabel: null, redoLabel: null};
     let performPersistentHistory = async () => false;
     const applyEffectiveReadOnly = () => {
-        readOnly = requestedReadOnly || conflictDraftJson !== null;
+        readOnly = requestedReadOnly;
         if (!view) return;
         view.setProps({editable: () => !readOnly});
         for (const control of root.querySelectorAll("button, select, input"))
@@ -2008,8 +2006,6 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         caretFrame = requestAnimationFrame(updatePersistentCaret);
     };
     const saveNow = () => {
-        if (conflictDraftJson !== null)
-            return Promise.resolve(false);
         if (timer) {
             clearTimeout(timer);
             timer = null;
@@ -2019,8 +2015,6 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             domainFromDocument(view.state.doc, manuscriptId, revision));
         const selectionJson = JSON.stringify(captureStableSelection(view));
         saveChain = saveChain.catch(() => false).then(async () => {
-            if (conflictDraftJson !== null)
-                return false;
             if (savedGeneration >= targetGeneration)
                 return true;
             const payload = JSON.parse(snapshotJson);
@@ -2032,19 +2026,11 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
                     revision,
                     json,
                     selectionJson);
-                if (result?.conflict) {
-                    conflictDraftJson = json;
-                    try { localStorage.setItem(conflictStorageKey, conflictDraftJson); } catch {}
-                    if (timer) {
-                        clearTimeout(timer);
-                        timer = null;
-                    }
-                    applyEffectiveReadOnly();
-                    await dotNetRef.invokeMethodAsync(
-                        "OnConflictPreserved",
-                        conflictDraftJson,
-                        result.currentManuscriptJson);
-                    return false;
+                if (result?.currentManuscriptJson) {
+                    replaceDocument(result.currentManuscriptJson);
+                    persistentHistoryState = await dotNetRef.invokeMethodAsync("GetAuthoringHistoryState");
+                    updateFormattingControls();
+                    return true;
                 }
                 if (!result?.saved) return false;
                 revision = result.revision;
@@ -2557,16 +2543,6 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     }).catch(() => {});
     updateStatus();
     outline.update();
-    try {
-        conflictDraftJson = localStorage.getItem(conflictStorageKey);
-    } catch {}
-    if (conflictDraftJson) {
-        applyEffectiveReadOnly();
-        void dotNetRef.invokeMethodAsync(
-            "OnConflictPreserved",
-            conflictDraftJson,
-            initialJson);
-    }
 
     return {
         flush: saveNow,
@@ -2578,26 +2554,6 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         },
         setDocument(json) {
             replaceDocument(json);
-        },
-        resolveConflictWithCurrent(json, restoreReadOnly) {
-            this.setDocument(json);
-            conflictDraftJson = null;
-            try { localStorage.removeItem(conflictStorageKey); } catch {}
-            requestedReadOnly = !!restoreReadOnly;
-            applyEffectiveReadOnly();
-        },
-        downloadConflictDraft(fileName) {
-            const value = conflictDraftJson ?? (() => {
-                try { return localStorage.getItem(conflictStorageKey); } catch { return null; }
-            })();
-            if (!value) return false;
-            const url = URL.createObjectURL(new Blob([value], {type: "application/json"}));
-            const anchor = document.createElement("a");
-            anchor.href = url;
-            anchor.download = fileName;
-            anchor.click();
-            URL.revokeObjectURL(url);
-            return true;
         },
         selectProjectImage(image) {
             const imageId = String(image?.id || "").toLowerCase();

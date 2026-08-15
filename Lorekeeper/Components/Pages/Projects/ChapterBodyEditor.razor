@@ -24,21 +24,6 @@
             <button type="button" class="btn-close" aria-label="Dismiss paste warning" @onclick="() => _pasteWarning = null"></button>
         </div>
     }
-    @if (_conflictDraftJson is not null && _conflictCurrentJson is not null)
-    {
-        <div class="semantic-editor-warning semantic-editor-conflict" role="alert">
-            <strong>This chapter changed elsewhere.</strong>
-            Your local draft is preserved and editing is paused. Download it before choosing the current saved version.
-            <div>
-                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="DownloadConflictDraftAsync">
-                    Download local draft
-                </button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ReloadCurrentAfterConflictAsync">
-                    Load current saved version
-                </button>
-            </div>
-        </div>
-    }
 </div>
 
 @code {
@@ -72,8 +57,6 @@
     private bool _disposed;
     private bool _disposing;
     private string? _pasteWarning;
-    private string? _conflictDraftJson;
-    private string? _conflictCurrentJson;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -330,7 +313,7 @@
             return new SemanticEditorSaveResult(false, expectedRevision);
 
         var result = await SaveAsync(ChapterId, expectedRevision, manuscriptJson);
-        if (result.Saved)
+        if (result.Saved && result.Applied)
             await AuthoringHistory.UpdateSelectionAsync(HistoryTarget(), selectionJson);
         return result;
     }
@@ -405,35 +388,6 @@
             return InvokeAsync(StateHasChanged);
         }
         return Task.CompletedTask;
-    }
-
-    [JSInvokable]
-    public Task OnConflictPreserved(string localDraftJson, string currentManuscriptJson)
-    {
-        _conflictDraftJson = localDraftJson;
-        _conflictCurrentJson = currentManuscriptJson;
-        return InvokeAsync(StateHasChanged);
-    }
-
-    private async Task DownloadConflictDraftAsync()
-    {
-        if (_handle is null)
-            return;
-        await _handle.InvokeAsync<bool>(
-            "downloadConflictDraft",
-            $"lorekeeper-manuscript-conflict-{ChapterId:N}.json");
-    }
-
-    private async Task ReloadCurrentAfterConflictAsync()
-    {
-        if (_handle is null || _conflictCurrentJson is null)
-            return;
-        await _handle.InvokeVoidAsync(
-            "resolveConflictWithCurrent",
-            _conflictCurrentJson,
-            IsReadOnly);
-        _conflictDraftJson = null;
-        _conflictCurrentJson = null;
     }
 
     public async Task<bool> FlushAsync()
@@ -528,7 +482,7 @@
     public sealed record SemanticEditorSaveResult(
         bool Saved,
         long Revision,
-        bool Conflict = false,
+        bool Applied = true,
         string? CurrentManuscriptJson = null);
 
     public sealed record SemanticEditorHistoryResult(

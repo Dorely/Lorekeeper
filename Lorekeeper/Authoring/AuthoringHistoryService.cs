@@ -40,9 +40,6 @@ public sealed record AuthoringHistoryMutation(
     string Snapshot,
     string SelectionJson);
 
-public sealed class AuthoringHistoryDivergedException()
-    : InvalidOperationException("HISTORY_DIVERGED: This document changed outside its authoring history. Reload it before trying again.");
-
 public interface IAuthoringHistoryService
 {
     Task<AuthoringHistoryState> ReadStateAsync(AuthoringHistoryTarget target, CancellationToken cancellationToken = default);
@@ -107,10 +104,18 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
         var batch = await db.AuthoringTurnHistoryBatches
             .Include(item => item.Dependencies)
             .SingleOrDefaultAsync(item => item.StreamId == stream.Id && item.AssistantTurnId == turnId, cancellationToken);
+        var beforeHash = Hash(beforeSnapshot);
+        var currentHash = await CurrentResultHashAsync(stream, cancellationToken);
+        if (!FixedEquals(beforeHash, currentHash)
+            || batch is { Status: AuthoringTurnHistoryBatchStatus.Open }
+                && !FixedEquals(batch.AfterHash, beforeHash))
+        {
+            await ResetStreamAsync(db, stream, beforeSnapshot, cancellationToken);
+            batch = null;
+        }
         var now = DateTime.UtcNow;
         if (batch is null)
         {
-            EnsureCurrentHash(stream, Hash(beforeSnapshot), await CurrentResultHashAsync(stream, cancellationToken));
             batch = new AuthoringTurnHistoryBatch
             {
                 StreamId = stream.Id,
@@ -136,10 +141,7 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
                     .Include(item => item.Dependencies)
                     .SingleOrDefaultAsync(item => item.StreamId == stream.Id
                         && item.AssistantTurnId == turnId, cancellationToken)
-                    ?? throw new AuthoringHistoryDivergedException();
-                if (stream.CursorSequence != completedEntry.Sequence)
-                    throw new AuthoringHistoryDivergedException();
-                EnsureCurrentHash(stream, Hash(beforeSnapshot), completedEntry.ResultHash);
+                    ?? throw new InvalidOperationException("The completed assistant history entry is missing.");
                 completedEntry.ResultSnapshot = Compress(afterSnapshot);
                 completedEntry.ResultHash = Hash(afterSnapshot);
                 completedEntry.SelectionJson = selectionJson;
@@ -153,8 +155,6 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
                 await CleanupDetachedCompositionsAsync(target.ProjectId, cancellationToken);
                 return await BuildStateAsync(stream, cancellationToken);
             }
-            if (!FixedEquals(batch.AfterHash, Hash(beforeSnapshot)))
-                throw new AuthoringHistoryDivergedException();
             batch.AfterSnapshot = Compress(afterSnapshot);
             batch.AfterHash = Hash(afterSnapshot);
             batch.SelectionJson = selectionJson;
@@ -355,7 +355,8 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
             return await ReadStateAsync(target, cancellationToken);
 
         var stream = await GetOrCreateStreamAsync(target, beforeSnapshot, cancellationToken);
-        EnsureCurrentHash(stream, Hash(beforeSnapshot), await CurrentResultHashAsync(stream, cancellationToken));
+        if (!FixedEquals(Hash(beforeSnapshot), await CurrentResultHashAsync(stream, cancellationToken)))
+            await ResetStreamAsync(db, stream, beforeSnapshot, cancellationToken);
         await AppendEntryAsync(stream, afterSnapshot, actionLabel, origin, assistantTurnId, selectionJson, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await CleanupDetachedCompositionsAsync(target.ProjectId, cancellationToken);
@@ -377,7 +378,16 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
         if (await db.AuthoringTurnHistoryBatches.AnyAsync(item => item.StreamId == stream.Id && item.Status == AuthoringTurnHistoryBatchStatus.Open, cancellationToken))
             throw new InvalidOperationException("Finish or stop the active assistant turn before using history.");
 
-        EnsureCurrentHash(stream, Hash(currentSnapshot), await CurrentResultHashAsync(stream, cancellationToken));
+        if (!FixedEquals(Hash(currentSnapshot), await CurrentResultHashAsync(stream, cancellationToken)))
+        {
+            await ResetStreamAsync(db, stream, currentSnapshot, cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+            return new AuthoringHistoryMutation(
+                await BuildStateAsync(stream, cancellationToken),
+                string.Empty,
+                currentSnapshot,
+                string.Empty);
+        }
         var entries = await db.AuthoringHistoryEntries
             .Where(item => item.StreamId == stream.Id)
             .OrderBy(item => item.Sequence)
@@ -570,10 +580,27 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
 
     private static AuthoringHistoryState EmptyState() => new(0, false, false, null, null, 0, 0);
 
-    private static void EnsureCurrentHash(AuthoringHistoryStream stream, string suppliedHash, string expectedHash)
+    private static async Task ResetStreamAsync(
+        AppDbContext db,
+        AuthoringHistoryStream stream,
+        string currentSnapshot,
+        CancellationToken cancellationToken)
     {
-        if (!FixedEquals(suppliedHash, expectedHash))
-            throw new AuthoringHistoryDivergedException();
+        var entries = await db.AuthoringHistoryEntries
+            .Where(item => item.StreamId == stream.Id)
+            .ToListAsync(cancellationToken);
+        var batches = await db.AuthoringTurnHistoryBatches
+            .Where(item => item.StreamId == stream.Id)
+            .ToListAsync(cancellationToken);
+        db.AuthoringHistoryEntries.RemoveRange(entries);
+        db.AuthoringTurnHistoryBatches.RemoveRange(batches);
+        stream.BaselineSnapshot = Compress(currentSnapshot);
+        stream.BaselineHash = Hash(currentSnapshot);
+        stream.FirstSequence = 1;
+        stream.LastSequence = 0;
+        stream.CursorSequence = 0;
+        stream.Revision++;
+        stream.UpdatedAt = DateTime.UtcNow;
     }
 
     private static string NormalizeLabel(string value, string fallback) =>

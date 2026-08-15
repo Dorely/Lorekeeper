@@ -376,10 +376,11 @@ chapter-visual persistence are not runtime paths.
 chapters, publication prose sections, complete Page Composition aggregates, and
 Core/release cover aggregates. Each canonical stream stores a Brotli-compressed
 baseline plus at most 100 resulting action snapshots; document revisions always
-advance when an older snapshot is restored. A current-snapshot hash must match
-the stream cursor before movement, otherwise the operation returns
-`HISTORY_DIVERGED` and leaves the live document untouched. New work after Undo
-deletes the Redo branch. History state and selection anchors are stored in
+advance when an older snapshot is restored. The current persisted document is
+authoritative when its snapshot no longer matches the history cursor: the
+server silently discards the stale stream, starts a new baseline from the live
+snapshot, and treats a stale Undo or Redo request as a no-op. New work after
+Undo deletes the Redo branch. History state and selection anchors are stored in
 SQLite, but history streams and open assistant batches are working-database
 state and are deliberately absent from project export/import.
 
@@ -596,7 +597,11 @@ project mutation lease and then a short database write operation, load the
 current aggregate with explicit tracking, and commit before either lease is
 released. A rejected, cancelled, or failed mutation disposes that operation;
 none of its entities can survive into the next edit. The next request performs a
-complete reread and fails closed when its expected revision is stale.
+complete reread when its expected revision is stale. Interactive autosaves keep
+the latest stored aggregate, ignore the out-of-order payload, and return that
+authoritative snapshot for the mounted editor to adopt without losing its
+surface. Explicit assistant stages and previews remain revision-bound because
+they represent an approved mutation against one exact snapshot.
 
 `LayoutGenerationTargetDescriptor` is the server-owned geometry boundary for a
 project page, Figure, page surface/frame, or publication cover surface/frame.
@@ -1255,13 +1260,16 @@ delays, or background polling.
 
 Application-managed revision tokens remain the concurrency contract. Explicit
 revision predicates treat zero affected rows as conflicts, and EF concurrency
-misses fail closed with a reread/retry message. Lorekeeper does not merge stale
-property values or silently rebase a failed save. The only bounded save retry in
-`AppDbContext` is for transient SQLite lock errors. Protected startup migrations
-retain one intentionally bounded tracking context across their explicit schema,
-transaction, backup, validation, and tracker-clear phases; guarded import
-transactions likewise share one operation but do not retain tracker state after
-rollback.
+misses identify stale work without graph-wide merging. Interactive editors
+resolve those misses by rereading and adopting the latest stored snapshot;
+out-of-order autosaves are ignored and do not replace the editing surface with
+an error. Exact-snapshot assistant previews, guarded import transactions, and
+other atomic server workflows may still reject a stale mutation before any
+partial write. The only bounded save retry in `AppDbContext` is for transient
+SQLite lock errors. Protected startup migrations retain one intentionally
+bounded tracking context across their explicit schema, transaction, backup,
+validation, and tracker-clear phases; guarded import transactions likewise
+share one operation but do not retain tracker state after rollback.
 
 `IDatabaseMigrationRecoveryService` owns provider-specific backup paths,
 owner-only permissions, SQLite Online Backup creation, expiring restore
@@ -1487,12 +1495,11 @@ the JavaScript attach boundary rejects missing or detached elements before any
 DOM mutation, so chapter switches or navigation cannot turn a stale element
 reference into a circuit-ending initialization exception.
 
-On a manuscript revision conflict, the browser adapter preserves the unsaved
-v2 JSON in chapter-keyed browser/Electron local storage, locks the stale editor,
-and exposes download or explicit reload-current actions. The copy is
-unencrypted manuscript content outside SQLite; it survives UI remounts, is not
-part of database backup/export, and is deleted only when the user explicitly
-loads the current saved manuscript. Clearing site data removes it.
+On a manuscript revision conflict, the server returns the latest persisted v2
+document and revision. The browser adapter replaces its stale document with that
+authoritative snapshot, refreshes history state, and continues editing without
+a conflict screen or browser/Electron manuscript copy. Out-of-order autosaves
+therefore cannot overwrite newer content or make the editor unusable.
 
 Windows and macOS release builders run the semantic-editor locked install,
 dependency audit, and deterministic rebuild, fail if the committed bundle is

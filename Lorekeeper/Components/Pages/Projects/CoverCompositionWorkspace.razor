@@ -640,8 +640,23 @@
             _cover = _loadedCoreBook
                 ? await Books.GetCoverAsync(saveProjectId)
                 : await Covers.GetSurfaceAsync(saveProjectId, _loadedEditionId, _surfaceRole);
-            _dirty = true;
-            ScheduleAutosave();
+            _scene = CoverCompositionFactory.KeepArtworkBehindCopy(
+                JsonSerializer.Deserialize<CompositionScene>(
+                    _cover.CompositionSceneJson,
+                    ManuscriptCodec.JsonOptions)
+                ?? throw new InvalidDataException("The current cover scene is empty."));
+            _objects = _scene.Objects.ToList();
+            _layers = _scene.Layers.ToList();
+            _styles = _scene.Styles.ToList();
+            _title = _cover.Title;
+            _subtitle = _cover.Subtitle;
+            _author = _cover.Author;
+            _spineText = _cover.SpineText;
+            _backCopy = _cover.BackCopy;
+            _background = _cover.BackgroundColor;
+            _barcodeMode = _cover.BarcodeMode;
+            _dirty = false;
+            _error = null;
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _saveGate.Release(); }

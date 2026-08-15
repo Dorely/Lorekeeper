@@ -1597,19 +1597,22 @@ else
             _lastSavedAt = DateTime.Now;
             return new ChapterBodyEditor.SemanticEditorSaveResult(true, result.Snapshot.Revision);
         }
-        catch (ManuscriptRevisionConflictException ex)
+        catch (ManuscriptRevisionConflictException)
         {
             var current = await Manuscripts.GetManuscriptAsync(_contentTarget, chapterId)
                 ?? throw new InvalidOperationException(
                     "The chapter was deleted while resolving an editing conflict.");
-            _saveState = SaveState.SaveFailed;
-            _saveError =
-                $"This chapter changed at revision {ex.ActualRevision}. "
-                + "Your local draft is preserved in the editor until you download it or load the current version.";
+            _current = await Chapters.ReloadFromStoreAsync(chapterId);
+            if (_current is not null)
+                ReplaceCachedChapter(_current);
+            RecordEditorSave(current);
+            UpdateChapterMetrics(current.PlainText);
+            _saveState = SaveState.Saved;
+            _saveError = null;
             return new ChapterBodyEditor.SemanticEditorSaveResult(
-                false,
-                expectedRevision,
-                Conflict: true,
+                true,
+                current.Revision,
+                Applied: false,
                 CurrentManuscriptJson: ManuscriptCodec.Serialize(current.Document));
         }
         catch (Exception ex)

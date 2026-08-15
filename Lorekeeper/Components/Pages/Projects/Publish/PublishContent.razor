@@ -1150,7 +1150,13 @@ else
         {
             await RefreshPublicationSectionsAsync();
             var current = _publicationSections.FirstOrDefault(item => item.Id == sectionId);
-            return new(false, expectedRevision, true, current is null ? null : ManuscriptCodec.Serialize(current.Manuscript));
+            return current is null
+                ? new(false, expectedRevision)
+                : new(
+                    true,
+                    current.Revision,
+                    Applied: false,
+                    CurrentManuscriptJson: ManuscriptCodec.Serialize(current.Manuscript));
         }
         catch (Exception exception)
         {
@@ -1681,8 +1687,15 @@ else
         catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
         {
             _workspace = await Publishing.GetWorkspaceForEditingAsync(Project.Id, id, _dispose.Token);
-            _releaseDirty = true;
-            QueueFormAutosave();
+            _releaseDraft = ReleaseDraft.From(_workspace.Edition);
+            _releaseOverrides = _workspace.OverrideFields.ToHashSet();
+            _loadedOverrides = _releaseOverrides.ToHashSet();
+            _releaseSelections = _workspace.Sections.SelectMany(section => section.Chapters)
+                .ToDictionary(item => item.Id, item => item.IsIncluded);
+            _loadedReleaseSelections = _releaseSelections.ToDictionary();
+            _releaseDirty = false;
+            _releaseContentDirty = false;
+            _error = null;
         }
         catch (Exception exception) { _error = exception.Message; }
         finally { _busy = false; }

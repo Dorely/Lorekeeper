@@ -1117,10 +1117,9 @@ public sealed class CompositionService(
             ?? throw new KeyNotFoundException("Composition workspace was not found in this project.");
         var composition = variant.Composition;
         EnsureTarget(target, composition);
-        if (composition.Revision != expectedCompositionRevision)
-            throw new CompositionRevisionConflictException(expectedCompositionRevision, composition.Revision);
-        if (variant.Revision != expectedVariantRevision)
-            throw new CompositionRevisionConflictException(expectedVariantRevision, variant.Revision);
+        if (composition.Revision != expectedCompositionRevision
+            || variant.Revision != expectedVariantRevision)
+            return new CompositionWorkspaceSaveResult(composition, variant, Applied: false);
         var semantic = new ManuscriptDocument
         {
             ManuscriptId = composition.Id,
@@ -2539,7 +2538,8 @@ public sealed record DesignedPageIdentity(Guid CompositionId, string BlockId);
 
 public sealed record CompositionWorkspaceSaveResult(
     PageComposition Composition,
-    PageCompositionVariant Variant);
+    PageCompositionVariant Variant,
+    bool Applied = true);
 
 public sealed record CompositionSemanticMutationResult(
     PageComposition Composition,

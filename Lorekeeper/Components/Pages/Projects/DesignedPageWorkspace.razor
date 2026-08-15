@@ -17,7 +17,7 @@
 <section class="composition-workspace @(InteractionLocked ? "composition-workspace--locked" : null)" aria-label="Designed page workspace" aria-disabled="@InteractionLocked" inert="@(InteractionLocked ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
     <style>@((MarkupString)FontFaceCss())</style>
     @if (!string.IsNullOrWhiteSpace(_error)) { <div class="alert alert-danger">@PublicationDiagnosticText.SanitizeIdentifiers(_error)</div> }
-    else if (_scene is null) { <p class="text-muted">Loading composition...</p> }
+    @if (_scene is null) { <p class="text-muted">Loading composition...</p> }
     else
     {
         <CompositionVisualEditorShell AccessibleLabel="Designed page visual editor">
@@ -1112,6 +1112,25 @@
             _variant = saved.Variant;
             _variants = await Compositions.ListVariantsAsync(ProjectId, _composition.Id);
             _history = await Compositions.GetHistoryStateAsync(ProjectId, _composition.Id);
+            if (!saved.Applied)
+            {
+                _semanticBlocks = ManuscriptCodec.Deserialize(
+                    _composition.SemanticManuscriptJson,
+                    _composition.Id,
+                    _composition.Revision).Content.ToList();
+                _scene = JsonSerializer.Deserialize<CompositionScene>(
+                    _variant.SceneJson,
+                    ManuscriptCodec.JsonOptions)
+                    ?? throw new InvalidDataException("The current composition scene is empty.");
+                _objects = _scene.Objects.ToList();
+                _layers = _scene.Layers.ToList();
+                _styles = _scene.Styles.ToList();
+                _dirty = false;
+                _error = null;
+                await NotifyWorkspaceChangedAsync();
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
             await AuthoringHistory.UpdateSelectionAsync(
                 new AuthoringHistoryTarget(
                     ProjectId,
