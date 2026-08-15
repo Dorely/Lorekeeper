@@ -52,6 +52,27 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
         var ingest = databaseOperation.Repositories.Ingest;
         return await ingest.ListReportItemViewsAsync(jobId, sourceChunkId, cancellationToken);
     }
+
+    public async Task<IngestSource?> GetSourceAsync(Guid sourceId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        return await databaseOperation.Repositories.Ingest.GetSourceAsync(sourceId, cancellationToken);
+    }
+
+    public async Task<IngestSourceChunk?> GetSourceChunkAsync(Guid sourceChunkId, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        return await databaseOperation.Repositories.Ingest.GetSourceChunkAsync(sourceChunkId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<IngestSourceChunk>> ListSourceChunksAsync(
+        Guid sourceId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        return await databaseOperation.Repositories.Ingest.ListSourceChunksAsync(sourceId, cancellationToken);
+    }
+
     public async Task<IngestSourceChunkExcerpt?> GetSourceChunkExcerptAsync(Guid sourceChunkId, int maxChars = 8_000, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);

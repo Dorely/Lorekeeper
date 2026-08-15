@@ -1,10 +1,10 @@
 @using Lorekeeper.Chapters
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
-@using Lorekeeper.Persistence.Repositories
+@using Lorekeeper.Projects
 @inject IActService Acts
 @inject IChapterService Chapters
-@inject IProjectRepository ProjectRepo
+@inject IProjectService Projects
 
 @if (Project is null)
 {
@@ -83,7 +83,7 @@ else
         {
             _loading = _workingProject is null;
             // Re-fetch the project so tool-driven mutations that touch project state are reflected here.
-            _workingProject = await ProjectRepo.GetSnapshotByIdAsync(Project.Id) ?? Project;
+            _workingProject = await Projects.GetByIdAsync(Project.Id) ?? Project;
             _acts = (await Acts.ListAsync(Project.Id)).ToList();
             var allChapters = (await Chapters.ListAsync(Project.Id)).ToList();
             _chaptersByAct = _acts.ToDictionary(

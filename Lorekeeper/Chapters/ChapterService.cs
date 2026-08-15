@@ -433,11 +433,8 @@ public class ChapterService(
             chapter.Id,
             chapter.ManuscriptRevision);
         var (document, changed) = ManuscriptOperations.Apply(source, operations);
-        return await SaveManuscriptUnderLeaseAsync(
-            chapter,
-            document,
-            changed,
-            cancellationToken);
+        var persisted = await PersistManuscriptUnderLeaseAsync(chapter, document, changed, cancellationToken);
+        return persisted.Result;
     }
 
     public async Task<ManuscriptMutationResult> ApplyPersistedUnderProjectMutationLeaseAsync(
@@ -452,7 +449,8 @@ public class ChapterService(
         var chapter = await RequireRevisionAsync(chapterId, expectedRevision, cancellationToken);
         var source = ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
         var (document, changed) = ManuscriptOperations.Apply(source, operations);
-        return await PersistManuscriptUnderLeaseAsync(chapter, document, changed, cancellationToken);
+        var persisted = await PersistManuscriptUnderLeaseAsync(chapter, document, changed, cancellationToken);
+        return persisted.Result;
     }
 
     public async Task RefreshDerivedStateAsync(
@@ -517,55 +515,51 @@ public class ChapterService(
         IReadOnlyList<string> changedBlockIds,
         CancellationToken cancellationToken)
     {
-        await using var mutation = await projectMutations.AcquireAsync(
-            chapter.ProjectId,
-            cancellationToken);
-        return await SaveManuscriptUnderLeaseAsync(
-            chapter,
-            document,
-            changedBlockIds,
-            cancellationToken);
+        (ManuscriptMutationResult Result, Chapter Chapter) persisted;
+        await using (await projectMutations.AcquireAsync(chapter.ProjectId, cancellationToken))
+        {
+            persisted = await PersistManuscriptUnderLeaseAsync(
+                chapter,
+                document,
+                changedBlockIds,
+                cancellationToken);
+        }
+
+        await RefreshPersistedManuscriptAsync(persisted.Chapter, cancellationToken);
+        return persisted.Result;
     }
 
-    private async Task<ManuscriptMutationResult> SaveManuscriptUnderLeaseAsync(
-        Chapter chapter,
-        ManuscriptDocument document,
-        IReadOnlyList<string> changedBlockIds,
+    private async Task RefreshPersistedManuscriptAsync(
+        Chapter savedChapter,
         CancellationToken cancellationToken)
     {
-        var result = await PersistManuscriptUnderLeaseAsync(
-            chapter,
-            document,
-            changedBlockIds,
-            cancellationToken);
         try
         {
-            await outlineGraphSync.EnsureChapterAsync(chapter, cancellationToken);
+            await outlineGraphSync.EnsureChapterAsync(savedChapter, cancellationToken);
         }
         catch (Exception exception)
         {
             logger.LogWarning(
                 exception,
                 "Chapter {ChapterId} manuscript committed at revision {Revision}, but graph synchronization failed.",
-                chapter.Id,
-                chapter.ManuscriptRevision);
+                savedChapter.Id,
+                savedChapter.ManuscriptRevision);
         }
         try
         {
-            await TryReindexBodyAsync(chapter.Id, cancellationToken);
+            await TryReindexBodyAsync(savedChapter.Id, cancellationToken);
         }
         catch (OperationCanceledException exception)
         {
             logger.LogWarning(
                 exception,
                 "Chapter {ChapterId} manuscript committed at revision {Revision}, but post-commit indexing was cancelled.",
-                chapter.Id,
-                chapter.ManuscriptRevision);
+                savedChapter.Id,
+                savedChapter.ManuscriptRevision);
         }
-        return result;
     }
 
-    private async Task<ManuscriptMutationResult> PersistManuscriptUnderLeaseAsync(
+    private async Task<(ManuscriptMutationResult Result, Chapter Chapter)> PersistManuscriptUnderLeaseAsync(
         Chapter chapter,
         ManuscriptDocument document,
         IReadOnlyList<string> changedBlockIds,
@@ -576,6 +570,11 @@ public class ChapterService(
         var db = databaseOperation.Db;
         var projects = databaseOperation.Repositories.Projects;
         var repo = databaseOperation.Repositories.Chapters;
+        chapter = await repo.GetByIdAsync(chapter.Id, cancellationToken)
+            ?? throw new InvalidOperationException($"Chapter {chapter.Id} not found.");
+        var expectedRevision = checked(document.Revision - 1);
+        if (chapter.ManuscriptRevision != expectedRevision)
+            throw new ManuscriptRevisionConflictException(expectedRevision, chapter.ManuscriptRevision);
         await ValidateFigureAssetsAsync(chapter.ProjectId, document, cancellationToken);
         await ValidateStyleReferencesAsync(chapter.ProjectId, document, null, cancellationToken);
         await ValidateDesignedPageReferencesAsync(chapter, document, EditorContentTarget.Core, cancellationToken);
@@ -587,7 +586,6 @@ public class ChapterService(
         chapter.ManuscriptRevision = document.Revision;
         chapter.UpdatedAt = DateTime.UtcNow;
         chapter.VectorIndexState = VectorIndexState.Stale;
-        repo.Update(chapter);
 
         var project = await projects.GetByIdAsync(chapter.ProjectId, cancellationToken);
         if (project is not null)
@@ -634,7 +632,7 @@ public class ChapterService(
                 checked(document.Revision - 1),
                 current?.ManuscriptRevision ?? document.Revision);
         }
-        return new ManuscriptMutationResult(await SnapshotAsync(chapter, cancellationToken), changedBlockIds);
+        return (new ManuscriptMutationResult(await SnapshotAsync(chapter, cancellationToken), changedBlockIds), chapter);
     }
 
     private async Task ValidateFigureAssetsAsync(

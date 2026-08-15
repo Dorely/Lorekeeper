@@ -1,7 +1,7 @@
 @using Lorekeeper.Context
 @using Lorekeeper.Chapters
 @using Lorekeeper.Models
-@using Lorekeeper.Persistence.Repositories
+@using Lorekeeper.Projects
 @using Lorekeeper.Tokens
 @implements IDisposable
 @inject IEditorContextService EditorContext
@@ -214,7 +214,7 @@ else
         try
         {
             using var scope = ScopeFactory.CreateScope();
-            var projects = scope.ServiceProvider.GetRequiredService<IProjectRepository>();
+            var projects = scope.ServiceProvider.GetRequiredService<IProjectService>();
             var chapters = scope.ServiceProvider.GetRequiredService<IChapterService>();
             var context = scope.ServiceProvider.GetRequiredService<IEditorContextService>();
 

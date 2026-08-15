@@ -5,6 +5,7 @@ namespace Lorekeeper.Projects;
 public interface IProjectService
 {
     Task<IReadOnlyList<Project>> ListAsync(CancellationToken cancellationToken = default);
+    Task<Project?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<Project?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default);
     Task<Project> CreateAsync(string name, CancellationToken cancellationToken = default);
     Task<Project> RenameAsync(Guid id, string newName, CancellationToken cancellationToken = default);

@@ -9,7 +9,8 @@ using Lorekeeper.Search;
 namespace Lorekeeper.Projects;
 
 public class ProjectService(
-IAppDatabaseOperationFactory database, IVectorStore vectors,
+    IAppDatabaseOperationFactory database,
+    IVectorStore vectors,
     IProjectSearchIndex projectSearch,
     IOutlineGraphSync outlineGraphSync,
     IBookBriefService bookBriefs) : IProjectService
@@ -20,6 +21,13 @@ IAppDatabaseOperationFactory database, IVectorStore vectors,
         var repo = databaseOperation.Repositories.Projects;
         return await repo.ListAsync(cancellationToken);
     }
+
+    public async Task<Project?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        return await databaseOperation.Repositories.Projects.GetByIdAsync(id, cancellationToken);
+    }
+
     public async Task<Project?> GetBySlugAsync(string slug, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);

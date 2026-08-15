@@ -7,14 +7,14 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Manuscripts
 @using Lorekeeper.Outline
-@using Lorekeeper.Persistence.Repositories
+@using Lorekeeper.Projects
 @using Lorekeeper.Tokens
 @implements IAsyncDisposable
 @inject IEditorChatService Chat
 @inject IEditorChatTurnRunner ChatTurns
 @inject IChatImageAttachmentService ImageAttachments
 @inject IContextBuilder ContextBuilder
-@inject IProjectRepository Projects
+@inject IProjectService Projects
 @inject IChapterService Chapters
 @inject ILlmProviderService ProviderService
 @inject ITokenCounter TokenCounter
