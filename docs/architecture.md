@@ -596,7 +596,12 @@ revision-checked composition mutation loads its writable entity graph, it also
 asks the central context-state coordinator to discard any unchanged locally
 tracked copy of that composition and its variants. The expected revisions are
 therefore compared with current persisted state rather than a stale long-lived
-circuit snapshot; a pending unsaved aggregate is never discarded.
+circuit snapshot. Project mutation leases prevent an active composition save
+from overlapping the next one. If a rejected, cancelled, or otherwise failed
+operation left uncommitted composition entries in a circuit's tracker, the next
+serialized mutation clears that failed operation's complete tracked residue
+before reloading the saved aggregate; it is neither surfaced as a false
+concurrent-save error nor partially persisted by a later edit.
 
 `LayoutGenerationTargetDescriptor` is the server-owned geometry boundary for a
 project page, Figure, page surface/frame, or publication cover surface/frame.
@@ -1259,8 +1264,12 @@ expected revision no longer matches.
 
 Services that need an authoritative aggregate read identify their mutation
 target through `AppDbContext.PrepareFreshMutation`; the coordinator alone
-validates and refreshes that tracked state, so feature code does not clear the
-tracker or silently discard pending entities. Protected startup migrations
+validates and refreshes that tracked state. It detaches unchanged stale reads and,
+when the requested authoritative aggregate reveals an already-ended failed
+operation, clears that operation's complete uncommitted tracker residue. An active
+save remains protected by the process-wide mutation lease. Feature code therefore
+does not clear the tracker or accidentally carry part of a rejected mutation into
+a later save. Protected startup migrations
 retain their explicit transaction, backup, and validation boundaries while
 using the same registered context configuration.
 

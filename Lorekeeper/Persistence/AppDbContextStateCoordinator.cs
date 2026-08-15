@@ -148,16 +148,23 @@ public sealed class AppDbContextStateCoordinator(ILogger<AppDbContextStateCoordi
             var entries = db.ChangeTracker.Entries<TEntity>()
                 .Where(entry => predicate(entry.Entity))
                 .ToList();
-            var pending = entries
+            var abandoned = entries
                 .Where(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
-                .Select(entry => entry.Metadata.ClrType.Name)
-                .Distinct(StringComparer.Ordinal)
-                .Order(StringComparer.Ordinal)
-                .ToArray();
-            if (pending.Length > 0)
+                .ToList();
+            if (abandoned.Count > 0)
             {
-                throw new InvalidOperationException(
-                    $"A previous {string.Join(", ", pending)} mutation has not finished saving. Wait for it to complete and retry.");
+                var entityNames = db.ChangeTracker.Entries()
+                    .Where(entry => entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                    .Select(entry => entry.Metadata.ClrType.Name)
+                    .Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal)
+                    .ToArray();
+                db.ChangeTracker.Clear();
+                state.SeenGenerations.Clear();
+                logger.LogWarning(
+                    "Discarded abandoned tracked state for {Entities} before loading the next serialized mutation. The prior operation did not commit it.",
+                    string.Join(", ", entityNames));
+                return;
             }
             foreach (var entry in entries.Where(entry => entry.State == EntityState.Unchanged))
             {
