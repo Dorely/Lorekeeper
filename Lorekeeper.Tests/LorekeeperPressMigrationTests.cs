@@ -51,6 +51,7 @@ public sealed class LorekeeperPressMigrationTests
             var pictureTextObjectId = Guid.NewGuid();
             var emptyPictureTextObjectId = Guid.NewGuid();
             const string pictureBlockId = "picture-page-story-text";
+            const string pictureSecondBlockId = "picture-page-story-text-two";
             var styleId = Guid.NewGuid();
             var assetId = Guid.NewGuid();
             var matterId = Guid.NewGuid();
@@ -76,6 +77,13 @@ public sealed class LorekeeperPressMigrationTests
                         Type = ManuscriptBlockType.Paragraph,
                         StyleRole = ManuscriptStyleRoles.Body,
                         Content = [new ManuscriptInline { Text = "The lighthouse shone across the water." }],
+                    },
+                    new ManuscriptBlock
+                    {
+                        Id = pictureSecondBlockId,
+                        Type = ManuscriptBlockType.Paragraph,
+                        StyleRole = ManuscriptStyleRoles.Body,
+                        Content = [new ManuscriptInline { Text = "A second paragraph remained in the same legacy frame." }],
                     },
                 ],
             }).Replace($"\"schemaVersion\":{ManuscriptDocument.CurrentSchemaVersion}", "\"schemaVersion\":2", StringComparison.Ordinal);
@@ -116,7 +124,10 @@ public sealed class LorekeeperPressMigrationTests
                         ChapterTextVerticalAlign.Top,
                         PicturePageTextShadow.Soft,
                         PicturePageTextRole.Body,
-                        [new ManuscriptRangeReference(pictureBlockId, null, null)]),
+                        [
+                            new ManuscriptRangeReference(pictureBlockId, null, null),
+                            new ManuscriptRangeReference(pictureSecondBlockId, null, null),
+                        ]),
                     new PicturePageTextElement(
                         emptyPictureTextObjectId,
                         string.Empty,
@@ -490,7 +501,7 @@ public sealed class LorekeeperPressMigrationTests
                     .SingleAsync(item => item.Id == compositionId && item.ProjectId == pictureProjectId);
                 Assert.Null(composition.DetachedAt);
                 Assert.Equal(
-                    "The lighthouse shone across the water.",
+                    "The lighthouse shone across the water.\n\nA second paragraph remained in the same legacy frame.",
                     ManuscriptCodec.ProjectPlainText(
                         composition.SemanticManuscriptJson,
                         composition.Id,
@@ -512,7 +523,10 @@ public sealed class LorekeeperPressMigrationTests
                 var text = Assert.Single(scene.Objects, item => item.Kind == CompositionObjectKind.Text);
                 Assert.Equal(pictureTextObjectId, text.Id);
                 Assert.DoesNotContain(scene.Objects, item => item.Id == emptyPictureTextObjectId);
-                Assert.Equal(pictureBlockId, Assert.Single(text.ContentReferences).BlockId);
+                Assert.Collection(
+                    text.ContentReferences,
+                    reference => Assert.Equal(pictureBlockId, reference.BlockId),
+                    reference => Assert.Equal(pictureSecondBlockId, reference.BlockId));
                 Assert.Equal(32, text.FontSizePoints);
                 Assert.Equal(CompositionTextShadow.Soft, text.TextShadow);
                 var history = new AuthoringHistoryService(database);

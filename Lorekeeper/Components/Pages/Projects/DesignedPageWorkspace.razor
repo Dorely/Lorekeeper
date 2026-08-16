@@ -723,7 +723,7 @@
 
         var sourceBlockIds = item.ContentReferences.Select(reference => reference.BlockId).Distinct(StringComparer.Ordinal).ToList();
         if (sourceBlockIds.Count != 1)
-            throw new InvalidDataException("This text frame contains incompatible legacy content and cannot be edited safely.");
+            return MaterializeLegacyMultiBlockFrame(item, sourceBlockIds);
         var sourceBlockId = sourceBlockIds[0];
         if (UnplacedIds.Contains(sourceBlockId))
             throw new InvalidDataException("This older layout contains preserved text outside its frames. Place that text before editing this frame.");
@@ -752,6 +752,55 @@
         _semanticBlocks.InsertRange(Math.Max(0, sourceIndex), materialized);
         MarkDirty();
         return requested ?? throw new InvalidOperationException("The selected text frame could not be prepared for editing.");
+    }
+
+    private ManuscriptBlock MaterializeLegacyMultiBlockFrame(
+        CompositionObject item,
+        IReadOnlyList<string> sourceBlockIds)
+    {
+        if (sourceBlockIds.Count == 0
+            || item.ContentReferences.Any(reference => reference.StartOffset is not null || reference.EndOffset is not null)
+            || sourceBlockIds.Any(UnplacedIds.Contains))
+        {
+            throw new InvalidDataException(
+                "This text frame contains incompatible legacy content and cannot be edited safely.");
+        }
+
+        var sourceIdSet = sourceBlockIds.ToHashSet(StringComparer.Ordinal);
+        if (_objects.Any(candidate => candidate.Id != item.Id
+            && candidate.Kind == CompositionObjectKind.Text
+            && candidate.ContentReferences.Any(reference => sourceIdSet.Contains(reference.BlockId))))
+        {
+            throw new InvalidDataException(
+                "This text frame shares legacy content with another frame and cannot be edited safely.");
+        }
+
+        var sourceDocument = new ManuscriptDocument { ManuscriptId = CompositionId, Content = _semanticBlocks };
+        var slices = ManuscriptRangeResolver.ResolveBlocks(sourceDocument, item.ContentReferences);
+        var template = slices.FirstOrDefault()
+            ?? throw new InvalidDataException("This text frame has no readable legacy content.");
+        if (slices.Any(block => block.Type != ManuscriptBlockType.Paragraph
+            || !string.Equals(block.StyleRole, template.StyleRole, StringComparison.Ordinal)))
+        {
+            throw new InvalidDataException(
+                "This text frame mixes incompatible legacy content roles and cannot be edited safely.");
+        }
+
+        var insertionIndex = _semanticBlocks.FindIndex(block => sourceIdSet.Contains(block.Id));
+        var materialized = template with
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Content = JoinInlineSlices(slices.Select(slice => slice.Content)),
+        };
+        _semanticBlocks.RemoveAll(block => sourceIdSet.Contains(block.Id));
+        _semanticBlocks.Insert(Math.Max(0, insertionIndex), materialized);
+        ReplaceObject(item with
+        {
+            TextBinding = string.Empty,
+            ContentReferences = [new ManuscriptRangeReference(materialized.Id)],
+        });
+        MarkDirty();
+        return materialized;
     }
 
     private static List<ManuscriptInline> JoinInlineSlices(IEnumerable<IReadOnlyList<ManuscriptInline>> slices)

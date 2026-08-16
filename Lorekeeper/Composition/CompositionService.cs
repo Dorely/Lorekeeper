@@ -1776,12 +1776,21 @@ public sealed class CompositionService(
         var visibleText = flattened
             .Where(item => item.Kind == CompositionObjectKind.Text && IsOutputVisible(scene, item))
             .ToList();
+        var semanticById = semantic.Content.ToDictionary(block => block.Id, StringComparer.Ordinal);
         foreach (var item in visibleText)
         {
             if (string.IsNullOrWhiteSpace(item.TextBinding) && item.ContentReferences.Count == 0)
                 diagnostics.Add(new("error", "TEXT_UNBOUND", "Text frame is not bound to semantic composition content.", item.Id));
-            if (item.ContentReferences.Select(reference => reference.BlockId).Distinct(StringComparer.Ordinal).Skip(1).Any())
-                diagnostics.Add(new("error", "TEXT_SEMANTIC_ROLE_MIXED", "A text frame may bind ranges from only one semantic block so its PDF and EPUB role remains unambiguous.", item.Id));
+            if (item.ContentReferences.Count > 0
+                && item.ContentReferences.All(reference => semanticById.ContainsKey(reference.BlockId))
+                && ResolveCommonTextSemanticRole(item, semanticById) is null)
+            {
+                diagnostics.Add(new(
+                    "error",
+                    "TEXT_SEMANTIC_ROLE_MIXED",
+                    "A text frame may bind multiple semantic blocks only when they share one PDF and EPUB role.",
+                    item.Id));
+            }
         }
         try
         {
@@ -2373,7 +2382,7 @@ public sealed class CompositionService(
             throw new InvalidDataException("Composition styles require unique IDs, names, and valid typography and stroke values.");
         var objectIds = new HashSet<Guid>();
         var readingOrder = new HashSet<int>();
-        var semanticIds = semantic.Content.Select(block => block.Id).ToHashSet(StringComparer.Ordinal);
+        var semanticById = semantic.Content.ToDictionary(block => block.Id, StringComparer.Ordinal);
         foreach (var item in scene.Objects)
         {
             if (item.Id == Guid.Empty || !objectIds.Add(item.Id) || !layerIds.Contains(item.LayerId))
@@ -2400,11 +2409,15 @@ public sealed class CompositionService(
             if (item.Kind == CompositionObjectKind.Image && !item.Decorative
                 && string.IsNullOrWhiteSpace(item.AltText) && !item.AccessibilityDecisionPending)
                 throw new InvalidDataException($"Image object {item.Id:N} requires alternative text or a decorative decision.");
-            if (item.ContentReferences.Any(reference => !semanticIds.Contains(reference.BlockId)))
+            if (item.ContentReferences.Any(reference => !semanticById.ContainsKey(reference.BlockId)))
                 throw new InvalidDataException($"Text object {item.Id:N} references content outside its composition document.");
             if (item.Kind == CompositionObjectKind.Text
-                && item.ContentReferences.Select(reference => reference.BlockId).Distinct(StringComparer.Ordinal).Skip(1).Any())
-                throw new InvalidDataException($"Text object {item.Id:N} may bind ranges from only one semantic block.");
+                && item.ContentReferences.Count > 0
+                && ResolveCommonTextSemanticRole(item, semanticById) is null)
+            {
+                throw new InvalidDataException(
+                    $"Text object {item.Id:N} may bind multiple semantic blocks only when they share one PDF and EPUB role.");
+            }
         }
         _ = ManuscriptRangeResolver.ValidateCoverage(
             semantic,
@@ -2438,11 +2451,24 @@ public sealed class CompositionService(
         return scene with
         {
             Objects = scene.Objects.Select(item => item.Kind == CompositionObjectKind.Text
-                    && item.ContentReferences.FirstOrDefault() is { } reference
-                    && blocks.TryGetValue(reference.BlockId, out var block)
-                ? item with { SemanticRole = SemanticRole(block) }
+                    && ResolveCommonTextSemanticRole(item, blocks) is { } role
+                ? item with { SemanticRole = role }
                 : item).ToList(),
         };
+    }
+
+    private static CompositionSemanticRole? ResolveCommonTextSemanticRole(
+        CompositionObject item,
+        IReadOnlyDictionary<string, ManuscriptBlock> blocks)
+    {
+        var roles = item.ContentReferences
+            .Select(reference => blocks.GetValueOrDefault(reference.BlockId))
+            .Where(block => block is not null)
+            .Select(block => SemanticRole(block!))
+            .Distinct()
+            .Take(2)
+            .ToList();
+        return roles.Count == 1 ? roles[0] : null;
     }
 
     private static CompositionSemanticRole SemanticRole(ManuscriptBlock block) => block.Type switch

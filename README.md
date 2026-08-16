@@ -319,6 +319,10 @@ the available backups and requires an explicit two-step confirmation before
 scheduling a restore. The selected backup is applied during the next startup,
 before normal app workers begin. Keep those backups with your other local-data
 backups; they are not included in project exports.
+Legacy illustrated-prose images retain the paragraph position the old runtime
+actually displayed even when a later chapter edit left their advisory paragraph
+hash stale. The migration records those stale hashes while continuing to reject
+malformed anchors or ambiguous paragraph mappings.
 
 If a semantic-editor save collides with a newer chapter revision, Lorekeeper
 places the unsaved manuscript JSON in browser/Electron local storage under a
@@ -345,7 +349,9 @@ counts, foreign keys, artifacts, hashes, packages, and audits before
 removing obsolete visual state. Every Picture Page retains its original 8.5 × 11
 inch leaf geometry (including 17 × 11 facing spreads) until the authoring
 migration materializes it as the active Designed Page layout, independently of
-publication releases. A failure
+publication releases. A legacy text frame that contains several paragraphs
+retains those same-role semantic blocks in its original frame; directly editing
+that frame materializes its body text into one editable block. A failure
 opens Lorekeeper's projectless recovery shell and leaves the original database
 available under **Settings > Data Recovery**. Existing generated artifacts keep
 their exact bytes and hashes but are labeled Legacy until regenerated through

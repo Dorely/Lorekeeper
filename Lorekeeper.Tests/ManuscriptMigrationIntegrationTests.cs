@@ -280,7 +280,7 @@ public sealed class ManuscriptMigrationIntegrationTests
     {
         using var fixture = new MigrationFixture();
         _ = await fixture.CreateV7DatabaseAsync("Cannot lose this");
-        await fixture.AddInvalidIllustrationAsync();
+        _ = await fixture.AddLegacyIllustrationAsync("not-a-valid-hash");
         var service = fixture.CreateService();
         await using (var db = fixture.CreateDbContext())
             await service.ApplyPendingAsync(db);
@@ -292,6 +292,43 @@ public sealed class ManuscriptMigrationIntegrationTests
         Assert.Contains(state.Backups, backup =>
             File.Exists(backup.Path)
             && Path.GetFileName(backup.Path).Contains("pre-manuscript", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task StaleLegacyIllustrationHashPreservesTheRuntimeParagraphAnchor()
+    {
+        using var fixture = new MigrationFixture();
+        _ = await fixture.CreateV7DatabaseAsync("Current first paragraph\n\nSecond paragraph");
+        var staleHash = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes("Former first paragraph")))[..16].ToLowerInvariant();
+        var (elementId, imageId) = await fixture.AddLegacyIllustrationAsync(staleHash);
+        var service = fixture.CreateService();
+
+        await using (var db = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(db);
+
+        await using var verification = fixture.CreateDbContext();
+        var chapter = await verification.Chapters.AsNoTracking().SingleAsync();
+        var layoutJson = await fixture.ReadIllustrationLayoutJsonAsync();
+        var layout = System.Text.Json.JsonSerializer.Deserialize<IllustratedProseLayout>(
+            layoutJson,
+            ManuscriptCodec.JsonOptions)!;
+        var image = Assert.Single(layout.Images);
+        Assert.Equal(elementId, image.Id);
+        Assert.Equal(imageId, image.ImageId);
+        Assert.Equal(chapter.Manuscript.Content[0].Id, image.BlockId);
+        Assert.Equal(ChapterImageAnchorPosition.AfterParagraph, image.AnchorPosition);
+        Assert.Equal(70, image.WidthPercent);
+        Assert.Equal(ChapterImageAlignment.Center, image.Alignment);
+        Assert.Equal("Legacy caption", image.Caption);
+        Assert.Equal("Legacy alt text", image.AltTextOverride);
+        Assert.Equal(3, image.SortOrder);
+        Assert.True(image.StartOnNewPage);
+
+        var journal = await verification.ManuscriptMigrationJournals.AsNoTracking().SingleAsync();
+        using var report = System.Text.Json.JsonDocument.Parse(journal.ValidationReportJson);
+        Assert.Equal(1, report.RootElement.GetProperty("StaleIllustrationAnchorHashCount").GetInt32());
     }
 
     [Fact]
@@ -963,27 +1000,29 @@ public sealed class ManuscriptMigrationIntegrationTests
             Assert.Equal(1, await command.ExecuteNonQueryAsync());
         }
 
-        public async Task AddInvalidIllustrationAsync()
+        public async Task<(Guid ElementId, Guid ImageId)> AddLegacyIllustrationAsync(string paragraphHash)
         {
             await using var connection = new SqliteConnection(ConnectionString);
             await connection.OpenAsync();
+            var elementId = Guid.NewGuid();
+            var imageId = Guid.NewGuid();
             var json = System.Text.Json.JsonSerializer.Serialize(new
             {
                 images = new[]
                 {
                     new
                     {
-                        id = Guid.NewGuid(),
-                        imageId = Guid.NewGuid(),
+                        id = elementId,
+                        imageId,
                         anchorPosition = "AfterParagraph",
                         paragraphIndex = 0,
-                        paragraphHash = "0000000000000000",
+                        paragraphHash,
                         widthPercent = 70,
                         alignment = "Center",
-                        caption = string.Empty,
-                        altTextOverride = string.Empty,
-                        sortOrder = 0,
-                        startOnNewPage = false,
+                        caption = "Legacy caption",
+                        altTextOverride = "Legacy alt text",
+                        sortOrder = 3,
+                        startOnNewPage = true,
                     },
                 },
             });
@@ -992,6 +1031,16 @@ public sealed class ManuscriptMigrationIntegrationTests
                 "UPDATE Chapters SET VisualMode = 'IllustratedProse', IllustrationLayoutJson = $json;";
             command.Parameters.AddWithValue("$json", json);
             await command.ExecuteNonQueryAsync();
+            return (elementId, imageId);
+        }
+
+        public async Task<string> ReadIllustrationLayoutJsonAsync()
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT IllustrationLayoutJson FROM Chapters;";
+            return (string)(await command.ExecuteScalarAsync())!;
         }
 
         public async Task DowngradeAllStructuredJsonToV1Async()

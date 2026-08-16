@@ -263,7 +263,12 @@ public sealed class ManuscriptMigrationService(
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
         var sourceHashes = new List<string>();
         var targetHashes = new List<string>();
-        var chapterCount = await TransformChaptersAsync(connection, transaction, sourceHashes, targetHashes, cancellationToken);
+        var chapterReport = await TransformChaptersAsync(
+            connection,
+            transaction,
+            sourceHashes,
+            targetHashes,
+            cancellationToken);
         var contestBatchCount = await TransformTextColumnAsync(
             connection, transaction, "ContestBatches", "Id", "ChapterId",
             ["OriginalManuscriptJson", "AcceptedManuscriptJson"], sourceHashes, targetHashes, cancellationToken);
@@ -275,7 +280,8 @@ public sealed class ManuscriptMigrationService(
             connection, transaction, sourceHashes, targetHashes, cancellationToken);
         await TerminalizeLegacyActiveWorkflowsAsync(connection, transaction, cancellationToken);
         var report = new ManuscriptMigrationReport(
-            chapterCount,
+            chapterReport.ChapterCount,
+            chapterReport.StaleIllustrationAnchorHashCount,
             contestBatchCount,
             contestCandidateCount,
             revisionSessionCount,
@@ -316,7 +322,7 @@ public sealed class ManuscriptMigrationService(
         return report;
     }
 
-    private static async Task<int> TransformChaptersAsync(
+    private static async Task<ChapterMigrationReport> TransformChaptersAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
         List<string> sourceHashes,
@@ -341,6 +347,7 @@ public sealed class ManuscriptMigrationService(
             }
         }
 
+        var staleIllustrationAnchorHashCount = 0;
         foreach (var row in rows)
         {
             if (IsManuscript(row.Body, row.Id, row.Revision))
@@ -352,7 +359,13 @@ public sealed class ManuscriptMigrationService(
                 throw new InvalidDataException($"Chapter {row.Id:N} changed during manuscript conversion.");
 
             var pageJson = MigrateLegacyPicturePage(row.Id, row.Body, row.Page, manuscript);
-            var illustrationJson = MigrateLegacyIllustrations(row.Id, row.Body, row.Illustrations, manuscript);
+            var illustrationJson = MigrateLegacyIllustrations(
+                row.Id,
+                row.Body,
+                row.Illustrations,
+                manuscript,
+                out var staleAnchorHashCount);
+            staleIllustrationAnchorHashCount += staleAnchorHashCount;
             await using var update = connection.CreateCommand();
             update.Transaction = transaction;
             update.CommandText =
@@ -372,7 +385,7 @@ public sealed class ManuscriptMigrationService(
             targetHashes.Add(targetHash);
         }
 
-        return rows.Count;
+        return new ChapterMigrationReport(rows.Count, staleIllustrationAnchorHashCount);
     }
 
     private static async Task<int> TransformTextColumnAsync(
@@ -879,8 +892,10 @@ public sealed class ManuscriptMigrationService(
         Guid chapterId,
         string body,
         string json,
-        ManuscriptDocument manuscript)
+        ManuscriptDocument manuscript,
+        out int staleAnchorHashCount)
     {
+        staleAnchorHashCount = 0;
         if (string.IsNullOrWhiteSpace(json))
             return string.Empty;
         using var document = JsonDocument.Parse(json);
@@ -896,13 +911,25 @@ public sealed class ManuscriptMigrationService(
         var paragraphs = LegacyParagraphs(body);
         if (paragraphs.Count != manuscript.Content.Count)
             throw new InvalidDataException($"Chapter {chapterId:N} illustration paragraphs could not be mapped unambiguously.");
-        var migrated = legacy.Images.Select(image =>
+        var migrated = new List<IllustratedProseImageBlock>(legacy.Images.Count);
+        foreach (var image in legacy.Images)
         {
             if (image.ParagraphIndex < 0 || image.ParagraphIndex >= paragraphs.Count)
                 throw new InvalidDataException($"Chapter {chapterId:N} illustration {image.Id:N} has an invalid paragraph index.");
-            if (!string.Equals(image.ParagraphHash, LegacyParagraphHash(paragraphs[image.ParagraphIndex]), StringComparison.Ordinal))
-                throw new InvalidDataException($"Chapter {chapterId:N} illustration {image.Id:N} failed paragraph hash validation.");
-            return new IllustratedProseImageBlock(
+            if (!IsLegacyParagraphHash(image.ParagraphHash))
+                throw new InvalidDataException($"Chapter {chapterId:N} illustration {image.Id:N} has an invalid paragraph hash.");
+            if (!string.Equals(
+                image.ParagraphHash,
+                LegacyParagraphHash(paragraphs[image.ParagraphIndex]),
+                StringComparison.Ordinal))
+            {
+                // The legacy runtime rendered, moved, and exported illustrations by
+                // ParagraphIndex. Its normalizer filled only an empty hash, so an
+                // ordinary later body edit could leave this drift sentinel stale.
+                // Preserve the exact location that the legacy runtime displayed.
+                staleAnchorHashCount++;
+            }
+            migrated.Add(new IllustratedProseImageBlock(
                 image.Id,
                 image.ImageId,
                 image.AnchorPosition,
@@ -915,8 +942,8 @@ public sealed class ManuscriptMigrationService(
                 image.StartOnNewPage)
             {
                 ParagraphIndex = image.ParagraphIndex,
-            };
-        }).ToList();
+            });
+        }
         return JsonSerializer.Serialize(new IllustratedProseLayout(migrated), ManuscriptCodec.JsonOptions);
     }
 
@@ -1516,6 +1543,10 @@ public sealed class ManuscriptMigrationService(
     private static string LegacyParagraphHash(string text) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.Trim())))[..16].ToLowerInvariant();
 
+    private static bool IsLegacyParagraphHash(string? value) =>
+        value is { Length: 16 }
+        && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
     private static string AggregateHash(IEnumerable<string> hashes)
     {
         var joined = string.Join("\n", hashes);
@@ -1618,8 +1649,13 @@ public sealed class ManuscriptMigrationService(
             ]),
     ];
 
+    private sealed record ChapterMigrationReport(
+        int ChapterCount,
+        int StaleIllustrationAnchorHashCount);
+
     private sealed record ManuscriptMigrationReport(
         int ChapterCount,
+        int StaleIllustrationAnchorHashCount,
         int ContestBatchCount,
         int ContestCandidateCount,
         int RevisionSessionCount,

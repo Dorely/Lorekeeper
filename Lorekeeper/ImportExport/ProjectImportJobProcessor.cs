@@ -465,7 +465,8 @@ public sealed class ProjectImportJobProcessor(
                         chapter.Id,
                         chapter.Body ?? string.Empty,
                         chapter.IllustrationLayoutJson,
-                        manuscript);
+                        manuscript,
+                        out _);
                 }
             }
             catch (Exception exception) when (exception is JsonException
@@ -1372,13 +1373,15 @@ public sealed class ProjectImportJobProcessor(
                     importedChapter.Body ?? string.Empty,
                     importedChapter.PageLayoutJson,
                     importedManuscript);
+            var staleIllustrationAnchorHashCount = 0;
             var illustrationLayoutJson = document.FormatVersion >= 8
                 ? importedChapter.IllustrationLayoutJson
                 : ManuscriptMigrationService.MigrateLegacyIllustrations(
                     tracked.Id,
                     importedChapter.Body ?? string.Empty,
                     importedChapter.IllustrationLayoutJson,
-                    importedManuscript);
+                    importedManuscript,
+                    out staleIllustrationAnchorHashCount);
             pageLayoutJson = RewritePageLayoutJson(pageLayoutJson, state.ImageMap, state.FontFamilyMap);
             illustrationLayoutJson = RewriteIllustrationLayoutJson(illustrationLayoutJson, state.ImageMap);
             var manuscriptToStore = importedManuscript;
@@ -1432,6 +1435,14 @@ public sealed class ProjectImportJobProcessor(
             await outlineGraphSync.EnsureChapterAsync(tracked, cancellationToken);
 
             job.CreatedChapterCount++;
+            if (staleIllustrationAnchorHashCount > 0)
+            {
+                await AddWarningAsync(
+                    job,
+                    $"Preserved {staleIllustrationAnchorHashCount} stale illustration anchor hash(es)",
+                    $"Chapter {tracked.Title} retained the paragraph positions used by the legacy runtime.",
+                    cancellationToken);
+            }
             state.ChapterMap[importedChapter.Id] = tracked.Id;
             state.CreatedChapterIds.Add(tracked.Id);
             var node = await nodes.FindAsync(job.ProjectId, EntityTypeService.ChapterNodeType, tracked.Id.ToString("N"), cancellationToken);

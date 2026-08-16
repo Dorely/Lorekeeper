@@ -248,8 +248,9 @@ neither safe nor required, wrapped in an explicit version-labeled legacy
 snapshot that preserves original JSON/text and renders read-only. No terminal
 audit record is silently rewritten into an operation with different meaning.
 
-Malformed JSON, stale line ranges, or a hash mismatch fails the transition and
-is named in the migration report. Fixtures cover every status, finished
+Malformed JSON, stale line ranges, malformed illustration hashes, invalid
+illustration indices, or ambiguous paragraph mappings fail the transition and
+are named in the migration report. Fixtures cover every status, finished
 contests, completed revision sessions, line-anchor remapping, and legacy
 read-only rendering.
 
@@ -276,8 +277,10 @@ For each Picture Page:
 
 For each illustrated-prose image:
 
-- resolve `ParagraphIndex` and verify `ParagraphHash` against the exact legacy
-  paragraph;
+- resolve the runtime-authoritative `ParagraphIndex`, validate its bounds and
+  the `ParagraphHash` shape, and record a well-formed stale hash instead of
+  blocking migration because the legacy normalizer did not refresh non-empty
+  hashes after ordinary chapter edits;
 - remap the anchor to a stable manuscript block ID plus the semantic before/
   after/within position needed by the current `AnchorPosition`;
 - preserve image ID, element ID, dimensions, alignment, caption, alt text,

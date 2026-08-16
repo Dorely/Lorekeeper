@@ -444,7 +444,11 @@ new text frame creates its own semantic block, authors edit it directly in the
 canvas, and selection-aware formatting writes ordinary `ManuscriptInline`
 marks. It does not expose reusable-content binding, block IDs, or character
 offset controls. Older range-based layouts remain losslessly readable and are
-materialized into frame-owned blocks when directly edited.
+materialized into frame-owned blocks when directly edited. A legacy frame may
+retain ranges from several semantic blocks only when all of them resolve to the
+same PDF/EPUB role; mixed-role frames fail validation. Directly editing an
+eligible multi-paragraph body frame materializes its exclusively owned full-block
+ranges into one editable frame block.
 The shared
 scene vocabulary covers image, text, rectangle, ellipse, line, and group
 objects; z-order, per-object locking and visibility, grouping, object styles,
@@ -1315,6 +1319,16 @@ recovery. The interrupted legacy transform is resumable only at its exact EF
 schema handoff: a completed manuscript journal or any later applied migration
 proves that invalid manuscript-shaped data is current corruption and must never
 be reinterpreted as legacy prose.
+
+Legacy illustrated-prose layouts used `ParagraphIndex` for every visible,
+print, and export placement. Their normalizer populated only an empty
+`ParagraphHash`, so ordinary later chapter edits could leave a well-formed hash
+stale even though the legacy runtime continued to use the stored index. The
+structured-manuscript migration therefore validates paragraph counts, index
+bounds, and hash shape, maps each illustration through that runtime-authoritative
+index, and records the number of stale anchor hashes in its validation report.
+Malformed hashes, invalid indices, ambiguous paragraph mapping, and any text
+projection mismatch still fail closed into protected recovery.
 
 The visual-composition cutover uses two forward EF boundaries: an additive
 schema creates composition,
