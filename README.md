@@ -320,6 +320,9 @@ finishes. A successful start opens the requested workspace; a protected
 migration failure opens **Settings > Data Recovery**, while an unexpected
 bootstrap failure remains on the startup screen with a safe close action so the
 application can be restarted after the cause is addressed.
+On a recovery start, Lorekeeper applies an explicitly scheduled restore first;
+otherwise it honors the existing recovery marker before opening the projectless
+database or running any normal migration service.
 
 When an older database first adopts structured manuscripts, Lorekeeper creates a
 WAL-consistent backup in `.migration-backups/manuscripts`, validates the

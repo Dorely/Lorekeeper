@@ -99,6 +99,7 @@ public sealed class ManuscriptMigrationIntegrationTests
 
         await using (var stillRunningDb = fixture.CreateDbContext())
             Assert.Equal("Changed after backup", (await stillRunningDb.Chapters.SingleAsync()).PlainText);
+        Assert.True(await fixture.CreateRecoveryService().ApplyScheduledRestoreAsync());
         await using (var restartedDb = fixture.CreateDbContext())
             await service.ApplyPendingAsync(restartedDb);
         await using (var restoredDb = fixture.CreateDbContext())
@@ -535,6 +536,7 @@ public sealed class ManuscriptMigrationIntegrationTests
 
         var restore = await service.PrepareRestoreAsync(protectedBackup);
         await service.RestoreAsync(restore.BackupPath, restore.ConfirmationToken);
+        Assert.True(await recovery.ApplyScheduledRestoreAsync());
         var restartedService = fixture.CreateService();
         await using (var restartedDatabase = fixture.CreateDbContext())
             await restartedService.ApplyPendingAsync(restartedDatabase);

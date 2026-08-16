@@ -9,7 +9,7 @@ namespace Lorekeeper.Tests;
 public sealed class DatabaseMigrationRecoveryTests
 {
     [Fact]
-    public async Task RecoveryStateNamesTheFailedMigrationAndProtectedBackup()
+    public async Task RecoveryStateNamesTheFailureAndStopsStartupBeforeOpeningTheRecoveryShell()
     {
         var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -44,6 +44,21 @@ public sealed class DatabaseMigrationRecoveryTests
             Assert.Equal("publication-editions-v10", state.MigrationName);
             Assert.Equal(backup, state.BackupPath);
             Assert.Contains("hostile fixture", state.Error, StringComparison.Ordinal);
+
+            var startup = new DatabaseStartupMigrationService(
+                new ThrowingDatabaseOperationFactory(),
+                null!,
+                null!,
+                null!,
+                null!,
+                null!,
+                null!,
+                null!,
+                null!,
+                null!,
+                recovery);
+
+            Assert.False(await startup.ApplyAsync());
         }
         finally
         {
@@ -100,5 +115,25 @@ public sealed class DatabaseMigrationRecoveryTests
             if (Directory.Exists(directory))
                 Directory.Delete(directory, recursive: true);
         }
+    }
+
+    private sealed class ThrowingDatabaseOperationFactory : IAppDatabaseOperationFactory
+    {
+        public AppDatabaseReadOperation OpenRead() => throw UnexpectedOpen();
+
+        public AppDatabaseWriteOperation OpenWrite() => throw UnexpectedOpen();
+
+        public ValueTask<AppDatabaseReadOperation> OpenReadAsync(
+            CancellationToken cancellationToken = default) => throw UnexpectedOpen();
+
+        public ValueTask<AppDatabaseWriteOperation> OpenWriteAsync(
+            CancellationToken cancellationToken = default) => throw UnexpectedOpen();
+
+        public ValueTask<AppDatabaseWriteOperation> OpenWriteAsync(
+            Guid projectId,
+            CancellationToken cancellationToken = default) => throw UnexpectedOpen();
+
+        private static InvalidOperationException UnexpectedOpen() =>
+            new("Startup opened a recovery-shell database before honoring its recovery marker.");
     }
 }

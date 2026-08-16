@@ -45,8 +45,6 @@ public sealed class ManuscriptMigrationService(
     public async Task ApplyPendingAsync(AppDbContext db, CancellationToken cancellationToken = default)
     {
         await using var migrationLock = await AcquireExclusiveLockAsync(cancellationToken);
-        if (await recovery.ApplyScheduledRestoreAsync(cancellationToken))
-            db.ChangeTracker.Clear();
         var needsDataMigration = await HasColumnAsync("Chapters", "Body", cancellationToken);
         var pending = (await db.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
         var manuscriptSchemaPending = pending.Contains(SchemaV2EfMigrationId, StringComparer.Ordinal);

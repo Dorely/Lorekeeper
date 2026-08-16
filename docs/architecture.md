@@ -1301,6 +1301,10 @@ active recovery state.
 orchestrator used by both the application host and installed-database migration
 fixtures. Tests therefore exercise the same migration boundaries and recovery
 checks as a normal application start instead of maintaining a parallel sequence.
+Before opening an EF operation, it applies an explicitly scheduled restore and
+then checks the recovery-state marker. An unscheduled recovery shell returns to
+the recovery UI immediately, so later migration services cannot query obsolete
+historical tables or columns from that intentionally projectless shell.
 It reports coarse, non-sensitive stage names through an optional progress
 contract; migration semantics do not depend on a UI subscriber.
 The publication-section boundary also journals and transactionally repairs the

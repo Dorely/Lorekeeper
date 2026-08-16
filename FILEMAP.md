@@ -70,7 +70,7 @@
 | `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trips for manuscript/image remapping, current and legacy cover-image conversion, and whole-import rollback on late publication conflicts. |
 | `PublishConversationMigrationTests.cs` | Populated pre-v13 upgrade fixture proving manuscript, edition, render, artifact hash/bytes, and new Publish transcript persistence survive unchanged. |
 | `LorekeeperPressMigrationTests.cs` | Fully populated installed-schema fixture run through the real startup migrator, including no-release Picture Page scene/asset/binding preservation, Press/Core projection equality, recovery cases, and whole-database byte/hash checks. |
-| `DatabaseMigrationRecoveryTests.cs` | Shared migration-recovery pruning fixture proving protected failed/running backup references survive automatic retention. |
+| `DatabaseMigrationRecoveryTests.cs` | Shared migration-recovery fixtures proving recovery markers stop startup before opening the shell and protected failed/running backup references survive automatic retention. |
 
 ## tools/semantic-editor/
 
@@ -360,7 +360,7 @@
 | `AppDatabaseOperations.cs` | Per-operation EF context factory, no-tracking read lifetimes, project-aware/process-wide write leases in fixed lock order, and nested-operation sharing for intentionally atomic multi-service work. Short write units opt into tracking and own commit/disposal. |
 | `AppDbContext.cs` | EF Core model for projects, page setup, providers, chats, writing, graph, ingest/import, publishing, composition, fonts, and Book Text Styles. Configures relationships/indexes, JSON property bags, revision advancement, fail-closed concurrency reporting, publication-target normalization, and bounded transient SQLite lock retries. |
 | `DatabaseMigrationRecoveryService.cs` | Shared protected SQLite backup/restore, recovery-shell, expiring confirmation, backup discovery, and reference-aware pruning boundary for guarded migrations. |
-| `DatabaseStartupMigrationService.cs` | Single application-startup schema/data migration orchestrator shared by the real host and installed-database migration fixtures, with optional coarse progress reporting that cannot change migration semantics. |
+| `DatabaseStartupMigrationService.cs` | Single application-startup schema/data migration orchestrator shared by the real host and installed-database fixtures; applies scheduled restores and honors recovery markers before opening EF, with optional coarse progress reporting. |
 | `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); registers the no-tracking `IDbContextFactory`, database-operation factory, and singleton write coordinator. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |

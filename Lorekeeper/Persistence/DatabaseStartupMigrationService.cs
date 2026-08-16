@@ -36,6 +36,10 @@ public sealed class DatabaseStartupMigrationService(
     {
         const int totalSteps = 11;
         Report(progress, "Checking database compatibility", "Preparing safe schema boundaries.", 1, totalSteps);
+        _ = await recovery.ApplyScheduledRestoreAsync(cancellationToken);
+        if (await recovery.IsRecoveryRequiredAsync(cancellationToken))
+            return false;
+
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
