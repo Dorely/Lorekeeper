@@ -9,6 +9,7 @@ using Lorekeeper.Fonts;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
+using Lorekeeper.Startup;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -583,12 +584,15 @@ public sealed class PublicationRenderWorker(
     IPublicationRenderQueue queue,
     IServiceScopeFactory scopeFactory,
     IAppDatabaseOperationFactory database,
+    IApplicationStartupState startup,
     ILogger<PublicationRenderWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
         {
+            if (!await startup.WaitForDatabaseReadyAsync(stoppingToken))
+                return;
             logger.LogInformation("Recovering publication render queue.");
             await RecoverInterruptedJobsAsync(stoppingToken);
             logger.LogInformation("Publication render queue is ready.");

@@ -1,12 +1,25 @@
+using Lorekeeper.Startup;
+
 namespace Lorekeeper.Llm;
 
 public sealed class EmbeddingRebuildWorker(
     IEmbeddingRebuildQueue queue,
     IServiceScopeFactory scopeFactory,
+    IApplicationStartupState startup,
     ILogger<EmbeddingRebuildWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        try
+        {
+            if (!await startup.WaitForDatabaseReadyAsync(stoppingToken))
+                return;
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return;
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             EmbeddingRebuildRequest request;

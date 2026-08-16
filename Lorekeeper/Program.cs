@@ -24,9 +24,9 @@ using Lorekeeper.Projects;
 using Lorekeeper.Publish;
 using Lorekeeper.Research;
 using Lorekeeper.Search;
+using Lorekeeper.Startup;
 using Lorekeeper.Tokens;
 using Lorekeeper.Writing;
-using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 var desktopUpdates = new DesktopUpdateService();
@@ -49,11 +49,20 @@ var databaseConnectionString = SqliteConnectionSettings.BuildConnectionString(
 builder.Configuration["ConnectionStrings:DefaultConnection"] = databaseConnectionString;
 var maxInteractiveServerMessageSize = builder.Configuration.GetValue<long?>("Blazor:MaximumReceiveMessageSizeBytes")
     ?? 64L * 1024 * 1024;
+var minimumStartupSplashMilliseconds = builder.Configuration.GetValue("Startup:MinimumSplashMilliseconds", 1200);
+if (minimumStartupSplashMilliseconds is < 0 or > 10_000)
+    throw new InvalidOperationException("Startup:MinimumSplashMilliseconds must be between zero and 10000.");
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents()
     .AddHubOptions(options => options.MaximumReceiveMessageSize = maxInteractiveServerMessageSize);
+builder.Services.AddSingleton<ApplicationStartupState>();
+builder.Services.AddSingleton<IApplicationStartupState>(services =>
+    services.GetRequiredService<ApplicationStartupState>());
+builder.Services.AddSingleton(new ApplicationStartupOptions(
+    TimeSpan.FromMilliseconds(minimumStartupSplashMilliseconds)));
+builder.Services.AddHostedService<ApplicationStartupWorker>();
 
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IDesktopReleaseUpdateChecker, GitHubDesktopReleaseUpdateChecker>(client =>
@@ -303,34 +312,6 @@ var app = builder.Build();
 if (isElectronMode)
     desktopReleaseUpdateChecker = app.Services.GetRequiredService<IDesktopReleaseUpdateChecker>();
 app.Lifetime.ApplicationStopping.Register(desktopUpdateMonitorCancellation.Cancel);
-
-// Apply EF Core migrations + initialise sqlite-vec tables.
-using (var scope = app.Services.CreateScope())
-{
-    var startupMigration = scope.ServiceProvider.GetRequiredService<IDatabaseStartupMigrationService>();
-    if (await startupMigration.ApplyAsync())
-    {
-        await scope.ServiceProvider.GetRequiredService<Lorekeeper.Authoring.IAuthoringHistoryService>()
-            .FinalizeAbandonedBatchesAsync();
-        var database = scope.ServiceProvider.GetRequiredService<IAppDatabaseOperationFactory>();
-        int? embeddingDimensions;
-        IReadOnlyList<Guid> projectIds;
-        await using (var read = await database.OpenReadAsync())
-        {
-            embeddingDimensions = await read.Db.EmbeddingConfigurations
-                .Select(configuration => (int?)configuration.Dimensions)
-                .FirstOrDefaultAsync();
-            projectIds = (await read.Repositories.Projects.ListAsync()).Select(project => project.Id).ToList();
-        }
-
-        var vectorMaintenance = scope.ServiceProvider.GetRequiredService<IVectorStoreMaintenance>();
-        vectorMaintenance.Initialize(embeddingDimensions);
-
-        var outlineGraphSync = scope.ServiceProvider.GetRequiredService<IOutlineGraphSync>();
-        foreach (var projectId in projectIds)
-            await outlineGraphSync.RepairProjectAsync(projectId);
-    }
-}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

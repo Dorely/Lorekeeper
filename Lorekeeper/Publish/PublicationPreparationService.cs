@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
+using Lorekeeper.Startup;
 using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Publish;
@@ -180,10 +181,21 @@ public sealed class PublicationPreparationWorker(
     IServiceScopeFactory scopeFactory,
     IAppDatabaseOperationFactory database,
     IPublicationPreparationQueue queue,
+    IApplicationStartupState startup,
     ILogger<PublicationPreparationWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        try
+        {
+            if (!await startup.WaitForDatabaseReadyAsync(stoppingToken))
+                return;
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return;
+        }
+
         await RecoverAsync(stoppingToken);
         try
         {

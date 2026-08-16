@@ -1,5 +1,6 @@
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Publish;
+using Lorekeeper.Startup;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -8,7 +9,9 @@ namespace Lorekeeper.Persistence;
 
 public interface IDatabaseStartupMigrationService
 {
-    Task<bool> ApplyAsync(CancellationToken cancellationToken = default);
+    Task<bool> ApplyAsync(
+        CancellationToken cancellationToken = default,
+        IProgress<DatabaseStartupMigrationProgress>? progress = null);
 }
 
 public sealed class DatabaseStartupMigrationService(
@@ -27,21 +30,29 @@ public sealed class DatabaseStartupMigrationService(
     private const string PublicationSectionOrderMigrationId = "20260813204554_AddPublicationSectionOrderOverrides";
     private const string AuthoringHistoryMigrationId = "20260814202943_AddPersistentAuthoringHistoryV29";
 
-    public async Task<bool> ApplyAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> ApplyAsync(
+        CancellationToken cancellationToken = default,
+        IProgress<DatabaseStartupMigrationProgress>? progress = null)
     {
+        const int totalSteps = 11;
+        Report(progress, "Checking database compatibility", "Preparing safe schema boundaries.", 1, totalSteps);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
         await EnsureAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        Report(progress, "Checking manuscripts", "Validating chapters, illustrations, and revision history.", 2, totalSteps);
         await manuscriptMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        Report(progress, "Checking publication editions", "Preparing edition-owned publishing records.", 3, totalSteps);
         await editionMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        Report(progress, "Checking press data", "Validating publication layouts, artifacts, and packages.", 4, totalSteps);
         await pressMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
 
+        Report(progress, "Checking designed pages", "Migrating visual compositions and semantic text bindings.", 5, totalSteps);
         var appliedMigrations = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
             .ToHashSet(StringComparer.Ordinal);
         if (!appliedMigrations.Contains(VisualCompositionMigrationService.CleanupMigrationId))
@@ -77,13 +88,16 @@ public sealed class DatabaseStartupMigrationService(
                 cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
 
+        Report(progress, "Checking authoring pages", "Preparing active page layouts and project page setup.", 6, totalSteps);
         await EnsurePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await authoringPageMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        Report(progress, "Checking publication structure", "Validating Core Book content and ownership.", 7, totalSteps);
         await publicationCoreMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
 
+        Report(progress, "Checking edition content", "Preparing release-specific manuscript content.", 8, totalSteps);
         await RemoveEditionCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await RemovePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
@@ -91,9 +105,11 @@ public sealed class DatabaseStartupMigrationService(
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await RemovePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
+        Report(progress, "Checking publication sections", "Validating front matter, body order, and back matter.", 9, totalSteps);
         await publicationSectionMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
 
+        Report(progress, "Checking print products", "Preparing physical-product and cover configuration.", 10, totalSteps);
         var migrationsBeforePrintProducts = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
             .ToHashSet(StringComparer.Ordinal);
         if (!migrationsBeforePrintProducts.Contains(PrintProductMigrationService.CleanupMigrationId))
@@ -113,6 +129,7 @@ public sealed class DatabaseStartupMigrationService(
         if (await recovery.IsRecoveryRequiredAsync(cancellationToken))
             return false;
 
+        Report(progress, "Finalizing database schema", "Applying the remaining forward migrations and integrity repairs.", 11, totalSteps);
         await RemovePublicationSectionStartSideCompatibilityColumnAsync(db, cancellationToken);
 
         var migrationsBeforeCleanup = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
@@ -136,6 +153,14 @@ public sealed class DatabaseStartupMigrationService(
         await publicationSectionMigration.RepairSemanticRevisionDriftAsync(db, cancellationToken);
         return !await recovery.IsRecoveryRequiredAsync(cancellationToken);
     }
+
+    private static void Report(
+        IProgress<DatabaseStartupMigrationProgress>? progress,
+        string title,
+        string detail,
+        int step,
+        int totalSteps) =>
+        progress?.Report(new(title, detail, step, totalSteps));
 
     internal static async Task EnsureAuthoringHistoryCompatibilityColumnsAsync(
         AppDbContext db,

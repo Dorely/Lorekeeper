@@ -102,8 +102,8 @@
 | File | Description |
 |------|-------------|
 | `Lorekeeper.csproj` | Project file: `net10.0`, nullable + implicit usings, warnings-as-errors, versioned Electron/Electron Builder pins, and app dependencies including EF Core SQLite, Microsoft.Extensions.AI(.OpenAI), OpenAI, sqlite-vec, tokenizers, SkiaSharp, and ingest packages. |
-| `Program.cs` | Host setup, hardened Electron binding, installed-Windows auto-updates, conditional macOS/portable release discovery and browser handoff, deterministic data placement, DI, startup-migration dispatch, and HTTP endpoints. |
-| `appsettings.json` / `appsettings.Development.json` | Configuration including `Desktop:*` data placement, update interval, and constrained public release API plus provider, persistence, Blazor, ingest, research, embedding, and agent settings. |
+| `Program.cs` | Host setup, hardened Electron binding, installed-Windows auto-updates, conditional macOS/portable release discovery and browser handoff, deterministic data placement, DI, gated-startup registration, and HTTP endpoints. |
+| `appsettings.json` / `appsettings.Development.json` | Configuration including `Desktop:*` data placement, startup-splash duration, update interval, and constrained public release API plus provider, persistence, Blazor, ingest, research, embedding, and agent settings. |
 | `Properties/launchSettings.json` | Local launch profiles for Electron, HTTP, and HTTPS; HTTP remains pinned to `localhost:1455` for Codex OAuth redirect. |
 | `Properties/electron-builder.json` | Electron.NET packaging targets, metadata, updater provider, Windows installer/portable configuration, and ad-hoc-signed DMG-only macOS configuration. |
 | `Properties/PublishProfiles/*.pubxml` | Runtime-specific self-contained profiles (`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`), with Windows/macOS staging isolated from final artifacts. |
@@ -112,9 +112,10 @@
 
 | File | Description |
 |------|-------------|
-| `App.razor` | Root component: `<html>` shell, responsive browser/app icon metadata, head outlet, and scripts. |
+| `App.razor` | Root component: `<html>` shell, responsive browser/app icon metadata, startup route gate, head outlet, and scripts. |
 | `Routes.razor` | `<Router>` wiring `MainLayout` and `NotFound`. |
 | `_Imports.razor` | Shared `@using` directives for all components. |
+| `StartupScreen.razor` (+ `.razor.css`) | Branded application-owned startup and failure surface with live database-stage progress, automatic workspace transition, recovery redirect, and safe close action. |
 | `ConfirmationDialog.razor` (+ `.razor.css`) | Shared application-owned confirmation dialog for destructive and consequential choices; replaces browser, Electron, and operating-system product prompts. |
 | `EntityKnowledgeView.razor` (+ `.razor.css`) | Shared read-only entity knowledge renderer for structured wiki data and source-backed canon markdown used by graph, outline, and context entity detail surfaces. |
 | `EntityVisualExamples.razor` (+ `.razor.css`) | Reusable ordered entity visual gallery/editor with library attach, upload, non-destructive cropping, labels, ordering, shared full-size viewing, and detach. |
@@ -345,6 +346,13 @@
 | `AuthoringMutationContext.cs` | Scoped assistant mutation provenance and persisted chat-turn batch lifetime, including stopped/failed/cancelled finalization. |
 | `AuthoringSnapshotCodec.cs` | Deterministic chapter/section/composition/cover aggregate snapshot capture plus nested image, font, and composition dependency discovery without copying asset binaries. |
 
+### Startup/
+
+| File | Description |
+|------|-------------|
+| `ApplicationStartupState.cs` | Thread-safe immutable startup snapshots, migration-progress contract, database readiness gate, terminal recovery/failure state, and minimum-splash configuration. |
+| `ApplicationStartupWorker.cs` | Background startup owner that yields for the host surface, runs ordered migrations and normal initialization, publishes progress, and releases database workers only after a safe result. |
+
 ### Persistence/
 
 | File | Description |
@@ -352,7 +360,7 @@
 | `AppDatabaseOperations.cs` | Per-operation EF context factory, no-tracking read lifetimes, project-aware/process-wide write leases in fixed lock order, and nested-operation sharing for intentionally atomic multi-service work. Short write units opt into tracking and own commit/disposal. |
 | `AppDbContext.cs` | EF Core model for projects, page setup, providers, chats, writing, graph, ingest/import, publishing, composition, fonts, and Book Text Styles. Configures relationships/indexes, JSON property bags, revision advancement, fail-closed concurrency reporting, publication-target normalization, and bounded transient SQLite lock retries. |
 | `DatabaseMigrationRecoveryService.cs` | Shared protected SQLite backup/restore, recovery-shell, expiring confirmation, backup discovery, and reference-aware pruning boundary for guarded migrations. |
-| `DatabaseStartupMigrationService.cs` | Single application-startup schema/data migration orchestrator shared by the real host and installed-database migration fixtures so verification cannot drift from startup order. |
+| `DatabaseStartupMigrationService.cs` | Single application-startup schema/data migration orchestrator shared by the real host and installed-database migration fixtures, with optional coarse progress reporting that cannot change migration semantics. |
 | `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); registers the no-tracking `IDbContextFactory`, database-operation factory, and singleton write coordinator. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |

@@ -48,17 +48,32 @@ and the sole paperback renderer. MSBuild builds its locked native executable and
 packages it into the application-owned runtime for Debug and Release. The
 retired Typst and WeasyPrint implementations have no runtime code, registration,
 settings, scripts, or machine fallback.
-`Program.cs` owns host startup,
-dependency registration, middleware, local media and OAuth endpoints, database
-migration, interrupted-work reconciliation, desktop update setup, and Electron
-window creation. Blazor interactivity is opted into per page or component with
-Interactive Server render mode; there is no WebAssembly client application.
+`Program.cs` owns host setup, dependency registration, middleware, local media
+and OAuth endpoints, startup-gate registration, desktop update setup, and
+Electron window creation. `ApplicationStartupWorker` owns database migration,
+interrupted-work reconciliation, vector initialization, and project-graph
+repair. Blazor interactivity is opted into per page or component with Interactive
+Server render mode; there is no WebAssembly client application.
 
 Electron is the primary debug and user target. The desktop host binds to the
 configured local host and port, while the explicit `http` launch profile remains
 available for browser development and validation. Application services,
 provider clients, persistence, indexing, and background work execute inside the
 server process and are consumed through dependency injection.
+
+The HTTP host and Electron bridge become available before database bootstrap so
+`App.razor` can render the application-owned startup screen instead of a blank
+window. Immutable singleton startup state publishes named migration stages and
+initialization progress to that interactive surface. Normal Razor routes remain
+unrendered until the database is safe to use, and every database-backed hosted
+worker waits on the same readiness gate before reconciliation or queue work.
+The startup worker deliberately yields before SQLite access so synchronously
+completed provider calls cannot delay the web surface. Successful startup
+reloads the originally requested route; recovery-required startup opens the data
+recovery page; an unexpected bootstrap exception leaves a persistent failure on
+the splash with a safe close action and without releasing database workers. A
+short configured minimum display interval also makes the branded splash visible
+on an already-current database.
 
 ## Runtime and Ownership Boundaries
 
@@ -1286,6 +1301,8 @@ active recovery state.
 orchestrator used by both the application host and installed-database migration
 fixtures. Tests therefore exercise the same migration boundaries and recovery
 checks as a normal application start instead of maintaining a parallel sequence.
+It reports coarse, non-sensitive stage names through an optional progress
+contract; migration semantics do not depend on a UI subscriber.
 The publication-section boundary also journals and transactionally repairs the
 known historical case where a bound system-page composition row advanced while
 its embedded semantic-manuscript revision did not. It changes only that embedded

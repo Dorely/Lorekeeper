@@ -1,0 +1,101 @@
+@using Lorekeeper.Startup
+@implements IDisposable
+@inject IApplicationStartupState Startup
+@inject NavigationManager Navigation
+@inject IHostApplicationLifetime ApplicationLifetime
+
+<PageTitle>Starting Lorekeeper</PageTitle>
+
+<main class="startup-screen" aria-labelledby="startup-title">
+    <section class="startup-card" role="status" aria-live="polite" aria-atomic="true">
+        <div class="startup-brand" aria-hidden="true">
+            <span class="startup-brand-glow"></span>
+            <img src="/branding/icon.svg" alt="" />
+        </div>
+
+        <div class="startup-copy">
+            <span class="startup-kicker">Lorekeeper</span>
+            <h1 id="startup-title">@_snapshot.Title</h1>
+            <p>@_snapshot.Detail</p>
+        </div>
+
+        @if (_snapshot.Status == ApplicationStartupStatus.Failed)
+        {
+            <div class="startup-error" role="alert">
+                <strong>Startup stopped safely.</strong>
+                @if (!string.IsNullOrWhiteSpace(_snapshot.Error))
+                {
+                    <span>@_snapshot.Error</span>
+                }
+            </div>
+            <button type="button" class="startup-close" @onclick="ApplicationLifetime.StopApplication">Close Lorekeeper</button>
+        }
+        else
+        {
+            <div class="startup-progress"
+                 role="progressbar"
+                 aria-label="Startup progress"
+                 aria-valuemin="0"
+                 aria-valuemax="100"
+                 aria-valuenow="@_snapshot.ProgressPercent">
+                <div class="startup-progress-track">
+                    <span style="width: @(_snapshot.ProgressPercent)%"></span>
+                </div>
+                <div class="startup-progress-meta">
+                    <span>@ProgressLabel()</span>
+                    <span>@_snapshot.ProgressPercent%</span>
+                </div>
+            </div>
+        }
+
+        <p class="startup-footnote">Your workspace stays local while Lorekeeper prepares it.</p>
+    </section>
+</main>
+
+@code {
+    private ApplicationStartupSnapshot _snapshot = null!;
+    private bool _transitioning;
+
+    protected override void OnInitialized()
+    {
+        _snapshot = Startup.Current;
+        Startup.Changed += HandleStartupChanged;
+    }
+
+    protected override Task OnAfterRenderAsync(bool firstRender) =>
+        firstRender ? TransitionIfReadyAsync() : Task.CompletedTask;
+
+    private void HandleStartupChanged() => _ = InvokeAsync(async () =>
+    {
+        _snapshot = Startup.Current;
+        StateHasChanged();
+        await TransitionIfReadyAsync();
+    });
+
+    private Task TransitionIfReadyAsync()
+    {
+        if (_transitioning)
+            return Task.CompletedTask;
+        if (_snapshot.Status == ApplicationStartupStatus.Ready)
+        {
+            _transitioning = true;
+            Navigation.NavigateTo(Navigation.Uri, forceLoad: true, replace: true);
+        }
+        else if (_snapshot.Status == ApplicationStartupStatus.RecoveryRequired)
+        {
+            _transitioning = true;
+            Navigation.NavigateTo("/settings/data-recovery", forceLoad: true, replace: true);
+        }
+        return Task.CompletedTask;
+    }
+
+    private string ProgressLabel() => _snapshot.Status switch
+    {
+        ApplicationStartupStatus.Migrating when _snapshot.Step is { } step && _snapshot.TotalSteps is { } total =>
+            $"Database check {step} of {total}",
+        ApplicationStartupStatus.Initializing => "Preparing workspace",
+        _ => "Starting application",
+    };
+
+    public void Dispose() => Startup.Changed -= HandleStartupChanged;
+}

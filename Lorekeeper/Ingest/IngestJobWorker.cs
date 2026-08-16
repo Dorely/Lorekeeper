@@ -1,6 +1,7 @@
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Startup;
 using Microsoft.Extensions.Hosting;
 
 namespace Lorekeeper.Ingest;
@@ -10,6 +11,7 @@ public sealed class IngestJobWorker(
     IAppDatabaseOperationFactory database,
     IIngestJobQueue queue,
     IIngestJobNotifier notifier,
+    IApplicationStartupState startup,
     ILogger<IngestJobWorker> logger) : BackgroundService
 {
     private static readonly TimeSpan StartupDelay = TimeSpan.FromSeconds(3);
@@ -18,6 +20,8 @@ public sealed class IngestJobWorker(
     {
         try
         {
+            if (!await startup.WaitForDatabaseReadyAsync(stoppingToken))
+                return;
             await Task.Delay(StartupDelay, stoppingToken);
             await MarkInterruptedJobsAsync(stoppingToken);
             await EnqueueQueuedJobsAsync(stoppingToken);

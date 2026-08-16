@@ -312,6 +312,15 @@ repository also consumes GitHub Actions minutes for its two hosted macOS jobs.
 SQLite databases, API keys, OAuth tokens, temporary verification databases, and
 publish output are local state and are ignored by git.
 
+Every launch begins with Lorekeeper's application-owned startup screen. It
+shows ordinary workspace initialization and names each database compatibility
+stage when migrations are being checked or applied. Project, ingest, import,
+image, embedding, and publication workers remain paused until database startup
+finishes. A successful start opens the requested workspace; a protected
+migration failure opens **Settings > Data Recovery**, while an unexpected
+bootstrap failure remains on the startup screen with a safe close action so the
+application can be restarted after the cause is addressed.
+
 When an older database first adopts structured manuscripts, Lorekeeper creates a
 WAL-consistent backup in `.migration-backups/manuscripts`, validates the
 conversion, and records a migration journal. **Settings > Data Recovery** shows

@@ -1,4 +1,7 @@
 ﻿<!DOCTYPE html>
+@using Lorekeeper.Startup
+@inject IApplicationStartupState Startup
+
 <html lang="en">
 
 <head>
@@ -20,7 +23,14 @@
 </head>
 
 <body>
-    <Routes />
+    @if (Startup.Current.CanUseDatabase)
+    {
+        <Routes />
+    }
+    else
+    {
+        <StartupScreen @rendermode="InteractiveServer" />
+    }
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
 </body>
