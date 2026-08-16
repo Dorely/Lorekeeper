@@ -26,18 +26,8 @@ concurrency:
 
 jobs:
   build:
-    name: Build ${{ matrix.runtime }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15
-            runtime: osx-arm64
-            artifact_arch: arm64
-          - runner: macos-15-intel
-            runtime: osx-x64
-            artifact_arch: x64
-    runs-on: ${{ matrix.runner }}
+    name: Build osx-arm64
+    runs-on: macos-15
     steps:
       - name: Check out exact release source
         uses: actions/checkout@v5
@@ -69,13 +59,12 @@ jobs:
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ inputs.version }}
-          RUNTIME_IDENTIFIER: ${{ matrix.runtime }}
-        run: ./scripts/build-macos-release.ps1 -Version $env:RELEASE_VERSION -RuntimeIdentifier $env:RUNTIME_IDENTIFIER
+        run: ./scripts/build-macos-release.ps1 -Version $env:RELEASE_VERSION
 
       - name: Upload architecture artifact
         uses: actions/upload-artifact@v7
         with:
-          name: macos-${{ inputs.correlation_id }}-${{ matrix.artifact_arch }}
-          path: publish/${{ matrix.runtime }}/Lorekeeper-${{ inputs.version }}-${{ matrix.artifact_arch }}.dmg
+          name: macos-${{ inputs.correlation_id }}-arm64
+          path: publish/osx-arm64/Lorekeeper-${{ inputs.version }}-arm64.dmg
           if-no-files-found: error
           retention-days: 1

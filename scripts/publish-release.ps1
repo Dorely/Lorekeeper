@@ -47,8 +47,7 @@ $releaseDirectory = Join-Path $repoRoot "publish\release-$Version"
 $correlationId = [Guid]::NewGuid().ToString('N')
 $macDownloadDirectory = Join-Path $repoRoot "publish\macos-action-$correlationId"
 $macWorkflowArtifactNames = @(
-    "macos-$correlationId-arm64",
-    "macos-$correlationId-x64"
+    "macos-$correlationId-arm64"
 )
 $buildScript = Join-Path $PSScriptRoot 'build-windows-release.ps1'
 $macRunId = $null
@@ -401,8 +400,7 @@ try
     if (-not $WindowsOnly)
     {
         $macArtifactNames = @(
-            "Lorekeeper-$Version-arm64.dmg",
-            "Lorekeeper-$Version-x64.dmg"
+            "Lorekeeper-$Version-arm64.dmg"
         )
     }
 

@@ -25,9 +25,9 @@
 | `.gitignore` | Standard .NET ignore patterns plus Lorekeeper local SQLite/temp data; publish output is scoped to the repo-root `/publish/` folder so source folders named `Publish` remain trackable. |
 | `.vscode/launch.json` | VS Code debug configurations; default F5 entry launches the Electron desktop shell, with a secondary web-hosted profile. |
 | `.vscode/tasks.json` | VS Code build task used by debug launch configurations. |
-| `.github/workflows/build-macos-release.yml` | Dispatch-only Apple Silicon/Intel macOS release builder and verifier; uploads one correlated DMG per architecture for the Windows release orchestrator. |
+| `.github/workflows/build-macos-release.yml` | Dispatch-only Apple Silicon macOS release builder and verifier; uploads one correlated arm64 DMG for the Windows release orchestrator. |
 | `scripts/build-windows-release.ps1` | Clean Windows x64 release builder: validates tooling/version, audits NuGet plus shipped npm/Electron dependencies, rebuilds isolated staging/output, verifies installer/updater artifacts, and writes GitHub Release checksums. |
-| `scripts/build-macos-release.ps1` | Native macOS release builder for one RID: audits dependencies, packages an ad-hoc-signed DMG, verifies signatures/architectures, mounts and smoke-tests the app, and writes a checksum. |
+| `scripts/build-macos-release.ps1` | Native Apple Silicon release builder: audits dependencies, packages an ad-hoc-signed arm64 DMG, verifies signatures/architectures, mounts and smoke-tests the app, and writes a checksum. |
 | `scripts/publish-release.ps1` | Windows release orchestrator with a local Windows-only mode or correlated native macOS builds; verifies one staged artifact set, coordinates matching source/public-repository releases with compensating cleanup, and removes temporary Actions artifacts after success. |
 | `eng/BuildPressRuntime.ps1` | Locked Rust build, license-expression audit, and exact native Press runtime packager used by Debug, Release, and platform packaging. |
 | `eng/ReleaseDependencyAudit.ps1` | Shared fail-closed Electron production-audit policy, including the exact dormant-splash exception for Electron.NET's currently unpatched `image-size` dependency. |
@@ -106,7 +106,7 @@
 | `appsettings.json` / `appsettings.Development.json` | Configuration including `Desktop:*` data placement, startup-splash duration, update interval, and constrained public release API plus provider, persistence, Blazor, ingest, research, embedding, and agent settings. |
 | `Properties/launchSettings.json` | Local launch profiles for Electron, HTTP, and HTTPS; HTTP remains pinned to `localhost:1455` for Codex OAuth redirect. |
 | `Properties/electron-builder.json` | Electron.NET packaging targets, metadata, updater provider, Windows installer/portable configuration, and ad-hoc-signed DMG-only macOS configuration. |
-| `Properties/PublishProfiles/*.pubxml` | Runtime-specific self-contained profiles (`win-x64`, `linux-x64`, `osx-x64`, `osx-arm64`), with Windows/macOS staging isolated from final artifacts. |
+| `Properties/PublishProfiles/*.pubxml` | Runtime-specific self-contained profiles (`win-x64`, `linux-x64`, `osx-arm64`), with Windows/macOS staging isolated from final artifacts. |
 
 ### Components/
 

@@ -9,7 +9,7 @@ operation is through an Electron.NET desktop shell backed by a local ASP.NET
 Core host. The same Blazor application can run directly in a browser for local
 development and debugging.
 
-The project declares Windows x64, Linux x64, macOS x64, and macOS arm64 runtime
+The project declares Windows x64, Linux x64, and macOS arm64 runtime
 identifiers. Declared targets preserve the intended cross-platform desktop
 shape; they are not evidence that packaging, updates, or platform-specific
 behavior has been validated on every operating system.
@@ -1139,7 +1139,7 @@ manifest. `describe` reports the packaged registry version/hash and the app
 rejects a mismatch. `eng/ReviewPrintProductRegistry.ps1` is the maintainer-only
 candidate validator and evidence-report workflow; no runtime path contacts a
 vendor site. Debug and Release use this
-same boundary. Windows x64, Linux x64, macOS x64, and macOS arm64 build on their
+same boundary. Windows x64, Linux x64, and macOS arm64 build on their
 native target runners; neither the app nor release package compiles Rust at
 runtime.
 `PublishChatService` owns one persisted, ordered, project-scoped Publish
@@ -1234,14 +1234,14 @@ Installed Windows builds use the Electron updater. Windows portable and macOS
 builds use the constrained public latest-release API and open an applicable
 newer release in the system browser.
 
-Release tooling is split between clean Windows and native macOS builders plus a
-Windows release orchestrator. The cross-platform publisher requires a clean
-local `main` matching `origin/main`, dispatches correlated macOS jobs, builds
-Windows locally, validates all requested artifacts, creates matching drafts in
-the private source and public release repositories, verifies both asset sets,
-then publishes both releases. A failed dual publication removes the exact
-releases/tags created by that run when GitHub permits compensating cleanup and
-reports any resource that requires manual inspection.
+Release tooling is split between clean Windows and native Apple Silicon builders
+plus a Windows release orchestrator. The cross-platform publisher requires a
+clean local `main` matching `origin/main`, dispatches one correlated macOS arm64
+job, builds Windows locally, validates all requested artifacts, creates matching
+drafts in the private source and public release repositories, verifies both
+asset sets, then publishes both releases. A failed dual publication removes the
+exact releases/tags created by that run when GitHub permits compensating cleanup
+and reports any resource that requires manual inspection.
 The public release repository remains the automatic/manual update authority.
 Temporary Actions artifacts are removed only after publication succeeds.
 Packaging and updater changes must be validated through the relevant scripts

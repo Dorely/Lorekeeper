@@ -254,8 +254,8 @@ and Windows portable builds can discover it. Manual-update packages containing
 this change ignore a newer release that lacks an artifact for their platform and
 architecture.
 
-To build and publish Windows plus Apple Silicon and Intel macOS packages as one
-release, run the same command without `-WindowsOnly`:
+To build and publish Windows plus Apple Silicon macOS packages as one release,
+run the same command without `-WindowsOnly`:
 
 ```powershell
 gh auth login
@@ -264,9 +264,9 @@ gh auth login
 
 The publisher requires a clean local `main` that exactly matches `origin/main`.
 Unless `-WindowsOnly` is used, it dispatches
-`.github/workflows/build-macos-release.yml` for both Mac architectures, builds
-Windows locally at the same time, waits for the correlated Actions run,
-downloads the verified DMGs, and publishes every artifact together only if all
+`.github/workflows/build-macos-release.yml` for the Apple Silicon package,
+builds Windows locally at the same time, waits for the correlated Actions run,
+downloads the verified DMG, and publishes every artifact together only if all
 builds succeeded. The workflow must already be committed and pushed to `main`;
 it uses the source repository's read-only `GITHUB_TOKEN` and never publishes a
 release itself. The orchestrator uploads the same verified artifact set and
@@ -277,8 +277,8 @@ created if dual publication fails. It warns if GitHub prevents compensating
 cleanup. The public repository remains the updater and user-download authority.
 
 Each completed release contains the Windows installer, portable executable,
-updater metadata and blockmap, `Lorekeeper-<version>-arm64.dmg`,
-`Lorekeeper-<version>-x64.dmg`, and one checksum file covering every asset. Add
+updater metadata and blockmap, `Lorekeeper-<version>-arm64.dmg`, and one checksum
+file covering every asset. Add
 `-Notes "..."` or `-NotesFile .\release-notes.md` for custom notes. SemVer
 prereleases such as `0.3.6-beta.1` are published as GitHub prereleases.
 Published versions are immutable; fixes require a higher version.
@@ -296,16 +296,17 @@ directory. Desktop development continues to use the repository-local database.
 
 Windows packages are unsigned, so Windows may show an unknown-publisher or
 SmartScreen warning. macOS packages are ad-hoc signed but not Developer ID signed
-or notarized. Download the DMG matching the Mac (`arm64` for Apple Silicon, `x64`
-for Intel), drag Lorekeeper into Applications, then use **Open Anyway** in
-System Settings > Privacy & Security if Gatekeeper blocks the first launch.
-These packages are intended for trusted testers.
+or notarized. On Apple Silicon, download the `arm64` DMG, drag Lorekeeper into
+Applications, then use **Open Anyway** in System Settings > Privacy & Security if
+Gatekeeper blocks the first launch. Lorekeeper 0.3.6 is the final Intel macOS
+package; its `x64` DMG remains available, but later releases do not provide Intel
+artifacts. These packages are intended for trusted testers.
 
 The `/publish/` directory is git-ignored. Release binaries are mirrored as
 GitHub Release assets in the private source repository and the public
 [`Dorely/Lorekeeper-Releases`](https://github.com/Dorely/Lorekeeper-Releases)
 repository rather than committed to source control. The private source
-repository also consumes GitHub Actions minutes for its two hosted macOS jobs.
+repository also consumes GitHub Actions minutes for its hosted macOS job.
 
 ## Local Data
 

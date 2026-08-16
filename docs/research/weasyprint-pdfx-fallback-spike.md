@@ -196,7 +196,7 @@ the spike does **not** approve copying that binary bundle into Lorekeeper.
 Feature 5 must assemble every target from controlled packages, record each
 native library/version/source/license/hash, reproduce required LGPL and other
 notices, provide relinking/source obligations where applicable, scan the final
-bundle, and exercise Windows x64 plus both macOS architectures.
+bundle, and exercise Windows x64 plus macOS arm64.
 
 ## Remaining external evidence
 
@@ -208,7 +208,7 @@ open:
 - authenticated KDP Print Previewer upload;
 - authenticated IngramSpark upload preflight;
 - physical proof inspection;
-- macOS x64/arm64 binary builds and runtime snapshots; and
+- macOS arm64 binary builds and runtime snapshots; and
 - final release-level native dependency notices.
 
 Accordingly, the accepted scope is `Preview`. Product language must never call

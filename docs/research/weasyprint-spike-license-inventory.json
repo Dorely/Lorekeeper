@@ -771,6 +771,6 @@
   "openReleaseObligations": [
     "Inventory each native Pango, Fontconfig, HarfBuzz, GLib, Cairo, and transitively shipped library per target.",
     "Assemble and verify the distributable third-party notice/source-offer bundle.",
-    "Repeat the inventory on Windows x64, macOS x64, and macOS arm64 final artifacts."
+    "Repeat the inventory on Windows x64 and macOS arm64 final artifacts."
   ]
 }

@@ -137,8 +137,8 @@ The current application provides:
 - conversational Publish assistance and shared page/cover composition tools.
 
 This foundation is broad enough to keep. The principal artifact-readiness gate
-that remains is complete native packaged-pipeline acceptance on Windows and both
-macOS architectures, not another renderer or validator runtime.
+that remains is complete native packaged-pipeline acceptance on Windows and
+Apple Silicon macOS, not another renderer or validator runtime.
 
 ## Next phase — artifact-complete publishing
 
@@ -252,7 +252,7 @@ unknown or custom destinations remain possible through Generic profiles.
   the runtime `PATH`, except for any explicitly bundled validator runtime.
 - Do not claim an untested platform.
 
-Gate: Windows x64, macOS x64, and macOS arm64 release artifacts execute the full
+Gate: Windows x64 and macOS arm64 release artifacts execute the full
 supported publication pipeline; other platforms remain unclaimed until tested.
 
 ### Definition of done

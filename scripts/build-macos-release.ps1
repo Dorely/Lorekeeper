@@ -1,11 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [string]$Version,
-
-    [Parameter(Mandatory)]
-    [ValidateSet('osx-arm64', 'osx-x64')]
-    [string]$RuntimeIdentifier
+    [string]$Version
 )
 
 Set-StrictMode -Version Latest
@@ -21,36 +17,30 @@ if ($Version -notmatch $semVerPattern)
     throw "Version '$Version' must use SemVer form such as 0.2.0 or 0.2.0-beta.1."
 }
 
-$expectedArchitecture = if ($RuntimeIdentifier -eq 'osx-arm64') { 'Arm64' } else { 'X64' }
+$runtimeIdentifier = 'osx-arm64'
+$expectedArchitecture = 'Arm64'
 $actualArchitecture = [System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
 if ($actualArchitecture -ne $expectedArchitecture)
 {
-    throw "$RuntimeIdentifier must be built on a native $expectedArchitecture runner; found $actualArchitecture."
+    throw "$runtimeIdentifier must be built on a native $expectedArchitecture runner; found $actualArchitecture."
 }
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $projectPath = Join-Path $repoRoot 'Lorekeeper/Lorekeeper.csproj'
-$stageDirectory = Join-Path $repoRoot "publish/$RuntimeIdentifier-stage"
-$outputDirectory = Join-Path $repoRoot "publish/$RuntimeIdentifier"
+$stageDirectory = Join-Path $repoRoot "publish/$runtimeIdentifier-stage"
+$outputDirectory = Join-Path $repoRoot "publish/$runtimeIdentifier"
 $semanticEditorDirectory = Join-Path $repoRoot 'tools/semantic-editor'
 $semanticEditorBundle = Join-Path $repoRoot 'Lorekeeper/wwwroot/js/semantic-editor.bundle.js'
 $semanticEditorNotice = Join-Path $repoRoot 'Lorekeeper/wwwroot/js/semantic-editor.NOTICES.txt'
 $dependencyAuditScript = Join-Path $repoRoot 'eng/ReleaseDependencyAudit.ps1'
 
 . $dependencyAuditScript
-$profileName = $RuntimeIdentifier
-$artifactArchitecture = if ($RuntimeIdentifier -eq 'osx-arm64') { 'arm64' } else { 'x64' }
-$machArchitecture = if ($RuntimeIdentifier -eq 'osx-arm64') { 'arm64' } else { 'x86_64' }
-$sqliteVecPlatformCheck = if ($RuntimeIdentifier -eq 'osx-arm64')
-{
-    # sqlite-vec ships an osx-arm64 dylib, but its package target still rejects
-    # ARM64 PlatformTarget values. The packaged dylib is validated below.
-    '-p:EnableUnsupportedPlatformTargetCheck=false'
-}
-else
-{
-    '-p:EnableUnsupportedPlatformTargetCheck=true'
-}
+$profileName = $runtimeIdentifier
+$artifactArchitecture = 'arm64'
+$machArchitecture = 'arm64'
+# sqlite-vec ships an osx-arm64 dylib, but its package target still rejects
+# ARM64 PlatformTarget values. The packaged dylib is validated below.
+$sqliteVecPlatformCheck = '-p:EnableUnsupportedPlatformTargetCheck=false'
 $dmgPath = Join-Path $outputDirectory "Lorekeeper-$Version-$artifactArchitecture.dmg"
 
 foreach ($commandName in @('dotnet', 'node', 'npm', 'cargo', 'rustc', 'hdiutil', 'codesign', 'lipo', 'ditto'))
@@ -188,14 +178,14 @@ try
 
     Invoke-CheckedCommand dotnet @(
         'restore', $projectPath, '--force-evaluate',
-        "-p:RuntimeIdentifier=$RuntimeIdentifier",
+        "-p:RuntimeIdentifier=$runtimeIdentifier",
         $sqliteVecPlatformCheck,
         '-p:NuGetAudit=true', '-p:NuGetAuditMode=all', '-p:NuGetAuditLevel=low',
         '-p:TreatWarningsAsErrors=true'
     )
     Invoke-CheckedCommand dotnet @(
         'build', $projectPath, '-c', 'Release',
-        "-p:RuntimeIdentifier=$RuntimeIdentifier", $sqliteVecPlatformCheck, "-p:Version=$Version"
+        "-p:RuntimeIdentifier=$runtimeIdentifier", $sqliteVecPlatformCheck, "-p:Version=$Version"
     )
     $previousCi = $env:CI
     try
@@ -205,7 +195,7 @@ try
         $env:CI = 'false'
         Invoke-CheckedCommand dotnet @(
             'publish', $projectPath, '-c', 'Release', "-p:PublishProfile=$profileName",
-            "-p:RuntimeIdentifier=$RuntimeIdentifier", $sqliteVecPlatformCheck,
+            "-p:RuntimeIdentifier=$runtimeIdentifier", $sqliteVecPlatformCheck,
             "-p:Version=$Version", '--no-restore'
         )
     }
