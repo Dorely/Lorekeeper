@@ -13,6 +13,11 @@ public interface IEditorContextService : IContextBuilder
         bool isIncluded,
         CancellationToken cancellationToken = default);
 
+    Task ResetToDefaultsAsync(
+        Guid projectId,
+        Guid chapterId,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<StoryEntity>> ListAutoRelatedEntitiesAsync(
         Guid projectId,
         Guid chapterId,

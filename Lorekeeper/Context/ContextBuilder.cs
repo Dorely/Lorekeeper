@@ -305,6 +305,26 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task ResetToDefaultsAsync(
+        Guid projectId,
+        Guid chapterId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+
+        var chapter = await chapters.GetAsync(chapterId, cancellationToken)
+            ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
+        if (chapter.ProjectId != projectId)
+            throw new InvalidOperationException($"Chapter {chapterId} does not belong to project {projectId}.");
+
+        await databaseOperation.Repositories.EditorContextPreferences.RemoveForChapterAsync(
+            projectId,
+            chapterId,
+            cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<StoryEntity>> ListAutoRelatedEntitiesAsync(
         Guid projectId,
         Guid chapterId,

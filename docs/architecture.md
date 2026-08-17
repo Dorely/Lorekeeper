@@ -156,6 +156,11 @@ The chapter header's word/token metric counts only the chapter's plain-text
 projection, while Assistant Memory counts the enabled assembled context
 including instructions, labels, references, and structured editing metadata;
 these are intentionally different scopes and are not normalized to one value.
+Per-chapter `EditorContextPreference` rows are an override layer over the
+current automatic inclusion rules. The Assistant Memory header reset removes
+all override rows for the active chapter and rebuilds every context surface from
+those defaults; it does not modify chapter content, graph relationships, Book
+Brief data, Project Guidance, or the underlying source material.
 
 ### Assistant Conversations and Review
 

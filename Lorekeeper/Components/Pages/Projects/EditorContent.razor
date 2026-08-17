@@ -753,7 +753,7 @@ else
                 </button>
 
                 <section class='@(PanelClass("panel-context", _contextFeedOpen))'>
-                    <h6 class="panel-title">
+                    <h6 class="panel-title panel-title--with-action">
                         <button type="button"
                                 class="panel-title-toggle"
                                 title='@(PanelToggleTitle("Assistant Memory", _contextFeedOpen))'
@@ -763,7 +763,19 @@ else
                             <span class="caret">@PanelCaret(_contextFeedOpen)</span>
                             <span class="panel-title-text">Assistant Memory</span>
                         </button>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary panel-title-action"
+                                title="Reset this chapter's Assistant Memory to its default context"
+                                aria-label="Reset this chapter's Assistant Memory to its default context"
+                                disabled="@(_activeChapterId is null || LayoutControlsLocked || _contextResetBusy)"
+                                @onclick="ResetAssistantMemoryAsync">
+                            @(_contextResetBusy ? "Resetting…" : "Reset")
+                        </button>
                     </h6>
+                    @if (!string.IsNullOrWhiteSpace(_contextResetError))
+                    {
+                        <div class="alert alert-danger py-2 small mb-2">@_contextResetError</div>
+                    }
                     <div id="context-feed-panel-content"
                          class="@PanelContentClass(_contextFeedOpen)"
                          aria-hidden="@AriaHidden(!_contextFeedOpen)">
@@ -904,6 +916,8 @@ else
     private bool _chapterLocked;
     private ContextFeedPanel? _contextPanel;
     private int _contextRefreshSignal;
+    private bool _contextResetBusy;
+    private string? _contextResetError;
     private int _reviewRefreshSignal;
     private bool _imagesModalOpen;
     private bool _manuscriptImageModalOpen;
@@ -1109,6 +1123,7 @@ else
 
         _activeChapterId = targetId;
         _current = fresh;
+        _contextResetError = null;
         ReplaceCachedChapter(fresh);
         var effective = await Manuscripts.GetManuscriptAsync(_contentTarget, fresh.Id)
             ?? throw new InvalidOperationException("The selected chapter manuscript was not found.");
@@ -3655,6 +3670,31 @@ else
     }
 
     private async Task OnContextChangedAsync() => await RefreshContextSurfacesAsync();
+
+    private async Task ResetAssistantMemoryAsync()
+    {
+        if (_contextResetBusy || Project is null || _activeChapterId is not { } chapterId)
+            return;
+
+        _contextResetBusy = true;
+        _contextResetError = null;
+        try
+        {
+            await EditorContext.ResetToDefaultsAsync(Project.Id, chapterId);
+            if (_activeChapterId == chapterId)
+                await RefreshContextSurfacesAsync();
+        }
+        catch (Exception ex)
+        {
+            _contextResetError = $"Assistant Memory could not be reset: {ex.Message}";
+            LogEditorRefreshFailure(ex, "Assistant Memory reset");
+        }
+        finally
+        {
+            _contextResetBusy = false;
+            StateHasChanged();
+        }
+    }
 
     private async Task RefreshContextSurfacesAsync()
     {

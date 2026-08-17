@@ -33,7 +33,17 @@ public sealed class EditorContextPreferenceRepository(AppDatabaseReadOperation o
     public async Task AddAsync(EditorContextPreference preference, CancellationToken cancellationToken = default) =>
         await operation.Db.EditorContextPreferences.AddAsync(preference, cancellationToken);
 
-    public void Update(EditorContextPreference preference) => operation.Db.MarkModified(preference);
+    public async Task<int> RemoveForChapterAsync(
+        Guid projectId,
+        Guid chapterId,
+        CancellationToken cancellationToken = default)
+    {
+        var preferences = await operation.Db.EditorContextPreferences
+            .Where(preference => preference.ProjectId == projectId && preference.ChapterId == chapterId)
+            .ToListAsync(cancellationToken);
+        operation.Db.EditorContextPreferences.RemoveRange(preferences);
+        return preferences.Count;
+    }
 
-    public void Remove(EditorContextPreference preference) => operation.Db.MarkDeleted(preference);
+    public void Update(EditorContextPreference preference) => operation.Db.MarkModified(preference);
 }

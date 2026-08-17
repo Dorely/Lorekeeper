@@ -17,6 +17,9 @@ public interface IEditorContextPreferenceRepository
         CancellationToken cancellationToken = default);
 
     Task AddAsync(EditorContextPreference preference, CancellationToken cancellationToken = default);
+    Task<int> RemoveForChapterAsync(
+        Guid projectId,
+        Guid chapterId,
+        CancellationToken cancellationToken = default);
     void Update(EditorContextPreference preference);
-    void Remove(EditorContextPreference preference);
 }
