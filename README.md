@@ -99,6 +99,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   placement is a separate revision-safe step using that image ID. Generation
   and inspection reserve quiet space for actual copy regions while requiring
   the rest of the frame to contribute purposeful visual information or atmosphere.
+  The Images library keeps every card at one bounded size, marks assets used by
+  chapters, and disables deletion until every semantic Figure and chapter-owned
+  Designed Page reference has been removed or replaced; the image service
+  enforces the same rule against stale UI state.
 - An always-present Core Book for shared title/author/language metadata, fixed
   outline order, presentation, publication sections, project typography, and
   reusable front-cover design. A publication section is either prose with

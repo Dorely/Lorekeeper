@@ -219,7 +219,7 @@
 
 | File | Description |
 |------|-------------|
-| `ImagesContent.razor` (+ `.razor.css`, `.razor.js`) | Three-pane image workspace with Images Chat, queued generation/edit job cards, attach-to-chat/entity actions, non-destructive library cropping, shared full-size viewing, manual queued generation, and mask edit modal. |
+| `ImagesContent.razor` (+ `.razor.css`, `.razor.js`) | Three-pane image workspace with fixed-size library/job cards, chapter-use badges and disabled protected deletion, Images Chat, queued generation/edit jobs, attach-to-chat/entity actions, non-destructive cropping, shared full-size viewing, manual generation, and mask edits. |
 | `ImagesChatPanel.razor` (+ `.razor.css`) | Images Chat adapter over `ChatSurface`: loads transcript, streams text/tool updates, manages attached image context chips with shared viewing, renders image visual strips, and refreshes the image grid after mutations. |
 
 ### Components/Pages/Projects/Publish/
@@ -576,9 +576,9 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectImageModels.cs` | Image, normalized crop, and entity-target requests/views plus persisted jobs, output state, masks, provider progress, and runtime snapshots. |
+| `ProjectImageModels.cs` | Image and chapter-usage views, normalized crop and entity-target requests, plus persisted jobs, output state, masks, provider progress, and runtime snapshots. |
 | `ImagePromptComposer.cs` | Shared structured generation/edit brief compiler with canonical-character reference schema guidance, stable provider-order labels, purposeful-space discipline, exact-aspect moderate layout rasters, reserved regions, rendered-text policy, and safe free-generation defaults. |
-| `IProjectImageService.cs` / `ProjectImageService.cs` | Shared project image-library facade over stored image assets: metadata-only listing with endpoint URLs, byte reads, upload, deterministic local crop/reuse, legacy blocking generation, metadata, delete, thumbnail, reference scrubbing, and confirmed clearing of history-only dependencies. |
+| `IProjectImageService.cs` / `ProjectImageService.cs` | Shared project image-library facade over stored assets: metadata and chapter-reference projection, byte reads, upload, deterministic crop/reuse, legacy blocking generation, metadata, thumbnail, deletion guarded against Figures, chapter Designed Pages, publication uses, and confirmed clearing of history-only dependencies. |
 | `IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Image job persistence for structured prompt audits, free-standing/layout-target classification, bounded uncropped provider-raster saving with non-blocking geometry warnings, revised prompts/output IDs, lifecycle/state/errors, and PNG/shape-mask validation. |
 | `IProjectImageGenerationRuntime.cs` / `ProjectImageGenerationRuntime.cs` | Singleton FIFO image queue with one active job per project, per-job cancellation propagated to providers/retries, partial previews, completion waiters, and state notifications. |
 | `ProjectImageGenerationStartupWorker.cs` | Hosted startup worker that marks interrupted running image jobs failed and resumes queued project work. |

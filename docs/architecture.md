@@ -343,6 +343,16 @@ metadata. `IProjectImageGenerationRuntime` owns FIFO execution, retries,
 cancellation, previews, and completion notifications, while provider transport
 details remain behind `IProjectImageProvider`.
 
+The project-image service derives chapter usage from semantic Figure blocks and
+from both semantic content and live variants of chapter-owned Designed Pages.
+The Images workspace uses that projection to identify protected assets and
+disable deletion, while `DeleteAsync` repeats the authoritative lookup inside
+its write transaction so concurrent or stale clients cannot remove a referenced
+image. Publication matter, covers, edition placements, and composition uses keep
+their corresponding service-level deletion guards. Image-library and queued-job
+cards use a fixed card and preview footprint with contained raster rendering, so
+source aspect ratio cannot resize the grid.
+
 `IAgentProjectImageWorkflow` is the single assistant-facing generation/edit
 boundary for Outline, Editor, Images, and Publish. It creates one unattached
 project-image job, registers its durable job ID, waits to a readable terminal

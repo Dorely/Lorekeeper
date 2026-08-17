@@ -55,11 +55,18 @@ else
 
                 @foreach (var image in FilteredImages)
                 {
-                    <article class="image-card" @key="image.Id">
+                    var chapterUsage = ChapterUsage(image.Id);
+                    <article class="image-card @(chapterUsage is null ? string.Empty : "image-card-used")" @key="image.Id">
                         <button type="button" class="image-preview-button" @onclick="() => OpenImageModal(image)">
                             <img src="@image.PreviewUrl" alt="@ImageAlt(image)" />
                         </button>
                         <div class="image-card-body">
+                            @if (chapterUsage is not null)
+                            {
+                                <div class="image-usage-badge" title="@ChapterUsageTitle(chapterUsage)">
+                                    Used in @chapterUsage.ChapterTitles.Count chapter@((chapterUsage.ChapterTitles.Count == 1) ? string.Empty : "s")
+                                </div>
+                            }
                             <input class="form-control form-control-sm"
                                    value="@image.FileName"
                                    @onchange="e => UpdateImageAsync(image, fileName: e.Value?.ToString() ?? string.Empty, altText: image.AltText)" />
@@ -77,7 +84,11 @@ else
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenCropModal(image)">Crop</button>
                                 <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenMaskModal(image)">Edit</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => DownloadAsync(image)">Download</button>
-                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(image.Id)">Delete</button>
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-danger"
+                                        disabled="@(chapterUsage is not null)"
+                                        title="@(chapterUsage is null ? "Delete image" : ChapterUsageTitle(chapterUsage))"
+                                        @onclick="() => DeleteAsync(image.Id)">Delete</button>
                             </div>
                         </div>
                     </article>
@@ -252,6 +263,8 @@ else
     [CascadingParameter] public Project? Project { get; set; }
 
     private IReadOnlyList<ProjectImageView> _images = [];
+    private IReadOnlyDictionary<Guid, ProjectImageChapterUsageView> _chapterUsage =
+        new Dictionary<Guid, ProjectImageChapterUsageView>();
     private IReadOnlyList<ProjectImageJobView> _jobs = [];
     private ProjectImageGenerationRuntimeSnapshot _runtimeSnapshot = new([]);
     private ProjectImageView? _editingImage;
@@ -361,7 +374,7 @@ else
         try
         {
             _codexConnected = await Providers.IsCodexConnectedAsync();
-            _images = await Images.ListAsync(Project.Id);
+            await ReloadImageLibraryAsync();
             _jobs = await ImageJobs.ListJobsAsync(Project.Id);
             _runtimeSnapshot = ImageRuntime.GetSnapshot();
             RefreshOpenImages();
@@ -386,7 +399,7 @@ else
                 if (Project is not null)
                 {
                     _jobs = await ImageJobs.ListJobsAsync(Project.Id);
-                    _images = await Images.ListAsync(Project.Id);
+                    await ReloadImageLibraryAsync();
                     RefreshOpenImages();
                 }
                 StateHasChanged();
@@ -546,6 +559,20 @@ else
     private void OpenImageModal(ProjectImageView image) => _viewImage = image;
 
     private void CloseImageModal() => _viewImage = null;
+
+    private async Task ReloadImageLibraryAsync()
+    {
+        if (Project is null) return;
+        _images = await Images.ListAsync(Project.Id);
+        _chapterUsage = (await Images.ListChapterUsageAsync(Project.Id))
+            .ToDictionary(usage => usage.ImageId);
+    }
+
+    private ProjectImageChapterUsageView? ChapterUsage(Guid imageId) =>
+        _chapterUsage.GetValueOrDefault(imageId);
+
+    private static string ChapterUsageTitle(ProjectImageChapterUsageView usage) =>
+        "Used by " + string.Join(", ", usage.ChapterTitles) + ". Remove or replace it in every chapter before deleting.";
 
     private static IReadOnlyList<string> ViewerDetails(ProjectImageView image) =>
         new[]

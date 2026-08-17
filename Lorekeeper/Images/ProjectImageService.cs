@@ -56,6 +56,20 @@ public sealed class ProjectImageService(
             row.SizeBytes)).ToList();
     }
 
+    public async Task<IReadOnlyList<ProjectImageChapterUsageView>> ListChapterUsageAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var usages = await BuildChapterUsageAsync(databaseOperation.Db, projectId, cancellationToken);
+        return usages
+            .OrderBy(usage => usage.Key)
+            .Select(usage => new ProjectImageChapterUsageView(
+                usage.Key,
+                usage.Value.Values.OrderBy(title => title, StringComparer.OrdinalIgnoreCase).ToList()))
+            .ToList();
+    }
+
     public async Task<IReadOnlyList<ProjectImageView>> ListByIdsAsync(
         Guid projectId,
         IReadOnlyCollection<Guid> imageIds,
@@ -316,21 +330,14 @@ public sealed class ProjectImageService(
         var project = await GetProjectAsync(projectId, cancellationToken);
         var asset = await db.PublishAssets.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == imageId, cancellationToken);
         if (asset is null) return;
-        var figureChapters = (await db.Chapters
-            .AsNoTracking()
-            .Where(chapter => chapter.ProjectId == projectId)
-            .Select(chapter => new { chapter.Title, chapter.ManuscriptJson })
-            .ToListAsync(cancellationToken))
-            .Where(chapter => ManuscriptCodec.Deserialize(chapter.ManuscriptJson).Content.Any(
-                block => block.Type == ManuscriptBlockType.Figure && block.ImageId == imageId))
-            .Select(chapter => chapter.Title)
-            .ToList();
+        var chapterUsage = await BuildChapterUsageAsync(db, projectId, cancellationToken);
+        var figureChapters = chapterUsage.GetValueOrDefault(imageId)?.Values.ToList() ?? [];
         if (figureChapters.Count > 0)
         {
             throw new InvalidOperationException(
-                $"Image '{asset.FileName}' is used by a semantic figure in: "
-                + string.Join(", ", figureChapters)
-                + ". Remove or replace those figures before deleting the image.");
+                $"Image '{asset.FileName}' is used in: "
+                + string.Join(", ", figureChapters.OrderBy(title => title, StringComparer.OrdinalIgnoreCase))
+                + ". Remove or replace every chapter figure or Designed Page placement before deleting the image.");
         }
         var figureMatter = (await db.PublicationMatter
             .AsNoTracking()
@@ -438,6 +445,115 @@ public sealed class ProjectImageService(
             .Select(example => example.GraphNode.Key)
             .ToListAsync(cancellationToken);
         return keys.Where(key => Guid.TryParseExact(key, "N", out _)).Select(key => Guid.ParseExact(key, "N")).ToList();
+    }
+
+    private static async Task<Dictionary<Guid, Dictionary<Guid, string>>> BuildChapterUsageAsync(
+        AppDbContext db,
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        var usages = new Dictionary<Guid, Dictionary<Guid, string>>();
+        var chapters = await db.Chapters
+            .AsNoTracking()
+            .Where(chapter => chapter.ProjectId == projectId)
+            .Select(chapter => new { chapter.Id, chapter.Title, chapter.ManuscriptJson })
+            .ToListAsync(cancellationToken);
+        var chapterTitles = chapters.ToDictionary(chapter => chapter.Id, chapter => chapter.Title);
+
+        foreach (var chapter in chapters)
+            AddChapterUses(usages, chapter.Id, chapter.Title, FigureImageIds(chapter.ManuscriptJson));
+
+        var compositions = await db.PageCompositions
+            .AsNoTracking()
+            .Where(composition => composition.ProjectId == projectId
+                && composition.ChapterId != null
+                && composition.DetachedAt == null)
+            .Select(composition => new
+            {
+                composition.Id,
+                ChapterId = composition.ChapterId!.Value,
+                composition.SemanticManuscriptJson,
+            })
+            .ToListAsync(cancellationToken);
+        var compositionChapters = compositions.ToDictionary(
+            composition => composition.Id,
+            composition => new
+            {
+                composition.ChapterId,
+                Title = chapterTitles.GetValueOrDefault(composition.ChapterId, "Untitled chapter"),
+            });
+
+        foreach (var composition in compositions)
+        {
+            AddChapterUses(
+                usages,
+                composition.ChapterId,
+                compositionChapters[composition.Id].Title,
+                FigureImageIds(composition.SemanticManuscriptJson));
+        }
+
+        var compositionIds = compositionChapters.Keys.ToList();
+        if (compositionIds.Count == 0)
+            return usages;
+
+        var variants = await db.PageCompositionVariants
+            .AsNoTracking()
+            .Where(variant => compositionIds.Contains(variant.CompositionId) && variant.DetachedAt == null)
+            .Select(variant => new { variant.CompositionId, variant.SceneJson })
+            .ToListAsync(cancellationToken);
+        foreach (var variant in variants)
+        {
+            AddChapterUses(
+                usages,
+                compositionChapters[variant.CompositionId].ChapterId,
+                compositionChapters[variant.CompositionId].Title,
+                SceneImageIds(variant.SceneJson));
+        }
+
+        return usages;
+    }
+
+    private static void AddChapterUses(
+        Dictionary<Guid, Dictionary<Guid, string>> usages,
+        Guid chapterId,
+        string chapterTitle,
+        IEnumerable<Guid> imageIds)
+    {
+        foreach (var imageId in imageIds.Where(imageId => imageId != Guid.Empty).Distinct())
+        {
+            if (!usages.TryGetValue(imageId, out var chapters))
+            {
+                chapters = [];
+                usages.Add(imageId, chapters);
+            }
+
+            chapters[chapterId] = string.IsNullOrWhiteSpace(chapterTitle) ? "Untitled chapter" : chapterTitle.Trim();
+        }
+    }
+
+    private static IEnumerable<Guid> FigureImageIds(string json)
+    {
+        var manuscript = ManuscriptCodec.Deserialize(json);
+        return manuscript.Content
+            .Where(block => block.Type == ManuscriptBlockType.Figure && block.ImageId is not null)
+            .Select(block => block.ImageId!.Value);
+    }
+
+    private static IEnumerable<Guid> SceneImageIds(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            var scene = System.Text.Json.JsonSerializer.Deserialize<CompositionScene>(json, ManuscriptCodec.JsonOptions);
+            return scene?.Objects
+                .Where(item => item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
+                .Select(item => item.ImageId!.Value)
+                .ToList() ?? [];
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return [];
+        }
     }
 
     private static ProjectImageCropRegion NormalizeCrop(ProjectImageCropRegion crop)

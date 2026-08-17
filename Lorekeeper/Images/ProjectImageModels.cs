@@ -17,6 +17,10 @@ public sealed record ProjectImageView(
     DateTime UpdatedAt,
     long SizeBytes);
 
+public sealed record ProjectImageChapterUsageView(
+    Guid ImageId,
+    IReadOnlyList<string> ChapterTitles);
+
 public sealed record ProjectImageUpload(
     string FileName,
     string ContentType,
