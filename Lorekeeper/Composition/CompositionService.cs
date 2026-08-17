@@ -58,7 +58,8 @@ public sealed class CompositionService(
     IPublicationCoverService covers,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IAuthoringHistoryService authoringHistory,
-    IAuthoringMutationContextAccessor authoringMutationContext) : ICompositionService
+    IAuthoringMutationContextAccessor authoringMutationContext,
+    ICompositionCanvasPreviewService canvasPreviews) : ICompositionService
 {
     private static readonly JsonSerializerOptions JsonOptions = ManuscriptCodec.JsonOptions;
 
@@ -1814,18 +1815,21 @@ public sealed class CompositionService(
             foreach (var item in duplicate)
                 diagnostics.Add(new("error", "READING_ORDER_DUPLICATE", $"Reading-order position {duplicate.Key} is assigned more than once.", item.Id));
         }
-        foreach (var item in flattened.Where(item => item.Kind == CompositionObjectKind.Text && IsOutputVisible(scene, item)))
-        {
-            string text;
-            try { text = ManuscriptRangeResolver.ResolveText(semantic, item.ContentReferences); }
-            catch (InvalidDataException) { continue; }
-            var width = scene.Surface.WidthPoints * item.Bounds.WidthPercent / 100;
-            var height = scene.Surface.HeightPoints * item.Bounds.HeightPercent / 100;
-            var charactersPerLine = Math.Max(1, (int)(width / Math.Max(1, item.FontSizePoints * .55)));
-            var lines = Math.Max(1, (int)Math.Ceiling((double)text.Length / charactersPerLine));
-            if (lines * item.FontSizePoints * item.LineHeight > height)
-                diagnostics.Add(new("error", "TEXT_OVERFLOW", "Text is likely to overflow its frame at the current typography.", item.Id));
-        }
+        var measuredPreview = await canvasPreviews.RenderSceneAsync(
+            projectId,
+            variant.Id,
+            variant.Revision,
+            scene,
+            semantic,
+            CompositionCanvasPreviewMode.Clean,
+            cancellationToken);
+        diagnostics.AddRange(measuredPreview.Diagnostics
+            .Where(item => item.Code == "TEXT_OVERFLOW")
+            .Select(item => new LayoutValidationDiagnostic(
+                "error",
+                item.Code,
+                "Text exceeds its frame at the current typography.",
+                item.ObjectId)));
 
         var imageIds = flattened.Where(item => item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
             .Select(item => item.ImageId!.Value).Distinct().ToList();

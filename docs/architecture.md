@@ -496,7 +496,11 @@ The preview request contains only the selected chapter and asks Press for its
 compact browser trace, which preserves paint and text-run data but omits
 glyph-level evidence used only by renderer conformance inspection. Designed Page
 line fitting uses the declared font's shaped widths and preserves authored hard
-line breaks, so the canvas and Press preview share the same frame capacity.
+line breaks. The Pages editor reports live overflow only after measuring the
+rendered browser frame, including its resolved font, wrapping, padding, and
+current viewport geometry. Saved-scene validation reuses the Skia canvas
+preview's measured line layout instead of estimating capacity from character
+counts, so authoring and output diagnostics are based on actual typography.
 Preview work is cancellable on mode changes and produces a retryable timeout instead of
 leaving the UI indefinitely busy. Designed Page text that exceeds its authored
 frame is clipped in this authoring trace and returned as a visible warning;

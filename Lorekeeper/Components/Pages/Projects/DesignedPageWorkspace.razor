@@ -330,6 +330,9 @@
     private string? _error;
     private ElementReference _stageElement;
     private IJSObjectReference? _workspaceModule;
+    private DotNetObjectReference<DesignedPageWorkspace>? _dotNetReference;
+    private readonly HashSet<Guid> _measuredTextObjects = [];
+    private readonly HashSet<Guid> _overflowingTextObjects = [];
     private TransformState? _transform;
     private CompositionObject? Selected => _objects.FirstOrDefault(item => item.Id == _selectedId);
     private void SelectObject(Guid id)
@@ -1380,7 +1383,22 @@
     private CompositionBounds EffectiveBounds(CompositionObject item, CompositionObject group) =>
         CompositionSceneResolver.ResolveBounds(_scene!.Surface, item.Bounds, group.Bounds, group.RotationDegrees);
     private void MoveReadingOrder(CompositionObject item, int delta) { var ordered = _objects.Where(candidate => candidate.ReadingOrder is not null).OrderBy(candidate => candidate.ReadingOrder).ToList(); var index = ordered.FindIndex(candidate => candidate.Id == item.Id); var target = index + delta; if (index < 0 || target < 0 || target >= ordered.Count) return; Snapshot(); var other = ordered[target]; var order = item.ReadingOrder; _objects = _objects.Select(candidate => candidate.Id == item.Id ? candidate with { ReadingOrder = other.ReadingOrder } : candidate.Id == other.Id ? candidate with { ReadingOrder = order } : candidate).ToList(); MarkDirty(); }
-    private bool TextOverflows(CompositionObject item) { var text = string.IsNullOrWhiteSpace(item.TextBinding) ? ManuscriptRangeResolver.ResolveText(new ManuscriptDocument { ManuscriptId = CompositionId, Content = _semanticBlocks }, item.ContentReferences) : item.TextBinding; var resolved = Resolved(item); var widthPoints = _scene!.Surface.WidthPoints * item.Bounds.WidthPercent / 100; var heightPoints = _scene.Surface.HeightPoints * item.Bounds.HeightPercent / 100; var charsPerLine = Math.Max(1, (int)(widthPoints / Math.Max(1, resolved.FontSizePoints * .55))); var lines = Math.Max(1, (int)Math.Ceiling((double)text.Length / charsPerLine)); return lines * resolved.FontSizePoints * resolved.LineHeight > heightPoints; }
+    private bool TextOverflows(CompositionObject item) =>
+        _measuredTextObjects.Contains(item.Id) && _overflowingTextObjects.Contains(item.Id);
+
+    [JSInvokable]
+    public Task UpdateTextOverflowAsync(IReadOnlyList<TextOverflowMeasurement> measurements)
+    {
+        var measured = measurements.Select(item => item.ObjectId).ToHashSet();
+        var overflowing = measurements.Where(item => item.Overflows).Select(item => item.ObjectId).ToHashSet();
+        if (_measuredTextObjects.SetEquals(measured) && _overflowingTextObjects.SetEquals(overflowing))
+            return Task.CompletedTask;
+        _measuredTextObjects.Clear();
+        _measuredTextObjects.UnionWith(measured);
+        _overflowingTextObjects.Clear();
+        _overflowingTextObjects.UnionWith(overflowing);
+        return InvokeAsync(StateHasChanged);
+    }
     private static string ColorValue(string value) => value.StartsWith('#') && value.Length == 7 ? value : "#000000";
     private static string Color(ChangeEventArgs e) => e.Value?.ToString() ?? "#000000";
     private static string SurfaceSizeLabel(CompositionSurface surface) =>
@@ -1465,7 +1483,11 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
+        {
             _workspaceModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-workspace.js");
+            _dotNetReference = DotNetObjectReference.Create(this);
+            await _workspaceModule.InvokeVoidAsync("observeTextOverflow", _stageElement, _dotNetReference);
+        }
         if (_workspaceModule is not null && _focusTextId is Guid focusId)
         {
             _focusTextId = null;
@@ -1603,14 +1625,23 @@
     {
         _autosaveCancellation?.Cancel();
         _autosaveCancellation?.Dispose();
-        if (_workspaceModule is null) return;
+        if (_workspaceModule is null)
+        {
+            _dotNetReference?.Dispose();
+            return;
+        }
         try
         {
+            await _workspaceModule.InvokeVoidAsync("disconnectTextOverflow", _stageElement);
             await _workspaceModule.DisposeAsync();
         }
         catch (JSDisconnectedException)
         {
             // The circuit already owns cleanup after disconnect.
+        }
+        finally
+        {
+            _dotNetReference?.Dispose();
         }
     }
 
@@ -1621,6 +1652,7 @@
     private sealed record TextEditState(string Text, int Start, int End);
     private sealed record TextSelectionRestore(Guid ObjectId, int Start, int End);
     private sealed record TextFocusRequest(Guid ObjectId, double ClientX, double ClientY);
+    public sealed record TextOverflowMeasurement(Guid ObjectId, bool Overflows);
 
     private void HandleKeyDown(KeyboardEventArgs e)
     {

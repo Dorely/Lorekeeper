@@ -62,8 +62,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   and contextual Edit/Read/Pages/Review modes. Read shows actual pagination,
   line breaks, images, captions, and Designed Pages with single/facing and zoom
   controls; it does not depend on a publication release. Designed Page text
-  lines are fitted from the selected font's real metrics; genuine overflow is
-  clipped to its authored frame and reported as a preview warning
+  lines are fitted from the selected font's real metrics; the Pages editor
+  measures its rendered text frames before showing an overflow warning, and
+  genuine output overflow is clipped to its authored frame and reported
   instead of preventing the chapter from opening. Editor Chat can also
   request a Press-rendered page image by stable paragraph block or chapter-local
   typeset page to visually verify applied typography and typesetting.

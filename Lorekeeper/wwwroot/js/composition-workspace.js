@@ -176,3 +176,73 @@ export function restoreTextSelection(stage, objectId, start, end) {
     selection.removeAllRanges();
     selection.addRange(range);
 }
+
+const overflowObservers = new WeakMap();
+
+function measureTextOverflow(stage) {
+    if (!stage) {
+        return [];
+    }
+    return [...stage.querySelectorAll(".composition-object--text[data-composition-object-id]")]
+        .map(frame => {
+            const content = frame.querySelector(".composition-rendered-text, .composition-text-editor");
+            return {
+                objectId: frame.dataset.compositionObjectId,
+                overflows: !!content && (content.scrollHeight > content.clientHeight + 1
+                    || content.scrollWidth > content.clientWidth + 1),
+            };
+        });
+}
+
+export function observeTextOverflow(stage, dotNetReference) {
+    disconnectTextOverflow(stage);
+    if (!stage || !dotNetReference) {
+        return;
+    }
+    let scheduled = false;
+    let lastSignature = null;
+    const report = () => {
+        scheduled = false;
+        const measurements = measureTextOverflow(stage);
+        const signature = JSON.stringify(measurements);
+        if (signature === lastSignature) {
+            return;
+        }
+        lastSignature = signature;
+        dotNetReference.invokeMethodAsync("UpdateTextOverflowAsync", measurements);
+    };
+    const schedule = () => {
+        if (!scheduled) {
+            scheduled = true;
+            requestAnimationFrame(report);
+        }
+    };
+    const resizeObserver = new ResizeObserver(schedule);
+    resizeObserver.observe(stage);
+    const mutationObserver = new MutationObserver(() => {
+        for (const frame of stage.querySelectorAll(".composition-object--text[data-composition-object-id]")) {
+            resizeObserver.observe(frame);
+        }
+        schedule();
+    });
+    mutationObserver.observe(stage, { childList: true, subtree: true, characterData: true, attributes: true });
+    for (const frame of stage.querySelectorAll(".composition-object--text[data-composition-object-id]")) {
+        resizeObserver.observe(frame);
+    }
+    const fontsReady = () => schedule();
+    document.fonts?.ready.then(fontsReady);
+    document.fonts?.addEventListener("loadingdone", fontsReady);
+    overflowObservers.set(stage, { resizeObserver, mutationObserver, fontsReady });
+    schedule();
+}
+
+export function disconnectTextOverflow(stage) {
+    const observer = stage ? overflowObservers.get(stage) : null;
+    if (!observer) {
+        return;
+    }
+    observer.resizeObserver.disconnect();
+    observer.mutationObserver.disconnect();
+    document.fonts?.removeEventListener("loadingdone", observer.fontsReady);
+    overflowObservers.delete(stage);
+}

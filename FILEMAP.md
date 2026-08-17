@@ -603,7 +603,7 @@
 
 | File | Description |
 |------|-------------|
-| `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service with setup-normalized active Core/release geometry, authoritative-current stale-write no-ops, reconciled persistent aggregate history, current-scene release materialization, atomic image/fit placement, scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
+| `CompositionService.cs` | Revision-aware Designed Page aggregate/variant service with setup-normalized active Core/release geometry, authoritative-current stale-write no-ops, reconciled persistent aggregate history, current-scene release materialization, atomic image/fit placement, measured canvas-backed scene validation/staging, exact fingerprints, and geometry-bound generation descriptors. |
 | `LayoutImageSizeResolver.cs` | Deterministic GPT Image 2 flexible-size resolver targeting about 1.57 MP while preferring exact target aspect and enforcing provider bounds. |
 | `CompositionImageLayout.cs` | Shared proportional image-layout rules for canvas filling, frame coverage inspection, and consistent Pages/Cover/assistant behavior. |
 | `ProjectPageSetupService.cs` | Revision-aware project authoring page setup used by Read preview, Core Book, Designed Pages, Figures, and generation targets; geometry changes transactionally reflow the reusable Core cover and active Designed Page layouts. |
@@ -738,7 +738,7 @@
 | `app.css` | App-wide Lorekeeper design tokens and shared editorial treatments for typography, controls, cards, status, empty states, navigation, and Bootstrap primitives. |
 | `text-select-cursor.svg` | High-contrast outlined I-beam cursor used by editable text surfaces so the pointer remains visible on light and dark backgrounds. |
 | `js/autosizeTextareas.js` | Small shared JS module that attaches to `textarea[data-autosize]`, grows each textarea to its `scrollHeight`, refreshes on input/change and width changes, and prevents nested textarea scrollbars. |
-| `js/composition-workspace.js` | Shared pointer-capture/measured-stage and source-raster aspect bridge for visual canvases plus Designed Page contenteditable focus, text-selection offsets, and formatting-selection restoration. |
+| `js/composition-workspace.js` | Shared pointer-capture/measured-stage and source-raster aspect bridge for visual canvases plus live rendered-frame overflow observation, Designed Page contenteditable focus, text-selection offsets, and formatting-selection restoration. |
 | `js/semantic-editor.bundle.js` / `semantic-editor.NOTICES.txt` | Deterministic ProseMirror ESM bundle built from `tools/semantic-editor`, plus the shipped runtime dependency/license notice. |
 | `js/fileDownloads.js` | Browser download helper used by Import / Export and Publish to save generated graph JSON and publish export files. |
 | `fonts/` | Offline pinned OFL publication families, per-family licenses, and source/revision documentation. |
