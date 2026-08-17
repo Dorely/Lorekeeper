@@ -509,7 +509,7 @@
 | `AgentPayloadPaginator.cs` | Shared soft-target model payload paginator with an opt-in compact-object page shape; repeats identity fields, packs logical JSON records, and segments only individually oversized text fields with explicit continuation metadata. |
 | `ContextPayloadJson.cs` | Shared compact JSON serializer settings for model-facing automatic context projections. |
 | `ContextManuscriptFormatter.cs` | Compact complete active-manuscript and Book Text Style context projections with revisions, stable block IDs, inline marks, roles, and sparse formatting metadata. |
-| `ContextEntityPayloadFormatter.cs` | Compact automatic entity projection that preserves meaningful data and minimal explicit/AutoMention relationship identities while leaving detailed tool payloads unchanged. |
+| `ContextEntityPayloadFormatter.cs` | Compact automatic entity projection that preserves meaningful data and canonical visual-reference metadata while omitting graph relationships; direct entity/link tools own paginated relationship reads. |
 | `IEditorContextService.cs` | Context facade with Project Guidance/Book Brief keys, explicit per-chapter inclusions/exclusions, default reset, project-image context, and recommendation key sets. |
 | `IContextRecommendationService.cs` / `ContextRecommendationService.cs` | Produces active-chapter context recommendations from second-degree graph links, direct context-vector hits, and manual search across entities plus structural references. |
 | `IContextIndexingService.cs` / `ContextIndexingService.cs` | Maintains targeted direct vector rows and internal lexical search chunks for addable context items: graph entities, chapters, acts, ingest sources, and ingest source chunks; refreshes source-scoped auto mention links. |

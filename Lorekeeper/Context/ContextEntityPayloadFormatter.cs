@@ -9,25 +9,15 @@ internal static class ContextEntityPayloadFormatter
 {
     public static string Serialize(
         StoryEntity entity,
-        IReadOnlyList<EntityVisualExampleView> visualExamples,
-        IReadOnlyList<EntityLink> links)
+        IReadOnlyList<EntityVisualExampleView> visualExamples)
     {
         ArgumentNullException.ThrowIfNull(entity);
         ArgumentNullException.ThrowIfNull(visualExamples);
-        ArgumentNullException.ThrowIfNull(links);
 
         var detail = new JsonObject();
         var data = DataPayload(entity, visualExamples);
         if (data.Count > 0)
             detail["data"] = data;
-
-        var explicitLinks = LinkPayloads(links.Where(link => !link.IsAutoLink));
-        if (explicitLinks.Count > 0)
-            detail["explicitLinks"] = explicitLinks;
-
-        var autoMentionLinks = LinkPayloads(links.Where(link => link.IsAutoLink));
-        if (autoMentionLinks.Count > 0)
-            detail["autoMentionLinks"] = autoMentionLinks;
 
         var identity = new JsonObject
         {
@@ -126,17 +116,4 @@ internal static class ContextEntityPayloadFormatter
 
         return data;
     }
-
-    private static JsonArray LinkPayloads(IEnumerable<EntityLink> links) => new(
-        links.Select(link => (JsonNode)new JsonObject
-        {
-            ["relationship"] = link.EdgeType,
-            ["direction"] = link.Direction.ToString(),
-            ["entity"] = new JsonObject
-            {
-                ["id"] = link.OtherEntityId,
-                ["name"] = link.OtherEntityName,
-                ["type"] = link.OtherEntityType,
-            },
-        }).ToArray());
 }

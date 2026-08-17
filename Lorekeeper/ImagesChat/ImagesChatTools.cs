@@ -92,7 +92,7 @@ public sealed class ImagesChatTools(
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read an explicitly paginated entity and its ordered canonical visual references. Full identity fields and GUIDs repeat on every page; omit pageNumber for page 1 and follow nextPageArguments. Vision-ready providers receive the image bytes on the next round."),
+                description: "Read an explicitly paginated entity with all adjacent manual and AutoMention links plus its ordered canonical visual references. Full identity fields and GUIDs repeat on every page; omit pageNumber for page 1 and follow nextPageArguments. Vision-ready providers receive the image bytes on the next round."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(context, entityId, pageNumber),

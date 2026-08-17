@@ -294,7 +294,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read one explicitly paginated entity with properties, knowledge, relationships, and ordered canonical visual references. Full identity fields and GUIDs are repeated on every page; omit pageNumber for page 1 and follow nextPageArguments. Vision-ready providers receive its image bytes on the next model round."),
+                description: "Read one explicitly paginated entity with properties, knowledge, all adjacent manual and AutoMention links, bounded relation context, and ordered canonical visual references. Full identity fields and GUIDs are repeated on every page; omit pageNumber for page 1 and follow nextPageArguments. Vision-ready providers receive its image bytes on the next model round."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(context, entityId, pageNumber),

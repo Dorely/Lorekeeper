@@ -154,9 +154,13 @@ initial `read_chapter` or `read_manuscript` call; those reads remain the
 fallback for missing/stale/non-active state, post-mutation verification, and
 physical page geometry.
 Automatic entity context uses a separate compact projection that retains
-meaningful entity data and minimal relationship identities while omitting empty
-fields and internal edge/provenance metadata. Detailed entity and link tools
-remain explicitly paginated and lossless for follow-up graph inspection.
+meaningful entity data and canonical visual-reference metadata while omitting
+empty fields, graph relationships, and internal edge/provenance metadata. This
+also avoids one adjacency query per attached entity during context assembly.
+Direct `read_entity` tools return complete paginated manual and AutoMention
+adjacency plus bounded relation context; `list_entity_links` remains the focused,
+explicitly paginated relationship read. Tool-result relationship data is
+current-turn context and is reacquired when a later turn needs it.
 The chapter header's word/token metric counts only the chapter's plain-text
 projection, while Assistant Memory counts the enabled assembled context
 including instructions, labels, references, and structured editing metadata;

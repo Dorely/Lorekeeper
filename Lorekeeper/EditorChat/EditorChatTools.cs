@@ -149,7 +149,7 @@ IAppDatabaseOperationFactory database, IActService acts,
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read one explicitly paginated graph entity by id, including properties, structured wiki data, adjacent links, relation context, and visible thumbnail chips for attached canonical visual references. Full identity fields and GUIDs are repeated on every page. Omit pageNumber for page 1 and follow nextPageArguments. When Review edits is enabled, returns the latest staged entity and link state from this turn. In normal editor chat, this also adds the entity to the active chapter's Context Feed."),
+                description: "Read one explicitly paginated graph entity by id, including properties, structured wiki data, all adjacent manual and AutoMention links, bounded relation context, and visible thumbnail chips for attached canonical visual references. Full identity fields and GUIDs are repeated on every page. Omit pageNumber for page 1 and follow nextPageArguments. When Review edits is enabled, returns the latest staged entity and link state from this turn. In normal editor chat, this also adds the entity's data—but not its graph relationships—to the active chapter's Context Feed."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(context, entityId, pageNumber),

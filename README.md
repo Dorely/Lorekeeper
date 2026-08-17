@@ -63,6 +63,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   inventory. The Book Brief lets the author select canonical sources; other
   sources remain searchable evidence. Chapter `RelevantTo` links are preferred
   over beat-only links because they feed Editor's automatic entity context.
+  Automatic entity summaries omit graph relationships to conserve context;
+  assistants retrieve complete paginated relationship data through direct
+  entity/link reads when needed.
   Reworked outline fields are written as standalone current canon without
   language that compares them with an earlier draft.
 - Text, EPUB, PDF, image, and webpage ingest with structured source provenance,

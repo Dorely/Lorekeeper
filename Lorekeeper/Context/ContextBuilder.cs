@@ -170,7 +170,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                     Key: key,
                     Kind: ContextItemKind.Entity,
                     Label: $"{entity.Type} — {entity.Name}",
-                    Body: await BuildEntityBlockAsync(project.Id, entity, examples, cancellationToken),
+                    Body: BuildEntityBlock(entity, examples),
                     IsEnabled: true,
                     IsRemovable: true,
                     Badge: entity.Type,
@@ -860,15 +860,10 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         return $"# {sample.Title}\n\n{body}";
     }
 
-    private async Task<string> BuildEntityBlockAsync(
-        Guid projectId,
+    private static string BuildEntityBlock(
         StoryEntity entity,
-        IReadOnlyList<EntityVisualExampleView> visualExamples,
-        CancellationToken cancellationToken)
-    {
-        var links = await entities.ListLinksAsync(projectId, entity.Id, cancellationToken);
-        return ContextEntityPayloadFormatter.Serialize(entity, visualExamples, links);
-    }
+        IReadOnlyList<EntityVisualExampleView> visualExamples) =>
+        ContextEntityPayloadFormatter.Serialize(entity, visualExamples);
 
     private async Task AppendChaptersAsync(
         StringBuilder sb,

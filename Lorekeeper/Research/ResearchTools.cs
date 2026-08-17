@@ -95,7 +95,7 @@ public sealed class ResearchTools(
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read one explicitly paginated graph entity by id, including properties, structured wiki data, adjacent links, relation context, and canonical visual references. Full identity fields and GUIDs repeat on every page; omit pageNumber for page 1 and follow nextPageArguments. When Review edits is enabled, returns the latest staged entity and link state from this turn."),
+                description: "Read one explicitly paginated graph entity by id, including properties, structured wiki data, all adjacent manual and AutoMention links, bounded relation context, and canonical visual references. Full identity fields and GUIDs repeat on every page; omit pageNumber for page 1 and follow nextPageArguments. When Review edits is enabled, returns the latest staged entity and link state from this turn."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(context, entityId, pageNumber),

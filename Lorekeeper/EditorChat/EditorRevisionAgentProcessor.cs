@@ -362,7 +362,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(projectId, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read one explicitly paginated graph entity with properties, links, and relation context. Full identity fields and GUIDs repeat on every page; follow nextPageArguments."),
+                description: "Read one explicitly paginated graph entity with properties, all adjacent manual and AutoMention links, and bounded relation context. Full identity fields and GUIDs repeat on every page; follow nextPageArguments."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(projectId, entityId, pageNumber),
