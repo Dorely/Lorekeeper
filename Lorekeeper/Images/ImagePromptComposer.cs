@@ -131,6 +131,7 @@ public sealed class ImagePromptComposer(
     IOptions<ProjectImageGenerationOptions> options) : IImagePromptComposer
 {
     private const double AspectTolerance = 0.025d;
+    private const string PurposefulSpaceInstruction = "Unless the brief explicitly calls for a sparse, minimalist, isolated-study, or open-field composition, concentrate quiet negative space only in explicit text-reservation regions. Everywhere else, make each area contribute to subject, setting, atmosphere, depth, scale, motion, focus, or visual flow without adding clutter. Atmospheric open space is purposeful when it clearly establishes mood or scale; avoid large unmotivated blank areas and do not invent a text landing zone where none was requested.";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -163,6 +164,7 @@ public sealed class ImagePromptComposer(
         AppendSection(builder, "Style, medium, and palette", brief.StyleMediumPalette);
         AppendSection(builder, "Camera and framing", brief.CameraFraming);
         AppendSection(builder, "Composition", brief.Composition);
+        AppendSection(builder, "Purposeful use of space", PurposefulSpaceInstruction);
         AppendSection(builder, "Lighting and mood", brief.LightingMood);
         AppendReferences(builder, manifest);
         AppendSection(builder, "Constraints and exclusions", brief.Constraints);
@@ -208,6 +210,7 @@ public sealed class ImagePromptComposer(
         AppendSection(builder, "Desired edited result", brief.Change);
         AppendSection(builder, "Continuity priorities", brief.Preserve);
         AppendSection(builder, "Composition after edit", brief.Composition);
+        AppendSection(builder, "Purposeful use of space after edit", PurposefulSpaceInstruction);
         AppendSection(builder, "Lighting and mood after edit", brief.LightingMood);
         AppendReferences(builder, manifest);
         AppendSection(builder, "Additional constraints and exclusions", brief.Constraints);

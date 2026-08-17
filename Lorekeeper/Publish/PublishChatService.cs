@@ -195,6 +195,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory
                     + "\n\n" + AssistantWorkflowInstructions.PublicationContentCraft
                     + "\n\n" + AssistantWorkflowInstructions.ImageGeneration
+                    + "\n\n" + AssistantWorkflowInstructions.ImageSpaceDiscipline
                     + "\n\n" + AssistantWorkflowInstructions.BookDesignCraft
                     + "\n\n" + AssistantWorkflowInstructions.CompositionDesign
                     + "\n\n" + AssistantWorkflowInstructions.PublicationDesign),

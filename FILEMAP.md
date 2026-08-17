@@ -576,7 +576,7 @@
 | File | Description |
 |------|-------------|
 | `ProjectImageModels.cs` | Image, normalized crop, and entity-target requests/views plus persisted jobs, output state, masks, provider progress, and runtime snapshots. |
-| `ImagePromptComposer.cs` | Shared structured generation/edit brief compiler with canonical-character reference schema guidance, stable provider-order labels, exact-aspect moderate layout rasters, reserved regions, rendered-text policy, and safe free-generation defaults. |
+| `ImagePromptComposer.cs` | Shared structured generation/edit brief compiler with canonical-character reference schema guidance, stable provider-order labels, purposeful-space discipline, exact-aspect moderate layout rasters, reserved regions, rendered-text policy, and safe free-generation defaults. |
 | `IProjectImageService.cs` / `ProjectImageService.cs` | Shared project image-library facade over stored image assets: metadata-only listing with endpoint URLs, byte reads, upload, deterministic local crop/reuse, legacy blocking generation, metadata, delete, thumbnail, reference scrubbing, and confirmed clearing of history-only dependencies. |
 | `IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Image job persistence for structured prompt audits, free-standing/layout-target classification, bounded uncropped provider-raster saving with non-blocking geometry warnings, revised prompts/output IDs, lifecycle/state/errors, and PNG/shape-mask validation. |
 | `IProjectImageGenerationRuntime.cs` / `ProjectImageGenerationRuntime.cs` | Singleton FIFO image queue with one active job per project, per-job cancellation propagated to providers/retries, partial previews, completion waiters, and state notifications. |

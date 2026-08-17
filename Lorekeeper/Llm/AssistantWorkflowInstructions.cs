@@ -7,6 +7,12 @@ namespace Lorekeeper.Llm;
 /// </summary>
 public static class AssistantWorkflowInstructions
 {
+    public const string ImageSpaceDiscipline = """
+        Purposeful image space:
+        - Unless the user explicitly wants a sparse, minimalist, isolated-study, or open-field composition, reserve quiet negative space for actual text landing zones. Outside those zones, every part of the image should contribute to subject, setting, atmosphere, depth, scale, motion, focus, or visual flow without becoming cluttered.
+        - Atmospheric open space is valid when it clearly establishes mood, scale, isolation, weather, light, or movement. During visual inspection, distinguish that purposeful space from large unmotivated blank areas. Correct excessive empty space before describing an output as successful, placing it, or promoting it to canon.
+        """;
+
     public const string CanonicalAppearanceImages = """
         Canonical appearance images:
         - Generate or edit an image only when the user explicitly asks to establish or revise an entity's canonical visual appearance or design. Ordinary manuscript illustration and page composition belong to Editor; publication-section and cover work belong to Publish.
@@ -143,6 +149,7 @@ public static class AssistantWorkflowInstructions
         + "\n\n" + NonReplayedToolHistory
         + "\n\n" + EntityVisualExamples
         + "\n\n" + ImageGeneration
+        + "\n\n" + ImageSpaceDiscipline
         + "\n\n" + BookDesignCraft
         + "\n\n" + TypographyVerification
         + "\n\n" + CompositionDesign;
@@ -151,7 +158,8 @@ public static class AssistantWorkflowInstructions
         NonReplayedToolHistory
         + "\n\n" + VisualDevelopment
         + "\n\n" + EntityVisualExamples
-        + "\n\n" + ImageLibraryGeneration;
+        + "\n\n" + ImageLibraryGeneration
+        + "\n\n" + ImageSpaceDiscipline;
 
     public static string EditorContestPreparationWorkflow =>
         EditorContestPreparation

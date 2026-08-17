@@ -335,7 +335,13 @@ when its dimensions differ from the request. Only an aspect error beyond the
 shared 0.001 log-ratio tolerance produces
 `LAYOUT_IMAGE_ASPECT_MISMATCH`. Authoring generation does not infer publication
 DPI readiness; actual placed-image validation owns DPI diagnostics. Outline and
-Images requests omit geometry.
+Images requests omit geometry. The shared prompt composer gives generation and
+editing the same spatial rule: quiet negative space belongs in explicit
+text-reservation regions unless the user requests a sparse or open composition;
+the remaining frame must serve the subject, setting, atmosphere, depth, scale,
+motion, focus, or visual flow without clutter. Editor, Images, Outline, and
+Publish receive matching inspection rules that distinguish purposeful
+atmospheric openness from unmotivated blank area.
 Outline is restricted to explicit canonical entity-appearance work. Images is
 the concept-art and visual-canon workspace: it may read project/manuscript
 sources for grounding, but can mutate only library images, canonical entity

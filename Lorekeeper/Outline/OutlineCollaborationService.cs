@@ -80,6 +80,8 @@ When to use tools:
 
 {{AssistantWorkflowInstructions.CanonicalAppearanceImages}}
 
+{{AssistantWorkflowInstructions.ImageSpaceDiscipline}}
+
 {{AssistantWorkflowInstructions.NonReplayedToolHistory}}
 
 {{AssistantWorkflowInstructions.EntityVisualExamples}}

@@ -86,7 +86,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   disables that constraint. Legacy cropped placement remains repositionable.
   Every assistant generation/edit waits for a terminal result and produces an
   unattached reusable project image; Figure, page, cover, and canonical-reference
-  placement is a separate revision-safe step using that image ID.
+  placement is a separate revision-safe step using that image ID. Generation
+  and inspection reserve quiet space for actual copy regions while requiring
+  the rest of the frame to contribute purposeful visual information or atmosphere.
 - An always-present Core Book for shared title/author/language metadata, fixed
   outline order, presentation, publication sections, project typography, and
   reusable front-cover design. A publication section is either prose with
