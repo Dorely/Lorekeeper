@@ -322,10 +322,13 @@ project-image IDs, diagnostics, and temporary visual context. Layout-bound
 descriptors select a deterministic, moderate raster that matches the exact
 target aspect (about 1.57 MP within GPT Image 2's flexible-size limits) and add
 physical/protected-region prompt guidance. Returned pixels are stored without
-cropping, resizing, or rejection: a provider dimension mismatch is returned
-visually with `geometryMatched=false` and a
-`LAYOUT_IMAGE_GEOMETRY_MISMATCH` warning so the assistant can inspect,
-regenerate, or deliberately fit it. Outline and Images requests omit geometry.
+cropping, resizing, or rejection. Results report `rasterMatched` separately
+from `aspectMatched`; a proportional provider raster remains compatible even
+when its dimensions differ from the request. Only an aspect error beyond the
+shared 0.001 log-ratio tolerance produces
+`LAYOUT_IMAGE_ASPECT_MISMATCH`. Authoring generation does not infer publication
+DPI readiness; actual placed-image validation owns DPI diagnostics. Outline and
+Images requests omit geometry.
 Outline is restricted to explicit canonical entity-appearance work. Images is
 the concept-art and visual-canon workspace: it may read project/manuscript
 sources for grounding, but can mutate only library images, canonical entity

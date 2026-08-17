@@ -341,8 +341,8 @@ public sealed class ImagePromptComposer(
             .Append(descriptor.WidthInches.ToString("0.####", CultureInfo.InvariantCulture)).Append(" x ")
             .Append(descriptor.HeightInches.ToString("0.####", CultureInfo.InvariantCulture)).Append(" inches; target ")
             .Append(descriptor.EffectiveDpiExpectation.ToString("0", CultureInfo.InvariantCulture)).AppendLine(" effective DPI.");
-        prompt.Append("Generate at the exact requested raster ").Append(descriptor.RequestedRaster)
-            .Append(" so the output matches this target aspect. Compose edge-to-edge for the complete surface, keep important content within its usable regions, and do not draw a simulated page border, binding, fold, gutter line, or book mockup. The 300-DPI publication recommendation is a separate final-output check; this moderate raster is the authoring target.").AppendLine();
+        prompt.Append("Request raster ").Append(descriptor.RequestedRaster)
+            .Append(" and preserve the target aspect exactly if the provider returns different pixel dimensions. Compose edge-to-edge for the complete surface, keep important content within its usable regions, and do not draw a simulated page border, binding, fold, gutter line, or book mockup.").AppendLine();
         foreach (var region in descriptor.Regions)
         {
             prompt.Append(region.KeepClear ? "Keep clear" : "Layout boundary").Append(": ").Append(region.Label)

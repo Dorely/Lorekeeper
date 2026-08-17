@@ -2796,7 +2796,8 @@ IAppDatabaseOperationFactory database, IActService acts,
                 targetAspect = result.TargetAspect,
                 requestedRaster = result.RequestedRaster,
                 actualRaster = output.ActualRaster,
-                geometryMatched = output.GeometryMatched,
+                rasterMatched = output.RasterMatched,
+                aspectMatched = output.AspectMatched,
                 effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null,
             });
         }
@@ -2813,14 +2814,14 @@ IAppDatabaseOperationFactory database, IActService acts,
             diagnosticCounts = new
             {
                 errors = result.Diagnostics.Count,
-                warnings = result.LayoutBound ? result.Outputs.Count(output => !output.GeometryMatched) : 0,
+                warnings = result.LayoutBound ? result.Outputs.Count(output => !output.AspectMatched) : 0,
             },
             diagnostics = result.Diagnostics.Take(3),
-            geometryWarnings = result.LayoutBound
-                ? result.Outputs.Where(output => !output.GeometryMatched).Select(output => new
+            aspectWarnings = result.LayoutBound
+                ? result.Outputs.Where(output => !output.AspectMatched).Select(output => new
                 {
-                    code = "LAYOUT_IMAGE_GEOMETRY_MISMATCH",
-                    message = $"Provider returned {output.ActualRaster} instead of requested {result.RequestedRaster}. Inspect the image before deciding whether to place or regenerate it.",
+                    code = "LAYOUT_IMAGE_ASPECT_MISMATCH",
+                    message = $"Provider output {output.ActualRaster} does not match the target aspect {result.TargetAspect}. Inspect the image before deciding whether to place or regenerate it.",
                 })
                 : [],
             summary = result.Summary,

@@ -1419,12 +1419,12 @@ public sealed class PublishAssistantTools(
             targetAspect = result.TargetAspect,
             requestedRaster = result.RequestedRaster,
             outputImageIds = result.Images.Select(image => image.Id),
-            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.GeometryMatched, effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null, output.Image.PreviewUrl }),
+            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.RasterMatched, output.AspectMatched, effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null, output.Image.PreviewUrl }),
             attached = false,
-            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.LayoutBound ? result.Outputs.Count(output => !output.GeometryMatched) : 0 },
+            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.LayoutBound ? result.Outputs.Count(output => !output.AspectMatched) : 0 },
             diagnostics = result.Diagnostics.Take(3),
-            geometryWarnings = result.LayoutBound
-                ? result.Outputs.Where(output => !output.GeometryMatched).Select(output => new { code = "LAYOUT_IMAGE_GEOMETRY_MISMATCH", message = $"Provider returned {output.ActualRaster} instead of requested {result.RequestedRaster}. Inspect before placement or regeneration." })
+            aspectWarnings = result.LayoutBound
+                ? result.Outputs.Where(output => !output.AspectMatched).Select(output => new { code = "LAYOUT_IMAGE_ASPECT_MISMATCH", message = $"Provider output {output.ActualRaster} does not match target aspect {result.TargetAspect}. Inspect before placement or regeneration." })
                 : [],
             summary = result.Summary,
             nextAction = result.Succeeded

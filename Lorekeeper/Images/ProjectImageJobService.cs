@@ -340,8 +340,11 @@ public sealed class ProjectImageJobService(
         var hasRequestedRaster = LayoutImageSizeResolver.TryParse(job.Size, out var requestedRaster);
         if (layoutBound && !hasRequestedRaster)
             throw new InvalidDataException("Layout-bound image jobs require an explicit requested raster.");
-        var geometryMatched = !layoutBound
+        var rasterMatched = !layoutBound
             || storedImage.Width == requestedRaster.Width && storedImage.Height == requestedRaster.Height;
+        var aspectMatched = !layoutBound
+            || TryReadTargetAspect(job.TargetGeometryJson, out var targetAspect)
+                && LayoutImageSizeResolver.AspectMatches((double)storedImage.Width / storedImage.Height, targetAspect);
         var now = DateTime.UtcNow;
         var asset = new PublishAsset
         {
@@ -381,8 +384,9 @@ public sealed class ProjectImageJobService(
                     LayoutBound = layoutBound,
                     RequestedRaster = hasRequestedRaster ? requestedRaster.Size : job.Size,
                     ActualRaster = $"{storedImage.Width}x{storedImage.Height}",
-                    GeometryMatched = geometryMatched,
-                    WarningCode = layoutBound && !geometryMatched ? "LAYOUT_IMAGE_GEOMETRY_MISMATCH" : null,
+                    RasterMatched = rasterMatched,
+                    AspectMatched = aspectMatched,
+                    WarningCode = layoutBound && !aspectMatched ? "LAYOUT_IMAGE_ASPECT_MISMATCH" : null,
                 },
                 SourceImage = source is null ? null : new { source.Id, source.FileName, source.ContentType },
                 Mask = mask is null ? null : new { mask.Id, mask.Label, mask.ContentType, mask.Width, mask.Height },
@@ -776,6 +780,33 @@ public sealed class ProjectImageJobService(
                 && height.ValueKind == JsonValueKind.Number
                 && height.TryGetDouble(out var heightInches)
                 && heightInches > 0;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryReadTargetAspect(string? value, out double aspect)
+    {
+        aspect = 0;
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+        try
+        {
+            using var document = JsonDocument.Parse(value);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("widthInches", out var width)
+                || !width.TryGetDouble(out var widthInches)
+                || widthInches <= 0
+                || !root.TryGetProperty("heightInches", out var height)
+                || !height.TryGetDouble(out var heightInches)
+                || heightInches <= 0)
+            {
+                return false;
+            }
+            aspect = widthInches / heightInches;
+            return true;
         }
         catch (JsonException)
         {

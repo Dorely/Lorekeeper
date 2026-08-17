@@ -76,8 +76,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   layout details open only when requested. Designed Page text frames are edited
   directly on the canvas; selected text uses the same semantic inline marks as
   ordinary manuscript paragraphs, without exposing content bindings or offsets.
-  Exact target-bound generation,
-  accessibility state, and layout diagnostics remain available. Image frames
+  Exact target-aspect generation treats a proportional provider raster as
+  compatible even when its pixel dimensions differ from the request.
+  Target-bound generation, accessibility state, and layout diagnostics remain
+  available. Image frames
   retain the raster's aspect ratio by default, can fill the largest proportional
   canvas area in one action, and permit deliberate stretching only when the user
   disables that constraint. Legacy cropped placement remains repositionable.

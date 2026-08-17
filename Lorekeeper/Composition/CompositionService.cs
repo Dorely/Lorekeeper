@@ -1571,12 +1571,6 @@ public sealed class CompositionService(
         var pixelsPerInch = edition.Format == PublicationEditionFormat.Paperback ? 300 : 180;
         var aspect = $"{(int)Math.Round(width * 1000) / gcd}:{(int)Math.Round(height * 1000) / gcd}";
         var requestedRaster = LayoutImageSizeResolver.Resolve(width, height);
-        var descriptorDiagnostics = diagnostics.ToList();
-        var providerDpi = Math.Min(
-            requestedRaster.Width / Math.Max(.01, width),
-            requestedRaster.Height / Math.Max(.01, height));
-        if (providerDpi + .5 < pixelsPerInch)
-            descriptorDiagnostics.Add($"The authoring raster supplies approximately {providerDpi:0} effective DPI for this target; publication validation expects {pixelsPerInch} DPI. This is suitable for layout work, while final publication may require a higher-resolution source.");
         var geometryFingerprint = TargetGeometryFingerprint(
             edition,
             normalizedKind,
@@ -1602,7 +1596,7 @@ public sealed class CompositionService(
             requestedRaster.Size,
             pixelsPerInch,
             regions,
-            descriptorDiagnostics);
+            diagnostics);
     }
 
     public async Task<LayoutGenerationTargetDescriptor> DescribeAuthoringGenerationTargetAsync(

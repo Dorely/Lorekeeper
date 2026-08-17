@@ -1041,7 +1041,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             targetAspect = result.TargetAspect,
             requestedRaster = result.RequestedRaster,
             outputImageIds = result.Images.Select(image => image.Id),
-            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.GeometryMatched, output.Image.PreviewUrl }),
+            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.RasterMatched, output.AspectMatched, output.Image.PreviewUrl }),
             attached = false,
             diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = 0 },
             diagnostics = result.Diagnostics.Take(3),

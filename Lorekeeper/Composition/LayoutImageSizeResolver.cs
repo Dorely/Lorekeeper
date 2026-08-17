@@ -15,7 +15,7 @@ public static class LayoutImageSizeResolver
     public const int TargetPixels = 1_572_864;
     public const double MaximumAspectRatio = 3d;
 
-    private const double PreferredAspectError = .001d;
+    public const double PreferredAspectError = .001d;
     private const double ExactAspectError = 1e-10;
 
     public static LayoutImageSize Resolve(double width, double height)
@@ -25,6 +25,13 @@ public static class LayoutImageSizeResolver
 
         return ResolveAspect(width / height);
     }
+
+    public static bool AspectMatches(double actualAspect, double targetAspect) =>
+        double.IsFinite(actualAspect)
+        && double.IsFinite(targetAspect)
+        && actualAspect > 0
+        && targetAspect > 0
+        && Math.Abs(Math.Log(actualAspect / targetAspect)) <= PreferredAspectError;
 
     public static LayoutImageSize ResolveAspect(double aspect)
     {
