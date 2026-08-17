@@ -199,7 +199,7 @@
 
 | File | Description |
 |------|-------------|
-| `IngestContent.razor` (+ `.razor.css`) | Functional Ingest tab workspace: creates text/EPUB/PDF/manual-webpage jobs, manages resume/restart/delete controls, shows live ingest LLM progress, diagnostics, chunk/finalization reports, and artifact options. |
+| `IngestContent.razor` (+ `.razor.css`) | Functional Ingest tab workspace: creates text/EPUB/PDF/manual-webpage jobs, accepts sequential per-file batches with individual results, preserves single-text edits, manages resume/restart/delete controls, and shows live LLM progress, diagnostics, chunk/finalization reports, and artifact options. |
 
 ### Components/Pages/Projects/Research/
 
@@ -540,7 +540,7 @@
 
 | File | Description |
 |------|-------------|
-| `IIngestService.cs` / `IngestService.cs` | Application service for ingest job lifecycle/UI reads/provider resolution/artifact preprocessing/queueing/notifications; restart/delete subtracts source-scoped graph assertions, removes ingest-owned orphan graph output, and refreshes targeted context vectors. |
+| `IIngestService.cs` / `IngestService.cs` | Application service for ingest job lifecycle/UI reads/provider resolution/artifact preprocessing/queueing/notifications, with edited text taking precedence over original text-artifact bytes; restart/delete subtracts source-scoped graph assertions, removes ingest-owned orphan graph output, and refreshes targeted context vectors. |
 | `IngestCreateJobRequest.cs` | Request DTO for creating ingest jobs with source text or uploaded artifact bytes, metadata, model/profile choice, PDF options, encoding/chunk-size override, and optional webpage fetch provenance. |
 | `IngestExtractionProfile.cs` | Enum for adaptive ingest profile selection: Auto, Story/Worldbuilding, or Research/Nonfiction. |
 | `BookArtifactIngestOptions.cs` | Options for artifact ingestion limits and PDF vision rendering defaults such as max file size/pages, DPI, image pixels, and vision output tokens. |

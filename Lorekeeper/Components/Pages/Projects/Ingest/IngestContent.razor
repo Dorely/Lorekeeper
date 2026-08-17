@@ -28,12 +28,12 @@ else
             }
             <div class="mb-2">
                 <label class="form-label small text-muted">Title</label>
-                <input class="form-control form-control-sm" @bind="_title" @bind:event="oninput" />
+                <input class="form-control form-control-sm" @bind="_title" @bind:event="oninput" disabled="@IsBatchSelection" />
             </div>
             <div class="ingest-two">
                 <div>
                     <label class="form-label small text-muted">Kind</label>
-                    <input class="form-control form-control-sm" placeholder="Book, wiki, paper..." @bind="_sourceKind" @bind:event="oninput" />
+                    <input class="form-control form-control-sm" placeholder="Book, wiki, paper..." @bind="_sourceKind" @bind:event="oninput" disabled="@IsBatchSelection" />
                 </div>
                 <div>
                     <label class="form-label small text-muted">Model</label>
@@ -122,13 +122,25 @@ else
             }
             <div class="mb-2">
                 <label class="form-label small text-muted">Source text</label>
-                <InputFile OnChange="OnFileSelectedAsync" class="form-control form-control-sm mb-2" accept=".txt,.md,.markdown,.epub,.pdf,.png,.jpg,.jpeg,.webp" />
-                @if (!string.IsNullOrWhiteSpace(_artifactFileName))
+                <InputFile OnChange="OnFileSelectedAsync" multiple class="form-control form-control-sm mb-2" accept=".txt,.md,.markdown,.epub,.pdf,.png,.jpg,.jpeg,.webp" />
+                @if (_selectedFiles.Count == 1)
                 {
                     <div class="ingest-artifact-status">
-                        <span>@_artifactFileName</span>
+                        <span>@_selectedFiles[0].Name</span>
                         <span class="text-muted">@ArtifactModeLabel</span>
                         <button type="button" class="btn btn-link btn-sm" @onclick="ClearSelectedArtifact">Clear</button>
+                    </div>
+                }
+                else if (IsBatchSelection)
+                {
+                    <div class="ingest-batch-selection">
+                        <div><strong>@_selectedFiles.Count files selected</strong><span class="text-muted">Titles and kinds will be derived from each file.</span><button type="button" class="btn btn-link btn-sm" @onclick="ClearSelectedArtifact">Clear</button></div>
+                        <ul>
+                            @foreach (var file in _selectedFiles)
+                            {
+                                <li><span>@file.Name</span><small>@FormatFileSize(file.Size)</small></li>
+                            }
+                        </ul>
                     </div>
                 }
                 @if (IsSelectedPdfArtifact)
@@ -152,7 +164,14 @@ else
                         <div class="form-text small text-warning">The selected provider must pass Test Vision before force-vision PDF ingest can start.</div>
                     }
                 }
-                <textarea class="form-control form-control-sm ingest-source-input" rows="12" @bind="_sourceText" @bind:event="oninput"></textarea>
+                @if (IsBatchSelection)
+                {
+                    <div class="form-text small text-muted mb-2">Files are read sequentially when ingest starts. Description, extraction instructions, model, profile, and PDF settings apply to every file.</div>
+                }
+                else
+                {
+                    <textarea class="form-control form-control-sm ingest-source-input" rows="12" @bind="_sourceText" @bind:event="oninput"></textarea>
+                }
             </div>
             @if (!string.IsNullOrWhiteSpace(_formError))
             {
@@ -168,6 +187,15 @@ else
             @if (!_creating && CreateBlockedReason is { Length: > 0 } createBlockedReason)
             {
                 <div class="form-text small text-muted">@createBlockedReason</div>
+            }
+            @if (_batchResults.Count > 0)
+            {
+                <div class="ingest-batch-results" aria-live="polite">
+                    @foreach (var result in _batchResults)
+                    {
+                        <div class="@(result.Succeeded ? "success" : "failed")"><span>@result.FileName</span><small>@result.Message</small></div>
+                    }
+                </div>
             }
 
             <div class="ingest-section-title mt-4">Jobs</div>
@@ -491,6 +519,8 @@ else
 }
 
 @code {
+    private const int MaximumBatchFiles = 50;
+    private const long MaximumFileBytes = 100L * 1024 * 1024;
     [CascadingParameter] public Project? Project { get; set; }
 
     private List<IngestJobListItem> _jobs = [];
@@ -541,9 +571,8 @@ else
     private string _description = string.Empty;
     private string _instructions = string.Empty;
     private string _sourceText = string.Empty;
-    private byte[]? _artifactBytes;
-    private string? _artifactFileName;
-    private string? _artifactContentType;
+    private IReadOnlyList<IBrowserFile> _selectedFiles = [];
+    private List<BatchIngestResult> _batchResults = [];
     private IngestExtractionProfile _extractionProfile = IngestExtractionProfile.Auto;
     private bool _pdfForceVision;
     private int _pdfMaxPages = 500;
@@ -565,8 +594,13 @@ else
     private string ChatDisabledMessage => _chatAvailability?.Message
         ?? "Configure and test a chat provider in Settings > Providers to enable LLM features.";
 
-    private string StartIngestButtonText =>
-        _readingFile ? "Reading file..." : _creating && _artifactBytes is not null ? "Preprocessing..." : _creating ? "Starting..." : "Start ingest";
+    private string StartIngestButtonText => _readingFile
+        ? "Reading file..."
+        : _creating && IsBatchSelection
+            ? $"Starting {_selectedFiles.Count} files..."
+            : _creating && _selectedFiles.Count == 1
+                ? "Preprocessing..."
+                : _creating ? "Starting..." : "Start ingest";
 
     private string StartWebIngestButtonText =>
         _webReading ? "Reading webpage..." : "Ingest webpage";
@@ -579,8 +613,9 @@ else
             if (ChatDisabled) return ChatDisabledMessage;
             if (_providerId is null) return _providers.Count == 0 ? "Configure and test a model before starting ingest." : "Select a model.";
             if (_pdfForceVision && IsSelectedPdfArtifact && !_visionProviderIds.Contains(_providerId.Value)) return "Run Test Vision for the selected model before force-vision PDF ingest.";
-            if (string.IsNullOrWhiteSpace(_title)) return "Add a source title.";
-            if (_artifactBytes is null && string.IsNullOrWhiteSpace(_sourceText)) return "Add source text or choose a source file.";
+            if (!IsBatchSelection && string.IsNullOrWhiteSpace(_title)) return "Add a source title.";
+            if (_selectedFiles.Count == 0 && string.IsNullOrWhiteSpace(_sourceText)) return "Add source text or choose one or more source files.";
+            if (_selectedFiles.Any(file => file.Size > MaximumFileBytes)) return $"Each source file must be {MaximumFileBytes / 1024 / 1024:N0} MB or smaller.";
             return null;
         }
     }
@@ -627,15 +662,17 @@ else
         }
     }
 
+    private bool IsBatchSelection => _selectedFiles.Count > 1;
+
     private bool IsSelectedPdfArtifact =>
-        string.Equals(Path.GetExtension(_artifactFileName), ".pdf", StringComparison.OrdinalIgnoreCase);
+        _selectedFiles.Any(file => string.Equals(Path.GetExtension(file.Name), ".pdf", StringComparison.OrdinalIgnoreCase));
 
     private string ArtifactModeLabel =>
         IsSelectedPdfArtifact
             ? "PDF artifact"
-            : string.Equals(Path.GetExtension(_artifactFileName), ".epub", StringComparison.OrdinalIgnoreCase)
+            : string.Equals(Path.GetExtension(_selectedFiles.FirstOrDefault()?.Name), ".epub", StringComparison.OrdinalIgnoreCase)
                 ? "EPUB artifact"
-                : Path.GetExtension(_artifactFileName ?? string.Empty).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".webp"
+                : Path.GetExtension(_selectedFiles.FirstOrDefault()?.Name ?? string.Empty).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".webp"
                     ? "Image artifact"
                     : "Text artifact";
 
@@ -868,24 +905,51 @@ else
 
         _creating = true;
         _formError = null;
+        _batchResults = [];
         try
         {
-            var job = await Ingest.CreateJobAsync(Project.Id, new IngestCreateJobRequest(
-                _title,
-                _sourceText,
-                _instructions,
-                _sourceKind,
-                _description,
-                _providerId,
-                ArtifactBytes: _artifactBytes,
-                ArtifactFileName: _artifactFileName,
-                ArtifactContentType: _artifactContentType,
-                ExtractionProfile: _extractionProfile,
-                PdfOptions: new PdfArtifactIngestOptions(
-                    _pdfForceVision,
-                    _pdfMaxPages > 0 ? _pdfMaxPages : null,
-                    _pdfVisionDpi > 0 ? _pdfVisionDpi : null,
-                    null)));
+            var jobs = new List<IngestJob>();
+            if (_selectedFiles.Count == 0)
+            {
+                jobs.Add(await CreateJobAsync(_title, _sourceKind, _sourceText, null, null, null));
+            }
+            else
+            {
+                foreach (var file in _selectedFiles)
+                {
+                    try
+                    {
+                        var isText = IsTextArtifact(file.Name);
+                        var bytes = isText && _selectedFiles.Count == 1
+                            ? null
+                            : await ReadFileBytesAsync(file);
+                        var text = isText
+                            ? _selectedFiles.Count == 1 ? _sourceText : ReadText(bytes!)
+                            : string.Empty;
+                        var title = _selectedFiles.Count == 1 ? _title : Path.GetFileNameWithoutExtension(file.Name);
+                        var kind = _selectedFiles.Count == 1 ? _sourceKind : SourceKindFromFileName(file.Name);
+                        var job = await CreateJobAsync(
+                            title,
+                            kind,
+                            text,
+                            isText ? null : bytes,
+                            file.Name,
+                            file.ContentType);
+                        jobs.Add(job);
+                        if (IsBatchSelection)
+                            _batchResults.Add(new(file.Name, true, "Ingest job started."));
+                    }
+                    catch (Exception ex) when (IsBatchSelection)
+                    {
+                        _batchResults.Add(new(file.Name, false, ex.Message));
+                    }
+                }
+            }
+            if (jobs.Count == 0)
+            {
+                _formError = "No ingest jobs could be started. Review the file results and try again.";
+                return;
+            }
             _title = string.Empty;
             _sourceKind = string.Empty;
             _description = string.Empty;
@@ -893,7 +957,7 @@ else
             _sourceText = string.Empty;
             ClearSelectedArtifact();
             await ReloadJobsAsync();
-            await SelectJobAsync(job.Id);
+            await SelectJobAsync(jobs[^1].Id);
         }
         catch (Exception ex)
         {
@@ -1229,6 +1293,31 @@ else
         }
     }
 
+    private Task<IngestJob> CreateJobAsync(
+        string title,
+        string sourceKind,
+        string sourceText,
+        byte[]? artifactBytes,
+        string? artifactFileName,
+        string? artifactContentType) =>
+        Ingest.CreateJobAsync(Project!.Id, new IngestCreateJobRequest(
+            title,
+            sourceText,
+            _instructions,
+            sourceKind,
+            _description,
+            _providerId,
+            ContentType: artifactContentType,
+            ArtifactBytes: artifactBytes,
+            ArtifactFileName: artifactFileName,
+            ArtifactContentType: artifactContentType,
+            ExtractionProfile: _extractionProfile,
+            PdfOptions: new PdfArtifactIngestOptions(
+                _pdfForceVision,
+                _pdfMaxPages > 0 ? _pdfMaxPages : null,
+                _pdfVisionDpi > 0 ? _pdfVisionDpi : null,
+                null)));
+
     private async Task ResumeAsync()
     {
         if (_selectedJob is null) return;
@@ -1302,32 +1391,31 @@ else
     {
         _readingFile = true;
         _formError = null;
+        _batchResults = [];
         try
         {
-            var file = e.File;
-            await using var stream = file.OpenReadStream(maxAllowedSize: 100 * 1024 * 1024);
-            using var ms = new MemoryStream();
-            await stream.CopyToAsync(ms);
-            _artifactBytes = ms.ToArray();
-            _artifactFileName = file.Name;
-            _artifactContentType = file.ContentType;
-
-            if (IsTextArtifact(file.Name))
+            _selectedFiles = e.GetMultipleFiles(MaximumBatchFiles);
+            if (_selectedFiles.Any(file => file.Size > MaximumFileBytes))
+                throw new InvalidOperationException($"Each source file must be {MaximumFileBytes / 1024 / 1024:N0} MB or smaller.");
+            if (_selectedFiles.Count == 1)
             {
-                using var reader = new StreamReader(new MemoryStream(_artifactBytes));
-                _sourceText = await reader.ReadToEndAsync();
+                var file = _selectedFiles[0];
+                _sourceText = IsTextArtifact(file.Name)
+                    ? ReadText(await ReadFileBytesAsync(file))
+                    : string.Empty;
+                if (string.IsNullOrWhiteSpace(_title))
+                    _title = Path.GetFileNameWithoutExtension(file.Name);
+                if (string.IsNullOrWhiteSpace(_sourceKind))
+                    _sourceKind = SourceKindFromFileName(file.Name);
             }
             else
             {
                 _sourceText = string.Empty;
             }
-
-            if (string.IsNullOrWhiteSpace(_title)) _title = Path.GetFileNameWithoutExtension(file.Name);
-            if (string.IsNullOrWhiteSpace(_sourceKind))
-                _sourceKind = SourceKindFromFileName(file.Name);
         }
         catch (Exception ex)
         {
+            _selectedFiles = [];
             _formError = ex.Message;
         }
         finally
@@ -1338,11 +1426,30 @@ else
 
     private void ClearSelectedArtifact()
     {
-        _artifactBytes = null;
-        _artifactFileName = null;
-        _artifactContentType = null;
+        _selectedFiles = [];
         _pdfForceVision = false;
     }
+
+    private static async Task<byte[]> ReadFileBytesAsync(IBrowserFile file)
+    {
+        await using var stream = file.OpenReadStream(MaximumFileBytes);
+        using var memory = new MemoryStream();
+        await stream.CopyToAsync(memory);
+        return memory.ToArray();
+    }
+
+    private static string ReadText(byte[] bytes)
+    {
+        using var reader = new StreamReader(new MemoryStream(bytes), detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
+    }
+
+    private static string FormatFileSize(long bytes) => bytes switch
+    {
+        >= 1024 * 1024 => $"{bytes / 1024d / 1024d:0.#} MB",
+        >= 1024 => $"{bytes / 1024d:0.#} KB",
+        _ => $"{bytes} B",
+    };
 
     private void OnProviderChanged(ChangeEventArgs args) =>
         _providerId = ParseProviderId(args.Value);
@@ -1368,6 +1475,8 @@ else
             ".md" or ".markdown" => "Markdown source",
             _ => "Text source",
         };
+
+    private sealed record BatchIngestResult(string FileName, bool Succeeded, string Message);
 
     private static bool TryNormalizeWebUrl(string value, out string normalizedUrl, out string hostKey)
     {

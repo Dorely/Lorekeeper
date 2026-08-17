@@ -117,6 +117,70 @@
     padding: 0;
 }
 
+.ingest-batch-selection {
+    margin-bottom: 0.6rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.375rem;
+    padding: 0.5rem;
+    font-size: 0.82rem;
+}
+
+.ingest-batch-selection > div {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+
+.ingest-batch-selection .btn-link {
+    margin-left: auto;
+    padding: 0;
+}
+
+.ingest-batch-selection ul {
+    max-height: 8rem;
+    margin: 0.45rem 0 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
+}
+
+.ingest-batch-selection li,
+.ingest-batch-results > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.2rem 0;
+}
+
+.ingest-batch-selection li span,
+.ingest-batch-results span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.ingest-batch-selection li small,
+.ingest-batch-results small {
+    flex: 0 0 auto;
+    color: var(--bs-secondary-color, #6c757d);
+}
+
+.ingest-batch-results {
+    margin-top: 0.6rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.375rem;
+    padding: 0.45rem 0.55rem;
+    font-size: 0.78rem;
+}
+
+.ingest-batch-results .success span {
+    color: var(--bs-success, #198754);
+}
+
+.ingest-batch-results .failed span {
+    color: var(--bs-danger, #dc3545);
+}
+
 .ingest-pdf-options {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 5.5rem 4.5rem;

@@ -293,6 +293,13 @@ structure, canon knowledge, and retrieval fragments. `IngestJobWorker` drains
 the in-process queue and the processor persists checkpoints, reports, events,
 and finalization results. Restart and delete behavior subtracts source-owned
 knowledge and refreshes affected indexes rather than leaving orphan graph state.
+The file boundary accepts at most 50 selected files, reads at most 100 MB per
+file, and creates one job per file sequentially so mixed batches retain an
+individual result instead of becoming one opaque transaction. Batch titles and
+kinds derive from filenames while the description, instructions, provider,
+extraction profile, and PDF options are shared. A single text or Markdown file
+remains editable before submission, and that edited text is the authoritative
+source rather than being overwritten by reprocessing its original bytes.
 
 Research combines configured web search, guarded and robots-aware page reads,
 cached webpage candidates, image inspection, graph reads, and reviewable graph

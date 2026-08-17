@@ -99,7 +99,10 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
         IReadOnlyList<IngestSourceBlockDraft> blockDrafts = [];
         IReadOnlyList<IngestVisualCandidateDraft> visualDrafts = [];
 
-        if (request.ArtifactBytes is { Length: > 0 } artifactBytes)
+        var editedTextIsAuthoritative = request.ArtifactBytes is { Length: > 0 }
+            && IsEditableTextArtifact(request.ArtifactFileName)
+            && !string.IsNullOrWhiteSpace(sourceText);
+        if (request.ArtifactBytes is { Length: > 0 } artifactBytes && !editedTextIsAuthoritative)
         {
             var preprocessed = await artifactPreprocessor.PreprocessAsync(new BookArtifactPreprocessRequest(
                 request.ArtifactFileName ?? title,
@@ -280,6 +283,9 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
         Notify(job.ProjectId, job.Id, IngestJobUpdateKind.Created);
         return job;
     }
+
+    private static bool IsEditableTextArtifact(string? fileName) =>
+        Path.GetExtension(fileName ?? string.Empty).ToLowerInvariant() is ".txt" or ".md" or ".markdown";
 
     public async Task RequestStopAsync(Guid jobId, CancellationToken cancellationToken = default)
     {

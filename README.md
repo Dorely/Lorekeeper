@@ -57,7 +57,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   compact grounded reads, while mutation tools stay within their owning surface.
 - Text, EPUB, PDF, image, and webpage ingest with structured source provenance,
   canon extraction, graph synchronization, and combined lexical/semantic
-  retrieval.
+  retrieval. File ingest accepts up to 50 files together, creates one durable
+  job per file sequentially, and keeps per-file success or failure visible.
 - Project-owned authoring page setup, Press-backed current-chapter Read preview,
   and contextual Edit/Read/Pages/Review modes. Read shows actual pagination,
   line breaks, images, captions, and Designed Pages with single/facing and zoom
