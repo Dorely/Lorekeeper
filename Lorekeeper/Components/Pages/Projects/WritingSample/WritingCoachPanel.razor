@@ -146,7 +146,7 @@
             && (_chatAvailability?.Provider is null
                 || !await Providers.IsVisionProviderWorkingAsync(_chatAvailability.Provider.Id)))
         {
-            _error = "The active chat provider has not passed Test Vision. Run Test Vision in Settings > Providers before sending images.";
+            _error = "The active chat provider has not passed the vision check. Run Test in Settings > Providers before sending images.";
             return;
         }
 

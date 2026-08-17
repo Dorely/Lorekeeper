@@ -9,6 +9,10 @@
 .embedding-form label { display: grid; gap: 0.3rem; }
 .embedding-form label > span { color: var(--lk-muted); font-size: 0.74rem; font-weight: 700; }
 .field-wide { grid-column: 1 / -1; }
+.model-id-field { display: flex; gap: 0.4rem; }
+.model-id-field input { flex: 1 1 auto; min-width: 0; }
+.model-id-field .btn { flex: 0 0 auto; white-space: nowrap; }
+.model-list-note { color: var(--lk-muted); font-size: 0.72rem; }
 .embedding-note,.embedding-test-success,.embedding-warning { border-radius: var(--lk-radius-md); display: grid; gap: 0.3rem; margin-top: 0.85rem; padding: 0.75rem; }
 .embedding-note { background: var(--lk-accent-soft); color: #2f448f; font-size: 0.78rem; }
 .embedding-test-success { align-items: center; background: var(--lk-success-soft); grid-template-columns: auto auto 1fr; }

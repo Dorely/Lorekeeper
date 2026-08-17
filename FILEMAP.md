@@ -257,8 +257,8 @@
 
 | File | Description |
 |------|-------------|
-| `Providers.razor` (+ `.razor.css`) | Connection-card LLM configuration UI: Codex OAuth, grouped credential connections and nested models, per-model thinking effort, connection editing/deletion, readiness tests, working-only defaults, and expandable add flows. |
-| `Embeddings.razor` (+ `.razor.css`) | Active embedding summary and configuration workflow: test-before-save, dimensions, rebuild confirmation, and an explicit semantic-feature danger zone. |
+| `Providers.razor` (+ `.razor.css`) | Connection-card LLM configuration UI: Codex OAuth, grouped credential connections and nested models, provider presets, model discovery, per-model thinking effort, connection editing/deletion, combined chat+vision readiness tests, working-only defaults, and expandable add flows. |
+| `Embeddings.razor` (+ `.razor.css`) | Active embedding summary and configuration workflow: embedding model discovery, test-before-save, dimensions, rebuild confirmation, and an explicit semantic-feature danger zone. |
 | `SearchProviders.razor` (+ `.razor.css`) | Card-based SerpApi/Brave configuration for Research: add/edit/test/activate providers, API keys, and confirmed deletion. |
 | `DataRecovery.razor` | Structured-manuscript migration journal and local backup recovery UI with explicit two-step restore confirmation. |
 
@@ -429,8 +429,12 @@
 | `StreamingToolCallTracker.cs` | Normalizes provider function-call start/delta/final content into app-level started/arguments/ready updates for chat services. |
 | `CodexChatClient.cs` | `IChatClient` implementation for Codex Responses API with configured reasoning effort, SSE parsing, multimodal user content, function calling, strict schemas, and tool-argument streaming. |
 | `OpenAIChatToolMetadataClient.cs` | OpenAI-compatible client boundary that preserves unknown streamed tool-call extensions and restores them on the correlated assistant/tool-result request. |
-| `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs Codex or metadata-preserving OpenAI-compatible chat clients, applies exact per-model reasoning effort and Codex timeout, and exposes configured verification probes. |
-| `IVisionModelClientFactory.cs` / `VisionModelClientFactory.cs` | Provider-backed image reader for vision probes and PDF transcription, with per-model reasoning effort across Codex Responses and OpenAI-compatible requests. |
+| `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs Codex or metadata-preserving OpenAI-compatible chat clients, applies exact per-model reasoning effort and Codex timeout, and exposes a protocol-safe verification probe with normalized errors. |
+| `IVisionModelClientFactory.cs` / `VisionModelClientFactory.cs` | Provider-backed image reader for vision probes and PDF transcription, with per-model reasoning effort across Codex Responses and normalized OpenAI-compatible requests. |
+| `LlmProviderCatalog.cs` | Built-in OpenAI-compatible provider presets (OpenAI, Cline usage/ClinePass, Anthropic, Gemini, OpenRouter, Groq, DeepSeek, xAI, Mistral, Together, Ollama, LM Studio, custom) with endpoint/auth defaults, seeded model suggestions, and key-management links. |
+| `IModelCatalogService.cs` / `ModelCatalogService.cs` | Model discovery over OpenAI-compatible `GET /models` (including the Codex platform endpoint) and Ollama `GET /api/tags`, with endpoint normalization and normalized errors for graceful manual-entry fallback. |
+| `LlmConnectionResolver.cs` | Shared credential resolution following `CredentialSourceId` for chat, vision, and model-catalog clients. |
+| `LlmErrorNormalizer.cs` | Shared normalization of provider HTTP error bodies into concise user-presentable messages. |
 | `AssistantWorkflowInstructions.cs` | Current code-owned AI workflow/tool rules for durable narrated work logs, automatic-context-first and canonical-state Outline work, proactive Editor execution, visual-development canon, publication craft/design, exact IDs, compact paging/staging, image generation, validation, and Contest preparation. |
 | `SystemPromptComposer.cs` | Central composer for the one actual system-role prompt, including specialized Images concept-art and Publish production charters, tool rules, dynamic guidance, Project Guidance, Book Brief, then working context. |
 | `AgentOptions.cs` | Shared agent options bound from `Agents:*`; caps iterative tool-call rounds, configures transient ingest LLM retry attempts/delays, and sets Codex/OAuth request timeout. |

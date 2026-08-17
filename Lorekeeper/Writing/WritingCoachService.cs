@@ -110,7 +110,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
 
         if (imageIds.Count > 0 && !await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken))
         {
-            yield return new WritingCoachTurnError("The active chat provider has not passed Test Vision. Run Test Vision in Settings > Providers before sending images.", Cancelled: false);
+            yield return new WritingCoachTurnError("The active chat provider has not passed the vision check. Run Test in Settings > Providers before sending images.", Cancelled: false);
             yield break;
         }
         await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);

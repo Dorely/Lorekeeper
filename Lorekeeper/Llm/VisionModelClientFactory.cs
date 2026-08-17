@@ -42,7 +42,7 @@ public sealed class VisionModelClientFactory(
         if (string.IsNullOrWhiteSpace(prompt))
             throw new ArgumentException("Prompt is required.", nameof(prompt));
 
-        var (apiKey, effectiveAuthType) = await ResolveConnectionAsync(provider, cancellationToken);
+        var (apiKey, effectiveAuthType) = await LlmConnectionResolver.ResolveAsync(providerService, provider, cancellationToken);
         var httpClient = httpClientFactory.CreateClient();
         httpClient.Timeout = TimeSpan.FromMinutes(5);
 
@@ -97,25 +97,6 @@ public sealed class VisionModelClientFactory(
         var normalized = NormalizeProbeResponse(response);
         if (!string.Equals(normalized, VisionProbeCode, StringComparison.Ordinal))
             throw new InvalidOperationException($"Vision probe expected {VisionProbeCode}, but the model returned '{Truncate(response, 80)}'.");
-    }
-
-    private async Task<(string? ApiKey, AuthType EffectiveAuthType)> ResolveConnectionAsync(
-        LlmProvider provider,
-        CancellationToken cancellationToken)
-    {
-        if (provider.CredentialSourceId is int sourceId)
-        {
-            var credentialSource = await providerService.GetByIdAsync(sourceId, cancellationToken)
-                ?? throw new InvalidOperationException($"Credential source provider {sourceId} not found.");
-
-            var sourceApiKey = await providerService.GetEffectiveApiKeyAsync(sourceId, cancellationToken);
-            return (sourceApiKey, credentialSource.AuthType);
-        }
-
-        if (provider.Id != 0)
-            return (await providerService.GetEffectiveApiKeyAsync(provider.Id, cancellationToken), provider.AuthType);
-
-        return (provider.ApiKey, provider.AuthType);
     }
 
     private async Task<string> ReadCodexImageAsync(
@@ -197,7 +178,7 @@ public sealed class VisionModelClientFactory(
         {
             var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
             logger.LogError("Codex vision API error {StatusCode}: {Body}", (int)response.StatusCode, errorBody);
-            throw new HttpRequestException($"Codex vision request returned {(int)response.StatusCode}: {errorBody}");
+            throw new HttpRequestException(LlmErrorNormalizer.SummarizeHttpError("Codex vision request", (int)response.StatusCode, errorBody));
         }
 
         var result = new StringBuilder();
@@ -346,7 +327,7 @@ public sealed class VisionModelClientFactory(
         if (!response.IsSuccessStatusCode)
         {
             logger.LogError("Vision chat-completions API error {StatusCode}: {Body}", (int)response.StatusCode, responseBody);
-            throw new HttpRequestException($"Vision request returned {(int)response.StatusCode}: {responseBody}");
+            throw new HttpRequestException(LlmErrorNormalizer.SummarizeHttpError("Vision request", (int)response.StatusCode, responseBody));
         }
 
         try

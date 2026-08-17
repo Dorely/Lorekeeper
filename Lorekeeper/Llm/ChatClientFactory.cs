@@ -18,7 +18,7 @@ public class ChatClientFactory(
         var provider = await providerService.GetByIdAsync(providerId, cancellationToken)
             ?? throw new InvalidOperationException($"Provider {providerId} not found.");
 
-        var (apiKey, effectiveAuthType) = await ResolveConnectionAsync(provider, cancellationToken);
+        var (apiKey, effectiveAuthType) = await LlmConnectionResolver.ResolveAsync(providerService, provider, cancellationToken);
         return CreateChatClient(provider, apiKey, effectiveAuthType);
     }
 
@@ -30,28 +30,9 @@ public class ChatClientFactory(
 
     public async Task TestModelAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
-        var (apiKey, effectiveAuthType) = await ResolveConnectionAsync(provider, cancellationToken);
+        var (apiKey, effectiveAuthType) = await LlmConnectionResolver.ResolveAsync(providerService, provider, cancellationToken);
         var chatClient = CreateChatClient(provider, apiKey, effectiveAuthType);
         await TestChatClientAsync(chatClient, cancellationToken);
-    }
-
-    private async Task<(string? ApiKey, AuthType EffectiveAuthType)> ResolveConnectionAsync(
-        LlmProvider provider,
-        CancellationToken cancellationToken)
-    {
-        if (provider.CredentialSourceId is int sourceId)
-        {
-            var credentialSource = await providerService.GetByIdAsync(sourceId, cancellationToken)
-                ?? throw new InvalidOperationException($"Credential source provider {sourceId} not found.");
-
-            var sourceApiKey = await providerService.GetEffectiveApiKeyAsync(sourceId, cancellationToken);
-            return (sourceApiKey, credentialSource.AuthType);
-        }
-
-        if (provider.Id != 0)
-            return (await providerService.GetEffectiveApiKeyAsync(provider.Id, cancellationToken), provider.AuthType);
-
-        return (provider.ApiKey, provider.AuthType);
     }
 
     private IChatClient CreateChatClient(LlmProvider provider, string? apiKey, AuthType effectiveAuthType)
@@ -89,9 +70,23 @@ public class ChatClientFactory(
 
     private static async Task TestChatClientAsync(IChatClient chatClient, CancellationToken cancellationToken)
     {
-        var options = new ChatOptions { MaxOutputTokens = 32 };
-        await chatClient.GetResponseAsync("hi", options, cancellationToken);
+        try
+        {
+            // No ChatOptions: several OpenAI-compatible providers reject trivially
+            // small token budgets or extra parameters, so the probe sends plain
+            // input and lets provider defaults apply.
+            await chatClient.GetResponseAsync("Reply with exactly: ok", cancellationToken: cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new InvalidOperationException(NormalizeChatTestError(ex), ex);
+        }
     }
+
+    private static string NormalizeChatTestError(Exception ex) =>
+        ex is ClientResultException requestFailure && requestFailure.Status > 0
+            ? $"Chat test failed (HTTP {requestFailure.Status}): {LlmErrorNormalizer.Truncate(requestFailure.Message)}"
+            : $"Chat test failed: {LlmErrorNormalizer.Truncate(ex.Message)}";
 
     private static IChatClient ConfigureReasoningEffort(
         IChatClient chatClient,

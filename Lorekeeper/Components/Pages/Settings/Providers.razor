@@ -8,6 +8,7 @@
 @inject ICodexAuthService CodexAuth
 @inject IChatClientFactory ChatClientFactory
 @inject IVisionModelClientFactory VisionModelClientFactory
+@inject IModelCatalogService ModelCatalog
 @inject NavigationManager Nav
 @inject ILogger<Providers> Logger
 @implements IDisposable
@@ -44,10 +45,47 @@
                 <div><span class="lk-section-kicker">OpenAI-compatible API</span><h2 id="add-connection-title">Add a connection</h2><p>Enter the endpoint and initial model, test it, then save the verified connection.</p></div>
             </div>
             <div class="connection-form-grid">
+                <label class="field-wide">
+                    <span>Provider preset</span>
+                    <select class="form-select" value="@_newProviderPresetSlug" @onchange="OnNewProviderPresetChanged">
+                        <option value="">Custom / manual entry</option>
+                        @foreach (var preset in LlmProviderCatalog.Presets.Where(preset => preset.Slug != LlmProviderCatalog.CustomPresetSlug))
+                        {
+                            <option value="@preset.Slug">@preset.DisplayName</option>
+                        }
+                    </select>
+                    @if (SelectedNewProviderPreset is { } selectedPreset)
+                    {
+                        <small class="field-note">
+                            @selectedPreset.Note
+                            @if (selectedPreset.KeyManagementUrl is { } keyUrl)
+                            {
+                                <a href="@keyUrl" target="_blank" rel="noopener">Get an API key</a>
+                            }
+                        </small>
+                    }
+                </label>
+
                 <label><span>Name (slug)</span><input class="form-control" @bind="_newProvider.Name" placeholder="ollama-local" /></label>
                 <label><span>Display name</span><input class="form-control" @bind="_newProvider.DisplayName" placeholder="Local Ollama" /></label>
                 <label class="field-wide"><span>Endpoint URL</span><input class="form-control" @bind="_newProvider.EndpointUrl" placeholder="http://localhost:11434/v1" /></label>
-                <label><span>Initial model ID</span><input class="form-control" @bind="_newProvider.ModelId" placeholder="llama3" /></label>
+                <label>
+                    <span>Initial model ID</span>
+                    <div class="model-id-field">
+                        <input class="form-control" list="new-provider-model-options" @bind="_newProvider.ModelId" placeholder="llama3" />
+                        <button type="button" class="btn btn-outline-secondary" disabled="@AnyTestRunning" @onclick="ListNewProviderModelsAsync">@(_listingNewProviderModels ? "Listing…" : "List models")</button>
+                    </div>
+                    @if (_newProviderModels.Count > 0)
+                    {
+                        <datalist id="new-provider-model-options">
+                            @foreach (var candidate in _newProviderModels)
+                            {
+                                <option value="@candidate" />
+                            }
+                        </datalist>
+                        <small class="field-note">Pick a suggested or discovered model, or type any model ID.</small>
+                    }
+                </label>
                 <label>
                     <span>Thinking effort</span>
                     <select class="form-select" @bind="_newProvider.ReasoningEffort">
@@ -67,9 +105,9 @@
                 <label class="connection-checkbox"><input type="checkbox" class="form-check-input" @bind="_newProvider.IsDefault" /><span>Make this the default after verification</span></label>
             </div>
             <div class="provider-form-actions">
-                <button type="button" class="btn btn-outline-info" disabled="@(_isTestingNewProvider || _testingVisionProviderId is not null)" @onclick="TestNewProviderAsync">@(_isTestingNewProvider ? "Testing chat…" : "Test chat")</button>
+                <button type="button" class="btn btn-outline-info" disabled="@AnyTestRunning" @onclick="TestNewProviderAsync">@(_isTestingNewProvider ? "Testing…" : "Test")</button>
                 <button type="button" class="btn btn-primary" disabled="@(!CanAddNewProvider)" @onclick="CreateProviderAsync">Save connection</button>
-                <span class="form-hint">A successful Chat test is required before saving.</span>
+                <span class="form-hint">A successful chat test is required before saving; the vision check reports separately.</span>
             </div>
         </section>
     }
@@ -102,7 +140,22 @@
                         <div class="model-row">
                             <div class="model-fields">
                                 <label><span>@(model.Id == _codexProvider.Id ? "Connection model" : "Display name")</span><input class="form-control form-control-sm" @bind="model.DisplayName" disabled="@(model.Id == _codexProvider.Id)" /></label>
-                                <label><span>Model ID</span><input class="form-control form-control-sm" @bind="model.ModelId" /></label>
+                                <label>
+                                    <span>Model ID</span>
+                                    <div class="model-id-field">
+                                        <input class="form-control form-control-sm" list="model-options-@(model.Id)" @bind="model.ModelId" />
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingRowModelId is not null)" @onclick="() => ListRowModelsAsync(model)">@(_listingRowModelId == model.Id ? "Listing…" : "List models")</button>
+                                    </div>
+                                    @if (_rowModels.TryGetValue(model.Id, out var rowModels))
+                                    {
+                                        <datalist id="model-options-@(model.Id)">
+                                            @foreach (var candidate in rowModels)
+                                            {
+                                                <option value="@candidate" />
+                                            }
+                                        </datalist>
+                                    }
+                                </label>
                                 <label>
                                     <span>Thinking effort</span>
                                     <select class="form-select form-select-sm" @bind="model.ReasoningEffort">
@@ -118,8 +171,7 @@
                             <div class="model-readiness"><div><span>Chat</span>@RenderChatStatus(model)</div><div><span>Vision</span>@RenderVisionStatus(model)</div>@if (model.IsDefault){<span class="lk-status-pill is-accent">Default</span>}</div>
                             <div class="model-actions">
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SaveProviderAsync(model)">Save</button>
-                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test chat")</button>
-                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestVisionProviderAsync(model)">@(_testingVisionProviderId == model.Id ? "Testing…" : "Test vision")</button>
+                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test")</button>
                                 @if (!model.IsDefault){<button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!IsChatReady(model))" title="@DefaultButtonTitle(model)" @onclick="() => SetDefaultAsync(model.Id)">Set default</button>}
                                 @if (model.CredentialSourceId is not null){<button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleModelDelete(model.Id)">Delete</button>}
                             </div>
@@ -165,7 +217,22 @@
                         <div class="model-row">
                             <div class="model-fields">
                                 <label><span>@(model.Id == connection.Id ? "Primary model name" : "Model name")</span><input class="form-control form-control-sm" @bind="model.DisplayName" /></label>
-                                <label><span>Model ID</span><input class="form-control form-control-sm" @bind="model.ModelId" /></label>
+                                <label>
+                                    <span>Model ID</span>
+                                    <div class="model-id-field">
+                                        <input class="form-control form-control-sm" list="model-options-@(model.Id)" @bind="model.ModelId" />
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingRowModelId is not null)" @onclick="() => ListRowModelsAsync(model)">@(_listingRowModelId == model.Id ? "Listing…" : "List models")</button>
+                                    </div>
+                                    @if (_rowModels.TryGetValue(model.Id, out var rowModels))
+                                    {
+                                        <datalist id="model-options-@(model.Id)">
+                                            @foreach (var candidate in rowModels)
+                                            {
+                                                <option value="@candidate" />
+                                            }
+                                        </datalist>
+                                    }
+                                </label>
                                 <label>
                                     <span>Thinking effort</span>
                                     <select class="form-select form-select-sm" @bind="model.ReasoningEffort">
@@ -181,8 +248,7 @@
                             <div class="model-readiness"><div><span>Chat</span>@RenderChatStatus(model)</div><div><span>Vision</span>@RenderVisionStatus(model)</div>@if (model.IsDefault){<span class="lk-status-pill is-accent">Default</span>}</div>
                             <div class="model-actions">
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SaveProviderAsync(model)">Save</button>
-                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test chat")</button>
-                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestVisionProviderAsync(model)">@(_testingVisionProviderId == model.Id ? "Testing…" : "Test vision")</button>
+                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test")</button>
                                 @if (!model.IsDefault){<button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!IsChatReady(model))" title="@DefaultButtonTitle(model)" @onclick="() => SetDefaultAsync(model.Id)">Set default</button>}
                                 @if (model.CredentialSourceId is not null){<button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleModelDelete(model.Id)">Delete</button>}
                             </div>
@@ -226,7 +292,15 @@
     private int? _confirmDeleteModelId;
     private bool _isTestingNewProvider;
     private int? _testingProviderId;
-    private int? _testingVisionProviderId;
+    private string _newProviderPresetSlug = "";
+    private IReadOnlyList<string> _newProviderModels = [];
+    private bool _listingNewProviderModels;
+    private bool _newProviderVisionSucceeded;
+    private string? _newProviderVisionError;
+    private readonly Dictionary<int, IReadOnlyList<string>> _rowModels = [];
+    private readonly Dictionary<int, IReadOnlyList<string>> _childModels = [];
+    private int? _listingRowModelId;
+    private int? _listingChildModelParentId;
 
     private string? _statusMessage;
     private string _statusKind = "success";
@@ -242,7 +316,7 @@
         (LlmReasoningEffort.Maximum, "Maximum"),
     ];
 
-    private bool AnyTestRunning => _testingProviderId is not null || _testingVisionProviderId is not null || _isTestingNewProvider;
+    private bool AnyTestRunning => _testingProviderId is not null || _isTestingNewProvider || _listingNewProviderModels || _listingRowModelId is not null || _listingChildModelParentId is not null;
     private IEnumerable<LlmProvider> OtherParents => _parents.Where(provider => !CodexProvider.IsCodex(provider));
     private IReadOnlyList<LlmProvider> CodexModels => _codexProvider is null ? [] : ModelsFor(_codexProvider);
 
@@ -350,6 +424,10 @@
         try
         {
             provider.MarkChatTestSucceeded(DateTime.UtcNow);
+            if (_newProviderVisionSucceeded)
+                provider.MarkVisionTestSucceeded(DateTime.UtcNow);
+            else if (_newProviderVisionError is not null)
+                provider.MarkVisionTestFailed(_newProviderVisionError, DateTime.UtcNow);
             await ProviderService.CreateAsync(provider);
             if (provider.IsDefault)
                 await ProviderService.SetDefaultAsync(provider.Id);
@@ -373,13 +451,28 @@
 
         _isTestingNewProvider = true;
         _testedNewProviderSnapshot = null;
+        _newProviderVisionSucceeded = false;
+        _newProviderVisionError = null;
 
         try
         {
             await ChatClientFactory.TestModelAsync(provider);
             _testedNewProviderSnapshot = GetNewProviderConnectionSnapshot();
             provider.MarkChatTestSucceeded(DateTime.UtcNow);
-            SetStatus($"Provider '{provider.DisplayName ?? provider.Name}' endpoint and model verified.", "success");
+
+            try
+            {
+                await VisionModelClientFactory.TestVisionModelAsync(provider);
+                provider.MarkVisionTestSucceeded(DateTime.UtcNow);
+                _newProviderVisionSucceeded = true;
+                SetStatus($"Provider '{provider.DisplayName ?? provider.Name}' endpoint and model verified for chat and vision.", "success");
+            }
+            catch (Exception visionEx)
+            {
+                provider.MarkVisionTestFailed(visionEx.Message, DateTime.UtcNow);
+                _newProviderVisionError = visionEx.Message;
+                SetStatus($"Provider '{provider.DisplayName ?? provider.Name}' verified for chat, but the vision check failed: {visionEx.Message} You can still save this connection; it will not be used for image reading.", "warning");
+            }
         }
         catch (Exception ex)
         {
@@ -413,7 +506,23 @@
         {
             await ChatClientFactory.TestModelAsync(p);
             await ProviderService.MarkChatTestSucceededAsync(p);
-            SetStatus($"Provider '{p.DisplayName ?? p.Name}' model '{p.ModelId}' saved and verified.", "success");
+
+            string? visionError = null;
+            try
+            {
+                await VisionModelClientFactory.TestVisionModelAsync(p);
+                await ProviderService.MarkVisionTestSucceededAsync(p);
+            }
+            catch (Exception visionEx)
+            {
+                visionError = visionEx.Message;
+                await MarkVisionFailureAsync(p, visionEx.Message);
+            }
+
+            SetStatus(visionError is null
+                ? $"Provider '{p.DisplayName ?? p.Name}' model '{p.ModelId}' verified for chat and vision."
+                : $"Provider '{p.DisplayName ?? p.Name}' model '{p.ModelId}' verified for chat, but the vision check failed: {visionError}",
+                visionError is null ? "success" : "warning");
         }
         catch (Exception ex)
         {
@@ -434,34 +543,18 @@
         }
     }
 
-    private async Task TestVisionProviderAsync(LlmProvider p)
+    private async Task MarkVisionFailureAsync(LlmProvider provider, string error)
     {
-        _testingVisionProviderId = p.Id;
-
         try
         {
-            await VisionModelClientFactory.TestVisionModelAsync(p);
-            await ProviderService.MarkVisionTestSucceededAsync(p);
-            SetStatus($"Provider '{p.DisplayName ?? p.Name}' model '{p.ModelId}' saved and vision-verified.", "success");
+            await ProviderService.MarkVisionTestFailedAsync(provider, error);
         }
-        catch (Exception ex)
+        catch
         {
-            try
-            {
-                await ProviderService.MarkVisionTestFailedAsync(p, ex.Message);
-            }
-            catch
-            {
-                // Keep the original test failure visible to the user.
-            }
-            SetStatus($"Provider '{p.DisplayName ?? p.Name}' vision test failed: {ex.Message}", "danger");
-        }
-        finally
-        {
-            _testingVisionProviderId = null;
-            await ReloadAsync();
+            // Keep the original vision failure visible to the user.
         }
     }
+
 
     private async Task SetDefaultAsync(int id)
     {
@@ -507,6 +600,10 @@
         {
             _newProvider = new NewProviderDraft();
             _testedNewProviderSnapshot = null;
+            _newProviderPresetSlug = "";
+            _newProviderModels = [];
+            _newProviderVisionSucceeded = false;
+            _newProviderVisionError = null;
         }
     }
 
@@ -568,12 +665,6 @@
     private void ToggleModelDelete(int id) =>
         _confirmDeleteModelId = _confirmDeleteModelId == id ? null : id;
 
-    private async Task RevokeOAuthAsync(int id)
-    {
-        await CodexAuth.RevokeTokenAsync(id);
-        SetStatus("OAuth token revoked.", "success");
-        await ReloadAsync();
-    }
 
     private void ToggleAddChild(int parentId)
     {
@@ -606,8 +697,22 @@
         {
             await ChatClientFactory.TestModelAsync(child);
             child.MarkChatTestSucceeded(DateTime.UtcNow);
+            string? visionError = null;
+            try
+            {
+                await VisionModelClientFactory.TestVisionModelAsync(child);
+                child.MarkVisionTestSucceeded(DateTime.UtcNow);
+            }
+            catch (Exception visionEx)
+            {
+                visionError = visionEx.Message;
+                child.MarkVisionTestFailed(visionEx.Message, DateTime.UtcNow);
+            }
             await ProviderService.CreateAsync(child);
-            SetStatus($"Model '{displayName}' ({modelId}) added under {parent.DisplayName ?? parent.Name}.", "success");
+            SetStatus(visionError is null
+                ? $"Model '{displayName}' ({modelId}) added under {parent.DisplayName ?? parent.Name} and verified for chat and vision."
+                : $"Model '{displayName}' ({modelId}) added under {parent.DisplayName ?? parent.Name}; chat verified, but the vision check failed: {visionError}",
+                visionError is null ? "success" : "warning");
             _childForms.Remove(parent.Id);
             await ReloadAsync();
         }
@@ -645,23 +750,8 @@
         await ReloadAsync();
     }
 
-    private async Task SaveCodexModelAsync()
-    {
-        if (_codexProvider is null) return;
-        await SaveProviderAsync(_codexProvider);
-    }
 
-    private async Task TestCodexModelAsync()
-    {
-        if (_codexProvider is null) return;
-        await TestProviderAsync(_codexProvider);
-    }
 
-    private async Task TestCodexVisionModelAsync()
-    {
-        if (_codexProvider is null) return;
-        await TestVisionProviderAsync(_codexProvider);
-    }
 
     private bool IsChatReady(LlmProvider provider) =>
         provider.HasCurrentChatTestSnapshot
@@ -688,7 +778,7 @@
 
         if (provider.LastChatTestedAt is null)
         {
-            <span class="lk-status-pill" title="Run Test Chat before using this model.">Untested</span>
+            <span class="lk-status-pill" title="Run Test before using this model.">Untested</span>
             return;
         }
 
@@ -711,7 +801,7 @@
 
         if (provider.LastVisionTestedAt is null)
         {
-            <span class="lk-status-pill" title="Run Test Vision before using this model for image reading.">Untested</span>
+            <span class="lk-status-pill" title="Run Test before using this model for image reading.">Untested</span>
             return;
         }
 
@@ -740,7 +830,22 @@
         <div class="child-model-form">
             <div><span class="lk-section-kicker">Shared connection</span><strong>Add another model</strong><small>Credentials and endpoint come from @(parent.DisplayName ?? parent.Name).</small></div>
             <label><span>Display name</span><input class="form-control form-control-sm" placeholder="GPT-5 Mini" @bind="draft.DisplayName" /></label>
-            <label><span>Model ID</span><input class="form-control form-control-sm" placeholder="gpt-5-mini" @bind="draft.ModelId" /></label>
+            <label>
+                <span>Model ID</span>
+                <div class="model-id-field">
+                    <input class="form-control form-control-sm" list="child-model-options-@(parent.Id)" placeholder="gpt-5-mini" @bind="draft.ModelId" />
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingChildModelParentId is not null)" @onclick="() => ListChildModelsAsync(parent)">@(_listingChildModelParentId == parent.Id ? "Listing…" : "List models")</button>
+                </div>
+                @if (_childModels.TryGetValue(parent.Id, out var childModels))
+                {
+                    <datalist id="child-model-options-@(parent.Id)">
+                        @foreach (var candidate in childModels)
+                        {
+                            <option value="@candidate" />
+                        }
+                    </datalist>
+                }
+            </label>
             <label>
                 <span>Thinking effort</span>
                 <select class="form-select form-select-sm" @bind="draft.ReasoningEffort">
@@ -780,6 +885,98 @@
         _ => "Local / no authentication"
     };
 
+    private LlmProviderPreset? SelectedNewProviderPreset =>
+        LlmProviderCatalog.Find(_newProviderPresetSlug);
+
+    private void OnNewProviderPresetChanged(ChangeEventArgs args)
+    {
+        _newProviderPresetSlug = args.Value?.ToString() ?? string.Empty;
+        if (LlmProviderCatalog.Find(_newProviderPresetSlug) is not { } preset)
+            return;
+
+        if (string.IsNullOrWhiteSpace(_newProvider.Name))
+            _newProvider.Name = preset.Slug;
+        _newProvider.DisplayName = preset.DisplayName;
+        _newProvider.EndpointUrl = preset.EndpointUrl;
+        _newProvider.AuthType = preset.AuthType;
+        if (preset.AuthType != AuthType.ApiKey)
+            _newProvider.ApiKey = null;
+        _newProviderModels = preset.SeededModels;
+        if (string.IsNullOrWhiteSpace(_newProvider.ModelId) && preset.SeededModels.Count > 0)
+            _newProvider.ModelId = preset.SeededModels[0];
+    }
+
+    private async Task ListNewProviderModelsAsync()
+    {
+        var provider = BuildNewProviderOrSetStatus();
+        if (provider is null)
+            return;
+
+        _listingNewProviderModels = true;
+        try
+        {
+            _newProviderModels = await ModelCatalog.ListChatModelsAsync(provider);
+            SetStatus(_newProviderModels.Count == 0
+                ? "The provider returned an empty model list; enter the model ID manually."
+                : $"Discovered {_newProviderModels.Count} model(s). Pick one from the Initial model ID suggestions.",
+                _newProviderModels.Count == 0 ? "info" : "success");
+        }
+        catch (Exception ex)
+        {
+            _newProviderModels = [];
+            SetStatus($"Model discovery failed: {ex.Message} Enter the model ID manually.", "info");
+        }
+        finally
+        {
+            _listingNewProviderModels = false;
+        }
+    }
+
+    private async Task ListRowModelsAsync(LlmProvider model)
+    {
+        _listingRowModelId = model.Id;
+        try
+        {
+            var models = await ModelCatalog.ListChatModelsAsync(model);
+            _rowModels[model.Id] = models;
+            SetStatus(models.Count == 0
+                ? "The provider returned an empty model list; enter the model ID manually."
+                : $"Discovered {models.Count} model(s) for '{model.DisplayName ?? model.Name}'. Pick one from the Model ID suggestions.",
+                models.Count == 0 ? "info" : "success");
+        }
+        catch (Exception ex)
+        {
+            _rowModels.Remove(model.Id);
+            SetStatus($"Model discovery failed: {ex.Message} Enter the model ID manually.", "info");
+        }
+        finally
+        {
+            _listingRowModelId = null;
+        }
+    }
+
+    private async Task ListChildModelsAsync(LlmProvider parent)
+    {
+        _listingChildModelParentId = parent.Id;
+        try
+        {
+            var models = await ModelCatalog.ListChatModelsAsync(parent);
+            _childModels[parent.Id] = models;
+            SetStatus(models.Count == 0
+                ? "The provider returned an empty model list; enter the model ID manually."
+                : $"Discovered {models.Count} model(s) for '{parent.DisplayName ?? parent.Name}'. Pick one from the Model ID suggestions.",
+                models.Count == 0 ? "info" : "success");
+        }
+        catch (Exception ex)
+        {
+            _childModels.Remove(parent.Id);
+            SetStatus($"Model discovery failed: {ex.Message} Enter the model ID manually.", "info");
+        }
+        finally
+        {
+            _listingChildModelParentId = null;
+        }
+    }
     private LlmProvider? BuildNewProviderOrSetStatus()
     {
         var name = (_newProvider.Name ?? string.Empty).Trim();

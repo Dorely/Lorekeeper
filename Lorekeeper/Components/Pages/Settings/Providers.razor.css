@@ -10,6 +10,9 @@
 .connection-form-grid label > span,.connection-edit-panel label > span,.child-model-form label > span,.model-fields label > span { color: var(--lk-muted); font-size: 0.72rem; font-weight: 750; }
 .field-wide { grid-column: 1 / -1; }
 .connection-checkbox { align-items: center; display: flex !important; grid-column: 1 / -1; }
+.model-id-field { display: flex; gap: 0.4rem; }
+.model-id-field input { flex: 1 1 auto; min-width: 0; }
+.model-id-field .btn { flex: 0 0 auto; white-space: nowrap; }
 .provider-form-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 0.55rem; margin-top: 0.85rem; }
 .form-hint { color: var(--lk-muted); font-size: 0.74rem; }
 .field-note { color: var(--lk-muted); font-size: 0.66rem; font-weight: 500; line-height: 1.3; }

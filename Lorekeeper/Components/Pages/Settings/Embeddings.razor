@@ -3,6 +3,7 @@
 @using Lorekeeper.Models
 @rendermode InteractiveServer
 @inject IEmbeddingConfigurationService EmbeddingConfig
+@inject IModelCatalogService ModelCatalog
 
 <PageTitle>Embeddings</PageTitle>
 
@@ -46,7 +47,23 @@
                 <div class="embedding-form">
                     <label><span>Connection</span><select class="form-select" value="@_providerId" @onchange="OnProviderChanged">@foreach (var connection in _connections){<option value="@connection.Id">@ConnectionLabel(connection)</option>}</select></label>
                     <label><span>Embedding API</span><select class="form-select" @bind="_apiKind" @bind:after="DraftChanged" disabled="@SelectedConnectionIsCodex">@if (!SelectedConnectionIsCodex){<option value="@EmbeddingApiKind.OllamaNative">Ollama native</option>}<option value="@EmbeddingApiKind.OpenAICompatible">OpenAI compatible</option></select></label>
-                    <label class="field-wide"><span>Embedding model ID</span><input class="form-control" value="@_modelId" @oninput="OnModelChanged" placeholder="@ModelPlaceholder" /></label>
+                    <label class="field-wide">
+                        <span>Embedding model ID</span>
+                        <div class="model-id-field">
+                            <input class="form-control" list="embedding-model-options" value="@_modelId" @oninput="OnModelChanged" placeholder="@ModelPlaceholder" />
+                            <button type="button" class="btn btn-outline-secondary" disabled="@Busy" @onclick="ListModelsAsync">@(_listingModels ? "Listing…" : "List models")</button>
+                        </div>
+                        @if (_availableModels.Count > 0)
+                        {
+                            <datalist id="embedding-model-options">
+                                @foreach (var candidate in _availableModels)
+                                {
+                                    <option value="@candidate" />
+                                }
+                            </datalist>
+                            <small class="model-list-note">Pick a discovered model or type any model ID.</small>
+                        }
+                    </label>
                 </div>
 
                 @if (SelectedConnectionIsCodex){<div class="embedding-note">OpenAI account embeddings use <code>@CodexProvider.PlatformEmbeddingsEndpoint</code> automatically; the chat endpoint is unchanged.</div>}
@@ -79,6 +96,8 @@
     private bool _testing;
     private bool _saving;
     private bool _unsetting;
+    private bool _listingModels;
+    private IReadOnlyList<string> _availableModels = [];
     private string? _statusMessage;
     private string _statusKind = "success";
 
@@ -243,8 +262,35 @@
         }
     }
 
+    private async Task ListModelsAsync()
+    {
+        NormalizeSelectedProviderDraft();
+        if (SelectedConnection is not { } connection)
+            return;
+
+        _listingModels = true;
+        try
+        {
+            _availableModels = await ModelCatalog.ListEmbeddingModelsAsync(connection, _apiKind);
+            SetStatus(_availableModels.Count == 0
+                ? "The provider returned an empty model list; enter the embedding model ID manually."
+                : $"Discovered {_availableModels.Count} model(s). Pick one from the Embedding model ID suggestions.",
+                _availableModels.Count == 0 ? "info" : "success");
+        }
+        catch (Exception ex)
+        {
+            _availableModels = [];
+            SetStatus($"Model discovery failed: {ex.Message} Enter the embedding model ID manually.", "info");
+        }
+        finally
+        {
+            _listingModels = false;
+        }
+    }
+
     private void OnProviderChanged(ChangeEventArgs args)
     {
+        _availableModels = [];
         if (int.TryParse(args.Value?.ToString(), out var providerId))
             _providerId = providerId;
         if (_connections.FirstOrDefault(connection => connection.Id == _providerId) is { } selected)

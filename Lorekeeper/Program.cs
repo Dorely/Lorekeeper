@@ -159,6 +159,7 @@ builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<IBookBriefService, BookBriefService>();
 builder.Services.AddScoped<IChatClientFactory, ChatClientFactory>();
 builder.Services.AddScoped<IVisionModelClientFactory, VisionModelClientFactory>();
+builder.Services.AddScoped<IModelCatalogService, ModelCatalogService>();
 
 // Chapters
 builder.Services.AddScoped<ChapterService>();

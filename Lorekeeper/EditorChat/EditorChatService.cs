@@ -167,7 +167,7 @@ public sealed class EditorChatService(
         var visionReady = await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken);
         if (imageIds.Count > 0 && !visionReady)
         {
-            yield return new EditorChatTurnError("The active chat provider has not passed Test Vision. Run Test Vision in Settings > Providers before sending images.", Cancelled: false);
+            yield return new EditorChatTurnError("The active chat provider has not passed the vision check. Run Test in Settings > Providers before sending images.", Cancelled: false);
             yield break;
         }
         await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);

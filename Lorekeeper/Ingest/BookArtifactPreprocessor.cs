@@ -41,7 +41,7 @@ public sealed partial class BookArtifactPreprocessor(
     private async Task<BookArtifactPreprocessResult> PreprocessImageAsync(BookArtifactPreprocessRequest request, CancellationToken cancellationToken)
     {
         if (request.ProviderId is not int providerId || !await providers.IsVisionProviderWorkingAsync(providerId, cancellationToken))
-            throw new InvalidOperationException("Standalone image ingestion requires a vision-ready model. Select one and run Test Vision in Settings > Providers.");
+            throw new InvalidOperationException("Standalone image ingestion requires a vision-ready model. Select one and run Test in Settings > Providers.");
         var contentType = ImageContentType(request.FileName, request.ContentType);
         if (!TryVisualDraft(request.FileName, contentType, request.Bytes, Path.GetFileName(request.FileName), null, null, out var visual))
             throw new InvalidOperationException("The image is invalid, unsupported, or too small to ingest as a visual source.");
@@ -221,7 +221,7 @@ public sealed partial class BookArtifactPreprocessor(
                 if (request.ProviderId is not int visionProviderId)
                     throw new InvalidOperationException("Select a vision-ready model before ingesting a PDF page that requires image reading.");
                 if (!await providers.IsVisionProviderWorkingAsync(visionProviderId, cancellationToken))
-                    throw new InvalidOperationException("The selected model is not vision-ready. Run Test Vision in Settings > Providers before ingesting this PDF.");
+                    throw new InvalidOperationException("The selected model is not vision-ready. Run Test in Settings > Providers before ingesting this PDF.");
 
                 var render = RenderPdfPage(request.Bytes, page.Number, page.Width, page.Height, dpi, maxImagePixels);
                 renderedPageBytes = render.ImageBytes;

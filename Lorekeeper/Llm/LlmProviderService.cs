@@ -171,7 +171,7 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
             provider.EndpointUrl = update.EndpointUrl.Trim();
             provider.AuthType = update.AuthType;
             provider.ClearChatReadiness("Connection settings changed. Run Test successfully before using this model for chat.");
-            provider.ClearVisionReadiness("Connection settings changed. Run Test Vision successfully before using this model for image reading.");
+            provider.ClearVisionReadiness("Connection settings changed. Run Test successfully before using this model for image reading.");
             provider.UpdatedAt = DateTime.UtcNow;
             if (provider.Id == connection.Id)
             {
@@ -358,12 +358,12 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
         if (!provider.LastVisionTestSucceeded)
         {
             return string.IsNullOrWhiteSpace(provider.LastVisionTestError)
-                ? "Run Test Vision successfully in Settings > Providers to enable PDF image reading."
+                ? "Run Test successfully in Settings > Providers to enable PDF image reading."
                 : $"The last provider vision test failed: {provider.LastVisionTestError}";
         }
 
         if (!provider.HasCurrentVisionTestSnapshot)
-            return "Provider settings changed. Run Test Vision successfully in Settings > Providers to enable PDF image reading.";
+            return "Provider settings changed. Run Test successfully in Settings > Providers to enable PDF image reading.";
 
         var credentials = await GetCredentialStatusAsync(provider, cancellationToken);
         return credentials.Available

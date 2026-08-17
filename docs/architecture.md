@@ -91,6 +91,19 @@ where the browser security model owns selection. External-browser navigation is
 reserved for deliberate handoffs such as OAuth, vendor documentation, and
 application updates.
 
+LLM provider configuration is an owning-service boundary. Settings > Providers
+offers built-in OpenAI-compatible presets (including Cline usage-billing and
+ClinePass entries sharing one endpoint) plus custom endpoints; presets only
+pre-fill connection fields. `IModelCatalogService` discovers chat and embedding
+model IDs through OpenAI-compatible `GET /models` (Codex routes to the platform
+endpoint) and Ollama `GET /api/tags`, degrading to seeded suggestions or manual
+entry when a provider has no usable discovery endpoint. Provider verification is
+one combined probe: a protocol-safe chat request (no constrained token budget)
+followed, on chat success, by a non-blocking vision probe; saving is gated on
+chat success only, and a vision failure records a warning without blocking.
+Chat, vision, and discovery errors are normalized through shared helpers that
+extract the provider's error detail instead of surfacing raw response bodies.
+
 The main application flow is:
 
 1. A Razor component, assistant tool, endpoint, or background processor requests

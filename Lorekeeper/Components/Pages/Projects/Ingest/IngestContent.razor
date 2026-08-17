@@ -161,7 +161,7 @@ else
                     </div>
                     @if (_pdfForceVision && _providerId is int providerId && !_visionProviderIds.Contains(providerId))
                     {
-                        <div class="form-text small text-warning">The selected provider must pass Test Vision before force-vision PDF ingest can start.</div>
+                        <div class="form-text small text-warning">The selected provider must pass the vision check before force-vision PDF ingest can start.</div>
                     }
                 }
                 @if (IsBatchSelection)
@@ -612,7 +612,7 @@ else
             if (_readingFile) return "Reading the selected source file.";
             if (ChatDisabled) return ChatDisabledMessage;
             if (_providerId is null) return _providers.Count == 0 ? "Configure and test a model before starting ingest." : "Select a model.";
-            if (_pdfForceVision && IsSelectedPdfArtifact && !_visionProviderIds.Contains(_providerId.Value)) return "Run Test Vision for the selected model before force-vision PDF ingest.";
+            if (_pdfForceVision && IsSelectedPdfArtifact && !_visionProviderIds.Contains(_providerId.Value)) return "Run Test for the selected model before force-vision PDF ingest.";
             if (!IsBatchSelection && string.IsNullOrWhiteSpace(_title)) return "Add a source title.";
             if (_selectedFiles.Count == 0 && string.IsNullOrWhiteSpace(_sourceText)) return "Add source text or choose one or more source files.";
             if (_selectedFiles.Any(file => file.Size > MaximumFileBytes)) return $"Each source file must be {MaximumFileBytes / 1024 / 1024:N0} MB or smaller.";
