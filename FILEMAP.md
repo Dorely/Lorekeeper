@@ -505,7 +505,7 @@
 
 | File | Description |
 |------|-------------|
-| `IContextBuilder.cs` / `ContextBuilder.cs` | Turn-aware one-system-message assembly with protected authorial direction, complete active-manuscript/style state, project page setup and active Designed Page geometry, canonical visuals, bounded retrieval, exclusions, token estimates, and provenance snapshots. |
+| `IContextBuilder.cs` / `ContextBuilder.cs` | Turn-aware one-system-message assembly with protected authorial direction, complete active-manuscript/style state, default-on Writing Samples, project page setup and active Designed Page geometry, canonical visuals, bounded retrieval, exclusions, token estimates, and provenance snapshots. |
 | `AgentPayloadPaginator.cs` | Shared soft-target model payload paginator with an opt-in compact-object page shape; repeats identity fields, packs logical JSON records, and segments only individually oversized text fields with explicit continuation metadata. |
 | `ContextPayloadJson.cs` | Shared compact JSON serializer settings for model-facing automatic context projections. |
 | `ContextManuscriptFormatter.cs` | Compact complete active-manuscript and Book Text Style context projections with revisions, stable block IDs, inline marks, roles, and sparse formatting metadata. |

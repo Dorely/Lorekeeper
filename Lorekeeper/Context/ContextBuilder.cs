@@ -141,12 +141,12 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                         preferenceMap,
                         ContextItemKind.WritingSample,
                         key,
-                        defaultIncluded: relevantWritingSampleIds.Contains(sample.Id)),
+                        defaultIncluded: true),
                     IsRemovable: true,
                     Badge: "Style",
                     Reason: relevantWritingSampleIds.Contains(sample.Id)
                         ? "Writing style matched to this turn"
-                        : "Available writing sample",
+                        : "Default writing style reference",
                     Origin: ContextItemOrigin.WritingSample,
                     IsProtected: IsExplicitlyIncluded(preferenceMap, ContextItemKind.WritingSample, key)));
             }

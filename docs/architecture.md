@@ -165,7 +165,9 @@ Per-chapter `EditorContextPreference` rows are an override layer over the
 current automatic inclusion rules. The Assistant Memory header reset removes
 all override rows for the active chapter and rebuilds every context surface from
 those defaults; it does not modify chapter content, graph relationships, Book
-Brief data, Project Guidance, or the underlying source material.
+Brief data, Project Guidance, or the underlying source material. Project Writing
+Samples are default-on style references, so a reset removes an explicit hide or
+include override and leaves each sample enabled by its default rule.
 
 ### Assistant Conversations and Review
 

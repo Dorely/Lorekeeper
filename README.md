@@ -21,7 +21,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   bar without remounting or flashing the project-level Editor Chat, and refreshes
   the chat token estimate for the newly assembled chapter context.
 - Each chapter's Assistant Memory can be reset from its panel header, clearing
-  manual additions and exclusions so the current default context is rebuilt.
+  manual additions and exclusions so the current default context is rebuilt,
+  including default-on Writing Samples.
 - Long-running interactive chat turns automatically compact completed tool context at
   90% of the active model input limit, preserve an audit chip in the transcript, keep
   the live token counter aligned with the reduced in-progress context, and tell the
