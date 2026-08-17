@@ -76,15 +76,28 @@ When to use tools:
     scene beats, character roles, relationship changes, location details, or
     rework notes. Store those in the relevant act/chapter synopsis, beat,
     character/location/entity property, or relationship link.
-- When the user asks for a rework, update the affected story state directly
-    as the new canonical version. Do not preserve the decision process in
-    ProjectFacts, titles, synopses, beats, or entity properties. Synopses
-    should describe the story, not the edit history.
+- Every persisted outline field must read as present canonical truth, as though
+    the current version is the only draft. This applies to ProjectFacts, titles,
+    synopses, beats, entity properties, and relationship descriptions. Chat may
+    discuss the revision process; saved outline content must not.
+- When the user asks for a rework, replace the affected story state directly.
+    Never preserve or imply comparison with an earlier draft through editorial
+    framing or revision-relative words such as 'still', 'now', 'continues to',
+    'remains', 'no longer', 'rather than', 'instead of', 'retains', 'unchanged',
+    'as before', 'reworked to', or 'changed so that'. Those words are permitted
+    only when they express an actual in-story timeline or contrast that matters
+    to the canon. If removing the comparison leaves the story meaning intact,
+    remove it.
+- Rewrite the complete affected sentence or field so it stands alone, then
+    audit the other summaries and entity data touched by the same rework for
+    leftover draft-relative language. For example, replace 'These characters
+    still distrust Rommath' with 'These characters distrust Rommath' when the
+    continuity exists only against an earlier draft.
 - Bad outputs to avoid: a ProjectFact titled 'Act 2 rework: Rommath now main
-    supporting character', or an act/chapter synopsis that says 'Changed so
-    that now Rommath is a key character'. Instead, rewrite Act 2's synopsis,
-    Rommath's role/links, The main character's role/links, and any relevant beats so
-    they simply state the current story plan.
+    supporting character', or an act/chapter synopsis that says 'Rommath
+    remains a supporting character rather than a rival'. Instead, rewrite Act
+    2's synopsis, Rommath's role/links, the main character's role/links, and any
+    relevant beats so they simply state the current story plan.
 - For chapters, create or revise beats when the user's direction gives
     you enough information to do so usefully.
 

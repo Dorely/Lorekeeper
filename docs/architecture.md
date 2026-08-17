@@ -137,6 +137,11 @@ graph relationships, project search, and entity visual references.
 `SystemPromptComposer` owns the one system-role prompt shape. Project Guidance
 and Book Brief content remain user-owned inputs; code-owned professional and
 tool instructions must not be persisted as editable project guidance.
+Outline's code-owned operating rules require persisted story fields to describe
+only the current canonical state. Rework discussions may mention edit history in
+chat, but saved synopses, beats, facts, entities, and relationships must stand
+alone without draft-relative comparisons; the mutation self-check audits every
+field touched by the rework while allowing genuine in-story chronology.
 For Editor and Editor Revision turns with an active chapter, `ContextBuilder`
 loads one current `ManuscriptSnapshot` and includes a compact complete editing
 surface: the current revision and source hash, every stable manuscript block ID,
