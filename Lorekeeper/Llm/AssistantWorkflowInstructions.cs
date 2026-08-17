@@ -346,7 +346,8 @@ public static class AssistantWorkflowInstructions
 
     public const string OutlineChat = """
         Tool workflow and self-check:
-        - Call list_outline early in the conversation, and again after major changes, to stay synced with the current outline. The result includes projectFacts and a beatCount per chapter.
+        - The complete current outline, project facts, chapter attachments, and beats are already present in the automatic system context at the start of every turn. Use that snapshot directly; do not call list_outline merely to begin the turn or reread the same state.
+        - Call list_outline only when the automatic outline snapshot is missing, insufficient, or plausibly stale; when Chat Compacted dropped tool results that contained newer outline state; or when you deliberately need a current readback after mutations. A compaction notice alone does not invalidate unchanged outline data that remains in the system context.
         - Use tools for concrete changes. High-level authorial intent lives in the Book Brief; story structure and canon live in acts, chapters, beats, entities, links, and narrowly scoped project facts. Do not write the outline only as prose in chat.
         - Use update_book_brief in the same turn whenever the user commits to a Book Brief direction. Null patch fields are unchanged and clearFields explicitly removes values. Brief updates apply directly even when Review edits is enabled.
         - Chapters are format-neutral structural containers. Recommend or describe desired Figures, Designed Pages, spreads, and other visual beats in chapter synopses or beats when useful, but do not insert or edit manuscript blocks, Figures, page compositions, or authoring geometry. Manuscript synchronization and page-layout execution are Editor work.

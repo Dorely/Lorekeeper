@@ -254,6 +254,11 @@ chapter and beat entity associations, every non-structural entity category with
 project-owned/source-derived counts and sample identities, and a compact source
 inventory. Publication releases are not queried or injected. One shared context
 builder supplies both prompt preview and live turns so they cannot drift.
+The assistant consumes that automatic outline snapshot directly and does not
+begin a turn with `list_outline`. That tool remains available for a missing,
+insufficient, or plausibly stale snapshot; for recovering newer outline state
+whose tool result was removed by chat compaction; and for deliberate
+post-mutation readback when the mutation result is not enough.
 Outline can mutate the Book Brief, acts, chapters, synopses, beats, entities,
 links, and project facts, and can search/read project sources. Chapter-body
 reads are available only for explicitly relevant reconciliation or inference,
