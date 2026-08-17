@@ -13,6 +13,21 @@ if (-not $runtimeRoot.StartsWith($repositoryRoot + [IO.Path]::DirectorySeparator
     throw "The Press runtime output must remain inside the Lorekeeper repository."
 }
 
+function Get-Sha256Hex {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $hashBytes = $sha256.ComputeHash($stream)
+        return ([BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
+    }
+    finally {
+        $stream.Dispose()
+        $sha256.Dispose()
+    }
+}
+
 $cargoArguments = @("build", "--locked")
 $cargoProfile = "debug"
 if ($Configuration -eq "Release") {
@@ -163,14 +178,14 @@ $assetInventory = @(
     Get-ChildItem -LiteralPath (Join-Path $runtimeRoot 'fonts') -Recurse -File | Sort-Object FullName | ForEach-Object {
         [ordered]@{
             relativePath = $_.FullName.Substring($runtimeRoot.Length + 1).Replace('\', '/')
-            sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            sha256 = Get-Sha256Hex -Path $_.FullName
             license = 'OFL-1.1'
         }
     }
     Get-ChildItem -LiteralPath (Join-Path $runtimeRoot 'profiles') -File | Sort-Object FullName | ForEach-Object {
         [ordered]@{
             relativePath = $_.FullName.Substring($runtimeRoot.Length + 1).Replace('\', '/')
-            sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            sha256 = Get-Sha256Hex -Path $_.FullName
             license = if ($_.Name -eq 'CGATS21_CRPC1.icc') { 'ICC-profile-redistribution' } else { 'Documentation' }
         }
     }
@@ -203,7 +218,7 @@ $files = @(Get-ChildItem -LiteralPath $runtimeRoot -Recurse -File | Sort-Object 
     [ordered]@{
         relativePath = $_.FullName.Substring($runtimeRoot.Length + 1).Replace('\', '/')
         byteLength = $_.Length
-        sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        sha256 = Get-Sha256Hex -Path $_.FullName
     }
 })
 $architecture = switch ($env:PROCESSOR_ARCHITECTURE) {
