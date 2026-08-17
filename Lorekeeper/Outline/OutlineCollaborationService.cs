@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Outline;
 
 public sealed class OutlineCollaborationService(
-IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, OutlineCollaborationTools tools, IEntityVisualContextService entityVisualContext, IAiChangeApprovalService changeApproval, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
+IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, OutlineCollaborationTools tools, IEntityVisualContextService entityVisualContext, IAiChangeApprovalService changeApproval, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IOutlineWorkingContextBuilder workingContext, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
 {
     /// <summary>
     /// Code-owned operating rules composed with the professional charter, Project Guidance,
@@ -49,6 +49,18 @@ When to use tools:
     visual direction, and non-negotiable creative constraints. Use
     update_book_brief whenever the user commits to one of these directions.
     Book Brief updates apply directly even when Review edits is enabled.
+- The Book Brief also owns canonical-source selection. Change that selection
+    only when the user explicitly asks; use update_book_brief_canon_sources
+    with the complete desired source-id list.
+- The system context includes the complete current outline, chapter entity
+    attachments, a compact inventory for every entity category, and an
+    ingested-source inventory. Do not claim these are absent without reading it.
+- Selected canonical sources are authoritative grounding. Unselected ingested
+    sources are useful evidence, not canon. Search and read them when useful,
+    but do not silently promote their claims to canon.
+- If source material conflicts with an explicit user instruction, the current
+    Book Brief, or the current outline, preserve the user/Book Brief/outline
+    direction and report the conflict instead of silently resolving it.
 - Treat missing premise, book kind, audience, purpose, genre, and relevant
     narrative choices as early outlining priorities. Ask one or two focused
     questions at a time. Do not block a concrete outline request because
@@ -91,7 +103,10 @@ Entity conventions:
     Chapter -> Event/Beat through HasChild links. Use the outline tools for
     Act and Chapter edits because those rows have stricter editor behavior.
 - Use list_entity_types when you need to inspect what graph types exist.
-    Use create_entity / update_entity / delete_entity for story entities.
+    Use list_entities for concise paginated browsing, search_entities for
+    focused discovery, and read_entity for the complete record including its
+    origin and source evidence. Use create_entity / update_entity /
+    delete_entity for story entities.
     Pass the type as a string. Common types are:
     * 'Character' — project-scoped people. Conventional properties:
         role, description.
@@ -105,15 +120,27 @@ Entity conventions:
         Omit parentId; the tool attaches it to the Project automatically.
     * 'Event' — chapter-scoped beats. REQUIRES parentId=<chapter id>.
         Conventional properties: summary.
+- Create durable entities for every canonical person, named or materially
+    recurring creature, place, object/artifact, vehicle, organization/faction,
+    culture, species, system, concept, ritual, and historical event the outline
+    must track. Do not create entities for generic scenery, incidental mentions,
+    transient actions, or unnamed one-off objects with no continuity value.
 - Use link_entities to create relationships between entities.
     Conventional edge types:
     * 'About'      — ProjectFact -> Project/Act/Chapter/entity it broadly constrains.
     * 'SetIn'      — ProjectFact -> Location for broad setting rules.
     * 'Constrains' — ProjectFact -> Act/Chapter/Project for tone, scope, or rules.
-    * 'AppearsIn' — Character -> Event (or -> Chapter via its id).
+    * 'RelevantTo' — any canonical entity -> Chapter. This preferred chapter
+        association is what Editor uses for automatic context.
+    * 'AppearsIn' — Character -> Event/beat only.
     * 'LocatedAt' — Event -> Location.
     * 'KnownTo'   — Character -> Character.
     Other edge types are allowed; prefer camel-case verbs.
+- Prefer chapter-level RelevantTo links over beat-level links for context-bearing
+    associations. Beat links are optional detail and never a substitute for the
+    chapter link. Every canonical entity that appears in, affects, constrains,
+    or otherwise matters to a chapter must have a RelevantTo link to it, even
+    if the entity is not physically present in the scene.
 
 When the user is exploring or undecided, propose options and wait. When
 they commit to a direction, act on it without a second confirmation.
@@ -162,12 +189,7 @@ they commit to a direction, act on it without a second confirmation.
         var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
-        var brief = await bookBriefs.GetOrCreateAsync(projectId, cancellationToken);
-        return systemPrompts.Compose(new(
-            project,
-            brief,
-            SystemPromptAgentRole.Outline,
-            CollaborationOperatingRules)).Prompt;
+        return await ComposeSystemPromptAsync(project, cancellationToken);
     }
 
     public async Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default)
@@ -284,12 +306,7 @@ they commit to a direction, act on it without a second confirmation.
                 projects => projects.GetByIdAsync(projectId, cancellationToken),
                 cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
-            var brief = await bookBriefs.GetOrCreateAsync(projectId, cancellationToken);
-            systemPrompt = systemPrompts.Compose(new(
-                project,
-                brief,
-                SystemPromptAgentRole.Outline,
-                CollaborationOperatingRules)).Prompt;
+            systemPrompt = await ComposeSystemPromptAsync(project, cancellationToken);
             chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
 
             if (project.AiChangeApprovalEnabled)
@@ -521,6 +538,18 @@ they commit to a direction, act on it without a second confirmation.
                 yield break;
             }
         }
+    }
+
+    private async Task<string> ComposeSystemPromptAsync(Project project, CancellationToken cancellationToken)
+    {
+        var brief = await bookBriefs.GetOrCreateAsync(project.Id, cancellationToken);
+        var context = await workingContext.BuildAsync(project.Id, cancellationToken);
+        return systemPrompts.Compose(new(
+            project,
+            brief,
+            SystemPromptAgentRole.Outline,
+            CollaborationOperatingRules,
+            WorkingContext: context)).Prompt;
     }
 
     // -- mutation flag (drained between yields so the UI can refresh the tree) --

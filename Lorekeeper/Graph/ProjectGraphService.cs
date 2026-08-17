@@ -365,9 +365,9 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IProjectService projec
             IngestWikiSheet.ReadSummary(node.Properties),
             IngestWikiSheet.ReadAliases(node.Properties),
             IngestWikiSheet.ReadSections(node.Properties),
-            IngestWikiSheet.ReadCanonSources(node.Properties),
+            IngestWikiSheet.ReadSourceEvidence(node.Properties),
             IngestSourceAssertions.IsIngestCreatedGraphObject(node.Properties),
-            IngestWikiSheet.ReadCanonSources(node.Properties).Count);
+            IngestWikiSheet.ReadSourceEvidence(node.Properties).Count);
     }
 
     private static ProjectGraphEdge ProjectEdge(GraphEdge edge)
@@ -387,7 +387,7 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IProjectService projec
             Read(edge.Properties, IngestWikiSheet.SummaryProperty) ?? string.Empty,
             IngestWikiSheet.ReadRelationshipCitations(edge.Properties),
             IngestSourceAssertions.IsIngestCreatedGraphObject(edge.Properties),
-            IngestWikiSheet.ReadCanonSources(edge.Properties).Count,
+            IngestWikiSheet.ReadSourceEvidence(edge.Properties).Count,
             GraphAutoLinkService.IsAutoMentionEdge(edge));
     }
 
@@ -432,7 +432,7 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IProjectService projec
         || string.Equals(key, "structural", StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, "order", StringComparison.OrdinalIgnoreCase)
         || IngestWikiSheet.IsWikiStorageProperty(key)
-        || IngestWikiSheet.IsCanonSourceProperty(key)
+        || IngestWikiSheet.IsSourceEvidenceProperty(key)
         || IngestSourceAssertions.IsProtectedProperty(key)
         || key.StartsWith("vectorIndex", StringComparison.OrdinalIgnoreCase);
 
@@ -503,7 +503,7 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IProjectService projec
         || IngestSourceAssertions.IsIngestCreatedGraphObject(edge.Properties)
         || IngestSourceAssertions.CountRelationshipSources(edge.Properties) > 0
         || IngestWikiSheet.ReadRelationshipCitations(edge.Properties).Count > 0
-        || IngestWikiSheet.ReadCanonSources(edge.Properties).Count > 0;
+        || IngestWikiSheet.ReadSourceEvidence(edge.Properties).Count > 0;
 
     private async Task TouchProjectAsync(Guid projectId, CancellationToken cancellationToken)
     {
@@ -551,7 +551,7 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IProjectService projec
         {
             if (IngestSourceAssertions.IsProtectedProperty(kv.Key)
                 || IngestWikiSheet.IsWikiStorageProperty(kv.Key)
-                || IngestWikiSheet.IsCanonSourceProperty(kv.Key)
+                || IngestWikiSheet.IsSourceEvidenceProperty(kv.Key)
                 || GraphAutoLinkService.IsProtectedAutoLinkProperty(kv.Key))
             {
                 continue;

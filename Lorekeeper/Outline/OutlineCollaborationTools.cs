@@ -15,6 +15,7 @@ using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
 using Lorekeeper.Search;
 using Microsoft.Extensions.AI;
+using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Outline;
 
@@ -181,6 +182,12 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 description: "Return compact source discovery with complete IDs, total/returned counts, completeness, and exact read_project_source arguments."),
 
             AIFunctionFactory.Create(
+                method: (string? query = null, bool? canonOnly = null, int page = 1) =>
+                    ListIngestedSourcesAsync(context, query, canonOnly, page),
+                name: "list_ingested_sources",
+                description: "List ingested sources only, in concise pages with canonical-selection status and exact read_project_source arguments. Use canonOnly=true for Book Brief canonical sources; follow nextPageArguments until complete."),
+
+            AIFunctionFactory.Create(
                 method: (string sourceType, Guid sourceId, int? pageNumber = null) =>
                     ReadProjectSourceAsync(context, sourceType, sourceId, pageNumber),
                 name: "read_project_source",
@@ -204,6 +211,12 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 description: "Read the outline as structured JSON with ids, ordering, projectFacts, chapter beat counts, and staged changes when Review edits is enabled. The outline text is already in the editor Context Feed; use this for mutations, staged-state verification, or missing/insufficient feed context."),
 
             CreateBookBriefUpdateTool(context),
+
+            AIFunctionFactory.Create(
+                method: (Guid[] sourceIds, bool explicitUserRequest = false) =>
+                    UpdateBookBriefCanonSourcesAsync(context, sourceIds, explicitUserRequest),
+                name: "update_book_brief_canon_sources",
+                description: "Replace the Book Brief canonical-source selection with the complete sourceIds list. Use only when the user explicitly requested this selection change and set explicitUserRequest=true. An empty list clears the selection."),
 
             AIFunctionFactory.Create(
                 method: (string title, string synopsis) => CreateActAsync(context, title, synopsis),
@@ -269,6 +282,11 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 description: "List registered and discovered graph entity types for this project, including structural types such as Project, Act, Chapter, and Event/Beat."),
 
             AIFunctionFactory.Create(
+                method: (string? type = null, int page = 1) => ListEntitiesAsync(context, type, page),
+                name: "list_entities",
+                description: "Browse concise, explicitly paginated non-structural entities, optionally filtered by type. Each item includes origin, source-evidence count, and exact read_entity arguments. Follow nextPageArguments until complete."),
+
+            AIFunctionFactory.Create(
                 method: (string query, int topK = 10, string? type = null, string? parentId = null) => SearchEntitiesAsync(context, query, topK, type, parentId),
                 name: "search_entities",
                 description: "Compact entity discovery with full IDs, total/returned counts, completeness, labeled previews, and exact read_entity arguments. Review mode includes staged state."),
@@ -315,7 +333,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 method: (string fromId, string toId, string edgeType, string? propertiesJson = null) =>
                     LinkEntitiesAsync(context, fromId, toId, edgeType, propertiesJson),
                 name: "link_entities",
-                description: "Create a typed edge between two entities. propertiesJson is an optional JSON object string of edge metadata. Conventional edge types: 'AppearsIn' (Character -> Event/Chapter), 'LocatedAt' (Event -> Location), 'KnownTo' (Character -> Character). Other types are allowed; use camel-case verbs. Returns link details plus compact source and target identities; use read_entity/list_entity_links for full context."),
+                description: "Create a typed edge between two entities. propertiesJson is optional JSON metadata. Prefer 'RelevantTo' from every canonical entity to each Chapter it matters to; Editor uses these chapter links for automatic context. Use 'AppearsIn' only for Character -> Event/beat, 'LocatedAt' for Event -> Location, and 'KnownTo' for Character -> Character. Returns link details plus compact endpoints."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, Guid imageId, string? label = null) => AttachEntityVisualAsync(context, entityId, imageId, label),
@@ -493,6 +511,89 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         return ProjectSearchAgentPayload.SerializeSources(sources);
     }
 
+    private async Task<string> UpdateBookBriefCanonSourcesAsync(
+        OutlineCollaborationContext context,
+        Guid[] sourceIds,
+        bool explicitUserRequest)
+    {
+        if (!explicitUserRequest)
+            return "Error: canonical-source selection can change only after an explicit user request; set explicitUserRequest=true only when that condition is satisfied.";
+        try
+        {
+            await bookBriefs.ReplaceCanonSourcesAsync(context.ProjectId, sourceIds.Distinct().ToArray());
+            var selected = await bookBriefs.ListCanonSourcesAsync(context.ProjectId);
+            context.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                status = "updated",
+                canonicalSources = selected,
+                count = selected.Count,
+            });
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    private async Task<string> ListIngestedSourcesAsync(
+        OutlineCollaborationContext ctx,
+        string? query,
+        bool? canonOnly,
+        int page)
+    {
+        const int pageSize = 20;
+        page = Math.Max(1, page);
+        await using var operation = await database.OpenReadAsync();
+        var canonicalIds = (await bookBriefs.ListCanonSourcesAsync(ctx.ProjectId))
+            .Select(source => source.SourceId)
+            .ToHashSet();
+        var sources = await operation.Db.IngestSources
+            .AsNoTracking()
+            .Where(source => source.ProjectId == ctx.ProjectId)
+            .OrderBy(source => source.Title)
+            .ThenBy(source => source.CreatedAt)
+            .Select(source => new
+            {
+                source.Id,
+                source.Title,
+                source.SourceKind,
+                source.Description,
+                source.Synopsis,
+                source.UpdatedAt,
+            })
+            .ToListAsync();
+        var filtered = sources
+            .Where(source => string.IsNullOrWhiteSpace(query)
+                || source.Title.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || source.SourceKind.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || source.Description.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || source.Synopsis.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .Where(source => canonOnly is null || canonicalIds.Contains(source.Id) == canonOnly.Value)
+            .ToList();
+        var items = filtered.Skip((page - 1) * pageSize).Take(pageSize).Select(source => new
+        {
+            sourceId = source.Id,
+            source.Title,
+            source.SourceKind,
+            isCanonical = canonicalIds.Contains(source.Id),
+            preview = TruncatePropertyValue(string.IsNullOrWhiteSpace(source.Synopsis) ? source.Description : source.Synopsis),
+            source.UpdatedAt,
+            detailReadTool = "read_project_source",
+            detailReadArguments = new { sourceType = ProjectSearchSourceTypes.IngestSource, sourceId = source.Id, pageNumber = 1 },
+        }).ToList();
+        return JsonSerializer.Serialize(new
+        {
+            page,
+            pageSize,
+            total = filtered.Count,
+            returned = items.Count,
+            isComplete = page * pageSize >= filtered.Count,
+            items,
+            nextPageArguments = page * pageSize < filtered.Count ? new { query, canonOnly, page = page + 1 } : null,
+        });
+    }
+
     private async Task<string> ReadProjectSourceAsync(
         OutlineCollaborationContext ctx,
         string sourceType,
@@ -521,11 +622,13 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         var visuals = await QueueEntityVisualsAsync(ctx, entityId);
         var detail = JsonSerializer.SerializeToNode(new
         {
+            origin = entity.IsIngestCreated ? "source-derived" : "project-owned",
+            entity.IsIngestCreated,
             properties = entity.Properties,
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
-            canonSources = entity.CanonSources,
+            sourceEvidence = entity.SourceEvidence,
             links,
             relationContextPreview = RelationContextPreview(entity.Id, EntityRelationOptions, relationContext),
             canonicalVisualReferences = visuals.Select(VisualPayload),
@@ -756,12 +859,39 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                                .ToDictionary(g => g.Key, g => g.OrderBy(c => c.Order).ToList());
         var unassigned = allChapters.Where(c => c.ActId is null).OrderBy(c => c.Order).ToList();
 
-        // Pre-resolve beat counts per chapter so the assistant can decide whether it needs to
-        // search focused beat/entity details; cheap because CountChildrenAsync short-circuits when the chapter
-        // has no graph node yet.
-        var beatCounts = new Dictionary<Guid, int>();
+        var chapterDetails = new Dictionary<Guid, object>();
         foreach (var c in allChapters)
-            beatCounts[c.Id] = await entities.CountChildrenAsync(ctx.ProjectId, c.Id, EventNodeType);
+        {
+            var beats = await entities.ListAsync(ctx.ProjectId, EventNodeType, c.Id);
+            var beatPayloads = new List<object>();
+            foreach (var beat in beats.OrderBy(beat => beat.Order))
+            {
+                var beatLinks = await entities.ListLinksAsync(ctx.ProjectId, beat.Id);
+                beatPayloads.Add(new
+                {
+                    id = beat.Id,
+                    order = beat.Order,
+                    name = beat.Name,
+                    summary = beat.Summary,
+                    attachedEntities = beatLinks
+                        .Where(link => !string.Equals(link.EdgeType, EntityService.HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
+                        .Select(link => new { relationship = link.EdgeType, id = link.OtherEntityId, type = link.OtherEntityType, name = link.OtherEntityName }),
+                });
+            }
+            var chapterEntity = await entities.GetAsync(ctx.ProjectId, c.Id);
+            var relevantEntities = chapterEntity is null
+                ? []
+                : (await entities.ListLinksAsync(ctx.ProjectId, c.Id))
+                    .Where(link => string.Equals(link.EdgeType, EntityService.RelevantToEdgeType, StringComparison.OrdinalIgnoreCase))
+                    .Select(link => new { id = link.OtherEntityId, type = link.OtherEntityType, name = link.OtherEntityName })
+                    .Cast<object>()
+                    .ToList();
+            chapterDetails[c.Id] = new
+            {
+                relevantEntities,
+                beats = beatPayloads,
+            };
+        }
         var facts = await projectFacts.ListAsync(ctx.ProjectId);
         var factPayloads = new List<object>();
         foreach (var fact in facts)
@@ -773,7 +903,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             order = c.Order,
             title = c.Title,
             synopsis = c.Synopsis,
-            beatCount = beatCounts.TryGetValue(c.Id, out var n) ? n : 0,
+            detail = chapterDetails[c.Id],
         };
 
         var payload = new
@@ -1153,6 +1283,43 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         }));
     }
 
+    private async Task<string> ListEntitiesAsync(OutlineCollaborationContext ctx, string? type, int page)
+    {
+        if (ctx.Staging is not null)
+            return await ctx.Staging.ListEntitiesAsync(type, page);
+
+        const int pageSize = 20;
+        page = Math.Max(1, page);
+        var typeNames = await SearchableTypeNamesAsync(ctx.ProjectId, type);
+        var all = new List<StoryEntity>();
+        foreach (var typeName in typeNames)
+            all.AddRange(await entities.ListAsync(ctx.ProjectId, typeName));
+        var ordered = all.OrderBy(entity => entity.Type, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(entity => entity.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var items = ordered.Skip((page - 1) * pageSize).Take(pageSize).Select(entity => new
+        {
+            id = entity.Id,
+            type = entity.Type,
+            name = entity.Name,
+            origin = entity.IsIngestCreated ? "source-derived" : "project-owned",
+            entity.IsIngestCreated,
+            sourceEvidenceCount = entity.SourceEvidence.Count,
+            detailReadTool = "read_entity",
+            detailReadArguments = new { entityId = entity.Id, pageNumber = 1 },
+        }).ToList();
+        return JsonSerializer.Serialize(new
+        {
+            page,
+            pageSize,
+            total = ordered.Count,
+            returned = items.Count,
+            isComplete = page * pageSize >= ordered.Count,
+            items,
+            nextPageArguments = page * pageSize < ordered.Count ? new { type, page = page + 1 } : null,
+        });
+    }
+
     private async Task<string> SearchEntitiesAsync(OutlineCollaborationContext ctx, string query, int topK, string? type, string? parentId)
     {
         if (string.IsNullOrWhiteSpace(query)) return "Error: query is required.";
@@ -1312,14 +1479,18 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             existing = EntityMutationPayload(duplicate),
         }));
 
-    private static object EntityMutationPayload(StoryEntity entity) =>
-        OutlineMutationPayloads.Entity(
-            entity.Id,
-            entity.Type,
-            entity.Name,
-            entity.Order,
-            entity.ParentId,
-            entity.Properties);
+    private static object EntityMutationPayload(StoryEntity entity) => new
+    {
+        id = entity.Id,
+        type = entity.Type,
+        name = entity.Name,
+        order = entity.Order,
+        parentId = entity.ParentId,
+        properties = entity.Properties,
+        origin = entity.IsIngestCreated ? "source-derived" : "project-owned",
+        entity.IsIngestCreated,
+        sourceEvidence = entity.SourceEvidence,
+    };
 
     private static string? ReadProperty(IReadOnlyDictionary<string, string?>? properties, string key) =>
         properties is not null && properties.TryGetValue(key, out var value) ? value : null;
@@ -1542,10 +1713,10 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             score += TextMatchScore(section.Title, query, titleWeight: 12, detailWeight: 6);
             score += TextMatchScore(section.Body, query, titleWeight: 12, detailWeight: 8);
         }
-        foreach (var canonSource in entity.CanonSources)
+        foreach (var sourceEvidence in entity.SourceEvidence)
         {
-            score += TextMatchScore(canonSource.SourceTitle, query, titleWeight: 12, detailWeight: 6);
-            score += TextMatchScore(canonSource.Markdown, query, titleWeight: 12, detailWeight: 8);
+            score += TextMatchScore(sourceEvidence.SourceTitle, query, titleWeight: 12, detailWeight: 6);
+            score += TextMatchScore(sourceEvidence.Markdown, query, titleWeight: 12, detailWeight: 8);
         }
         foreach (var property in entity.Properties)
         {
@@ -1565,10 +1736,10 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 score += TextMatchScore(section.Title, term, titleWeight: 18, detailWeight: 8);
                 score += TextMatchScore(section.Body, term, titleWeight: 18, detailWeight: 10);
             }
-            foreach (var canonSource in entity.CanonSources)
+            foreach (var sourceEvidence in entity.SourceEvidence)
             {
-                score += TextMatchScore(canonSource.SourceTitle, term, titleWeight: 18, detailWeight: 8);
-                score += TextMatchScore(canonSource.Markdown, term, titleWeight: 18, detailWeight: 10);
+                score += TextMatchScore(sourceEvidence.SourceTitle, term, titleWeight: 18, detailWeight: 8);
+                score += TextMatchScore(sourceEvidence.Markdown, term, titleWeight: 18, detailWeight: 10);
             }
             foreach (var property in entity.Properties)
             {
@@ -1595,6 +1766,8 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         name = entity.Name,
         order = entity.Order,
         parentId = entity.ParentId,
+        origin = entity.IsIngestCreated ? "source-derived" : "project-owned",
+        entity.IsIngestCreated,
         matchScore = score,
         previewIsComplete = false,
         previewCounts = new
@@ -1602,7 +1775,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             summaryCharacters = entity.Summary?.Length ?? 0,
             aliases = entity.Aliases.Count,
             wikiSections = entity.WikiSections.Count,
-            canonSources = entity.CanonSources.Count,
+            sourceEvidence = entity.SourceEvidence.Count,
             properties = entity.Properties.Count,
             visuals = visuals?.Count ?? 0,
         },

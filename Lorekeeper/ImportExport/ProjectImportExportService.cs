@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using Lorekeeper.Context;
+using Lorekeeper.Ingest;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
@@ -46,13 +47,51 @@ public sealed class ProjectImportExportService(
         await entityTypeService.EnsureDefaultsAsync(projectId, cancellationToken);
         var exportedImageContextIds = await ListExportedImageContextIdsAsync(projectId, cancellationToken);
 
+        var canonSourceIds = await db.BookBriefCanonSources
+            .AsNoTracking()
+            .Where(selection => selection.BookBrief.ProjectId == projectId)
+            .Select(selection => selection.IngestSourceId)
+            .ToListAsync(cancellationToken);
+        var allProjectSourceIds = await db.IngestSources.AsNoTracking()
+            .Where(source => source.ProjectId == projectId)
+            .Select(source => source.Id)
+            .ToListAsync(cancellationToken);
+        var omittedSourceIds = (kind == ProjectExportKind.NonStructural
+                ? allProjectSourceIds
+                : allProjectSourceIds.Except(canonSourceIds))
+            .ToHashSet();
+        var exportedProvenanceIds = canonSourceIds
+            .Concat(await db.IngestSourceChunks.AsNoTracking()
+                .Where(chunk => canonSourceIds.Contains(chunk.SourceId))
+                .Select(chunk => chunk.Id)
+                .ToListAsync(cancellationToken))
+            .Concat(await db.IngestSourceBlocks.AsNoTracking()
+                .Where(block => canonSourceIds.Contains(block.SourceId))
+                .Select(block => block.Id)
+                .ToListAsync(cancellationToken))
+            .Select(id => id.ToString("N"))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var allNodes = await nodes.ListByProjectAsync(projectId, cancellationToken);
         var nodeById = allNodes.ToDictionary(node => node.Id);
         var includedNodeKeys = allNodes
-            .Where(node => ShouldExportNode(kind, node))
+            .Where(node => ShouldExportNode(kind, node, exportedProvenanceIds))
             .Select(NodeStableKey)
             .ToHashSet(StringComparer.Ordinal);
         var warnings = new List<string>();
+        var exportedIngestSources = kind == ProjectExportKind.Full
+            ? (await db.IngestSources
+                .AsNoTracking()
+                .Include(source => source.SourceChunks)
+                .Include(source => source.SourcePages)
+                .Include(source => source.SourceBlocks)
+                .Where(source => source.ProjectId == projectId && canonSourceIds.Contains(source.Id))
+                .OrderBy(source => source.Title)
+                .ToListAsync(cancellationToken))
+                .Select(ProjectIngestSource)
+                .ToList()
+            : [];
+        if (kind == ProjectExportKind.NonStructural && allProjectSourceIds.Count > 0)
+            warnings.Add($"Omitted {allProjectSourceIds.Count} ingested source body/bodies, all source evidence, and {canonSourceIds.Count} Book Brief canonical selection(s) from this non-structural export.");
         var visualExamples = await db.EntityVisualExamples
             .AsNoTracking()
             .Include(example => example.GraphNode)
@@ -83,7 +122,7 @@ public sealed class ProjectImportExportService(
             var toKey = NodeStableKey(to);
             if (includedNodeKeys.Contains(fromKey) && includedNodeKeys.Contains(toKey))
             {
-                exportedEdges.Add(ProjectEdge(edge, from, to));
+                exportedEdges.Add(ProjectEdge(edge, from, to, omittedSourceIds));
                 continue;
             }
 
@@ -137,6 +176,8 @@ public sealed class ProjectImportExportService(
                     brief.AccessibilityGoals,
                     brief.VisualDirection))
                 .SingleOrDefaultAsync(cancellationToken),
+            IngestSources = exportedIngestSources,
+            BookBriefCanonSourceIds = kind == ProjectExportKind.Full ? canonSourceIds : [],
             EntityTypes = (await entityTypes.ListByProjectAsync(projectId, cancellationToken))
                 .Where(type => ShouldExportType(kind, type))
                 .Select(ProjectEntityType)
@@ -279,7 +320,7 @@ public sealed class ProjectImportExportService(
                 : [],
             Nodes = allNodes
                 .Where(node => includedNodeKeys.Contains(NodeStableKey(node)))
-                .Select(ProjectNode)
+                .Select(node => ProjectNode(node, omittedSourceIds))
                 .ToList(),
             Edges = exportedEdges,
             Warnings = warnings,
@@ -378,17 +419,78 @@ public sealed class ProjectImportExportService(
         }
     }
 
-    private static bool ShouldExportNode(ProjectExportKind kind, GraphNode node) =>
-        kind == ProjectExportKind.Full || !NonStructuralExcludedNodeTypes.Contains(node.NodeType);
+    private static bool ShouldExportNode(
+        ProjectExportKind kind,
+        GraphNode node,
+        IReadOnlySet<string> exportedProvenanceIds)
+    {
+        if (kind == ProjectExportKind.NonStructural)
+            return !NonStructuralExcludedNodeTypes.Contains(node.NodeType);
+        if (node.NodeType is EntityTypeService.SourceNodeType
+            or EntityTypeService.SourceChunkNodeType
+            or EntityTypeService.SourceBlockNodeType)
+        {
+            return exportedProvenanceIds.Contains(node.Key);
+        }
+        return true;
+    }
 
     private static bool ShouldExportType(ProjectExportKind kind, GraphEntityType type) =>
         kind == ProjectExportKind.Full || !NonStructuralExcludedNodeTypes.Contains(type.Type);
 
-    private static ProjectExportNode ProjectNode(GraphNode node) =>
-        new(node.NodeType, node.Key, node.Label, new Dictionary<string, object?>(node.Properties), node.CreatedAt, node.UpdatedAt);
+    private static ProjectExportNode ProjectNode(GraphNode node, IReadOnlySet<Guid> omittedSourceIds)
+    {
+        var properties = new Dictionary<string, object?>(node.Properties);
+        foreach (var sourceId in omittedSourceIds)
+        {
+            IngestSourceAssertions.RemoveEntitySource(properties, sourceId);
+            IngestWikiSheet.RemoveSourceEvidence(properties, sourceId);
+        }
+        return new(node.NodeType, node.Key, node.Label, properties, node.CreatedAt, node.UpdatedAt);
+    }
 
-    private static ProjectExportEdge ProjectEdge(GraphEdge edge, GraphNode from, GraphNode to) =>
-        new(
+    private static ProjectExportIngestSource ProjectIngestSource(IngestSource source) => new(
+        source.Id,
+        source.Title,
+        source.SourceKind,
+        source.Description,
+        source.Synopsis,
+        source.UserInstructions,
+        source.SourceText,
+        source.SourceHash,
+        source.SourceUrl,
+        source.FinalUrl,
+        source.CanonicalUrl,
+        source.FetchedAt,
+        source.ContentType,
+        source.SourceMetadataJson,
+        source.CreatedAt,
+        source.UpdatedAt,
+        source.SourceChunks.OrderBy(chunk => chunk.Index).Select(chunk => new ProjectExportIngestSourceChunk(
+            chunk.Id, chunk.Index, chunk.Title, chunk.HeadingPath, chunk.StartChar, chunk.EndChar,
+            chunk.EstimatedTokenCount, chunk.TokenCountMethod, chunk.TokenEncodingName, chunk.TokenCountIsExact,
+            chunk.Summary, chunk.AgentNotes, chunk.StructureStatus, chunk.CreatedAt, chunk.UpdatedAt)).ToList(),
+        source.SourcePages.OrderBy(page => page.PageNumber).Select(page => new ProjectExportIngestSourcePage(
+            page.Id, page.PageNumber, page.Text, page.StartChar, page.EndChar, page.ExtractionMethod,
+            page.Width, page.Height, page.ImageHash, page.RenderSettingsJson, page.VisionProviderId,
+            page.VisionModelName, page.Diagnostics, page.CreatedAt)).ToList(),
+        source.SourceBlocks.OrderBy(block => block.Index).Select(block => new ProjectExportIngestSourceBlock(
+            block.Id, block.SourcePageId, block.Index, block.Kind, block.Title, block.Locator,
+            block.PageNumber, block.StartChar, block.EndChar, block.MetadataJson, block.CreatedAt)).ToList());
+
+    private static ProjectExportEdge ProjectEdge(
+        GraphEdge edge,
+        GraphNode from,
+        GraphNode to,
+        IReadOnlySet<Guid> omittedSourceIds)
+    {
+        var properties = new Dictionary<string, object?>(edge.Properties);
+        foreach (var sourceId in omittedSourceIds)
+        {
+            IngestSourceAssertions.RemoveRelationshipSource(properties, sourceId);
+            IngestWikiSheet.RemoveSourceEvidence(properties, sourceId);
+        }
+        return new(
             new ProjectExportNodeRef(from.NodeType, from.Key),
             new ProjectExportNodeRef(to.NodeType, to.Key),
             edge.EdgeType,
@@ -396,6 +498,7 @@ public sealed class ProjectImportExportService(
             edge.SortOrder,
             edge.CreatedAt,
             edge.UpdatedAt);
+    }
 
     private static ProjectExportEntityType ProjectEntityType(GraphEntityType type) =>
         new(

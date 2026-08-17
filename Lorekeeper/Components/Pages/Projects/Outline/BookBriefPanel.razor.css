@@ -113,6 +113,58 @@
     font-size: 0.68rem;
 }
 
+.book-brief-canon {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    margin-top: 0.85rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--bs-border-color);
+}
+
+.book-brief-canon-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.book-brief-canon-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem 0.65rem;
+    max-height: 12rem;
+    overflow-y: auto;
+}
+
+.book-brief-canon-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    min-width: 0;
+    padding: 0.35rem;
+    border-radius: 0.35rem;
+    background: var(--bs-tertiary-bg);
+    cursor: pointer;
+}
+
+.book-brief-canon-option > span {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+}
+
+.book-brief-canon-option strong,
+.book-brief-canon-option small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.book-brief-canon-option small {
+    color: var(--bs-secondary-color);
+}
+
 @media (max-width: 900px) {
     .book-brief-fields {
         grid-template-columns: minmax(0, 1fr);
@@ -120,5 +172,9 @@
 
     .book-brief-field-wide {
         grid-column: auto;
+    }
+
+    .book-brief-canon-list {
+        grid-template-columns: minmax(0, 1fr);
     }
 }

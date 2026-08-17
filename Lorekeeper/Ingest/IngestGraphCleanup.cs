@@ -52,10 +52,10 @@ IAppDatabaseOperationFactory database, IGraphStore graphStore) : IIngestGraphCle
             .Where(edge => !deletedEdgeIds.Contains(edge.Id))
             .Where(edge => edgeActions.ContainsKey(edge.Id)
                 || IngestSourceAssertions.ContainsRelationshipSource(edge.Properties, sourceId)
-                || IngestWikiSheet.ContainsCanonSource(edge.Properties, sourceId))
+                || IngestWikiSheet.ContainsSourceEvidence(edge.Properties, sourceId))
             .ToList())
         {
-            var canonChanged = IngestWikiSheet.RemoveCanonSource(edge.Properties, sourceId);
+            var canonChanged = IngestWikiSheet.RemoveSourceEvidence(edge.Properties, sourceId);
             var wikiChanged = IngestWikiSheet.RemoveSourceCitations(edge.Properties, sourceId);
             var removal = IngestSourceAssertions.ContainsRelationshipSource(edge.Properties, sourceId)
                 ? IngestSourceAssertions.RemoveRelationshipSource(edge.Properties, sourceId)
@@ -82,10 +82,10 @@ IAppDatabaseOperationFactory database, IGraphStore graphStore) : IIngestGraphCle
         foreach (var node in projectNodes
             .Where(node => nodeActions.ContainsKey(node.Id)
                 || IngestSourceAssertions.ContainsEntitySource(node.Properties, sourceId)
-                || IngestWikiSheet.ContainsCanonSource(node.Properties, sourceId))
+                || IngestWikiSheet.ContainsSourceEvidence(node.Properties, sourceId))
             .ToList())
         {
-            var canonChanged = IngestWikiSheet.RemoveCanonSource(node.Properties, sourceId);
+            var canonChanged = IngestWikiSheet.RemoveSourceEvidence(node.Properties, sourceId);
             var wikiChanged = IngestWikiSheet.RemoveSourceCitations(node.Properties, sourceId);
             var removal = IngestSourceAssertions.ContainsEntitySource(node.Properties, sourceId)
                 ? IngestSourceAssertions.RemoveEntitySource(node.Properties, sourceId)
@@ -197,7 +197,7 @@ IAppDatabaseOperationFactory database, IGraphStore graphStore) : IIngestGraphCle
             return false;
         if (IngestSourceAssertions.CountEntitySources(node.Properties) > 0)
             return false;
-        if (IngestWikiSheet.HasCanonSources(node.Properties))
+        if (IngestWikiSheet.HasSourceEvidence(node.Properties))
             return false;
         if (IngestWikiSheet.HasCitations(node.Properties))
             return false;
@@ -214,7 +214,7 @@ IAppDatabaseOperationFactory database, IGraphStore graphStore) : IIngestGraphCle
             return false;
         if (IngestSourceAssertions.CountRelationshipSources(edge.Properties) > 0)
             return false;
-        if (IngestWikiSheet.HasCanonSources(edge.Properties))
+        if (IngestWikiSheet.HasSourceEvidence(edge.Properties))
             return false;
         if (IngestWikiSheet.HasCitations(edge.Properties))
             return false;

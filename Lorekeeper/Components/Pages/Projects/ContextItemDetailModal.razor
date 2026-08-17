@@ -436,7 +436,7 @@
             <EntityKnowledgeView Summary="@_entity.Summary"
                                  Aliases="@_entity.Aliases"
                                  WikiSections="@_entity.WikiSections"
-                                 CanonSources="@_entity.CanonSources" />
+                                 SourceEvidence="@_entity.SourceEvidence" />
             <EntityVisualExamples ProjectId="@ProjectId" EntityId="@_entity.Id" Editable="@AllowEntityEdit" />
             @RenderEntityLinks()
         }
@@ -829,9 +829,9 @@
                         <span class="context-detail-link-edge">@link.EdgeType</span>
                         <span class="context-detail-link-other">@link.OtherEntityName</span>
                         <span class="context-detail-link-type text-muted small">@link.OtherEntityType</span>
-                        @if (link.CanonSourceCount > 0)
+                        @if (link.SourceEvidenceCount > 0)
                         {
-                            <span class="context-detail-link-badge">@link.CanonSourceCount canon source@(PluralSuffix(link.CanonSourceCount))</span>
+                            <span class="context-detail-link-badge">@link.SourceEvidenceCount source evidence@(PluralSuffix(link.SourceEvidenceCount))</span>
                         }
                         else if (link.IsIngestCreated)
                         {

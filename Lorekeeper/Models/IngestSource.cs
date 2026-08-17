@@ -35,6 +35,7 @@ public class IngestSource
     public ICollection<IngestJob> Jobs { get; set; } = [];
     public ICollection<IngestStagingRecord> StagingRecords { get; set; } = [];
     public ICollection<SourceVisualCandidate> VisualCandidates { get; set; } = [];
+    public ICollection<BookBriefCanonSource> BookBriefCanonSelections { get; set; } = [];
 
     public string VectorSourceId => Id.ToString("N");
 }

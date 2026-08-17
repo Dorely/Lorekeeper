@@ -135,7 +135,7 @@ IAppDatabaseOperationFactory database, IEntityService entities, IGraphStore grap
                 string body,
                 string? notes = null) => WriteIngestSourceWikiSectionAsync(context, body, notes),
             name: "write_ingest_source_wiki_section",
-            description: "Write exactly one source-specific canon markdown page for this entity. Replaces only the canonSource property for this ingest source and preserves other source/manual canon."),
+            description: "Write exactly one source-specific canon markdown page for this entity. Replaces only the sourceEvidence property for this ingest source and preserves other source/manual canon."),
     ];
 
     private async Task<string> ListProjectEntityIndexAsync(IngestAgentContext context, string? type, string? cursor, int? limit)
@@ -489,7 +489,7 @@ IAppDatabaseOperationFactory database, IEntityService entities, IGraphStore grap
         var node = await ResolveAllowedEntityNodeAsync(context.ProjectId, context.EntityId);
         if (node is null) return $"Error: entity {context.EntityId} is not a non-structural project entity.";
 
-        IngestWikiSheet.UpsertCanonSourceMarkdown(
+        IngestWikiSheet.UpsertSourceEvidenceMarkdown(
             node.Properties,
             context.SourceId,
             context.SourceTitle,
@@ -509,7 +509,7 @@ IAppDatabaseOperationFactory database, IEntityService entities, IGraphStore grap
             sourceTitle = context.SourceTitle,
             bodyChars = body.Trim().Length,
             canonicalSummaryUpdated = false,
-            canonSourceUpdated = true,
+            sourceEvidenceUpdated = true,
         });
     }
 

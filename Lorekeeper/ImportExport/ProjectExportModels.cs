@@ -27,7 +27,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 22;
+    public const int CurrentFormatVersion = 23;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -36,6 +36,8 @@ public sealed record ProjectExportDocument
     public required ProjectExportProject Project { get; init; }
     public ProjectExportPageSetup? PageSetup { get; init; }
     public ProjectExportBookBrief? BookBrief { get; init; }
+    public List<ProjectExportIngestSource> IngestSources { get; init; } = [];
+    public List<Guid> BookBriefCanonSourceIds { get; init; } = [];
     public List<ProjectExportEntityType> EntityTypes { get; init; } = [];
     public List<ProjectExportImage> Images { get; init; } = [];
     public List<ProjectExportEntityVisualExample> EntityVisualExamples { get; init; } = [];
@@ -103,6 +105,73 @@ public sealed record ProjectExportBookBrief(
     bool? ReadAloudPriority,
     string AccessibilityGoals,
     string VisualDirection);
+
+public sealed record ProjectExportIngestSource(
+    Guid Id,
+    string Title,
+    string SourceKind,
+    string Description,
+    string Synopsis,
+    string UserInstructions,
+    string SourceText,
+    string SourceHash,
+    string SourceUrl,
+    string FinalUrl,
+    string CanonicalUrl,
+    DateTime? FetchedAt,
+    string ContentType,
+    string SourceMetadataJson,
+    DateTime CreatedAt,
+    DateTime UpdatedAt,
+    List<ProjectExportIngestSourceChunk> Chunks,
+    List<ProjectExportIngestSourcePage> Pages,
+    List<ProjectExportIngestSourceBlock> Blocks);
+
+public sealed record ProjectExportIngestSourceChunk(
+    Guid Id,
+    int Index,
+    string Title,
+    string HeadingPath,
+    int StartChar,
+    int EndChar,
+    int EstimatedTokenCount,
+    string TokenCountMethod,
+    string? TokenEncodingName,
+    bool TokenCountIsExact,
+    string Summary,
+    string AgentNotes,
+    IngestSourceChunkStructureStatus StructureStatus,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+public sealed record ProjectExportIngestSourcePage(
+    Guid Id,
+    int PageNumber,
+    string Text,
+    int StartChar,
+    int EndChar,
+    string ExtractionMethod,
+    int Width,
+    int Height,
+    string ImageHash,
+    string RenderSettingsJson,
+    int? VisionProviderId,
+    string VisionModelName,
+    string Diagnostics,
+    DateTime CreatedAt);
+
+public sealed record ProjectExportIngestSourceBlock(
+    Guid Id,
+    Guid? SourcePageId,
+    int Index,
+    string Kind,
+    string Title,
+    string Locator,
+    int? PageNumber,
+    int StartChar,
+    int EndChar,
+    string MetadataJson,
+    DateTime CreatedAt);
 
 public sealed record ProjectExportEntityType(
     string Type,

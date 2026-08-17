@@ -498,7 +498,7 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         foreach (var property in node.Properties
             .Where(property => !IngestSourceAssertions.IsProtectedProperty(property.Key)
                 && !IngestWikiSheet.IsWikiStorageProperty(property.Key)
-                && !IngestWikiSheet.IsCanonSourceProperty(property.Key)
+                && !IngestWikiSheet.IsSourceEvidenceProperty(property.Key)
                 && !string.IsNullOrWhiteSpace(property.Value?.ToString()))
             .OrderBy(property => property.Key, StringComparer.OrdinalIgnoreCase))
         {
@@ -512,9 +512,9 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         foreach (var section in IngestWikiSheet.ReadSections(node.Properties))
             sb.Append(section.Title).Append(": ").AppendLine(section.Body);
 
-        foreach (var source in IngestWikiSheet.ReadCanonSources(node.Properties))
+        foreach (var source in IngestWikiSheet.ReadSourceEvidence(node.Properties))
         {
-            sb.Append("Canon source: ").Append(source.SourceTitle).Append(" (").Append(source.SourceKind).AppendLine(")");
+            sb.Append("Source evidence: ").Append(source.SourceTitle).Append(" (").Append(source.SourceKind).AppendLine(")");
             sb.AppendLine(source.Markdown);
         }
 

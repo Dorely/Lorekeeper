@@ -466,7 +466,7 @@ IAppDatabaseOperationFactory database, IEditorContextService editorContext,
             || Contains(entity.Summary, query)
             || entity.Aliases.Any(alias => Contains(alias, query))
             || entity.WikiSections.Any(section => Contains(section.Title, query) || Contains(section.Body, query))
-            || entity.CanonSources.Any(source => Contains(source.SourceTitle, query) || Contains(source.Markdown, query))
+            || entity.SourceEvidence.Any(source => Contains(source.SourceTitle, query) || Contains(source.Markdown, query))
             || entity.Properties.Any(property => Contains(property.Key, query) || Contains(property.Value, query))
             ? DetailSearchRank
             : null;

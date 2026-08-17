@@ -65,16 +65,44 @@ IAppDatabaseOperationFactory database, Guid projectId, Guid conversationId, AiCh
     {
         await EnsureLoadedAsync(cancellationToken);
 
+        var chapterDetails = new Dictionary<Guid, object>();
+        foreach (var chapter in _chapters.Values.Where(chapter => !chapter.Deleted))
+        {
+            var chapterLinks = await ListEntityLinksCoreAsync(chapter.Id, cancellationToken);
+            var beatPayloads = new List<object>();
+            foreach (var beat in _entities.Values.Where(entity =>
+                !entity.Deleted
+                && string.Equals(entity.Type, _eventNodeType, StringComparison.OrdinalIgnoreCase)
+                && entity.ParentId == chapter.Id).OrderBy(entity => entity.Order))
+            {
+                var beatLinks = await ListEntityLinksCoreAsync(beat.Id, cancellationToken);
+                beatPayloads.Add(new
+                {
+                    id = beat.Id,
+                    order = beat.Order,
+                    name = beat.Name,
+                    summary = beat.Summary,
+                    attachedEntities = beatLinks
+                        .Where(link => !string.Equals(link.EdgeType, EntityService.HasChildEdgeType, StringComparison.OrdinalIgnoreCase))
+                        .Select(LinkPayload),
+                });
+            }
+            chapterDetails[chapter.Id] = new
+            {
+                relevantEntities = chapterLinks
+                    .Where(link => string.Equals(link.EdgeType, EntityService.RelevantToEdgeType, StringComparison.OrdinalIgnoreCase))
+                    .Select(link => new { id = link.OtherEntityId, type = link.OtherEntityType, name = link.OtherEntityName }),
+                beats = beatPayloads,
+            };
+        }
+
         object ProjectChapter(ChapterState chapter) => new
         {
             id = chapter.Id,
             order = chapter.Order,
             title = chapter.Title,
             synopsis = chapter.Synopsis,
-            beatCount = _entities.Values.Count(entity =>
-                !entity.Deleted
-                && string.Equals(entity.Type, _eventNodeType, StringComparison.OrdinalIgnoreCase)
-                && entity.ParentId == chapter.Id),
+            detail = chapterDetails[chapter.Id],
         };
 
         var activeChapters = _chapters.Values.Where(chapter => !chapter.Deleted).ToList();
@@ -131,6 +159,41 @@ IAppDatabaseOperationFactory database, Guid projectId, Guid conversationId, AiCh
                 isChapterScoped = type.IsChapterScoped,
                 defaultProperties = type.DefaultProperties,
             }));
+    }
+
+    public async Task<string> ListEntitiesAsync(string? type, int page, CancellationToken cancellationToken = default)
+    {
+        await EnsureLoadedAsync(cancellationToken);
+        const int pageSize = 20;
+        page = Math.Max(1, page);
+        var typeNames = SearchableTypeNames(type);
+        var ordered = _entities.Values
+            .Where(entity => !entity.Deleted && typeNames.Contains(entity.Type))
+            .OrderBy(entity => entity.Type, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(entity => entity.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var items = ordered.Skip((page - 1) * pageSize).Take(pageSize).Select(entity => new
+        {
+            id = entity.Id,
+            type = entity.Type,
+            name = entity.Name,
+            origin = entity.IsIngestCreated ? "source-derived" : "project-owned",
+            entity.IsIngestCreated,
+            sourceEvidenceCount = entity.SourceEvidence.Count,
+            state = "staged",
+            detailReadTool = "read_entity",
+            detailReadArguments = new { entityId = entity.Id, pageNumber = 1 },
+        }).ToList();
+        return Serialize(new
+        {
+            page,
+            pageSize,
+            total = ordered.Count,
+            returned = items.Count,
+            isComplete = page * pageSize >= ordered.Count,
+            items,
+            nextPageArguments = page * pageSize < ordered.Count ? new { type, page = page + 1 } : null,
+        });
     }
 
     public async Task<string> SearchEntitiesAsync(string query, int topK, string? type, Guid? parentId, CancellationToken cancellationToken = default)
@@ -200,11 +263,13 @@ IAppDatabaseOperationFactory database, Guid projectId, Guid conversationId, AiCh
 
         var detail = JsonSerializer.SerializeToNode(new
         {
+            origin = entity.IsIngestCreated ? "source-derived" : "project-owned",
+            entity.IsIngestCreated,
             properties = entity.Properties,
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
-            canonSources = entity.CanonSources,
+            sourceEvidence = entity.SourceEvidence,
             canonicalVisualReferences = visualExamples.Select(example => new
             {
                 example.Id,
@@ -570,7 +635,8 @@ IAppDatabaseOperationFactory database, Guid projectId, Guid conversationId, AiCh
             created.Summary,
             created.Aliases,
             created.WikiSections,
-            created.CanonSources,
+            created.SourceEvidence,
+            created.IsIngestCreated,
             Deleted: false);
         _entities[entity.Id] = entity;
         MarkDirectlyCreated(Resource("Entity", entity.Id));
@@ -598,7 +664,8 @@ IAppDatabaseOperationFactory database, Guid projectId, Guid conversationId, AiCh
                 updated.Summary,
                 updated.Aliases,
                 updated.WikiSections,
-                updated.CanonSources,
+                updated.SourceEvidence,
+                updated.IsIngestCreated,
                 Deleted: false);
             onDirectMutationApplied?.Invoke();
             return Serialize(EntityMutationPayload(_entities[updated.Id]));
@@ -726,10 +793,17 @@ IAppDatabaseOperationFactory database, Guid projectId, Guid conversationId, AiCh
         if (!CanResolveEntityOrChapter(fromId)) return $"Error: source entity {fromId} not found in this project.";
         if (!CanResolveEntityOrChapter(toId)) return $"Error: target entity {toId} not found in this project.";
 
+        var normalizedEdgeType = edgeType.Trim();
+        if (string.Equals(normalizedEdgeType, "AppearsIn", StringComparison.OrdinalIgnoreCase)
+            && TryGetEndpoint(toId, out var target)
+            && string.Equals(target.Type, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase))
+        {
+            normalizedEdgeType = EntityService.RelevantToEdgeType;
+        }
         var link = new OutlineEntityLinkChange(
             fromId,
             toId,
-            edgeType.Trim(),
+            normalizedEdgeType,
             new Dictionary<string, string?>(properties ?? [], StringComparer.OrdinalIgnoreCase));
         var linkState = new LinkState(
             _nextSyntheticLinkId--,
@@ -814,7 +888,8 @@ IAppDatabaseOperationFactory database, Guid projectId, Guid conversationId, AiCh
                 entity.Summary,
                 entity.Aliases,
                 entity.WikiSections,
-                entity.CanonSources,
+                entity.SourceEvidence,
+                entity.IsIngestCreated,
                 Deleted: false);
         }
     }
@@ -966,14 +1041,18 @@ IAppDatabaseOperationFactory database, Guid projectId, Guid conversationId, AiCh
             existing = EntityMutationPayload(duplicate),
         }));
 
-    private static object EntityMutationPayload(EntityState entity) =>
-        OutlineMutationPayloads.Entity(
-            entity.Id,
-            entity.Type,
-            entity.Name,
-            entity.Order,
-            entity.ParentId,
-            entity.Properties);
+    private static object EntityMutationPayload(EntityState entity) => new
+    {
+        id = entity.Id,
+        type = entity.Type,
+        name = entity.Name,
+        order = entity.Order,
+        parentId = entity.ParentId,
+        properties = entity.Properties,
+        origin = entity.IsIngestCreated ? "source-derived" : "project-owned",
+        entity.IsIngestCreated,
+        sourceEvidence = entity.SourceEvidence,
+    };
 
     private object EndpointMutationPayload(Guid entityId)
     {
@@ -1314,10 +1393,10 @@ IAppDatabaseOperationFactory database, Guid projectId, Guid conversationId, AiCh
             score += TextMatchScore(section.Title, query, titleWeight: 12, detailWeight: 6);
             score += TextMatchScore(section.Body, query, titleWeight: 12, detailWeight: 8);
         }
-        foreach (var canonSource in entity.CanonSources)
+        foreach (var sourceEvidence in entity.SourceEvidence)
         {
-            score += TextMatchScore(canonSource.SourceTitle, query, titleWeight: 12, detailWeight: 6);
-            score += TextMatchScore(canonSource.Markdown, query, titleWeight: 12, detailWeight: 8);
+            score += TextMatchScore(sourceEvidence.SourceTitle, query, titleWeight: 12, detailWeight: 6);
+            score += TextMatchScore(sourceEvidence.Markdown, query, titleWeight: 12, detailWeight: 8);
         }
         foreach (var property in entity.Properties)
         {
@@ -1337,10 +1416,10 @@ IAppDatabaseOperationFactory database, Guid projectId, Guid conversationId, AiCh
                 score += TextMatchScore(section.Title, term, titleWeight: 18, detailWeight: 8);
                 score += TextMatchScore(section.Body, term, titleWeight: 18, detailWeight: 10);
             }
-            foreach (var canonSource in entity.CanonSources)
+            foreach (var sourceEvidence in entity.SourceEvidence)
             {
-                score += TextMatchScore(canonSource.SourceTitle, term, titleWeight: 18, detailWeight: 8);
-                score += TextMatchScore(canonSource.Markdown, term, titleWeight: 18, detailWeight: 10);
+                score += TextMatchScore(sourceEvidence.SourceTitle, term, titleWeight: 18, detailWeight: 8);
+                score += TextMatchScore(sourceEvidence.Markdown, term, titleWeight: 18, detailWeight: 10);
             }
             foreach (var property in entity.Properties)
             {
@@ -1367,6 +1446,8 @@ IAppDatabaseOperationFactory database, Guid projectId, Guid conversationId, AiCh
         name = entity.Name,
         order = entity.Order,
         parentId = entity.ParentId,
+        origin = entity.IsIngestCreated ? "source-derived" : "project-owned",
+        entity.IsIngestCreated,
         matchScore = score,
         previewIsComplete = false,
         previewCounts = new
@@ -1374,7 +1455,7 @@ IAppDatabaseOperationFactory database, Guid projectId, Guid conversationId, AiCh
             summaryCharacters = entity.Summary?.Length ?? 0,
             aliases = entity.Aliases.Count,
             wikiSections = entity.WikiSections.Count,
-            canonSources = entity.CanonSources.Count,
+            sourceEvidence = entity.SourceEvidence.Count,
             properties = entity.Properties.Count,
         },
         preview = new
@@ -1472,7 +1553,8 @@ IAppDatabaseOperationFactory database, Guid projectId, Guid conversationId, AiCh
         string Summary,
         IReadOnlyList<string> Aliases,
         IReadOnlyList<IngestWikiSection> WikiSections,
-        IReadOnlyList<IngestCanonSource> CanonSources,
+        IReadOnlyList<IngestSourceEvidence> SourceEvidence,
+        bool IsIngestCreated,
         bool Deleted)
     {
         public string Name { get; set; } = Name;

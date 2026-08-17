@@ -23,6 +23,12 @@ external tools.
 - Retrieve the most relevant canon and prior text for each task.
 - Keep authorial direction, Book Brief, source provenance, and generated output
   visible and correctable.
+- Let authors explicitly select which ingested sources are canonical grounding;
+  assistants may mine every other source as evidence but must surface conflicts
+  instead of silently promoting evidence or overriding current story direction.
+- Keep every durable canonical person, place, thing, organization, culture,
+  system, concept, ritual, and historical event represented and associated with
+  every chapter it materially affects so later drafting receives the right canon.
 - Detect contradictions and help the author resolve them without silently
   rewriting canon.
 

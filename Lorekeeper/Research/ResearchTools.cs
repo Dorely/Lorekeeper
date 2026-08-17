@@ -264,7 +264,7 @@ public sealed class ResearchTools(
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
-            canonSources = entity.CanonSources,
+            sourceEvidence = entity.SourceEvidence,
             canonicalVisualReferences = canonicalVisualReferences.Select(VisualPayload),
             manualLinks,
             autoMentionLinks,

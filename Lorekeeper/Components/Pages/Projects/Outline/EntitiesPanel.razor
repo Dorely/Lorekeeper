@@ -76,9 +76,9 @@
                             }
                             <button type="button" class="entities-item-name"
                                     @onclick="() => OpenModalAsync(e)">@e.Name</button>
-                            @if (e.CanonSourceCount > 0)
+                            @if (e.SourceEvidenceCount > 0)
                             {
-                                <div class="entities-item-meta small">@e.CanonSourceCount canon source@(PluralSuffix(e.CanonSourceCount))</div>
+                                <div class="entities-item-meta small">@e.SourceEvidenceCount source evidence@(PluralSuffix(e.SourceEvidenceCount))</div>
                             }
                             @if (_visuals.GetValueOrDefault(e.Id) is { Count: > 0 } entityVisuals)
                             {
@@ -151,7 +151,7 @@
                     <EntityKnowledgeView Summary="@_modalEntity.Summary"
                                          Aliases="@_modalEntity.Aliases"
                                          WikiSections="@_modalEntity.WikiSections"
-                                         CanonSources="@_modalEntity.CanonSources" />
+                                         SourceEvidence="@_modalEntity.SourceEvidence" />
 
                     <div class="mb-3">
                         <EntityVisualExamples ProjectId="@ProjectId" EntityId="@_modalEntity.Id" Editable="true" />
@@ -175,9 +175,9 @@
                                         <span class="entities-modal-link-edge">@link.EdgeType</span>
                                         <span class="entities-modal-link-other">@link.OtherEntityName</span>
                                         <span class="entities-modal-link-type text-muted small">@link.OtherEntityType</span>
-                                        @if (link.CanonSourceCount > 0)
+                                        @if (link.SourceEvidenceCount > 0)
                                         {
-                                            <span class="entities-modal-link-badge">@link.CanonSourceCount canon source@(PluralSuffix(link.CanonSourceCount))</span>
+                                            <span class="entities-modal-link-badge">@link.SourceEvidenceCount source evidence@(PluralSuffix(link.SourceEvidenceCount))</span>
                                         }
                                         else if (link.IsIngestCreated)
                                         {

@@ -117,6 +117,14 @@ exact-name and alias mentions are low-priority, read-only `AutoMention` edges;
 manual and structural mutations must pass through their owning services so graph
 state and retrieval indexes remain synchronized.
 
+Manual entity-to-chapter context uses the `RelevantTo` edge. `AppearsIn` remains
+an Event/beat relationship. Existing `AppearsIn` edges targeting Chapter nodes
+are migrated forward to `RelevantTo`. Outline instructions require a chapter
+link for every canonical entity that appears, affects, constrains, or otherwise
+matters there; beat links may add detail but do not replace the chapter link.
+Editor automatic context traverses the active Chapter and its beats, so these
+direct chapter associations are the primary handoff from outlining to drafting.
+
 `IProjectSearchService` combines FTS5 keyword results with sqlite-vec semantic
 results. `IContextIndexingService`, ingest indexing, chapter services, and the
 embedding rebuild worker maintain retrievable rows. Changing a model, graph
@@ -240,8 +248,12 @@ turn with a concurrent-disposal `NotSupportedException`. Tool contracts,
 prompts, persistence, review UI, and approval behavior must evolve together.
 
 Outline Chat is a structural-planning and canon surface. Its normal system
-prompt includes Project Guidance, the Book Brief, and structure-only
-genre/audience guidance; publication releases are not queried or injected.
+prompt includes Project Guidance, the Book Brief, structure-only genre/audience
+guidance, the complete current acts/chapters/synopses/beats/project facts,
+chapter and beat entity associations, every non-structural entity category with
+project-owned/source-derived counts and sample identities, and a compact source
+inventory. Publication releases are not queried or injected. One shared context
+builder supplies both prompt preview and live turns so they cannot drift.
 Outline can mutate the Book Brief, acts, chapters, synopses, beats, entities,
 links, and project facts, and can search/read project sources. Chapter-body
 reads are available only for explicitly relevant reconciliation or inference,
@@ -252,6 +264,16 @@ Canonical-appearance generation is the sole Outline image workflow: it produces
 an unattached project image without geometry, then a separate entity-reference
 tool attaches the inspected result. Publication-aware book-format guidance is
 available only through an explicit on-demand scope.
+
+`BookBriefCanonSource` is a relational selection keyed to an actual
+`IngestSource`; deleting the source cascades the selection. Selected sources are
+canonical grounding. Unselected sources remain searchable evidence and are not
+canon unless the user says so. Explicit user direction, then current Book Brief
+and outline state, take precedence over conflicting source claims, and the
+assistant reports the conflict. Outline exposes concise paginated ingest-source
+and entity inventories plus full paginated reads and focused hybrid search.
+Canonical-source selection changes only through the Book Brief UI or the
+explicit-user-request tool.
 
 `OutlineCollaborationTools` owns a shared structural/canon catalog and exposes
 intentional surface subsets rather than making Editor filter the entire Outline
@@ -781,7 +803,8 @@ version changes.
 Archived releases are immutable at every owning mutation boundary; their
 existing artifacts remain readable and exportable, and cloning creates the
 editable continuation.
-Project export v22 writes manuscript-v4 documents, project page setup, page
+Project export v23 writes manuscript-v4 documents, selected canonical ingest
+source bodies/evidence and Book Brief mappings, project page setup, page
 compositions and exact geometry variants with active authoring variants, Core
 Book, sparse release overlays and cover scenes, Book Text Styles,
 edition chapter snapshots, publication sections, sparse release section-order overlays and their compositions, visual references,
@@ -1277,6 +1300,17 @@ binary assets. SQLite startup applies a busy timeout and WAL journal mode.
 sqlite-vec and internal FTS5 structures are initialized outside normal EF
 migrations.
 
+Project export format v23 includes only Book Brief-selected canonical ingest
+sources in Full exports: source records/text, chunks, pages, blocks, metadata,
+and the selection mapping. Jobs, staging rows, temporary visual candidates, and
+unselected source bodies/provenance are excluded. Import remaps source and child
+IDs inside graph evidence/citations, restores the selection, rebuilds lexical and
+context indexes, and marks then rebuilds provider search vectors without rerunning
+ingest extraction. Non-structural exports omit all source bodies,
+selections, and source evidence and include a warning. The v22-and-earlier import
+adapter translates persisted `canonSource.*` keys to `sourceEvidence.*`; runtime
+models and tool payloads expose only the new provenance terminology.
+
 Runtime code receives `IAppDatabaseOperationFactory`, never a circuit-scoped
 `AppDbContext`. `OpenReadAsync` creates a no-tracking context for one database
 block, and callers fully materialize entities or DTOs before disposal.
@@ -1447,11 +1481,12 @@ validates metadata/content projections, row counts, scene objects, packages,
 artifact bytes/hashes, and foreign keys before the cleanup migration removes
 runtime paper/binding/ink columns and the universal spine-caliper path.
 
-Project export v22 contains only the current v4/page-setup/composition model,
+Project export v23 contains only the current v4/page-setup/composition model,
 Core Book, sparse release overlays, edition chapter snapshots, edition-owned
 compositions, publication sections, target-aware publication records, resolved
 print-product selections, Generic printer templates, and independent cover
-surface scenes; authoring-history streams, entries, selections, dependencies,
+surface scenes, plus Book Brief-selected canonical source bodies and evidence;
+authoring-history streams, entries, selections, dependencies,
 and open assistant batches are excluded. Older formats remain importable only
 through isolated versioned transformers.
 Human-readable language names from Book Briefs and publication inputs are

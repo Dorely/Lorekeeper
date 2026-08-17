@@ -190,9 +190,9 @@ public sealed class ImagesChatTools(
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
-            canonSources = entity.CanonSources,
+            sourceEvidence = entity.SourceEvidence,
             entity.IsIngestCreated,
-            entity.CanonSourceCount,
+            entity.SourceEvidenceCount,
             links = links.Select(link => new
             {
                 link.EdgeId,

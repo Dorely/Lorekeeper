@@ -64,6 +64,48 @@
                     @RenderField("Accessibility goals", _brief.AccessibilityGoals, wide: true)
                     @RenderField("Visual direction", _brief.VisualDirection, wide: true)
                 </div>
+                <div class="book-brief-canon">
+                    <div class="book-brief-canon-heading">
+                        <div>
+                            <strong>Canonical sources</strong>
+                            <div class="text-muted small">Selected sources are treated as canon by Outline Chat. Other ingested sources remain searchable evidence.</div>
+                        </div>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary"
+                                disabled="@_savingSources"
+                                @onclick="SaveCanonSourcesAsync">
+                            @(_savingSources ? "Saving..." : "Save sources")
+                        </button>
+                    </div>
+                    @if (_sourceOptions.Count == 0)
+                    {
+                        <div class="text-muted small"><em>No ingested sources are available.</em></div>
+                    }
+                    else
+                    {
+                        <div class="book-brief-canon-list">
+                            @foreach (var source in _sourceOptions)
+                            {
+                                <label class="book-brief-canon-option">
+                                    <input type="checkbox"
+                                           checked="@_selectedSourceIds.Contains(source.SourceId)"
+                                           @onchange="args => ToggleSource(source.SourceId, args.Value is true)" />
+                                    <span>
+                                        <strong>@source.Title</strong>
+                                        @if (!string.IsNullOrWhiteSpace(source.SourceKind))
+                                        {
+                                            <small>@source.SourceKind</small>
+                                        }
+                                    </span>
+                                </label>
+                            }
+                        </div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_sourceStatus))
+                    {
+                        <div class="small @(_sourceSaveFailed ? "text-danger" : "text-success")">@_sourceStatus</div>
+                    }
+                </div>
                 <div class="book-brief-updated text-muted">Updated @_brief.UpdatedAt.ToLocalTime().ToString("g")</div>
             }
         </div>
@@ -80,6 +122,11 @@
     private bool _loading;
     private bool _collapsed;
     private string? _error;
+    private IReadOnlyList<BookBriefCanonSourceOption> _sourceOptions = [];
+    private HashSet<Guid> _selectedSourceIds = [];
+    private bool _savingSources;
+    private bool _sourceSaveFailed;
+    private string? _sourceStatus;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -98,6 +145,11 @@
         try
         {
             _brief = await BookBriefs.GetOrCreateAsync(ProjectId);
+            _sourceOptions = await BookBriefs.ListCanonSourceOptionsAsync(ProjectId);
+            _selectedSourceIds = _sourceOptions
+                .Where(source => source.IsSelected)
+                .Select(source => source.SourceId)
+                .ToHashSet();
         }
         catch (Exception ex)
         {
@@ -106,6 +158,38 @@
         finally
         {
             _loading = false;
+        }
+    }
+
+    private void ToggleSource(Guid sourceId, bool selected)
+    {
+        if (selected)
+            _selectedSourceIds.Add(sourceId);
+        else
+            _selectedSourceIds.Remove(sourceId);
+        _sourceStatus = null;
+    }
+
+    private async Task SaveCanonSourcesAsync()
+    {
+        _savingSources = true;
+        _sourceStatus = null;
+        _sourceSaveFailed = false;
+        try
+        {
+            await BookBriefs.ReplaceCanonSourcesAsync(ProjectId, _selectedSourceIds);
+            _sourceOptions = await BookBriefs.ListCanonSourceOptionsAsync(ProjectId);
+            _brief = await BookBriefs.GetOrCreateAsync(ProjectId);
+            _sourceStatus = $"Saved {_selectedSourceIds.Count} canonical source{(_selectedSourceIds.Count == 1 ? string.Empty : "s")}.";
+        }
+        catch (Exception ex)
+        {
+            _sourceSaveFailed = true;
+            _sourceStatus = ex.Message;
+        }
+        finally
+        {
+            _savingSources = false;
         }
     }
 

@@ -668,7 +668,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
                     summaryCharacters = match.Entity.Summary?.Length ?? 0,
                     aliases = match.Entity.Aliases.Count,
                     wikiSections = match.Entity.WikiSections.Count,
-                    canonSources = match.Entity.CanonSources.Count,
+                    sourceEvidence = match.Entity.SourceEvidence.Count,
                     properties = match.Entity.Properties.Count,
                 },
                 preview = new
@@ -676,7 +676,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
                     summaryText = TruncatePropertyValue(match.Entity.Summary),
                     aliases = match.Entity.Aliases.Take(8).ToArray(),
                     wikiSections = CompactWikiSections(match.Entity.WikiSections),
-                    canonSources = CompactCanonSources(match.Entity.CanonSources),
+                    sourceEvidence = CompactSourceEvidence(match.Entity.SourceEvidence),
                     properties = match.Entity.Properties,
                 },
                 detailReadTool = "read_entity",
@@ -703,7 +703,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
-            canonSources = entity.CanonSources,
+            sourceEvidence = entity.SourceEvidence,
             canonicalVisualReferences = visualExamples.Select(example => new
             {
                 example.Id,
@@ -1093,10 +1093,10 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             score += TextMatchScore(section.Title, query, titleWeight: 12, detailWeight: 6);
             score += TextMatchScore(section.Body, query, titleWeight: 12, detailWeight: 8);
         }
-        foreach (var canonSource in entity.CanonSources)
+        foreach (var sourceEvidence in entity.SourceEvidence)
         {
-            score += TextMatchScore(canonSource.SourceTitle, query, titleWeight: 12, detailWeight: 6);
-            score += TextMatchScore(canonSource.Markdown, query, titleWeight: 12, detailWeight: 8);
+            score += TextMatchScore(sourceEvidence.SourceTitle, query, titleWeight: 12, detailWeight: 6);
+            score += TextMatchScore(sourceEvidence.Markdown, query, titleWeight: 12, detailWeight: 8);
         }
         foreach (var property in entity.Properties)
         {
@@ -1116,10 +1116,10 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
                 score += TextMatchScore(section.Title, term, titleWeight: 18, detailWeight: 8);
                 score += TextMatchScore(section.Body, term, titleWeight: 18, detailWeight: 10);
             }
-            foreach (var canonSource in entity.CanonSources)
+            foreach (var sourceEvidence in entity.SourceEvidence)
             {
-                score += TextMatchScore(canonSource.SourceTitle, term, titleWeight: 18, detailWeight: 8);
-                score += TextMatchScore(canonSource.Markdown, term, titleWeight: 18, detailWeight: 10);
+                score += TextMatchScore(sourceEvidence.SourceTitle, term, titleWeight: 18, detailWeight: 8);
+                score += TextMatchScore(sourceEvidence.Markdown, term, titleWeight: 18, detailWeight: 10);
             }
             foreach (var property in entity.Properties)
             {
@@ -1173,7 +1173,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         return parsed.Count == 0 ? null : parsed;
     }
 
-    private static object[] CompactCanonSources(IReadOnlyList<IngestCanonSource> sources) =>
+    private static object[] CompactSourceEvidence(IReadOnlyList<IngestSourceEvidence> sources) =>
         sources
             .Take(4)
             .Select(source => new

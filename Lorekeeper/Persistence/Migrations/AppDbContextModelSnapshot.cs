@@ -487,6 +487,24 @@ namespace Lorekeeper.Persistence.Migrations
                     b.ToTable("BookBriefs");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.BookBriefCanonSource", b =>
+                {
+                    b.Property<Guid>("BookBriefId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("IngestSourceId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("BookBriefId", "IngestSourceId");
+
+                    b.HasIndex("IngestSourceId");
+
+                    b.ToTable("BookBriefCanonSources");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.Chapter", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5101,6 +5119,25 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.BookBriefCanonSource", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.BookBrief", "BookBrief")
+                        .WithMany("CanonSources")
+                        .HasForeignKey("BookBriefId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Lorekeeper.Models.IngestSource", "IngestSource")
+                        .WithMany("BookBriefCanonSelections")
+                        .HasForeignKey("IngestSourceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("BookBrief");
+
+                    b.Navigation("IngestSource");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.Chapter", b =>
                 {
                     b.HasOne("Lorekeeper.Models.Act", "Act")
@@ -5332,6 +5369,11 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.BookBrief", b =>
+                {
+                    b.Navigation("CanonSources");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.IngestJob", b =>
@@ -6324,6 +6366,8 @@ namespace Lorekeeper.Persistence.Migrations
 
             modelBuilder.Entity("Lorekeeper.Models.IngestSource", b =>
                 {
+                    b.Navigation("BookBriefCanonSelections");
+
                     b.Navigation("Jobs");
 
                     b.Navigation("SourceBlocks");

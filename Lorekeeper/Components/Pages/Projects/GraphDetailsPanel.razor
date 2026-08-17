@@ -51,9 +51,9 @@
         <div class="graph-node-meta">
             <span class="graph-node-type" style="border-color: @selected.Color">@selected.Type</span>
             <span class="text-muted small">@selected.Key</span>
-            @if (selected.CanonSourceCount > 0)
+            @if (selected.SourceEvidenceCount > 0)
             {
-                <span class="badge text-bg-info">@selected.CanonSourceCount canon source@(PluralSuffix(selected.CanonSourceCount))</span>
+                <span class="badge text-bg-info">@selected.SourceEvidenceCount source evidence@(PluralSuffix(selected.SourceEvidenceCount))</span>
             }
             else if (selected.IsIngestCreated)
             {
@@ -70,7 +70,7 @@
         <EntityKnowledgeView Summary="@selected.Summary"
                              Aliases="@selected.Aliases"
                              WikiSections="@selected.WikiSections"
-                             CanonSources="@selected.CanonSources" />
+                             SourceEvidence="@selected.SourceEvidence" />
 
         @if (TryEntityId(selected, out var entityId))
         {
@@ -108,9 +108,9 @@
                             {
                                 <span class="badge text-bg-secondary">auto</span>
                             }
-                            @if (edge.CanonSourceCount > 0)
+                            @if (edge.SourceEvidenceCount > 0)
                             {
-                                <span class="badge text-bg-info">@edge.CanonSourceCount canon source@(PluralSuffix(edge.CanonSourceCount))</span>
+                                <span class="badge text-bg-info">@edge.SourceEvidenceCount source evidence@(PluralSuffix(edge.SourceEvidenceCount))</span>
                             }
                             else if (IsExtractedFrom(edge) || edge.IsIngestCreated)
                             {

@@ -29,7 +29,7 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
 
         Adapt what counts as an entity to the source and the project. Fiction, science fiction, and fantasy sources should preserve story and setting continuity: characters, places, cultures, factions, artifacts, magic/technology, histories, rules, recurring terms, and relationships. Nonfiction and research sources should preserve concepts, people, events, examples, methods, terms, claims, source support, and arguments. Use the project type palette first, then create broad useful non-structural types only when the source needs them.
 
-        A useful final wiki page captures the source-grounded information the current project would need later: identity, role, status, affiliation, history, motivation, significance, setting/world-building details, factual claims, examples, and relationships. During chunk ingestion, store this only as temporary staging records. A later final review pass will synthesize those records into a single canonSource markdown property for the whole source. The graph is only a sparse support structure.
+        A useful final wiki page captures the source-grounded information the current project would need later: identity, role, status, affiliation, history, motivation, significance, setting/world-building details, factual claims, examples, and relationships. During chunk ingestion, store this only as temporary staging records. A later final review pass will synthesize those records into a single sourceEvidence markdown property for the whole source. The graph is only a sparse support structure.
 
         Process rules:
         - Start from the compact touched-entity index in the prompt. It is only an identity hint.
@@ -40,7 +40,7 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
         - Do not create an entity when the touched-entity index or resolver returns a clear same subject with matching names or aliases. Call append_ingest_entity_observation with entityId for an existing match.
         - Do not update an existing entity just because it is semantically similar to the current source chunk. Update it only when the chunk explicitly supports a fact about that same entity.
         - Use append_ingest_entity_observation as the single entity write path. Supply entityId for an existing entity, or type and name only when creating/reusing a new entity in the same call.
-        - append_ingest_entity_observation never edits canonical summaries, normal wiki sections, or canonSource properties. Do not try to rewrite the entity wiki during chunk ingestion.
+        - append_ingest_entity_observation never edits canonical summaries, normal wiki sections, or sourceEvidence properties. Do not try to rewrite the entity wiki during chunk ingestion.
         - Create a new entity only when no existing project entity or same-job entity matches after variant resolution. The tool will reject duplicate names; treat that as instruction to reuse the returned existing entity.
         - Use canonical singular entity type keys from the known project entity types. Do not invent plural, lowercase, or near-duplicate categories such as "characters", "Characters", "locations", or "organisations" when an existing project type reasonably fits.
         - If a new type is needed, choose a broad stable type name. Prefer reusable categories such as Culture, Faction, Artifact, Magic, Technology, Lore, Concept, Person, Event, Example, Claim, Term, or Method over one-off labels.
@@ -543,7 +543,7 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
                 };
             }
 
-            IngestWikiSheet.AddCanonSourceProvenance(
+            IngestWikiSheet.AddSourceEvidenceProvenance(
                 edge.Properties,
                 input.SourceId,
                 input.SourceTitle,
@@ -1038,7 +1038,7 @@ IAppDatabaseOperationFactory database, ILlmProviderService providerService, ICha
         - First call read_ingest_entity_source_observations.
         - Then write exactly one markdown page with write_ingest_source_wiki_section.
         - Before calling the writer, stream a short plain-text note explaining that you are writing the source-backed canon page.
-        - The property key is controlled by the tool and will be canonSource.{source-title-slug}.
+        - The property key is controlled by the tool and will be sourceEvidence.{source-title-slug}.
         - The body should read like a compact markdown wiki page for this entity in this text: who they are in this source, where they appear, why they matter in this text, important events, relationships, traits or motivations, and memorable exact quotes when present.
         - Use only information from the source observations. Do not alter or summarize canonical project knowledge outside this source.
         - Write only useful source-backed content for this entity.

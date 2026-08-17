@@ -77,6 +77,22 @@ public sealed class BookBrief
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public ICollection<BookBriefCanonSource> CanonSources { get; set; } = [];
+}
+
+/// <summary>
+/// An ingested source the user has explicitly selected as canonical grounding for the Book Brief.
+/// </summary>
+public sealed class BookBriefCanonSource
+{
+    public Guid BookBriefId { get; set; }
+    public BookBrief BookBrief { get; set; } = null!;
+
+    public Guid IngestSourceId { get; set; }
+    public IngestSource IngestSource { get; set; } = null!;
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
 /// <summary>

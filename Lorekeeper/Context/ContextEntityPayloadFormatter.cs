@@ -35,6 +35,8 @@ internal static class ContextEntityPayloadFormatter
             ["type"] = entity.Type,
             ["name"] = entity.Name,
             ["contextFeed"] = true,
+            ["origin"] = entity.IsIngestCreated ? "source-derived" : "project-owned",
+            ["isIngestCreated"] = entity.IsIngestCreated,
         };
         if (entity.Order is { } order)
             identity["order"] = order;
@@ -87,7 +89,7 @@ internal static class ContextEntityPayloadFormatter
         if (wikiSections.Count > 0)
             data["wikiSections"] = JsonSerializer.SerializeToNode(wikiSections, ContextPayloadJson.Options);
 
-        var canonSources = entity.CanonSources
+        var sourceEvidence = entity.SourceEvidence
             .Where(source => !string.IsNullOrWhiteSpace(source.SourceTitle)
                 || !string.IsNullOrWhiteSpace(source.Markdown))
             .Select(source => new
@@ -100,8 +102,8 @@ internal static class ContextEntityPayloadFormatter
                 source.Markdown,
             })
             .ToList();
-        if (canonSources.Count > 0)
-            data["canonSources"] = JsonSerializer.SerializeToNode(canonSources, ContextPayloadJson.Options);
+        if (sourceEvidence.Count > 0)
+            data["sourceEvidence"] = JsonSerializer.SerializeToNode(sourceEvidence, ContextPayloadJson.Options);
 
         var visualReferences = visualExamples
             .OrderBy(example => example.SortOrder)

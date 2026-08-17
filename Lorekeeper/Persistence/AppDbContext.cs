@@ -19,6 +19,7 @@ public class AppDbContext(
     public DbSet<OAuthToken> OAuthTokens => Set<OAuthToken>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<BookBrief> BookBriefs => Set<BookBrief>();
+    public DbSet<BookBriefCanonSource> BookBriefCanonSources => Set<BookBriefCanonSource>();
     public DbSet<Act> Acts => Set<Act>();
     public DbSet<Chapter> Chapters => Set<Chapter>();
     public DbSet<ManuscriptMigrationJournal> ManuscriptMigrationJournals => Set<ManuscriptMigrationJournal>();
@@ -231,6 +232,22 @@ public class AppDbContext(
             entity.HasOne(e => e.Project)
                 .WithOne(p => p.BookBrief)
                 .HasForeignKey<BookBrief>(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<BookBriefCanonSource>(entity =>
+        {
+            entity.HasKey(e => new { e.BookBriefId, e.IngestSourceId });
+            entity.HasIndex(e => e.IngestSourceId);
+
+            entity.HasOne(e => e.BookBrief)
+                .WithMany(e => e.CanonSources)
+                .HasForeignKey(e => e.BookBriefId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.IngestSource)
+                .WithMany(e => e.BookBriefCanonSelections)
+                .HasForeignKey(e => e.IngestSourceId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

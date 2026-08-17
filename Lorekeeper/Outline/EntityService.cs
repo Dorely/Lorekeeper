@@ -17,6 +17,9 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IContextIndexingServic
     /// <summary>Canonical edge type linking a parent node to its ordered children.</summary>
     public const string HasChildEdgeType = "HasChild";
 
+    /// <summary>Canonical manual edge associating a story entity with a relevant chapter.</summary>
+    public const string RelevantToEdgeType = "RelevantTo";
+
     public async Task<StoryEntity?> GetAsync(
         Guid projectId,
         Guid entityId,
@@ -295,12 +298,11 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IContextIndexingServic
         if (fromEntityId == toEntityId)
             throw new InvalidOperationException("Cannot link an entity to itself.");
 
-        var normalizedEdgeType = NormalizeEditableEdgeType(edgeType);
-
         var fromNode = await ResolveEntityNodeAsync(projectId, fromEntityId, cancellationToken)
             ?? throw new InvalidOperationException($"Source entity {fromEntityId} not found in project {projectId}.");
         var toNode = await ResolveEntityNodeAsync(projectId, toEntityId, cancellationToken)
             ?? throw new InvalidOperationException($"Target entity {toEntityId} not found in project {projectId}.");
+        var normalizedEdgeType = NormalizeChapterRelationship(edgeType, toNode);
 
         await graph.UpsertEdgeAsync(
             fromNode.Id,
@@ -326,7 +328,7 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IContextIndexingServic
         if (IsReadOnlyLink(edge))
             throw new InvalidOperationException("Managed and auto-generated links cannot be edited directly.");
 
-        edge.EdgeType = NormalizeEditableEdgeType(edgeType);
+        edge.EdgeType = NormalizeChapterRelationship(edgeType, toNode);
         edge.Properties = ToObjectDict(properties);
         edge.UpdatedAt = DateTime.UtcNow;
         edges.Update(edge);
@@ -343,6 +345,15 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IContextIndexingServic
 
         await graph.RemoveEdgeAsync(edge.Id, cancellationToken);
         await ReindexEntitiesAsync(projectId, EndpointEntityIds(fromNode, toNode), cancellationToken);
+    }
+
+    private static string NormalizeChapterRelationship(string edgeType, GraphNode toNode)
+    {
+        var normalized = NormalizeEditableEdgeType(edgeType);
+        return string.Equals(normalized, "AppearsIn", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(toNode.NodeType, ChapterNodeType, StringComparison.OrdinalIgnoreCase)
+                ? RelevantToEdgeType
+                : normalized;
     }
 
     public async Task<int> CountChildrenAsync(
@@ -415,9 +426,9 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IContextIndexingServic
                 Summary: ReadProperty(edge.Properties, IngestWikiSheet.SummaryProperty),
                 Aliases: [],
                 WikiSections: [],
-                CanonSources: [],
+                SourceEvidence: [],
                 IsIngestCreated: IngestSourceAssertions.IsIngestCreatedGraphObject(edge.Properties),
-                CanonSourceCount: IngestWikiSheet.ReadCanonSources(edge.Properties).Count,
+                SourceEvidenceCount: IngestWikiSheet.ReadSourceEvidence(edge.Properties).Count,
                 IsAutoLink: GraphAutoLinkService.IsAutoMentionEdge(edge),
                 RelationshipCitations: IngestWikiSheet.ReadRelationshipCitations(edge.Properties)));
         }
@@ -583,7 +594,7 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IContextIndexingServic
         {
             if (IngestSourceAssertions.IsProtectedProperty(kv.Key)
                 || IngestWikiSheet.IsWikiStorageProperty(kv.Key)
-                || IngestWikiSheet.IsCanonSourceProperty(kv.Key)
+                || IngestWikiSheet.IsSourceEvidenceProperty(kv.Key)
                 || GraphAutoLinkService.IsProtectedAutoLinkProperty(kv.Key))
             {
                 continue;
@@ -605,9 +616,9 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IContextIndexingServic
                 Summary: IngestWikiSheet.ReadSummary(node.Properties),
                 Aliases: IngestWikiSheet.ReadAliases(node.Properties),
                 WikiSections: IngestWikiSheet.ReadSections(node.Properties),
-                CanonSources: IngestWikiSheet.ReadCanonSources(node.Properties),
+                SourceEvidence: IngestWikiSheet.ReadSourceEvidence(node.Properties),
                 IsIngestCreated: IngestSourceAssertions.IsIngestCreatedGraphObject(node.Properties),
-                CanonSourceCount: IngestWikiSheet.ReadCanonSources(node.Properties).Count);
+                SourceEvidenceCount: IngestWikiSheet.ReadSourceEvidence(node.Properties).Count);
     }
 
     private static Dictionary<string, object?> ToObjectDict(IDictionary<string, string?>? src)
@@ -629,7 +640,7 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IContextIndexingServic
         {
             if (IngestSourceAssertions.IsProtectedProperty(kv.Key)
                 || IngestWikiSheet.IsWikiStorageProperty(kv.Key)
-                || IngestWikiSheet.IsCanonSourceProperty(kv.Key))
+                || IngestWikiSheet.IsSourceEvidenceProperty(kv.Key))
             {
                 continue;
             }

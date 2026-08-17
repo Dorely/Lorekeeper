@@ -104,6 +104,78 @@ public sealed class BookBriefService(IAppDatabaseOperationFactory database) : IB
         return updated;
     }
 
+    public async Task<IReadOnlyList<BookBriefCanonSourceOption>> ListCanonSourceOptionsAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        var selectedIds = await db.BookBriefCanonSources
+            .AsNoTracking()
+            .Where(selection => selection.BookBrief.ProjectId == projectId)
+            .Select(selection => selection.IngestSourceId)
+            .ToListAsync(cancellationToken);
+        var selected = selectedIds.ToHashSet();
+        return await db.IngestSources
+            .AsNoTracking()
+            .Where(source => source.ProjectId == projectId)
+            .OrderBy(source => source.Title)
+            .ThenBy(source => source.CreatedAt)
+            .Select(source => new BookBriefCanonSourceOption(
+                source.Id,
+                source.Title,
+                source.SourceKind,
+                selected.Contains(source.Id)))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<BookBriefCanonSourceSummary>> ListCanonSourcesAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        return await databaseOperation.Db.BookBriefCanonSources
+            .AsNoTracking()
+            .Where(selection => selection.BookBrief.ProjectId == projectId)
+            .OrderBy(selection => selection.IngestSource.Title)
+            .Select(selection => new BookBriefCanonSourceSummary(
+                selection.IngestSourceId,
+                selection.IngestSource.Title,
+                selection.IngestSource.SourceKind))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task ReplaceCanonSourcesAsync(
+        Guid projectId,
+        IReadOnlyCollection<Guid> sourceIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(sourceIds);
+        var requestedIds = sourceIds.ToHashSet();
+        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var brief = await db.BookBriefs.SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken)
+            ?? await GetOrCreateAsync(projectId, cancellationToken);
+        var validIds = await db.IngestSources
+            .Where(source => source.ProjectId == projectId && requestedIds.Contains(source.Id))
+            .Select(source => source.Id)
+            .ToListAsync(cancellationToken);
+        if (validIds.Count != requestedIds.Count)
+            throw new ArgumentException("Every canonical source must belong to this project.", nameof(sourceIds));
+
+        var current = await db.BookBriefCanonSources
+            .Where(selection => selection.BookBriefId == brief.Id)
+            .ToListAsync(cancellationToken);
+        db.BookBriefCanonSources.RemoveRange(current.Where(selection => !requestedIds.Contains(selection.IngestSourceId)));
+        var currentIds = current.Select(selection => selection.IngestSourceId).ToHashSet();
+        db.BookBriefCanonSources.AddRange(validIds
+            .Where(sourceId => !currentIds.Contains(sourceId))
+            .Select(sourceId => new BookBriefCanonSource { BookBriefId = brief.Id, IngestSourceId = sourceId }));
+        brief.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     public string FormatForPrompt(BookBrief brief)
     {
         ArgumentNullException.ThrowIfNull(brief);

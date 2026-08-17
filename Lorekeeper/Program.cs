@@ -202,6 +202,7 @@ builder.Services.AddScoped<IEntityService, EntityService>();
 builder.Services.AddScoped<IEntityTypeService, EntityTypeService>();
 builder.Services.AddScoped<IProjectFactService, ProjectFactService>();
 builder.Services.AddScoped<IOutlineGraphSync, OutlineGraphSync>();
+builder.Services.AddScoped<IOutlineWorkingContextBuilder, OutlineWorkingContextBuilder>();
 builder.Services.AddScoped<OutlineCollaborationTools>();
 builder.Services.AddScoped<IAiChangeApprovalService, AiChangeApprovalService>();
 builder.Services.AddScoped<IOutlineCollaborationService, OutlineCollaborationService>();

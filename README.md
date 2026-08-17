@@ -55,10 +55,20 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   library generation, user-approved Visual Direction, and canonical character,
   location, prop, creature, and custom-entity references. All assistants retain
   compact grounded reads, while mutation tools stay within their owning surface.
+- Outline automatically receives the complete current outline, chapter-level
+  entity associations, category inventories, and a compact ingested-source
+  inventory. The Book Brief lets the author select canonical sources; other
+  sources remain searchable evidence. Chapter `RelevantTo` links are preferred
+  over beat-only links because they feed Editor's automatic entity context.
 - Text, EPUB, PDF, image, and webpage ingest with structured source provenance,
   canon extraction, graph synchronization, and combined lexical/semantic
   retrieval. File ingest accepts up to 50 files together, creates one durable
   job per file sequentially, and keeps per-file success or failure visible.
+- Full project export format v23 preserves only the Book Brief's selected
+  canonical ingest sources (source text, chunks, pages, blocks, metadata, and
+  selection mapping), remaps their provenance on import, and rebuilds retrieval
+  indexes without rerunning extraction. Non-structural exports omit source bodies,
+  selections, and evidence and report that omission.
 - Project-owned authoring page setup, Press-backed current-chapter Read preview,
   and contextual Edit/Read/Pages/Review modes. Read shows actual pagination,
   line breaks, images, captions, and Designed Pages with single/facing and zoom
@@ -161,9 +171,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   content, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded subset fonts, ToUnicode maps, and a
   240% total-ink ceiling. These checks establish only the exact named
   Lorekeeper profile; they do not claim that a vendor accepted an upload.
-- Versioned project import/export (current v22 manuscript-v4/page-setup/
+- Versioned project import/export (current v23 manuscript-v4/page-setup/
   composition model, Core Book, sparse release overlays, edition chapter
-  snapshots/compositions, covers, custom-font binaries,
+  snapshots/compositions, selected canonical source bodies/evidence, covers, custom-font binaries,
   and isolated older structured/text adapters) plus TXT, Markdown,
   semantic mixed-layout EPUB, artifact-backed Generate/Regenerate, separate
   paperback interior/cover saves, and one Digital PDF Book save. EPUB export is

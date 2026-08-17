@@ -723,7 +723,7 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
         if (await HasActiveStagingReferencesForEntityAsync(item.JobId, entityId, item.Id, cancellationToken))
             return;
 
-        if (IngestWikiSheet.HasCanonSources(node.Properties) || HasCanonicalProperties(node.Properties))
+        if (IngestWikiSheet.HasSourceEvidence(node.Properties) || HasCanonicalProperties(node.Properties))
             return;
 
         var adjacent = await edges.GetAdjacentAsync(node.Id, EdgeDirection.Both, edgeTypes: null, maxResults: null, cancellationToken);
@@ -744,7 +744,7 @@ IAppDatabaseOperationFactory database, IIngestSourceStructureBuilder structureBu
         var graphAction = IngestSourceAssertions.ReadRelationshipGraphAction(item.PayloadJson);
         if (!CanRemovePotentiallyIngestCreatedObject(edge.Properties, graphAction, IngestSourceAssertions.CreatedEdgeAction))
             return;
-        if (IngestWikiSheet.HasCanonSources(edge.Properties) || HasCanonicalProperties(edge.Properties))
+        if (IngestWikiSheet.HasSourceEvidence(edge.Properties) || HasCanonicalProperties(edge.Properties))
             return;
 
         await graphStore.RemoveEdgeAsync(edge.Id, cancellationToken);

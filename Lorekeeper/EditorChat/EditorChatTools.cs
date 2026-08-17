@@ -1571,7 +1571,7 @@ IAppDatabaseOperationFactory database, IActService acts,
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
-            canonSources = entity.CanonSources,
+            sourceEvidence = entity.SourceEvidence,
             canonicalVisualReferences = canonicalVisualReferences.Select(VisualExamplePayload),
             manualLinks,
             autoMentionLinks,
@@ -1782,7 +1782,7 @@ IAppDatabaseOperationFactory database, IActService acts,
             summary = entity.Summary,
             aliases = entity.Aliases,
             wikiSections = entity.WikiSections,
-            canonSources = entity.CanonSources,
+            sourceEvidence = entity.SourceEvidence,
             relationContext,
         };
     }
@@ -3241,10 +3241,10 @@ IAppDatabaseOperationFactory database, IActService acts,
             score += TextMatchScore(section.Title, query, titleWeight: 12, detailWeight: 6);
             score += TextMatchScore(section.Body, query, titleWeight: 12, detailWeight: 8);
         }
-        foreach (var canonSource in entity.CanonSources)
+        foreach (var sourceEvidence in entity.SourceEvidence)
         {
-            score += TextMatchScore(canonSource.SourceTitle, query, titleWeight: 12, detailWeight: 6);
-            score += TextMatchScore(canonSource.Markdown, query, titleWeight: 12, detailWeight: 8);
+            score += TextMatchScore(sourceEvidence.SourceTitle, query, titleWeight: 12, detailWeight: 6);
+            score += TextMatchScore(sourceEvidence.Markdown, query, titleWeight: 12, detailWeight: 8);
         }
         foreach (var property in entity.Properties)
         {
@@ -3264,10 +3264,10 @@ IAppDatabaseOperationFactory database, IActService acts,
                 score += TextMatchScore(section.Title, term, titleWeight: 18, detailWeight: 8);
                 score += TextMatchScore(section.Body, term, titleWeight: 18, detailWeight: 10);
             }
-            foreach (var canonSource in entity.CanonSources)
+            foreach (var sourceEvidence in entity.SourceEvidence)
             {
-                score += TextMatchScore(canonSource.SourceTitle, term, titleWeight: 18, detailWeight: 8);
-                score += TextMatchScore(canonSource.Markdown, term, titleWeight: 18, detailWeight: 10);
+                score += TextMatchScore(sourceEvidence.SourceTitle, term, titleWeight: 18, detailWeight: 8);
+                score += TextMatchScore(sourceEvidence.Markdown, term, titleWeight: 18, detailWeight: 10);
             }
             foreach (var property in entity.Properties)
             {
@@ -3301,7 +3301,7 @@ IAppDatabaseOperationFactory database, IActService acts,
             summaryCharacters = entity.Summary?.Length ?? 0,
             aliases = entity.Aliases.Count,
             wikiSections = entity.WikiSections.Count,
-            canonSources = entity.CanonSources.Count,
+            sourceEvidence = entity.SourceEvidence.Count,
             properties = entity.Properties.Count,
             visuals = visuals?.Count ?? 0,
         },
@@ -3310,7 +3310,7 @@ IAppDatabaseOperationFactory database, IActService acts,
             summaryText = TruncatePropertyValue(entity.Summary),
             aliases = entity.Aliases.Take(8).ToArray(),
             wikiSections = CompactWikiSections(entity.WikiSections),
-            canonSources = CompactCanonSources(entity.CanonSources),
+            sourceEvidence = CompactSourceEvidence(entity.SourceEvidence),
             properties = CompactProperties(entity.Properties),
             canonicalVisualReferences = (visuals ?? []).Select(example => new { example.Image.Id, example.Label, example.SortOrder, example.Image.AltText, example.Image.Prompt }),
         },
@@ -3352,7 +3352,7 @@ IAppDatabaseOperationFactory database, IActService acts,
         isAutoLink = link.IsAutoLink,
     };
 
-    private static object[] CompactCanonSources(IReadOnlyList<IngestCanonSource> sources) =>
+    private static object[] CompactSourceEvidence(IReadOnlyList<IngestSourceEvidence> sources) =>
         sources
             .Take(4)
             .Select(source => new

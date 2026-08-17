@@ -11,8 +11,8 @@ public static class IngestWikiSheet
     public const string AliasesProperty = "aliasesJson";
     public const string WikiSectionsProperty = "wikiSectionsJson";
     public const string RelationshipCitationsProperty = "citationsJson";
-    public const string CanonSourcePrefix = "canonSource.";
-    public const string CanonSourceMetaProperty = "canonSourceMetaJson";
+    public const string SourceEvidencePrefix = "sourceEvidence.";
+    public const string SourceEvidenceMetaProperty = "sourceEvidenceMetaJson";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -55,20 +55,20 @@ public static class IngestWikiSheet
             .ToList();
     }
 
-    public static IReadOnlyList<IngestCanonSource> ReadCanonSources(IReadOnlyDictionary<string, object?> properties)
+    public static IReadOnlyList<IngestSourceEvidence> ReadSourceEvidence(IReadOnlyDictionary<string, object?> properties)
     {
-        var meta = ReadCanonSourceMeta(properties);
-        var result = new List<IngestCanonSource>();
+        var meta = ReadSourceEvidenceMeta(properties);
+        var result = new List<IngestSourceEvidence>();
         foreach (var property in properties.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
         {
-            if (!IsCanonSourceProperty(property.Key)) continue;
+            if (!IsSourceEvidenceProperty(property.Key)) continue;
 
-            var slug = property.Key[CanonSourcePrefix.Length..];
+            var slug = property.Key[SourceEvidencePrefix.Length..];
             var markdown = NormalizeText(property.Value?.ToString());
             if (string.IsNullOrWhiteSpace(markdown)) continue;
 
             meta.TryGetValue(slug, out var sourceMeta);
-            result.Add(new IngestCanonSource(
+            result.Add(new IngestSourceEvidence(
                 property.Key,
                 slug,
                 sourceMeta?.SourceId ?? string.Empty,
@@ -80,7 +80,7 @@ public static class IngestWikiSheet
         return result;
     }
 
-    public static bool UpsertCanonSourceMarkdown(
+    public static bool UpsertSourceEvidenceMarkdown(
         IDictionary<string, object?> properties,
         Guid sourceId,
         string sourceTitle,
@@ -92,20 +92,20 @@ public static class IngestWikiSheet
         if (string.IsNullOrWhiteSpace(normalized))
             return false;
 
-        var meta = ReadCanonSourceMeta(AsReadOnly(properties))
+        var meta = ReadSourceEvidenceMeta(AsReadOnly(properties))
             .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
         var sourceKey = sourceId.ToString("N");
         var existing = meta.FirstOrDefault(kv => string.Equals(kv.Value.SourceId, sourceKey, StringComparison.OrdinalIgnoreCase));
         var slug = string.IsNullOrWhiteSpace(existing.Key)
-            ? ResolveCanonSourceSlug(properties, meta, sourceTitle, sourceId)
+            ? ResolveSourceEvidenceSlug(properties, meta, sourceTitle, sourceId)
             : existing.Key;
 
-        var propertyKey = CanonSourcePrefix + slug;
+        var propertyKey = SourceEvidencePrefix + slug;
         var changed = !properties.TryGetValue(propertyKey, out var current)
             || !string.Equals(NormalizeText(current?.ToString()), normalized, StringComparison.Ordinal);
         properties[propertyKey] = normalized;
 
-        var normalizedMeta = new IngestCanonSourceMeta(
+        var normalizedMeta = new IngestSourceEvidenceMeta(
             sourceKey,
             NormalizeText(sourceTitle, "Untitled source"),
             NormalizeText(sourceKind),
@@ -115,40 +115,40 @@ public static class IngestWikiSheet
         if (!meta.TryGetValue(slug, out var currentMeta) || !Equals(currentMeta, normalizedMeta))
             changed = true;
         meta[slug] = normalizedMeta;
-        properties[CanonSourceMetaProperty] = JsonSerializer.Serialize(meta, JsonOptions);
+        properties[SourceEvidenceMetaProperty] = JsonSerializer.Serialize(meta, JsonOptions);
         return changed;
     }
 
-    public static bool AddCanonSourceProvenance(
+    public static bool AddSourceEvidenceProvenance(
         IDictionary<string, object?> properties,
         Guid sourceId,
         string sourceTitle,
         string sourceKind,
         Guid jobId)
     {
-        var meta = ReadCanonSourceMeta(AsReadOnly(properties))
+        var meta = ReadSourceEvidenceMeta(AsReadOnly(properties))
             .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
         var sourceKey = sourceId.ToString("N");
         if (meta.Values.Any(existing => string.Equals(existing.SourceId, sourceKey, StringComparison.OrdinalIgnoreCase)))
             return false;
 
-        var slug = ResolveCanonSourceSlug(properties, meta, sourceTitle, sourceId);
-        meta[slug] = new IngestCanonSourceMeta(
+        var slug = ResolveSourceEvidenceSlug(properties, meta, sourceTitle, sourceId);
+        meta[slug] = new IngestSourceEvidenceMeta(
             sourceKey,
             NormalizeText(sourceTitle, "Untitled source"),
             NormalizeText(sourceKind),
             "ingestSource",
             jobId.ToString("N"),
             DateTime.UtcNow);
-        properties[CanonSourceMetaProperty] = JsonSerializer.Serialize(meta, JsonOptions);
+        properties[SourceEvidenceMetaProperty] = JsonSerializer.Serialize(meta, JsonOptions);
         return true;
     }
 
-    public static bool RemoveCanonSource(
+    public static bool RemoveSourceEvidence(
         IDictionary<string, object?> properties,
         Guid sourceId)
     {
-        var meta = ReadCanonSourceMeta(AsReadOnly(properties))
+        var meta = ReadSourceEvidenceMeta(AsReadOnly(properties))
             .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
         if (meta.Count == 0) return false;
 
@@ -162,24 +162,24 @@ public static class IngestWikiSheet
         foreach (var slug in removedSlugs)
         {
             meta.Remove(slug);
-            properties.Remove(CanonSourcePrefix + slug);
+            properties.Remove(SourceEvidencePrefix + slug);
         }
 
         if (meta.Count == 0)
-            properties.Remove(CanonSourceMetaProperty);
+            properties.Remove(SourceEvidenceMetaProperty);
         else
-            properties[CanonSourceMetaProperty] = JsonSerializer.Serialize(meta, JsonOptions);
+            properties[SourceEvidenceMetaProperty] = JsonSerializer.Serialize(meta, JsonOptions);
         return true;
     }
 
-    public static bool HasCanonSources(IReadOnlyDictionary<string, object?> properties) =>
-        properties.Keys.Any(IsCanonSourceProperty)
-        || ReadCanonSourceMeta(properties).Count > 0;
+    public static bool HasSourceEvidence(IReadOnlyDictionary<string, object?> properties) =>
+        properties.Keys.Any(IsSourceEvidenceProperty)
+        || ReadSourceEvidenceMeta(properties).Count > 0;
 
-    public static bool ContainsCanonSource(IReadOnlyDictionary<string, object?> properties, Guid sourceId)
+    public static bool ContainsSourceEvidence(IReadOnlyDictionary<string, object?> properties, Guid sourceId)
     {
         var sourceKey = sourceId.ToString("N");
-        return ReadCanonSourceMeta(properties).Values.Any(meta =>
+        return ReadSourceEvidenceMeta(properties).Values.Any(meta =>
             string.Equals(meta.SourceId, sourceKey, StringComparison.OrdinalIgnoreCase));
     }
 
@@ -411,10 +411,10 @@ public static class IngestWikiSheet
             parts.Add(section.Body);
             parts.AddRange(section.Citations.Select(CitationPreview));
         }
-        foreach (var canonSource in ReadCanonSources(properties))
+        foreach (var sourceEvidence in ReadSourceEvidence(properties))
         {
-            parts.Add(canonSource.SourceTitle);
-            parts.Add(canonSource.Markdown);
+            parts.Add(sourceEvidence.SourceTitle);
+            parts.Add(sourceEvidence.Markdown);
         }
 
         foreach (var property in VisibleProperties(properties))
@@ -442,11 +442,11 @@ public static class IngestWikiSheet
         || string.Equals(key, AliasesProperty, StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, WikiSectionsProperty, StringComparison.OrdinalIgnoreCase)
         || string.Equals(key, RelationshipCitationsProperty, StringComparison.OrdinalIgnoreCase)
-        || string.Equals(key, CanonSourceMetaProperty, StringComparison.OrdinalIgnoreCase);
+        || string.Equals(key, SourceEvidenceMetaProperty, StringComparison.OrdinalIgnoreCase);
 
-    public static bool IsCanonSourceProperty(string key) =>
-        key.StartsWith(CanonSourcePrefix, StringComparison.OrdinalIgnoreCase)
-        && key.Length > CanonSourcePrefix.Length;
+    public static bool IsSourceEvidenceProperty(string key) =>
+        key.StartsWith(SourceEvidencePrefix, StringComparison.OrdinalIgnoreCase)
+        && key.Length > SourceEvidencePrefix.Length;
 
     public static bool IsInternalProperty(string key) =>
         IngestSourceAssertions.IsProtectedProperty(key)
@@ -461,36 +461,36 @@ public static class IngestWikiSheet
         || string.Equals(key, "order", StringComparison.OrdinalIgnoreCase)
         || key.StartsWith("vectorIndex", StringComparison.OrdinalIgnoreCase);
 
-    private static IReadOnlyDictionary<string, IngestCanonSourceMeta> ReadCanonSourceMeta(IReadOnlyDictionary<string, object?> properties)
+    private static IReadOnlyDictionary<string, IngestSourceEvidenceMeta> ReadSourceEvidenceMeta(IReadOnlyDictionary<string, object?> properties)
     {
-        if (!properties.TryGetValue(CanonSourceMetaProperty, out var value))
-            return new Dictionary<string, IngestCanonSourceMeta>(StringComparer.OrdinalIgnoreCase);
+        if (!properties.TryGetValue(SourceEvidenceMetaProperty, out var value))
+            return new Dictionary<string, IngestSourceEvidenceMeta>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
-            Dictionary<string, IngestCanonSourceMeta>? parsed = value switch
+            Dictionary<string, IngestSourceEvidenceMeta>? parsed = value switch
             {
                 JsonElement element when element.ValueKind == JsonValueKind.Object =>
-                    JsonSerializer.Deserialize<Dictionary<string, IngestCanonSourceMeta>>(element.GetRawText(), JsonOptions),
+                    JsonSerializer.Deserialize<Dictionary<string, IngestSourceEvidenceMeta>>(element.GetRawText(), JsonOptions),
                 string text when LooksLikeJsonRoot(text, '{') =>
-                    JsonSerializer.Deserialize<Dictionary<string, IngestCanonSourceMeta>>(text, JsonOptions),
+                    JsonSerializer.Deserialize<Dictionary<string, IngestSourceEvidenceMeta>>(text, JsonOptions),
                 _ => null,
             };
 
             return (parsed ?? [])
                 .Where(kv => !string.IsNullOrWhiteSpace(kv.Key) && !string.IsNullOrWhiteSpace(kv.Value.SourceId))
                 .ToDictionary(
-                    kv => NormalizeCanonSlug(kv.Key),
-                    kv => NormalizeCanonSourceMeta(kv.Value),
+                    kv => NormalizeSourceEvidenceSlug(kv.Key),
+                    kv => NormalizeSourceEvidenceMeta(kv.Value),
                     StringComparer.OrdinalIgnoreCase);
         }
         catch (JsonException)
         {
-            return new Dictionary<string, IngestCanonSourceMeta>(StringComparer.OrdinalIgnoreCase);
+            return new Dictionary<string, IngestSourceEvidenceMeta>(StringComparer.OrdinalIgnoreCase);
         }
     }
 
-    private static IngestCanonSourceMeta NormalizeCanonSourceMeta(IngestCanonSourceMeta meta) =>
+    private static IngestSourceEvidenceMeta NormalizeSourceEvidenceMeta(IngestSourceEvidenceMeta meta) =>
         meta with
         {
             SourceId = NormalizeText(meta.SourceId),
@@ -500,36 +500,36 @@ public static class IngestWikiSheet
             LastFinalizedJobId = NormalizeText(meta.LastFinalizedJobId),
         };
 
-    private static string ResolveCanonSourceSlug(
+    private static string ResolveSourceEvidenceSlug(
         IDictionary<string, object?> properties,
-        IReadOnlyDictionary<string, IngestCanonSourceMeta> existingMeta,
+        IReadOnlyDictionary<string, IngestSourceEvidenceMeta> existingMeta,
         string sourceTitle,
         Guid sourceId)
     {
-        var baseSlug = NormalizeCanonSlug(sourceTitle);
+        var baseSlug = NormalizeSourceEvidenceSlug(sourceTitle);
         if (string.IsNullOrWhiteSpace(baseSlug))
             baseSlug = "source";
 
-        if (!CanonSourceSlugExists(properties, existingMeta, baseSlug))
+        if (!SourceEvidenceSlugExists(properties, existingMeta, baseSlug))
             return baseSlug;
 
         var suffix = sourceId.ToString("N")[..8];
         var maxBaseLength = Math.Max(1, 72 - suffix.Length - 1);
         var candidate = $"{baseSlug[..Math.Min(baseSlug.Length, maxBaseLength)]}-{suffix}";
         var index = 2;
-        while (CanonSourceSlugExists(properties, existingMeta, candidate))
+        while (SourceEvidenceSlugExists(properties, existingMeta, candidate))
             candidate = $"{baseSlug[..Math.Min(baseSlug.Length, Math.Max(1, maxBaseLength - index.ToString().Length - 1))]}-{suffix}-{index++}";
         return candidate;
     }
 
-    private static bool CanonSourceSlugExists(
+    private static bool SourceEvidenceSlugExists(
         IDictionary<string, object?> properties,
-        IReadOnlyDictionary<string, IngestCanonSourceMeta> existingMeta,
+        IReadOnlyDictionary<string, IngestSourceEvidenceMeta> existingMeta,
         string slug) =>
         existingMeta.ContainsKey(slug)
-        || properties.ContainsKey(CanonSourcePrefix + slug);
+        || properties.ContainsKey(SourceEvidencePrefix + slug);
 
-    private static string NormalizeCanonSlug(string? value)
+    private static string NormalizeSourceEvidenceSlug(string? value)
     {
         var text = NormalizeText(value).ToLowerInvariant();
         var builder = new StringBuilder();
@@ -783,7 +783,7 @@ public sealed record IngestWikiCitation(
     int? PageNumber,
     string? Locator);
 
-public sealed record IngestCanonSource(
+public sealed record IngestSourceEvidence(
     string PropertyKey,
     string Slug,
     string SourceId,
@@ -791,7 +791,7 @@ public sealed record IngestCanonSource(
     string SourceKind,
     string Markdown);
 
-public sealed record IngestCanonSourceMeta(
+public sealed record IngestSourceEvidenceMeta(
     string SourceId,
     string SourceTitle,
     string SourceKind,

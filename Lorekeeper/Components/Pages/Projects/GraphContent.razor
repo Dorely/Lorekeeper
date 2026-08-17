@@ -314,7 +314,7 @@ else
                 section.Title.Contains(search, StringComparison.OrdinalIgnoreCase)
                 || section.Body.Contains(search, StringComparison.OrdinalIgnoreCase)
                 || section.Citations.Any(citation => citation.SourceTitle.Contains(search, StringComparison.OrdinalIgnoreCase)))
-            || node.CanonSources.Any(source =>
+            || node.SourceEvidence.Any(source =>
                 source.SourceTitle.Contains(search, StringComparison.OrdinalIgnoreCase)
                 || source.SourceKind.Contains(search, StringComparison.OrdinalIgnoreCase)
                 || source.Markdown.Contains(search, StringComparison.OrdinalIgnoreCase));
@@ -322,7 +322,7 @@ else
 
     private static bool IsIngestNode(ProjectGraphNode node) =>
         node.IsIngestCreated
-        || node.CanonSourceCount > 0
+        || node.SourceEvidenceCount > 0
         || IsIngestSourceNode(node);
 
     private static bool IsIngestSourceNode(ProjectGraphNode node) =>
@@ -332,7 +332,7 @@ else
 
     private static bool IsIngestEdge(ProjectGraphEdge edge) =>
         edge.IsIngestCreated
-        || edge.CanonSourceCount > 0
+        || edge.SourceEvidenceCount > 0
         || string.Equals(edge.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase);
 
     private static string NodeTitle(ProjectGraphNode node)
@@ -340,8 +340,8 @@ else
         var title = $"{node.Type}: {node.Label}";
         if (!string.IsNullOrWhiteSpace(node.Summary))
             title += $"\n{node.Summary}";
-        if (node.CanonSourceCount > 0)
-            title += $"\nCanon sources: {node.CanonSourceCount}";
+        if (node.SourceEvidenceCount > 0)
+            title += $"\nSource evidence: {node.SourceEvidenceCount}";
         else if (node.IsIngestCreated)
             title += "\nCreated by ingest";
         return title;
@@ -352,8 +352,8 @@ else
         var title = edge.EdgeType;
         if (!string.IsNullOrWhiteSpace(edge.Summary))
             title += $"\n{edge.Summary}";
-        if (edge.CanonSourceCount > 0)
-            title += $"\nCanon sources: {edge.CanonSourceCount}";
+        if (edge.SourceEvidenceCount > 0)
+            title += $"\nSource evidence: {edge.SourceEvidenceCount}";
         else if (edge.IsAutoLink)
             title += "\nAuto mention link";
         else if (edge.IsIngestCreated || string.Equals(edge.EdgeType, IngestGraphSync.ExtractedFromEdgeType, StringComparison.OrdinalIgnoreCase))

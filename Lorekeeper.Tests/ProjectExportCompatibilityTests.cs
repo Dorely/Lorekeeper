@@ -8,7 +8,7 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
-    public void V22WritesPrintProductsPublicationSectionsAndSparseReleaseOrderWithoutObsoleteDefaultReleaseState()
+    public void V23WritesCanonicalSourceContainersAndCurrentPublicationState()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
@@ -29,7 +29,9 @@ public sealed class ProjectExportCompatibilityTests
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(22, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(23, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Contains("\"ingestSources\":[]", json, StringComparison.Ordinal);
+        Assert.Contains("\"bookBriefCanonSourceIds\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationBook\"", json, StringComparison.Ordinal);
         Assert.Contains("\"allowDesignedPageOverrides\":true", json, StringComparison.Ordinal);

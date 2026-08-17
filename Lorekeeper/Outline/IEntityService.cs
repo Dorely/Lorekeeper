@@ -126,9 +126,9 @@ public sealed record EntityLink(
     string Summary,
     IReadOnlyList<string> Aliases,
     IReadOnlyList<IngestWikiSection> WikiSections,
-    IReadOnlyList<IngestCanonSource> CanonSources,
+    IReadOnlyList<IngestSourceEvidence> SourceEvidence,
     bool IsIngestCreated,
-    int CanonSourceCount,
+    int SourceEvidenceCount,
     bool IsAutoLink,
     IReadOnlyList<IngestWikiCitation> RelationshipCitations);
 
@@ -151,6 +151,6 @@ public sealed record StoryEntity(
     string Summary,
     IReadOnlyList<string> Aliases,
     IReadOnlyList<IngestWikiSection> WikiSections,
-    IReadOnlyList<IngestCanonSource> CanonSources,
+    IReadOnlyList<IngestSourceEvidence> SourceEvidence,
     bool IsIngestCreated,
-    int CanonSourceCount);
+    int SourceEvidenceCount);

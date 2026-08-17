@@ -6,6 +6,7 @@ using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Fonts;
 using Lorekeeper.ImportExport;
+using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
@@ -388,6 +389,7 @@ public sealed class ProjectImportJobIntegrationTests
             DefaultProxy<IEntityVisualExampleService>(),
             new BookBriefService(database),
             new ManuscriptStyleService(database),
+            DefaultProxy<IIngestVectorIndexingService>(),
             indexWork,
             new ProjectImportJobNotifier(),
             NullLogger<ProjectImportJobProcessor>.Instance);
@@ -561,6 +563,7 @@ public sealed class ProjectImportJobIntegrationTests
             DefaultProxy<IEntityVisualExampleService>(),
             new BookBriefService(database),
             new ManuscriptStyleService(database),
+            DefaultProxy<IIngestVectorIndexingService>(),
             indexWork,
             new ProjectImportJobNotifier(),
             NullLogger<ProjectImportJobProcessor>.Instance);
@@ -624,6 +627,7 @@ public sealed class ProjectImportJobIntegrationTests
             DefaultProxy<IEntityVisualExampleService>(),
             new BookBriefService(database),
             new ManuscriptStyleService(database),
+            DefaultProxy<IIngestVectorIndexingService>(),
             new VectorIndexWorkCoordinator(NullLogger<VectorIndexWorkCoordinator>.Instance),
             new ProjectImportJobNotifier(),
             NullLogger<ProjectImportJobProcessor>.Instance);

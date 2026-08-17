@@ -36,10 +36,10 @@
             </article>
         }
 
-        @if (CanonSources.Count > 0)
+        @if (SourceEvidence.Count > 0)
         {
             <div class="entity-knowledge-subtitle">Canon Sources</div>
-            @foreach (var source in CanonSources)
+            @foreach (var source in SourceEvidence)
             {
                 <article class="entity-knowledge-item" @key="source.PropertyKey">
                     <div class="entity-knowledge-head">
@@ -62,14 +62,14 @@
     [Parameter] public string Summary { get; set; } = string.Empty;
     [Parameter] public IReadOnlyList<string> Aliases { get; set; } = [];
     [Parameter] public IReadOnlyList<IngestWikiSection> WikiSections { get; set; } = [];
-    [Parameter] public IReadOnlyList<IngestCanonSource> CanonSources { get; set; } = [];
+    [Parameter] public IReadOnlyList<IngestSourceEvidence> SourceEvidence { get; set; } = [];
     [Parameter] public bool ShowEmptyState { get; set; } = true;
 
     private bool HasContent =>
         !string.IsNullOrWhiteSpace(Summary)
         || Aliases.Count > 0
         || WikiSections.Count > 0
-        || CanonSources.Count > 0;
+        || SourceEvidence.Count > 0;
 
     private static string CitationKey(IngestWikiCitation citation) =>
         $"{citation.SourceId}:{citation.SourceChunkId}:{citation.SourceBlockId}:{citation.PageNumber}:{citation.Locator}";

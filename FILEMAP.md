@@ -66,7 +66,8 @@
 |------|-------------|
 | `Lorekeeper.Tests.csproj` / `Usings.cs` | xUnit project restricted to startup database and versioned project import/export migration-safety fixtures. |
 | `ManuscriptMigrationIntegrationTests.cs` | Actual legacy-schema WAL migration with plain-text audit compatibility, backup/journal/hash validation, confirmation, and restore drills. |
-| `ProjectExportCompatibilityTests.cs` | Current v22 manuscript/page-setup/composition/Core Book/publication-section/order/PDF-presentation/edition-content/print-product/cover/font fixtures plus isolated older fail-closed import-boundary checks. |
+| `ProjectExportCompatibilityTests.cs` | Current v23 manuscript/source/page-setup/composition/Core Book/publication-section/order/PDF-presentation/edition-content/print-product/cover/font fixtures plus isolated older fail-closed import-boundary checks. |
+| `SourceEvidenceMigrationTests.cs` | Populated pre-v23 database fixture proving source-evidence property renaming, chapter-link migration, canon selection persistence, and source-delete cascade behavior. |
 | `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trips for manuscript/image remapping, current and legacy cover-image conversion, and whole-import rollback on late publication conflicts. |
 | `PublishConversationMigrationTests.cs` | Populated pre-v13 upgrade fixture proving manuscript, edition, render, artifact hash/bytes, and new Publish transcript persistence survive unchanged. |
 | `LorekeeperPressMigrationTests.cs` | Fully populated installed-schema fixture run through the real startup migrator, including no-release Picture Page scene/asset/binding preservation, Press/Core projection equality, recovery cases, and whole-database byte/hash checks. |
@@ -235,7 +236,7 @@
 | File | Description |
 |------|-------------|
 | `OutlineContent.razor` (+ `.razor.css`) | Top-level Outline tab orchestrator with serialized authoritative project/act/chapter reloads. Its three independently scrolling panes host chat, outline tree, and the Book Brief/facts/entities side column; successful reloads bump the child-panel refresh signal. |
-| `BookBriefPanel.razor` (+ `.razor.css`) | Collapsible, refreshable Outline-side viewer for every Book Brief field. Re-reads the persisted brief whenever tool-driven Outline mutations bump the shared refresh signal. |
+| `BookBriefPanel.razor` (+ `.razor.css`) | Collapsible Outline-side Book Brief viewer with explicit canonical-ingest-source selection; refreshes persisted direction and source state after Outline mutations. |
 | `ProjectFactsPanel.razor` (+ `.razor.css`) | Editable project facts block surfaced at the top of the right side column. Reads/writes `ProjectFact` graph nodes via `IProjectFactService`, keeps the compact collapsible key/value UX, supports add/edit/delete, shows linked graph entities, and autosizes fact textareas via `wwwroot/js/autosizeTextareas.js`. |
 | `IngestSourcesPanel.razor` (+ `.razor.css`) | Read-only Outline side panel for structural ingest Source → SourceChunk → SourceBlock graph nodes, showing chunk/block locators and linked entities. |
 | `OutlineTree.razor` (+ `.razor.css`) | Hierarchical Acts → Chapters tree with stronger act boundaries and visibly inset chapter rows. Acts are collapsible, drag-reorderable groups with inline-editable title/synopsis and `+ Chapter` / Delete (chapters fall back to Unassigned via `OnDelete.SetNull`). Act/chapter synopsis textareas autosize to their content via `wwwroot/js/autosizeTextareas.js`. Chapters are inline-editable rows with a beats-toggle caret + count badge (renders `ChapterBeats` inline when expanded), stale/failed vector-index badge, drag-reorder within their act bucket, an act-picker `<select>` for cross-act moves, Open link, and delete-with-confirm. Re-fetches per-chapter beat counts via `IEntityService.CountChildrenAsync` whenever `RefreshSignal` bumps. |
@@ -271,7 +272,7 @@
 | `EmbeddingConfiguration.cs` | Singleton EF entity for the active embedding setup: top-level provider connection, embedding API kind, model id, dimensions, last-tested snapshot, and timestamps. |
 | `OAuthToken.cs` | EF entity holding access/refresh tokens for an OAuth-backed provider. |
 | `Project.cs` | EF project root with optional user-owned `ProjectGuidance`, stable slug/settings, one `BookBrief`, and navigation to conversations, images, fonts, jobs, publishing, and graph rows. |
-| `BookBrief.cs` | Canonical high-level authorial-direction model, `BookKind` enum, and partial-patch contract whose null values are unchanged and `ClearFields` explicitly removes values. |
+| `BookBrief.cs` | Canonical high-level authorial-direction model, relational selected-canonical-ingest-source mapping, `BookKind` enum, and partial-patch contract whose null values are unchanged and `ClearFields` explicitly removes values. |
 | `Act.cs` | EF entity for a top-level outline grouping (Title/Synopsis/Order) under a `Project`. Cascade-deleted with the project. Owned chapters survive act deletion (FK `OnDelete.SetNull`). |
 | `Chapter.cs` | EF chapter with canonical manuscript-v4 JSON/revision and computed plain-text/document projections, plus title/synopsis/order, optional act, and vector-index state. |
 | `ChapterVisualMode.cs` / `ChapterVisualLayouts.cs` | Isolated legacy import/migration DTOs and original 8.5 × 11 leaf-geometry mapping for interpreting earlier chapter visual records; no current runtime authoring path consumes them. |
@@ -364,7 +365,7 @@
 | `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); registers the no-tracking `IDbContextFactory`, database-operation factory, and singleton write coordinator. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
-| `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, publication-release, Publish-chat, Press, authoring-page, Core Book, edition-content, physical-product/cover-surface, persistent authoring-history, and cleanup migrations with the current model snapshot. |
+| `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, publication-release, Publish-chat, Press, authoring-page, Core Book, edition-content, physical-product/cover-surface, source-evidence/canonical-source selection, persistent authoring-history, and cleanup migrations with the current model snapshot. |
 
 ### Persistence/Repositories/
 
@@ -488,7 +489,7 @@
 | File | Description |
 |------|-------------|
 | `IProjectService.cs` / `ProjectService.cs` | Project CRUD and blank optional Project Guidance persistence; creates the Book Brief, syncs graph defaults, preserves stable slugs, and performs indexed-project cleanup on delete. |
-| `IBookBriefService.cs` / `BookBriefService.cs` | Get/create, validated partial update, explicit field clearing, stale-write-protected Visual Direction update, and compact system-prompt formatting for the project Book Brief. |
+| `IBookBriefService.cs` / `BookBriefService.cs` | Get/create, validated partial update, explicit field clearing, stale-write-protected Visual Direction update, canonical-ingest-source list/replace operations, and compact system-prompt formatting for the Book Brief. |
 
 ### Writing/
 
@@ -554,7 +555,7 @@
 | `IIngestJobNotifier.cs` / `IngestJobNotifier.cs` | In-process pub/sub for ingest job updates, including ephemeral live LLM/text/tool-call progress consumed by Blazor Server components. |
 | `IngestUiModels.cs` | Lightweight read-model records for the Ingest tab: job summaries, selected job detail, chunk/finalization progress, staging/report items, events, and bounded source excerpts. |
 | `IngestSourceAssertions.cs` | Legacy helper/model for protected source-scoped node/edge assertion JSON, ingest-created graph origin markers, report graph-action payloads, and source-subtraction operations. |
-| `IngestWikiSheet.cs` | Shared wiki/canon helper/models for ingest-managed summaries, aliases, wiki sections, source-backed `canonSource.*` markdown, canon metadata cleanup, citations, and search projection helpers. |
+| `IngestWikiSheet.cs` | Shared wiki/evidence helper/models for ingest-managed summaries, aliases, wiki sections, source-backed `sourceEvidence.*` markdown, evidence cleanup, citations, provenance, and search projection helpers. |
 | `IngestJobWorker.cs` | Hosted background worker that marks interrupted jobs/chunks stopped at startup, notifies the UI, and drains queued ingest jobs in scoped processors. |
 | `IngestJobProcessor.cs` | Runs ingest with streaming staging, bounded source visuals and canonical entity references, final synthesis, relationship promotion, retries, diagnostics, and indexing. |
 | `IngestAgentTools.cs` | Ingest tools for identity/observations/relationships, single-entity canonical-reference promotion with optional subject crop, final canon writes, and source progress. |
@@ -563,13 +564,13 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | Current v22 portable DTOs with v4 manuscripts, page setup, authoring/edition variants, Core Book publication sections/PDF presentation, sparse release section ordering, exact print products/templates, edition chapter snapshots/cover surfaces, accessibility data, and complete custom-font binaries; retains isolated older input adapters. |
-| `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON including visual/image data for Full exports, queues import jobs, lists/details/deletes import jobs, and emits import notifications. |
+| `ProjectExportModels.cs` | Current v23 portable DTOs with v4 manuscripts, selected canonical ingest sources, page setup, authoring/edition variants, Core Book publication sections/PDF presentation, sparse release ordering, print products/templates, cover surfaces, accessibility data, and custom fonts; retains isolated older input adapters. |
+| `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON, includes only selected canonical source bodies/evidence in Full exports, warns on Non-structural omissions, queues jobs, and emits notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
-| `ProjectImportJobProcessor.cs` | Runs one import job, importing v22 manuscripts/page setup/Core, publication sections/order overlays and compositions, releases/print products/cover surfaces/fonts, adapting older section-side defaults only at the versioned boundary, then refreshing projections and indexes. |
+| `ProjectImportJobProcessor.cs` | Runs one import job, importing v23 manuscripts, canonical sources, page setup/Core, publication sections/order overlays and compositions, releases/print products/cover surfaces/fonts; remaps source provenance, adapts older formats only at the versioned boundary, then refreshes projections and indexes. |
 
 ### Images/
 
@@ -689,8 +690,9 @@
 | File | Description |
 |------|-------------|
 | `IActService.cs` / `ActService.cs` | Act CRUD facade. `CreateAsync` auto-orders to the end. `DeleteAsync` lets the FK demote owned chapters to Unassigned (`OnDelete.SetNull`). Touches `Project.UpdatedAt`, keeps Act graph nodes/structural edges synchronized, and updates targeted act context vectors on mutations. |
-| `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Structure-focused Outline adapter whose prompt includes Project Guidance, Book Brief, and concise structure-only genre guidance while maintaining staged outline/canon changes. |
-| `OutlineCollaborationTools.cs` | Shared structural/canon tool catalog plus the restricted Outline surface: Book Brief, acts/chapters/beats/entities/links/facts, read-only manuscript access, sources/search, canonical references, and explicit canonical-appearance image generation. Editor imports an intentional structural subset and owns all manuscript/composition tools. |
+| `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Structure-focused Outline adapter whose prompt includes Project Guidance, Book Brief, shared current-outline/entity/source context, and concise structure-only genre guidance while maintaining staged outline/canon changes. |
+| `IOutlineWorkingContextBuilder.cs` / `OutlineWorkingContextBuilder.cs` | Builds the one automatic Outline working context: full outline/beats, chapter/beat entity associations, per-category origin counts/samples, and canonical versus evidentiary source inventory. |
+| `OutlineCollaborationTools.cs` | Shared structural/canon tool catalog plus the restricted Outline surface: Book Brief and explicit canon-source selection, full outline, paginated entity/source discovery and reads, chapter-first `RelevantTo` links, facts, canonical references, and explicit appearance generation. Editor imports an intentional structural subset and owns manuscript/composition tools. |
 | `BookFormatGuidanceService.cs` | Compact/paginated fiction, nonfiction, picture-book, illustrated-book, poetry, hybrid, audience, extent, accessibility, and constraint recommendations with explicit structure-only and publication-aware scopes. |
 | `OutlineMutationPayloads.cs` | Shared compact entity/endpoint envelopes used by direct and staged outline mutation tools without serializing full knowledge or relationship traversals. |
 | `OutlineChatTurnRunner.cs` | Background turn runner for Outline chat: owns active turn cancellation/subscription outside the Blazor component lifetime. |

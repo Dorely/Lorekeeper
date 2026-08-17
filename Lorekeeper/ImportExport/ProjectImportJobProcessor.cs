@@ -21,7 +21,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Lorekeeper.ImportExport;
 
 public sealed class ProjectImportJobProcessor(
-    IAppDatabaseOperationFactory database, IGraphStore graph, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IEntityTypeService entityTypeService, IOutlineGraphSync outlineGraphSync, IContextIndexingService contextIndexing, IEntityVisualExampleService entityVisualExamples, IBookBriefService bookBriefs, IManuscriptStyleService manuscriptStyles, IVectorIndexWorkCoordinator indexWork, IProjectImportJobNotifier notifier, ILogger<ProjectImportJobProcessor> logger)
+    IAppDatabaseOperationFactory database, IGraphStore graph, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IEntityTypeService entityTypeService, IOutlineGraphSync outlineGraphSync, IContextIndexingService contextIndexing, IEntityVisualExampleService entityVisualExamples, IBookBriefService bookBriefs, IManuscriptStyleService manuscriptStyles, IIngestVectorIndexingService ingestVectorIndexing, IVectorIndexWorkCoordinator indexWork, IProjectImportJobNotifier notifier, ILogger<ProjectImportJobProcessor> logger)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -55,6 +55,10 @@ public sealed class ProjectImportJobProcessor(
         public Dictionary<Guid, Guid> EditionMap { get; } = [];
         public Dictionary<Guid, Guid> CoreMatterMap { get; } = [];
         public Dictionary<Guid, Guid> CorePlacementMap { get; } = [];
+        public Dictionary<Guid, Guid> IngestSourceMap { get; } = [];
+        public Dictionary<Guid, Guid> IngestSourceChunkMap { get; } = [];
+        public Dictionary<Guid, Guid> IngestSourcePageMap { get; } = [];
+        public Dictionary<Guid, Guid> IngestSourceBlockMap { get; } = [];
         public List<Guid> CreatedActIds { get; } = [];
         public List<Guid> CreatedChapterIds { get; } = [];
         public List<Guid> ContextEntityIdsToReindex { get; } = [];
@@ -101,6 +105,7 @@ public sealed class ProjectImportJobProcessor(
 
                 if (document.ExportKind == ProjectExportKind.Full)
                 {
+                    await ImportCanonicalIngestSourcesAsync(job, document, state, cancellationToken);
                     await ImportProjectImagesAsync(job, document, state, cancellationToken);
                     await StepAsync(job, "Imported project images.", cancellationToken);
                     await ImportProjectFontsAsync(job, document, state, cancellationToken);
@@ -274,6 +279,128 @@ public sealed class ProjectImportJobProcessor(
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    private async Task ImportCanonicalIngestSourcesAsync(
+        ProjectImportJob job,
+        ProjectExportDocument document,
+        ImportState state,
+        CancellationToken cancellationToken)
+    {
+        if (document.FormatVersion < 23 || document.IngestSources.Count == 0)
+            return;
+
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        operation.ShareWithNestedOperations();
+        var db = operation.Db;
+        foreach (var imported in document.IngestSources)
+        {
+            var sourceId = Guid.NewGuid();
+            state.IngestSourceMap[imported.Id] = sourceId;
+            var source = new IngestSource
+            {
+                Id = sourceId,
+                ProjectId = job.ProjectId,
+                Title = imported.Title,
+                SourceKind = imported.SourceKind,
+                Description = imported.Description,
+                Synopsis = imported.Synopsis,
+                UserInstructions = imported.UserInstructions,
+                SourceText = imported.SourceText,
+                SourceHash = imported.SourceHash,
+                SourceUrl = imported.SourceUrl,
+                FinalUrl = imported.FinalUrl,
+                CanonicalUrl = imported.CanonicalUrl,
+                FetchedAt = imported.FetchedAt,
+                ContentType = imported.ContentType,
+                SourceMetadataJson = imported.SourceMetadataJson,
+                VectorIndexState = VectorIndexState.Stale,
+                VectorIndexedAt = null,
+                VectorIndexError = null,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            foreach (var importedPage in imported.Pages)
+            {
+                var pageId = Guid.NewGuid();
+                state.IngestSourcePageMap[importedPage.Id] = pageId;
+                source.SourcePages.Add(new IngestSourcePage
+                {
+                    Id = pageId,
+                    SourceId = sourceId,
+                    PageNumber = importedPage.PageNumber,
+                    Text = importedPage.Text,
+                    StartChar = importedPage.StartChar,
+                    EndChar = importedPage.EndChar,
+                    ExtractionMethod = importedPage.ExtractionMethod,
+                    Width = importedPage.Width,
+                    Height = importedPage.Height,
+                    ImageHash = importedPage.ImageHash,
+                    RenderSettingsJson = importedPage.RenderSettingsJson,
+                    VisionProviderId = null,
+                    VisionModelName = importedPage.VisionModelName,
+                    Diagnostics = importedPage.Diagnostics,
+                    CreatedAt = importedPage.CreatedAt,
+                });
+            }
+            foreach (var importedChunk in imported.Chunks)
+            {
+                var chunkId = Guid.NewGuid();
+                state.IngestSourceChunkMap[importedChunk.Id] = chunkId;
+                source.SourceChunks.Add(new IngestSourceChunk
+                {
+                    Id = chunkId,
+                    SourceId = sourceId,
+                    Index = importedChunk.Index,
+                    Title = importedChunk.Title,
+                    HeadingPath = importedChunk.HeadingPath,
+                    StartChar = importedChunk.StartChar,
+                    EndChar = importedChunk.EndChar,
+                    EstimatedTokenCount = importedChunk.EstimatedTokenCount,
+                    TokenCountMethod = importedChunk.TokenCountMethod,
+                    TokenEncodingName = importedChunk.TokenEncodingName,
+                    TokenCountIsExact = importedChunk.TokenCountIsExact,
+                    Summary = importedChunk.Summary,
+                    AgentNotes = importedChunk.AgentNotes,
+                    StructureStatus = importedChunk.StructureStatus,
+                    CreatedAt = importedChunk.CreatedAt,
+                    UpdatedAt = importedChunk.UpdatedAt,
+                });
+            }
+            foreach (var importedBlock in imported.Blocks)
+            {
+                var blockId = Guid.NewGuid();
+                state.IngestSourceBlockMap[importedBlock.Id] = blockId;
+                source.SourceBlocks.Add(new IngestSourceBlock
+                {
+                    Id = blockId,
+                    SourceId = sourceId,
+                    SourcePageId = importedBlock.SourcePageId is { } oldPageId
+                        ? state.IngestSourcePageMap.GetValueOrDefault(oldPageId)
+                        : null,
+                    Index = importedBlock.Index,
+                    Kind = importedBlock.Kind,
+                    Title = importedBlock.Title,
+                    Locator = importedBlock.Locator,
+                    PageNumber = importedBlock.PageNumber,
+                    StartChar = importedBlock.StartChar,
+                    EndChar = importedBlock.EndChar,
+                    MetadataJson = importedBlock.MetadataJson,
+                    CreatedAt = importedBlock.CreatedAt,
+                });
+            }
+            db.IngestSources.Add(source);
+        }
+        await db.SaveChangesAsync(cancellationToken);
+
+        var currentSelections = await bookBriefs.ListCanonSourcesAsync(job.ProjectId, cancellationToken);
+        var importedSelections = document.BookBriefCanonSourceIds
+            .Where(state.IngestSourceMap.ContainsKey)
+            .Select(id => state.IngestSourceMap[id]);
+        await bookBriefs.ReplaceCanonSourcesAsync(
+            job.ProjectId,
+            currentSelections.Select(source => source.SourceId).Concat(importedSelections).Distinct().ToArray(),
+            cancellationToken);
+    }
+
     private async Task<ProjectExportDocument> ReadAndValidateAsync(ProjectImportJob job, CancellationToken cancellationToken)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
@@ -294,7 +421,8 @@ public sealed class ProjectImportJobProcessor(
             throw new InvalidOperationException($"Unsupported import format '{document.FormatId}'.");
         if (document.FormatVersion < 1 || document.FormatVersion > ProjectExportDocument.CurrentFormatVersion)
             throw new InvalidOperationException($"Unsupported import format version {document.FormatVersion}.");
-        document = AdaptLegacyPublicationEditions(AdaptLegacyManuscriptStyles(document));
+        document = AdaptLegacySourceEvidence(
+            AdaptLegacyPublicationEditions(AdaptLegacyManuscriptStyles(document)));
 
         var duplicateNode = document.Nodes
             .GroupBy(node => StableKey(node.NodeType, node.Key), StringComparer.Ordinal)
@@ -315,6 +443,7 @@ public sealed class ProjectImportJobProcessor(
 
         ValidateChapterPayloads(document);
         ValidatePublicationPayloads(document);
+        ValidateIngestSourcePayloads(document);
 
         job.FormatId = document.FormatId;
         job.FormatVersion = document.FormatVersion;
@@ -2742,17 +2871,18 @@ public sealed class ProjectImportJobProcessor(
             if (string.Equals(importedNode.NodeType, EntityTypeService.ProjectNodeType, StringComparison.Ordinal)) continue;
             if (document.ExportKind == ProjectExportKind.Full && AppendStructuralNodeTypes.Contains(importedNode.NodeType)) continue;
 
-            if (string.Equals(importedNode.NodeType, EntityTypeService.ProjectFactNodeType, StringComparison.Ordinal))
+            var remappedNode = RemapImportedNode(importedNode, state);
+            if (string.Equals(remappedNode.NodeType, EntityTypeService.ProjectFactNodeType, StringComparison.Ordinal))
             {
-                await ImportProjectFactAsync(job, importedNode, state, cancellationToken);
+                await ImportProjectFactAsync(job, remappedNode, state, cancellationToken, importedStableKey);
                 continue;
             }
 
-            var importedProperties = NormalizeProperties(importedNode.Properties);
-            var existing = await FindExistingNodeAsync(job.ProjectId, importedNode, cancellationToken);
+            var importedProperties = NormalizeProperties(remappedNode.Properties);
+            var existing = await FindExistingNodeAsync(job.ProjectId, remappedNode, cancellationToken);
             if (existing is null)
             {
-                var created = await graph.UpsertNodeAsync(job.ProjectId, importedNode.NodeType, importedNode.Key, importedNode.Label, importedProperties, cancellationToken);
+                var created = await graph.UpsertNodeAsync(job.ProjectId, remappedNode.NodeType, remappedNode.Key, remappedNode.Label, importedProperties, cancellationToken);
                 state.NodeMap[importedStableKey] = created;
                 job.CreatedNodeCount++;
                 AddContextEntityId(created, state.ContextEntityIdsToReindex);
@@ -2785,7 +2915,8 @@ public sealed class ProjectImportJobProcessor(
         ProjectImportJob job,
         ProjectExportNode importedNode,
         ImportState state,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? originalStableKey = null)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
@@ -2808,7 +2939,7 @@ public sealed class ProjectImportJobProcessor(
             await databaseOperation.SaveChangesAsync(cancellationToken);
         }
 
-        state.NodeMap[StableKey(importedNode.NodeType, importedNode.Key)] = node;
+        state.NodeMap[originalStableKey ?? StableKey(importedNode.NodeType, importedNode.Key)] = node;
         if (existing is null) job.CreatedNodeCount++; else job.MergedNodeCount++;
         await AddReportAsync(job, ProjectImportReportItemKind.Entity, $"{(existing is null ? "Created" : "Merged")} project fact {fact.Key}", fact.Value, EntityTypeService.ProjectFactNodeType, fact.Id.ToString("N"), entityId: fact.Id, graphNodeId: node.Id, cancellationToken: cancellationToken);
     }
@@ -2833,7 +2964,7 @@ public sealed class ProjectImportJobProcessor(
 
             if (IsManagedStructuralEdge(importedEdge)) continue;
 
-            var importedProperties = NormalizeProperties(importedEdge.Properties);
+            var importedProperties = NormalizeProperties(RemapSourceReferences(importedEdge.Properties, state));
             var existing = await edges.FindAsync(fromNode.Id, toNode.Id, importedEdge.EdgeType, cancellationToken);
             if (existing is null)
             {
@@ -2897,6 +3028,28 @@ public sealed class ProjectImportJobProcessor(
                 job,
                 "Entity context index refresh failed",
                 () => contextIndexing.ReindexEntityAsync(job.ProjectId, entityId, cancellationToken),
+                cancellationToken);
+        }
+
+        foreach (var sourceId in state.IngestSourceMap.Values.Distinct())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await TryReindexAsync(
+                job,
+                "Imported source context index refresh failed",
+                () => contextIndexing.ReindexIngestSourceAsync(sourceId, cancellationToken),
+                cancellationToken);
+            await TryReindexAsync(
+                job,
+                "Imported source search index refresh failed",
+                async () =>
+                {
+                    await using var operation = await database.OpenReadAsync(cancellationToken);
+                    var source = await operation.Db.IngestSources
+                        .Include(item => item.SourceChunks)
+                        .SingleAsync(item => item.Id == sourceId, cancellationToken);
+                    await ingestVectorIndexing.EnsureVectorFragmentsAsync(source, cancellationToken: cancellationToken);
+                },
                 cancellationToken);
         }
     }
@@ -3899,6 +4052,110 @@ public sealed class ProjectImportJobProcessor(
                 buffer[index++] = char.ToLowerInvariant(ch);
         }
         return new string(buffer[..index]);
+    }
+
+    internal static void ValidateIngestSourcePayloads(ProjectExportDocument document)
+    {
+        if (document.FormatVersion < 23)
+            return;
+        if (document.ExportKind == ProjectExportKind.NonStructural
+            && (document.IngestSources.Count > 0 || document.BookBriefCanonSourceIds.Count > 0))
+        {
+            throw new InvalidOperationException("Non-structural exports cannot contain ingested source bodies or canonical-source selections.");
+        }
+
+        if (document.IngestSources.GroupBy(source => source.Id).Any(group => group.Count() > 1))
+            throw new InvalidOperationException("Import file contains duplicate ingested source records.");
+        var sourceIds = document.IngestSources.Select(source => source.Id).ToHashSet();
+        if (document.BookBriefCanonSourceIds.Distinct().Count() != document.BookBriefCanonSourceIds.Count
+            || document.BookBriefCanonSourceIds.Any(sourceId => !sourceIds.Contains(sourceId)))
+        {
+            throw new InvalidOperationException("Canonical-source selections must be unique and reference exported ingested sources.");
+        }
+
+        var childIds = document.IngestSources.SelectMany(source =>
+                source.Chunks.Select(chunk => chunk.Id)
+                    .Concat(source.Pages.Select(page => page.Id))
+                    .Concat(source.Blocks.Select(block => block.Id)))
+            .ToList();
+        if (childIds.Distinct().Count() != childIds.Count)
+            throw new InvalidOperationException("Import file contains duplicate ingested source child records.");
+        foreach (var source in document.IngestSources)
+        {
+            var pageIds = source.Pages.Select(page => page.Id).ToHashSet();
+            if (source.Blocks.Any(block => block.SourcePageId is { } pageId && !pageIds.Contains(pageId)))
+                throw new InvalidOperationException($"Ingested source '{source.Title}' contains a block whose page was not exported.");
+        }
+    }
+
+    private static ProjectExportDocument AdaptLegacySourceEvidence(ProjectExportDocument document)
+    {
+        if (document.FormatVersion >= 23)
+            return document;
+
+        static Dictionary<string, object?> Adapt(Dictionary<string, object?> properties)
+        {
+            var adapted = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in properties)
+            {
+                var key = property.Key switch
+                {
+                    "canonSourceMetaJson" => IngestWikiSheet.SourceEvidenceMetaProperty,
+                    _ when property.Key.StartsWith("canonSource.", StringComparison.OrdinalIgnoreCase) =>
+                        IngestWikiSheet.SourceEvidencePrefix + property.Key["canonSource.".Length..],
+                    _ => property.Key,
+                };
+                adapted[key] = property.Value;
+            }
+            return adapted;
+        }
+
+        return document with
+        {
+            Nodes = document.Nodes.Select(node => node with { Properties = Adapt(node.Properties) }).ToList(),
+            Edges = document.Edges.Select(edge => edge with { Properties = Adapt(edge.Properties) }).ToList(),
+        };
+    }
+
+    private static ProjectExportNode RemapImportedNode(ProjectExportNode node, ImportState state)
+    {
+        var key = node.Key;
+        if (Guid.TryParse(key, out var id))
+        {
+            var mapped = node.NodeType switch
+            {
+                EntityTypeService.SourceNodeType => state.IngestSourceMap.GetValueOrDefault(id),
+                EntityTypeService.SourceChunkNodeType => state.IngestSourceChunkMap.GetValueOrDefault(id),
+                EntityTypeService.SourceBlockNodeType => state.IngestSourceBlockMap.GetValueOrDefault(id),
+                _ => Guid.Empty,
+            };
+            if (mapped != Guid.Empty)
+                key = mapped.ToString("N");
+        }
+
+        return node with
+        {
+            Key = key,
+            Properties = RemapSourceReferences(node.Properties, state),
+        };
+    }
+
+    private static Dictionary<string, object?> RemapSourceReferences(
+        Dictionary<string, object?> properties,
+        ImportState state)
+    {
+        if (properties.Count == 0)
+            return [];
+        var json = JsonSerializer.Serialize(properties, JsonOptions);
+        foreach (var mapping in state.IngestSourceMap
+            .Concat(state.IngestSourceChunkMap)
+            .Concat(state.IngestSourcePageMap)
+            .Concat(state.IngestSourceBlockMap))
+        {
+            json = json.Replace(mapping.Key.ToString("N"), mapping.Value.ToString("N"), StringComparison.OrdinalIgnoreCase)
+                .Replace(mapping.Key.ToString(), mapping.Value.ToString(), StringComparison.OrdinalIgnoreCase);
+        }
+        return JsonSerializer.Deserialize<Dictionary<string, object?>>(json, JsonOptions) ?? [];
     }
 
     private static string StableKey(string nodeType, string key) =>
