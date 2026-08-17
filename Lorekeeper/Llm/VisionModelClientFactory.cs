@@ -332,7 +332,10 @@ public sealed class VisionModelClientFactory(
 
         try
         {
-            using var document = JsonDocument.Parse(responseBody);
+            // Gateways like Cline wrap non-streaming completions in a {"data": {...}, "success": true}
+            // envelope; unwrap it before looking for the standard chat-completions payload.
+            var payloadBody = OpenAICompatEnvelopeHandler.TryUnwrapEnvelope(responseBody) ?? responseBody;
+            using var document = JsonDocument.Parse(payloadBody);
             var root = document.RootElement;
             if (root.TryGetProperty("choices", out var choices) && choices.ValueKind == JsonValueKind.Array)
             {

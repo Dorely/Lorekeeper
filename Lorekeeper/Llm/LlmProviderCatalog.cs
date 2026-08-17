@@ -41,12 +41,10 @@ public static class LlmProviderCatalog
             Note: "Usage-billed Cline API. Create an API key in the Cline app under Settings > API Keys; model IDs use provider/model form."),
         new("cline-pass", "Cline (ClinePass)", "https://api.cline.bot/api/v1", AuthType.ApiKey,
         [
-            "cline-pass/anthropic/claude-sonnet-4.5",
-            "cline-pass/openai/gpt-5.1",
-            "cline-pass/google/gemini-2.5-pro",
+            "cline-pass/kimi-k3",
         ],
             KeyManagementUrl: "https://app.cline.bot/settings",
-            Note: "Quota-based ClinePass plans use the same endpoint and API key with cline-pass/* model slugs; see the Cline documentation for the current catalog."),
+            Note: "Quota-based ClinePass plans use the same endpoint and API key with cline-pass/<model> slugs (no vendor prefix); see the Cline documentation for the current catalog."),
         new("anthropic", "Anthropic (OpenAI-compatible)", "https://api.anthropic.com/v1", AuthType.ApiKey,
         [
             "claude-sonnet-4-5",

@@ -1,4 +1,5 @@
 using System.ClientModel;
+using System.ClientModel.Primitives;
 using Microsoft.Extensions.Options;
 using Lorekeeper.Models;
 using Microsoft.Extensions.AI;
@@ -13,6 +14,13 @@ public class ChatClientFactory(
     IOptions<AgentOptions> agentOptions,
     ILoggerFactory loggerFactory) : IChatClientFactory
 {
+    // One shared connection pool for all OpenAI-compatible clients; the handler unwraps
+    // gateway envelopes (see OpenAICompatEnvelopeHandler) and adds no per-provider state.
+    private static readonly HttpClient EnvelopeHttpClient = new(new OpenAICompatEnvelopeHandler())
+    {
+        Timeout = TimeSpan.FromMinutes(10)
+    };
+
     public async Task<IChatClient> CreateChatClientAsync(int providerId, CancellationToken cancellationToken = default)
     {
         var provider = await providerService.GetByIdAsync(providerId, cancellationToken)
@@ -59,6 +67,10 @@ public class ChatClientFactory(
             Endpoint = new Uri(provider.EndpointUrl),
             NetworkTimeout = TimeSpan.FromMinutes(10)
         };
+        // Gateways like Cline wrap non-streaming completions in a {"data": {...}, "success": true}
+        // envelope; the shared handler unwraps it before the SDK parses the payload. Standard
+        // providers are unaffected, and streaming responses pass through untouched.
+        options.Transport = new HttpClientPipelineTransport(EnvelopeHttpClient);
 
         // Local OpenAI-compatible providers (e.g. Ollama) don't require auth; use a placeholder.
         var credential = new ApiKeyCredential(apiKey ?? "ollama");

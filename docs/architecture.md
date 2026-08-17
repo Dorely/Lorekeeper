@@ -103,6 +103,11 @@ followed, on chat success, by a non-blocking vision probe; saving is gated on
 chat success only, and a vision failure records a warning without blocking.
 Chat, vision, and discovery errors are normalized through shared helpers that
 extract the provider's error detail instead of surfacing raw response bodies.
+OpenAI-compatible clients install a shared envelope-unwrap transport so gateways
+that wrap non-streaming completions in an outer object (Cline's
+`{"data": {...}, "success": true}` form) still parse; streaming responses use the
+standard root shape and pass through untouched, and the raw-HTTP vision probe
+applies the same unwrap.
 
 The main application flow is:
 
