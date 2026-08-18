@@ -23,6 +23,24 @@
             root.setAttribute("data-bs-theme", theme);
             var meta = document.querySelector('meta[name="theme-color"]');
             if (meta) meta.setAttribute("content", theme === "dark" ? "#14181f" : "#425fce");
+
+            // Blazor enhanced navigation re-renders the <html> element from
+            // server HTML, which drops the theme attributes. Watch the root
+            // element and re-apply the stored theme whenever the attribute is
+            // removed, so the choice survives page-to-page navigation.
+            if (window.MutationObserver) {
+                new MutationObserver(function () {
+                    var stored = null;
+                    try {
+                        stored = window.localStorage.getItem(THEME_KEY);
+                    } catch (_) { }
+                    if (stored !== "light" && stored !== "dark") return;
+                    if (root.getAttribute("data-lk-theme") === stored) return;
+                    root.setAttribute("data-lk-theme", stored);
+                    root.setAttribute("data-bs-theme", stored);
+                    if (meta) meta.setAttribute("content", stored === "dark" ? "#14181f" : "#425fce");
+                }).observe(root, { attributes: true, attributeFilter: ["data-lk-theme"] });
+            }
         })();
     </script>
     <ResourcePreloader />
