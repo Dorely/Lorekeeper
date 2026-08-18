@@ -692,6 +692,7 @@ public class AppDbContext(
             entity.HasIndex(e => e.Name).IsUnique();
             entity.Property(e => e.AuthType).HasConversion<string>();
             entity.Property(e => e.ReasoningEffort).HasConversion<string>();
+            entity.Property(e => e.MaxTokensField).HasConversion<string>();
             entity.Property(e => e.LastChatTestAuthType).HasConversion<string>();
             entity.Property(e => e.LastChatTestReasoningEffort).HasConversion<string>();
             entity.Property(e => e.LastVisionTestAuthType).HasConversion<string>();

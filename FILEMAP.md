@@ -268,8 +268,9 @@
 | File | Description |
 |------|-------------|
 | `AuthType.cs` | Enum: None, ApiKey, OAuth. |
-| `LlmProvider.cs` | EF entity for an LLM endpoint/model row. Supports parent/child credential sharing, per-model reasoning effort, and persisted chat/vision readiness snapshots. |
+| `LlmProvider.cs` | EF entity for an LLM endpoint/model row. Supports parent/child credential sharing, per-model reasoning effort, optional output-token budget and max-tokens field override, and persisted chat/vision readiness snapshots. |
 | `LlmReasoningEffort.cs` | Full model reasoning-effort enum plus exact provider wire-value mapping (`none` through `max`). |
+| `LlmMaxTokensField.cs` | Enum selecting the max-tokens request field: `Default` (endpoint auto), `Standard` (`max_completion_tokens`), or `Legacy` (`max_tokens`). |
 | `EmbeddingConfiguration.cs` | Singleton EF entity for the active embedding setup: top-level provider connection, embedding API kind, model id, dimensions, last-tested snapshot, and timestamps. |
 | `OAuthToken.cs` | EF entity holding access/refresh tokens for an OAuth-backed provider. |
 | `Project.cs` | EF project root with optional user-owned `ProjectGuidance`, stable slug/settings, one `BookBrief`, and navigation to conversations, images, fonts, jobs, publishing, and graph rows. |
@@ -430,10 +431,12 @@
 | `StreamingToolCallTracker.cs` | Normalizes provider function-call start/delta/final content into app-level started/arguments/ready updates for chat services. |
 | `CodexChatClient.cs` | `IChatClient` implementation for Codex Responses API with configured reasoning effort, SSE parsing, multimodal user content, function calling, strict schemas, and tool-argument streaming. |
 | `OpenAIChatToolMetadataClient.cs` | OpenAI-compatible client boundary that preserves unknown streamed tool-call extensions and restores them on the correlated assistant/tool-result request. |
-| `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs Codex or metadata-preserving OpenAI-compatible chat clients, applies exact per-model reasoning effort and Codex timeout, and exposes a protocol-safe verification probe with normalized errors. |
+| `IChatClientFactory.cs` / `ChatClientFactory.cs` | Constructs Codex or metadata-preserving OpenAI-compatible chat clients, applies exact per-model reasoning effort, output-token budget, max-tokens field-name selection, and Codex/chat timeouts, and exposes a protocol-safe verification probe with normalized errors. |
 | `OpenAICompatEnvelopeHandler.cs` | Shared HTTP transport handler that unwraps gateway envelopes (Cline's `{"data": {...}, "success": true}` non-streaming completions) into the standard OpenAI payload shape for SDK clients and raw-HTTP probes. |
+| `WireCompat/LlmWireCompatResolver.cs` | Endpoint-host-keyed wire-compatibility classification (pi `detectCompat` pattern): OpenAI first-party, legacy `max_tokens` open-weight gateways, local servers, and generic gateways, plus effective output-token-budget resolution (16,384 default for non-first-class remotes). |
+| `WireCompat/OpenAiLegacyMaxTokensFieldHandler.cs` | Per-provider HTTP handler that renames `max_completion_tokens` to legacy `max_tokens` in request bodies for endpoints that reject the standard field. |
 | `IVisionModelClientFactory.cs` / `VisionModelClientFactory.cs` | Provider-backed image reader for vision probes and PDF transcription, with per-model reasoning effort across Codex Responses and normalized OpenAI-compatible requests. |
-| `LlmProviderCatalog.cs` | Built-in OpenAI-compatible provider presets (OpenAI, Cline usage/ClinePass, Anthropic, Gemini, OpenRouter, Groq, DeepSeek, xAI, Mistral, Together, Ollama, LM Studio, custom) with endpoint/auth defaults, seeded model suggestions, and key-management links. |
+| `LlmProviderCatalog.cs` | Built-in OpenAI-compatible provider presets (OpenAI, Cline usage/ClinePass, Anthropic, Gemini, OpenRouter, Groq, DeepSeek, xAI, Mistral, Together, Ollama, LM Studio, custom) with endpoint/auth defaults, seeded model suggestions, output-token-budget pre-fills, and key-management links. |
 | `IModelCatalogService.cs` / `ModelCatalogService.cs` | Model discovery over OpenAI-compatible `GET /models` (including the Codex platform endpoint) and Ollama `GET /api/tags`, with endpoint normalization and normalized errors for graceful manual-entry fallback. |
 | `LlmConnectionResolver.cs` | Shared credential resolution following `CredentialSourceId` for chat, vision, and model-catalog clients. |
 | `LlmErrorNormalizer.cs` | Shared normalization of provider HTTP error bodies into concise user-presentable messages. |

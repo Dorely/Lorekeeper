@@ -13,4 +13,11 @@ public sealed class AgentOptions
     public int IngestRetryMaxDelayMs { get; set; } = 8_000;
 
     public int CodexRequestTimeoutSeconds { get; set; } = 600;
+
+    /// <summary>
+    /// Per-request timeout for OpenAI-compatible chat requests through the
+    /// shared connection pool, in seconds. The default matches the previous
+    /// hard-coded 10-minute transport limit.
+    /// </summary>
+    public int ChatRequestTimeoutSeconds { get; set; } = 600;
 }

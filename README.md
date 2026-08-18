@@ -190,7 +190,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   semantic mixed-layout EPUB, artifact-backed Generate/Regenerate, separate
   paperback interior/cover saves, and one Digital PDF Book save. EPUB export is
   restricted to EPUB editions.
-- Configurable Codex/OpenAI-compatible chat and embedding providers — with provider presets, model discovery, and combined chat+vision verification — configurable web search, and local SQLite persistence.
+- Configurable Codex/OpenAI-compatible chat and embedding providers — with provider presets, model discovery, combined chat+vision verification, per-model reasoning effort, output-token budget, and endpoint-aware wire compatibility — configurable web search, and local SQLite persistence.
 
 ## Requirements
 

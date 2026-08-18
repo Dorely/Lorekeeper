@@ -95,7 +95,22 @@
                             <option value="@choice.Value">@choice.Label</option>
                         }
                     </select>
-                    <small class="field-note">Higher effort can improve complex work, with more latency and token use. Support depends on the model.</small>
+                    <small class="field-note">Higher effort can improve complex work, with more latency and token use. Support depends on the model. "Provider default" omits the parameter entirely — use it for gateways that reject <code>reasoning_effort</code>.</small>
+                </label>
+                <label>
+                    <span>Max output tokens</span>
+                    <input type="number" min="1" step="1" class="form-control" placeholder="Auto" @bind="_newProvider.MaxOutputTokens" />
+                    <small class="field-note">Caps the response budget. Leave blank to auto-apply a per-endpoint default: standard field with 16,384 for generic/unknown gateways, none for OpenAI and local servers.</small>
+                </label>
+                <label>
+                    <span>Max tokens field</span>
+                    <select class="form-select" @bind="_newProvider.MaxTokensField">
+                        @foreach (var choice in MaxTokensFieldChoices)
+                        {
+                            <option value="@choice.Value">@choice.Label</option>
+                        }
+                    </select>
+                    <small class="field-note">Field name carrying the output budget. "Auto" follows the endpoint (legacy <code>max_tokens</code> for DeepSeek/Together and local servers, OpenAI <code>max_completion_tokens</code> otherwise). Override for gateways that reject the auto-chosen field.</small>
                 </label>
                 <label><span>Authentication</span><select class="form-select" @bind="_newProvider.AuthType"><option value="@AuthType.None">None</option><option value="@AuthType.ApiKey">API key</option></select></label>
                 @if (_newProvider.AuthType == AuthType.ApiKey)
@@ -167,6 +182,7 @@
                                     </select>
                                     <small class="field-note">Higher levels use more time and tokens; model support varies.</small>
                                 </label>
+                                @RenderMaxTokenControls(model)
                             </div>
                             <div class="model-readiness"><div><span>Chat</span>@RenderChatStatus(model)</div><div><span>Vision</span>@RenderVisionStatus(model)</div>@if (model.IsDefault){<span class="lk-status-pill is-accent">Default</span>}</div>
                             <div class="model-actions">
@@ -244,6 +260,7 @@
                                     </select>
                                     <small class="field-note">Higher levels use more time and tokens; model support varies.</small>
                                 </label>
+                                @RenderMaxTokenControls(model)
                             </div>
                             <div class="model-readiness"><div><span>Chat</span>@RenderChatStatus(model)</div><div><span>Vision</span>@RenderVisionStatus(model)</div>@if (model.IsDefault){<span class="lk-status-pill is-accent">Default</span>}</div>
                             <div class="model-actions">
@@ -314,6 +331,13 @@
         (LlmReasoningEffort.High, "High"),
         (LlmReasoningEffort.ExtraHigh, "Extra high"),
         (LlmReasoningEffort.Maximum, "Maximum"),
+    ];
+
+    private static readonly (LlmMaxTokensField Value, string Label)[] MaxTokensFieldChoices =
+    [
+        (LlmMaxTokensField.Default, "Auto"),
+        (LlmMaxTokensField.Standard, "max_completion_tokens"),
+        (LlmMaxTokensField.Legacy, "max_tokens"),
     ];
 
     private bool AnyTestRunning => _testingProviderId is not null || _isTestingNewProvider || _listingNewProviderModels || _listingRowModelId is not null || _listingChildModelParentId is not null;
@@ -689,6 +713,8 @@
             EndpointUrl = parent.EndpointUrl,
             ModelId = modelId,
             ReasoningEffort = draft.ReasoningEffort,
+            MaxOutputTokens = draft.MaxOutputTokens,
+            MaxTokensField = draft.MaxTokensField,
             AuthType = parent.AuthType,
             CredentialSourceId = parent.Id
         };
@@ -822,6 +848,24 @@
         return models;
     }
 
+    private RenderFragment RenderMaxTokenControls(LlmProvider model) => __builder =>
+    {
+        <label>
+            <span>Max output tokens</span>
+            <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto" @bind="model.MaxOutputTokens" />
+            <small class="field-note">Blank uses the per-endpoint auto default (see add/edit connection notes).</small>
+        </label>
+        <label>
+            <span>Max tokens field</span>
+            <select class="form-select form-select-sm" @bind="model.MaxTokensField">
+                @foreach (var choice in MaxTokensFieldChoices)
+                {
+                    <option value="@choice.Value">@choice.Label</option>
+                }
+            </select>
+        </label>
+    };
+
     private RenderFragment RenderChildForm(LlmProvider parent) => __builder =>
     {
         if (!_childForms.TryGetValue(parent.Id, out var draft))
@@ -856,6 +900,20 @@
                     }
                 </select>
                 <small class="field-note">Support depends on the model.</small>
+            </label>
+            <label>
+                <span>Max output tokens</span>
+                <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto" @bind="draft.MaxOutputTokens" />
+                <small class="field-note">Blank uses the per-endpoint auto default.</small>
+            </label>
+            <label>
+                <span>Max tokens field</span>
+                <select class="form-select form-select-sm" @bind="draft.MaxTokensField">
+                    @foreach (var choice in MaxTokensFieldChoices)
+                    {
+                        <option value="@choice.Value">@choice.Label</option>
+                    }
+                </select>
             </label>
             <div class="lk-toolbar"><button type="button" class="btn btn-sm btn-primary" @onclick="() => AddChildModelAsync(parent, draft)">Test and add</button><button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _childForms.Remove(parent.Id)">Cancel</button></div>
         </div>
@@ -902,6 +960,7 @@
         if (preset.AuthType != AuthType.ApiKey)
             _newProvider.ApiKey = null;
         _newProviderModels = preset.SeededModels;
+        _newProvider.MaxOutputTokens = preset.DefaultMaxOutputTokens;
         if (string.IsNullOrWhiteSpace(_newProvider.ModelId) && preset.SeededModels.Count > 0)
             _newProvider.ModelId = preset.SeededModels[0];
     }
@@ -1003,6 +1062,8 @@
             EndpointUrl = endpoint,
             ModelId = model,
             ReasoningEffort = _newProvider.ReasoningEffort,
+            MaxOutputTokens = _newProvider.MaxOutputTokens,
+            MaxTokensField = _newProvider.MaxTokensField,
             AuthType = _newProvider.AuthType,
             ApiKey = _newProvider.AuthType == AuthType.ApiKey ? apiKey : null,
             IsDefault = _newProvider.IsDefault
@@ -1014,6 +1075,8 @@
             (_newProvider.EndpointUrl ?? string.Empty).Trim(),
             (_newProvider.ModelId ?? string.Empty).Trim(),
             _newProvider.ReasoningEffort,
+            _newProvider.MaxOutputTokens,
+            _newProvider.MaxTokensField,
             _newProvider.AuthType,
             _newProvider.AuthType == AuthType.ApiKey ? (_newProvider.ApiKey ?? string.Empty).Trim() : string.Empty);
 
@@ -1030,6 +1093,8 @@
         public string? EndpointUrl { get; set; }
         public string? ModelId { get; set; }
         public LlmReasoningEffort? ReasoningEffort { get; set; }
+        public int? MaxOutputTokens { get; set; }
+        public LlmMaxTokensField MaxTokensField { get; set; } = LlmMaxTokensField.Default;
         public AuthType AuthType { get; set; } = AuthType.None;
         public string? ApiKey { get; set; }
         public bool IsDefault { get; set; }
@@ -1039,6 +1104,8 @@
         string EndpointUrl,
         string ModelId,
         LlmReasoningEffort? ReasoningEffort,
+        int? MaxOutputTokens,
+        LlmMaxTokensField MaxTokensField,
         AuthType AuthType,
         string ApiKey);
 
@@ -1047,6 +1114,8 @@
         public string? DisplayName { get; set; }
         public string? ModelId { get; set; }
         public LlmReasoningEffort? ReasoningEffort { get; set; }
+        public int? MaxOutputTokens { get; set; }
+        public LlmMaxTokensField MaxTokensField { get; set; } = LlmMaxTokensField.Default;
     }
 
     private sealed class ConnectionEditDraft

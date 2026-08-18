@@ -121,6 +121,26 @@ that wrap non-streaming completions in an outer object (Cline's
 standard root shape and pass through untouched, and the raw-HTTP vision probe
 applies the same unwrap.
 
+Per-endpoint wire compatibility is derived from the endpoint host (a bounded,
+code-owned classification mirroring pi's `detectCompat` model, implemented in
+`LlmWireCompatResolver`) rather than a per-provider model matrix. OpenAI
+first-party (`api.openai.com`) is first-class: it uses the OpenAI-standard
+`max_completion_tokens` field and receives no auto output-token budget.
+Legacy-field open-weight endpoints (`api.deepseek.com`, `api.together.xyz`) and
+local servers (localhost Ollama/LM Studio) use the legacy `max_tokens` field.
+Every other remote OpenAI-compatible endpoint — including the Cline gateway and
+custom entries — is treated as a generic gateway with the standard field and a
+16,384-token universal output budget, so thinking models receive an explicit
+response cap instead of exhausting a gateway default on reasoning before
+emitting tool calls. Per-provider rows can override the output budget
+(`MaxOutputTokens`) and the max-tokens field name (`MaxTokensField`) in
+Settings > Providers; the readiness probe sends no `ChatOptions` and is
+unaffected. Open-weight thinking models behind generic gateways (for example a
+Kimi/GLM/DeepSeek/Qwen model routed through Cline) therefore get safe defaults
+automatically while remaining tunable per row. OpenAI-compatible chat requests
+use a shared pooled transport with a configurable timeout
+(`Agents:ChatRequestTimeoutSeconds`, default 600).
+
 The main application flow is:
 
 1. A Razor component, assistant tool, endpoint, or background processor requests

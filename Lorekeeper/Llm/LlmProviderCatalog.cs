@@ -9,7 +9,8 @@ public sealed record LlmProviderPreset(
     AuthType AuthType,
     IReadOnlyList<string> SeededModels,
     string? KeyManagementUrl = null,
-    string? Note = null);
+    string? Note = null,
+    int? DefaultMaxOutputTokens = null);
 
 /// <summary>
 /// Catalog of built-in OpenAI-compatible provider presets used to pre-fill new
@@ -29,6 +30,7 @@ public static class LlmProviderCatalog
             "gpt-5.1",
         ],
             KeyManagementUrl: "https://platform.openai.com/api-keys"),
+        // OpenAI first-party is resolved as OpenAiFirstParty: no auto budget, standard field.
         new("cline", "Cline (usage billing)", "https://api.cline.bot/api/v1", AuthType.ApiKey,
         [
             "anthropic/claude-sonnet-4.5",
@@ -44,7 +46,8 @@ public static class LlmProviderCatalog
             "cline-pass/kimi-k3",
         ],
             KeyManagementUrl: "https://app.cline.bot/settings",
-            Note: "Quota-based ClinePass plans use the same endpoint and API key with cline-pass/<model> slugs (no vendor prefix); see the Cline documentation for the current catalog."),
+            Note: "Quota-based ClinePass plans use the same endpoint and API key with cline-pass/<model> slugs (no vendor prefix); see the Cline documentation for the current catalog.",
+            DefaultMaxOutputTokens: 16_384),
         new("anthropic", "Anthropic (OpenAI-compatible)", "https://api.anthropic.com/v1", AuthType.ApiKey,
         [
             "claude-sonnet-4-5",
@@ -77,7 +80,8 @@ public static class LlmProviderCatalog
             "deepseek-chat",
             "deepseek-reasoner",
         ],
-            KeyManagementUrl: "https://platform.deepseek.com/api_keys"),
+            KeyManagementUrl: "https://platform.deepseek.com/api_keys",
+            DefaultMaxOutputTokens: 8_192),
         new("xai", "xAI", "https://api.x.ai/v1", AuthType.ApiKey,
         [
             "grok-4",
@@ -96,7 +100,8 @@ public static class LlmProviderCatalog
             "meta-llama/Llama-3.3-70B-Instruct-Turbo",
             "deepseek-ai/DeepSeek-V3",
         ],
-            KeyManagementUrl: "https://api.together.ai/settings/api-keys"),
+            KeyManagementUrl: "https://api.together.ai/settings/api-keys",
+            DefaultMaxOutputTokens: 16_384),
         new("ollama", "Ollama (local)", "http://localhost:11434/v1", AuthType.None,
         [
             "llama3.2",
@@ -106,6 +111,7 @@ public static class LlmProviderCatalog
         new("lm-studio", "LM Studio (local)", "http://localhost:1234/v1", AuthType.None,
         [
         ]),
+        // Local endpoints resolve as Local: no auto budget; model capability is unknown.
         new(CustomPresetSlug, "Custom / manual entry", "https://", AuthType.ApiKey,
         [
         ]),

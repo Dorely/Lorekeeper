@@ -14,8 +14,18 @@ namespace Lorekeeper.Llm;
 /// </summary>
 internal sealed class OpenAICompatEnvelopeHandler : DelegatingHandler
 {
+    private static readonly SocketsHttpHandler DefaultInner = new()
+    {
+        PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+    };
+
     public OpenAICompatEnvelopeHandler()
-        : base(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) })
+        : base(DefaultInner)
+    {
+    }
+
+    public OpenAICompatEnvelopeHandler(HttpMessageHandler inner)
+        : base(inner)
     {
     }
 

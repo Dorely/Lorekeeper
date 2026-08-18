@@ -14,12 +14,34 @@ public class ChatClientFactory(
     IOptions<AgentOptions> agentOptions,
     ILoggerFactory loggerFactory) : IChatClientFactory
 {
-    // One shared connection pool for all OpenAI-compatible clients; the handler unwraps
-    // gateway envelopes (see OpenAICompatEnvelopeHandler) and adds no per-provider state.
-    private static readonly HttpClient EnvelopeHttpClient = new(new OpenAICompatEnvelopeHandler())
+    private static readonly object SharedHttpClientLock = new();
+    private static HttpClient? _sharedHttpClient;
+    private static TimeSpan _sharedHttpClientTimeout;
+
+    private static HttpClient SharedHttpClient(TimeSpan timeout)
     {
-        Timeout = TimeSpan.FromMinutes(10)
-    };
+        // HttpClient.Timeout is effectively immutable after the first request, so a
+        // shared instance is created once per distinct configured timeout.
+        if (_sharedHttpClient is { } client && _sharedHttpClientTimeout == timeout)
+            return client;
+
+        lock (SharedHttpClientLock)
+        {
+            if (_sharedHttpClient is { } current && _sharedHttpClientTimeout == timeout)
+                return current;
+
+            var replacement = buildHttpClient(timeout);
+            _sharedHttpClient = replacement;
+            _sharedHttpClientTimeout = timeout;
+            return replacement;
+        }
+    }
+
+    private static HttpClient buildHttpClient(TimeSpan timeout) =>
+        new(new OpenAICompatEnvelopeHandler())
+        {
+            Timeout = timeout
+        };
 
     public async Task<IChatClient> CreateChatClientAsync(int providerId, CancellationToken cancellationToken = default)
     {
@@ -62,23 +84,56 @@ public class ChatClientFactory(
         if (effectiveAuthType != AuthType.None && apiKey is null)
             throw new InvalidOperationException($"No valid API key or token for provider '{provider.Name}'.");
 
+        var chatTimeoutSeconds = Math.Clamp(agentOptions.Value.ChatRequestTimeoutSeconds, 60, 3600);
+        var requestTimeout = TimeSpan.FromSeconds(chatTimeoutSeconds);
+
         var options = new OpenAIClientOptions
         {
             Endpoint = new Uri(provider.EndpointUrl),
-            NetworkTimeout = TimeSpan.FromMinutes(10)
+            NetworkTimeout = requestTimeout
         };
-        // Gateways like Cline wrap non-streaming completions in a {"data": {...}, "success": true}
-        // envelope; the shared handler unwraps it before the SDK parses the payload. Standard
-        // providers are unaffected, and streaming responses pass through untouched.
-        options.Transport = new HttpClientPipelineTransport(EnvelopeHttpClient);
+
+        var wireField = LlmWireCompatResolver.ResolveMaxTokensField(
+            provider.EndpointUrl,
+            provider.MaxTokensField);
+        if (wireField == WireMaxTokensField.Legacy)
+        {
+            // Legacy-field endpoints rewrite max_completion_tokens → max_tokens in the
+            // request body while sharing the same pooled SocketsHttpHandler underneath.
+            options.Transport = new HttpClientPipelineTransport(
+                new HttpClient(LegacyFieldHandler())
+                {
+                    Timeout = requestTimeout
+                });
+        }
+        else
+        {
+            // Gateways like Cline wrap non-streaming completions in a
+            // {"data": {...}, "success": true} envelope; the shared handler unwraps it
+            // before the SDK parses the payload. Streaming responses pass through.
+            options.Transport = new HttpClientPipelineTransport(SharedHttpClient(requestTimeout));
+        }
 
         // Local OpenAI-compatible providers (e.g. Ollama) don't require auth; use a placeholder.
         var credential = new ApiKeyCredential(apiKey ?? "ollama");
         var client = new OpenAIClient(credential, options);
         IChatClient chatClient = new OpenAIChatToolMetadataClient(
             client.GetChatClient(provider.ModelId).AsIChatClient());
-        return ConfigureReasoningEffort(chatClient, provider.ReasoningEffort);
+
+        var maxOutputTokens = LlmWireCompatResolver.ResolveMaxOutputTokens(
+            provider.EndpointUrl,
+            provider.MaxTokensField,
+            provider.MaxOutputTokens);
+
+        var pipeline = chatClient.AsBuilder();
+        if (maxOutputTokens is { } budget)
+            pipeline.ConfigureOptions(options => options.MaxOutputTokens = budget);
+        return ConfigureReasoningEffort(pipeline.Build(), provider.ReasoningEffort);
     }
+
+    private static HttpMessageHandler LegacyFieldHandler() =>
+        new OpenAiLegacyMaxTokensFieldHandler(
+            new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) });
 
     private static async Task TestChatClientAsync(IChatClient chatClient, CancellationToken cancellationToken)
     {

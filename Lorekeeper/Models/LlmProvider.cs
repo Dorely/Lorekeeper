@@ -8,6 +8,21 @@ public class LlmProvider
     public required string EndpointUrl { get; set; }
     public required string ModelId { get; set; }
     public LlmReasoningEffort? ReasoningEffort { get; set; }
+
+    /// <summary>
+    /// Explicit output-token budget for chat requests, independent of the
+    /// wire-compat default. When null, the endpoint-based wire-compat
+    /// classification supplies the budget for non-OpenAI providers.
+    /// </summary>
+    public int? MaxOutputTokens { get; set; }
+
+    /// <summary>
+    /// Overrides the max-tokens request field name chosen by the endpoint-based
+    /// wire-compat classification. Use <see cref="LlmMaxTokensField.Legacy"/> for
+    /// providers that reject <c>max_completion_tokens</c>.
+    /// </summary>
+    public LlmMaxTokensField MaxTokensField { get; set; } = LlmMaxTokensField.Default;
+
     public AuthType AuthType { get; set; }
     public string? ApiKey { get; set; }
     public bool IsDefault { get; set; }
