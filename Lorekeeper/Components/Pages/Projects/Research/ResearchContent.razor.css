@@ -85,7 +85,7 @@
 }
 
 .research-activity-card.failed {
-    border-color: #dc3545;
+    border-color: var(--lk-danger);
 }
 
 .research-activity-card-head {
@@ -205,7 +205,7 @@
 
 .research-section-title,.research-activity-heading { color: var(--lk-accent); letter-spacing: 0.07em; }
 .research-activity-card { border-color: var(--lk-line); border-radius: var(--lk-radius-md); background: var(--lk-surface); }
-.research-activity-card:hover,.research-activity-card:focus { background: var(--lk-accent-soft); border-color: #aeb9e8; }
+.research-activity-card:hover,.research-activity-card:focus { background: var(--lk-accent-soft); border-color: var(--lk-accent-border); }
 .research-source-visuals button { display: grid; gap: .3rem; width: 100%; padding: 0; border: 0; color: inherit; text-align: left; font: inherit; font-size: .75rem; background: transparent; cursor: pointer; }
 .research-source-visuals button:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 2px; }
 .research-source-visuals img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: .4rem; border: 1px solid var(--bs-border-color); }

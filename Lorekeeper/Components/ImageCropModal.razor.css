@@ -5,7 +5,7 @@
     display: grid;
     place-items: center;
     padding: 1.25rem;
-    background: rgba(15, 23, 42, 0.52);
+    background: var(--lk-backdrop);
 }
 
 .crop-modal {
@@ -18,7 +18,7 @@
     border-radius: .5rem;
     overflow: hidden;
     background: var(--bs-body-bg, #fff);
-    box-shadow: 0 1rem 3rem rgba(15, 23, 42, .3);
+    box-shadow: var(--lk-shadow-md);
 }
 
 .crop-modal-header {
@@ -34,7 +34,7 @@
 .crop-modal-header h5 { margin: 0; font-size: 1rem; }
 .crop-modal-header span { color: var(--bs-secondary-color, #6c757d); font-size: .82rem; }
 
-.crop-modal-backdrop { background: rgb(15 23 42 / 58%); backdrop-filter: blur(2px); }
+.crop-modal-backdrop { background: var(--lk-backdrop); backdrop-filter: blur(2px); }
 .crop-modal { border: 1px solid var(--lk-line); border-radius: var(--lk-radius-lg); box-shadow: var(--lk-shadow-md); }
 .crop-modal-header { background: var(--lk-soft); border-bottom-color: var(--lk-line); }
 .crop-modal-header h5 { font-family: Georgia, "Times New Roman", serif; }

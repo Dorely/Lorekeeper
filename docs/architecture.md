@@ -42,6 +42,18 @@ current-runtime claims.
   inspector
 - Bootstrap and vis-network vendored under `Lorekeeper/wwwroot`
 
+Theming is token-driven and browser-local. `wwwroot/app.css` defines the light
+palette on `:root` and a dark palette under `html[data-lk-theme="dark"]`, both
+exposing `--lk-*` design tokens and Bootstrap `--bs-*` overrides. `App.razor`
+runs a synchronous pre-paint script that reads the stored theme (falling back to
+`prefers-color-scheme` once) and sets `data-lk-theme`/`data-bs-theme` plus the
+`theme-color` meta before the body renders, so there is no light flash in either
+host. The top-bar `ThemeToggle` switches light/dark and persists the choice to
+browser-local storage under `Lorekeeper.ui.theme`; component stylesheets route
+their surfaces through the tokens so every screen themes correctly. The Graph
+visualization canvas is intentionally always-dark in both themes, and print
+output always renders on white.
+
 The solution contains the application and its authorized migration/format
 fixture test project. `Lorekeeper.Press` is a Lorekeeper-owned native subproject
 and the sole paperback renderer. MSBuild builds its locked native executable and

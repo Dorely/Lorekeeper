@@ -1,4 +1,4 @@
-.project-image-picker-backdrop { position: fixed; inset: 0; z-index: 1060; display: grid; place-items: center; padding: 1rem; background: rgb(15 23 42 / 58%); backdrop-filter: blur(2px); }
+.project-image-picker-backdrop { position: fixed; inset: 0; z-index: 1060; display: grid; place-items: center; padding: 1rem; background: var(--lk-backdrop); backdrop-filter: blur(2px); }
 .project-image-picker { width: min(62rem, 100%); height: min(45rem, 92vh); min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: .75rem; padding: 1rem; overflow: hidden; border: 1px solid var(--lk-line); border-radius: var(--lk-radius-lg); background: var(--lk-surface); box-shadow: var(--lk-shadow-md); }
 .project-image-picker-header,.project-image-picker-toolbar,.project-image-picker-footer { display: flex; align-items: center; gap: .5rem; }
 .project-image-picker-header { justify-content: space-between; border-bottom: 1px solid var(--lk-line); padding-bottom: .65rem; }

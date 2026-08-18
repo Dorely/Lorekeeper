@@ -209,7 +209,7 @@
     display: grid;
     place-items: center;
     padding: 1.25rem;
-    background: rgba(15, 23, 42, 0.48);
+    background: var(--lk-backdrop);
 }
 
 .mask-modal {
@@ -220,7 +220,7 @@
     grid-template-rows: auto minmax(0, 1fr);
     border-radius: 0.5rem;
     background: var(--bs-body-bg, #fff);
-    box-shadow: 0 1rem 3rem rgba(15, 23, 42, 0.28);
+    box-shadow: var(--lk-shadow-md);
     overflow: hidden;
 }
 

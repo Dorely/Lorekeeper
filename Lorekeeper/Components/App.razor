@@ -8,6 +8,23 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
+    <script>
+        (function () {
+            var THEME_KEY = "Lorekeeper.ui.theme";
+            var theme = null;
+            try {
+                theme = window.localStorage.getItem(THEME_KEY);
+            } catch (_) { }
+            if (theme !== "light" && theme !== "dark") {
+                theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+            }
+            var root = document.documentElement;
+            root.setAttribute("data-lk-theme", theme);
+            root.setAttribute("data-bs-theme", theme);
+            var meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) meta.setAttribute("content", theme === "dark" ? "#14181f" : "#425fce");
+        })();
+    </script>
     <ResourcePreloader />
     <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
     <link rel="stylesheet" href="@Assets["app.css"]" />

@@ -113,7 +113,7 @@
 
 | File | Description |
 |------|-------------|
-| `App.razor` | Root component: `<html>` shell, responsive browser/app icon metadata, startup route gate, head outlet, and scripts. |
+| `App.razor` | Root component: `<html>` shell, responsive browser/app icon metadata, pre-paint theme bootstrap, startup route gate, head outlet, and scripts. |
 | `Routes.razor` | `<Router>` wiring `MainLayout` and `NotFound`. |
 | `_Imports.razor` | Shared `@using` directives for all components. |
 | `StartupScreen.razor` (+ `.razor.css`) | Branded application-owned startup and failure surface with live database-stage progress, automatic workspace transition, recovery redirect, and safe close action. |
@@ -151,6 +151,7 @@
 | File | Description |
 |------|-------------|
 | `MainLayout.razor` / `.css` | Viewport-locked application shell with the branded Lorekeeper top bar, independently interactive update-control host, route-aware page/workspace padding, and global error notice. |
+| `ThemeToggle.razor` (+ `.razor.css`, `.razor.js`) | Top-bar light/dark theme switcher that persists the choice to browser-local storage and applies it to the document before first paint. |
 | `DesktopUpdateControl.razor` (+ `.razor.css`) | Top-bar update UI for automatic download/restart progress or a conditional external-browser Download Update action when manual discovery finds a newer release. |
 | `PrintLayout.razor` / `.css` | Minimal no-navigation layout used by print-oriented pages; owns the viewport scroll container while restoring unbounded overflow for printed output. |
 | `PageHeader.razor` | Reusable editorial page heading with eyebrow, title, description, and optional actions. |
@@ -742,7 +743,7 @@
 
 | File | Description |
 |------|-------------|
-| `app.css` | App-wide Lorekeeper design tokens and shared editorial treatments for typography, controls, cards, status, empty states, navigation, and Bootstrap primitives. |
+| `app.css` | App-wide Lorekeeper design tokens (light and dark palettes) and shared editorial treatments for typography, controls, cards, status, empty states, navigation, and Bootstrap primitives. |
 | `text-select-cursor.svg` | High-contrast outlined I-beam cursor used by editable text surfaces so the pointer remains visible on light and dark backgrounds. |
 | `js/autosizeTextareas.js` | Small shared JS module that attaches to `textarea[data-autosize]`, grows each textarea to its `scrollHeight`, refreshes on input/change and width changes, and prevents nested textarea scrollbars. |
 | `js/composition-workspace.js` | Shared pointer-capture/measured-stage and source-raster aspect bridge for visual canvases plus live rendered-frame overflow observation, Designed Page contenteditable focus, text-selection offsets, and formatting-selection restoration. |

@@ -1,0 +1,42 @@
+.theme-toggle {
+    align-items: center;
+    background: transparent;
+    border: 1px solid var(--lk-line-strong);
+    border-radius: var(--lk-radius-sm);
+    color: var(--lk-muted);
+    cursor: pointer;
+    display: inline-flex;
+    flex: 0 0 auto;
+    height: 2rem;
+    justify-content: center;
+    padding: 0;
+    transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+    width: 2rem;
+}
+
+.theme-toggle:hover {
+    background: var(--lk-soft);
+    border-color: var(--lk-border-strong);
+    color: var(--lk-ink);
+}
+
+.theme-toggle:focus-visible {
+    border-color: var(--lk-accent);
+    box-shadow: var(--lk-focus);
+    outline: none;
+}
+
+.theme-toggle:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.theme-toggle-icon {
+    fill: none;
+    height: 1.1rem;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+    width: 1.1rem;
+}

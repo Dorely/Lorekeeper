@@ -22,7 +22,10 @@
             </nav>
         }
 
-        <DesktopUpdateControl @rendermode="InteractiveServer" />
+        <div class="app-topbar-actions">
+            <ThemeToggle @rendermode="InteractiveServer" />
+            <DesktopUpdateControl @rendermode="InteractiveServer" />
+        </div>
     </header>
 
     <main>

@@ -7,17 +7,17 @@
     background:
         radial-gradient(circle at 18% 16%, rgb(122 143 224 / 22%), transparent 34rem),
         radial-gradient(circle at 84% 82%, rgb(77 164 133 / 14%), transparent 30rem),
-        linear-gradient(145deg, #f8f9fe 0%, #eef2fb 52%, #f7faf8 100%);
+        var(--lk-canvas);
 }
 
 .startup-card {
     width: min(34rem, 100%);
     padding: clamp(2rem, 7vw, 3.5rem);
     text-align: center;
-    background: rgb(255 255 255 / 88%);
-    border: 1px solid rgb(255 255 255 / 90%);
+    background: var(--lk-surface-translucent);
+    border: 1px solid var(--lk-line);
     border-radius: 1.5rem;
-    box-shadow: 0 1.5rem 5rem rgb(41 54 94 / 15%);
+    box-shadow: var(--lk-shadow-md);
     backdrop-filter: blur(1rem);
 }
 
@@ -82,7 +82,7 @@
 .startup-progress-track {
     height: 0.42rem;
     overflow: hidden;
-    background: #e6eaf5;
+    background: var(--lk-progress-track);
     border-radius: 999px;
 }
 
@@ -111,10 +111,10 @@
     gap: 0.35rem;
     margin-top: 1.25rem;
     padding: 0.9rem 1rem;
-    color: #802d38;
+    color: var(--lk-danger);
     text-align: left;
     background: var(--lk-danger-soft);
-    border: 1px solid #edc4c9;
+    border: 1px solid var(--lk-danger-border);
     border-radius: var(--lk-radius-md);
 }
 
@@ -138,7 +138,7 @@
 
 .startup-footnote {
     margin: 1.4rem 0 0;
-    color: #8590a3;
+    color: var(--lk-muted);
     font-size: 0.76rem;
 }
 

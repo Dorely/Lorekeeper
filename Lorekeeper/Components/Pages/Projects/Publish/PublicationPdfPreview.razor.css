@@ -28,7 +28,7 @@
     min-height: 0;
     overflow: auto;
     padding: 1rem;
-    background: #e7ebf2;
+    background: var(--lk-canvas-inset);
     scrollbar-gutter: stable;
 }
 
@@ -93,7 +93,7 @@
     padding: 2rem;
     border: 1px solid var(--lk-line);
     border-radius: .55rem;
-    background: #f7f9fc;
+    background: var(--lk-soft);
     color: var(--lk-muted);
     text-align: center;
 }

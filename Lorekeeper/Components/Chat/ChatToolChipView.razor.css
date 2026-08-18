@@ -4,7 +4,7 @@
     margin-top: 0.4rem;
     border: 1px solid var(--bs-border-color, #dee2e6);
     border-radius: 0.4rem;
-    background: rgba(255, 255, 255, 0.55);
+    background: var(--lk-surface-translucent);
     font-size: 0.82rem;
     overflow-wrap: normal;
     word-break: normal;
@@ -138,7 +138,7 @@
     margin-top: 0.2rem;
     border: 1px solid rgba(0, 0, 0, 0.08);
     border-radius: 0.35rem;
-    background: rgba(255, 255, 255, 0.5);
+    background: var(--lk-surface-translucent);
     overflow: hidden;
 }
 
@@ -237,7 +237,7 @@
     position: fixed;
     inset: 0;
     z-index: 1050;
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--lk-backdrop);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -253,7 +253,7 @@
     background: var(--bs-body-bg, #fff);
     border: 1px solid var(--bs-border-color, #dee2e6);
     border-radius: 0.5rem;
-    box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.22);
+    box-shadow: var(--lk-shadow-md);
 }
 
 .chat-revision-head {

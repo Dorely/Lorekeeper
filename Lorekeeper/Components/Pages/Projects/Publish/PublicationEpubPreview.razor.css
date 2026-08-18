@@ -67,7 +67,7 @@
     overflow: hidden;
     border: 1px solid var(--lk-line);
     border-radius: .55rem;
-    background: #e7ebf2;
+    background: var(--lk-canvas-inset);
 }
 
 .publication-epub-preview-stage.reflowable {
@@ -94,7 +94,7 @@
 }
 
 .publication-epub-preview-location-state.error {
-    color: #8a2430;
+    color: var(--lk-danger);
 }
 
 .publication-epub-preview-frame {
@@ -126,13 +126,13 @@
     padding: 2rem;
     border: 1px solid var(--lk-line);
     border-radius: .55rem;
-    background: #f7f9fc;
+    background: var(--lk-soft);
     color: var(--lk-muted);
     text-align: center;
 }
 
 .publication-epub-preview-state.error {
-    color: #8a2430;
+    color: var(--lk-danger);
 }
 
 @media (max-width: 720px) {

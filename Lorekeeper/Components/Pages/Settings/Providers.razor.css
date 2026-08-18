@@ -4,7 +4,7 @@
 .provider-overview small { color: var(--lk-muted); font-size: 0.72rem; }
 .provider-overview .provider-overview-action { align-items: center; border: 0; display: flex; }
 
-.provider-add-card { border-color: #cfd6fa; }
+.provider-add-card { border-color: var(--lk-accent-border); }
 .connection-form-grid,.connection-edit-panel { display: grid; gap: 0.75rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .connection-form-grid label,.connection-edit-panel label,.child-model-form label,.model-fields label { display: grid; gap: 0.3rem; }
 .connection-form-grid label > span,.connection-edit-panel label > span,.child-model-form label > span,.model-fields label > span { color: var(--lk-muted); font-size: 0.72rem; font-weight: 750; }
@@ -19,7 +19,7 @@
 
 .provider-list { display: grid; gap: 0.85rem; }
 .connection-card { background: var(--lk-surface); border: 1px solid var(--lk-line); border-radius: var(--lk-radius-lg); box-shadow: var(--lk-shadow-sm); overflow: hidden; }
-.codex-card { border-color: #cbd3ee; }
+.codex-card { border-color: var(--lk-accent-border); }
 .connection-header { align-items: center; display: flex; gap: 1rem; justify-content: space-between; padding: 1rem; }
 .connection-identity { align-items: center; display: flex; gap: 0.75rem; min-width: 0; }
 .connection-mark { align-items: center; background: var(--lk-accent-soft); border-radius: 0.55rem; color: var(--lk-accent); display: inline-flex; flex: 0 0 2.6rem; font-family: Georgia, "Times New Roman", serif; font-size: 0.95rem; font-weight: 700; height: 2.6rem; justify-content: center; }
@@ -27,7 +27,7 @@
 .connection-identity p { color: var(--lk-muted); font-size: 0.76rem; margin: 0; max-width: 38rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .connection-actions,.model-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 0.4rem; }
 
-.connection-edit-panel { background: var(--lk-accent-soft); border-top: 1px solid #d7dcf6; padding: 0.85rem 1rem; }
+.connection-edit-panel { background: var(--lk-accent-soft); border-top: 1px solid var(--lk-accent-border); padding: 0.85rem 1rem; }
 .connection-edit-panel .provider-form-actions { margin: 0; }
 .model-list { border-top: 1px solid var(--lk-line); }
 .model-row { align-items: center; display: grid; gap: 0.75rem; grid-template-columns: minmax(24rem, 1.35fr) minmax(15rem, 0.65fr) auto; padding: 0.75rem 1rem; }
@@ -38,15 +38,15 @@
 .model-readiness > div > span { color: var(--lk-muted); font-size: 0.68rem; font-weight: 700; }
 .model-detail { color: var(--lk-muted); font-size: 0.72rem; grid-column: 1 / 3; overflow-wrap: anywhere; }
 .inline-confirm { align-items: center; background: var(--lk-danger-soft); border-radius: var(--lk-radius-sm); display: flex; gap: 0.45rem; grid-column: 1 / -1; padding: 0.55rem; }
-.inline-confirm span { color: #842029; font-size: 0.78rem; font-weight: 700; margin-right: auto; }
+.inline-confirm span { color: var(--lk-danger); font-size: 0.78rem; font-weight: 700; margin-right: auto; }
 .connection-footer { border-top: 1px solid var(--lk-line); padding: 0.6rem 1rem; }
 .child-model-form { align-items: end; background: var(--lk-soft); border-top: 1px solid var(--lk-line); display: grid; gap: 0.75rem; grid-template-columns: minmax(12rem, 1fr) repeat(3, minmax(9rem, 0.7fr)) auto; padding: 0.8rem 1rem; }
 .child-model-form > div:first-child { display: grid; }
 .child-model-form small { color: var(--lk-muted); font-size: 0.7rem; }
-.connection-delete-confirm { align-items: center; background: var(--lk-danger-soft); border-top: 1px solid #efc7ca; display: flex; gap: 0.55rem; padding: 0.8rem 1rem; }
+.connection-delete-confirm { align-items: center; background: var(--lk-danger-soft); border-top: 1px solid var(--lk-danger-border); display: flex; gap: 0.55rem; padding: 0.8rem 1rem; }
 .connection-delete-confirm > div { display: grid; margin-right: auto; }
-.connection-delete-confirm strong { color: #842029; font-size: 0.82rem; }
-.connection-delete-confirm span { color: #92505a; font-size: 0.72rem; }
+.connection-delete-confirm strong { color: var(--lk-danger); font-size: 0.82rem; }
+.connection-delete-confirm span { color: var(--lk-danger); font-size: 0.72rem; }
 
 @media (max-width: 1100px) {
     .model-row { align-items: start; grid-template-columns: 1fr; }

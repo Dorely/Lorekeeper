@@ -214,8 +214,8 @@
 
 .ingest-job-row.selected,
 .ingest-chunk-row.selected {
-    border-color: #1b6ec2;
-    background: rgba(27, 110, 194, 0.08);
+    border-color: var(--lk-accent);
+    background: var(--lk-accent-soft);
 }
 
 .ingest-finalization-row {
@@ -276,7 +276,7 @@
 
 .ingest-progress-bar > div {
     height: 100%;
-    background: #1b6ec2;
+    background: var(--lk-accent);
 }
 
 .ingest-live-panel {
@@ -377,12 +377,12 @@
 }
 
 .ingest-event-row.warning {
-    border-color: #f0ad4e;
+    border-color: var(--lk-warning);
     background: rgba(240, 173, 78, 0.08);
 }
 
 .ingest-event-row.error {
-    border-color: #dc3545;
+    border-color: var(--lk-danger);
     background: rgba(220, 53, 69, 0.08);
 }
 

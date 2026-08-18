@@ -20,9 +20,9 @@
 
 .transfer-card,
 .transfer-detail {
-    border: 1px solid #d8dee9;
+    border: 1px solid var(--lk-line-strong);
     border-radius: 8px;
-    background: #ffffff;
+    background: var(--lk-surface);
     padding: 0.875rem;
 }
 
@@ -31,7 +31,7 @@
     font-weight: 700;
     letter-spacing: 0;
     text-transform: uppercase;
-    color: #566276;
+    color: var(--lk-muted);
 }
 
 .transfer-export-group {
@@ -52,7 +52,7 @@
 
 .transfer-file-name {
     font-size: 0.85rem;
-    color: #566276;
+    color: var(--lk-muted);
     word-break: break-word;
     margin-bottom: 0.5rem;
 }
@@ -70,10 +70,10 @@
 }
 
 .transfer-job-row {
-    border: 1px solid #d8dee9;
+    border: 1px solid var(--lk-line-strong);
     border-radius: 6px;
-    background: #f8fafc;
-    color: #182131;
+    background: var(--lk-soft);
+    color: var(--lk-ink);
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -93,7 +93,7 @@
 
 .transfer-job-meta {
     font-size: 0.78rem;
-    color: #667085;
+    color: var(--lk-muted);
 }
 
 .transfer-detail {
@@ -125,29 +125,29 @@
 }
 
 .transfer-stats span {
-    border: 1px solid #d8dee9;
+    border: 1px solid var(--lk-line-strong);
     border-radius: 999px;
     padding: 0.18rem 0.55rem;
     font-size: 0.78rem;
-    color: #384152;
-    background: #f8fafc;
+    color: var(--lk-ink);
+    background: var(--lk-soft);
 }
 
 .transfer-report-item {
-    border: 1px solid #d8dee9;
+    border: 1px solid var(--lk-line-strong);
     border-radius: 6px;
-    background: #ffffff;
+    background: var(--lk-surface);
     padding: 0.45rem 0.6rem;
 }
 
 .transfer-report-item.warning {
-    border-color: #f1c232;
-    background: #fff9e6;
+    border-color: var(--lk-warning);
+    background: var(--lk-warning-soft);
 }
 
 .transfer-report-item.failed {
-    border-color: #d93025;
-    background: #fff1f0;
+    border-color: var(--lk-danger);
+    background: var(--lk-danger-soft);
 }
 
 .transfer-report-item summary {
@@ -160,7 +160,7 @@
 
 .transfer-report-item p {
     margin: 0.45rem 0 0;
-    color: #384152;
+    color: var(--lk-ink);
 }
 
 .transfer-report-meta,
@@ -170,11 +170,11 @@
 }
 
 .transfer-report-meta {
-    color: #667085;
+    color: var(--lk-muted);
 }
 
 .transfer-report-error {
-    color: #b42318;
+    color: var(--lk-danger);
 }
 
 @media (max-width: 900px) {

@@ -7,7 +7,7 @@
 
 .app-topbar {
     align-items: center;
-    background: rgb(255 255 255 / 96%);
+    background: var(--lk-surface-translucent);
     border-bottom: 1px solid var(--lk-line);
     display: flex;
     flex: 0 0 52px;
@@ -15,6 +15,13 @@
     padding: 0 1rem;
     position: relative;
     z-index: 20;
+}
+
+.app-topbar-actions {
+    align-items: center;
+    display: inline-flex;
+    gap: 0.5rem;
+    margin-left: auto;
 }
 
 .app-brand {
@@ -48,7 +55,7 @@
 
 .app-topbar-nav {
     align-items: center;
-    color: #a0a8b6;
+    color: var(--lk-muted);
     display: flex;
     font-size: 0.82rem;
     gap: 0.55rem;
@@ -92,12 +99,12 @@ main ::deep article.content--workspace {
 #blazor-error-ui {
     align-items: center;
     background: var(--lk-danger-soft);
-    border: 1px solid #efc7ca;
+    border: 1px solid var(--lk-danger-border);
     border-radius: var(--lk-radius-md) var(--lk-radius-md) 0 0;
     bottom: 0;
     box-shadow: var(--lk-shadow-md);
     box-sizing: border-box;
-    color: #842029;
+    color: var(--lk-danger);
     display: none;
     gap: 0.75rem;
     left: 50%;

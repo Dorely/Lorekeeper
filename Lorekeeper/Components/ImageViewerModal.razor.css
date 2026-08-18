@@ -5,7 +5,7 @@
     display: grid;
     place-items: center;
     padding: 1.25rem;
-    background: rgba(15, 23, 42, 0.48);
+    background: var(--lk-backdrop);
 }
 
 .image-viewer-modal {
@@ -18,7 +18,7 @@
     grid-template-rows: auto minmax(0, 1fr) auto;
     border-radius: 0.5rem;
     background: var(--bs-body-bg, #fff);
-    box-shadow: 0 1rem 3rem rgba(15, 23, 42, 0.28);
+    box-shadow: var(--lk-shadow-md);
     overflow: hidden;
 }
 
@@ -48,7 +48,7 @@
     white-space: nowrap;
 }
 
-.image-viewer-backdrop { background: rgb(15 23 42 / 58%); backdrop-filter: blur(2px); }
+.image-viewer-backdrop { background: var(--lk-backdrop); backdrop-filter: blur(2px); }
 .image-viewer-modal { border: 1px solid var(--lk-line); border-radius: var(--lk-radius-lg); box-shadow: var(--lk-shadow-md); }
 .image-viewer-header { background: var(--lk-soft); border-bottom-color: var(--lk-line); }
 .image-viewer-meta h5 { font-family: Georgia, "Times New Roman", serif; }
