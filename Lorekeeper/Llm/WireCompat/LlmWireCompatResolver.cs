@@ -34,10 +34,12 @@ internal static class LlmWireCompatResolver
     /// 10 min (B02), with 4096 it finishes in ~53 s (B13); with 40 tools
     /// standard max_completion_tokens is ignored by the gateway (B12 dies at
     /// 10 min) while legacy max_tokens is respected (B15 finishes in ~6 min
-    /// with 48k reasoning chars and no transport error). 4096 bounds reasoning
-    /// + answer to ~4 min.
+    /// with 48k reasoning chars and no transport error). Default is doubled to
+    /// 8192 per user tuning — still safely under the ~10 min gateway cut for
+    /// the measured prompt/throughput, while giving more headroom; set a
+    /// per-row MaxOutputTokens override in Settings > Providers to tune further.
     /// </summary>
-    public const int DefaultMaxOutputTokens = 4096;
+    public const int DefaultMaxOutputTokens = 8192;
 
     public enum EndpointClass
     {

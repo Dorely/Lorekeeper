@@ -47,7 +47,7 @@ public static class LlmProviderCatalog
         ],
             KeyManagementUrl: "https://app.cline.bot/settings",
             Note: "Quota-based ClinePass plans use the same endpoint and API key with cline-pass/<model> slugs (no vendor prefix); see the Cline documentation for the current catalog.",
-            DefaultMaxOutputTokens: 4096),
+            DefaultMaxOutputTokens: 8192),
         new("anthropic", "Anthropic (OpenAI-compatible)", "https://api.anthropic.com/v1", AuthType.ApiKey,
         [
             "claude-sonnet-4-5",
@@ -101,7 +101,7 @@ public static class LlmProviderCatalog
             "deepseek-ai/DeepSeek-V3",
         ],
             KeyManagementUrl: "https://api.together.ai/settings/api-keys",
-            DefaultMaxOutputTokens: 4096),
+            DefaultMaxOutputTokens: 8192),
         new("ollama", "Ollama (local)", "http://localhost:11434/v1", AuthType.None,
         [
             "llama3.2",

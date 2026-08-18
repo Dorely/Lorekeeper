@@ -131,15 +131,16 @@ Cline's gateway (`api.cline.bot`) and legacy-field open-weight endpoints
 local servers (localhost Ollama/LM Studio) also use the legacy field but remain
 auto-budget-free because local model capability is unknown. Every other remote
 OpenAI-compatible endpoint — including OpenRouter and custom entries — is
-treated as a generic gateway with the standard field and a 4,096-token universal
-output budget. The 4,096 default is sized for the ~38k-token Editor system
+treated as a generic gateway with the standard field and an 8,192-token universal
+output budget. The 8,192 default is sized for the ~38k-token Editor system
 prompt: at the observed ~17 tok/s Qwen/Kimi rate on that prompt 16,384 implies
 ~16 min of streaming so the Cline gateway cuts the stream at ~10 min (raw-SSE
 bisection B02 vs B13: full system prompt no-tools dies at exactly 10 min
 without a budget, finishes in ~53 s with `max_tokens=4096`; with 40 tools
 `max_completion_tokens` is ignored by the gateway and still dies at 10 min
 (B12) while `max_tokens=4096` is respected and streams ~48k `reasoning_content`
-chars in ~6 min with no transport error (B15)). Per-provider rows can override
+chars in ~6 min with no transport error (B15) — 8192 keeps the same safety
+margin with more headroom and remains tunable per row). Per-provider rows can override
 the output budget (`MaxOutputTokens`) and the max-tokens field name
 (`MaxTokensField`) in Settings > Providers; the readiness probe sends no
 `ChatOptions` and is unaffected, and the legacy-field transport is composed with
