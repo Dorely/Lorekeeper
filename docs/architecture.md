@@ -126,19 +126,27 @@ code-owned classification mirroring pi's `detectCompat` model, implemented in
 `LlmWireCompatResolver`) rather than a per-provider model matrix. OpenAI
 first-party (`api.openai.com`) is first-class: it uses the OpenAI-standard
 `max_completion_tokens` field and receives no auto output-token budget.
-Legacy-field open-weight endpoints (`api.deepseek.com`, `api.together.xyz`) and
-local servers (localhost Ollama/LM Studio) use the legacy `max_tokens` field.
-Every other remote OpenAI-compatible endpoint — including the Cline gateway and
-custom entries — is treated as a generic gateway with the standard field and a
-16,384-token universal output budget, so thinking models receive an explicit
-response cap instead of exhausting a gateway default on reasoning before
-emitting tool calls. Per-provider rows can override the output budget
-(`MaxOutputTokens`) and the max-tokens field name (`MaxTokensField`) in
-Settings > Providers; the readiness probe sends no `ChatOptions` and is
-unaffected. Open-weight thinking models behind generic gateways (for example a
-Kimi/GLM/DeepSeek/Qwen model routed through Cline) therefore get safe defaults
-automatically while remaining tunable per row. OpenAI-compatible chat requests
-use a shared pooled transport with a configurable timeout
+Cline's gateway (`api.cline.bot`) and legacy-field open-weight endpoints
+(`api.deepseek.com`, `api.together.xyz`) use the legacy `max_tokens` field;
+local servers (localhost Ollama/LM Studio) also use the legacy field but remain
+auto-budget-free because local model capability is unknown. Every other remote
+OpenAI-compatible endpoint — including OpenRouter and custom entries — is
+treated as a generic gateway with the standard field and a 4,096-token universal
+output budget. The 4,096 default is sized for the ~38k-token Editor system
+prompt: at the observed ~17 tok/s Qwen/Kimi rate on that prompt 16,384 implies
+~16 min of streaming so the Cline gateway cuts the stream at ~10 min (raw-SSE
+bisection B02 vs B13: full system prompt no-tools dies at exactly 10 min
+without a budget, finishes in ~53 s with `max_tokens=4096`; with 40 tools
+`max_completion_tokens` is ignored by the gateway and still dies at 10 min
+(B12) while `max_tokens=4096` is respected and streams ~48k `reasoning_content`
+chars in ~6 min with no transport error (B15)). Per-provider rows can override
+the output budget (`MaxOutputTokens`) and the max-tokens field name
+(`MaxTokensField`) in Settings > Providers; the readiness probe sends no
+`ChatOptions` and is unaffected, and the legacy-field transport is composed with
+the envelope-unwrap transport so Cline streaming and non-streaming payloads stay
+correct. Open-weight thinking models behind generic gateways therefore get safe
+defaults automatically while remaining tunable per row. OpenAI-compatible chat
+requests use a shared pooled transport with a configurable timeout
 (`Agents:ChatRequestTimeoutSeconds`, default 600).
 
 The main application flow is:

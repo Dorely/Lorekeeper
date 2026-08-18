@@ -25,8 +25,19 @@ public enum WireMaxTokensField
 /// </summary>
 internal static class LlmWireCompatResolver
 {
-    /// <summary>Universal output-token-budget default pi applies to unknown models.</summary>
-    public const int DefaultMaxOutputTokens = 16_384;
+    /// <summary>
+    /// Output-token-budget default for generic OpenAI-compatible gateways. Pi
+    /// uses 16 384 for unknown models, but with the ~38k-token Editor system
+    /// prompt Qwen/Kimi generate at ~17 tok/s so 16k implies ~16 min of
+    /// streaming — well beyond the Cline gateway's ~10 min stream lifetime.
+    /// Bisection: full system no-tools without a budget dies at exactly
+    /// 10 min (B02), with 4096 it finishes in ~53 s (B13); with 40 tools
+    /// standard max_completion_tokens is ignored by the gateway (B12 dies at
+    /// 10 min) while legacy max_tokens is respected (B15 finishes in ~6 min
+    /// with 48k reasoning chars and no transport error). 4096 bounds reasoning
+    /// + answer to ~4 min.
+    /// </summary>
+    public const int DefaultMaxOutputTokens = 4096;
 
     public enum EndpointClass
     {
@@ -107,5 +118,6 @@ internal static class LlmWireCompatResolver
     private static bool IsLegacyFieldHost(string host) =>
         host.Equals("api.deepseek.com", StringComparison.OrdinalIgnoreCase)
         || host.Equals("api.together.xyz", StringComparison.OrdinalIgnoreCase)
-        || host.Equals("api.together.ai", StringComparison.OrdinalIgnoreCase);
+        || host.Equals("api.together.ai", StringComparison.OrdinalIgnoreCase)
+        || host.Equals("api.cline.bot", StringComparison.OrdinalIgnoreCase);
 }

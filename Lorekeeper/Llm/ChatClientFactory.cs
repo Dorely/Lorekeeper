@@ -133,7 +133,8 @@ public class ChatClientFactory(
 
     private static HttpMessageHandler LegacyFieldHandler() =>
         new OpenAiLegacyMaxTokensFieldHandler(
-            new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) });
+            new OpenAICompatEnvelopeHandler(
+                new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(2) }));
 
     private static async Task TestChatClientAsync(IChatClient chatClient, CancellationToken cancellationToken)
     {
