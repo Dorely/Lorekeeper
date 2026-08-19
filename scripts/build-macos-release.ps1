@@ -359,7 +359,10 @@ try
         try
         {
             New-Item -ItemType Directory -Path $dmgStaging | Out-Null
-            Copy-Item -Recurse -LiteralPath $appPath -Destination (Join-Path $dmgStaging 'Lorekeeper.app')
+            # Preserve framework symlinks and bundle metadata when staging the
+            # repaired app; PowerShell Copy-Item can dereference macOS bundle
+            # symlinks and leave codesign with an ambiguous framework layout.
+            Invoke-CheckedCommand ditto @($appPath, (Join-Path $dmgStaging 'Lorekeeper.app'))
             # Recreate the conventional Applications symlink if absent.
             $appsLink = Join-Path $dmgStaging 'Applications'
             if (-not (Test-Path -LiteralPath $appsLink))
