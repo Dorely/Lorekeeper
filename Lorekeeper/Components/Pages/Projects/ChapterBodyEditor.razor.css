@@ -391,9 +391,10 @@
     position: relative;
     min-height: 100%;
     color: var(--bs-body-color, #212529);
-    font-family: Georgia, "Times New Roman", serif;
-    font-size: 1.08rem;
-    line-height: 1.72;
+    font-family: "Lora", "Lorekeeper-builtin-lora", Georgia, "Times New Roman", serif;
+    font-size: 12pt;
+    line-height: 1.55;
+    text-align: left;
     outline: none;
     white-space: pre-wrap;
     overflow-wrap: break-word;
@@ -453,7 +454,20 @@
 .semantic-editor ::deep .semantic-prosemirror blockquote,
 .semantic-editor ::deep .semantic-prosemirror .semantic-list-item,
 .semantic-editor ::deep .semantic-prosemirror figure {
-    margin: 0 0 1em;
+    margin: 0;
+}
+
+.semantic-editor ::deep .semantic-prosemirror p[data-style-role="body"]:not([style*="margin-bottom"]) {
+    margin-bottom: 8pt;
+}
+
+.semantic-editor ::deep .semantic-prosemirror p[data-style-role="body"][style*="margin-bottom:0"] + p[data-style-role="body"]:not([style*="margin-top"]) {
+    margin-top: 0;
+}
+
+.semantic-editor ::deep .semantic-prosemirror blockquote + p,
+.semantic-editor ::deep .semantic-prosemirror .semantic-list-item + .semantic-list-item {
+    margin-top: 8pt;
 }
 
 .semantic-editor ::deep .semantic-prosemirror figure img {

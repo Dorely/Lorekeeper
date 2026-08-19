@@ -2032,6 +2032,7 @@ fn paginate_with_cancellation(
                     append_styled_text(&mut pages, &chapter_synopsis, trim, &synopsis_style);
                 }
                 let mut active_list_id: Option<String> = None;
+                let mut previous_space_after: f32 = 0.0;
                 for block in blocks.drain(..) {
                     check_layout_cancellation(job_root)?;
                     semantic_order += 1;
@@ -2119,6 +2120,7 @@ fn paginate_with_cancellation(
                                 page_number: first_page.max(chapter_start),
                             });
                         }
+                        previous_space_after = 0.0;
                         continue;
                     }
                     if block_type.eq_ignore_ascii_case("Figure") {
@@ -2283,6 +2285,14 @@ fn paginate_with_cancellation(
                         continue;
                     }
                     let style = block_style(document, &block, trim);
+                    if style.page_break_before
+                        && pages
+                            .last()
+                            .is_some_and(|page| page.kind == PageKind::Body && !page.lines.is_empty())
+                    {
+                        // page break reset collapsed gap
+                        previous_space_after = 0.0;
+                    }
                     let runs = if block_type.eq_ignore_ascii_case("SceneBreak")
                         || block_type.eq_ignore_ascii_case("ListItem")
                     {
@@ -2297,14 +2307,25 @@ fn paginate_with_cancellation(
                     } else {
                         block_runs(document, &block, &style)
                     };
-                    let first_page = append_styled_runs(
-                        &mut pages,
-                        &text,
-                        &runs,
-                        trim,
-                        &style,
-                        block.get("language").and_then(Value::as_str),
-                    );
+                    let gap_before = if text.trim().is_empty() && !block_type.eq_ignore_ascii_case("SceneBreak") {
+                        0.0
+                    } else {
+                        previous_space_after
+                    };
+                    let first_page = if text.trim().is_empty() && !block_type.eq_ignore_ascii_case("SceneBreak") {
+                        pages.len().max(1)
+                    } else {
+                        append_styled_runs_with_gap(
+                            &mut pages,
+                            &text,
+                            &runs,
+                            trim,
+                            &style,
+                            block.get("language").and_then(Value::as_str),
+                            gap_before,
+                        )
+                    };
+                    previous_space_after = style.space_after;
                     assign_semantic_order_since(
                         &mut pages,
                         &semantic_snapshot,
@@ -4080,12 +4101,14 @@ fn append_publication_sections(
             pages.push(empty_body_page());
         }
         let mut previous_was_designed_page = false;
+        let mut previous_space_after = 0.0f32;
         for (block_index, block) in blocks.into_iter().enumerate() {
             *semantic_order += 1;
             let block_id = string(block, "id");
             let block_type = string(block, "type");
             if previous_was_designed_page && !block_type.eq_ignore_ascii_case("DesignedPage") {
                 pages.push(empty_body_page());
+                previous_space_after = 0.0;
             }
             if block_type.eq_ignore_ascii_case("DesignedPage") {
                 let composition_id = string(block, "pageCompositionId");
@@ -4159,6 +4182,7 @@ fn append_publication_sections(
                     });
                 }
                 previous_was_designed_page = true;
+                previous_space_after = 0.0;
                 continue;
             }
             let semantic_snapshot = pages
@@ -4331,6 +4355,7 @@ fn append_publication_sections(
                         page_number: first_changed_page(pages, &semantic_snapshot),
                     });
                 }
+                previous_space_after = 0.0;
                 continue;
             }
             let text = display_block_text(block);
@@ -4338,6 +4363,13 @@ fn append_publication_sections(
                 continue;
             }
             let style = block_style(document, block, trim);
+            if style.page_break_before
+                && pages
+                    .last()
+                    .is_some_and(|page| page.kind == PageKind::Body && !page.lines.is_empty())
+            {
+                previous_space_after = 0.0;
+            }
             let runs = if block_type.eq_ignore_ascii_case("SceneBreak")
                 || block_type.eq_ignore_ascii_case("ListItem")
             {
@@ -4345,14 +4377,16 @@ fn append_publication_sections(
             } else {
                 block_runs(document, block, &style)
             };
-            append_styled_runs(
+            append_styled_runs_with_gap(
                 pages,
                 &text,
                 &runs,
                 trim,
                 &style,
                 block.get("language").and_then(Value::as_str),
+                previous_space_after,
             );
+            previous_space_after = style.space_after;
             assign_semantic_order_since(
                 pages,
                 &semantic_snapshot,
@@ -4820,11 +4854,11 @@ impl BlockStyle {
             first_line_indent: 0.0,
             page_break_before: false,
             keep_with_next: false,
-            alignment: "justify".to_owned(),
+            alignment: "left".to_owned(),
             face: FontFace::SerifRegular,
             small_caps: false,
             space_before: 0.0,
-            space_after: 0.0,
+            space_after: 8.0,
             semantic_role: LayoutSemanticRole::Paragraph,
         }
     }
@@ -4855,6 +4889,18 @@ fn append_styled_runs(
     style: &BlockStyle,
     language: Option<&str>,
 ) -> usize {
+    append_styled_runs_with_gap(pages, text, source_runs, trim, style, language, 0.0)
+}
+
+fn append_styled_runs_with_gap(
+    pages: &mut Vec<LayoutPage>,
+    text: &str,
+    source_runs: &[LayoutRun],
+    trim: &crate::model::Trim,
+    style: &BlockStyle,
+    language: Option<&str>,
+    previous_space_after: f32,
+) -> usize {
     if text.is_empty() {
         return pages.len().max(1);
     }
@@ -4869,10 +4915,10 @@ fn append_styled_runs(
     let mut wrapped = wrap_layout_runs(text, source_runs, style.size, available_width);
     let mut float_line_count = 0usize;
     if let Some((_, _, float_bottom)) = flow_region {
-        let baseline = pages
-            .last()
-            .map_or(0.0, |page| next_flow_baseline(page, trim, style, true));
-        let step = (style.size * 1.6).max(style.size * style.line_height.max(1.0));
+        let baseline = pages.last().map_or(0.0, |page| {
+            next_flow_baseline_with_gap(page, trim, style, true, previous_space_after)
+        });
+        let step = style.size * style.line_height.max(1.0);
         let capacity =
             (((baseline - float_bottom) / step).ceil().max(0.0) as usize).min(wrapped.len());
         if capacity < wrapped.len() {
@@ -4911,9 +4957,10 @@ fn append_styled_runs(
         pages.push(empty_body_page());
     }
     while offset < lines.len() {
+        let gap_for_first = if offset == 0 { previous_space_after } else { 0.0 };
         let remaining_capacity = pages.last().map_or(0, |page| {
             if page.kind == PageKind::Body {
-                remaining_line_capacity(page, trim, style)
+                remaining_line_capacity_with_gap(page, trim, style, gap_for_first)
             } else {
                 0
             }
@@ -4925,7 +4972,12 @@ fn append_styled_runs(
         {
             pages.push(empty_body_page());
         }
-        let page_capacity = remaining_line_capacity(pages.last().expect("body page"), trim, style);
+        let page_capacity = remaining_line_capacity_with_gap(
+            pages.last().expect("body page"),
+            trim,
+            style,
+            gap_for_first,
+        );
         let mut take = remaining_lines.min(page_capacity);
         let following = remaining_lines - take;
         if following > 0 && following < trim.minimum_widow_lines {
@@ -4934,11 +4986,13 @@ fn append_styled_runs(
                 take -= move_to_next;
             } else {
                 pages.push(empty_body_page());
-                take = remaining_lines.min(remaining_line_capacity(
+                take = remaining_line_capacity_with_gap(
                     pages.last().expect("body page"),
                     trim,
                     style,
-                ));
+                    gap_for_first,
+                )
+                .min(remaining_lines);
             }
         }
         let page_number = pages.len();
@@ -4974,7 +5028,17 @@ fn append_styled_runs(
                 "right" => (line_width - estimated_width).max(0.0),
                 _ => 0.0,
             };
-            let y = next_baseline(page, trim, style, offset == 0 && relative_index == 0);
+            let y = if offset == 0 && relative_index == 0 {
+                next_flow_baseline_with_gap(
+                    page,
+                    trim,
+                    style,
+                    true,
+                    previous_space_after,
+                )
+            } else {
+                next_baseline(page, trim, style, false)
+            };
             page.lines.push(LayoutLine {
                 text: line.clone(),
                 runs: line_runs,
@@ -5000,36 +5064,9 @@ fn append_styled_runs(
         }
         offset += take;
     }
-    if style.space_after > 0.0
-        && let Some(page) = pages.last_mut()
-    {
-        let y = page.lines.last().map_or(
-            trim.height_inches * 72.0 - trim.margin_inches * 72.0,
-            |previous| previous.y - previous.size * 1.6,
-        );
-        page.lines.push(LayoutLine {
-            text: String::new(),
-            runs: Vec::new(),
-            size: style.space_after / 1.6,
-            x: trim.margin_inches * 72.0,
-            y,
-            word_spacing: 0.0,
-            character_spacing: 0.0,
-            rotation_degrees: 0.0,
-            rotation_origin_x: None,
-            rotation_origin_y: None,
-            opacity: 1.0,
-            light_text: false,
-            fill_rgb: None,
-            semantic_role: style.semantic_role,
-            artifact: true,
-            language: None,
-            reading_order: None,
-            semantic_id: None,
-            semantic_parent_id: None,
-            link_page: None,
-        });
-    }
+    // Paragraph after-spacing is applied as baseline advance on the next block
+    // via next_flow_baseline/space_before, not as a synthetic artifact line.
+
     first_page.unwrap_or_else(|| pages.len().max(1))
 }
 
@@ -5100,6 +5137,25 @@ fn next_flow_baseline(
     style: &BlockStyle,
     first_block_line: bool,
 ) -> f32 {
+    next_flow_baseline_with_gap(page, trim, style, first_block_line, 0.0)
+}
+
+fn next_flow_baseline_with_gap(
+    page: &LayoutPage,
+    trim: &crate::model::Trim,
+    style: &BlockStyle,
+    first_block_line: bool,
+    previous_space_after: f32,
+) -> f32 {
+    let has_content = page
+        .lines
+        .iter()
+        .any(|line| !line.artifact && line.semantic_role != LayoutSemanticRole::Caption);
+    let gap = if first_block_line && has_content {
+        previous_space_after.max(style.space_before)
+    } else {
+        0.0
+    };
     let previous = page
         .lines
         .iter()
@@ -5109,19 +5165,11 @@ fn next_flow_baseline(
         trim.height_inches * 72.0
             - trim.margin_inches * 72.0
             - style.size * 0.82
-            - if first_block_line {
-                style.space_before
-            } else {
-                0.0
-            },
+            - gap,
         |line| {
-            line.y
-                - (line.size * 1.6).max(style.size * style.line_height)
-                - if first_block_line {
-                    style.space_before
-                } else {
-                    0.0
-                }
+            let step = (line.size * style.line_height.max(1.0))
+                .max(style.size * style.line_height.max(1.0));
+            line.y - step - gap
         },
     )
 }
@@ -5140,9 +5188,18 @@ fn remaining_line_capacity(
     trim: &crate::model::Trim,
     style: &BlockStyle,
 ) -> usize {
+    remaining_line_capacity_with_gap(page, trim, style, 0.0)
+}
+
+fn remaining_line_capacity_with_gap(
+    page: &LayoutPage,
+    trim: &crate::model::Trim,
+    style: &BlockStyle,
+    previous_space_after: f32,
+) -> usize {
     let bottom = trim.margin_inches * 72.0;
-    let step = (style.size * 1.6).max(style.size * style.line_height.max(1.0));
-    let first = next_baseline(page, trim, style, true);
+    let step = style.size * style.line_height.max(1.0);
+    let first = next_flow_baseline_with_gap(page, trim, style, true, previous_space_after);
     if first - style.size * 0.30 < bottom {
         return 0;
     }
@@ -5266,6 +5323,8 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             style.keep_with_next = true;
             style.alignment = "left".to_owned();
             style.face = FontFace::SansBold;
+            style.space_before = 0.0;
+            style.space_after = 0.0;
             style.semantic_role = match block
                 .get("headingLevel")
                 .and_then(Value::as_u64)
@@ -5279,14 +5338,20 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
         "blockquote" => {
             style.indent = 24.0;
             style.alignment = "left".to_owned();
+            style.space_before = 0.0;
+            style.space_after = 0.0;
         }
         "scenebreak" => {
             style.alignment = "center".to_owned();
             style.keep_with_next = true;
+            style.space_before = 0.0;
+            style.space_after = 0.0;
         }
         "listitem" => {
             style.alignment = "left".to_owned();
             style.semantic_role = LayoutSemanticRole::ListItem;
+            style.space_before = 0.0;
+            style.space_after = 0.0;
         }
         _ => {}
     }
@@ -5330,14 +5395,18 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             .get("smallCaps")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        style.space_before = definition
+        if let Some(value) = definition
             .get("spaceBeforePoints")
             .and_then(Value::as_f64)
-            .unwrap_or(0.0) as f32;
-        style.space_after = definition
+        {
+            style.space_before = value as f32;
+        }
+        if let Some(value) = definition
             .get("spaceAfterPoints")
             .and_then(Value::as_f64)
-            .unwrap_or(0.0) as f32;
+        {
+            style.space_after = value as f32;
+        }
         style.indent = definition
             .get("leftIndentEm")
             .and_then(Value::as_f64)

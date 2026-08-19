@@ -1274,10 +1274,11 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         var css = $$"""
         body {
           color: #172033;
-          font-family: Georgia, "Times New Roman", serif;
+          font-family: "Lora", Georgia, "Times New Roman", serif;
           font-size: {{fontSize}}pt;
           line-height: {{lineHeight}};
           margin: {{marginPercent}}%;
+          text-align: left;
         }
 
         h1 {
@@ -1357,7 +1358,12 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
 
         .chapter-body p,
         .matter-page p {
-          margin: 0 0 0.9em;
+          margin: 0;
+        }
+
+        .chapter-body p[data-style-role="body"]:not([style*="margin-bottom"]):not([style*="margin-top"]),
+        .matter-page p[data-style-role="body"]:not([style*="margin-bottom"]):not([style*="margin-top"]) {
+          margin-bottom: 8pt;
         }
 
         body.fixed-layout {
