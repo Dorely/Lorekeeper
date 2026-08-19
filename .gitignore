@@ -496,3 +496,7 @@ $RECYCLE.BIN/
 # Rust spike output
 /Lorekeeper.Press/target/
 
+.commandcode/taste/taste.md
+.commandcode/taste/architecture/taste.md
+.commandcode/taste/ui/taste.md
+.commandcode/taste/workflow/taste.md
