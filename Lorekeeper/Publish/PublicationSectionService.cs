@@ -62,6 +62,7 @@ public interface IPublicationSectionService
     Task<IReadOnlyList<PublicationSectionView>> ListAsync(PublicationSectionTarget target, CancellationToken cancellationToken = default);
     Task<PublicationSectionView> GetAsync(PublicationSectionTarget target, Guid sectionId, CancellationToken cancellationToken = default);
     Task<PublicationSectionView> UpsertAsync(PublicationSectionTarget target, PublicationSectionInput input, CancellationToken cancellationToken = default);
+    Task<PublicationSectionView> SetInclusionAsync(PublicationSectionTarget target, Guid sectionId, PublicationSectionInclusionMode inclusionMode, long expectedRevision, CancellationToken cancellationToken = default);
     Task<PublicationSectionView> PatchManuscriptAsync(PublicationSectionTarget target, Guid sectionId, long expectedRevision, IReadOnlyList<ManuscriptOperationInput> operations, CancellationToken cancellationToken = default);
     Task<PublicationSectionView> CustomizeAsync(Guid projectId, Guid editionId, Guid coreSectionId, CancellationToken cancellationToken = default);
     Task<PublicationSectionView> EnsureSystemDesignedPageAsync(PublicationSectionTarget target, Guid sectionId, CancellationToken cancellationToken = default);
@@ -254,6 +255,70 @@ public sealed class PublicationSectionService(
         }
         else
             await db.SaveChangesAsync(cancellationToken);
+        return await GetStoredAsync(target, row.Id, cancellationToken);
+    }
+
+    public async Task<PublicationSectionView> SetInclusionAsync(
+        PublicationSectionTarget target,
+        Guid sectionId,
+        PublicationSectionInclusionMode inclusionMode,
+        long expectedRevision,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Enum.IsDefined(inclusionMode))
+            throw new ArgumentOutOfRangeException(nameof(inclusionMode));
+
+        await using var databaseOperation = await database.OpenWriteAsync(target.ProjectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var row = await db.PublicationSections.SingleOrDefaultAsync(
+            item => item.ProjectId == target.ProjectId && item.Id == sectionId,
+            cancellationToken) ?? throw new KeyNotFoundException("Publication section was not found.");
+
+        if (row.EditionId != target.EditionId)
+        {
+            if (target.EditionId is not Guid editionId || row.EditionId is not null)
+                throw new InvalidOperationException("The publication section belongs to a different content target.");
+
+            var overlay = await db.PublicationSections.SingleOrDefaultAsync(
+                item => item.ProjectId == target.ProjectId
+                    && item.EditionId == editionId
+                    && item.CoreSectionId == row.Id,
+                cancellationToken);
+            if (overlay is null)
+            {
+                if (row.Revision != expectedRevision)
+                    throw new DbUpdateConcurrencyException($"Publication section changed (expected revision {expectedRevision}, current {row.Revision}).");
+
+                overlay = await CloneSectionAsync(row, editionId, cancellationToken);
+                overlay.InclusionMode = inclusionMode;
+                overlay.IsExcluded = false;
+                db.PublicationSections.Add(overlay);
+            }
+            else
+            {
+                if (overlay.Revision != expectedRevision)
+                    throw new DbUpdateConcurrencyException($"Publication section changed (expected revision {expectedRevision}, current {overlay.Revision}).");
+
+                overlay.InclusionMode = inclusionMode;
+                overlay.IsExcluded = false;
+                overlay.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await TouchEditionAsync(editionId, cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+            return await GetStoredAsync(target, overlay.Id, cancellationToken);
+        }
+
+        if (row.Revision != expectedRevision)
+            throw new DbUpdateConcurrencyException($"Publication section changed (expected revision {expectedRevision}, current {row.Revision}).");
+        if (row.IsExcluded)
+            throw new InvalidOperationException("An excluded publication section cannot be included through this operation.");
+
+        row.InclusionMode = inclusionMode;
+        row.UpdatedAt = DateTime.UtcNow;
+        await TouchTargetAsync(target, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return await GetStoredAsync(target, row.Id, cancellationToken);
     }
 

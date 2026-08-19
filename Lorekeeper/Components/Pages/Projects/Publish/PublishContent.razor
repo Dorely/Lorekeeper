@@ -1300,10 +1300,12 @@ else
     {
         try
         {
-            var saved = await PublicationSections.UpsertAsync(CurrentPublicationSectionTarget(), new(
-                item.Id, item.Title, item.Kind, item.Anchor, item.TargetKind, item.TargetId,
+            var saved = await PublicationSections.SetInclusionAsync(
+                CurrentPublicationSectionTarget(),
+                item.Id,
                 included ? PublicationSectionInclusionMode.Included : PublicationSectionInclusionMode.Omitted,
-                item.StartSide, ManuscriptCodec.Serialize(item.Manuscript), item.Revision));
+                item.Revision,
+                _dispose.Token);
             if (_editingSection?.Id == item.Id)
                 BeginPublicationSectionEdit(saved);
             await RefreshPublicationSectionsAsync(updateEditing: false);
