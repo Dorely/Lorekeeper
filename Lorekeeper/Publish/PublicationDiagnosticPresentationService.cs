@@ -174,6 +174,27 @@ public sealed partial class PublicationDiagnosticPresentationService(IAppDatabas
                     return new(PublicationDiagnosticTargetKind.Cover, "Core Book cover", ObjectId: objectId);
                 }
             }
+
+            var chapter = await db.Chapters.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == candidateId && item.ProjectId == projectId, cancellationToken);
+            if (chapter is not null)
+            {
+                var label = chapterOrdinals.TryGetValue(chapter.Id, out var ordinal)
+                    ? $"Chapter {ordinal}: {chapter.Title}"
+                    : chapter.Title;
+                return new(PublicationDiagnosticTargetKind.ChapterPage, label, ChapterId: chapter.Id);
+            }
+
+            var publicationSection = await db.PublicationSections.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == candidateId && item.ProjectId == projectId, cancellationToken);
+            if (publicationSection is not null)
+            {
+                return new(
+                    PublicationDiagnosticTargetKind.PublicationSectionPage,
+                    publicationSection.Title,
+                    EditionId: publicationSection.EditionId,
+                    PublicationSectionId: publicationSection.Id);
+            }
         }
 
         return null;
@@ -291,6 +312,9 @@ public sealed partial class PublicationDiagnosticPresentationService(IAppDatabas
             ["PRESS_COMPOSITION_VARIANT_MISSING"] = "Page layout is missing",
             ["PRESS_COMPOSITION_MISSING"] = "Designed Page is missing",
             ["PRESS_COMPOSITION_RANGE_INVALID"] = "Page text reference needs repair",
+            ["PRESS_PAGE_MAP_INCOMPLETE"] = "Some content was not placed on a page",
+            ["PRESS_PAGE_MAP_DUPLICATE"] = "Duplicate page entry",
+            ["PRESS_PAGE_MAP_UNEXPECTED"] = "Unexpected page entry",
         };
 
     [GeneratedRegex("(?i)(?:Composition\\s+)?(?:object|frame)\\s+['\"]?(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})['\"]?\\s*")]

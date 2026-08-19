@@ -965,9 +965,84 @@ public sealed class PublicationRenderProcessor(
                 throw new InvalidOperationException("The renderer returned an invalid page-map entry.");
             returnedPageMap.Add((entry.ChapterId, entry.BlockId, entry.PageNumber));
         }
-        if (returnedPageMap.Select(entry => (entry.OwnerId, entry.BlockId)).Distinct().Count() != returnedPageMap.Count
-            || !returnedPageMap.Select(entry => (entry.OwnerId, entry.BlockId)).ToHashSet().SetEquals(expectedPageMap))
-            throw new InvalidOperationException("The renderer returned an incomplete or duplicate semantic page map.");
+        var hasDuplicatePageMap = returnedPageMap.Select(entry => (entry.OwnerId, entry.BlockId)).Distinct().Count() != returnedPageMap.Count;
+        var returnedPageMapKeys = returnedPageMap.Select(entry => (entry.OwnerId, entry.BlockId)).ToHashSet();
+        var isIncompletePageMap = !returnedPageMapKeys.SetEquals(expectedPageMap);
+        if (hasDuplicatePageMap || isIncompletePageMap)
+        {
+            if (coreTarget)
+            {
+                var mergedDiagnostics = new List<PublicationRenderDiagnostic>(result.Diagnostics ?? Array.Empty<PublicationRenderDiagnostic>());
+                var duplicateGroups = returnedPageMap
+                    .GroupBy(entry => (entry.OwnerId, entry.BlockId))
+                    .Where(group => group.Count() > 1)
+                    .Select(group => group.Key)
+                    .ToList();
+                foreach (var dup in duplicateGroups)
+                {
+                    var sourceKind = expectedChapterPageMap.Contains(dup) ? "chapter" : "publication-section";
+                    mergedDiagnostics.Add(new PublicationRenderDiagnostic(
+                        "warning",
+                        "PRESS_PAGE_MAP_DUPLICATE",
+                        $"A block {dup.BlockId} in {sourceKind} {dup.OwnerId} appears more than once in the page map and was de-duplicated for the reading copy.",
+                        null,
+                        null,
+                        sourceKind,
+                        dup.OwnerId));
+                }
+
+                var missing = expectedPageMap.Except(returnedPageMapKeys).ToList();
+                foreach (var group in missing.GroupBy(entry => entry.OwnerId))
+                {
+                    var ownerId = group.Key;
+                    var sourceKind = group.Any(entry => expectedChapterPageMap.Contains(entry)) ? "chapter" : "publication-section";
+                    var count = group.Count();
+                    var message = count == 1
+                        ? $"A block {group.First().BlockId} in {sourceKind} {ownerId} was not placed on a page in the reading copy."
+                        : $"{count} blocks in {sourceKind} {ownerId} were not placed on a page in the reading copy.";
+                    mergedDiagnostics.Add(new PublicationRenderDiagnostic(
+                        "warning",
+                        "PRESS_PAGE_MAP_INCOMPLETE",
+                        message,
+                        null,
+                        null,
+                        sourceKind,
+                        ownerId));
+                }
+
+                var extra = returnedPageMapKeys.Except(expectedPageMap).ToList();
+                foreach (var group in extra.GroupBy(entry => entry.OwnerId))
+                {
+                    var ownerId = group.Key;
+                    mergedDiagnostics.Add(new PublicationRenderDiagnostic(
+                        "warning",
+                        "PRESS_PAGE_MAP_UNEXPECTED",
+                        $"The reading copy page map contains an unexpected entry for {ownerId}.",
+                        null,
+                        null,
+                        "publication-section",
+                        ownerId));
+                }
+
+                if (mergedDiagnostics.Count == (result.Diagnostics?.Length ?? 0))
+                    mergedDiagnostics.Add(new PublicationRenderDiagnostic(
+                        "warning",
+                        "PRESS_PAGE_MAP_INCOMPLETE",
+                        "The reading copy page map was incomplete and some content may not be navigable.",
+                        null,
+                        null,
+                        null,
+                        null));
+
+                job.DiagnosticsJson = JsonSerializer.Serialize(mergedDiagnostics, JsonOptions);
+                result = result with { Diagnostics = mergedDiagnostics.ToArray() };
+                returnedPageMap = returnedPageMap.DistinctBy(entry => (entry.OwnerId, entry.BlockId)).ToList();
+            }
+            else
+            {
+                throw new InvalidOperationException("The renderer returned an incomplete or duplicate semantic page map.");
+            }
+        }
         // Publication-section block IDs are stable manuscript identifiers, but they are not
         // necessarily GUIDs. Validate them above as part of the complete Press map; persist only
         // chapter entries in the chapter-navigation table whose contract remains Guid-based.
