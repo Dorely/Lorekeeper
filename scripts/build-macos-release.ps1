@@ -149,6 +149,76 @@ function Invoke-NpmAuditJson
     }
 }
 
+function Get-PressSha256Hex
+{
+    param([Parameter(Mandatory)][string]$Path)
+
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    $stream = [IO.File]::OpenRead($Path)
+    try
+    {
+        $hashBytes = $sha256.ComputeHash($stream)
+        return ([BitConverter]::ToString($hashBytes) -replace '-', '').ToLowerInvariant()
+    }
+    finally
+    {
+        $stream.Dispose()
+        $sha256.Dispose()
+    }
+}
+
+function Repair-PressRuntimeManifest
+{
+    param([Parameter(Mandatory)][string]$PressRoot)
+
+    $manifestPath = Join-Path $PressRoot 'lorekeeper-press-runtime.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf))
+    {
+        Write-Host "No press manifest at $PressRoot; skipping." -ForegroundColor Yellow
+        return $false
+    }
+
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $files = @(Get-ChildItem -LiteralPath $PressRoot -Recurse -File |
+        Where-Object { $_.FullName -ne $manifestPath } |
+        Sort-Object FullName |
+        ForEach-Object {
+            [ordered]@{
+                relativePath = $_.FullName.Substring($PressRoot.Length + 1).Replace('\', '/')
+                byteLength = $_.Length
+                sha256 = Get-PressSha256Hex -Path $_.FullName
+            }
+        })
+
+    $oldJson = ($manifest.files | ConvertTo-Json -Depth 8 -Compress)
+    $newJson = ($files | ConvertTo-Json -Depth 8 -Compress)
+    if ($oldJson -eq $newJson)
+    {
+        Write-Host "Press manifest at $PressRoot already matches signed bundle."
+        return $false
+    }
+
+    Write-Host "Updating press manifest at $PressRoot (ad-hoc signature changed file sizes)." -ForegroundColor Yellow
+    $newManifest = [ordered]@{
+        schemaVersion = $manifest.schemaVersion
+        platform = $manifest.platform
+        architecture = $manifest.architecture
+        description = $manifest.description
+        files = $files
+    }
+    [IO.File]::WriteAllText(
+        $manifestPath,
+        ($newManifest | ConvertTo-Json -Depth 16),
+        [Text.UTF8Encoding]::new($false))
+    $rebuilt = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $pressEntry = $rebuilt.files | Where-Object relativePath -eq 'lorekeeper-press' | Select-Object -First 1
+    if ($pressEntry)
+    {
+        Write-Host "Rewrote manifest: lorekeeper-press byteLength=$($pressEntry.byteLength) sha256=$($pressEntry.sha256.Substring(0, 12))..."
+    }
+    return $true
+}
+
 Push-Location $repoRoot
 try
 {
@@ -268,6 +338,50 @@ try
         throw "Expected one unpacked Lorekeeper.app, found $($unpackedApps.Count)."
     }
     $appPath = $unpackedApps[0].FullName
+    $pressRoot = Join-Path $appPath 'Contents/Resources/bin/press-runtime'
+    $pressExecutable = Join-Path $pressRoot 'lorekeeper-press'
+    # The ad-hoc signature added by electron-builder mutates the Mach-O, so the
+    # manifest frozen by BuildPressRuntime (unsigned size/hash) is stale.
+    # Repair the manifest to reflect the final signed bundle and re-seal the app
+    # before verification. This keeps PublicationPressRuntime.VerifyManifest
+    # fail-closed on unsigned or tampered files while allowing the intended
+    # ad-hoc signed artifact to pass.
+    $pressManifestWasRepaired = Repair-PressRuntimeManifest -PressRoot $pressRoot
+    if ($pressManifestWasRepaired)
+    {
+        Write-Host "Re-signing $appPath after press manifest repair." -ForegroundColor Yellow
+        Invoke-CheckedCommand codesign @('--force', '--deep', '--sign', '-', $appPath)
+        # Rebuild the DMG from the re-signed bundle so the shipped artifact
+        # contains the repaired manifest. Use a fresh UDZO image.
+        Write-Host "Rebuilding DMG at $dmgPath from repaired bundle." -ForegroundColor Yellow
+        Remove-Item -LiteralPath $dmgPath -Force
+        $dmgStaging = Join-Path $outputDirectory "dmg-staging-$([Guid]::NewGuid().ToString('N'))"
+        try
+        {
+            New-Item -ItemType Directory -Path $dmgStaging | Out-Null
+            Copy-Item -Recurse -LiteralPath $appPath -Destination (Join-Path $dmgStaging 'Lorekeeper.app')
+            # Recreate the conventional Applications symlink if absent.
+            $appsLink = Join-Path $dmgStaging 'Applications'
+            if (-not (Test-Path -LiteralPath $appsLink))
+            {
+                & ln -s /Applications $appsLink 2>$null
+            }
+            Invoke-CheckedCommand hdiutil @('create', '-volname', 'Lorekeeper', '-srcfolder', $dmgStaging, '-ov', '-format', 'UDZO', $dmgPath)
+            Invoke-CheckedCommand hdiutil @('verify', $dmgPath)
+        }
+        finally
+        {
+            if (Test-Path -LiteralPath $dmgStaging) { Remove-Item -LiteralPath $dmgStaging -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+        # Re-signing is idempotent for the same binary content (ad-hoc signature
+        # is deterministic), so the manifest repaired before re-sign must still
+        # match. Re-verify to guard against a non-deterministic re-sign.
+        $stillMismatched = Repair-PressRuntimeManifest -PressRoot $pressRoot
+        if ($stillMismatched)
+        {
+            throw 'Press manifest still mismatched after re-sign; ad-hoc signature is not stable.'
+        }
+    }
     Invoke-CheckedCommand codesign @('--verify', '--deep', '--strict', '--verbose=2', $appPath)
     $signatureDetails = (& codesign --display --verbose=4 $appPath 2>&1) -join [Environment]::NewLine
     if ($signatureDetails -notmatch '(?m)^Signature=adhoc$')
@@ -278,8 +392,6 @@ try
     $electronExecutable = Join-Path $appPath 'Contents/MacOS/Lorekeeper'
     $dotnetExecutable = Join-Path $appPath "Contents/Resources/bin/$($manifest.executable)"
     $sqliteVecLibrary = Join-Path $appPath 'Contents/Resources/bin/vec0.dylib'
-    $pressRoot = Join-Path $appPath 'Contents/Resources/bin/press-runtime'
-    $pressExecutable = Join-Path $pressRoot 'lorekeeper-press'
     foreach ($requiredPressFile in @(
         $pressExecutable,
         (Join-Path $pressRoot 'lorekeeper-press-runtime.json'),

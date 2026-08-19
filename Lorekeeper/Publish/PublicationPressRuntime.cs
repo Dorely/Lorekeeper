@@ -173,7 +173,7 @@ public sealed class PublicationPressRuntime(
                 RequireOwnedFile(runtimeRoot, fullPath, relativePath);
                 var info = new FileInfo(fullPath);
                 if (info.Length != size)
-                    throw new InvalidDataException($"The runtime file '{relativePath}' has changed size.");
+                    throw new InvalidDataException($"The runtime file '{relativePath}' has changed size (manifest expected {size} bytes, found {info.Length} bytes).");
                 VerifyHash(fullPath, hash, relativePath);
             }
 
