@@ -44,7 +44,7 @@ public class PublicationBook
     public bool IncludeVisibleTableOfContents { get; set; } = true;
     public bool IncludeActSynopses { get; set; }
     public bool IncludeChapterSynopses { get; set; }
-    public bool IncludeActHeadings { get; set; } = true;
+    public bool IncludeActHeadings { get; set; }
     public bool IncludeChapterHeadings { get; set; } = true;
     public bool NumberActs { get; set; }
     public bool NumberChapters { get; set; }

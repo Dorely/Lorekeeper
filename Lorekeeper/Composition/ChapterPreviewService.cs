@@ -139,6 +139,8 @@ public sealed class ChapterPreviewService(
     IAppDatabaseOperationFactory database,
     IPublicationPressRuntime press,
     IProjectFontService projectFonts,
+    IPublicationBookService books,
+    IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IOptions<PublicationPressOptions> options) : IChapterPreviewService
 {
     private static readonly ConcurrentDictionary<string, ChapterPreviewResult> Cache = new(StringComparer.Ordinal);
@@ -232,6 +234,8 @@ public sealed class ChapterPreviewService(
         var setup = await db.ProjectPageSetups.AsNoTracking().SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken)
             ?? new ProjectPageSetup { ProjectId = projectId };
         PublicationEdition? targetEdition = null;
+        PublicationEdition profile;
+        long publicationRevision;
         if (target.EditionId is Guid targetEditionId)
         {
             targetEdition = await db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
@@ -240,16 +244,25 @@ public sealed class ChapterPreviewService(
                     && item.EditionSpecificContentEnabled
                     && item.Status == PublicationEditionStatus.Draft,
                 cancellationToken) ?? throw new InvalidOperationException("The selected edition content target is unavailable.");
+            var effectiveRelease = await effectiveConfigurations.ResolveReleaseAsync(projectId, targetEdition.Id, cancellationToken);
+            profile = effectiveRelease.Edition;
+            publicationRevision = Math.Max(effectiveRelease.Book.Revision, profile.Revision);
             setup = new ProjectPageSetup
             {
                 ProjectId = projectId,
-                PageWidthInches = targetEdition.PageWidthInches,
-                PageHeightInches = targetEdition.PageHeightInches,
-                PageMarginInches = targetEdition.PageMarginInches,
-                BodyFontSizePoints = setup.BodyFontSizePoints,
-                BodyLineHeight = setup.BodyLineHeight,
-                Revision = targetEdition.Revision,
+                PageWidthInches = profile.PageWidthInches,
+                PageHeightInches = profile.PageHeightInches,
+                PageMarginInches = profile.PageMarginInches,
+                BodyFontSizePoints = profile.BodyFontSizePoints,
+                BodyLineHeight = profile.BodyLineHeight,
+                Revision = publicationRevision,
             };
+        }
+        else
+        {
+            var core = await books.GetOrCreateAsync(projectId, cancellationToken);
+            profile = PublishService.CoreProfile(projectId, core);
+            publicationRevision = core.Revision;
         }
         var acts = await db.Acts.AsNoTracking().Where(item => item.ProjectId == projectId)
             .OrderBy(item => item.Order).ThenBy(item => item.Id).ToListAsync(cancellationToken);
@@ -409,6 +422,25 @@ public sealed class ChapterPreviewService(
             Compositions = compositions.Select(item => new { item.Id, item.Revision, item.UpdatedAt, item.ActiveAuthoringVariantId }),
             Variants = variants.Select(item => new { item.Id, item.Revision, item.UpdatedAt }),
             Assets = assets.Select(item => new { item.Id, item.UpdatedAt }),
+            Publication = new
+            {
+                publicationRevision,
+                profile.IncludeTableOfContents,
+                profile.IncludeVisibleTableOfContents,
+                profile.IncludeActSynopses,
+                profile.IncludeChapterSynopses,
+                profile.IncludeActHeadings,
+                profile.IncludeChapterHeadings,
+                profile.NumberActs,
+                profile.NumberChapters,
+                profile.TitlePageMode,
+                profile.AllowDesignedPageOverrides,
+                profile.PageWidthInches,
+                profile.PageHeightInches,
+                profile.PageMarginInches,
+                profile.BodyFontSizePoints,
+                profile.BodyLineHeight,
+            },
             Documents = documents.Select(item => new
             {
                 item.Key,
@@ -460,15 +492,16 @@ public sealed class ChapterPreviewService(
                     {
                         id = act?.Id ?? GuidUtility(projectId, index),
                         title = act?.Title ?? "Chapters",
-                        synopsis = act?.Synopsis ?? string.Empty,
-                        includePage = false,
-                        includeHeading = false,
+                        synopsis = profile.IncludeActSynopses ? act?.Synopsis ?? string.Empty : string.Empty,
+                        includePage = profile.IncludeActHeadings
+                            || profile.IncludeActSynopses && !string.IsNullOrWhiteSpace(act?.Synopsis),
+                        includeHeading = profile.IncludeActHeadings,
                         chapters = group.Select(chapter => new
                         {
                             id = chapter.Id,
                             chapter.Title,
-                            chapter.Synopsis,
-                            includeHeading = true,
+                            synopsis = profile.IncludeChapterSynopses ? chapter.Synopsis : string.Empty,
+                            includeHeading = profile.IncludeChapterHeadings,
                             blocks = documents[chapter.Id].Content.Select(BlockPayload).ToArray(),
                             pageCompositions = documents[chapter.Id].Content
                                 .Where(block => block.PageCompositionId is not null)
@@ -493,10 +526,10 @@ public sealed class ChapterPreviewService(
                     matter = Array.Empty<object>(),
                     includeTitlePage = false,
                     includeVisibleTableOfContents = false,
-                    includeActHeadings = false,
-                    includeChapterHeadings = true,
-                    numberActs = false,
-                    numberChapters = false,
+                    includeActHeadings = profile.IncludeActHeadings,
+                    includeChapterHeadings = profile.IncludeChapterHeadings,
+                    numberActs = profile.NumberActs,
+                    numberChapters = profile.NumberChapters,
                     sections,
                     styles = styles.Select(style => new
                     {
@@ -507,7 +540,7 @@ public sealed class ChapterPreviewService(
                     }).ToArray(),
                     placements = Array.Empty<object>(),
                     outputMode = "DigitalPdf",
-                    allowDesignedPageOverrides = true,
+                    allowDesignedPageOverrides = profile.AllowDesignedPageOverrides,
                 },
                 trim = new
                 {

@@ -620,6 +620,13 @@ workspace preferences rather than project publication data. Read flushes
 pending manuscript edits and uses `IChapterPreviewService` plus the Press layout
 command to render the current chapter as clean page canvases with real line
 breaks, images, captions, Designed Pages, recto parity, labels, links, and boxes.
+Its Press request resolves the current Core Book presentation settings, or the
+effective inherited/overridden release settings for edition-target content, at
+generation time. Heading, summary, numbering, page geometry, and Designed Page
+override behavior therefore follow the configured publication target; the
+preview cache key includes those layout-affecting settings. Read remains a
+private selected-chapter browser trace and does not add full-publication matter
+such as title pages or tables of contents.
 The preview request contains only the selected chapter and asks Press for its
 compact browser trace, which preserves paint and text-run data but omits
 glyph-level evidence used only by renderer conformance inspection. Designed Page

@@ -490,7 +490,7 @@ public sealed class PublishService(
         };
     }
 
-    private static PublicationEdition CoreProfile(Guid projectId, PublicationBookView core) => new()
+    internal static PublicationEdition CoreProfile(Guid projectId, PublicationBookView core) => new()
     {
         ProjectId = projectId,
         Name = "Core Book",

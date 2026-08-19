@@ -122,7 +122,7 @@ public sealed class PublicationCoreMigrationService(
             IncludeVisibleTableOfContents = source?.IncludeVisibleTableOfContents ?? false,
             IncludeActSynopses = source?.IncludeActSynopses ?? false,
             IncludeChapterSynopses = source?.IncludeChapterSynopses ?? false,
-            IncludeActHeadings = source?.IncludeActHeadings ?? true,
+            IncludeActHeadings = source?.IncludeActHeadings ?? false,
             IncludeChapterHeadings = source?.IncludeChapterHeadings ?? true,
             NumberActs = source?.NumberActs ?? false,
             NumberChapters = source?.NumberChapters ?? false,
