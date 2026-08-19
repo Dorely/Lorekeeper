@@ -50,18 +50,19 @@
                     <label class="field-wide">
                         <span>Embedding model ID</span>
                         <div class="model-id-field">
-                            <input class="form-control" list="embedding-model-options" value="@_modelId" @oninput="OnModelChanged" placeholder="@ModelPlaceholder" />
+                            <input class="form-control" value="@_modelId" @oninput="OnModelChanged" placeholder="@ModelPlaceholder" />
                             <button type="button" class="btn btn-outline-secondary" disabled="@Busy" @onclick="ListModelsAsync">@(_listingModels ? "Listing…" : "List models")</button>
                         </div>
                         @if (_availableModels.Count > 0)
                         {
-                            <datalist id="embedding-model-options">
+                            <select class="form-select form-select-sm" value="@_modelId" @onchange="OnAvailableModelSelected">
+                                <option value="">-- Select a model --</option>
                                 @foreach (var candidate in _availableModels)
                                 {
-                                    <option value="@candidate" />
+                                    <option value="@candidate">@candidate</option>
                                 }
-                            </datalist>
-                            <small class="model-list-note">Pick a discovered model or type any model ID.</small>
+                            </select>
+                            <small class="model-list-note">Pick a discovered model or keep your typed ID.</small>
                         }
                     </label>
                 </div>
@@ -272,10 +273,8 @@
         try
         {
             _availableModels = await ModelCatalog.ListEmbeddingModelsAsync(connection, _apiKind);
-            SetStatus(_availableModels.Count == 0
-                ? "The provider returned an empty model list; enter the embedding model ID manually."
-                : $"Discovered {_availableModels.Count} model(s). Pick one from the Embedding model ID suggestions.",
-                _availableModels.Count == 0 ? "info" : "success");
+            if (_availableModels.Count == 0)
+                SetStatus("The provider returned an empty model list; enter the embedding model ID manually.", "info");
         }
         catch (Exception ex)
         {
@@ -285,6 +284,16 @@
         finally
         {
             _listingModels = false;
+        }
+    }
+
+    private void OnAvailableModelSelected(ChangeEventArgs args)
+    {
+        var value = args.Value?.ToString()?.Trim();
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            _modelId = value;
+            DraftChanged();
         }
     }
 

@@ -72,18 +72,19 @@
                 <label>
                     <span>Initial model ID</span>
                     <div class="model-id-field">
-                        <input class="form-control" list="new-provider-model-options" @bind="_newProvider.ModelId" placeholder="llama3" />
+                        <input class="form-control" @bind="_newProvider.ModelId" placeholder="llama3" />
                         <button type="button" class="btn btn-outline-secondary" disabled="@AnyTestRunning" @onclick="ListNewProviderModelsAsync">@(_listingNewProviderModels ? "Listing…" : "List models")</button>
                     </div>
                     @if (_newProviderModels.Count > 0)
                     {
-                        <datalist id="new-provider-model-options">
+                        <select class="form-select form-select-sm" value="@_newProvider.ModelId" @onchange="OnNewProviderModelSelected">
+                            <option value="">-- Select a model --</option>
                             @foreach (var candidate in _newProviderModels)
                             {
-                                <option value="@candidate" />
+                                <option value="@candidate">@candidate</option>
                             }
-                        </datalist>
-                        <small class="field-note">Pick a suggested or discovered model, or type any model ID.</small>
+                        </select>
+                        <small class="field-note">Pick a discovered model, or type any model ID above.</small>
                     }
                 </label>
                 <label>
@@ -158,17 +159,19 @@
                                 <label>
                                     <span>Model ID</span>
                                     <div class="model-id-field">
-                                        <input class="form-control form-control-sm" list="model-options-@(model.Id)" @bind="model.ModelId" />
+                                        <input class="form-control form-control-sm" @bind="model.ModelId" />
                                         <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingRowModelId is not null)" @onclick="() => ListRowModelsAsync(model)">@(_listingRowModelId == model.Id ? "Listing…" : "List models")</button>
                                     </div>
-                                    @if (_rowModels.TryGetValue(model.Id, out var rowModels))
+                                    @if (_rowModels.TryGetValue(model.Id, out var rowModels) && rowModels.Count > 0)
                                     {
-                                        <datalist id="model-options-@(model.Id)">
+                                        <select class="form-select form-select-sm" value="@model.ModelId" @onchange="args => OnRowModelSelected(model, args)">
+                                            <option value="">-- Select a model --</option>
                                             @foreach (var candidate in rowModels)
                                             {
-                                                <option value="@candidate" />
+                                                <option value="@candidate">@candidate</option>
                                             }
-                                        </datalist>
+                                        </select>
+                                        <small class="field-note">Pick a discovered model or keep your typed ID.</small>
                                     }
                                 </label>
                                 <label>
@@ -236,17 +239,19 @@
                                 <label>
                                     <span>Model ID</span>
                                     <div class="model-id-field">
-                                        <input class="form-control form-control-sm" list="model-options-@(model.Id)" @bind="model.ModelId" />
+                                        <input class="form-control form-control-sm" @bind="model.ModelId" />
                                         <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingRowModelId is not null)" @onclick="() => ListRowModelsAsync(model)">@(_listingRowModelId == model.Id ? "Listing…" : "List models")</button>
                                     </div>
-                                    @if (_rowModels.TryGetValue(model.Id, out var rowModels))
+                                    @if (_rowModels.TryGetValue(model.Id, out var rowModels) && rowModels.Count > 0)
                                     {
-                                        <datalist id="model-options-@(model.Id)">
+                                        <select class="form-select form-select-sm" value="@model.ModelId" @onchange="args => OnRowModelSelected(model, args)">
+                                            <option value="">-- Select a model --</option>
                                             @foreach (var candidate in rowModels)
                                             {
-                                                <option value="@candidate" />
+                                                <option value="@candidate">@candidate</option>
                                             }
-                                        </datalist>
+                                        </select>
+                                        <small class="field-note">Pick a discovered model or keep your typed ID.</small>
                                     }
                                 </label>
                                 <label>
@@ -877,17 +882,19 @@
             <label>
                 <span>Model ID</span>
                 <div class="model-id-field">
-                    <input class="form-control form-control-sm" list="child-model-options-@(parent.Id)" placeholder="gpt-5-mini" @bind="draft.ModelId" />
+                    <input class="form-control form-control-sm" placeholder="gpt-5-mini" @bind="draft.ModelId" />
                     <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingChildModelParentId is not null)" @onclick="() => ListChildModelsAsync(parent)">@(_listingChildModelParentId == parent.Id ? "Listing…" : "List models")</button>
                 </div>
-                @if (_childModels.TryGetValue(parent.Id, out var childModels))
+                @if (_childModels.TryGetValue(parent.Id, out var childModels) && childModels.Count > 0)
                 {
-                    <datalist id="child-model-options-@(parent.Id)">
+                    <select class="form-select form-select-sm" value="@draft.ModelId" @onchange="args => OnChildModelSelected(parent.Id, args)">
+                        <option value="">-- Select a model --</option>
                         @foreach (var candidate in childModels)
                         {
-                            <option value="@candidate" />
+                            <option value="@candidate">@candidate</option>
                         }
-                    </datalist>
+                    </select>
+                    <small class="field-note">Pick a discovered model or keep your typed ID.</small>
                 }
             </label>
             <label>
@@ -965,20 +972,44 @@
             _newProvider.ModelId = preset.SeededModels[0];
     }
 
+    private void OnNewProviderModelSelected(ChangeEventArgs args)
+    {
+        var value = args.Value?.ToString()?.Trim();
+        if (!string.IsNullOrWhiteSpace(value))
+            _newProvider.ModelId = value;
+    }
+
+    private void OnRowModelSelected(LlmProvider model, ChangeEventArgs args)
+    {
+        var value = args.Value?.ToString()?.Trim();
+        if (!string.IsNullOrWhiteSpace(value))
+            model.ModelId = value;
+    }
+
+    private void OnChildModelSelected(int parentId, ChangeEventArgs args)
+    {
+        if (!_childForms.TryGetValue(parentId, out var draft))
+            return;
+        var value = args.Value?.ToString()?.Trim();
+        if (!string.IsNullOrWhiteSpace(value))
+            draft.ModelId = value;
+    }
+
     private async Task ListNewProviderModelsAsync()
     {
-        var provider = BuildNewProviderOrSetStatus();
+        var provider = BuildNewProviderOrSetStatus(requireApiKey: false, requireModel: false);
         if (provider is null)
             return;
+
+        if (string.IsNullOrWhiteSpace(provider.ModelId))
+            provider.ModelId = "models-discovery-placeholder";
 
         _listingNewProviderModels = true;
         try
         {
             _newProviderModels = await ModelCatalog.ListChatModelsAsync(provider);
-            SetStatus(_newProviderModels.Count == 0
-                ? "The provider returned an empty model list; enter the model ID manually."
-                : $"Discovered {_newProviderModels.Count} model(s). Pick one from the Initial model ID suggestions.",
-                _newProviderModels.Count == 0 ? "info" : "success");
+            if (_newProviderModels.Count == 0)
+                SetStatus("The provider returned an empty model list; enter the model ID manually.", "info");
         }
         catch (Exception ex)
         {
@@ -998,10 +1029,8 @@
         {
             var models = await ModelCatalog.ListChatModelsAsync(model);
             _rowModels[model.Id] = models;
-            SetStatus(models.Count == 0
-                ? "The provider returned an empty model list; enter the model ID manually."
-                : $"Discovered {models.Count} model(s) for '{model.DisplayName ?? model.Name}'. Pick one from the Model ID suggestions.",
-                models.Count == 0 ? "info" : "success");
+            if (models.Count == 0)
+                SetStatus("The provider returned an empty model list; enter the model ID manually.", "info");
         }
         catch (Exception ex)
         {
@@ -1021,10 +1050,8 @@
         {
             var models = await ModelCatalog.ListChatModelsAsync(parent);
             _childModels[parent.Id] = models;
-            SetStatus(models.Count == 0
-                ? "The provider returned an empty model list; enter the model ID manually."
-                : $"Discovered {models.Count} model(s) for '{parent.DisplayName ?? parent.Name}'. Pick one from the Model ID suggestions.",
-                models.Count == 0 ? "info" : "success");
+            if (models.Count == 0)
+                SetStatus("The provider returned an empty model list; enter the model ID manually.", "info");
         }
         catch (Exception ex)
         {
@@ -1036,20 +1063,22 @@
             _listingChildModelParentId = null;
         }
     }
-    private LlmProvider? BuildNewProviderOrSetStatus()
+    private LlmProvider? BuildNewProviderOrSetStatus(bool requireApiKey = true, bool requireModel = true)
     {
         var name = (_newProvider.Name ?? string.Empty).Trim();
         var endpoint = (_newProvider.EndpointUrl ?? string.Empty).Trim();
         var model = (_newProvider.ModelId ?? string.Empty).Trim();
         var apiKey = string.IsNullOrWhiteSpace(_newProvider.ApiKey) ? null : _newProvider.ApiKey.Trim();
 
-        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(endpoint) || string.IsNullOrWhiteSpace(model))
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(endpoint) || (requireModel && string.IsNullOrWhiteSpace(model)))
         {
-            SetStatus("Name, Endpoint URL, and Model ID are required.", "danger");
+            SetStatus(requireModel
+                ? "Name, Endpoint URL, and Model ID are required."
+                : "Name and Endpoint URL are required.", "danger");
             return null;
         }
 
-        if (_newProvider.AuthType == AuthType.ApiKey && string.IsNullOrWhiteSpace(apiKey))
+        if (requireApiKey && _newProvider.AuthType == AuthType.ApiKey && string.IsNullOrWhiteSpace(apiKey))
         {
             SetStatus("API Key is required when Auth is API Key.", "danger");
             return null;

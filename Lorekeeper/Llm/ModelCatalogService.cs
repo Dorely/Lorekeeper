@@ -41,8 +41,11 @@ public sealed class ModelCatalogService(
         CancellationToken cancellationToken)
     {
         var (apiKey, effectiveAuthType) = await LlmConnectionResolver.ResolveAsync(providerService, provider, cancellationToken);
-        if (effectiveAuthType != AuthType.None && string.IsNullOrWhiteSpace(apiKey))
-            throw new InvalidOperationException($"No valid API key or token for provider '{provider.Name}'.");
+        // Don't block discovery when AuthType is ApiKey but no key has been entered yet.
+        // CommandCode's GET /v1/models succeeds without auth and many gateways return an
+        // empty or public list anonymously; authenticated gateways will return 401/403
+        // which is surfaced below as an HttpRequestException. This lets Settings >
+        // Providers "List models" work prior to API-key configuration.
 
         using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
         if (effectiveAuthType != AuthType.None && !string.IsNullOrWhiteSpace(apiKey))

@@ -102,6 +102,18 @@ public static class LlmProviderCatalog
         ],
             KeyManagementUrl: "https://api.together.ai/settings/api-keys",
             DefaultMaxOutputTokens: 8192),
+        new("commandcode", "Command Code", "https://api.commandcode.ai/provider/v1", AuthType.ApiKey,
+        [
+            "deepseek/deepseek-v4-flash",
+            "claude-sonnet-5",
+            "gpt-5.5",
+            "google/gemini-3.7-flash",
+            "moonshotai/Kimi-K3",
+            "xiaomi/mimo-v2.5",
+            "MiniMaxAI/MiniMax-M3",
+        ],
+            KeyManagementUrl: "https://commandcode.ai/settings/keys",
+            Note: "OpenAI-compatible gateway for every top model (OpenAI, Anthropic, Gemini, DeepSeek, Kimi, etc.). Create an API key in Studio > Settings > API Keys and point any OpenAI client at https://api.commandcode.ai/provider/v1. Also exposes Anthropic Messages at /v1/messages and a models list at /v1/models; add x-cmdc-zdr: 1 for zero-data-retention when supported."),
         new("ollama", "Ollama (local)", "http://localhost:11434/v1", AuthType.None,
         [
             "llama3.2",

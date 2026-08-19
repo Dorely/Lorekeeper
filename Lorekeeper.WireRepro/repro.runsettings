@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <!-- Reproduction harness settings: long gateway timeouts, no parallelism so
+       scenarios are comparable, and console output for diagnostic visibility. -->
+  <RunConfiguration>
+    <MaxCpuCount>1</MaxCpuCount>
+    <ResultsDirectory>.\bin\TestResults</ResultsDirectory>
+    <TargetPlatform>x64</TargetPlatform>
+  </RunConfiguration>
+</RunSettings>
