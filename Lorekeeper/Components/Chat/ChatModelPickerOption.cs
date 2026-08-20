@@ -5,5 +5,6 @@ namespace Lorekeeper.Components.Chat;
 /// </summary>
 public sealed record ChatModelPickerOption(
     int ProviderId,
-    string Label,
+    string ConnectionLabel,
+    string ModelLabel,
     bool IsDefault);

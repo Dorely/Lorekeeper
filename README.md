@@ -18,7 +18,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   reviewable changes, visual context, background revision agents, and project/surface-
   scoped composer drafts that survive navigation and reloads until sent.
 - Each of the six assistant chats has a compact per-conversation model picker.
-  It lists only saved connections/models with working chat readiness; an
+  It groups working models under their saved connection and shows model-only
+  option labels; an
   unselected conversation follows the current working global default, while an
   explicit choice remains sticky across navigation and restarts. Deleted or
   otherwise unavailable explicit choices fail closed until the author chooses a

@@ -270,8 +270,9 @@ other worker loops do not use this policy.
 Each of the six user-facing chat roots also stores a nullable
 `SelectedProviderId` soft reference. A null value follows the current working
 global chat default; an explicit value is accepted only when that saved
-connection/model currently passes chat readiness. The shared model picker lists
-only those working chat providers and identifies the global default. If an
+connection/model currently passes chat readiness. The shared model picker groups
+working models under connection labels, shows model-only option labels, and
+identifies the global default. If an
 explicit provider is deleted or becomes unavailable, the reference is retained
 as an unavailable selection rather than silently falling back, and the surface
 fails closed until the author chooses another working model or resets the

@@ -255,7 +255,13 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
 
     private static string BuildModelLabel(LlmProvider provider)
     {
-        var displayName = FirstNonEmpty(provider.DisplayName, provider.ModelId, "Model");
+        // A root row owns both the connection and its first model, so its
+        // display name is the connection name rather than a distinct model
+        // label. Use the actual model ID for that row to avoid repeating the
+        // optgroup label; child rows retain their model display names.
+        var displayName = provider.CredentialSourceId is null
+            ? FirstNonEmpty(null, provider.ModelId, "Model")
+            : FirstNonEmpty(provider.DisplayName, provider.ModelId, "Model");
         var modelId = provider.ModelId?.Trim();
         return !string.IsNullOrWhiteSpace(modelId)
             && !string.Equals(displayName, modelId, StringComparison.OrdinalIgnoreCase)

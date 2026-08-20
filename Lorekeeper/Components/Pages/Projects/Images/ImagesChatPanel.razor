@@ -480,7 +480,7 @@
         _chatAvailability = await ImagesChat.GetChatProviderAvailabilityAsync(ProjectId, cancellationToken);
         _chatSelection = await Providers.ResolveChatModelSelectionAsync(_selectedProviderId, cancellationToken);
         _modelOptions = (await Providers.ListChatModelOptionsAsync(cancellationToken))
-            .Select(option => new ChatModelPickerOption(option.ProviderId, option.Label, option.IsDefault))
+            .Select(option => new ChatModelPickerOption(option.ProviderId, option.ConnectionLabel, option.ModelLabel, option.IsDefault))
             .ToList();
     }
 
@@ -492,7 +492,7 @@
             || _modelOptions.Any(option => option.ProviderId == active.ProviderId))
             return;
         _modelOptions = _modelOptions
-            .Append(new ChatModelPickerOption(active.ProviderId, active.Label, IsDefault: false))
+            .Append(new ChatModelPickerOption(active.ProviderId, "Active model", active.ModelId, IsDefault: false))
             .ToList();
     }
 

@@ -382,7 +382,7 @@
         _chatAvailability = await Coach.GetChatProviderAvailabilityAsync(ProjectId);
         _chatSelection = await Providers.ResolveChatModelSelectionAsync(_selectedProviderId);
         _modelOptions = (await Providers.ListChatModelOptionsAsync())
-            .Select(option => new ChatModelPickerOption(option.ProviderId, option.Label, option.IsDefault))
+            .Select(option => new ChatModelPickerOption(option.ProviderId, option.ConnectionLabel, option.ModelLabel, option.IsDefault))
             .ToList();
     }
 
@@ -392,7 +392,7 @@
             || _modelOptions.Any(option => option.ProviderId == active.ProviderId))
             return;
         _modelOptions = _modelOptions
-            .Append(new ChatModelPickerOption(active.ProviderId, active.Label, IsDefault: false))
+            .Append(new ChatModelPickerOption(active.ProviderId, "Active model", active.ModelId, IsDefault: false))
             .ToList();
     }
 

@@ -18,9 +18,14 @@
             <option value="" disabled="true">@UnavailableLabel</option>
         }
 
-        @foreach (var option in Options)
+        @foreach (var group in OptionGroups)
         {
-            <option value="@option.ProviderId">@OptionLabel(option)</option>
+            <optgroup label="@group.Key">
+                @foreach (var option in group)
+                {
+                    <option value="@option.ProviderId">@OptionLabel(option)</option>
+                }
+            </optgroup>
         }
     </select>
 </div>
@@ -43,7 +48,12 @@
             : Options.Count > 0 && Options.All(option => !option.IsDefault);
 
     private static string OptionLabel(ChatModelPickerOption option) =>
-        option.IsDefault ? $"{option.Label} (default)" : option.Label;
+        option.IsDefault ? $"{option.ModelLabel} (default)" : option.ModelLabel;
+
+    private IEnumerable<IGrouping<string, ChatModelPickerOption>> OptionGroups =>
+        Options.GroupBy(
+            option => string.IsNullOrWhiteSpace(option.ConnectionLabel) ? "Connection" : option.ConnectionLabel,
+            StringComparer.OrdinalIgnoreCase);
 
     private Task OnSelectionChangedAsync(ChangeEventArgs args)
     {

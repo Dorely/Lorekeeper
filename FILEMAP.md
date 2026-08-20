@@ -133,7 +133,7 @@
 | File | Description |
 |------|-------------|
 | `ChatModels.cs` | Shared chat UI view models for persisted/live messages, text/image parts, image-bearing composer submissions, duration-aware tool-call chips, active-context token projection, and transcript helpers. |
-| `ChatModelPicker.razor` (+ `.razor.css`) / `ChatModelPickerOption.cs` | Shared accessible chat-model select and provider-neutral display option; marks the working default, reports nullable provider changes, and retains unavailable explicit selections for fail-closed recovery. |
+| `ChatModelPicker.razor` (+ `.razor.css`) / `ChatModelPickerOption.cs` | Shared accessible chat-model select with connection optgroups and model-only option labels; marks the working default, reports nullable provider changes, and retains unavailable explicit selections for fail-closed recovery. |
 | `ChatTranscriptTokenCounter.cs` | Shared model-input token adapter for every `ChatSurface`: applies text-only replay, includes pending/live turns, tracks settled counts, and formats advisory maximum/remaining labels. |
 | `ChatSurface.razor` (+ `.razor.css`, `.razor.js`) | Reusable chat shell with the shared header model picker, transcript/live rendering, image viewing, paste/library image attachments, project/surface-keyed browser-local text drafts, scrolling, and textarea autosizing. |
 | `ChatToolChipView.razor` (+ `.razor.css`) | Reusable expandable tool-call card that shows streamed arguments/results/errors, generic progress rows/previews, Editor Revision worker transcript links, and the styled `Chat Compacted` audit chip. |
