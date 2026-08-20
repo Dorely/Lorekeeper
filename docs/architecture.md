@@ -524,7 +524,8 @@ release annotations for chapters that still inherit Core. Exact quote/context
 relocation must identify one location or the annotation becomes Outdated.
 Annotations remain outside manuscript Undo/Redo, indexing, plain-text
 projection, publication fingerprints, Press requests, and generated artifacts.
-Edit and Press-backed Read views share one collapsible margin rail. Browser
+Edit and Press-backed Read views share one collapsible, top-stacked margin rail
+with theme-aware review colors. Browser
 preview lines carry optional semantic-block UTF-16 source ranges without
 advancing Press protocol v7, allowing wrapped and cross-page Read selections to
 produce the same anchor contract as Edit while Designed Page content is rejected.

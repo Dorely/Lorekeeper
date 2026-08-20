@@ -34,6 +34,12 @@
 }
 
 .annotation-rail--collapsed .annotation-rail-toggle {
+    flex-direction: column;
+    justify-content: flex-start;
+    padding-inline: .35rem;
+}
+
+.annotation-rail--collapsed .annotation-rail-label {
     writing-mode: vertical-rl;
 }
 
@@ -41,24 +47,39 @@
     min-width: 1.4rem;
     padding: .05rem .3rem;
     border-radius: 999px;
-    background: #ffd84d;
-    color: #4a3b00;
+    background: var(--lk-review-badge-bg);
+    color: var(--lk-review-badge-ink);
     text-align: center;
     font-size: .72rem;
 }
 
+.annotation-rail--collapsed .annotation-rail-count {
+    display: grid;
+    width: 1.45rem;
+    min-width: 1.45rem;
+    height: 1.45rem;
+    padding: 0;
+    flex: 0 0 1.45rem;
+    place-items: center;
+    line-height: 1;
+    writing-mode: horizontal-tb;
+}
+
 .annotation-rail-body {
+    display: flex;
     min-height: 0;
     padding: .65rem;
+    flex-direction: column;
+    align-items: stretch;
     overflow: auto;
 }
 
 .annotation-card {
     margin-bottom: .65rem;
     padding: .6rem;
-    border: 1px solid color-mix(in srgb, #d4a900 55%, var(--lk-line, #d8dde6));
+    border: 1px solid var(--lk-review-card-border);
     border-radius: .5rem;
-    background: color-mix(in srgb, #fff4a8 35%, var(--bs-body-bg, #fff));
+    background: var(--lk-review-card-bg);
     box-shadow: var(--lk-shadow-sm);
 }
 
@@ -69,7 +90,7 @@
 }
 
 .annotation-card--selected {
-    outline: 2px solid color-mix(in srgb, #d4a900 72%, var(--bs-primary, #0d6efd));
+    outline: 2px solid var(--lk-review-selected);
     outline-offset: 1px;
 }
 

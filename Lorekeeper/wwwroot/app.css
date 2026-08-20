@@ -34,6 +34,13 @@
     --lk-border-strong: #cbd2df;
     --lk-text-muted: #596274;
     --lk-canvas-inset: #f8fafc;
+    --lk-review-badge-bg: #ffd84d;
+    --lk-review-badge-ink: #4a3b00;
+    --lk-review-card-bg: color-mix(in srgb, #fff4a8 35%, var(--bs-body-bg));
+    --lk-review-card-border: color-mix(in srgb, #d4a900 55%, var(--lk-line));
+    --lk-review-selected: color-mix(in srgb, #d4a900 72%, var(--lk-accent));
+    --lk-review-highlight-bg: color-mix(in srgb, #ffd84d 62%, transparent);
+    --lk-review-highlight-edge: color-mix(in srgb, #d4a900 48%, transparent);
     --bs-primary: #425fce;
     --bs-primary-rgb: 66, 95, 206;
     --bs-link-color: #425fce;
@@ -81,6 +88,13 @@ html[data-lk-theme="dark"] {
     --lk-border-strong: #3a4456;
     --lk-text-muted: #a7b0c0;
     --lk-canvas-inset: #1a2029;
+    --lk-review-badge-bg: #e8bd52;
+    --lk-review-badge-ink: #251b03;
+    --lk-review-card-bg: #2d2a20;
+    --lk-review-card-border: #80662d;
+    --lk-review-selected: #d8ad47;
+    --lk-review-highlight-bg: rgb(218 165 49 / 28%);
+    --lk-review-highlight-edge: rgb(240 198 95 / 52%);
     --bs-primary: #7d96f0;
     --bs-primary-rgb: 125, 150, 240;
     --bs-link-color: #7d96f0;
