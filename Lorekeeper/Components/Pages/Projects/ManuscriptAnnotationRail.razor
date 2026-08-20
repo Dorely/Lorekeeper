@@ -54,15 +54,6 @@
     }
 </aside>
 
-<ConfirmationDialog IsOpen="@(_pendingCompletion is not null)"
-                    Title="Complete annotation?"
-                    Message="This permanently removes the review annotation. The manuscript text is not changed."
-                    ConfirmLabel="Complete annotation"
-                    Destructive="true"
-                    Busy="_busy"
-                    OnConfirm="ConfirmCompleteAsync"
-                    OnCancel="CancelComplete" />
-
 @code {
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter, EditorRequired] public Guid ChapterId { get; set; }
@@ -87,7 +78,6 @@
     private Guid? _selectedId;
     private Guid? _pendingCardSelection;
     private string _noteDraft = string.Empty;
-    private ManuscriptAnnotationView? _pendingCompletion;
     private IJSObjectReference? _module;
     private ElementReference _rail;
 
@@ -191,7 +181,7 @@
                 {
                     <button type="button" class="btn btn-sm btn-link" @onclick="() => ReattachAsync(annotation)">Attach to selection</button>
                 }
-                <button type="button" class="btn btn-sm btn-link text-danger" @onclick="() => RequestComplete(annotation)">Complete</button>
+                <button type="button" class="btn btn-sm btn-link text-danger" disabled="@_busy" @onclick="() => CompleteAsync(annotation)">Complete</button>
             </div>
         }
     </article>;
@@ -257,20 +247,12 @@
         });
     }
 
-    private void RequestComplete(ManuscriptAnnotationView annotation) => _pendingCompletion = annotation;
-    private void CancelComplete() => _pendingCompletion = null;
-
-    private async Task ConfirmCompleteAsync()
-    {
-        if (_pendingCompletion is not { } annotation)
-            return;
-        await MutateAsync(async () =>
+    private Task CompleteAsync(ManuscriptAnnotationView annotation) =>
+        MutateAsync(async () =>
         {
             await Annotations.CompleteAsync(ProjectId, ContentTarget, annotation.Id, annotation.Revision);
             return null;
         });
-        _pendingCompletion = null;
-    }
 
     private async Task MutateAsync(Func<Task<ManuscriptAnnotationView?>> action)
     {

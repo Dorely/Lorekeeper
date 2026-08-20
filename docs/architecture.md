@@ -528,6 +528,8 @@ Edit and Press-backed Read views share one collapsible margin rail. Browser
 preview lines carry optional semantic-block UTF-16 source ranges without
 advancing Press protocol v7, allowing wrapped and cross-page Read selections to
 produce the same anchor contract as Edit while Designed Page content is rejected.
+Manual completion permanently deletes the annotation immediately from the rail
+without a confirmation step.
 The active chapter's annotations are protected assistant context. Paged tools
 discover the selected target's open annotations and can complete—but not create
 or rewrite—them. Review Edits stores completion as a dependent change so a
