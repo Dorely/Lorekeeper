@@ -1741,14 +1741,32 @@ else
         await RefreshContextSurfacesAsync();
     }
 
-    private async Task SynchronizeAnnotationsAsync(IReadOnlyList<ManuscriptAnnotationView> annotations)
+    private async Task SynchronizeAnnotationsAsync(ManuscriptAnnotationRail.AnnotationChange change)
     {
-        if (_bodyEditor is not null)
-            await _bodyEditor.SetAnnotationsAsync(annotations);
-        _readPreview?.SetAnnotations(annotations);
+        if (!IsCurrentAnnotationIdentity(change.ProjectId, change.ChapterId, change.ContentTarget))
+            return;
+
+        var bodyEditor = _bodyEditor;
+        if (bodyEditor is not null)
+            await bodyEditor.SetAnnotationsAsync(change.Annotations);
+        if (!IsCurrentAnnotationIdentity(change.ProjectId, change.ChapterId, change.ContentTarget))
+            return;
+
+        _readPreview?.SetAnnotations(change.Annotations);
+        if (!IsCurrentAnnotationIdentity(change.ProjectId, change.ChapterId, change.ContentTarget))
+            return;
+
         _annotationRefreshSignal++;
         await RefreshContextSurfacesAsync();
     }
+
+    private bool IsCurrentAnnotationIdentity(
+        Guid projectId,
+        Guid chapterId,
+        EditorContentTarget contentTarget) =>
+        Project?.Id == projectId
+        && _activeChapterId == chapterId
+        && _contentTarget == contentTarget;
 
     private Task<ManuscriptAnnotationRange?> GetAnnotationSelectionAsync() => _mode switch
     {
@@ -3598,11 +3616,18 @@ else
         if (_activeChapterId is not { } chapterId)
             return false;
 
+        var projectId = Project?.Id;
+        var contentTarget = _contentTarget;
+        bool IsCurrentIdentity() =>
+            _activeChapterId == chapterId
+            && _contentTarget == contentTarget
+            && Project?.Id == projectId;
+
         await _chapterRefreshGate.WaitAsync();
         try
         {
             var fresh = await Chapters.ReloadFromStoreAsync(chapterId);
-            if (_activeChapterId != chapterId)
+            if (!IsCurrentIdentity())
                 return false;
             if (fresh is null)
             {
@@ -3610,14 +3635,56 @@ else
                 return false;
             }
 
+            var effective = await Manuscripts.GetManuscriptAsync(contentTarget, chapterId)
+                ?? throw new InvalidOperationException("The selected chapter manuscript was not found.");
+            if (!IsCurrentIdentity())
+                return false;
+
+            IReadOnlyList<ManuscriptAnnotationView> annotations = [];
+            if (projectId is Guid currentProjectId)
+            {
+                // Advance the rail before the read so a failed annotation
+                // refresh invalidates stale cards and exposes its retry path.
+                _annotationRefreshSignal++;
+                try
+                {
+                    annotations = await Annotations.ListChapterAsync(currentProjectId, contentTarget, chapterId);
+                }
+                catch
+                {
+                    if (IsCurrentIdentity())
+                    {
+                        if (_bodyEditor is not null)
+                            await _bodyEditor.SetAnnotationsAsync([]);
+                        if (IsCurrentIdentity())
+                            _readPreview?.SetAnnotations([]);
+                    }
+                    throw;
+                }
+                if (!IsCurrentIdentity())
+                    return false;
+            }
+
+            EditionChapterContentStatus? status = null;
+            if (contentTarget.EditionId is Guid statusEditionId && projectId is Guid statusProjectId)
+            {
+                status = await EditionContent.GetChapterStatusAsync(statusProjectId, statusEditionId, chapterId);
+                if (!IsCurrentIdentity())
+                    return false;
+            }
+
+            if (!IsCurrentIdentity())
+                return false;
             _current = fresh;
             ReplaceCachedChapter(fresh);
-            var effective = await Manuscripts.GetManuscriptAsync(_contentTarget, chapterId)
-                ?? throw new InvalidOperationException("The selected chapter manuscript was not found.");
             SynchronizeExternalEditorDocument(effective);
             UpdateChapterMetrics(effective.PlainText);
-            if (_contentTarget.EditionId is Guid statusEditionId && Project is not null)
-                _contentStatus = await EditionContent.GetChapterStatusAsync(Project.Id, statusEditionId, chapterId);
+            _contentStatus = status;
+            if (_bodyEditor is not null)
+                await _bodyEditor.SetAnnotationsAsync(annotations);
+            if (!IsCurrentIdentity())
+                return false;
+            _readPreview?.SetAnnotations(annotations);
 
         }
         finally
@@ -3625,8 +3692,10 @@ else
             _chapterRefreshGate.Release();
         }
 
+        if (!IsCurrentIdentity())
+            return false;
         StateHasChanged();
-        if (refreshContextSurfaces)
+        if (refreshContextSurfaces && IsCurrentIdentity())
             await RefreshContextSurfacesAsync();
         return true;
     }

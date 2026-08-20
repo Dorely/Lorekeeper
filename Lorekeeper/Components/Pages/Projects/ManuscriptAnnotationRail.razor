@@ -22,17 +22,23 @@
         <div class="annotation-rail-body">
             @if (!string.IsNullOrWhiteSpace(_error))
             {
-                <div class="annotation-rail-error" role="alert">@_error</div>
+                <div class="annotation-rail-error" role="alert">
+                    @_error
+                    @if (_loadFailed || _synchronizationFailed)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary ms-2" disabled="@_busy" @onclick="RetryLoadAsync">Retry</button>
+                    }
+                </div>
             }
             @if (_loading)
             {
                 <div class="annotation-rail-empty"><em>Loading review notes…</em></div>
             }
-            else if (_items.Count == 0)
+            else if (!_loadFailed && _items.Count == 0)
             {
                 <div class="annotation-rail-empty">Select text, then choose <strong>Highlight</strong> or <strong>Note</strong> in the editor toolbar.</div>
             }
-            else
+            else if (!_loadFailed)
             {
                 @foreach (var annotation in CurrentItems)
                 {
@@ -61,7 +67,7 @@
     [Parameter] public int RefreshSignal { get; set; }
     [Parameter] public Func<Task<ManuscriptAnnotationRange?>>? GetSelectionAsync { get; set; }
     [Parameter] public EventCallback<Guid> SelectAnnotation { get; set; }
-    [Parameter] public EventCallback<IReadOnlyList<ManuscriptAnnotationView>> Changed { get; set; }
+    [Parameter] public EventCallback<AnnotationChange> Changed { get; set; }
 
     private List<ManuscriptAnnotationView> _items = [];
     private Guid _loadedProject;
@@ -73,6 +79,8 @@
     private bool _collapsedLoaded;
     private bool _collapsePreferenceExists;
     private bool _busy;
+    private bool _loadFailed;
+    private bool _synchronizationFailed;
     private string? _error;
     private Guid? _editingId;
     private Guid? _selectedId;
@@ -80,6 +88,8 @@
     private string _noteDraft = string.Empty;
     private IJSObjectReference? _module;
     private ElementReference _rail;
+    private long _loadGeneration;
+    private long _targetGeneration;
 
     private IReadOnlyList<ManuscriptAnnotationView> CurrentItems => _items
         .Where(item => item.AnchorState == ManuscriptAnnotationAnchorState.Current)
@@ -90,10 +100,21 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        var targetChanged = _loadedProject != ProjectId
+            || _loadedChapter != ChapterId
+            || _loadedTarget != ContentTarget;
         if (_loadedProject != Guid.Empty && _loadedProject != ProjectId)
         {
             _collapsedLoaded = false;
             _collapsePreferenceExists = false;
+        }
+        if (targetChanged)
+        {
+            _targetGeneration++;
+            _editingId = null;
+            _selectedId = null;
+            _pendingCardSelection = null;
+            _noteDraft = string.Empty;
         }
         if (_loadedProject == ProjectId && _loadedChapter == ChapterId
             && _loadedTarget == ContentTarget && _loadedSignal == RefreshSignal)
@@ -112,7 +133,7 @@
         {
             var stored = await _module.InvokeAsync<bool?>("readRailCollapsed", ProjectId.ToString("N"));
             _collapsePreferenceExists = stored is not null;
-            _collapsed = stored ?? _items.Count == 0;
+            _collapsed = stored ?? (_items.Count == 0 && !_loadFailed);
             _collapsedLoaded = true;
             StateHasChanged();
             return;
@@ -124,24 +145,73 @@
         }
     }
 
-    private async Task LoadAsync()
+    private async Task<bool?> LoadAsync()
     {
+        var request = new RailLoadRequest(
+            ++_loadGeneration,
+            CurrentTarget,
+            RefreshSignal);
         _loading = true;
         _error = null;
+        _loadFailed = false;
+        _synchronizationFailed = false;
         try
         {
-            _items = (await Annotations.ListChapterAsync(ProjectId, ContentTarget, ChapterId)).ToList();
+            var items = (await Annotations.ListChapterAsync(
+                request.Target.ProjectId,
+                request.Target.ContentTarget,
+                request.Target.ChapterId)).ToList();
+            if (!IsCurrent(request))
+                return null;
+
+            _items = items;
             if (_collapsedLoaded && _items.Count > 0 && !_collapsePreferenceExists)
                 _collapsed = false;
+            return true;
         }
         catch (Exception exception)
         {
+            if (!IsCurrent(request))
+                return null;
+
             _error = exception.Message;
             _items = [];
+            _loadFailed = true;
+            return false;
         }
         finally
         {
-            _loading = false;
+            if (IsCurrent(request))
+                _loading = false;
+        }
+    }
+
+    private RailTarget CurrentTarget => new(ProjectId, ChapterId, ContentTarget, _targetGeneration);
+
+    private bool IsCurrent(RailLoadRequest request) =>
+        request.Generation == _loadGeneration
+        && request.Target == CurrentTarget
+        && request.RefreshSignal == RefreshSignal;
+
+    private bool IsCurrentTarget(RailTarget target) => target == CurrentTarget;
+
+    private async Task RetryLoadAsync()
+    {
+        if (_busy || _loading)
+            return;
+
+        var target = CurrentTarget;
+        var result = await LoadAsync();
+        if (result is true && IsCurrentTarget(target))
+        {
+            var syncError = await NotifyChangedAsync(target);
+            if (!IsCurrentTarget(target))
+                return;
+            if (syncError is not null)
+            {
+                _synchronizationFailed = true;
+                _error = syncError;
+            }
         }
     }
 
@@ -211,14 +281,22 @@
             _error = "Enter note text before saving.";
             return;
         }
-        await MutateAsync(async () => await Annotations.UpdateNoteAsync(
-            ProjectId, ContentTarget, annotation.Id, _noteDraft, annotation.Revision));
+        var target = CurrentTarget;
+        await MutateAsync(target, async () => await Annotations.UpdateNoteAsync(
+            target.ProjectId,
+            target.ContentTarget,
+            annotation.Id,
+            _noteDraft,
+            annotation.Revision));
         CancelEdit();
     }
 
-    private Task ConvertAsync(ManuscriptAnnotationView annotation, ManuscriptAnnotationKind kind) =>
-        MutateAsync(async () => await Annotations.ConvertAsync(
-            ProjectId, ContentTarget, annotation.Id, kind, annotation.Revision));
+    private Task ConvertAsync(ManuscriptAnnotationView annotation, ManuscriptAnnotationKind kind)
+    {
+        var target = CurrentTarget;
+        return MutateAsync(target, async () => await Annotations.ConvertAsync(
+            target.ProjectId, target.ContentTarget, annotation.Id, kind, annotation.Revision));
+    }
 
     private async Task ReattachAsync(ManuscriptAnnotationView annotation)
     {
@@ -235,35 +313,77 @@
             _error = "Select the replacement manuscript text in Edit or Read first.";
             return;
         }
-        await MutateAsync(async () =>
+        var target = CurrentTarget;
+        await MutateAsync(target, async () =>
         {
-            var manuscript = await Manuscripts.GetManuscriptAsync(ContentTarget, ChapterId)
+            var manuscript = await Manuscripts.GetManuscriptAsync(target.ContentTarget, target.ChapterId)
                 ?? throw new InvalidOperationException("The chapter manuscript was not found.");
             return await Annotations.ReattachAsync(
-                ProjectId, ContentTarget, annotation.Id, range, annotation.Revision, manuscript.Revision);
+                target.ProjectId,
+                target.ContentTarget,
+                annotation.Id,
+                range,
+                annotation.Revision,
+                manuscript.Revision);
         });
     }
 
-    private Task CompleteAsync(ManuscriptAnnotationView annotation) =>
-        MutateAsync(async () =>
+    private Task CompleteAsync(ManuscriptAnnotationView annotation)
+    {
+        var target = CurrentTarget;
+        return MutateAsync(target, async () =>
         {
-            await Annotations.CompleteAsync(ProjectId, ContentTarget, annotation.Id, annotation.Revision);
+            await Annotations.CompleteAsync(target.ProjectId, target.ContentTarget, annotation.Id, annotation.Revision);
             return null;
         });
+    }
 
-    private async Task MutateAsync(Func<Task<ManuscriptAnnotationView?>> action)
+    private async Task MutateAsync(RailTarget target, Func<Task<ManuscriptAnnotationView?>> action)
     {
         _busy = true;
         _error = null;
         try
         {
             await action();
-            await LoadAsync();
-            await Changed.InvokeAsync(_items);
+            if (!IsCurrentTarget(target))
+                return;
+
+            var refresh = await LoadAsync();
+            if (refresh is null)
+                return;
+            var syncError = await NotifyChangedAsync(target);
+            if (!IsCurrentTarget(target))
+                return;
+            if (syncError is not null)
+            {
+                _synchronizationFailed = true;
+                _error = syncError;
+            }
+            else if (refresh is false)
+                _error = "The annotation change succeeded, but review annotations could not be refreshed. Use Retry.";
         }
         catch (Exception exception)
         {
-            _error = exception.Message;
+            if (!IsCurrentTarget(target))
+                return;
+
+            var refresh = await LoadAsync();
+            if (refresh is null)
+                return;
+            var syncError = await NotifyChangedAsync(target);
+            if (!IsCurrentTarget(target))
+                return;
+            var actionError = IsMissingAnnotation(exception)
+                ? "This review annotation was already changed elsewhere. The review rail was refreshed."
+                : exception.Message;
+            _synchronizationFailed = syncError is not null;
+            _error = refresh is false
+                ? syncError is null
+                    ? $"{exception.Message} The review rail could not refresh. Use Retry."
+                    : $"{exception.Message} The review rail could not refresh. {syncError} Use Retry."
+                : syncError is null
+                    ? actionError
+                    : $"{actionError} {syncError}";
         }
         finally
         {
@@ -271,7 +391,45 @@
         }
     }
 
+    private async Task<string?> NotifyChangedAsync(RailTarget target)
+    {
+        try
+        {
+            await Changed.InvokeAsync(new AnnotationChange(
+                target.ProjectId,
+                target.ChapterId,
+                target.ContentTarget,
+                _items.ToArray()));
+            return null;
+        }
+        catch (Exception exception)
+        {
+            return $"Review annotations loaded, but the editor could not update: {exception.Message}";
+        }
+    }
+
+    private static bool IsMissingAnnotation(Exception exception) =>
+        exception is KeyNotFoundException
+        && string.Equals(exception.Message, "The annotation was not found.", StringComparison.Ordinal);
+
     private static string BoundedQuote(string quote) => ManuscriptAnnotationText.Bound(quote, 240);
+
+    private readonly record struct RailTarget(
+        Guid ProjectId,
+        Guid ChapterId,
+        EditorContentTarget ContentTarget,
+        long Generation);
+
+    private readonly record struct RailLoadRequest(
+        long Generation,
+        RailTarget Target,
+        int RefreshSignal);
+
+    public readonly record struct AnnotationChange(
+        Guid ProjectId,
+        Guid ChapterId,
+        EditorContentTarget ContentTarget,
+        IReadOnlyList<ManuscriptAnnotationView> Annotations);
 
     private async Task SelectRangeFromCardAsync(Guid annotationId)
     {
