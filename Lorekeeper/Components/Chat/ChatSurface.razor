@@ -13,10 +13,17 @@
                 <span class="chat-token-count" title="@TokenTitle">@TokenText</span>
             }
         </div>
-        @if (HeaderActions is not null)
-        {
-            <div class="chat-header-actions">@HeaderActions</div>
-        }
+        <div class="chat-header-controls">
+            <ChatModelPicker Options="@ModelOptions"
+                             SelectedProviderId="@SelectedProviderId"
+                             UnavailableLabel="@UnavailableModelLabel"
+                             Disabled="@(ModelPickerDisabled || Loading || Running)"
+                             OnChanged="@OnModelChanged" />
+            @if (HeaderActions is not null)
+            {
+                <div class="chat-header-actions">@HeaderActions</div>
+            }
+        </div>
     </div>
 
     <div class="chat-scroll" @ref="_scrollEl">
@@ -137,6 +144,11 @@
     [Parameter] public bool ComposerDisabled { get; set; }
     [Parameter] public bool SendDisabled { get; set; }
     [Parameter] public string? CssClass { get; set; }
+    [Parameter] public IReadOnlyList<ChatModelPickerOption> ModelOptions { get; set; } = [];
+    [Parameter] public int? SelectedProviderId { get; set; }
+    [Parameter] public string UnavailableModelLabel { get; set; } = "No available chat models";
+    [Parameter] public bool ModelPickerDisabled { get; set; }
+    [Parameter] public EventCallback<int?> OnModelChanged { get; set; }
     [Parameter] public int ForceScrollKey { get; set; }
     [Parameter] public int ScrollKey { get; set; }
     [Parameter] public int AutoFollowKey { get; set; }

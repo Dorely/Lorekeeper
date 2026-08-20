@@ -1,0 +1,17 @@
+.chat-model-picker {
+    min-width: 0;
+    flex: 1 1 12rem;
+    max-width: 24rem;
+}
+
+.chat-model-picker-select {
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chat-model-picker-unavailable .chat-model-picker-select {
+    border-color: var(--bs-danger, #dc3545);
+    color: var(--bs-danger, #dc3545);
+}

@@ -267,6 +267,22 @@ The completed operation is recorded as a synthetic `Chat Compacted` tool row and
 manifest entry for the transcript UI; the original tool rows remain audit history,
 and no new persistence schema is required. Background ingest, revision, contest, and
 other worker loops do not use this policy.
+Each of the six user-facing chat roots also stores a nullable
+`SelectedProviderId` soft reference. A null value follows the current working
+global chat default; an explicit value is accepted only when that saved
+connection/model currently passes chat readiness. The shared model picker lists
+only those working chat providers and identifies the global default. If an
+explicit provider is deleted or becomes unavailable, the reference is retained
+as an unavailable selection rather than silently falling back, and the surface
+fails closed until the author chooses another working model or resets the
+conversation. Choosing the global default clears the explicit override.
+Selection changes preserve the transcript and apply to the next turn; the active
+turn runtime captures provider ID, model ID, and display label in its model
+snapshot so client creation, vision checks, token limits, compaction, and tool
+context remain consistent even if the UI reconnects. Reset deletes the
+conversation and its override, so the replacement follows the then-current
+default. Contest candidates, revision workers, ingest jobs, embeddings, image
+generation, and publication rendering retain their separate provider contracts.
 Feature adapters must accept any valid JSON shape returned by a read-only tool.
 Post-tool mutation projection inspects only object envelopes that can carry a
 mutation notice; array or scalar read results continue the turn without a
@@ -1430,6 +1446,15 @@ ingest extraction. Non-structural exports omit all source bodies,
 selections, and source evidence and include a warning. The v22-and-earlier import
 adapter translates persisted `canonSource.*` keys to `sourceEvidence.*`; runtime
 models and tool payloads expose only the new provenance terminology.
+Assistant conversation rows and their per-conversation model selections are
+working-database state and are intentionally excluded from project import/export;
+importing a project therefore starts each chat without transcript-owned model
+overrides.
+The forward EF migration
+`20260820130000_AddChatConversationModelSelection` adds the nullable
+soft reference to all six conversation tables without adding provider foreign
+keys, so populated transcripts and messages remain unchanged and a deleted
+provider can still be surfaced as an unavailable explicit selection.
 
 Runtime code receives `IAppDatabaseOperationFactory`, never a circuit-scoped
 `AppDbContext`. `OpenReadAsync` creates a no-tracking context for one database

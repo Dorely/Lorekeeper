@@ -58,6 +58,8 @@ public sealed class PublishConversationRepository(AppDatabaseReadOperation opera
     public async Task AddConversationAsync(PublishConversation conversation, CancellationToken cancellationToken = default) =>
         await operation.Db.PublishConversations.AddAsync(conversation, cancellationToken);
 
+    public void UpdateSelectedProvider(PublishConversation conversation) => operation.Db.MarkModified(conversation);
+
     public async Task AddMessageAsync(PublishMessage message, CancellationToken cancellationToken = default)
     {
         TouchConversation(message.ConversationId);

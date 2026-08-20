@@ -10,7 +10,8 @@ public interface IPublishChatTurnRunner
         Guid? selectedEditionId,
         PublishAssistantWorkspaceContext? workspaceContext,
         string userText,
-        IReadOnlyList<ChatTurnImageAttachment> images);
+        IReadOnlyList<ChatTurnImageAttachment> images,
+        ChatTurnModelSnapshot model);
     ChatTurnSnapshot? GetActiveTurn(Guid projectId);
     IChatTurnSubscription<PublishTurnUpdate>? Subscribe(Guid projectId);
     void Cancel(Guid projectId);
@@ -27,7 +28,8 @@ public sealed class PublishChatTurnRunner(
         Guid? selectedEditionId,
         PublishAssistantWorkspaceContext? workspaceContext,
         string userText,
-        IReadOnlyList<ChatTurnImageAttachment> images) =>
+        IReadOnlyList<ChatTurnImageAttachment> images,
+        ChatTurnModelSnapshot model) =>
         runtime.TryStart(
             Key(projectId),
             userText,
@@ -37,10 +39,12 @@ public sealed class PublishChatTurnRunner(
                 workspaceContext,
                 userText,
                 images.Select(image => image.ImageId).ToList(),
+                model.ProviderId,
                 cancellationToken),
             static (exception, cancelled) => new PublishTurnError(cancelled ? "Cancelled." : exception.Message, cancelled),
             static update => update is PublishAssistantMessageCompleted or PublishTurnError,
-            images);
+            images,
+            model);
 
     public ChatTurnSnapshot? GetActiveTurn(Guid projectId) => runtime.GetActiveTurn(Key(projectId));
     public IChatTurnSubscription<PublishTurnUpdate>? Subscribe(Guid projectId) => runtime.Subscribe<PublishTurnUpdate>(Key(projectId));
@@ -52,6 +56,7 @@ public sealed class PublishChatTurnRunner(
         PublishAssistantWorkspaceContext? workspaceContext,
         string userText,
         IReadOnlyList<Guid> imageIds,
+        int providerId,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
@@ -62,6 +67,7 @@ public sealed class PublishChatTurnRunner(
             workspaceContext,
             userText,
             imageIds,
+            providerId,
             cancellationToken))
         {
             yield return update;

@@ -25,6 +25,8 @@ public class WritingCoachConversationRepository(AppDatabaseReadOperation operati
     public async Task AddConversationAsync(WritingCoachConversation conversation, CancellationToken cancellationToken = default) =>
         await operation.Db.WritingCoachConversations.AddAsync(conversation, cancellationToken);
 
+    public void UpdateSelectedProvider(WritingCoachConversation conversation) => operation.Db.MarkModified(conversation);
+
     public async Task AddMessageAsync(WritingCoachMessage message, CancellationToken cancellationToken = default)
     {
         TouchConversation(message.ConversationId);

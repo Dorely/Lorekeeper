@@ -13,7 +13,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Writing;
 
 public sealed class WritingCoachService(
-IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, WritingCoachTools tools, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<WritingCoachService> logger) : IWritingCoachService
+IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, WritingCoachTools tools, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<WritingCoachService> logger) : IWritingCoachService
 {
     public static readonly string CoachSystemPrompt = """
         You are a Writing Coach for a long-form fiction project. Your job is to help
@@ -76,8 +76,55 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         var conversations = databaseOperation.Repositories.WritingCoachConversations;
         return await conversations.LoadMessagesAsync(conversationId, cancellationToken);
     }
+
+    public async Task<ChatProviderAvailability> GetChatProviderAvailabilityAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var conversation = await databaseOperation.Repositories.WritingCoachConversations
+            .GetByProjectIdAsync(projectId, cancellationToken);
+        var selection = await providerService.ResolveChatModelSelectionAsync(
+            conversation?.SelectedProviderId,
+            cancellationToken);
+        return selection.IsAvailable && selection.Provider is { } provider
+            ? ChatProviderAvailability.Available(provider)
+            : ChatProviderAvailability.Unavailable(selection.Message, selection.Provider);
+    }
+
+    public async Task SetSelectedProviderAsync(
+        Guid projectId,
+        int? providerId,
+        CancellationToken cancellationToken = default)
+    {
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.WritingCoach));
+        if (maintenance is null)
+            throw new InvalidOperationException("Writing Coach is still working in another window. Stop or wait for that turn before changing its model.");
+
+        if (providerId is int)
+        {
+            var selection = await providerService.ResolveChatModelSelectionAsync(providerId, cancellationToken);
+            if (!selection.IsAvailable || selection.Provider is null)
+                throw new InvalidOperationException(selection.Message);
+        }
+
+        var normalizedProviderId = await providerService.NormalizeChatModelSelectionAsync(providerId, cancellationToken);
+
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var conversation = await databaseOperation.Repositories.WritingCoachConversations
+            .GetByProjectIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException("Writing Coach is not initialized.");
+        conversation.SelectedProviderId = normalizedProviderId;
+        conversation.UpdatedAt = DateTime.UtcNow;
+        databaseOperation.Repositories.WritingCoachConversations.UpdateSelectedProvider(conversation);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+    }
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.WritingCoach));
+        if (maintenance is null)
+            throw new InvalidOperationException("Writing Coach is still working in another window. Stop or wait for that turn before resetting the conversation.");
         await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.WritingCoach, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
@@ -95,20 +142,29 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         string? currentSampleTitle,
         string? currentSampleBody,
         IReadOnlyList<Guid> imageIds,
+        int providerId,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userText))
             throw new ArgumentException("Message cannot be empty.", nameof(userText));
 
         var conversation = await GetOrCreateAsync(projectId, cancellationToken);
-        var providerAvailability = await providerService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
-        if (!providerAvailability.IsAvailable || providerAvailability.Provider is null)
+        var persistedSelection = await providerService.ResolveChatModelSelectionAsync(
+            conversation.SelectedProviderId,
+            cancellationToken);
+        if (!persistedSelection.IsAvailable || persistedSelection.Provider is not { } persistedProvider)
         {
-            yield return new WritingCoachTurnError(providerAvailability.Message, Cancelled: false);
+            yield return new WritingCoachTurnError(persistedSelection.Message, Cancelled: false);
             yield break;
         }
 
-        if (imageIds.Count > 0 && !await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken))
+        if (persistedProvider.Id != providerId)
+        {
+            yield return new WritingCoachTurnError(ChatModelSelectionMessages.Changed, Cancelled: false);
+            yield break;
+        }
+
+        if (imageIds.Count > 0 && !await providerService.IsVisionProviderWorkingAsync(persistedProvider.Id, cancellationToken))
         {
             yield return new WritingCoachTurnError("The active chat provider has not passed the vision check. Run Test in Settings > Providers before sending images.", Cancelled: false);
             yield break;
@@ -142,7 +198,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 projects => projects.GetByIdAsync(projectId, cancellationToken),
                 cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
-            chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
+            chat = await chatClientFactory.CreateChatClientAsync(persistedProvider.Id, cancellationToken);
             aiTools = tools.Build(new WritingCoachContext(project.Id, currentSampleTitle, currentSampleBody));
         }
         catch (Exception ex)
@@ -299,7 +355,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
 
-            if (turnEngine.TryCompactContext(messages, providerAvailability.Provider.ModelId) is { } compaction)
+            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId) is { } compaction)
             {
                 manifest.Add(new ChatToolCallManifest(
                     compaction.CallId,

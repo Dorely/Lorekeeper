@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Outline;
 
 public sealed class OutlineCollaborationService(
-IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, OutlineCollaborationTools tools, IEntityVisualContextService entityVisualContext, IAiChangeApprovalService changeApproval, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IOutlineWorkingContextBuilder workingContext, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
+IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, OutlineCollaborationTools tools, IEntityVisualContextService entityVisualContext, IAiChangeApprovalService changeApproval, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IOutlineWorkingContextBuilder workingContext, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
 {
     /// <summary>
     /// Code-owned operating rules composed with the professional charter, Project Guidance,
@@ -196,6 +196,50 @@ they commit to a direction, act on it without a second confirmation.
         var conversations = databaseOperation.Repositories.OutlineConversations;
         return await conversations.LoadMessagesAsync(conversationId, cancellationToken);
     }
+
+    public async Task<ChatProviderAvailability> GetChatProviderAvailabilityAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var conversation = await databaseOperation.Repositories.OutlineConversations
+            .GetByProjectIdAsync(projectId, cancellationToken);
+        var selection = await providerService.ResolveChatModelSelectionAsync(
+            conversation?.SelectedProviderId,
+            cancellationToken);
+        return selection.IsAvailable && selection.Provider is { } provider
+            ? ChatProviderAvailability.Available(provider)
+            : ChatProviderAvailability.Unavailable(selection.Message, selection.Provider);
+    }
+
+    public async Task SetSelectedProviderAsync(
+        Guid projectId,
+        int? providerId,
+        CancellationToken cancellationToken = default)
+    {
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Outline));
+        if (maintenance is null)
+            throw new InvalidOperationException("Outline Chat is still working in another window. Stop or wait for that turn before changing its model.");
+
+        if (providerId is int)
+        {
+            var selection = await providerService.ResolveChatModelSelectionAsync(providerId, cancellationToken);
+            if (!selection.IsAvailable || selection.Provider is null)
+                throw new InvalidOperationException(selection.Message);
+        }
+
+        var normalizedProviderId = await providerService.NormalizeChatModelSelectionAsync(providerId, cancellationToken);
+
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var conversation = await databaseOperation.Repositories.OutlineConversations
+            .GetByProjectIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException("Outline Chat is not initialized.");
+        conversation.SelectedProviderId = normalizedProviderId;
+        conversation.UpdatedAt = DateTime.UtcNow;
+        databaseOperation.Repositories.OutlineConversations.UpdateSelectedProvider(conversation);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+    }
     public async Task<string> GetSystemPromptAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
@@ -245,6 +289,9 @@ they commit to a direction, act on it without a second confirmation.
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Outline));
+        if (maintenance is null)
+            throw new InvalidOperationException("Outline Chat is still working in another window. Stop or wait for that turn before resetting the conversation.");
         await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Outline, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
@@ -259,12 +306,28 @@ they commit to a direction, act on it without a second confirmation.
         Guid projectId,
         string userText,
         IReadOnlyList<Guid> imageIds,
+        int providerId,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userText))
             throw new ArgumentException("Message cannot be empty.", nameof(userText));
 
         var conversation = await GetOrCreateAsync(projectId, cancellationToken);
+
+        var persistedSelection = await providerService.ResolveChatModelSelectionAsync(
+            conversation.SelectedProviderId,
+            cancellationToken);
+        if (!persistedSelection.IsAvailable || persistedSelection.Provider is not { } persistedProvider)
+        {
+            yield return new TurnError(persistedSelection.Message, Cancelled: false);
+            yield break;
+        }
+
+        if (persistedProvider.Id != providerId)
+        {
+            yield return new TurnError(ChatModelSelectionMessages.Changed, Cancelled: false);
+            yield break;
+        }
 
         var unresolvedChanges = await changeApproval.ListPendingBatchesAsync(projectId, cancellationToken);
         if (unresolvedChanges.Count > 0)
@@ -273,14 +336,7 @@ they commit to a direction, act on it without a second confirmation.
             yield break;
         }
 
-        var providerAvailability = await providerService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
-        if (!providerAvailability.IsAvailable || providerAvailability.Provider is null)
-        {
-            yield return new TurnError(providerAvailability.Message, Cancelled: false);
-            yield break;
-        }
-
-        var visionReady = await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken);
+        var visionReady = await providerService.IsVisionProviderWorkingAsync(persistedProvider.Id, cancellationToken);
         if (imageIds.Count > 0 && !visionReady)
         {
             yield return new TurnError("The active chat provider has not passed the vision check. Run Test in Settings > Providers before sending images.", Cancelled: false);
@@ -320,7 +376,7 @@ they commit to a direction, act on it without a second confirmation.
                 cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
             systemPrompt = await ComposeSystemPromptAsync(project, cancellationToken);
-            chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
+            chat = await chatClientFactory.CreateChatClientAsync(persistedProvider.Id, cancellationToken);
 
             if (project.AiChangeApprovalEnabled)
                 staging = tools.CreateStagingContext(projectId, conversation.Id, onDirectMutationApplied: OnToolMutated);
@@ -513,7 +569,7 @@ they commit to a direction, act on it without a second confirmation.
                     messages.Add(ChatTurnEngine.MarkToolContextMessage(visualMessage));
             }
 
-            if (turnEngine.TryCompactContext(messages, providerAvailability.Provider.ModelId) is { } compaction)
+            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId) is { } compaction)
             {
                 manifest.Add(new ChatToolCallManifest(
                     compaction.CallId,

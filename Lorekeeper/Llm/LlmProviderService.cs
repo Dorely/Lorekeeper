@@ -34,24 +34,7 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
     public async Task<ChatProviderAvailability> GetDefaultChatProviderAvailabilityAsync(CancellationToken cancellationToken = default)
     {
         var all = await GetAllAsync(cancellationToken);
-        if (all.Count == 0)
-            return ChatProviderAvailability.Unavailable("Configure and test a chat provider in Settings > Providers to enable LLM features.");
-
-        var explicitDefault = all.FirstOrDefault(provider => provider.IsDefault);
-        if (explicitDefault is not null && await IsChatProviderWorkingAsync(explicitDefault, cancellationToken))
-            return ChatProviderAvailability.Available(explicitDefault);
-
-        foreach (var provider in all.Where(provider => !provider.IsDefault))
-        {
-            if (await IsChatProviderWorkingAsync(provider, cancellationToken))
-                return ChatProviderAvailability.Available(provider);
-        }
-
-        var candidate = explicitDefault ?? all.FirstOrDefault();
-        var reason = candidate is null
-            ? "Configure and test a chat provider in Settings > Providers to enable LLM features."
-            : await GetUnavailableReasonAsync(candidate, cancellationToken);
-        return ChatProviderAvailability.Unavailable(reason, candidate);
+        return await ResolveDefaultChatProviderAvailabilityAsync(all, cancellationToken);
     }
 
     public async Task<VisionProviderAvailability> GetDefaultVisionProviderAvailabilityAsync(CancellationToken cancellationToken = default)
@@ -80,6 +63,140 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
     public async Task<List<LlmProvider>> ListWorkingChatProvidersAsync(CancellationToken cancellationToken = default)
     {
         var all = await GetAllAsync(cancellationToken);
+        return await ListWorkingChatProvidersAsync(all, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ChatModelOption>> ListChatModelOptionsAsync(CancellationToken cancellationToken = default)
+    {
+        var all = await GetAllAsync(cancellationToken);
+        var working = await ListWorkingChatProvidersAsync(all, cancellationToken);
+        var defaultAvailability = await ResolveDefaultChatProviderAvailabilityAsync(all, cancellationToken);
+        var defaultProviderId = defaultAvailability.IsAvailable ? defaultAvailability.Provider?.Id : null;
+
+        return working
+            .Select(provider =>
+            {
+                var labels = GetChatModelLabels(provider, all);
+                return new ChatModelOption(
+                    provider.Id,
+                    labels.ConnectionLabel,
+                    labels.ModelLabel,
+                    labels.Label,
+                    provider.Id == defaultProviderId,
+                    provider);
+            })
+            .OrderByDescending(option => option.IsDefault)
+            .ThenBy(option => option.ConnectionLabel, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(option => option.ModelLabel, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(option => option.ProviderId)
+            .ToList();
+    }
+
+    public async Task<ChatModelSelection> ResolveChatModelSelectionAsync(
+        int? selectedProviderId,
+        CancellationToken cancellationToken = default)
+    {
+        var all = await GetAllAsync(cancellationToken);
+        var defaultAvailability = await ResolveDefaultChatProviderAvailabilityAsync(all, cancellationToken);
+
+        if (selectedProviderId is null)
+        {
+            var provider = defaultAvailability.Provider;
+            if (provider is null)
+            {
+                return new ChatModelSelection(
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    false,
+                    false,
+                    false,
+                    false,
+                    defaultAvailability.Message);
+            }
+
+            var labels = GetChatModelLabels(provider, all);
+            return new ChatModelSelection(
+                null,
+                provider,
+                labels.ConnectionLabel,
+                labels.ModelLabel,
+                labels.Label,
+                defaultAvailability.IsAvailable,
+                defaultAvailability.IsAvailable,
+                false,
+                false,
+                defaultAvailability.Message);
+        }
+
+        var selected = all.FirstOrDefault(provider => provider.Id == selectedProviderId.Value);
+        if (selected is null)
+        {
+            return new ChatModelSelection(
+                selectedProviderId,
+                null,
+                null,
+                null,
+                $"Saved model {selectedProviderId.Value} (unavailable)",
+                false,
+                false,
+                true,
+                true,
+                "This chat's selected model is no longer saved. Choose another available model or press Reset.");
+        }
+
+        var selectedLabels = GetChatModelLabels(selected, all);
+        if (await IsChatProviderWorkingAsync(selected, cancellationToken))
+        {
+            var isDefault = defaultAvailability.IsAvailable
+                && defaultAvailability.Provider?.Id == selected.Id;
+            return new ChatModelSelection(
+                selectedProviderId,
+                selected,
+                selectedLabels.ConnectionLabel,
+                selectedLabels.ModelLabel,
+                selectedLabels.Label,
+                true,
+                isDefault,
+                true,
+                false,
+                string.Empty);
+        }
+
+        return new ChatModelSelection(
+            selectedProviderId,
+            selected,
+            selectedLabels.ConnectionLabel,
+            selectedLabels.ModelLabel,
+            $"{selectedLabels.Label} (unavailable)",
+            false,
+            false,
+            true,
+            true,
+            $"The selected model is unavailable. {await GetUnavailableReasonAsync(selected, cancellationToken)} Choose another available model or press Reset.");
+    }
+
+    public async Task<int?> NormalizeChatModelSelectionAsync(
+        int? selectedProviderId,
+        CancellationToken cancellationToken = default)
+    {
+        if (selectedProviderId is null)
+            return null;
+
+        var all = await GetAllAsync(cancellationToken);
+        var defaultAvailability = await ResolveDefaultChatProviderAvailabilityAsync(all, cancellationToken);
+        return defaultAvailability.IsAvailable
+            && defaultAvailability.Provider?.Id == selectedProviderId
+            ? null
+            : selectedProviderId;
+    }
+
+    private async Task<List<LlmProvider>> ListWorkingChatProvidersAsync(
+        IReadOnlyList<LlmProvider> all,
+        CancellationToken cancellationToken)
+    {
         var working = new List<LlmProvider>();
         foreach (var provider in all)
         {
@@ -89,6 +206,71 @@ IAppDatabaseOperationFactory database, ICodexAuthService codexAuth) : ILlmProvid
 
         return working;
     }
+
+    private async Task<ChatProviderAvailability> ResolveDefaultChatProviderAvailabilityAsync(
+        IReadOnlyList<LlmProvider> all,
+        CancellationToken cancellationToken)
+    {
+        if (all.Count == 0)
+            return ChatProviderAvailability.Unavailable("Configure and test a chat provider in Settings > Providers to enable LLM features.");
+
+        var explicitDefault = all.FirstOrDefault(provider => provider.IsDefault);
+        if (explicitDefault is not null && await IsChatProviderWorkingAsync(explicitDefault, cancellationToken))
+            return ChatProviderAvailability.Available(explicitDefault);
+
+        foreach (var provider in all.Where(provider => !provider.IsDefault))
+        {
+            if (await IsChatProviderWorkingAsync(provider, cancellationToken))
+                return ChatProviderAvailability.Available(provider);
+        }
+
+        var candidate = explicitDefault ?? all.FirstOrDefault();
+        var reason = candidate is null
+            ? "Configure and test a chat provider in Settings > Providers to enable LLM features."
+            : await GetUnavailableReasonAsync(candidate, cancellationToken);
+        return ChatProviderAvailability.Unavailable(reason, candidate);
+    }
+
+    private static ChatModelLabels GetChatModelLabels(
+        LlmProvider provider,
+        IReadOnlyList<LlmProvider> all)
+    {
+        var connection = provider.CredentialSourceId is int sourceId
+            ? all.FirstOrDefault(candidate => candidate.Id == sourceId) ?? provider
+            : provider;
+        var connectionLabel = BuildConnectionLabel(connection);
+        var modelLabel = BuildModelLabel(provider);
+        return new ChatModelLabels(connectionLabel, modelLabel, $"{connectionLabel} · {modelLabel}");
+    }
+
+    private static string BuildConnectionLabel(LlmProvider connection)
+    {
+        var displayName = FirstNonEmpty(connection.DisplayName, connection.Name, "Connection");
+        var name = connection.Name?.Trim();
+        return !string.IsNullOrWhiteSpace(name)
+            && !string.Equals(displayName, name, StringComparison.OrdinalIgnoreCase)
+            ? $"{displayName} ({name})"
+            : displayName;
+    }
+
+    private static string BuildModelLabel(LlmProvider provider)
+    {
+        var displayName = FirstNonEmpty(provider.DisplayName, provider.ModelId, "Model");
+        var modelId = provider.ModelId?.Trim();
+        return !string.IsNullOrWhiteSpace(modelId)
+            && !string.Equals(displayName, modelId, StringComparison.OrdinalIgnoreCase)
+            ? $"{displayName} ({modelId})"
+            : displayName;
+    }
+
+    private static string FirstNonEmpty(string? value, string? fallback, string finalFallback) =>
+        !string.IsNullOrWhiteSpace(value)
+            ? value.Trim()
+            : !string.IsNullOrWhiteSpace(fallback)
+                ? fallback.Trim()
+                : finalFallback;
+
+    private sealed record ChatModelLabels(string ConnectionLabel, string ModelLabel, string Label);
 
     public async Task<List<LlmProvider>> ListWorkingVisionProvidersAsync(CancellationToken cancellationToken = default)
     {

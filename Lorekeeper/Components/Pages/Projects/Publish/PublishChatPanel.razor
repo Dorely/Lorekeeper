@@ -29,8 +29,13 @@
              InputChanged="SetInput"
              Placeholder="Ask about Core Book, releases, or prepared files..."
              Running="@_running"
-             ComposerDisabled="@(ChatDisabled || _running || WorkspaceRefreshing)"
-             SendDisabled="@(ChatDisabled || WorkspaceRefreshing || string.IsNullOrWhiteSpace(_input))"
+             ComposerDisabled="@(ChatDisabled || _running || _resetting || WorkspaceRefreshing)"
+             SendDisabled="@(ChatDisabled || _resetting || WorkspaceRefreshing || string.IsNullOrWhiteSpace(_input))"
+             ModelOptions="@_modelOptions"
+             SelectedProviderId="@PickerSelectedProviderId"
+             UnavailableModelLabel="@(_chatSelection?.Message ?? "No available chat models")"
+             ModelPickerDisabled="@(_loading || _resetting || TurnActive || WorkspaceRefreshing)"
+             OnModelChanged="OnModelChangedAsync"
              OnSend="SendAsync"
              OnStop="CancelAsync"
              ForceScrollKey="@_forceScrollKey"
@@ -39,7 +44,7 @@
              ResetComposerKey="@_resetComposerKey">
     <HeaderActions>
         <button type="button" class="btn btn-link btn-sm publish-chat-reset"
-                title="Start over" disabled="@(ChatDisabled || TurnActive)" @onclick="ResetAsync">Reset</button>
+                title="Start over" disabled="@(_loading || _resetting || TurnActive)" @onclick="ResetAsync">Reset</button>
     </HeaderActions>
     <ExtraControls>
         @if (ChatDisabled)
@@ -74,6 +79,10 @@
     private ChatLiveTurn? _live;
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
     private ChatProviderAvailability? _chatAvailability;
+    private IReadOnlyList<ChatModelPickerOption> _modelOptions = [];
+    private ChatModelSelection? _chatSelection;
+    private int? _selectedProviderId;
+    private ChatTurnModelSnapshot? _activeTurnModel;
     private CancellationTokenSource? _listenCts;
     private Guid? _listeningTurnId;
     private Guid? _loadedProjectId;
@@ -85,12 +94,13 @@
     private string? _error;
     private bool _loading = true;
     private bool _running;
+    private bool _resetting;
     private int _forceScrollKey;
     private int _scrollKey;
     private int _autoFollowKey;
     private int _resetComposerKey;
 
-    private string? ActiveModelId => _chatAvailability?.Provider?.ModelId;
+    private string? ActiveModelId => _activeTurnModel?.ModelId ?? _chatAvailability?.Provider?.ModelId;
     private int ConversationTokenLimit => TokenLimits.Resolve(ActiveModelId);
     private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
     private bool TurnActive => _running || ChatTurns.GetActiveTurn(ProjectId) is not null;
@@ -124,9 +134,10 @@
         try
         {
             _conversation = await Chat.GetOrCreateAsync(ProjectId);
+            _selectedProviderId = _conversation.SelectedProviderId;
             _messages = (await Chat.LoadMessagesAsync(_conversation.Id)).ToList();
             _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Publish);
-            _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
+            await LoadChatProviderStateAsync();
             _promptEditionId = SelectedEditionId;
             _promptWorkspaceContext = WorkspaceContext;
             _systemPrompt = await Chat.GetSystemPromptAsync(ProjectId, SelectedEditionId, WorkspaceContext);
@@ -134,6 +145,8 @@
             RebuildRenderable(activeTurn?.StartedAtUtc);
             if (activeTurn is not null)
             {
+                _activeTurnModel = activeTurn.Model;
+                IncludeActiveModelOption();
                 _renderable.Add(new ChatRenderableMessage(
                     Guid.NewGuid(),
                     ChatMessageRole.User,
@@ -146,6 +159,7 @@
             }
             else
             {
+                _activeTurnModel = null;
                 _pendingUserText = null;
                 _live = null;
                 _running = false;
@@ -174,9 +188,13 @@
             _error = ChatDisabledMessage;
             return;
         }
+        if (_chatAvailability?.Provider is not { } provider)
+        {
+            _error = ChatDisabledMessage;
+            return;
+        }
         if (submission.Images.Count > 0
-            && (_chatAvailability?.Provider is null
-                || !await Providers.IsVisionProviderWorkingAsync(_chatAvailability.Provider.Id)))
+            && !await Providers.IsVisionProviderWorkingAsync(provider.Id))
         {
             _error = "The active chat provider has not passed the vision check. Run Test in Settings > Providers before sending images.";
             return;
@@ -194,6 +212,9 @@
             return;
         }
 
+        var model = Snapshot(provider);
+        _activeTurnModel = model;
+        IncludeActiveModelOption();
         _input = string.Empty;
         _running = true;
         await OnRunningChanged.InvokeAsync(true);
@@ -211,7 +232,7 @@
         RequestScroll(force: true);
         StateHasChanged();
 
-        if (!ChatTurns.TryStart(ProjectId, SelectedEditionId, turnWorkspaceContext, text, submission.Images))
+        if (!ChatTurns.TryStart(ProjectId, SelectedEditionId, turnWorkspaceContext, text, submission.Images, model))
         {
             _error = "Publish Assistant already has a running turn.";
             if (ChatTurns.GetActiveTurn(ProjectId) is { } existingTurn)
@@ -233,6 +254,8 @@
 
     private async Task ResetAsync()
     {
+        if (_resetting)
+            return;
         if (ChatTurns.GetActiveTurn(ProjectId) is { } activeTurn)
         {
             _error = "Publish Assistant is still working in another window. Stop or wait for that turn before resetting the conversation.";
@@ -241,6 +264,7 @@
             await ListenToActiveTurnAsync(activeTurn);
             return;
         }
+        _resetting = true;
         try
         {
             await Chat.ResetAsync(ProjectId);
@@ -251,12 +275,19 @@
         {
             _error = exception.Message;
         }
+        finally
+        {
+            _resetting = false;
+        }
     }
 
     private async Task ListenToActiveTurnAsync(ChatTurnSnapshot activeTurn)
     {
         if (_listeningTurnId == activeTurn.TurnId)
             return;
+        _activeTurnModel = activeTurn.Model;
+        IncludeActiveModelOption();
+        UpdateConversationTokenCount();
         StopListening();
         var subscription = ChatTurns.Subscribe(ProjectId);
         if (subscription is null)
@@ -349,6 +380,7 @@
         _running = false;
         _live = null;
         _pendingUserText = null;
+        _activeTurnModel = null;
         await OnRunningChanged.InvokeAsync(false);
         UpdateConversationTokenCount();
     }
@@ -357,6 +389,9 @@
     {
         if (_conversation is null)
             return;
+        _conversation = await Chat.GetOrCreateAsync(ProjectId);
+        _selectedProviderId = _conversation.SelectedProviderId;
+        await LoadChatProviderStateAsync();
         _messages = (await Chat.LoadMessagesAsync(_conversation.Id)).ToList();
         _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Publish);
         _promptWorkspaceContext = WorkspaceContext;
@@ -477,6 +512,52 @@
         PublishMessageStatus.Pending => ChatMessageStatus.Pending,
         _ => ChatMessageStatus.Completed,
     };
+
+    private async Task LoadChatProviderStateAsync(CancellationToken cancellationToken = default)
+    {
+        _chatAvailability = await Chat.GetChatProviderAvailabilityAsync(ProjectId, cancellationToken);
+        _chatSelection = await Providers.ResolveChatModelSelectionAsync(_selectedProviderId, cancellationToken);
+        _modelOptions = (await Providers.ListChatModelOptionsAsync(cancellationToken))
+            .Select(option => new ChatModelPickerOption(option.ProviderId, option.Label, option.IsDefault))
+            .ToList();
+    }
+
+    private int? PickerSelectedProviderId => _activeTurnModel?.ProviderId ?? _selectedProviderId ?? _chatSelection?.ProviderId;
+
+    private void IncludeActiveModelOption()
+    {
+        if (_activeTurnModel is not { } active
+            || _modelOptions.Any(option => option.ProviderId == active.ProviderId))
+            return;
+        _modelOptions = _modelOptions
+            .Append(new ChatModelPickerOption(active.ProviderId, active.Label, IsDefault: false))
+            .ToList();
+    }
+
+    private async Task OnModelChangedAsync(int? providerId)
+    {
+        if (_loading || _resetting || WorkspaceRefreshing) return;
+        if (TurnActive)
+        {
+            _error = "Publish Assistant is still working in another window. Stop or wait for that turn before changing its model.";
+            return;
+        }
+        try
+        {
+            await Chat.SetSelectedProviderAsync(ProjectId, providerId);
+            _selectedProviderId = await Providers.NormalizeChatModelSelectionAsync(providerId);
+            await LoadChatProviderStateAsync();
+            UpdateConversationTokenCount();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private ChatTurnModelSnapshot Snapshot(LlmProvider provider) =>
+        new(provider.Id, provider.ModelId, _chatSelection?.Label ?? $"{provider.DisplayName ?? provider.Name} · {provider.ModelId}");
 
     private void UpdateConversationTokenCount()
     {

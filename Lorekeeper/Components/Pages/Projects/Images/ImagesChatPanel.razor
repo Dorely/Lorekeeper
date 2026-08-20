@@ -29,8 +29,13 @@
              InputChanged="SetInput"
              Placeholder="Ask for an image, edit, mask, or layout inspection..."
              Running="@_running"
-             ComposerDisabled="@(ChatDisabled || _running)"
-             SendDisabled="@(ChatDisabled || string.IsNullOrWhiteSpace(_input))"
+             ComposerDisabled="@(ChatDisabled || _running || _resetting)"
+             SendDisabled="@(ChatDisabled || _resetting || string.IsNullOrWhiteSpace(_input))"
+             ModelOptions="@_modelOptions"
+             SelectedProviderId="@PickerSelectedProviderId"
+             UnavailableModelLabel="@(_chatSelection?.Message ?? "No available chat models")"
+             ModelPickerDisabled="@(_loading || _running || _resetting || ChatTurns.GetActiveTurn(ProjectId) is not null)"
+             OnModelChanged="OnModelChangedAsync"
              OnSend="SendAsync"
              OnStop="CancelAsync"
              ForceScrollKey="@_forceScrollKey"
@@ -38,7 +43,7 @@
              AutoFollowKey="@_autoFollowKey"
              ResetComposerKey="@_resetComposerKey">
     <HeaderActions>
-        <button type="button" class="btn btn-link btn-sm images-chat-reset" title="Start over" disabled="@(ChatDisabled || _running)" @onclick="ResetAsync">Reset</button>
+        <button type="button" class="btn btn-link btn-sm images-chat-reset" title="Start over" disabled="@(_loading || _running || _resetting)" @onclick="ResetAsync">Reset</button>
     </HeaderActions>
     <ExtraControls>
         @if (_attachments.Count > 0)
@@ -112,6 +117,7 @@
     private string _input = string.Empty;
     private bool _running;
     private bool _loading = true;
+    private bool _resetting;
     private string? _error;
     private CancellationTokenSource? _listenCts;
     private Guid? _listeningTurnId;
@@ -120,10 +126,14 @@
     private string _systemPrompt = string.Empty;
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
     private ChatProviderAvailability? _chatAvailability;
+    private IReadOnlyList<ChatModelPickerOption> _modelOptions = [];
+    private ChatModelSelection? _chatSelection;
+    private int? _selectedProviderId;
+    private ChatTurnModelSnapshot? _activeTurnModel;
     private int _seenAttachmentRefreshKey;
     private IReadOnlyDictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>> _messageImages = new Dictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>>();
 
-    private string? ActiveModelId => _chatAvailability?.Provider?.ModelId;
+    private string? ActiveModelId => _activeTurnModel?.ModelId ?? _chatAvailability?.Provider?.ModelId;
     private int ConversationTokenLimit => TokenLimits.Resolve(ActiveModelId);
     private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
     private string ChatDisabledMessage => _chatAvailability?.Message
@@ -155,7 +165,8 @@
         try
         {
             _conversation = await ImagesChat.GetOrCreateAsync(ProjectId);
-            _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
+            _selectedProviderId = _conversation.SelectedProviderId;
+            await LoadChatProviderStateAsync();
             _messages = (await ImagesChat.LoadMessagesAsync(_conversation.Id)).ToList();
             _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Images);
             await LoadAttachmentsAsync();
@@ -164,6 +175,8 @@
             RebuildRenderable(activeTurn?.StartedAtUtc);
             if (activeTurn is not null)
             {
+                _activeTurnModel = activeTurn.Model;
+                IncludeActiveModelOption();
                 _renderable.Add(new ChatRenderableMessage(
                     Guid.NewGuid(),
                     ChatMessageRole.User,
@@ -176,6 +189,7 @@
             }
             else
             {
+                _activeTurnModel = null;
                 _pendingUserText = null;
                 _live = null;
                 _running = false;
@@ -198,14 +212,21 @@
             _error = ChatDisabledMessage;
             return;
         }
+        if (_chatAvailability?.Provider is not { } provider)
+        {
+            _error = ChatDisabledMessage;
+            return;
+        }
         if (submission.Images.Count > 0
-            && (_chatAvailability?.Provider is null
-                || !await Providers.IsVisionProviderWorkingAsync(_chatAvailability.Provider.Id)))
+            && !await Providers.IsVisionProviderWorkingAsync(provider.Id))
         {
             _error = "The active chat provider has not passed the vision check. Run Test in Settings > Providers before sending images.";
             return;
         }
 
+        var model = Snapshot(provider);
+        _activeTurnModel = model;
+        IncludeActiveModelOption();
         _input = string.Empty;
         _running = true;
         _error = null;
@@ -223,7 +244,7 @@
         RequestScroll(force: true);
         StateHasChanged();
 
-        if (!ChatTurns.TryStart(ProjectId, text, submission.Images))
+        if (!ChatTurns.TryStart(ProjectId, text, submission.Images, model))
         {
             _error = "Images Chat already has a running turn.";
             ReleaseRunningUi();
@@ -238,10 +259,22 @@
 
     private async Task ResetAsync()
     {
-        if (_running) return;
-        await ImagesChat.ResetAsync(ProjectId);
-        _loadedProjectId = null;
-        await LoadAsync();
+        if (_running || _resetting) return;
+        _resetting = true;
+        try
+        {
+            await ImagesChat.ResetAsync(ProjectId);
+            _loadedProjectId = null;
+            await LoadAsync();
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _resetting = false;
+        }
     }
 
     private async Task ListenToActiveTurnAsync(ChatTurnSnapshot activeTurn)
@@ -249,6 +282,9 @@
         if (_listeningTurnId == activeTurn.TurnId)
             return;
 
+        _activeTurnModel = activeTurn.Model;
+        IncludeActiveModelOption();
+        UpdateConversationTokenCount();
         StopListening();
         var subscription = ChatTurns.Subscribe(ProjectId);
         if (subscription is null)
@@ -379,6 +415,7 @@
         var hadLive = _live is not null;
         _running = false;
         _live = null;
+        _activeTurnModel = null;
         UpdateConversationTokenCount();
         RequestScroll();
         if (wasRunning || hadLive)
@@ -388,6 +425,9 @@
     private async Task ReloadFromDbAsync()
     {
         if (_conversation is null) return;
+        _conversation = await ImagesChat.GetOrCreateAsync(ProjectId);
+        _selectedProviderId = _conversation.SelectedProviderId;
+        await LoadChatProviderStateAsync();
         _messages = (await ImagesChat.LoadMessagesAsync(_conversation.Id)).ToList();
         _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Images);
         _systemPrompt = await ImagesChat.GetSystemPromptAsync(ProjectId);
@@ -434,6 +474,52 @@
         ProjectImageMessageStatus.Pending => ChatMessageStatus.Pending,
         _ => ChatMessageStatus.Completed,
     };
+
+    private async Task LoadChatProviderStateAsync(CancellationToken cancellationToken = default)
+    {
+        _chatAvailability = await ImagesChat.GetChatProviderAvailabilityAsync(ProjectId, cancellationToken);
+        _chatSelection = await Providers.ResolveChatModelSelectionAsync(_selectedProviderId, cancellationToken);
+        _modelOptions = (await Providers.ListChatModelOptionsAsync(cancellationToken))
+            .Select(option => new ChatModelPickerOption(option.ProviderId, option.Label, option.IsDefault))
+            .ToList();
+    }
+
+    private int? PickerSelectedProviderId => _activeTurnModel?.ProviderId ?? _selectedProviderId ?? _chatSelection?.ProviderId;
+
+    private void IncludeActiveModelOption()
+    {
+        if (_activeTurnModel is not { } active
+            || _modelOptions.Any(option => option.ProviderId == active.ProviderId))
+            return;
+        _modelOptions = _modelOptions
+            .Append(new ChatModelPickerOption(active.ProviderId, active.Label, IsDefault: false))
+            .ToList();
+    }
+
+    private async Task OnModelChangedAsync(int? providerId)
+    {
+        if (_loading || _running || _resetting) return;
+        if (ChatTurns.GetActiveTurn(ProjectId) is not null)
+        {
+            _error = "Images Chat is still working in another window. Stop or wait for that turn before changing its model.";
+            return;
+        }
+        try
+        {
+            await ImagesChat.SetSelectedProviderAsync(ProjectId, providerId);
+            _selectedProviderId = await Providers.NormalizeChatModelSelectionAsync(providerId);
+            await LoadChatProviderStateAsync();
+            UpdateConversationTokenCount();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private ChatTurnModelSnapshot Snapshot(LlmProvider provider) =>
+        new(provider.Id, provider.ModelId, _chatSelection?.Label ?? $"{provider.DisplayName ?? provider.Name} · {provider.ModelId}");
 
     private void UpdateConversationTokenCount()
     {

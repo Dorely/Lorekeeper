@@ -17,7 +17,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Research;
 
 public sealed class ResearchService(
-IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ISearchProviderService searchProviders, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IContextBuilder contextBuilder, OutlineCollaborationTools outlineTools, IAiChangeApprovalService changeApproval, IWebIngestCandidateService webCandidates, IEntityService entities, ResearchTools tools, IEntityVisualContextService entityVisualContext, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<ResearchService> logger) : IResearchService
+IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ISearchProviderService searchProviders, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IContextBuilder contextBuilder, OutlineCollaborationTools outlineTools, IAiChangeApprovalService changeApproval, IWebIngestCandidateService webCandidates, IEntityService entities, ResearchTools tools, IEntityVisualContextService entityVisualContext, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<ResearchService> logger) : IResearchService
 {
     public const string ResearchWorkflowInstructions = """
         You are Lorekeeper's Research Mode: a factual research agent for a long-form writing project.
@@ -82,6 +82,50 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var conversations = databaseOperation.Repositories.ResearchConversations;
         return await conversations.LoadMessagesAsync(conversationId, cancellationToken);
+    }
+
+    public async Task<ChatProviderAvailability> GetChatProviderAvailabilityAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var conversation = await databaseOperation.Repositories.ResearchConversations
+            .GetByProjectIdAsync(projectId, cancellationToken);
+        var selection = await providerService.ResolveChatModelSelectionAsync(
+            conversation?.SelectedProviderId,
+            cancellationToken);
+        return selection.IsAvailable && selection.Provider is { } provider
+            ? ChatProviderAvailability.Available(provider)
+            : ChatProviderAvailability.Unavailable(selection.Message, selection.Provider);
+    }
+
+    public async Task SetSelectedProviderAsync(
+        Guid projectId,
+        int? providerId,
+        CancellationToken cancellationToken = default)
+    {
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Research));
+        if (maintenance is null)
+            throw new InvalidOperationException("Research Chat is still working in another window. Stop or wait for that turn before changing its model.");
+
+        if (providerId is int)
+        {
+            var selection = await providerService.ResolveChatModelSelectionAsync(providerId, cancellationToken);
+            if (!selection.IsAvailable || selection.Provider is null)
+                throw new InvalidOperationException(selection.Message);
+        }
+
+        var normalizedProviderId = await providerService.NormalizeChatModelSelectionAsync(providerId, cancellationToken);
+
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var conversation = await databaseOperation.Repositories.ResearchConversations
+            .GetByProjectIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException("Research Chat is not initialized.");
+        conversation.SelectedProviderId = normalizedProviderId;
+        conversation.UpdatedAt = DateTime.UtcNow;
+        databaseOperation.Repositories.ResearchConversations.UpdateSelectedProvider(conversation);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
     public async Task<string> GetSystemPromptAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -196,6 +240,9 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Research));
+        if (maintenance is null)
+            throw new InvalidOperationException("Research Chat is still working in another window. Stop or wait for that turn before resetting the conversation.");
         await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Research, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
@@ -211,6 +258,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         Guid projectId,
         string userText,
         IReadOnlyList<Guid> imageIds,
+        int providerId,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userText))
@@ -229,9 +277,14 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
             if (!await searchProviders.HasActiveProviderAsync(cancellationToken))
                 throw new InvalidOperationException("No active search provider is configured.");
-            providerAvailability = await providerService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
-            if (!providerAvailability.IsAvailable || providerAvailability.Provider is null)
-                throw new InvalidOperationException(providerAvailability.Message);
+            var persistedSelection = await providerService.ResolveChatModelSelectionAsync(
+                conversation.SelectedProviderId,
+                cancellationToken);
+            if (!persistedSelection.IsAvailable || persistedSelection.Provider is not { } persistedProvider)
+                throw new InvalidOperationException(persistedSelection.Message);
+            if (persistedProvider.Id != providerId)
+                throw new InvalidOperationException(ChatModelSelectionMessages.Changed);
+            providerAvailability = ChatProviderAvailability.Available(persistedProvider);
         }
         catch (Exception ex)
         {

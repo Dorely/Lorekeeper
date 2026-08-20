@@ -21,7 +21,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorChatService(
-    IAppDatabaseOperationFactory database, IChapterService chapters, IChatImageAttachmentService imageAttachments, IContextBuilder contextBuilder, IProjectImageService projectImages, IEntityVisualContextService entityVisualContext, IProjectImageGenerationRuntime imageRuntime, ILlmProviderService providerService, IChatClientFactory chatClientFactory, EditorChatTools tools, OutlineCollaborationTools outlineTools, IEditorContestService contestService, IEditorRevisionJobNotifier revisionJobNotifier, IEditorRevisionAgentService revisionAgents, IAiChangeApprovalService changeApproval, IServiceScopeFactory scopeFactory, ChatTurnEngine turnEngine, IAuthoringHistoryService authoringHistory, IAuthoringMutationContextAccessor authoringMutationContext, IOptions<AgentOptions> options, ILogger<EditorChatService> logger) : IEditorChatService
+    IAppDatabaseOperationFactory database, IChapterService chapters, IChatImageAttachmentService imageAttachments, IContextBuilder contextBuilder, IProjectImageService projectImages, IEntityVisualContextService entityVisualContext, IProjectImageGenerationRuntime imageRuntime, ILlmProviderService providerService, IChatClientFactory chatClientFactory, EditorChatTools tools, OutlineCollaborationTools outlineTools, IEditorContestService contestService, IEditorRevisionJobNotifier revisionJobNotifier, IEditorRevisionAgentService revisionAgents, IAiChangeApprovalService changeApproval, IServiceScopeFactory scopeFactory, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IAuthoringHistoryService authoringHistory, IAuthoringMutationContextAccessor authoringMutationContext, IOptions<AgentOptions> options, ILogger<EditorChatService> logger) : IEditorChatService
 {
     private const string _initialAssistantGreeting =
         "I'm ready to work on the draft with you. Tell me what you want to shape, revise, or check in the current chapter.";
@@ -59,6 +59,50 @@ public sealed class EditorChatService(
         var conversations = databaseOperation.Repositories.EditorConversations;
         return await conversations.LoadTranscriptMessagesAsync(conversationId, cancellationToken);
     }
+
+    public async Task<ChatProviderAvailability> GetChatProviderAvailabilityAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var conversation = await databaseOperation.Repositories.EditorConversations
+            .GetByProjectIdAsync(projectId, cancellationToken);
+        var selection = await providerService.ResolveChatModelSelectionAsync(
+            conversation?.SelectedProviderId,
+            cancellationToken);
+        return selection.IsAvailable && selection.Provider is { } provider
+            ? ChatProviderAvailability.Available(provider)
+            : ChatProviderAvailability.Unavailable(selection.Message, selection.Provider);
+    }
+
+    public async Task SetSelectedProviderAsync(
+        Guid projectId,
+        int? providerId,
+        CancellationToken cancellationToken = default)
+    {
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Editor));
+        if (maintenance is null)
+            throw new InvalidOperationException("Editor Chat is still working in another window. Stop or wait for that turn before changing its model.");
+
+        if (providerId is int)
+        {
+            var selection = await providerService.ResolveChatModelSelectionAsync(providerId, cancellationToken);
+            if (!selection.IsAvailable || selection.Provider is null)
+                throw new InvalidOperationException(selection.Message);
+        }
+
+        var normalizedProviderId = await providerService.NormalizeChatModelSelectionAsync(providerId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var conversation = await databaseOperation.Repositories.EditorConversations
+            .GetByProjectIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException("Editor Chat is not initialized.");
+        conversation.SelectedProviderId = normalizedProviderId;
+        conversation.UpdatedAt = DateTime.UtcNow;
+        databaseOperation.Repositories.EditorConversations.UpdateSelectedProvider(conversation);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
@@ -112,6 +156,9 @@ public sealed class EditorChatService(
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Editor));
+        if (maintenance is null)
+            throw new InvalidOperationException("Editor Chat is still working in another window. Stop or wait for that turn before resetting the conversation.");
         await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Editor, cancellationToken);
         await contestService.DiscardInactiveContestBatchesAsync(projectId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
@@ -130,12 +177,28 @@ public sealed class EditorChatService(
         EditorContentTarget contentTarget,
         string userText,
         IReadOnlyList<Guid> imageIds,
+        int providerId,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userText))
             throw new ArgumentException("Message cannot be empty.", nameof(userText));
 
         var conversation = await GetOrCreateAsync(projectId, cancellationToken);
+
+        var persistedSelection = await providerService.ResolveChatModelSelectionAsync(
+            conversation.SelectedProviderId,
+            cancellationToken);
+        if (!persistedSelection.IsAvailable || persistedSelection.Provider is not { } persistedProvider)
+        {
+            yield return new EditorChatTurnError(persistedSelection.Message, Cancelled: false);
+            yield break;
+        }
+
+        if (persistedProvider.Id != providerId)
+        {
+            yield return new EditorChatTurnError(ChatModelSelectionMessages.Changed, Cancelled: false);
+            yield break;
+        }
 
         var unresolvedChanges = await changeApproval.ListPendingBatchesAsync(projectId, cancellationToken);
         if (unresolvedChanges.Count > 0)
@@ -157,14 +220,7 @@ public sealed class EditorChatService(
         }
         await contestService.DiscardInactiveContestBatchesAsync(projectId, cancellationToken);
 
-        var providerAvailability = await providerService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
-        if (!providerAvailability.IsAvailable || providerAvailability.Provider is null)
-        {
-            yield return new EditorChatTurnError(providerAvailability.Message, Cancelled: false);
-            yield break;
-        }
-
-        var visionReady = await providerService.IsVisionProviderWorkingAsync(providerAvailability.Provider.Id, cancellationToken);
+        var visionReady = await providerService.IsVisionProviderWorkingAsync(persistedProvider.Id, cancellationToken);
         if (imageIds.Count > 0 && !visionReady)
         {
             yield return new EditorChatTurnError("The active chat provider has not passed the vision check. Run Test in Settings > Providers before sending images.", Cancelled: false);
@@ -236,7 +292,7 @@ public sealed class EditorChatService(
             userMessage.ContextSnapshotJson = assembly.SnapshotJson();
             await turnEngine.UpdateMessageAsync(repositories => repositories.EditorConversations, userMessage, cancellationToken);
 
-            chat = await chatClientFactory.CreateChatClientAsync(providerAvailability.Provider.Id, cancellationToken);
+            chat = await chatClientFactory.CreateChatClientAsync(persistedProvider.Id, cancellationToken);
 
             OutlineToolStagingContext? outlineStaging = null;
             EditorChatChangeStagingContext? editorStaging = null;
@@ -256,7 +312,7 @@ public sealed class EditorChatService(
                 currentChapterId,
                 currentCompositionId,
                 contentTarget,
-                providerAvailability.Provider.Id,
+                persistedProvider.Id,
                 visionReady,
                 OnToolMutated,
                 project.AiChangeApprovalEnabled,
@@ -670,7 +726,7 @@ public sealed class EditorChatService(
                 messages.Add(ChatTurnEngine.MarkToolContextMessage(
                     await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound)));
 
-            if (turnEngine.TryCompactContext(messages, providerAvailability.Provider.ModelId) is { } compaction)
+            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId) is { } compaction)
             {
                 manifest.Add(new ChatToolCallManifest(
                     compaction.CallId,

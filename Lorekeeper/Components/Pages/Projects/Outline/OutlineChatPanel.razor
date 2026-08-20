@@ -1,4 +1,5 @@
 @using Lorekeeper.ChatTurns
+@using Lorekeeper.Components.Chat
 @using Lorekeeper.Models
 @using Lorekeeper.Llm
 @using Lorekeeper.Outline
@@ -28,8 +29,13 @@
              InputChanged="SetInput"
              Placeholder="Type a message..."
              Running="@_running"
-             ComposerDisabled="@(ChatDisabled || _running || PendingChangeCount > 0)"
-             SendDisabled="@(ChatDisabled || string.IsNullOrWhiteSpace(_input) || PendingChangeCount > 0)"
+             ComposerDisabled="@(ChatDisabled || _running || _resetting || PendingChangeCount > 0)"
+             SendDisabled="@(ChatDisabled || _resetting || string.IsNullOrWhiteSpace(_input) || PendingChangeCount > 0)"
+             ModelOptions="@_modelOptions"
+             SelectedProviderId="@PickerSelectedProviderId"
+             UnavailableModelLabel="@(_chatSelection?.Message ?? "No available chat models")"
+             ModelPickerDisabled="@(_loading || _running || _resetting || ChatTurns.GetActiveTurn(ProjectId) is not null)"
+             OnModelChanged="OnModelChangedAsync"
              OnSend="SendAsync"
              OnStop="CancelAsync"
              ForceScrollKey="@_forceScrollKey"
@@ -38,7 +44,7 @@
              ResetComposerKey="@_resetComposerKey">
     <HeaderActions>
             <button type="button" class="btn btn-link btn-sm outline-chat-reset" title="Start over"
-                    disabled="@(ChatDisabled || _running || PendingChangeCount > 0)" @onclick="ResetAsync">Reset</button>
+                    disabled="@(_loading || _running || _resetting || PendingChangeCount > 0)" @onclick="ResetAsync">Reset</button>
     </HeaderActions>
     <ExtraControls>
         @if (ChatDisabled)
@@ -91,6 +97,7 @@
     private string _input = string.Empty;
     private bool _running;
     private bool _loading = true;
+    private bool _resetting;
     private bool _approvalEnabled;
     private bool _showPendingChanges;
     private string? _error;
@@ -102,9 +109,14 @@
     private string _systemPrompt = string.Empty;
     private ChatTranscriptTokenCount _conversationTokens = ChatTranscriptTokenCount.Empty;
     private ChatProviderAvailability? _chatAvailability;
+    private IReadOnlyList<ChatModelPickerOption> _modelOptions = [];
+    private ChatModelSelection? _chatSelection;
+    private int? _selectedProviderId;
+    private ChatTurnModelSnapshot? _activeTurnModel;
     private IReadOnlyDictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>> _messageImages = new Dictionary<Guid, IReadOnlyList<ChatTurnImageAttachment>>();
 
-    private string? ActiveModelId => _chatAvailability?.Provider?.ModelId;
+    private string? ActiveModelId => _activeTurnModel?.ModelId ?? _chatAvailability?.Provider?.ModelId;
+    private int? PickerSelectedProviderId => _activeTurnModel?.ProviderId ?? _selectedProviderId ?? _chatSelection?.ProviderId;
     private int ConversationTokenLimit => TokenLimits.Resolve(ActiveModelId);
     private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(change => change.Status is AiChangeStatus.Pending or AiChangeStatus.Conflict));
     private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
@@ -127,7 +139,8 @@
         {
             _conversation = await Collab.GetOrCreateAsync(ProjectId);
             _systemPrompt = await Collab.GetSystemPromptAsync(ProjectId);
-            _chatAvailability = await Providers.GetDefaultChatProviderAvailabilityAsync();
+            _selectedProviderId = _conversation.SelectedProviderId;
+            await LoadChatProviderStateAsync();
             _messages = (await Collab.LoadMessagesAsync(_conversation.Id)).ToList();
             _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Outline);
             _approvalEnabled = await Collab.GetAiChangeApprovalEnabledAsync(ProjectId);
@@ -136,6 +149,8 @@
             RebuildRenderable(activeTurn?.StartedAtUtc);
             if (activeTurn is not null)
             {
+                _activeTurnModel = activeTurn.Model;
+                IncludeActiveModelOption();
                 _renderable.Add(new ChatRenderableMessage(
                     Id: Guid.NewGuid(),
                     Role: ChatMessageRole.User,
@@ -148,6 +163,7 @@
             }
             else
             {
+                _activeTurnModel = null;
                 _pendingUserText = null;
                 _live = null;
                 _running = false;
@@ -183,6 +199,15 @@
             return;
         }
 
+        if (_chatAvailability?.Provider is not { } provider)
+        {
+            _error = ChatDisabledMessage;
+            return;
+        }
+
+        var model = Snapshot(provider);
+        _activeTurnModel = model;
+        IncludeActiveModelOption();
         _input = string.Empty;
         _running = true;
         _error = null;
@@ -200,7 +225,7 @@
         RequestScroll(force: true);
         StateHasChanged();
 
-        if (!ChatTurns.TryStart(ProjectId, text, submission.Images))
+        if (!ChatTurns.TryStart(ProjectId, text, submission.Images, model))
         {
             _error = "Outline Chat already has a running turn.";
             ReleaseRunningUi();
@@ -218,6 +243,9 @@
         if (_listeningTurnId == activeTurn.TurnId)
             return;
 
+        _activeTurnModel = activeTurn.Model;
+        IncludeActiveModelOption();
+        UpdateConversationTokenCount();
         StopListening();
         var subscription = ChatTurns.Subscribe(ProjectId);
         if (subscription is null)
@@ -325,6 +353,7 @@
         var hadLive = _live is not null;
         _running = false;
         _live = null;
+        _activeTurnModel = null;
         UpdateConversationTokenCount();
         RequestScroll();
         if (wasRunning || hadLive)
@@ -333,17 +362,32 @@
 
     private async Task ResetAsync()
     {
-        if (_running) return;
-        await Collab.ResetAsync(ProjectId);
-        _loadedProjectId = null; // force reload
-        await LoadAsync();
-        if (OnOutlineChanged.HasDelegate)
-            await OnOutlineChanged.InvokeAsync();
+        if (_running || _resetting) return;
+        _resetting = true;
+        try
+        {
+            await Collab.ResetAsync(ProjectId);
+            _loadedProjectId = null; // force reload
+            await LoadAsync();
+            if (OnOutlineChanged.HasDelegate)
+                await OnOutlineChanged.InvokeAsync();
+        }
+        catch (InvalidOperationException exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _resetting = false;
+        }
     }
 
     private async Task ReloadFromDbAsync()
     {
         if (_conversation is null) return;
+        _conversation = await Collab.GetOrCreateAsync(ProjectId);
+        _selectedProviderId = _conversation.SelectedProviderId;
+        await LoadChatProviderStateAsync();
         _messages = (await Collab.LoadMessagesAsync(_conversation.Id)).ToList();
         _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Outline);
         RebuildRenderable();
@@ -408,6 +452,50 @@
                 Parts: BuildPartsWithImages(m, byCallId)));
         }
     }
+
+    private async Task LoadChatProviderStateAsync()
+    {
+        _chatAvailability = await Collab.GetChatProviderAvailabilityAsync(ProjectId);
+        _chatSelection = await Providers.ResolveChatModelSelectionAsync(_selectedProviderId);
+        _modelOptions = (await Providers.ListChatModelOptionsAsync())
+            .Select(option => new ChatModelPickerOption(option.ProviderId, option.Label, option.IsDefault))
+            .ToList();
+    }
+
+    private void IncludeActiveModelOption()
+    {
+        if (_activeTurnModel is not { } active
+            || _modelOptions.Any(option => option.ProviderId == active.ProviderId))
+            return;
+        _modelOptions = _modelOptions
+            .Append(new ChatModelPickerOption(active.ProviderId, active.Label, IsDefault: false))
+            .ToList();
+    }
+
+    private async Task OnModelChangedAsync(int? providerId)
+    {
+        if (_loading || _running || _resetting) return;
+        if (ChatTurns.GetActiveTurn(ProjectId) is not null)
+        {
+            _error = "Outline Chat is still working in another window. Stop or wait for that turn before changing its model.";
+            return;
+        }
+        try
+        {
+            await Collab.SetSelectedProviderAsync(ProjectId, providerId);
+            _selectedProviderId = await Providers.NormalizeChatModelSelectionAsync(providerId);
+            await LoadChatProviderStateAsync();
+            UpdateConversationTokenCount();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private ChatTurnModelSnapshot Snapshot(LlmProvider provider) =>
+        new(provider.Id, provider.ModelId, _chatSelection?.Label ?? $"{provider.DisplayName ?? provider.Name} · {provider.ModelId}");
 
     private List<ChatMessagePart> BuildPartsWithImages(OutlineMessage message, IReadOnlyDictionary<string, OutlineMessage> byCallId)
     {

@@ -28,6 +28,8 @@ public sealed class ResearchConversationRepository(AppDatabaseReadOperation oper
     public async Task AddConversationAsync(ResearchConversation conversation, CancellationToken cancellationToken = default) =>
         await operation.Db.ResearchConversations.AddAsync(conversation, cancellationToken);
 
+    public void UpdateSelectedProvider(ResearchConversation conversation) => operation.Db.MarkModified(conversation);
+
     public async Task AddMessageAsync(ResearchMessage message, CancellationToken cancellationToken = default)
     {
         TouchConversation(message.ConversationId);

@@ -17,7 +17,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.ImagesChat;
 
 public sealed class ImagesChatService(
-    IChatImageAttachmentService imageAttachments, IAppDatabaseOperationFactory database, IContextBuilder contextBuilder, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IProjectImageService projectImages, IEntityVisualContextService entityVisualContext, ImagesChatTools tools, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<ImagesChatService> logger) : IImagesChatService
+    IChatImageAttachmentService imageAttachments, IAppDatabaseOperationFactory database, IContextBuilder contextBuilder, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IProjectImageService projectImages, IEntityVisualContextService entityVisualContext, ImagesChatTools tools, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<ImagesChatService> logger) : IImagesChatService
 {
     public const string ImagesWorkflowInstructions = """
         You are Lorekeeper's Images assistant: the concept-art and visual-canon workspace for a long-form writing project.
@@ -76,6 +76,50 @@ public sealed class ImagesChatService(
         var conversations = databaseOperation.Repositories.ProjectImageConversations;
         return await conversations.LoadMessagesAsync(conversationId, cancellationToken);
     }
+
+    public async Task<ChatProviderAvailability> GetChatProviderAvailabilityAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var conversation = await databaseOperation.Repositories.ProjectImageConversations
+            .GetByProjectIdAsync(projectId, cancellationToken);
+        var selection = await providerService.ResolveChatModelSelectionAsync(
+            conversation?.SelectedProviderId,
+            cancellationToken);
+        return selection.IsAvailable && selection.Provider is { } provider
+            ? ChatProviderAvailability.Available(provider)
+            : ChatProviderAvailability.Unavailable(selection.Message, selection.Provider);
+    }
+
+    public async Task SetSelectedProviderAsync(
+        Guid projectId,
+        int? providerId,
+        CancellationToken cancellationToken = default)
+    {
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Images));
+        if (maintenance is null)
+            throw new InvalidOperationException("Images Chat is still working in another window. Stop or wait for that turn before changing its model.");
+
+        if (providerId is int)
+        {
+            var selection = await providerService.ResolveChatModelSelectionAsync(providerId, cancellationToken);
+            if (!selection.IsAvailable || selection.Provider is null)
+                throw new InvalidOperationException(selection.Message);
+        }
+
+        var normalizedProviderId = await providerService.NormalizeChatModelSelectionAsync(providerId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var conversation = await databaseOperation.Repositories.ProjectImageConversations
+            .GetByProjectIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException("Images Chat is not initialized.");
+        conversation.SelectedProviderId = normalizedProviderId;
+        conversation.UpdatedAt = DateTime.UtcNow;
+        databaseOperation.Repositories.ProjectImageConversations.UpdateSelectedProvider(conversation);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<ProjectImageChatAttachmentView>> ListAttachmentsAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
@@ -173,6 +217,9 @@ public sealed class ImagesChatService(
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Images));
+        if (maintenance is null)
+            throw new InvalidOperationException("Images Chat is still working in another window. Stop or wait for that turn before resetting the conversation.");
         await imageAttachments.ClearSurfaceAsync(projectId, ChatTurnSurface.Images, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
@@ -188,20 +235,29 @@ public sealed class ImagesChatService(
         Guid projectId,
         string userText,
         IReadOnlyList<Guid> imageIds,
+        int providerId,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userText))
             throw new ArgumentException("Message cannot be empty.", nameof(userText));
 
         var conversation = await GetOrCreateAsync(projectId, cancellationToken);
-        var providerAvailability = await providerService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
-        if (!providerAvailability.IsAvailable || providerAvailability.Provider is null)
+        var persistedSelection = await providerService.ResolveChatModelSelectionAsync(
+            conversation.SelectedProviderId,
+            cancellationToken);
+        if (!persistedSelection.IsAvailable || persistedSelection.Provider is not { } persistedProvider)
         {
-            yield return new ImagesChatTurnError(providerAvailability.Message, Cancelled: false);
+            yield return new ImagesChatTurnError(persistedSelection.Message, Cancelled: false);
             yield break;
         }
 
-        var chatProvider = providerAvailability.Provider;
+        if (persistedProvider.Id != providerId)
+        {
+            yield return new ImagesChatTurnError(ChatModelSelectionMessages.Changed, Cancelled: false);
+            yield break;
+        }
+
+        var chatProvider = persistedProvider;
         var visionReady = await providerService.IsVisionProviderWorkingAsync(chatProvider.Id, cancellationToken);
         if (imageIds.Count > 0 && !visionReady)
         {

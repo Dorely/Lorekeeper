@@ -9,6 +9,7 @@ public interface IProjectImageConversationRepository : IChatMessageStore<Project
     Task<List<ProjectImageMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
     Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default);
     Task AddConversationAsync(ProjectImageConversation conversation, CancellationToken cancellationToken = default);
+    void UpdateSelectedProvider(ProjectImageConversation conversation);
     Task AddMessageVisualsAsync(IEnumerable<ProjectImageMessageVisual> visuals, CancellationToken cancellationToken = default);
     void RemoveConversation(ProjectImageConversation conversation);
 }

@@ -9,5 +9,6 @@ public interface IWritingCoachConversationRepository : IChatMessageStore<Writing
     Task<List<WritingCoachMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
     Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default);
     Task AddConversationAsync(WritingCoachConversation conversation, CancellationToken cancellationToken = default);
+    void UpdateSelectedProvider(WritingCoachConversation conversation);
     void RemoveConversation(WritingCoachConversation conversation);
 }

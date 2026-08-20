@@ -14,13 +14,19 @@ public enum ChatTurnSurface
 
 public readonly record struct ChatTurnKey(Guid ProjectId, ChatTurnSurface Surface);
 
+public sealed record ChatTurnModelSnapshot(
+    int ProviderId,
+    string ModelId,
+    string Label);
+
 public sealed record ChatTurnSnapshot(
     Guid TurnId,
     Guid ProjectId,
     ChatTurnSurface Surface,
     DateTime StartedAtUtc,
     string UserText,
-    IReadOnlyList<ChatTurnImageAttachment> Images);
+    IReadOnlyList<ChatTurnImageAttachment> Images,
+    ChatTurnModelSnapshot? Model);
 
 public interface IChatTurnSubscription<TUpdate> : IAsyncDisposable
 {
@@ -54,7 +60,8 @@ public sealed class ChatTurnRuntime
         Func<CancellationToken, IAsyncEnumerable<TUpdate>> run,
         Func<Exception, bool, TUpdate> errorUpdateFactory,
         Func<TUpdate, bool> isTerminalUpdate,
-        IReadOnlyList<ChatTurnImageAttachment>? images = null)
+        IReadOnlyList<ChatTurnImageAttachment>? images = null,
+        ChatTurnModelSnapshot? model = null)
     {
         ActiveTurn<TUpdate> turn;
         lock (_lock)
@@ -62,7 +69,7 @@ public sealed class ChatTurnRuntime
             if (_activeTurns.ContainsKey(key) || _maintenanceKeys.Contains(key))
                 return false;
 
-            turn = new ActiveTurn<TUpdate>(key, userText, images ?? [], RemoveSubscription);
+            turn = new ActiveTurn<TUpdate>(key, userText, images ?? [], model, RemoveSubscription);
             _activeTurns[key] = turn;
         }
 
@@ -193,6 +200,7 @@ public sealed class ChatTurnRuntime
         ChatTurnKey key,
         string userText,
         IReadOnlyList<ChatTurnImageAttachment> images,
+        ChatTurnModelSnapshot? model,
         Action<ChatTurnKey, Guid, Guid> removeSubscription) : IActiveTurn
     {
         private readonly object _turnLock = new();
@@ -207,7 +215,7 @@ public sealed class ChatTurnRuntime
         public DateTime StartedAtUtc { get; } = DateTime.UtcNow;
         public CancellationToken CancellationToken => _cts.Token;
         public bool IsCancellationRequested => _cts.IsCancellationRequested;
-        public ChatTurnSnapshot Snapshot => new(TurnId, Key.ProjectId, Key.Surface, StartedAtUtc, userText, images);
+        public ChatTurnSnapshot Snapshot => new(TurnId, Key.ProjectId, Key.Surface, StartedAtUtc, userText, images, model);
 
         public IChatTurnSubscription<TUpdate> Subscribe()
         {

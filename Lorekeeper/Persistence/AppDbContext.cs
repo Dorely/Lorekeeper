@@ -320,6 +320,7 @@ public class AppDbContext(
         modelBuilder.Entity<OutlineConversation>(entity =>
         {
             entity.HasIndex(e => e.ProjectId).IsUnique();
+            entity.Property(e => e.SelectedProviderId);
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.OutlineConversations)
@@ -342,6 +343,7 @@ public class AppDbContext(
         modelBuilder.Entity<EditorConversation>(entity =>
         {
             entity.HasIndex(e => e.ProjectId).IsUnique();
+            entity.Property(e => e.SelectedProviderId);
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.EditorConversations)
@@ -481,6 +483,7 @@ public class AppDbContext(
         modelBuilder.Entity<WritingCoachConversation>(entity =>
         {
             entity.HasIndex(e => e.ProjectId).IsUnique();
+            entity.Property(e => e.SelectedProviderId);
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.WritingCoachConversations)
@@ -503,6 +506,7 @@ public class AppDbContext(
         modelBuilder.Entity<ResearchConversation>(entity =>
         {
             entity.HasIndex(e => e.ProjectId).IsUnique();
+            entity.Property(e => e.SelectedProviderId);
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.ResearchConversations)
@@ -525,6 +529,7 @@ public class AppDbContext(
         modelBuilder.Entity<PublishConversation>(entity =>
         {
             entity.HasIndex(e => e.ProjectId).IsUnique();
+            entity.Property(e => e.SelectedProviderId);
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.PublishConversations)
@@ -558,6 +563,7 @@ public class AppDbContext(
         modelBuilder.Entity<ProjectImageConversation>(entity =>
         {
             entity.HasIndex(e => e.ProjectId).IsUnique();
+            entity.Property(e => e.SelectedProviderId);
 
             entity.HasOne(e => e.Project)
                 .WithMany(p => p.ProjectImageConversations)

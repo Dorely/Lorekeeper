@@ -2,6 +2,7 @@ using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Images;
 using Lorekeeper.Manuscripts;
+using Lorekeeper.Llm;
 
 namespace Lorekeeper.EditorChat;
 
@@ -9,6 +10,8 @@ public interface IEditorChatService
 {
     Task<EditorConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<EditorMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
+    Task<ChatProviderAvailability> GetChatProviderAvailabilityAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task SetSelectedProviderAsync(Guid projectId, int? providerId, CancellationToken cancellationToken = default);
     Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task SetAiChangeApprovalEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default);
     Task<EditorContestSettings> GetContestSettingsAsync(Guid projectId, CancellationToken cancellationToken = default);
@@ -19,7 +22,7 @@ public interface IEditorChatService
     Task ResolveContestCandidateLineAsync(Guid projectId, Guid chapterId, ContestCandidateReviewLineResolution request, CancellationToken cancellationToken = default);
     Task KeepContestCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default);
     Task FinishContestBatchAsync(Guid batchId, CancellationToken cancellationToken = default);
-    IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(Guid projectId, Guid? currentChapterId, Guid? currentCompositionId, EditorContentTarget contentTarget, string userText, IReadOnlyList<Guid> imageIds, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(Guid projectId, Guid? currentChapterId, Guid? currentCompositionId, EditorContentTarget contentTarget, string userText, IReadOnlyList<Guid> imageIds, int providerId, CancellationToken cancellationToken = default);
     Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default);
 }
 

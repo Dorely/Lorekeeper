@@ -9,6 +9,7 @@ public interface IPublishConversationRepository : IChatMessageStore<PublishMessa
     Task<List<PublishMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
     Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default);
     Task AddConversationAsync(PublishConversation conversation, CancellationToken cancellationToken = default);
+    void UpdateSelectedProvider(PublishConversation conversation);
     Task AddMessageVisualsAsync(IEnumerable<PublishMessageVisual> visuals, CancellationToken cancellationToken = default);
     void RemoveConversation(PublishConversation conversation);
 }

@@ -19,6 +19,8 @@ public interface IPublishChatService
 {
     Task<PublishConversation> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<PublishMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
+    Task<ChatProviderAvailability> GetChatProviderAvailabilityAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task SetSelectedProviderAsync(Guid projectId, int? providerId, CancellationToken cancellationToken = default);
     Task<string> GetSystemPromptAsync(Guid projectId, Guid? selectedEditionId, PublishAssistantWorkspaceContext? workspaceContext = null, CancellationToken cancellationToken = default);
     IAsyncEnumerable<PublishTurnUpdate> SendAsync(
         Guid projectId,
@@ -26,6 +28,7 @@ public interface IPublishChatService
         PublishAssistantWorkspaceContext? workspaceContext,
         string userText,
         IReadOnlyList<Guid> imageIds,
+        int providerId,
         CancellationToken cancellationToken = default);
     Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default);
 }
@@ -171,6 +174,50 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         var conversations = databaseOperation.Repositories.PublishConversations;
         return await conversations.LoadMessagesAsync(conversationId, cancellationToken);
     }
+
+    public async Task<ChatProviderAvailability> GetChatProviderAvailabilityAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var conversation = await databaseOperation.Repositories.PublishConversations
+            .GetByProjectIdAsync(projectId, cancellationToken);
+        var selection = await providers.ResolveChatModelSelectionAsync(
+            conversation?.SelectedProviderId,
+            cancellationToken);
+        return selection.IsAvailable && selection.Provider is { } provider
+            ? ChatProviderAvailability.Available(provider)
+            : ChatProviderAvailability.Unavailable(selection.Message, selection.Provider);
+    }
+
+    public async Task SetSelectedProviderAsync(
+        Guid projectId,
+        int? providerId,
+        CancellationToken cancellationToken = default)
+    {
+        using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Publish));
+        if (maintenance is null)
+            throw new InvalidOperationException("Publish Assistant is still working in another window. Stop or wait for that turn before changing its model.");
+
+        if (providerId is int)
+        {
+            var selection = await providers.ResolveChatModelSelectionAsync(providerId, cancellationToken);
+            if (!selection.IsAvailable || selection.Provider is null)
+                throw new InvalidOperationException(selection.Message);
+        }
+
+        var normalizedProviderId = await providers.NormalizeChatModelSelectionAsync(providerId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var conversation = await databaseOperation.Repositories.PublishConversations
+            .GetByProjectIdAsync(projectId, cancellationToken)
+            ?? throw new InvalidOperationException("Publish Assistant is not initialized.");
+        conversation.SelectedProviderId = normalizedProviderId;
+        conversation.UpdatedAt = DateTime.UtcNow;
+        databaseOperation.Repositories.PublishConversations.UpdateSelectedProvider(conversation);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<string> GetSystemPromptAsync(
         Guid projectId,
         Guid? selectedEditionId,
@@ -276,20 +323,29 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         PublishAssistantWorkspaceContext? workspaceContext,
         string userText,
         IReadOnlyList<Guid> imageIds,
+        int providerId,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userText))
             throw new ArgumentException("Message cannot be empty.", nameof(userText));
 
         var conversation = await GetOrCreateAsync(projectId, cancellationToken);
-        var availability = await providers.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
-        if (!availability.IsAvailable || availability.Provider is null)
+        var persistedSelection = await providers.ResolveChatModelSelectionAsync(
+            conversation.SelectedProviderId,
+            cancellationToken);
+        if (!persistedSelection.IsAvailable || persistedSelection.Provider is not { } persistedProvider)
         {
-            yield return new PublishTurnError(availability.Message, Cancelled: false);
+            yield return new PublishTurnError(persistedSelection.Message, Cancelled: false);
             yield break;
         }
 
-        var visionReady = await providers.IsVisionProviderWorkingAsync(availability.Provider.Id, cancellationToken);
+        if (persistedProvider.Id != providerId)
+        {
+            yield return new PublishTurnError(ChatModelSelectionMessages.Changed, Cancelled: false);
+            yield break;
+        }
+
+        var visionReady = await providers.IsVisionProviderWorkingAsync(persistedProvider.Id, cancellationToken);
         if (imageIds.Count > 0 && !visionReady)
         {
             yield return new PublishTurnError(
@@ -332,7 +388,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         var setupCancelled = false;
         try
         {
-            chat = await clients.CreateChatClientAsync(availability.Provider.Id, cancellationToken);
+            chat = await clients.CreateChatClientAsync(persistedProvider.Id, cancellationToken);
             assistantContext = new PublishAssistantContext(projectId, conversation.Id, selectedEditionId, workspaceContext, visionReady, cancellationToken);
             aiTools = await tools.BuildAsync(assistantContext, cancellationToken);
             systemPrompt = await GetSystemPromptAsync(projectId, selectedEditionId, workspaceContext, cancellationToken);
@@ -587,7 +643,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     }
                 }
 
-                if (turnEngine.TryCompactContext(messages, availability.Provider.ModelId) is { } compaction)
+                if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId) is { } compaction)
                 {
                     manifest.Add(new ChatToolCallManifest(
                         compaction.CallId,

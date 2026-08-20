@@ -11,6 +11,9 @@ public interface ILlmProviderService
     Task<ChatProviderAvailability> GetDefaultChatProviderAvailabilityAsync(CancellationToken cancellationToken = default);
     Task<VisionProviderAvailability> GetDefaultVisionProviderAvailabilityAsync(CancellationToken cancellationToken = default);
     Task<List<LlmProvider>> ListWorkingChatProvidersAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ChatModelOption>> ListChatModelOptionsAsync(CancellationToken cancellationToken = default);
+    Task<ChatModelSelection> ResolveChatModelSelectionAsync(int? selectedProviderId, CancellationToken cancellationToken = default);
+    Task<int?> NormalizeChatModelSelectionAsync(int? selectedProviderId, CancellationToken cancellationToken = default);
     Task<List<LlmProvider>> ListWorkingVisionProvidersAsync(CancellationToken cancellationToken = default);
     Task<bool> IsChatProviderWorkingAsync(int providerId, CancellationToken cancellationToken = default);
     Task<bool> IsVisionProviderWorkingAsync(int providerId, CancellationToken cancellationToken = default);
@@ -50,6 +53,48 @@ public sealed record ChatProviderAvailability(
 
     public static ChatProviderAvailability Unavailable(string message, LlmProvider? provider = null) =>
         new(false, provider, message);
+}
+
+/// <summary>
+/// A saved provider/model row that currently has a successful, credential-valid
+/// chat-readiness snapshot. The connection and model labels are kept separate so
+/// the picker can identify both parts of a shared connection.
+/// </summary>
+public sealed record ChatModelOption(
+    int ProviderId,
+    string ConnectionLabel,
+    string ModelLabel,
+    string Label,
+    bool IsDefault,
+    LlmProvider Provider)
+{
+    public bool IsAvailable => true;
+}
+
+/// <summary>
+/// Resolves one conversation's nullable override to the exact provider row that
+/// will be used for its next turn. Explicit overrides never fall back to another
+/// row; a missing or no-longer-working row is returned as an unavailable override.
+/// </summary>
+public sealed record ChatModelSelection(
+    int? SelectedProviderId,
+    LlmProvider? Provider,
+    string? ConnectionLabel,
+    string? ModelLabel,
+    string? Label,
+    bool IsAvailable,
+    bool IsDefault,
+    bool IsOverride,
+    bool IsUnavailableOverride,
+    string Message)
+{
+    public int? ProviderId => Provider?.Id;
+}
+
+public static class ChatModelSelectionMessages
+{
+    public const string Changed =
+        "The chat model selection changed before this turn started. Choose the current model in the picker and try again.";
 }
 
 public sealed record VisionProviderAvailability(

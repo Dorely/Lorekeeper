@@ -5,7 +5,7 @@ namespace Lorekeeper.ImagesChat;
 
 public interface IImagesChatTurnRunner
 {
-    bool TryStart(Guid projectId, string userText, IReadOnlyList<ChatTurnImageAttachment> images);
+    bool TryStart(Guid projectId, string userText, IReadOnlyList<ChatTurnImageAttachment> images, ChatTurnModelSnapshot model);
     ChatTurnSnapshot? GetActiveTurn(Guid projectId);
     IChatTurnSubscription<ImagesChatTurnUpdate>? Subscribe(Guid projectId);
     void Cancel(Guid projectId);
@@ -17,14 +17,15 @@ public sealed class ImagesChatTurnRunner(
 {
     private static ChatTurnKey Key(Guid projectId) => new(projectId, ChatTurnSurface.Images);
 
-    public bool TryStart(Guid projectId, string userText, IReadOnlyList<ChatTurnImageAttachment> images) =>
+    public bool TryStart(Guid projectId, string userText, IReadOnlyList<ChatTurnImageAttachment> images, ChatTurnModelSnapshot model) =>
         runtime.TryStart(
             Key(projectId),
             userText,
-            cancellationToken => RunAsync(projectId, userText, images.Select(image => image.ImageId).ToList(), cancellationToken),
+            cancellationToken => RunAsync(projectId, userText, images.Select(image => image.ImageId).ToList(), model.ProviderId, cancellationToken),
             static (ex, cancelled) => new ImagesChatTurnError(cancelled ? "Cancelled." : ex.Message, cancelled),
             static update => update is ImagesChatAssistantMessageCompleted or ImagesChatTurnError,
-            images);
+            images,
+            model);
 
     public ChatTurnSnapshot? GetActiveTurn(Guid projectId) => runtime.GetActiveTurn(Key(projectId));
 
@@ -36,11 +37,12 @@ public sealed class ImagesChatTurnRunner(
         Guid projectId,
         string userText,
         IReadOnlyList<Guid> imageIds,
+        int providerId,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var chat = scope.ServiceProvider.GetRequiredService<IImagesChatService>();
-        await foreach (var update in chat.SendAsync(projectId, userText, imageIds, cancellationToken))
+        await foreach (var update in chat.SendAsync(projectId, userText, imageIds, providerId, cancellationToken))
             yield return update;
     }
 }

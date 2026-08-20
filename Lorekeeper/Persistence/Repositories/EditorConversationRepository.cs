@@ -70,6 +70,8 @@ public sealed class EditorConversationRepository(AppDatabaseReadOperation operat
     public async Task AddConversationAsync(EditorConversation conversation, CancellationToken cancellationToken = default) =>
         await operation.Db.EditorConversations.AddAsync(conversation, cancellationToken);
 
+    public void UpdateSelectedProvider(EditorConversation conversation) => operation.Db.MarkModified(conversation);
+
     public async Task AddMessageAsync(EditorMessage message, CancellationToken cancellationToken = default)
     {
         TouchConversation(message.ConversationId);

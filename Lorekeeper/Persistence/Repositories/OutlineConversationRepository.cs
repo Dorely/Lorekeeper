@@ -26,6 +26,8 @@ public class OutlineConversationRepository(AppDatabaseReadOperation operation) :
     public async Task AddConversationAsync(OutlineConversation conversation, CancellationToken cancellationToken = default) =>
         await operation.Db.OutlineConversations.AddAsync(conversation, cancellationToken);
 
+    public void UpdateSelectedProvider(OutlineConversation conversation) => operation.Db.MarkModified(conversation);
+
     public async Task AddMessageAsync(OutlineMessage message, CancellationToken cancellationToken = default)
     {
         TouchConversation(message.ConversationId);

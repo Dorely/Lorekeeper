@@ -1,4 +1,5 @@
 using Lorekeeper.Models;
+using Lorekeeper.Llm;
 
 namespace Lorekeeper.Outline;
 
@@ -19,6 +20,8 @@ public interface IOutlineCollaborationService
     /// Loads the persisted message log for a conversation, ordered ascending.
     /// </summary>
     Task<IReadOnlyList<OutlineMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
+    Task<ChatProviderAvailability> GetChatProviderAvailabilityAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task SetSelectedProviderAsync(Guid projectId, int? providerId, CancellationToken cancellationToken = default);
     Task<string> GetSystemPromptAsync(Guid projectId, CancellationToken cancellationToken = default);
 
     Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default);
@@ -33,7 +36,7 @@ public interface IOutlineCollaborationService
     /// Sends a user message and yields incremental updates as the assistant responds and
     /// invokes tools. Persists user / assistant / tool messages as the turn progresses.
     /// </summary>
-    IAsyncEnumerable<OutlineTurnUpdate> SendAsync(Guid projectId, string userText, IReadOnlyList<Guid> imageIds, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<OutlineTurnUpdate> SendAsync(Guid projectId, string userText, IReadOnlyList<Guid> imageIds, int providerId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Wipes the project's conversation. The next <see cref="GetOrCreateAsync"/> call

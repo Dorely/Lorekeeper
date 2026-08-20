@@ -1,0 +1,55 @@
+@namespace Lorekeeper.Components.Chat
+
+<div class="chat-model-picker @(HasUnavailableSelection ? "chat-model-picker-unavailable" : null)"
+     title="Choose the model for this chat">
+    <label class="visually-hidden" for="@_selectId">Chat model</label>
+    <select id="@_selectId"
+            class="form-select form-select-sm chat-model-picker-select"
+            value="@SelectedValue"
+            disabled="@Disabled"
+            aria-label="Chat model"
+            @onchange="OnSelectionChangedAsync">
+        @if (HasUnavailableSelection)
+        {
+            <option value="@SelectedValue" disabled="true">@UnavailableLabel</option>
+        }
+        else if (Options.Count == 0)
+        {
+            <option value="" disabled="true">@UnavailableLabel</option>
+        }
+
+        @foreach (var option in Options)
+        {
+            <option value="@option.ProviderId">@OptionLabel(option)</option>
+        }
+    </select>
+</div>
+
+@code {
+    private static long _nextSelectId;
+    private readonly string _selectId = $"chat-model-picker-{Interlocked.Increment(ref _nextSelectId)}";
+
+    [Parameter] public IReadOnlyList<ChatModelPickerOption> Options { get; set; } = [];
+    [Parameter] public int? SelectedProviderId { get; set; }
+    [Parameter] public string UnavailableLabel { get; set; } = "No available chat models";
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public EventCallback<int?> OnChanged { get; set; }
+
+    private string SelectedValue => SelectedProviderId?.ToString() ?? string.Empty;
+
+    private bool HasUnavailableSelection =>
+        SelectedProviderId is int selectedProviderId
+            ? Options.All(option => option.ProviderId != selectedProviderId)
+            : Options.Count > 0 && Options.All(option => !option.IsDefault);
+
+    private static string OptionLabel(ChatModelPickerOption option) =>
+        option.IsDefault ? $"{option.Label} (default)" : option.Label;
+
+    private Task OnSelectionChangedAsync(ChangeEventArgs args)
+    {
+        var selectedProviderId = int.TryParse(args.Value?.ToString(), out var parsedProviderId)
+            ? parsedProviderId
+            : (int?)null;
+        return OnChanged.InvokeAsync(selectedProviderId);
+    }
+}
