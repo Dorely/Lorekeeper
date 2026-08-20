@@ -39,18 +39,22 @@ export function startRailPositioning(rail) {
             positionRailCards(rail);
         });
     };
-    workspace.addEventListener("scroll", schedule, true);
+    const handleScroll = event => {
+        if (event.target === rail || rail.contains(event.target)) return;
+        schedule();
+    };
+    workspace.addEventListener("scroll", handleScroll, true);
     window.addEventListener("resize", schedule);
     const resizeObserver = new ResizeObserver(schedule);
     resizeObserver.observe(workspace);
-    railObservers.set(rail, {workspace, schedule, resizeObserver, get frame() { return frame; }});
+    railObservers.set(rail, {workspace, schedule, handleScroll, resizeObserver, get frame() { return frame; }});
     schedule();
 }
 
 export function stopRailPositioning(rail) {
     const observer = railObservers.get(rail);
     if (!observer) return;
-    observer.workspace.removeEventListener("scroll", observer.schedule, true);
+    observer.workspace.removeEventListener("scroll", observer.handleScroll, true);
     window.removeEventListener("resize", observer.schedule);
     observer.resizeObserver.disconnect();
     if (observer.frame !== null) cancelAnimationFrame(observer.frame);

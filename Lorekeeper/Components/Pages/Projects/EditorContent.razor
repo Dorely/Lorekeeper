@@ -802,6 +802,7 @@ else
                         <ContextFeedPanel @ref="_contextPanel"
                                           Project="Project"
                                           CurrentChapter="_current"
+                                          ContentTarget="_contentTarget"
                                           OnContextChanged="OnContextChangedAsync" />
                     </div>
                 </section>
@@ -1158,6 +1159,7 @@ else
         _saveState = SaveState.Idle;
         _saveError = null;
         _pendingRememberChapterId = targetId;
+        await RefreshContextSurfacesAsync();
 
         if (await ActivateCurrentContestReviewAsync())
             return true;
@@ -1733,11 +1735,10 @@ else
         ? "annotation-workspace"
         : "annotation-workspace annotation-workspace--plain";
 
-    private Task OnEditorAnnotationsChangedAsync()
+    private async Task OnEditorAnnotationsChangedAsync()
     {
         _annotationRefreshSignal++;
-        _contextRefreshSignal++;
-        return InvokeAsync(StateHasChanged);
+        await RefreshContextSurfacesAsync();
     }
 
     private async Task SynchronizeAnnotationsAsync(IReadOnlyList<ManuscriptAnnotationView> annotations)
@@ -1746,7 +1747,7 @@ else
             await _bodyEditor.SetAnnotationsAsync(annotations);
         _readPreview?.SetAnnotations(annotations);
         _annotationRefreshSignal++;
-        _contextRefreshSignal++;
+        await RefreshContextSurfacesAsync();
     }
 
     private Task<ManuscriptAnnotationRange?> GetAnnotationSelectionAsync() => _mode switch

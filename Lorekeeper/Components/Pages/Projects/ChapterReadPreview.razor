@@ -65,7 +65,7 @@
     @if (_noteOpen)
     {
         <div class="chapter-preview-note-form" role="dialog" aria-label="Add review note">
-            <label>Note<textarea class="form-control form-control-sm" maxlength="8000" rows="3" @bind="_noteDraft"></textarea></label>
+            <label>Note<textarea class="form-control form-control-sm" maxlength="8000" rows="3" @bind="_noteDraft" @bind:event="oninput"></textarea></label>
             <button type="button" class="btn btn-sm btn-primary" @onclick="() => CreateReadAnnotationAsync(ManuscriptAnnotationKind.Note)">Add note</button>
             <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelReadNote">Cancel</button>
         </div>
@@ -594,6 +594,10 @@
         _loadCancellation?.Dispose();
         _loadCancellation = null;
         if (_selectionModule is not null)
-            await _selectionModule.DisposeAsync();
+        {
+            try { await _selectionModule.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+            catch (OperationCanceledException) { }
+        }
     }
 }

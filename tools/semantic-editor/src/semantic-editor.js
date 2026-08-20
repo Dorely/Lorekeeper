@@ -2517,6 +2517,10 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             controlByTitle("Find and replace"),
             controlByTitle("Toggle document outline"),
         ]),
+        toolGroup("Review", [
+            controlByTitle("Highlight the selected text for review"),
+            controlByTitle("Add a review note to the selected text"),
+        ]),
         toolGroup("Text and typography", [
             controlBySelect("Block style"),
             controlBySelect("Heading level"),

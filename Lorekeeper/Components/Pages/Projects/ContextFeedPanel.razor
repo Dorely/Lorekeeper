@@ -1,5 +1,6 @@
 @using Lorekeeper.Context
 @using Lorekeeper.Chapters
+@using Lorekeeper.Manuscripts
 @using Lorekeeper.Models
 @using Lorekeeper.Projects
 @using Lorekeeper.Tokens
@@ -121,6 +122,7 @@ else
 @code {
     [Parameter, EditorRequired] public Project Project { get; set; } = null!;
     [Parameter] public Chapter? CurrentChapter { get; set; }
+    [Parameter] public EditorContentTarget ContentTarget { get; set; } = EditorContentTarget.Core;
     [Parameter] public EventCallback OnContextChanged { get; set; }
 
     private ContextAssembly? _assembly;
@@ -131,6 +133,7 @@ else
     private string? _error;
     private Guid _loadedProjectId;
     private Guid? _loadedChapterId;
+    private EditorContentTarget _loadedContentTarget = EditorContentTarget.Core;
     private CancellationTokenSource? _reloadCts;
     private int _reloadVersion;
     private bool _disposed;
@@ -138,11 +141,14 @@ else
     protected override void OnParametersSet()
     {
         var chapterId = CurrentChapter?.Id;
-        if (_loadedProjectId == Project.Id && _loadedChapterId == chapterId)
+        if (_loadedProjectId == Project.Id
+            && _loadedChapterId == chapterId
+            && _loadedContentTarget == ContentTarget)
             return;
 
         _loadedProjectId = Project.Id;
         _loadedChapterId = chapterId;
+        _loadedContentTarget = ContentTarget;
         _assembly = null;
         StartReload();
     }
@@ -157,6 +163,7 @@ else
             reload.Version,
             reload.ProjectId,
             reload.ChapterId,
+            reload.ContentTarget,
             reload.CancellationToken);
     }
 
@@ -169,6 +176,7 @@ else
             reload.Version,
             reload.ProjectId,
             reload.ChapterId,
+            reload.ContentTarget,
             reload.CancellationToken));
     }
 
@@ -202,6 +210,7 @@ else
             ++_reloadVersion,
             Project.Id,
             CurrentChapter?.Id,
+            ContentTarget,
             _reloadCts.Token);
     }
 
@@ -209,6 +218,7 @@ else
         int version,
         Guid projectId,
         Guid? chapterId,
+        EditorContentTarget contentTarget,
         CancellationToken cancellationToken)
     {
         try
@@ -229,7 +239,7 @@ else
                 throw new InvalidOperationException("Chapter was not found in this project.");
 
             var assembly = await context.BuildAsync(
-                new ContextBuildRequest(project, chapter),
+                new ContextBuildRequest(project, chapter, ContentTarget: contentTarget),
                 cancellationToken);
             if (!IsCurrentReload(version, cancellationToken)) return;
 
@@ -373,5 +383,6 @@ else
         int Version,
         Guid ProjectId,
         Guid? ChapterId,
+        EditorContentTarget ContentTarget,
         CancellationToken CancellationToken);
 }

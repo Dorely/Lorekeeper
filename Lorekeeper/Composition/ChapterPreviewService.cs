@@ -1052,7 +1052,10 @@ public sealed class ChapterPreviewService(
                 line.Runs.FirstOrDefault()?.Face,
                 line.Runs.Select(run => new ChapterPreviewRun(run.Text, run.Face, run.Underline, run.Strikethrough, run.BaselineShiftEm, run.SizeScale)).ToArray(),
                 line.WordSpacing, line.CharacterSpacing,
-                lineOrder.GetValueOrDefault(index, page.PaintOrder.Length + index))).ToArray(),
+                lineOrder.GetValueOrDefault(index, page.PaintOrder.Length + index),
+                line.SemanticId,
+                line.SourceStartUtf16,
+                line.SourceEndUtf16)).ToArray(),
             page.Images.Select((image, index) => (image, index))
                 .Where(item => Guid.TryParse(item.image.AssetId, out _))
                 .Select(item => new ChapterPreviewImage(
@@ -1110,7 +1113,24 @@ public sealed class ChapterPreviewService(
     private sealed record LayoutDiagnostic(string Severity, string Code, string Message);
     private sealed record LayoutPage(string Kind, double WidthPoints, double HeightPoints, string? PageLabel, string? Bookmark, LayoutPaint[] PaintOrder, LayoutLine[] Lines, LayoutImage[] Images, LayoutShape[] Shapes);
     private sealed record LayoutPaint(string Kind, int Index);
-    private sealed record LayoutLine(string Text, double Size, double X, double Y, double WordSpacing, double CharacterSpacing, double RotationDegrees, double? RotationOriginX, double? RotationOriginY, double Opacity, double[]? FillRgb, string? SemanticRole, int? LinkPage, LayoutRun[] Runs);
+    private sealed record LayoutLine(
+        string Text,
+        double Size,
+        double X,
+        double Y,
+        double WordSpacing,
+        double CharacterSpacing,
+        double RotationDegrees,
+        double? RotationOriginX,
+        double? RotationOriginY,
+        double Opacity,
+        double[]? FillRgb,
+        string? SemanticRole,
+        string? SemanticId,
+        int? SourceStartUtf16,
+        int? SourceEndUtf16,
+        int? LinkPage,
+        LayoutRun[] Runs);
     private sealed record LayoutRun(string Text, string Face, bool Underline, bool Strikethrough, double BaselineShiftEm, double SizeScale);
     private sealed record LayoutImage(string AssetId, double X, double Y, double Width, double Height, double RotationDegrees, double Opacity, string Fit, double CropX, double CropY, double SourceLeftFraction, double SourceWidthFraction, string? AltText, bool Decorative);
     private sealed record LayoutShape(string Kind, double X, double Y, double Width, double Height, double RotationDegrees, double Opacity, double[]? FillRgb, double[]? StrokeRgb, double StrokeWidth);
