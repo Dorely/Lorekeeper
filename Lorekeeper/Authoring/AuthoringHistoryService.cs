@@ -1,6 +1,8 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -40,11 +42,19 @@ public sealed record AuthoringHistoryMutation(
     string Snapshot,
     string SelectionJson);
 
+public sealed record LatestAssistantReviewSnapshot(
+    string BeforeManuscriptJson,
+    string BeforeHash,
+    Guid? AssistantTurnId,
+    string ActionLabel,
+    DateTime CapturedAt);
+
 public interface IAuthoringHistoryService
 {
     Task<AuthoringHistoryState> ReadStateAsync(AuthoringHistoryTarget target, CancellationToken cancellationToken = default);
+    Task<LatestAssistantReviewSnapshot?> ReadLatestAssistantReviewAsync(AuthoringHistoryTarget target, CancellationToken cancellationToken = default);
     Task<AuthoringHistoryState> RecordManualActionAsync(AuthoringHistoryTarget target, string beforeSnapshot, string afterSnapshot, string actionLabel, string selectionJson = "", CancellationToken cancellationToken = default);
-    Task<AuthoringHistoryState> UpdateAssistantTurnBatchAsync(AuthoringHistoryTarget target, Guid turnId, string beforeSnapshot, string afterSnapshot, string actionLabel, string selectionJson = "", CancellationToken cancellationToken = default);
+    Task<AuthoringHistoryState> UpdateAssistantTurnBatchAsync(AuthoringHistoryTarget target, Guid turnId, string beforeSnapshot, string afterSnapshot, string actionLabel, string selectionJson = "", string? reviewBaselineManuscriptJson = null, CancellationToken cancellationToken = default);
     Task<AuthoringHistoryState> FinalizeAssistantTurnBatchAsync(AuthoringHistoryTarget target, Guid turnId, AuthoringTurnHistoryBatchStatus status, CancellationToken cancellationToken = default);
     Task FinalizeAssistantTurnAsync(Guid turnId, AuthoringTurnHistoryBatchStatus status, CancellationToken cancellationToken = default);
     Task FinalizeAbandonedBatchesAsync(CancellationToken cancellationToken = default);
@@ -76,6 +86,48 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
             : await BuildStateAsync(stream, cancellationToken);
     }
 
+    public async Task<LatestAssistantReviewSnapshot?> ReadLatestAssistantReviewAsync(
+        AuthoringHistoryTarget target,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        var stream = await QueryStream(databaseOperation.Db, target)
+            .AsNoTracking()
+            .SingleOrDefaultAsync(cancellationToken);
+        if (stream is null)
+            return null;
+
+        var durable = ReadDurableReviewSnapshot(stream);
+        var entries = await db.AuthoringHistoryEntries
+            .AsNoTracking()
+            .Where(item => item.StreamId == stream.Id && item.Sequence <= stream.CursorSequence)
+            .OrderBy(item => item.Sequence)
+            .ToListAsync(cancellationToken);
+        foreach (var entry in entries
+            .Where(item => item.Origin == AuthoringHistoryOrigin.Assistant)
+            .OrderByDescending(item => item.Sequence))
+        {
+            if (durable is not null && entry.CreatedAt <= durable.CapturedAt)
+                return durable;
+
+            var preceding = entries.LastOrDefault(item => item.Sequence < entry.Sequence);
+            var beforePayload = preceding?.ResultSnapshot ?? stream.BaselineSnapshot;
+            var beforeJson = TryReadManuscriptJson(Decompress(beforePayload));
+            if (beforeJson is null || !IsValidReviewManuscript(stream, beforeJson))
+                continue;
+
+            return new LatestAssistantReviewSnapshot(
+                beforeJson,
+                Hash(beforeJson),
+                entry.AssistantTurnId,
+                NormalizeLabel(entry.ActionLabel, "Assistant change"),
+                entry.CreatedAt);
+        }
+
+        return durable;
+    }
+
     public Task<AuthoringHistoryState> RecordManualActionAsync(
         AuthoringHistoryTarget target,
         string beforeSnapshot,
@@ -92,6 +144,7 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
         string afterSnapshot,
         string actionLabel,
         string selectionJson = "",
+        string? reviewBaselineManuscriptJson = null,
         CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
@@ -101,6 +154,12 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
             throw new ArgumentException("An assistant turn ID is required.", nameof(turnId));
 
         var stream = await GetOrCreateStreamAsync(target, beforeSnapshot, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(reviewBaselineManuscriptJson)
+            && !IsValidReviewManuscript(stream, reviewBaselineManuscriptJson))
+        {
+            throw new InvalidDataException(
+                $"The assistant review baseline does not belong to history document {stream.DocumentId:D}.");
+        }
         var batch = await db.AuthoringTurnHistoryBatches
             .Include(item => item.Dependencies)
             .SingleOrDefaultAsync(item => item.StreamId == stream.Id && item.AssistantTurnId == turnId, cancellationToken);
@@ -126,6 +185,7 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
                 AfterSnapshot = Compress(afterSnapshot),
                 AfterHash = Hash(afterSnapshot),
                 SelectionJson = selectionJson,
+                ReviewBaselineManuscriptJson = reviewBaselineManuscriptJson,
                 CreatedAt = now,
                 UpdatedAt = now
             };
@@ -159,6 +219,11 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
             batch.AfterHash = Hash(afterSnapshot);
             batch.SelectionJson = selectionJson;
             batch.ActionLabel = NormalizeLabel(actionLabel, batch.ActionLabel);
+            if (string.IsNullOrWhiteSpace(batch.ReviewBaselineManuscriptJson)
+                && !string.IsNullOrWhiteSpace(reviewBaselineManuscriptJson))
+            {
+                batch.ReviewBaselineManuscriptJson = reviewBaselineManuscriptJson;
+            }
             batch.UpdatedAt = now;
             ReplaceDependencies(batch, Decompress(batch.BeforeSnapshot), afterSnapshot);
             AddStreamDependency(stream, batch);
@@ -509,14 +574,22 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
+        var finalizedAt = DateTime.UtcNow;
         if (!FixedEquals(batch.BeforeHash, batch.AfterHash))
+        {
             await AppendEntryAsync(stream, Decompress(batch.AfterSnapshot), batch.ActionLabel, AuthoringHistoryOrigin.Assistant, batch.AssistantTurnId, batch.SelectionJson, cancellationToken);
+            var baseline = string.IsNullOrWhiteSpace(batch.ReviewBaselineManuscriptJson)
+                ? TryReadManuscriptJson(Decompress(batch.BeforeSnapshot))
+                : batch.ReviewBaselineManuscriptJson;
+            PromoteLatestAssistantReview(stream, baseline, batch.AssistantTurnId, batch.ActionLabel, finalizedAt);
+        }
         db.AuthoringHistoryDependencies.RemoveRange(batch.Dependencies);
         batch.Dependencies.Clear();
         batch.BeforeSnapshot = [];
         batch.AfterSnapshot = [];
+        batch.ReviewBaselineManuscriptJson = null;
         batch.Status = status;
-        batch.FinalizedAt = DateTime.UtcNow;
+        batch.FinalizedAt = finalizedAt;
         batch.UpdatedAt = batch.FinalizedAt.Value;
     }
 
@@ -533,8 +606,23 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
         var overflow = entries.Count + db.ChangeTracker.Entries<AuthoringHistoryEntry>().Count(item => item.State == EntityState.Added && item.Entity.StreamId == stream.Id) - MaxActions;
         if (overflow <= 0)
             return;
+        var precedingSnapshot = stream.BaselineSnapshot;
+        var durable = ReadDurableReviewSnapshot(stream);
         foreach (var entry in entries.Take(overflow))
         {
+            if (entry.Origin == AuthoringHistoryOrigin.Assistant
+                && (durable is null || entry.CreatedAt > durable.CapturedAt))
+            {
+                var legacyBaseline = TryReadManuscriptJson(Decompress(precedingSnapshot));
+                PromoteLatestAssistantReview(
+                    stream,
+                    legacyBaseline,
+                    entry.AssistantTurnId,
+                    entry.ActionLabel,
+                    entry.CreatedAt);
+                durable = ReadDurableReviewSnapshot(stream);
+            }
+            precedingSnapshot = entry.ResultSnapshot;
             stream.BaselineSnapshot = entry.ResultSnapshot;
             stream.BaselineHash = entry.ResultHash;
             stream.FirstSequence = entry.Sequence + 1;
@@ -548,6 +636,76 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
                 Decompress(stream.BaselineSnapshot),
                 Decompress(firstRetained.ResultSnapshot));
             AddStreamDependency(stream, firstRetained);
+        }
+    }
+
+    private static LatestAssistantReviewSnapshot? ReadDurableReviewSnapshot(AuthoringHistoryStream stream)
+    {
+        if (stream.LatestReviewCapturedAt is not DateTime capturedAt
+            || string.IsNullOrWhiteSpace(stream.LatestReviewBeforeJson)
+            || string.IsNullOrWhiteSpace(stream.LatestReviewBeforeHash)
+            || !FixedEquals(Hash(stream.LatestReviewBeforeJson), stream.LatestReviewBeforeHash)
+            || !IsValidReviewManuscript(stream, stream.LatestReviewBeforeJson))
+        {
+            return null;
+        }
+
+        return new LatestAssistantReviewSnapshot(
+            stream.LatestReviewBeforeJson,
+            stream.LatestReviewBeforeHash,
+            stream.LatestReviewAssistantTurnId,
+            stream.LatestReviewActionLabel ?? "Assistant change",
+            capturedAt);
+    }
+
+    private static bool IsValidReviewManuscript(AuthoringHistoryStream stream, string manuscriptJson)
+    {
+        if (stream.DocumentKind is not (
+            AuthoringHistoryDocumentKind.CoreChapter
+            or AuthoringHistoryDocumentKind.EditionChapter))
+        {
+            return false;
+        }
+
+        try
+        {
+            return ManuscriptCodec.Deserialize(manuscriptJson).ManuscriptId == stream.DocumentId;
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidDataException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private static void PromoteLatestAssistantReview(
+        AuthoringHistoryStream stream,
+        string? beforeManuscriptJson,
+        Guid? assistantTurnId,
+        string actionLabel,
+        DateTime capturedAt)
+    {
+        if (string.IsNullOrWhiteSpace(beforeManuscriptJson))
+            return;
+
+        if (!IsValidReviewManuscript(stream, beforeManuscriptJson))
+            return;
+
+        stream.LatestReviewBeforeJson = beforeManuscriptJson;
+        stream.LatestReviewBeforeHash = Hash(beforeManuscriptJson);
+        stream.LatestReviewAssistantTurnId = assistantTurnId;
+        stream.LatestReviewActionLabel = NormalizeLabel(actionLabel, "Assistant change");
+        stream.LatestReviewCapturedAt = capturedAt;
+    }
+
+    private static string? TryReadManuscriptJson(string payload)
+    {
+        try
+        {
+            return AuthoringSnapshotCodec.ReadManuscript(payload).ManuscriptJson;
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidDataException)
+        {
+            return null;
         }
     }
 

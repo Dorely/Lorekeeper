@@ -2,15 +2,27 @@ namespace Lorekeeper.Authoring;
 
 using Lorekeeper.Models;
 
-public sealed record AuthoringMutationContext(Guid AssistantTurnId, string ActionLabel)
+public sealed record AuthoringMutationContext(
+    Guid AssistantTurnId,
+    string ActionLabel,
+    IReadOnlyDictionary<Guid, string>? ReviewBaselineManuscripts = null)
 {
     public bool IsAssistant => AssistantTurnId != Guid.Empty;
+
+    public string? ReviewBaselineFor(Guid chapterId) =>
+        ReviewBaselineManuscripts is not null
+        && ReviewBaselineManuscripts.TryGetValue(chapterId, out var manuscriptJson)
+            ? manuscriptJson
+            : null;
 }
 
 public interface IAuthoringMutationContextAccessor
 {
     AuthoringMutationContext? Current { get; }
-    IDisposable BeginAssistantTurn(Guid turnId, string actionLabel);
+    IDisposable BeginAssistantTurn(
+        Guid turnId,
+        string actionLabel,
+        IReadOnlyDictionary<Guid, string>? reviewBaselineManuscripts = null);
 }
 
 public sealed class AuthoringMutationContextAccessor : IAuthoringMutationContextAccessor
@@ -24,11 +36,14 @@ public sealed class AuthoringMutationContextAccessor : IAuthoringMutationContext
 
     public AuthoringMutationContext? Current => Ambient.Value ?? _current;
 
-    public IDisposable BeginAssistantTurn(Guid turnId, string actionLabel)
+    public IDisposable BeginAssistantTurn(
+        Guid turnId,
+        string actionLabel,
+        IReadOnlyDictionary<Guid, string>? reviewBaselineManuscripts = null)
     {
         var previous = _current;
         var previousAmbient = Ambient.Value;
-        _current = new AuthoringMutationContext(turnId, actionLabel);
+        _current = new AuthoringMutationContext(turnId, actionLabel, reviewBaselineManuscripts);
         Ambient.Value = _current;
         return new Scope(() =>
         {
@@ -56,11 +71,12 @@ public sealed class AuthoringTurnHistoryScope : IAsyncDisposable
         IAuthoringHistoryService history,
         IAuthoringMutationContextAccessor mutationContext,
         Guid turnId,
-        string actionLabel)
+        string actionLabel,
+        IReadOnlyDictionary<Guid, string>? reviewBaselineManuscripts = null)
     {
         _history = history;
         _turnId = turnId;
-        _mutationScope = mutationContext.BeginAssistantTurn(turnId, actionLabel);
+        _mutationScope = mutationContext.BeginAssistantTurn(turnId, actionLabel, reviewBaselineManuscripts);
     }
 
     public void Complete() => _status = AuthoringTurnHistoryBatchStatus.Completed;

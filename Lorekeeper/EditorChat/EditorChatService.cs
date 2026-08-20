@@ -429,6 +429,7 @@ public sealed class EditorChatService(
                 await SafePersistAsync(activeAssistant);
 
                 authoringTurn.Complete();
+                await authoringTurn.DisposeAsync();
                 yield return new EditorChatAssistantMessageCompleted(activeAssistant.Id);
                 yield break;
             }
@@ -713,6 +714,7 @@ public sealed class EditorChatService(
                     }
 
                     authoringTurn.Complete();
+                    await authoringTurn.DisposeAsync();
                     yield return new EditorChatAssistantMessageCompleted(activeAssistant.Id);
                     yield break;
                 }

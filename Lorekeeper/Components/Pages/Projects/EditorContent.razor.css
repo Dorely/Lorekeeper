@@ -633,6 +633,46 @@
     justify-content: flex-end;
 }
 
+.chapter-review-toolbar--applied {
+    border-bottom-color: rgba(25, 135, 84, 0.28);
+}
+
+.review-block--applied-structured {
+    margin: 0.75rem 0.75rem 0.75rem 0;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: 0.35rem;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+}
+
+.review-structured-diff {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.55rem;
+    padding: 0.55rem;
+}
+
+.review-structured-diff-old,
+.review-structured-diff-new {
+    min-width: 0;
+    padding: 0.45rem;
+    border-radius: 0.25rem;
+    font-size: 0.78rem;
+}
+
+.review-structured-diff-old { background: rgba(220, 53, 69, 0.08); }
+.review-structured-diff-new { background: rgba(25, 135, 84, 0.09); }
+.review-structured-diff pre {
+    max-height: 14rem;
+    margin: 0.35rem 0 0;
+    overflow: auto;
+    white-space: pre-wrap;
+    font: inherit;
+}
+
+@media (max-width: 900px) {
+    .review-structured-diff { grid-template-columns: minmax(0, 1fr); }
+}
+
 .chapter-review-summary {
     color: var(--bs-secondary-color, #6c757d);
 }

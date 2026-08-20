@@ -96,6 +96,11 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   instead of preventing the chapter from opening. Editor Chat can also
   request a Press-rendered page image by stable paragraph block or chapter-local
   typeset page to visually verify applied typography and typesetting.
+- Review remains populated after an assistant manuscript pass is applied: it
+  compares the live Current chapter with the saved Before snapshot from before
+  that pass, so later manual edits remain visible. Pending and Contest review
+  actions retain priority, while the applied comparison is read-only and covers
+  body, structure/formatting, Figures, and Designed Page references.
 - Exact-target review highlights and notes in Edit and Read, with a collapsible
   margin rail, deterministic outdated-anchor handling, assistant context and
   completion tools, and no effect on manuscript formatting or publication output.

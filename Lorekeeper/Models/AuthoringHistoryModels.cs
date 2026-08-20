@@ -50,6 +50,14 @@ public class AuthoringHistoryStream
     public long Revision { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    // The latest assistant review anchor is deliberately separate from Undo/Redo
+    // history. It pins the manuscript as it existed before the assistant pass so
+    // Review can compare it with the live document after later manual edits.
+    public string? LatestReviewBeforeJson { get; set; }
+    public string? LatestReviewBeforeHash { get; set; }
+    public Guid? LatestReviewAssistantTurnId { get; set; }
+    public string? LatestReviewActionLabel { get; set; }
+    public DateTime? LatestReviewCapturedAt { get; set; }
     public ICollection<AuthoringHistoryEntry> Entries { get; set; } = [];
     public ICollection<AuthoringTurnHistoryBatch> TurnBatches { get; set; } = [];
 }
@@ -86,6 +94,9 @@ public class AuthoringTurnHistoryBatch
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? FinalizedAt { get; set; }
+    // Set only for reviewed/staged manuscript turns. Direct assistant turns use
+    // BeforeSnapshot when they are finalized.
+    public string? ReviewBaselineManuscriptJson { get; set; }
     public ICollection<AuthoringHistoryDependency> Dependencies { get; set; } = [];
 }
 

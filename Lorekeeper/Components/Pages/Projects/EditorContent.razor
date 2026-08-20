@@ -2,6 +2,7 @@
 @using System.Text.Json.Serialization
 @using System.Globalization
 @using Lorekeeper.Chapters
+@using Lorekeeper.Authoring
 @using Lorekeeper.Composition
 @using Lorekeeper.Components.Pages.Projects.Outline
 @using Lorekeeper.Context
@@ -533,7 +534,39 @@ else
                         }
                         else
                         {
-                            @if (!_reviewProjection.HasChanges)
+                            @if (_reviewProjection.IsReadOnly)
+                            {
+                                <div class="chapter-review-toolbar chapter-review-toolbar--applied">
+                                    <div class="chapter-review-summary">
+                                        <strong>Applied assistant changes</strong>
+                                        <span>Current vs Before</span>
+                                    </div>
+                                    <div class="small text-muted">This comparison includes later manual edits.</div>
+                                </div>
+                                @if (_reviewProjection.IsNoDifference)
+                                {
+                                    <div class="chapter-review-notice">Current matches the saved Before snapshot; there are no differences right now.</div>
+                                }
+                                else
+                                {
+                                    @foreach (var diffSection in _reviewProjection.Sections.Where(item => !string.Equals(item.Key, "Body", StringComparison.OrdinalIgnoreCase)))
+                                    {
+                                        <section class="review-block review-block--applied-structured">
+                                            <header class="review-block-header">
+                                                <div class="review-block-title-wrap">
+                                                    <div class="review-block-title">@diffSection.Label</div>
+                                                    <div class="review-block-summary">Current vs Before</div>
+                                                </div>
+                                            </header>
+                                            <div class="review-structured-diff">
+                                                <div class="review-structured-diff-old"><strong>Before</strong><pre>@diffSection.OldText</pre></div>
+                                                <div class="review-structured-diff-new"><strong>Current</strong><pre>@diffSection.NewText</pre></div>
+                                            </div>
+                                        </section>
+                                    }
+                                }
+                            }
+                            else if (!_reviewProjection.HasChanges)
                             {
                                 <div class="chapter-review-notice">No pending staged chapter-body changes for this chapter.</div>
                             }
@@ -606,53 +639,56 @@ else
                                                     <div class="review-block-title">@block.Title</div>
                                                     <div class="review-block-summary">@block.Summary</div>
                                                 </div>
-                                                <div class="review-block-actions">
-                                                    <button type="button"
-                                                            class="btn btn-sm btn-outline-secondary"
-                                                            disabled="@_reviewBusy"
-                                                            @onclick="() => ToggleReviewBlockAsync(block.Id)">
-                                                        Hide
-                                                    </button>
-                                                    <button type="button"
-                                                            class="btn btn-sm btn-outline-primary"
-                                                            disabled="@_reviewBusy"
-                                                            @onclick="() => KeepReviewBlockAsync(block)">
-                                                        Keep
-                                                    </button>
-                                                    <button type="button"
-                                                            class="btn btn-sm btn-outline-danger"
-                                                            disabled="@_reviewBusy"
-                                                            @onclick="() => RejectReviewBlockAsync(block)">
-                                                        Reject
-                                                    </button>
-                                                    @if (block.CanEdit)
-                                                    {
-                                                        @if (IsEditingReviewBlock(block))
+                                                @if (!_reviewProjection.IsReadOnly)
+                                                {
+                                                    <div class="review-block-actions">
+                                                        <button type="button"
+                                                                class="btn btn-sm btn-outline-secondary"
+                                                                disabled="@_reviewBusy"
+                                                                @onclick="() => ToggleReviewBlockAsync(block.Id)">
+                                                            Hide
+                                                        </button>
+                                                        <button type="button"
+                                                                class="btn btn-sm btn-outline-primary"
+                                                                disabled="@_reviewBusy"
+                                                                @onclick="() => KeepReviewBlockAsync(block)">
+                                                            Keep
+                                                        </button>
+                                                        <button type="button"
+                                                                class="btn btn-sm btn-outline-danger"
+                                                                disabled="@_reviewBusy"
+                                                                @onclick="() => RejectReviewBlockAsync(block)">
+                                                            Reject
+                                                        </button>
+                                                        @if (block.CanEdit)
                                                         {
-                                                            <button type="button"
-                                                                    class="btn btn-sm btn-outline-primary"
-                                                                    disabled="@_reviewBusy"
-                                                                    @onclick="() => SaveReviewBlockEditAsync(block)">
-                                                                Save edit
-                                                            </button>
-                                                            <button type="button"
-                                                                    class="btn btn-sm btn-outline-secondary"
-                                                                    disabled="@_reviewBusy"
-                                                                    @onclick="CancelReviewBlockEdit">
-                                                                Cancel
-                                                            </button>
+                                                            @if (IsEditingReviewBlock(block))
+                                                            {
+                                                                <button type="button"
+                                                                        class="btn btn-sm btn-outline-primary"
+                                                                        disabled="@_reviewBusy"
+                                                                        @onclick="() => SaveReviewBlockEditAsync(block)">
+                                                                    Save edit
+                                                                </button>
+                                                                <button type="button"
+                                                                        class="btn btn-sm btn-outline-secondary"
+                                                                        disabled="@_reviewBusy"
+                                                                        @onclick="CancelReviewBlockEdit">
+                                                                    Cancel
+                                                                </button>
+                                                            }
+                                                            else
+                                                            {
+                                                                <button type="button"
+                                                                        class="btn btn-sm btn-outline-secondary"
+                                                                        disabled="@_reviewBusy"
+                                                                        @onclick="() => BeginReviewBlockEdit(block)">
+                                                                    Edit
+                                                                </button>
+                                                            }
                                                         }
-                                                        else
-                                                        {
-                                                            <button type="button"
-                                                                    class="btn btn-sm btn-outline-secondary"
-                                                                    disabled="@_reviewBusy"
-                                                                    @onclick="() => BeginReviewBlockEdit(block)">
-                                                                Edit
-                                                            </button>
-                                                        }
-                                                    }
-                                                </div>
+                                                    </div>
+                                                }
                                             </header>
 
                                             @if (IsRejectingReviewBlock(block))
@@ -722,7 +758,7 @@ else
                                             </span>
                                             <span class="review-line-text">@RenderReviewLine(line)</span>
                                             <span class="review-line-actions">
-                                                @if (line.PrimaryBlockId is { } blockId)
+                                                @if (!_reviewProjection.IsReadOnly && line.PrimaryBlockId is { } blockId)
                                                 {
                                                     <button type="button"
                                                             class="@ReviewLineActionClass(blockId)"
@@ -952,6 +988,7 @@ else
     private bool _chapterTokenIsExact = true;
     private bool _reviewLoading;
     private ReviewProjection? _reviewProjection;
+    private LatestAssistantReviewSnapshot? _latestAssistantReview;
     private ContestReviewProjection? _contestReviewProjection;
     private IReadOnlyList<ContestBatch> _contestReviewBatches = [];
     private IReadOnlyList<AiChangeBatch> _reviewPendingBatches = [];
@@ -1048,6 +1085,7 @@ else
             _contestReviewProjection = null;
             _reviewPendingBatches = [];
             _reviewProjection = null;
+            _latestAssistantReview = null;
             ResetInlineReviewState();
             _chapters = (await Chapters.ListAsync(Project.Id)).ToList();
             _acts = (await Acts.ListAsync(Project.Id)).ToList();
@@ -2094,7 +2132,14 @@ else
             _contestReviewProjection = null;
             await ChangeApproval.PrepareChapterBodyLineReviewAsync(Project.Id, _current.Id);
             _reviewPendingBatches = await Chat.ListPendingChangesAsync(Project.Id);
-            _reviewProjection = BuildReviewProjection(_current, _reviewPendingBatches);
+            _latestAssistantReview = await Manuscripts.GetLatestAssistantReviewAsync(_contentTarget, _current.Id);
+            _reviewProjection = BuildReviewProjection(
+                _current,
+                _reviewPendingBatches,
+                _latestAssistantReview,
+                _editorDocument is { } editorDocument
+                    ? ManuscriptCodec.Deserialize(editorDocument.ManuscriptJson, editorDocument.ChapterId, editorDocument.ManuscriptRevision)
+                    : null);
             _reviewError = null;
             PruneInlineReviewState();
         }
@@ -2103,7 +2148,14 @@ else
             _contestReviewBatches = await Chat.ListCurrentContestBatchesAsync(Project.Id);
             _contestReviewProjection = null;
             _reviewPendingBatches = await Chat.ListPendingChangesAsync(Project.Id);
-            _reviewProjection = BuildReviewProjection(_current, _reviewPendingBatches);
+            _latestAssistantReview = await Manuscripts.GetLatestAssistantReviewAsync(_contentTarget, _current.Id);
+            _reviewProjection = BuildReviewProjection(
+                _current,
+                _reviewPendingBatches,
+                _latestAssistantReview,
+                _editorDocument is { } editorDocument
+                    ? ManuscriptCodec.Deserialize(editorDocument.ManuscriptJson, editorDocument.ChapterId, editorDocument.ManuscriptRevision)
+                    : null);
             _reviewError = ex.Message;
             PruneInlineReviewState();
         }
@@ -2171,6 +2223,7 @@ else
         _mode = EditorMode.Review;
         _reviewPendingBatches = [];
         _reviewProjection = null;
+        _latestAssistantReview = null;
         _contestReviewProjection = BuildContestReviewProjection(contest);
         _reviewError = null;
         PruneInlineReviewState();
@@ -2235,7 +2288,7 @@ else
 
     private IReadOnlyList<ReviewBlock> ReviewBlocksBeforeLine(ReviewProjection? projection, int lineNumber) =>
         projection?.Blocks
-            .Where(block => IsReviewBlockExpanded(block.Id) && ReviewBlockRenderLine(block) == lineNumber)
+            .Where(block => (projection.IsReadOnly || IsReviewBlockExpanded(block.Id)) && ReviewBlockRenderLine(block) == lineNumber)
             .ToList()
         ?? [];
 
@@ -2244,7 +2297,7 @@ else
 
     private bool ShouldRenderReviewLine(ReviewProjection? projection, ReviewLine line) =>
         projection?.Blocks.Any(block =>
-            IsReviewBlockExpanded(block.Id)
+            (projection.IsReadOnly || IsReviewBlockExpanded(block.Id))
             && ReviewBlockCoversLine(block, line.LineNumber)) != true;
 
     private bool ShouldRenderReviewLine(ReviewLine line) =>
@@ -2539,23 +2592,70 @@ else
         }
     }
 
-    private static ReviewProjection BuildReviewProjection(Chapter chapter, IReadOnlyList<AiChangeBatch> batches)
+    private static ReviewProjection BuildReviewProjection(
+        Chapter chapter,
+        IReadOnlyList<AiChangeBatch> batches,
+        LatestAssistantReviewSnapshot? latestAssistantReview = null,
+        ManuscriptDocument? liveDocument = null,
+        ReviewDiff? comparisonDiff = null,
+        bool isReadOnly = false)
     {
         var changes = CurrentChapterManuscriptChanges(batches, chapter.Id);
+        if (changes.Count == 0 && latestAssistantReview is not null)
+        {
+            try
+            {
+                var before = ManuscriptCodec.Deserialize(latestAssistantReview.BeforeManuscriptJson, chapter.Id, 0);
+                var current = liveDocument ?? chapter.Manuscript;
+                if (AiChangeReviewDiffBuilder.TryBuild(before, current, chapter.Title, out var appliedDiff))
+                {
+                    var appliedChapter = new Chapter
+                    {
+                        Id = chapter.Id,
+                        ProjectId = chapter.ProjectId,
+                        Title = chapter.Title,
+                        ManuscriptJson = ManuscriptCodec.Serialize(current),
+                        ManuscriptRevision = current.Revision,
+                    };
+                    return BuildReviewProjection(
+                        appliedChapter,
+                        [],
+                        comparisonDiff: appliedDiff,
+                        isReadOnly: true);
+                }
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidDataException or ArgumentException)
+            {
+                // A malformed legacy anchor should not prevent the normal Review
+                // surface from opening.
+            }
+        }
+
         var proposedBody = changes.Count == 0
             ? chapter.PlainText
             : ReadChapterManuscriptChange(AiChangeReviewDrafts.EffectiveAfterJson(changes[^1]))?.PlainText ?? chapter.PlainText;
         var lines = ChapterFormatting.SplitLines(proposedBody);
-        var displayLines = lines.Count == 0 && changes.Count > 0 ? [string.Empty] : lines;
+        var displayLines = lines.Count == 0 && (changes.Count > 0 || comparisonDiff is not null)
+            ? [string.Empty]
+            : lines;
         var width = Math.Max(4, displayLines.Count.ToString().Length);
         var drafts = displayLines
             .Select((text, index) => new ReviewLineDraft(index + 1, text))
             .ToList();
         var blocks = new List<ReviewBlock>();
+        IReadOnlyList<DiffSection> sections = comparisonDiff?.Sections ?? [];
 
-        if (changes.Count > 0 && AiChangeReviewDiffBuilder.TryBuild(changes, out var diff))
+        if (comparisonDiff is null
+            && changes.Count > 0
+            && AiChangeReviewDiffBuilder.TryBuild(changes, out var pendingDiff))
         {
-            var fallbackChangeId = changes[^1].Id;
+            comparisonDiff = pendingDiff;
+            sections = pendingDiff.Sections;
+        }
+
+        if (comparisonDiff is { } diff)
+        {
+            var fallbackChangeId = changes.Count > 0 ? changes[^1].Id : Guid.Empty;
             foreach (var section in diff.Sections.Where(section => string.Equals(section.Key, "Body", StringComparison.OrdinalIgnoreCase)))
             {
                 for (var hunkIndex = 0; hunkIndex < section.Hunks.Count; hunkIndex++)
@@ -2595,8 +2695,8 @@ else
             .ToList();
 
         return new ReviewProjection(
-            HasChanges: changes.Count > 0,
-            PendingChangeCount: orderedBlocks.Count > 0 ? orderedBlocks.Count : changes.Count,
+            HasChanges: isReadOnly ? sections.Count > 0 : changes.Count > 0,
+            PendingChangeCount: isReadOnly ? 0 : orderedBlocks.Count > 0 ? orderedBlocks.Count : changes.Count,
             PendingChangeIds: changes.Select(change => change.Id).ToList(),
             LineNumberFormat: new string('0', width),
             Blocks: orderedBlocks,
@@ -2610,7 +2710,10 @@ else
                     draft.BlockIds.Distinct(StringComparer.Ordinal).ToList(),
                     draft.BlockIds.FirstOrDefault(),
                     MarkerTitle(draft)))
-                .ToList());
+                .ToList(),
+            Sections: sections,
+            IsReadOnly: isReadOnly,
+            IsNoDifference: isReadOnly && sections.Count == 0);
     }
 
     private static ContestReviewProjection BuildContestReviewProjection(ContestBatch batch)
@@ -3905,7 +4008,10 @@ else
         IReadOnlyList<Guid> PendingChangeIds,
         string LineNumberFormat,
         IReadOnlyList<ReviewBlock> Blocks,
-        IReadOnlyList<ReviewLine> Lines);
+        IReadOnlyList<ReviewLine> Lines,
+        IReadOnlyList<DiffSection> Sections,
+        bool IsReadOnly = false,
+        bool IsNoDifference = false);
 
     private sealed record ContestReviewProjection(
         ContestBatch Batch,

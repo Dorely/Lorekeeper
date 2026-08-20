@@ -69,7 +69,7 @@
 | `ProjectExportCompatibilityTests.cs` | Current v24 manuscript/annotation/source/page-setup/composition/Core Book/publication-section/order/PDF-presentation/edition-content/print-product/cover/font fixtures plus isolated older fail-closed import-boundary checks. |
 | `SourceEvidenceMigrationTests.cs` | Populated pre-v23 database fixture proving source-evidence property renaming, chapter-link migration, canon selection persistence, and source-delete cascade behavior. |
 | `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trips for manuscript/image/annotation ID remapping, invalid-anchor preservation, current and legacy cover-image conversion, and whole-import rollback on late publication conflicts. |
-| `ManuscriptAnnotationMigrationTests.cs` | Populated pre-annotation startup-migration fixture proving the additive table migration preserves project, manuscript, edition, and publication-artifact data. |
+| `ManuscriptAnnotationMigrationTests.cs` | Populated pre-annotation and pre-review-baseline startup-migration fixtures proving additive migrations preserve project, manuscript, edition, publication-artifact, and authoring-history data while initializing nullable review anchors safely. |
 | `PublishConversationMigrationTests.cs` | Populated pre-v13 upgrade fixture proving manuscript, edition, render, artifact hash/bytes, and new Publish transcript persistence survive unchanged. |
 | `ChatConversationModelSelectionMigrationTests.cs` | Populated six-surface startup-migration fixture proving existing chat transcripts/messages survive and nullable selected-provider overrides initialize empty. |
 | `LorekeeperPressMigrationTests.cs` | Fully populated installed-schema fixture run through the real startup migrator, including no-release Picture Page scene/asset/binding preservation, Press/Core projection equality, recovery cases, and whole-database byte/hash checks. |
@@ -175,7 +175,7 @@
 |------|-------------|
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared project workspace shell: loads the project, renders the section tabs, condenses Editor navigation into one scrollable header row, and exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`), wraps `ProjectLayout` + `EditorContent`, and synchronizes in-place chapter selection with its route parameter. |
-| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware Edit/Read/Pages/Review chapter workspace with shared annotation rail, in-place chapter switching/URL history, a stable project chat mount, keyed semantic editor, serialized refresh coordination, reusable project-image and Book Text Style modals, Assistant Memory default reset/refresh routing, and browser-local per-project chapter mode, Read view, and resizable/collapsible Chat/Memory preferences. |
+| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware Edit/Read/Pages/Review chapter workspace with pending/Contest precedence and a read-only live Current-vs-Before applied assistant diff, shared annotation rail, in-place chapter switching/URL history, stable project chat mount, keyed semantic editor, serialized refresh coordination, reusable project-image and Book Text Style modals, Assistant Memory routing, and browser-local workspace preferences. |
 | `ChapterBodyEditor.razor` (+ `.razor.css`) | Shared Editor/Publish ProseMirror host with review highlight/note creation and navigation, disposal-safe attachment, visible-mode autofocus, persistent selection caret, content-driven scrolling, 500 ms action grouping, database-backed history controls/shortcuts/selection restoration, revision-aware save/flush, Book Text Style controls, Figure controls, and caller-controlled Designed Page insertion. |
 | `ChapterReadPreview.razor` (+ `.razor.css`) | Press-backed current-chapter page preview with semantic UTF-16 review ranges, annotation rendering/creation/navigation, width-fit default, single/facing display, fit/zoom controls, project page setup, exact bundled/imported font-face URLs, images, labels, links, identifier-safe warnings, and retryable failures. |
 | `ManuscriptAnnotationRail.razor` (+ `.razor.css`) | Shared top-stacked Edit/Read review rail for current/outdated notes and highlights, theme-aware styling, inline note editing/conversion, reattachment, navigation, browser-local collapse state, and immediate permanent completion. |
@@ -284,7 +284,7 @@
 | `ManuscriptAnnotation.cs` | EF sidecar entity for exact-target review highlights/notes, stable UTF-16 anchors, preserved quote/context, current/outdated state, revisions, and timestamps. |
 | `ChapterVisualMode.cs` / `ChapterVisualLayouts.cs` | Isolated legacy import/migration DTOs and original 8.5 × 11 leaf-geometry mapping for interpreting earlier chapter visual records; no current runtime authoring path consumes them. |
 | `CompositionModels.cs` | Page composition/variant/stage entities, active authoring-variant ownership, and shared scene, object/style, reading-order, region, and geometry-neutral generation-target contracts. |
-| `AuthoringHistoryModels.cs` | Persistent per-document history streams, completed snapshots, durable assistant-turn batches, selection state, origins, cursors, and image/font/composition dependency references. |
+| `AuthoringHistoryModels.cs` | Persistent per-document history streams, completed snapshots, durable assistant-turn batches, latest applied-assistant review anchors, selection state, origins, cursors, and image/font/composition dependency references. |
 | `ProjectPageSetup.cs` | One-to-one project-owned authoring page geometry, margins, body typography, preset, and revision state. |
 | `ManuscriptMigrationJournal.cs` | Durable structured-manuscript migration phase, counts, hashes, backup path, timing, and redacted failure state. |
 | `ProjectFontFamily.cs` / `ProjectFontFace.cs` | Project-scoped EF entities for imported font families and static face bytes, with weight/italic metadata and project cascade ownership. |
@@ -350,7 +350,7 @@
 
 | File | Description |
 |------|-------------|
-| `AuthoringHistoryService.cs` | Canonical database-backed Undo/Redo streams with compressed baselines/results, 100-action retention, live-snapshot stale-stream reconciliation, Redo branching, assistant-turn finalization/recovery, selection state, dependency retention, and detached-composition pruning. |
+| `AuthoringHistoryService.cs` | Canonical database-backed Undo/Redo streams with compressed baselines/results, durable latest pre-assistant review anchors, 100-action retention, live-snapshot stale-stream reconciliation, Redo branching, assistant-turn finalization/recovery, selection state, dependency retention, and detached-composition pruning. |
 | `AuthoringMutationContext.cs` | Scoped assistant mutation provenance and persisted chat-turn batch lifetime, including stopped/failed/cancelled finalization. |
 | `AuthoringSnapshotCodec.cs` | Deterministic chapter/section/composition/cover aggregate snapshot capture plus nested image, font, and composition dependency discovery without copying asset binaries. |
 
@@ -372,7 +372,7 @@
 | `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); registers the no-tracking `IDbContextFactory`, database-operation factory, and singleton write coordinator. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
-| `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, publication-release, Publish-chat, per-conversation chat-model-selection, Press, authoring-page, Core Book, edition-content, physical-product/cover-surface, source-evidence/canonical-source selection, persistent authoring-history, and cleanup migrations with the current model snapshot. |
+| `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, publication-release, Publish-chat, per-conversation chat-model-selection, Press, authoring-page, Core Book, edition-content, physical-product/cover-surface, source-evidence/canonical-source selection, persistent authoring-history, latest assistant review-baseline, and cleanup migrations with the current model snapshot. |
 
 ### Persistence/Repositories/
 
@@ -714,7 +714,7 @@
 | `AiChangeReviewDrafts.cs` | Typed helper for persisted pending-change review drafts: reads editable text fields, updates draft payload JSON, validates draft metadata, and resolves effective after-payloads. |
 | `OutlineToolStagingContext.cs` | Approval-mode working snapshot that overlays staged edits/reorders/links and mirrors direct-tool compact mutation and paginated read envelopes. |
 | `OutlineChangePayloads.cs` | JSON payload records shared by staging and approval application for acts, chapters, entities, links, and reorders. |
-| `AiChangeReviewDiffBuilder.cs` | Builds single-change and grouped review diff models from pending AI changes, including manuscript structure/visual summaries, line-review eligibility, fuzzy line alignment, and intraline highlights. |
+| `AiChangeReviewDiffBuilder.cs` | Builds pending and read-only current-vs-before manuscript review diff models, including structure/visual summaries, line-review eligibility, fuzzy line alignment, and intraline highlights. |
 | `IEntityService.cs` / `EntityService.cs` | Single contract for every story-graph entity (Characters, Locations, Events/beats, ...). Entities persist as `GraphNode`s via `IGraphStore`; create/update/delete, parent moves, and relationship mutations refresh affected context/search indexes and auto mentions. `ListLinksAsync` returns manual links before low-priority read-only auto links. |
 | `IEntityTypeService.cs` / `EntityTypeService.cs` | Lightweight graph type registry facade. Seeds structural/default types (`Project`, `Act`, `Chapter`, `ProjectFact`, `Event`, `Character`, `Location`), discovers arbitrary node types, and creates custom non-structural types for the side panel. |
 | `IProjectFactService.cs` / `ProjectFactService.cs` | Project-level graph fact facade. Stores one `ProjectFact` graph node per key/value pair, ensures a Project → ProjectFact `HasChild` edge, enforces case-insensitive key upserts, touches `Project.UpdatedAt`, and projects linked graph entities for UI/prompt display. |
@@ -743,7 +743,7 @@
 | `ManuscriptStyleService.cs` | Revision-checked project-wide Book Text Style ownership, built-in/imported font validation, immutable generated semantic keys, Core/release usage counts, and usage-safe deletion. |
 | `EditorContentTarget.cs` | Protected Editor target value identifying Core Book or one enabled publication release. |
 | `ManuscriptStyleTemplateExtractor.cs` | Shared paragraph-style capture and compact style-application policy used by the manual editor and Editor assistant. |
-| `IManuscriptService.cs` | Canonical target-aware chapter manuscript read/replace/operation and persistent-history contract plus explicit edition Designed Page snapshot creation. |
+| `IManuscriptService.cs` | Canonical target-aware chapter manuscript read/replace/operation, latest applied-review anchor read, persistent-history contract, and explicit edition Designed Page snapshot creation. |
 | `ManuscriptMigrationService.cs` | Cross-process-serialized, WAL-safe Online Backup API migration/recovery owner for resumable schema/data transformation, atomic validation journaling, retention, confirmed restore, and non-downgrading later-migration orchestration. |
 | `VisualCompositionMigrationService.cs` | Guarded protected-backup v3/composition cutover and geometry-policy rekey that preserve semantic IDs/text, original Picture Page geometry, visual styles, Figures/pages/covers/pending Outline state, artifacts/hashes, and foreign keys before cleanup. |
 | `AuthoringPageMigrationService.cs` | Guarded protected-backup v4 authoring cutover that materializes staged Picture Page scenes into active exact-geometry variants, seeds page setup, normalizes Figure/scene fit and crop state, preserves artifacts/hashes, and validates scene hashes, ownership, counts, references, and foreign keys. |

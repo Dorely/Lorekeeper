@@ -171,6 +171,17 @@ public class ChapterService(
         return await authoringHistory.ReadStateAsync(HistoryTarget(target, chapter), cancellationToken);
     }
 
+    public async Task<LatestAssistantReviewSnapshot?> GetLatestAssistantReviewAsync(
+        EditorContentTarget target,
+        Guid chapterId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var chapter = await databaseOperation.Repositories.Chapters.GetByIdAsync(chapterId, cancellationToken)
+            ?? throw new KeyNotFoundException("The chapter was not found.");
+        return await authoringHistory.ReadLatestAssistantReviewAsync(HistoryTarget(target, chapter), cancellationToken);
+    }
+
     public Task<ManuscriptHistoryMutationResult> UndoAsync(
         EditorContentTarget target,
         Guid chapterId,
@@ -628,7 +639,14 @@ public class ChapterService(
             var target = new AuthoringHistoryTarget(chapter.ProjectId, AuthoringHistoryDocumentKind.CoreChapter, chapter.Id);
             var context = authoringMutationContext.Current;
             if (context?.IsAssistant == true)
-                await authoringHistory.UpdateAssistantTurnBatchAsync(target, context.AssistantTurnId, beforeHistory, afterHistory, context.ActionLabel, cancellationToken: cancellationToken);
+                await authoringHistory.UpdateAssistantTurnBatchAsync(
+                    target,
+                    context.AssistantTurnId,
+                    beforeHistory,
+                    afterHistory,
+                    context.ActionLabel,
+                    cancellationToken: cancellationToken,
+                    reviewBaselineManuscriptJson: context.ReviewBaselineFor(chapter.Id));
             else
                 await authoringHistory.RecordManualActionAsync(target, beforeHistory, afterHistory,
                     AuthoringSnapshotCodec.DescribeManuscriptAction(beforeHistory, afterHistory, "chapter"), cancellationToken: cancellationToken);
@@ -904,7 +922,14 @@ public class ChapterService(
             var historyTarget = new AuthoringHistoryTarget(chapter.ProjectId, AuthoringHistoryDocumentKind.EditionChapter, chapter.Id, edition.Id);
             var context = authoringMutationContext.Current;
             if (context?.IsAssistant == true)
-                await authoringHistory.UpdateAssistantTurnBatchAsync(historyTarget, context.AssistantTurnId, beforeHistory, afterHistory, context.ActionLabel, cancellationToken: cancellationToken);
+                await authoringHistory.UpdateAssistantTurnBatchAsync(
+                    historyTarget,
+                    context.AssistantTurnId,
+                    beforeHistory,
+                    afterHistory,
+                    context.ActionLabel,
+                    cancellationToken: cancellationToken,
+                    reviewBaselineManuscriptJson: context.ReviewBaselineFor(chapter.Id));
             else
                 await authoringHistory.RecordManualActionAsync(historyTarget, beforeHistory, afterHistory,
                     AuthoringSnapshotCodec.DescribeManuscriptAction(beforeHistory, afterHistory, "chapter"), cancellationToken: cancellationToken);

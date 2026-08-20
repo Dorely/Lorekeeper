@@ -120,10 +120,11 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             ManuscriptJson = ManuscriptCodec.Serialize(proposedDocument),
         };
 
+        var originalBeforeJson = ReadReviewOriginalBeforeJson(aggregate.ReviewStateJson) ?? aggregate.BeforeJson;
         aggregate.BeforeJson = Serialize(rebasedBefore);
         aggregate.AfterJson = Serialize(rebasedAfter);
         aggregate.DraftAfterJson = null;
-        aggregate.ReviewStateJson = BuildReviewStateJson();
+        aggregate.ReviewStateJson = BuildReviewStateJson(originalBeforeJson);
         aggregate.DependsOnChangeIdsJson = "[]";
         aggregate.Status = ManuscriptCodec.ContentEquals(chapter.Manuscript, rebasedAfter.Manuscript)
             ? AiChangeStatus.Resolved
@@ -163,6 +164,11 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         if (aggregate.Batch.ContentTargetEditionId.HasValue)
             throw new InvalidOperationException(
                 "Line-by-line review is unavailable for edition-specific content. Keep or reject the complete structured manuscript change.");
+
+        // A line decision is still part of the originating assistant turn. Keep
+        // it on that turn's history stream so the first Keep/Edit pins the
+        // manuscript from before staging instead of recording a manual action.
+        await using var authoringTurn = await BeginReviewedEditorTurnAsync(aggregate.Batch, cancellationToken);
 
         var chapter = await chapters.GetAsync(chapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
@@ -208,6 +214,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 ?? throw new InvalidOperationException($"Chapter {chapter.Id} not found after review save.");
         }
 
+        var originalBeforeJson = ReadReviewOriginalBeforeJson(aggregate.ReviewStateJson) ?? aggregate.BeforeJson;
         aggregate.BeforeJson = Serialize(Change(chapter));
         var reparsedProposal = ManuscriptCodec.ReparsePreservingBlockIds(proposed.Manuscript, newProposedPlainText) with
         {
@@ -222,7 +229,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             ManuscriptJson = ManuscriptCodec.Serialize(reparsedProposal),
         });
         aggregate.DraftAfterJson = null;
-        aggregate.ReviewStateJson = BuildReviewStateJson();
+        aggregate.ReviewStateJson = BuildReviewStateJson(originalBeforeJson);
         aggregate.UpdatedAt = DateTime.UtcNow;
         aggregate.ResolvedAt = null;
 
@@ -243,6 +250,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
 
         UpdateBatchStatus(aggregate.Batch);
         await databaseOperation.SaveChangesAsync(cancellationToken);
+        authoringTurn?.Complete();
     }
 
     public async Task ApplyBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
@@ -406,7 +414,8 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             authoringHistory,
             authoringMutationContext,
             turnId,
-            $"Assistant: {summary}");
+            $"Assistant: {summary}",
+            ReviewBaselinesFor(batch));
     }
 
     public async Task RejectBatchAsync(Guid batchId, string? message, CancellationToken cancellationToken = default)
@@ -1346,8 +1355,39 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             ? []
             : JsonSerializer.Deserialize<List<Guid>>(json, JsonSerializerOptions.Default) ?? [];
 
-    private static string BuildReviewStateJson() =>
-        JsonSerializer.Serialize(new ReviewDraftState(DateTime.UtcNow), JsonSerializerOptions.Default);
+    private static string BuildReviewStateJson(string? originalBeforeJson = null) =>
+        JsonSerializer.Serialize(new ReviewDraftState(DateTime.UtcNow, originalBeforeJson), JsonSerializerOptions.Default);
+
+    private static IReadOnlyDictionary<Guid, string> ReviewBaselinesFor(AiChangeBatch batch)
+    {
+        var baselines = new Dictionary<Guid, string>();
+        foreach (var change in batch.Changes
+            .Where(item => string.Equals(item.ResourceKind, "ChapterManuscript", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(item => item.Order))
+        {
+            var originalBeforeJson = ReadReviewOriginalBeforeJson(change.ReviewStateJson);
+            var payload = TryReadChapterManuscriptChange(originalBeforeJson ?? change.BeforeJson);
+            if (payload is not null && !baselines.ContainsKey(payload.Id))
+                baselines[payload.Id] = payload.ManuscriptJson;
+        }
+
+        return baselines;
+    }
+
+    private static string? ReadReviewOriginalBeforeJson(string? reviewStateJson)
+    {
+        if (string.IsNullOrWhiteSpace(reviewStateJson))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<ReviewDraftState>(reviewStateJson, ChangePayloadJsonOptions)?.OriginalBeforeJson;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private static string Serialize(object value) =>
         JsonSerializer.Serialize(value, JsonSerializerOptions.Default);
@@ -1382,5 +1422,5 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         DiffRow? OldRow,
         DiffRow? NewRow);
 
-    private sealed record ReviewDraftState(DateTime UpdatedAt);
+    private sealed record ReviewDraftState(DateTime UpdatedAt, string? OriginalBeforeJson = null);
 }

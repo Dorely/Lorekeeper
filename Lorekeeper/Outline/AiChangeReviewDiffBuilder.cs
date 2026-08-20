@@ -218,6 +218,37 @@ public static class AiChangeReviewDiffBuilder
         return false;
     }
 
+    /// <summary>
+    /// Builds the same semantic manuscript diff used by pending Review changes
+    /// from a durable pre-assistant document and the live current document.
+    /// The resulting diff is intentionally read-only and has no owning change.
+    /// </summary>
+    public static bool TryBuild(
+        ManuscriptDocument before,
+        ManuscriptDocument current,
+        string title,
+        out ReviewDiff diff)
+    {
+        var beforePayload = new ChapterManuscriptChange(
+            before.ManuscriptId,
+            title,
+            before.Revision,
+            ManuscriptCodec.Serialize(before));
+        var currentPayload = new ChapterManuscriptChange(
+            current.ManuscriptId,
+            title,
+            current.Revision,
+            ManuscriptCodec.Serialize(current));
+        var change = new AiChange
+        {
+            ResourceKind = "ChapterManuscript",
+            BeforeJson = JsonSerializer.Serialize(beforePayload, ChangePayloadJsonOptions),
+            AfterJson = JsonSerializer.Serialize(currentPayload, ChangePayloadJsonOptions),
+            Status = AiChangeStatus.Resolved,
+        };
+        return TryBuild(change, out diff);
+    }
+
     private static bool TryBuildGrouped(IReadOnlyList<AiChange> changes, out ReviewDiff diff)
     {
         diff = null!;

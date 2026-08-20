@@ -589,6 +589,17 @@ cover. Applying staged Review Edits reconnects to the originating Editor turn;
 separately approved changes from that turn extend the same completed action
 rather than creating one history entry per stored tool call.
 
+Each Core or release chapter stream also retains one nullable latest-review
+anchor in working-database state: the manuscript JSON, hash, originating
+assistant turn, action label, and capture time from immediately before the
+latest assistant pass. Review gives pending and Contest projections priority;
+after they are resolved, it compares that fixed Before document with the live
+Current document. Manual edits made afterward therefore remain visible in the
+same read-only comparison, including body, structure/formatting, Figure, and
+Designed Page reference changes. Undo, Redo, and manual reversion never rewrite
+the anchor. A new assistant pass replaces it only after a net manuscript
+mutation commits. These anchors are not included in project export/import.
+
 History snapshots store references rather than image/font bytes. Dependency
 rows retain project images, imported fonts, and detached compositions required
 by the current baseline, completed entries, or open turn batches. Deleting a
