@@ -297,16 +297,20 @@ public sealed class LorekeeperPressMigrationTests
                     BlockId = Guid.NewGuid(),
                     PageNumber = 17,
                 });
-                var conversation = new PublishConversation { ProjectId = projectId };
-                db.PublishConversations.Add(conversation);
-                db.PublishMessages.Add(new PublishMessage
-                {
-                    ConversationId = conversation.Id,
-                    Order = 1,
-                    Role = PublishMessageRole.User,
-                    Content = "Preserve this publishing decision.",
-                });
                 await db.SaveChangesAsync();
+                var conversationId = Guid.NewGuid();
+                await db.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    INSERT INTO PublishConversations (Id, ProjectId, CreatedAt, UpdatedAt)
+                    VALUES ({conversationId}, {projectId}, {now}, {now});
+
+                    INSERT INTO PublishMessages (
+                        Id, ConversationId, "Order", Role, Content, ToolCallsJson,
+                        ToolCallId, ToolName, Status, ErrorMessage, CreatedAt)
+                    VALUES ({Guid.NewGuid()}, {conversationId}, 1, {"User"},
+                        {"Preserve this publishing decision."}, {"[]"}, NULL, NULL,
+                        {"Completed"}, NULL, {now});
+                    """);
                 await db.Database.ExecuteSqlInterpolatedAsync(
                     $"""
                     INSERT INTO PublicationEditionStyleMappings (

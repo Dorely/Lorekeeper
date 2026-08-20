@@ -28,12 +28,12 @@ public sealed class ManuscriptMigrationIntegrationTests
                 Slug = $"current-{Guid.NewGuid():N}",
             };
             db.Projects.Add(project);
-            db.PublishConversations.Add(new PublishConversation
-            {
-                Id = conversationId,
-                ProjectId = project.Id,
-            });
             await db.SaveChangesAsync();
+            var now = DateTime.UtcNow;
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO PublishConversations (Id, ProjectId, CreatedAt, UpdatedAt)
+                VALUES ({conversationId}, {project.Id}, {now}, {now});
+                """);
 
             await fixture.CreateService().ApplyPendingAsync(db);
         }
