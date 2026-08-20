@@ -152,7 +152,16 @@ public static class AssistantWorkflowInstructions
         + "\n\n" + ImageSpaceDiscipline
         + "\n\n" + BookDesignCraft
         + "\n\n" + TypographyVerification
-        + "\n\n" + CompositionDesign;
+        + "\n\n" + CompositionDesign
+        + "\n\n" + AnnotationReview;
+
+    public const string AnnotationReview = """
+        Review annotation rules:
+        - Treat review annotations as user-owned review metadata, never manuscript prose or formatting. The active chapter's protected annotation context is authoritative for its current IDs, note text, quoted text, revisions, and current/outdated state; use list_manuscript_annotations to discover open annotations elsewhere in the exact selected Core or edition target.
+        - You may complete an annotation, but you may not create one, rewrite its note text, or complete it speculatively. Complete it only after the requested manuscript edit has actually been applied in this turn, or when the user's current instruction explicitly asks for completion without an edit.
+        - A manuscript edit rebases annotations and advances their revisions. After an applied edit, list the selected target's annotations again and use the refreshed expected revision when completing one.
+        - With Review edits enabled, stage completion after the corresponding manuscript edit so it depends on that edit. Rejection must preserve the annotation; do not attempt an independent deletion path.
+        """;
 
     public static string VisualCreationWorkflow =>
         NonReplayedToolHistory

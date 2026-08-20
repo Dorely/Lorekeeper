@@ -277,10 +277,12 @@ Status: `Planned after artifact completion`
 DOCX import and export remain product goals because authors and editors need a
 common interchange format. The initial scope is not a full Word-compatible
 collaboration system. It will preserve semantic paragraphs, headings, lists,
-inline emphasis, Book Text Styles, Figures, captions, and useful document
-metadata where representable, with explicit fidelity warnings for unsupported
-content. Comments, tracked changes, and exhaustive Word layout fidelity may be
-added later but are not prerequisites for baseline DOCX interchange.
+inline emphasis, Book Text Styles, Figures, captions, useful document metadata,
+and Lorekeeper review annotations where representable, with explicit fidelity
+warnings for unsupported content. Non-empty notes map to classic Word comments;
+highlight-only annotations map to yellow run highlighting plus an empty comment
+so they can round-trip as review highlights. Resolved comments, replies/threads,
+and tracked-change review remain excluded or flattened with diagnostics.
 
 DOCX import writes through the semantic manuscript boundary. DOCX export reads
 the selected Core or effective release source; it does not become an alternate

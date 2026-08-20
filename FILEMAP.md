@@ -66,9 +66,10 @@
 |------|-------------|
 | `Lorekeeper.Tests.csproj` / `Usings.cs` | xUnit project restricted to startup database and versioned project import/export migration-safety fixtures. |
 | `ManuscriptMigrationIntegrationTests.cs` | Actual legacy-schema WAL migration with plain-text audit compatibility, backup/journal/hash validation, confirmation, and restore drills. |
-| `ProjectExportCompatibilityTests.cs` | Current v23 manuscript/source/page-setup/composition/Core Book/publication-section/order/PDF-presentation/edition-content/print-product/cover/font fixtures plus isolated older fail-closed import-boundary checks. |
+| `ProjectExportCompatibilityTests.cs` | Current v24 manuscript/annotation/source/page-setup/composition/Core Book/publication-section/order/PDF-presentation/edition-content/print-product/cover/font fixtures plus isolated older fail-closed import-boundary checks. |
 | `SourceEvidenceMigrationTests.cs` | Populated pre-v23 database fixture proving source-evidence property renaming, chapter-link migration, canon selection persistence, and source-delete cascade behavior. |
-| `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trips for manuscript/image remapping, current and legacy cover-image conversion, and whole-import rollback on late publication conflicts. |
+| `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trips for manuscript/image/annotation ID remapping, invalid-anchor preservation, current and legacy cover-image conversion, and whole-import rollback on late publication conflicts. |
+| `ManuscriptAnnotationMigrationTests.cs` | Populated pre-annotation startup-migration fixture proving the additive table migration preserves project, manuscript, edition, and publication-artifact data. |
 | `PublishConversationMigrationTests.cs` | Populated pre-v13 upgrade fixture proving manuscript, edition, render, artifact hash/bytes, and new Publish transcript persistence survive unchanged. |
 | `LorekeeperPressMigrationTests.cs` | Fully populated installed-schema fixture run through the real startup migrator, including no-release Picture Page scene/asset/binding preservation, Press/Core projection equality, recovery cases, and whole-database byte/hash checks. |
 | `DatabaseMigrationRecoveryTests.cs` | Shared migration-recovery fixtures proving recovery markers stop startup before opening the shell and protected failed/running backup references survive automatic retention. |
@@ -78,7 +79,7 @@
 | File | Description |
 |------|-------------|
 | `package.json` / `package-lock.json` | Exact-pinned ProseMirror and esbuild dependency graph plus the deterministic editor build command. |
-| `src/semantic-editor.js` | Owned ProseMirror schema/adapter, disconnect-safe host attachment, focus/persistent-caret and non-text-block gap selection, direct Figure selection, compact grouped formatting controls, authoritative-current stale-save reconciliation, paste diagnostics, outline, counts, and find/replace behavior. |
+| `src/semantic-editor.js` | Owned ProseMirror schema/adapter, disconnect-safe host attachment, stable-range review selection/decorations, focus/persistent-caret and non-text-block gap selection, direct Figure selection, compact grouped formatting controls, authoritative-current stale-save reconciliation, paste diagnostics, outline, counts, and find/replace behavior. |
 | `THIRD_PARTY_NOTICES.md` | Runtime/build dependency inventory and MIT notice for the semantic-editor bundle. |
 
 ## Lorekeeper.Press/ — Owned native publication renderer
@@ -172,9 +173,10 @@
 |------|-------------|
 | `ProjectLayout.razor` (+ `.razor.css`) | Shared project workspace shell: loads the project, renders the section tabs, condenses Editor navigation into one scrollable header row, and exposes `Project` via `CascadingValue`. |
 | `EditorPage.razor` | Editor tab routes (`/projects/{Slug}/editor` and `/projects/{Slug}/editor/{ChapterId:guid}`), wraps `ProjectLayout` + `EditorContent`, and synchronizes in-place chapter selection with its route parameter. |
-| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware Edit/Read/Pages/Review chapter workspace with in-place chapter switching/URL history, a stable project chat mount, keyed semantic editor, serialized refresh coordination, reusable project-image and Book Text Style modals, Assistant Memory default reset/refresh routing, and browser-local per-project chapter mode, Read view, and resizable/collapsible Chat/Memory preferences. |
-| `ChapterBodyEditor.razor` (+ `.razor.css`) | Shared Editor/Publish ProseMirror host with disposal-safe attachment, visible-mode autofocus, persistent selection caret, content-driven scrolling, 500 ms action grouping, database-backed history controls/shortcuts/selection restoration, revision-aware save/flush with authoritative-current stale-save adoption, compact formatting and Book Text Style controls, modal image selection, Figure controls, and caller-controlled Designed Page insertion. |
-| `ChapterReadPreview.razor` (+ `.razor.css`) | Press-backed current-chapter page preview with flush-before-layout, width-fit default, single/facing display, fixed two-leaf spread rows with an optional visible seam, fit/zoom controls, project page setup, exact bundled/imported font-face URLs, images, labels, links, identifier-safe authoring warnings, and retryable failures. |
+| `EditorContent.razor` (+ `.razor.css`, `.razor.js`) | Context-aware Edit/Read/Pages/Review chapter workspace with shared annotation rail, in-place chapter switching/URL history, a stable project chat mount, keyed semantic editor, serialized refresh coordination, reusable project-image and Book Text Style modals, Assistant Memory default reset/refresh routing, and browser-local per-project chapter mode, Read view, and resizable/collapsible Chat/Memory preferences. |
+| `ChapterBodyEditor.razor` (+ `.razor.css`) | Shared Editor/Publish ProseMirror host with review highlight/note creation and navigation, disposal-safe attachment, visible-mode autofocus, persistent selection caret, content-driven scrolling, 500 ms action grouping, database-backed history controls/shortcuts/selection restoration, revision-aware save/flush, Book Text Style controls, Figure controls, and caller-controlled Designed Page insertion. |
+| `ChapterReadPreview.razor` (+ `.razor.css`) | Press-backed current-chapter page preview with semantic UTF-16 review ranges, annotation rendering/creation/navigation, width-fit default, single/facing display, fit/zoom controls, project page setup, exact bundled/imported font-face URLs, images, labels, links, identifier-safe warnings, and retryable failures. |
+| `ManuscriptAnnotationRail.razor` (+ `.razor.css`) | Shared Word-like Edit/Read review rail for current/outdated notes and highlights, inline note editing/conversion, reattachment, navigation, browser-local collapse state, and confirmed permanent completion. |
 | `BookTextStylesModal.razor` (+ `.razor.css`) | Shared Editor/Publish modal shell for the revision-aware Book Text Styles manager. |
 | `ManuscriptStylesPanel.razor` (+ `.razor.css`) | Compact Book Text Style manager with an on-demand create/edit form, revision-aware paragraph/character typography, spacing, indentation, pagination, and stable semantic roles. |
 | `CompositionVisualEditorShell.razor` (+ `.razor.css`) | Shared Pages/Cover visual-editor chrome with a compact view toolbar, canvas-first stage, fixed bottom object/context controls, and a host-supplied on-demand details drawer. |
@@ -277,6 +279,7 @@
 | `BookBrief.cs` | Canonical high-level authorial-direction model, relational selected-canonical-ingest-source mapping, `BookKind` enum, and partial-patch contract whose null values are unchanged and `ClearFields` explicitly removes values. |
 | `Act.cs` | EF entity for a top-level outline grouping (Title/Synopsis/Order) under a `Project`. Cascade-deleted with the project. Owned chapters survive act deletion (FK `OnDelete.SetNull`). |
 | `Chapter.cs` | EF chapter with canonical manuscript-v4 JSON/revision and computed plain-text/document projections, plus title/synopsis/order, optional act, and vector-index state. |
+| `ManuscriptAnnotation.cs` | EF sidecar entity for exact-target review highlights/notes, stable UTF-16 anchors, preserved quote/context, current/outdated state, revisions, and timestamps. |
 | `ChapterVisualMode.cs` / `ChapterVisualLayouts.cs` | Isolated legacy import/migration DTOs and original 8.5 × 11 leaf-geometry mapping for interpreting earlier chapter visual records; no current runtime authoring path consumes them. |
 | `CompositionModels.cs` | Page composition/variant/stage entities, active authoring-variant ownership, and shared scene, object/style, reading-order, region, and geometry-neutral generation-target contracts. |
 | `AuthoringHistoryModels.cs` | Persistent per-document history streams, completed snapshots, durable assistant-turn batches, selection state, origins, cursors, and image/font/composition dependency references. |
@@ -361,7 +364,7 @@
 | File | Description |
 |------|-------------|
 | `AppDatabaseOperations.cs` | Per-operation EF context factory, no-tracking read lifetimes, project-aware/process-wide write leases in fixed lock order, and nested-operation sharing for intentionally atomic multi-service work. Short write units opt into tracking and own commit/disposal. |
-| `AppDbContext.cs` | EF Core model for projects, page setup, providers, chats, writing, graph, ingest/import, publishing, composition, fonts, and Book Text Styles. Configures relationships/indexes, JSON property bags, revision advancement, fail-closed concurrency reporting, publication-target normalization, and bounded transient SQLite lock retries. |
+| `AppDbContext.cs` | EF Core model for projects, manuscript annotations, page setup, providers, chats, writing, graph, ingest/import, publishing, composition, fonts, and Book Text Styles. Configures relationships/indexes, JSON property bags, concurrency, publication-target normalization, and bounded transient SQLite lock retries. |
 | `DatabaseMigrationRecoveryService.cs` | Shared protected SQLite backup/restore, recovery-shell, expiring confirmation, backup discovery, and reference-aware pruning boundary for guarded migrations. |
 | `DatabaseStartupMigrationService.cs` | Single application-startup schema/data migration orchestrator shared by the real host and installed-database fixtures; applies scheduled restores and honors recovery markers before opening EF, with optional coarse progress reporting. |
 | `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |
@@ -440,7 +443,7 @@
 | `IModelCatalogService.cs` / `ModelCatalogService.cs` | Model discovery over OpenAI-compatible `GET /models` (including the Codex platform endpoint) and Ollama `GET /api/tags`, with endpoint normalization and normalized errors for graceful manual-entry fallback. |
 | `LlmConnectionResolver.cs` | Shared credential resolution following `CredentialSourceId` for chat, vision, and model-catalog clients. |
 | `LlmErrorNormalizer.cs` | Shared normalization of provider HTTP error bodies into concise user-presentable messages. |
-| `AssistantWorkflowInstructions.cs` | Current code-owned AI workflow/tool rules for durable narrated work logs, automatic-context-first and canonical-state Outline work, proactive Editor execution, visual-development canon, publication craft/design, exact IDs, compact paging/staging, image generation, validation, and Contest preparation. |
+| `AssistantWorkflowInstructions.cs` | Current code-owned AI workflow/tool rules for durable narrated work logs, automatic-context-first and canonical-state Outline work, proactive Editor execution, user-owned review annotation completion, visual-development canon, publication craft/design, exact IDs, compact paging/staging, image generation, validation, and Contest preparation. |
 | `SystemPromptComposer.cs` | Central composer for the one actual system-role prompt, including specialized Images concept-art and Publish production charters, tool rules, dynamic guidance, Project Guidance, Book Brief, then working context. |
 | `AgentOptions.cs` | Shared agent options bound from `Agents:*`; caps iterative tool-call rounds, configures transient ingest LLM retry attempts/delays, and sets Codex/OAuth request timeout. |
 | `SeedSystemPrompt.cs` | Frozen historical seed retained only so legacy migrations can identify and clear untouched seeded guidance; runtime prompts no longer use it. |
@@ -573,13 +576,13 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | Current v23 portable DTOs with v4 manuscripts, selected canonical ingest sources, page setup, authoring/edition variants, Core Book publication sections/PDF presentation, sparse release ordering, print products/templates, cover surfaces, accessibility data, and custom fonts; retains isolated older input adapters. |
+| `ProjectExportModels.cs` | Current v24 portable DTOs with v4 manuscripts, Core/release annotations, selected canonical ingest sources, page setup, authoring/edition variants, Core Book publication sections/PDF presentation, sparse release ordering, print products/templates, cover surfaces, accessibility data, and custom fonts; retains isolated older input adapters. |
 | `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON, includes only selected canonical source bodies/evidence in Full exports, warns on Non-structural omissions, queues jobs, and emits notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
 | `ProjectImportJobWorker.cs` | Hosted background worker that marks interrupted imports failed at startup and drains queued import jobs. |
-| `ProjectImportJobProcessor.cs` | Runs one import job, importing v23 manuscripts, canonical sources, page setup/Core, publication sections/order overlays and compositions, releases/print products/cover surfaces/fonts; remaps source provenance, adapts older formats only at the versioned boundary, then refreshes projections and indexes. |
+| `ProjectImportJobProcessor.cs` | Runs one import job, importing v24 manuscripts/annotations, canonical sources, page setup/Core, publication sections/order overlays and compositions, releases/print products/cover surfaces/fonts; remaps annotation ownership/source provenance, preserves invalid anchors as outdated, adapts older formats only at the versioned boundary, then refreshes projections and indexes. |
 
 ### Images/
 
@@ -727,6 +730,7 @@
 | File | Description |
 |------|-------------|
 | `ManuscriptModels.cs` | Manuscript-v4 document/block/inline/mark model with sparse direct paragraph typography/presentation, geometry-neutral Figure presentation/accessibility, Designed Page references, semantic operations, snapshots, and revision conflicts. |
+| `ManuscriptAnnotationModels.cs` / `ManuscriptAnnotationService.cs` | Exact Core/release review annotation contracts, stable UTF-16 range validation, quote/context rebasing, current/outdated state, paged reads, ownership/revision checks, and permanent completion. |
 | `ManuscriptSemanticRoles.cs` | Safe semantic-role identifier validation plus deterministic normalization for manuscript-v1 migration and v8 import. |
 | `ManuscriptCodec.cs` | Plain-text normalization/projection, deterministic migration IDs, validation, serialization, hashing, and stable-ID reparsing. |
 | `ManuscriptRangeResolver.cs` | Validates non-overlapping UTF-16 semantic text ranges, rejects surrogate splits, resolves frame content exactly once, and identifies unplaced composition content. |
@@ -751,6 +755,7 @@
 | `js/autosizeTextareas.js` | Small shared JS module that attaches to `textarea[data-autosize]`, grows each textarea to its `scrollHeight`, refreshes on input/change and width changes, and prevents nested textarea scrollbars. |
 | `js/composition-workspace.js` | Shared pointer-capture/measured-stage and source-raster aspect bridge for visual canvases plus live rendered-frame overflow observation, Designed Page contenteditable focus, text-selection offsets, and formatting-selection restoration. |
 | `js/semantic-editor.bundle.js` / `semantic-editor.NOTICES.txt` | Deterministic ProseMirror ESM bundle built from `tools/semantic-editor`, plus the shipped runtime dependency/license notice. |
+| `js/annotation-review.js` / `js/read-annotation-selection.js` | Browser-local annotation-rail preference and Read-preview semantic selection/navigation bridges; neither persists manuscript or annotation data directly. |
 | `js/fileDownloads.js` | Browser download helper used by Import / Export and Publish to save generated graph JSON and publish export files. |
 | `fonts/` | Offline pinned OFL publication families, per-family licenses, and source/revision documentation. |
 | `branding/` | Lorekeeper vector master plus generated PNG/ICO variants used by the app shell, browser metadata, and Electron release packaging. |

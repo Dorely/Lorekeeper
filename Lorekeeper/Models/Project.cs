@@ -58,6 +58,7 @@ public class Project
     public ICollection<Act> Acts { get; set; } = [];
 
     public ICollection<Chapter> Chapters { get; set; } = [];
+    public ICollection<ManuscriptAnnotation> ManuscriptAnnotations { get; set; } = [];
 
     public ICollection<PageComposition> PageCompositions { get; set; } = [];
     public ICollection<CompositionMutationStage> CompositionMutationStages { get; set; } = [];

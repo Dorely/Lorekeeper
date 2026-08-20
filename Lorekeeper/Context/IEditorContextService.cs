@@ -42,6 +42,7 @@ public static class EditorContextKeys
     public const string ProjectGuidance = "project-guidance";
     public const string BookBrief = "book-brief";
     public const string CurrentChapter = "current-chapter";
+    public const string ManuscriptAnnotations = "manuscript-annotations";
     public const string ProjectPageSetup = "project-page-setup";
     public const string ManuscriptStyles = "manuscript-styles";
     public const string ProjectOutline = "project-outline";

@@ -8,7 +8,7 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
-    public void V23WritesCanonicalSourceContainersAndCurrentPublicationState()
+    public void V24WritesCanonicalSourceContainersCurrentPublicationStateAndAnnotations()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
@@ -29,7 +29,7 @@ public sealed class ProjectExportCompatibilityTests
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(23, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(24, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"ingestSources\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"bookBriefCanonSourceIds\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
@@ -40,6 +40,7 @@ public sealed class ProjectExportCompatibilityTests
         Assert.Contains("\"chapterOverrides\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationSectionOrder\":", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationSections\":[]", json, StringComparison.Ordinal);
+        Assert.Contains("\"manuscriptAnnotations\":[]", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"isDefault\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("selectedCoverChapterId", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"publishProfiles\"", json, StringComparison.Ordinal);
@@ -48,6 +49,48 @@ public sealed class ProjectExportCompatibilityTests
         Assert.DoesNotContain("\"imagePlacements\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"bodyFontSizePoints\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"bodyLineHeight\"", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void V24RoundTripsCurrentAndOutdatedCoreAndEditionAnnotations()
+    {
+        var chapterId = Guid.NewGuid();
+        var editionId = Guid.NewGuid();
+        var document = Document(new ProjectExportChapter { Id = chapterId }) with
+        {
+            ManuscriptAnnotations =
+            [
+                new(Guid.NewGuid(), chapterId, "Chapter", null, null, ManuscriptAnnotationKind.Highlight, "", 2, 7,
+                    ManuscriptAnnotationAnchorState.Current, "a", 1, "a", 4, "text", "before", "after", DateTime.UtcNow, DateTime.UtcNow),
+                new(Guid.NewGuid(), chapterId, "Chapter", editionId, "Paperback", ManuscriptAnnotationKind.Note, "Revise this", 3, 9,
+                    ManuscriptAnnotationAnchorState.Outdated, "b", 0, "c", 2, "old text", "left", "right", DateTime.UtcNow, DateTime.UtcNow),
+            ],
+        };
+
+        var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
+        var roundTrip = JsonSerializer.Deserialize<ProjectExportDocument>(json, ManuscriptCodec.JsonOptions)!;
+
+        Assert.Equal(2, roundTrip.ManuscriptAnnotations.Count);
+        Assert.Null(roundTrip.ManuscriptAnnotations[0].EditionId);
+        Assert.Equal(editionId, roundTrip.ManuscriptAnnotations[1].EditionId);
+        Assert.Equal(ManuscriptAnnotationAnchorState.Outdated, roundTrip.ManuscriptAnnotations[1].AnchorState);
+        Assert.Equal("Revise this", roundTrip.ManuscriptAnnotations[1].NoteText);
+    }
+
+    [Fact]
+    public void V23WithoutAnnotationsDefaultsToAnEmptyCollection()
+    {
+        var json = JsonSerializer.Serialize(Document(new ProjectExportChapter()) with { FormatVersion = 23 }, ManuscriptCodec.JsonOptions);
+        using var parsed = JsonDocument.Parse(json);
+        var withoutAnnotations = parsed.RootElement.EnumerateObject()
+            .Where(property => property.Name != "manuscriptAnnotations")
+            .ToDictionary(property => property.Name, property => property.Value.Clone());
+        var legacyJson = JsonSerializer.Serialize(withoutAnnotations, ManuscriptCodec.JsonOptions);
+
+        var imported = JsonSerializer.Deserialize<ProjectExportDocument>(legacyJson, ManuscriptCodec.JsonOptions)!;
+
+        Assert.Equal(23, imported.FormatVersion);
+        Assert.Empty(imported.ManuscriptAnnotations);
     }
 
     [Fact]

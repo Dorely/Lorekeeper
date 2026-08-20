@@ -104,8 +104,9 @@ The import:
 - reuses equivalent styles and gives conflicting definitions a unique imported
   name;
 - keeps font family names but never transfers embedded font binaries;
-- resolves tracked changes to Word's final text, omits comments, and reports
-  exact counts.
+- resolves tracked changes to Word's final text; imports empty classic comments
+  as review highlights and non-empty classic comments as review notes; reports
+  resolved comments, replies/threads, and other flattened review content.
 
 Import begins immediately after file selection. There is no staging wizard or
 multi-chapter preview.
@@ -139,7 +140,10 @@ and edition-specific content.
 
 DOCX output uses Word-native paragraph and character styles, headings, lists,
 tables, notes, links, tabs, columns, callouts, Figures, captions, metadata, page
-size, and margins.
+size, and margins. Non-empty Lorekeeper notes use classic comment
+range/reference structures. Highlight-only annotations use yellow run
+highlighting plus an empty comment so they return as review highlights; bare
+Word highlighting remains manuscript formatting in schema v5.
 
 Designed Pages become clean canvas PNGs at approximately 150 PPI, capped at a
 4096-pixel long edge. Logical reading-order and accessibility text are stored in
@@ -168,7 +172,9 @@ Assistant parity remains compact:
 
 Use a protected startup migration to advance manuscript-v4 documents to v5
 while preserving IDs, text, styles, Figures, Designed Pages, edition snapshots,
-compositions, and artifacts. Advance project export/import to v23.
+compositions, sidecar review annotations, and artifacts. Project export/import
+is already v24 for annotations; advance it again only if the schema-v5 payload
+requires another boundary version.
 
 Only approved Lorekeeper migration/import fixtures are added or changed. Press
 TDD covers the PDF-facing behavior of lists, tables, notes, callouts, columns,
@@ -208,7 +214,16 @@ implementation.
 - Word text boxes become flowing callouts rather than positioned page objects.
 - Headers/footers, equations, charts, SmartArt, macros, embedded objects,
   bibliography/index fields, and exact Word pagination remain deferred.
-- Comments and tracked-change review are not imported; only final text is used.
+- Non-empty Lorekeeper notes map to classic Word comments. Highlight-only
+  annotations map to yellow Word run highlighting plus an empty comment;
+  imported empty comments become highlights and non-empty comments become notes.
+- Preserve that distinction with WordprocessingML's separate
+  [comment range/reference](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.commentrangeend)
+  and [run highlight](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.wordprocessing.highlight)
+  structures; do not add an Open XML runtime dependency until this phase starts.
+- Word highlighting without a comment remains manuscript formatting under the
+  planned schema-v5 formatting model. Resolved comments, replies/threads, and
+  tracked-change review remain excluded or are flattened with explicit diagnostics.
 - DOCX is an interchange format, never Lorekeeper's authoritative manuscript.
 - Native packaged-pipeline acceptance remains the next artifact-readiness gate
   before this deferred phase is activated.

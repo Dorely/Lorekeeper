@@ -515,6 +515,24 @@ contests, revision agents, approvals, indexing, composition, and publishing all
 consume the same document or a derived projection; direct body-string and
 chapter-visual persistence are not runtime paths.
 
+`IManuscriptAnnotationService` owns single-author review highlights and notes as
+sidecar rows scoped to one project, chapter, and exact Core/release target.
+Anchors use stable start/end block IDs plus UTF-16 offsets, the original quote,
+and bounded surrounding context. Every persisted manuscript mutation rebases
+the affected target in the same database operation; Core mutations also rebase
+release annotations for chapters that still inherit Core. Exact quote/context
+relocation must identify one location or the annotation becomes Outdated.
+Annotations remain outside manuscript Undo/Redo, indexing, plain-text
+projection, publication fingerprints, Press requests, and generated artifacts.
+Edit and Press-backed Read views share one collapsible margin rail. Browser
+preview lines carry optional semantic-block UTF-16 source ranges without
+advancing Press protocol v7, allowing wrapped and cross-page Read selections to
+produce the same anchor contract as Edit while Designed Page content is rejected.
+The active chapter's annotations are protected assistant context. Paged tools
+discover the selected target's open annotations and can complete—but not create
+or rewrite—them. Review Edits stores completion as a dependent change so a
+rejected manuscript edit preserves its annotation.
+
 `IAuthoringHistoryService` owns persistent Undo/Redo for Core and release
 chapters, publication prose sections, complete Page Composition aggregates, and
 Core/release cover aggregates. Each canonical stream stores a Brotli-compressed
@@ -900,7 +918,8 @@ version changes.
 Archived releases are immutable at every owning mutation boundary; their
 existing artifacts remain readable and exportable, and cloning creates the
 editable continuation.
-Project export v23 writes manuscript-v4 documents, selected canonical ingest
+Project export v24 writes manuscript-v4 documents, current/outdated Core and
+release review annotations, selected canonical ingest
 source bodies/evidence and Book Brief mappings, project page setup, page
 compositions and exact geometry variants with active authoring variants, Core
 Book, sparse release overlays and cover scenes, Book Text Styles,
@@ -1397,8 +1416,9 @@ binary assets. SQLite startup applies a busy timeout and WAL journal mode.
 sqlite-vec and internal FTS5 structures are initialized outside normal EF
 migrations.
 
-Project export format v23 includes only Book Brief-selected canonical ingest
-sources in Full exports: source records/text, chunks, pages, blocks, metadata,
+Project export format v24 includes Core/release review annotations in Full and
+Non-structural exports. Full exports include only Book Brief-selected canonical ingest
+sources: source records/text, chunks, pages, blocks, metadata,
 and the selection mapping. Jobs, staging rows, temporary visual candidates, and
 unselected source bodies/provenance are excluded. Import remaps source and child
 IDs inside graph evidence/citations, restores the selection, rebuilds lexical and
@@ -1578,9 +1598,9 @@ validates metadata/content projections, row counts, scene objects, packages,
 artifact bytes/hashes, and foreign keys before the cleanup migration removes
 runtime paper/binding/ink columns and the universal spine-caliper path.
 
-Project export v23 contains only the current v4/page-setup/composition model,
+Project export v24 contains only the current v4/page-setup/composition model,
 Core Book, sparse release overlays, edition chapter snapshots, edition-owned
-compositions, publication sections, target-aware publication records, resolved
+compositions, current/outdated sidecar review annotations, publication sections, target-aware publication records, resolved
 print-product selections, Generic printer templates, and independent cover
 surface scenes, plus Book Brief-selected canonical source bodies and evidence;
 authoring-history streams, entries, selections, dependencies,

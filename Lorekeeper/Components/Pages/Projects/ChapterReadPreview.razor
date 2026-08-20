@@ -1,11 +1,16 @@
 @using Lorekeeper.Composition
+@using Lorekeeper.Manuscripts
 @using Lorekeeper.Models
 @using Lorekeeper.Publish
+@using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject IChapterPreviewService Preview
 @inject IProjectPageSetupService PageSetups
+@inject IManuscriptService Manuscripts
+@inject IManuscriptAnnotationService Annotations
+@inject IJSRuntime JS
 
-<section class="chapter-read-preview" aria-label="Chapter print preview">
+<section class="chapter-read-preview" aria-label="Chapter print preview" @ref="_root">
     <style>@((MarkupString)PreviewFontCss())</style>
     <header class="chapter-preview-toolbar">
         <div class="btn-group btn-group-sm" role="group" aria-label="Page display">
@@ -51,7 +56,24 @@
             </details>
         }
         <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_loading" @onclick="LoadAsync">Refresh</button>
+        <div class="btn-group btn-group-sm" role="group" aria-label="Review selected preview text">
+            <button type="button" class="btn btn-outline-warning" @onmousedown:preventDefault @onclick="() => CreateReadAnnotationAsync(ManuscriptAnnotationKind.Highlight)">Highlight</button>
+            <button type="button" class="btn btn-outline-secondary" @onmousedown:preventDefault @onclick="OpenReadNoteAsync">Note</button>
+        </div>
     </header>
+
+    @if (_noteOpen)
+    {
+        <div class="chapter-preview-note-form" role="dialog" aria-label="Add review note">
+            <label>Note<textarea class="form-control form-control-sm" maxlength="8000" rows="3" @bind="_noteDraft"></textarea></label>
+            <button type="button" class="btn btn-sm btn-primary" @onclick="() => CreateReadAnnotationAsync(ManuscriptAnnotationKind.Note)">Add note</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelReadNote">Cancel</button>
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_selectionError))
+    {
+        <div class="chapter-preview-selection-error" role="status">@_selectionError</div>
+    }
 
     @if (_loading)
     {
@@ -118,6 +140,8 @@
     [Parameter] public long RefreshSignal { get; set; }
     [Parameter] public bool FacingPages { get; set; }
     [Parameter] public EventCallback<bool> FacingPagesChanged { get; set; }
+    [Parameter] public EventCallback AnnotationsChanged { get; set; }
+    [Parameter] public EventCallback<Guid> AnnotationSelected { get; set; }
 
     private static IEnumerable<ChapterPreviewPage?[]> BuildFacingSpreads(IReadOnlyList<ChapterPreviewPage> pages)
     {
@@ -140,7 +164,7 @@
             yield return [left, null];
     }
 
-    private RenderFragment RenderPage(ChapterPreviewPage page) => @<article id="@($"page-{page.PhysicalPage}")" class="chapter-preview-page" style="@PageStyle(page)" aria-label="Page @(page.PageLabel ?? page.PhysicalPage.ToString())">
+    private RenderFragment RenderPage(ChapterPreviewPage page) => @<article id="@($"page-{page.PhysicalPage}")" class="chapter-preview-page" data-page-kind="@(page.Kind)" style="@PageStyle(page)" aria-label="Page @(page.PageLabel ?? page.PhysicalPage.ToString())">
                 @foreach (var shape in page.Shapes)
                 {
                     <span class="chapter-preview-shape" style="@ShapeStyle(page, shape)"></span>
@@ -155,11 +179,11 @@
                 {
                     @if (line.Link is { } link)
                     {
-                        <a class="chapter-preview-line" href="@link" style="@LineStyle(page, line)">@RunContent(line)</a>
+                        <a class="chapter-preview-line" href="@link" style="@LineStyle(page, line)" data-block-id="@FlowBlockId(line)" data-source-start-utf16="@line.SourceStartUtf16" data-source-end-utf16="@line.SourceEndUtf16">@RunContent(line)</a>
                     }
                     else
                     {
-                        <span class="chapter-preview-line" style="@LineStyle(page, line)">@RunContent(line)</span>
+                        <span class="chapter-preview-line" style="@LineStyle(page, line)" data-block-id="@FlowBlockId(line)" data-source-start-utf16="@line.SourceStartUtf16" data-source-end-utf16="@line.SourceEndUtf16">@RunContent(line)</span>
                     }
                 }
                 <footer>@(page.PageLabel ?? string.Empty)</footer>
@@ -184,6 +208,15 @@
     private CancellationTokenSource? _loadCancellation;
     private long _loadGeneration;
     private bool _disposed;
+    private ElementReference _root;
+    private IJSObjectReference? _selectionModule;
+    private IReadOnlyList<ManuscriptAnnotationView> _annotations = [];
+    private readonly Dictionary<string, int> _blockOrder = new(StringComparer.Ordinal);
+    private long _manuscriptRevision;
+    private bool _noteOpen;
+    private string _noteDraft = string.Empty;
+    private ManuscriptAnnotationRange? _noteRange;
+    private string? _selectionError;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -209,7 +242,17 @@
         _error = null;
         try
         {
-            _result = await Preview.LayoutAsync(ProjectId, ChapterId, ContentTarget, cancellation.Token);
+            var manuscript = await Manuscripts.GetManuscriptAsync(ContentTarget, ChapterId, cancellation.Token)
+                ?? throw new InvalidOperationException("The chapter manuscript was not found.");
+            _manuscriptRevision = manuscript.Revision;
+            _blockOrder.Clear();
+            for (var index = 0; index < manuscript.Document.Content.Count; index++)
+                _blockOrder[manuscript.Document.Content[index].Id] = index;
+            var previewTask = Preview.LayoutAsync(ProjectId, ChapterId, ContentTarget, cancellation.Token);
+            var annotationsTask = Annotations.ListChapterAsync(ProjectId, ContentTarget, ChapterId, cancellation.Token);
+            await Task.WhenAll(previewTask, annotationsTask);
+            _result = await previewTask;
+            _annotations = await annotationsTask;
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -357,28 +400,200 @@
         || face?.Contains("Italic", StringComparison.OrdinalIgnoreCase) == true ? "italic" : "normal";
     private RenderFragment RunContent(ChapterPreviewLine line) => builder =>
     {
-        if (line.Runs.Count == 0)
-        {
-            builder.AddContent(0, line.Text);
-            return;
-        }
         var sequence = 0;
-        foreach (var run in line.Runs)
+        foreach (var piece in SplitLine(line))
         {
             builder.OpenElement(sequence++, "span");
-            builder.AddAttribute(sequence++, "style", RunStyle(run));
-            builder.AddContent(sequence++, run.Text);
+            if (!string.IsNullOrEmpty(piece.Style))
+                builder.AddAttribute(sequence++, "style", piece.Style);
+            if (piece.Highlighted)
+            {
+                builder.AddAttribute(sequence++, "class", "chapter-preview-review-highlight");
+                builder.AddAttribute(sequence++, "data-annotation-id", piece.AnnotationId);
+                builder.AddAttribute(sequence++, "onclick", EventCallback.Factory.Create(
+                    this,
+                    () => AnnotationSelected.InvokeAsync(piece.AnnotationId!.Value)));
+                builder.AddEventPreventDefaultAttribute(sequence++, "onclick", true);
+                builder.AddEventStopPropagationAttribute(sequence++, "onclick", true);
+            }
+            builder.AddContent(sequence++, piece.Text);
             builder.CloseElement();
         }
     };
     private string RunStyle(ChapterPreviewRun run) => $"font-family:{FontFamily(run.Face)};font-weight:{FontWeight(run.Face)};font-style:{FontStyle(run.Face)};font-size:{run.SizeScale:R}em;vertical-align:{run.BaselineShiftEm:R}em;text-decoration:{(run.Underline && run.Strikethrough ? "underline line-through" : run.Underline ? "underline" : run.Strikethrough ? "line-through" : "none")}";
 
-    public ValueTask DisposeAsync()
+    private IReadOnlyList<PreviewTextPiece> SplitLine(ChapterPreviewLine line)
+    {
+        var blockId = FlowBlockId(line);
+        if (blockId is null || line.SourceStartUtf16 is not int lineStart || line.SourceEndUtf16 is not int lineEnd)
+            return line.Runs.Count == 0
+                ? [new PreviewTextPiece(line.Text, string.Empty, false)]
+                : line.Runs.Select(run => new PreviewTextPiece(run.Text, RunStyle(run), false)).ToList();
+        var intervals = AnnotationIntervals(blockId)
+            .Where(interval => interval.Start < lineEnd && interval.End > lineStart)
+            .ToList();
+        var prefix = line.Text.StartsWith("• ", StringComparison.Ordinal) ? 2 : 0;
+        var displayContentLength = Math.Max(0, line.Text.Length - prefix);
+        var boundaries = intervals.SelectMany(interval => new[]
+            {
+                prefix + Math.Clamp(interval.Start - lineStart, 0, displayContentLength),
+                prefix + Math.Clamp(interval.End - lineStart, 0, displayContentLength),
+            })
+            .Append(0)
+            .Append(line.Text.Length)
+            .Distinct()
+            .Order()
+            .ToList();
+        IReadOnlyList<ChapterPreviewRun> sourceRuns = line.Runs.Count == 0
+            ? [new ChapterPreviewRun(line.Text, line.Face ?? "Serif", false, false, 0, 1)]
+            : line.Runs;
+        var result = new List<PreviewTextPiece>();
+        var runStart = 0;
+        foreach (var run in sourceRuns)
+        {
+            var runEnd = runStart + run.Text.Length;
+            var runBoundaries = boundaries
+                .Where(value => value > runStart && value < runEnd)
+                .Append(runStart)
+                .Append(runEnd)
+                .Distinct()
+                .Order()
+                .ToList();
+            for (var boundaryIndex = 0; boundaryIndex < runBoundaries.Count - 1; boundaryIndex++)
+            {
+                var start = runBoundaries[boundaryIndex];
+                var end = runBoundaries[boundaryIndex + 1];
+                var sourceStart = lineStart + Math.Max(0, start - prefix);
+                var sourceEnd = lineStart + Math.Max(0, end - prefix);
+                var matching = intervals.FirstOrDefault(interval => sourceStart < interval.End && sourceEnd > interval.Start);
+                result.Add(new PreviewTextPiece(
+                    run.Text[(start - runStart)..(end - runStart)],
+                    RunStyle(run),
+                    matching != default,
+                    matching == default ? null : matching.Id));
+            }
+            runStart = runEnd;
+        }
+        return result;
+    }
+
+    private IReadOnlyList<(int Start, int End, Guid Id)> AnnotationIntervals(string blockId)
+    {
+        if (!_blockOrder.TryGetValue(blockId, out var blockIndex))
+            return [];
+        var result = new List<(int Start, int End, Guid Id)>();
+        foreach (var annotation in _annotations.Where(item => item.AnchorState == ManuscriptAnnotationAnchorState.Current))
+        {
+            if (!_blockOrder.TryGetValue(annotation.Range.StartBlockId, out var startIndex)
+                || !_blockOrder.TryGetValue(annotation.Range.EndBlockId, out var endIndex)
+                || blockIndex < startIndex || blockIndex > endIndex)
+                continue;
+            result.Add((
+                blockIndex == startIndex ? annotation.Range.StartOffset : 0,
+                blockIndex == endIndex ? annotation.Range.EndOffset : int.MaxValue,
+                annotation.Id));
+        }
+        return result;
+    }
+
+    private static string? FlowBlockId(ChapterPreviewLine line) => line.SemanticId switch
+    {
+        null or "" => null,
+        var id when id.EndsWith(":caption", StringComparison.Ordinal) => id[..^":caption".Length],
+        var id => id,
+    };
+
+    private async Task OpenReadNoteAsync()
+    {
+        _noteRange = await GetAnnotationRangeAsync();
+        if (_noteRange is null)
+            return;
+        _noteOpen = true;
+        _selectionError = null;
+    }
+
+    private void CancelReadNote()
+    {
+        _noteOpen = false;
+        _noteDraft = string.Empty;
+        _noteRange = null;
+    }
+
+    private async Task CreateReadAnnotationAsync(ManuscriptAnnotationKind kind)
+    {
+        if (kind == ManuscriptAnnotationKind.Note && string.IsNullOrWhiteSpace(_noteDraft))
+        {
+            _selectionError = "Enter note text before adding the annotation.";
+            return;
+        }
+        var range = kind == ManuscriptAnnotationKind.Note
+            ? _noteRange
+            : await GetAnnotationRangeAsync();
+        if (range is null)
+            return;
+        try
+        {
+            await Annotations.CreateAsync(
+                ProjectId, ContentTarget, ChapterId, kind, _noteDraft, range, _manuscriptRevision);
+            CancelReadNote();
+            _selectionError = null;
+            _annotations = await Annotations.ListChapterAsync(ProjectId, ContentTarget, ChapterId);
+            await AnnotationsChanged.InvokeAsync();
+        }
+        catch (Exception exception)
+        {
+            _selectionError = exception.Message;
+        }
+    }
+
+    public async Task<ManuscriptAnnotationRange?> GetAnnotationRangeAsync()
+    {
+        try
+        {
+            _selectionModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/read-annotation-selection.js");
+            var result = await _selectionModule.InvokeAsync<ReadSelectionResult>("readSelection", _root);
+            _selectionError = result.Error;
+            return result.Range;
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException)
+        {
+            _selectionError = "The preview selection could not be read. Refresh the preview and try again.";
+            return null;
+        }
+    }
+
+    public async Task SelectAnnotationAsync(Guid annotationId)
+    {
+        var annotation = _annotations.FirstOrDefault(item => item.Id == annotationId);
+        if (annotation is null || annotation.AnchorState != ManuscriptAnnotationAnchorState.Current)
+            return;
+        try
+        {
+            _selectionModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/read-annotation-selection.js");
+            await _selectionModule.InvokeVoidAsync("selectRange", _root, annotation.Range);
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException)
+        {
+            _selectionError = "The annotated preview range could not be selected. Refresh the preview and try again.";
+        }
+    }
+
+    public void SetAnnotations(IReadOnlyList<ManuscriptAnnotationView> annotations)
+    {
+        _annotations = annotations;
+        StateHasChanged();
+    }
+
+    private sealed record PreviewTextPiece(string Text, string Style, bool Highlighted, Guid? AnnotationId = null);
+    private sealed record ReadSelectionResult(ManuscriptAnnotationRange? Range, string? Error);
+
+    public async ValueTask DisposeAsync()
     {
         _disposed = true;
         _loadCancellation?.Cancel();
         _loadCancellation?.Dispose();
         _loadCancellation = null;
-        return ValueTask.CompletedTask;
+        if (_selectionModule is not null)
+            await _selectionModule.DisposeAsync();
     }
 }

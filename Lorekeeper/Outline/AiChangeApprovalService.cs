@@ -16,7 +16,7 @@ using Lorekeeper.Persistence.Repositories;
 namespace Lorekeeper.Outline;
 
 public sealed class AiChangeApprovalService(
-IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IManuscriptService manuscripts, ICompositionService compositions, IManuscriptStyleService manuscriptStyles, IEntityService entities, IVectorIndexWorkCoordinator indexWork, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages, IAuthoringHistoryService authoringHistory, IAuthoringMutationContextAccessor authoringMutationContext, ILogger<AiChangeApprovalService> logger) : IAiChangeApprovalService
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, ICompositionService compositions, IManuscriptStyleService manuscriptStyles, IEntityService entities, IVectorIndexWorkCoordinator indexWork, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages, IAuthoringHistoryService authoringHistory, IAuthoringMutationContextAccessor authoringMutationContext, ILogger<AiChangeApprovalService> logger) : IAiChangeApprovalService
 {
     private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
     {
@@ -496,6 +496,30 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         var afterJson = AiChangeReviewDrafts.EffectiveAfterJson(change);
         switch (change.ToolName)
         {
+            case "complete_manuscript_annotation":
+                {
+                    var before = ReadRequired<ManuscriptAnnotationView>(change.BeforeJson);
+                    var manuscriptDependencies = ReadGuidList(change.DependsOnChangeIdsJson);
+                    if (manuscriptDependencies.Count > 1)
+                        throw new InvalidOperationException("Annotation completion has more than one manuscript dependency.");
+                    var expectedRevision = checked(before.Revision + manuscriptDependencies.Count);
+                    var current = await annotations.GetAsync(
+                        projectId,
+                        contentTarget,
+                        before.Id,
+                        cancellationToken)
+                        ?? throw new InvalidOperationException("The review annotation no longer exists.");
+                    if (current.Revision != expectedRevision)
+                        throw new InvalidOperationException(
+                            $"Annotation revision conflict: expected {expectedRevision}, current revision is {current.Revision}.");
+                    await annotations.CompleteAsync(
+                        projectId,
+                        contentTarget,
+                        before.Id,
+                        current.Revision,
+                        cancellationToken);
+                    break;
+                }
             case "create_act":
                 {
                     var after = ReadRequired<OutlineActChange>(afterJson);

@@ -27,6 +27,7 @@ public sealed class EditorChatTools(
 IAppDatabaseOperationFactory database, IActService acts,
     IChapterService chapters,
     IManuscriptService manuscripts,
+    IManuscriptAnnotationService annotations,
     IManuscriptMigrationService manuscriptMigrations,
     IManuscriptStyleService manuscriptStyles,
     IProjectFontService projectFonts,
@@ -91,6 +92,18 @@ IAppDatabaseOperationFactory database, IActService acts,
                     name: "redo_authoring_action",
                     description: "Redo the next action in the protected current chapter and selected Core/release target. The target cannot be supplied or changed by tool input."),
             ]);
+        }
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (int offset = 0, int limit = 50) => ListManuscriptAnnotationsAsync(context, offset, limit),
+            name: "list_manuscript_annotations",
+            description: "List open review annotations across the protected selected Core/release target in explicit pages. Returns annotation IDs, chapter IDs, current/outdated state, note text, bounded quoted text, revisions, and pagination."));
+        if (mode == EditorChatToolMode.Normal)
+        {
+            tools.Add(AIFunctionFactory.Create(
+                method: (Guid annotationId, long expectedRevision) => CompleteManuscriptAnnotationAsync(context, annotationId, expectedRevision),
+                name: "complete_manuscript_annotation",
+                description: "Permanently complete one user review annotation in the protected selected Core/release target. Use only after applying the requested manuscript edit or when the user explicitly instructs you to complete it. This cannot create or rewrite user note text. With Review edits enabled, completion is staged and depends on the corresponding staged manuscript edit when one exists."));
         }
 
         tools.AddRange([
@@ -3335,6 +3348,101 @@ IAppDatabaseOperationFactory database, IActService acts,
         }
 
         return parsed.Count == 0 ? null : parsed;
+    }
+
+    private async Task<string> ListManuscriptAnnotationsAsync(EditorChatContext context, int offset, int limit)
+    {
+        try
+        {
+            var page = await annotations.ListTargetAsync(
+                context.ProjectId,
+                context.ContentTarget,
+                offset,
+                limit,
+                context.TurnCancellationToken);
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                target = context.ContentTarget.StorageKey,
+                annotations = page.Items.Select(item => new
+                {
+                    annotationId = item.Id,
+                    item.ChapterId,
+                    item.EditionId,
+                    kind = item.Kind.ToString(),
+                    state = item.AnchorState.ToString(),
+                    item.NoteText,
+                    quote = ManuscriptAnnotationText.Bound(item.Quote, 1_000),
+                    item.Revision,
+                    item.AnchorManuscriptRevision,
+                }),
+                pagination = new
+                {
+                    page.Offset,
+                    page.Limit,
+                    page.Total,
+                    returned = page.Items.Count,
+                    hasMore = page.Offset + page.Items.Count < page.Total,
+                    nextOffset = page.Offset + page.Items.Count < page.Total ? page.Offset + page.Items.Count : (int?)null,
+                },
+            });
+        }
+        catch (Exception exception)
+        {
+            return JsonSerializer.Serialize(new { ok = false, error = exception.Message });
+        }
+    }
+
+    private async Task<string> CompleteManuscriptAnnotationAsync(
+        EditorChatContext context,
+        Guid annotationId,
+        long expectedRevision)
+    {
+        try
+        {
+            var annotation = await annotations.GetAsync(
+                context.ProjectId,
+                context.ContentTarget,
+                annotationId,
+                context.TurnCancellationToken)
+                ?? throw new KeyNotFoundException("The review annotation was not found in the selected content target.");
+            if (annotation.Revision != expectedRevision)
+                throw new InvalidOperationException($"Annotation revision conflict: expected {expectedRevision}, current revision is {annotation.Revision}.");
+            if (context.ReviewEdits && context.EditorStaging is not null)
+            {
+                var result = JsonSerializer.Serialize(new
+                {
+                    ok = true,
+                    annotationId,
+                    requiresReview = true,
+                    summary = "Annotation completion staged. It will be permanent only if the reviewed dependent edit is kept.",
+                });
+                await context.EditorStaging.StageAnnotationCompletionAsync(
+                    annotation,
+                    result,
+                    context.TurnCancellationToken);
+                return result;
+            }
+
+            await annotations.CompleteAsync(
+                context.ProjectId,
+                context.ContentTarget,
+                annotationId,
+                expectedRevision,
+                context.TurnCancellationToken);
+            context.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                annotationId,
+                requiresReview = false,
+                summary = "Review annotation completed and permanently removed.",
+            });
+        }
+        catch (Exception exception)
+        {
+            return JsonSerializer.Serialize(new { ok = false, error = exception.Message });
+        }
     }
 
     private static object LinkPayload(EntityLink link) => new

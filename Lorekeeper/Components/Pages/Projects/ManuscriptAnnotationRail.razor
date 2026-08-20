@@ -1,0 +1,325 @@
+@using Lorekeeper.Manuscripts
+@using Lorekeeper.Models
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IManuscriptAnnotationService Annotations
+@inject IManuscriptService Manuscripts
+@inject IJSRuntime JS
+
+<aside class="annotation-rail @(_collapsed ? "annotation-rail--collapsed" : null)" aria-label="Review annotations" @ref="_rail">
+    <header class="annotation-rail-header">
+        <button type="button"
+                class="annotation-rail-toggle"
+                aria-expanded="@(!_collapsed)"
+                title="@(_collapsed ? "Open review annotations" : "Collapse review annotations")"
+                @onclick="ToggleCollapsedAsync">
+            <span>Review</span>
+            <span class="annotation-rail-count">@_items.Count</span>
+        </button>
+    </header>
+    @if (!_collapsed)
+    {
+        <div class="annotation-rail-body">
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="annotation-rail-error" role="alert">@_error</div>
+            }
+            @if (_loading)
+            {
+                <div class="annotation-rail-empty"><em>Loading review notes…</em></div>
+            }
+            else if (_items.Count == 0)
+            {
+                <div class="annotation-rail-empty">Select text, then choose <strong>Highlight</strong> or <strong>Note</strong> in the editor toolbar.</div>
+            }
+            else
+            {
+                @foreach (var annotation in CurrentItems)
+                {
+                    @AnnotationCard(annotation)
+                }
+                @if (OutdatedItems.Count > 0)
+                {
+                    <section class="annotation-outdated-section">
+                        <h3>Outdated annotations</h3>
+                        <p>The original wording no longer has one unambiguous location.</p>
+                        @foreach (var annotation in OutdatedItems)
+                        {
+                            @AnnotationCard(annotation)
+                        }
+                    </section>
+                }
+            }
+        </div>
+    }
+</aside>
+
+<ConfirmationDialog IsOpen="@(_pendingCompletion is not null)"
+                    Title="Complete annotation?"
+                    Message="This permanently removes the review annotation. The manuscript text is not changed."
+                    ConfirmLabel="Complete annotation"
+                    Destructive="true"
+                    Busy="_busy"
+                    OnConfirm="ConfirmCompleteAsync"
+                    OnCancel="CancelComplete" />
+
+@code {
+    [Parameter, EditorRequired] public Guid ProjectId { get; set; }
+    [Parameter, EditorRequired] public Guid ChapterId { get; set; }
+    [Parameter] public EditorContentTarget ContentTarget { get; set; } = EditorContentTarget.Core;
+    [Parameter] public int RefreshSignal { get; set; }
+    [Parameter] public Func<Task<ManuscriptAnnotationRange?>>? GetSelectionAsync { get; set; }
+    [Parameter] public EventCallback<Guid> SelectAnnotation { get; set; }
+    [Parameter] public EventCallback<IReadOnlyList<ManuscriptAnnotationView>> Changed { get; set; }
+
+    private List<ManuscriptAnnotationView> _items = [];
+    private Guid _loadedProject;
+    private Guid _loadedChapter;
+    private EditorContentTarget _loadedTarget = EditorContentTarget.Core;
+    private int _loadedSignal = -1;
+    private bool _loading;
+    private bool _collapsed;
+    private bool _collapsedLoaded;
+    private bool _collapsePreferenceExists;
+    private bool _busy;
+    private string? _error;
+    private Guid? _editingId;
+    private Guid? _selectedId;
+    private Guid? _pendingCardSelection;
+    private string _noteDraft = string.Empty;
+    private ManuscriptAnnotationView? _pendingCompletion;
+    private IJSObjectReference? _module;
+    private ElementReference _rail;
+
+    private IReadOnlyList<ManuscriptAnnotationView> CurrentItems => _items
+        .Where(item => item.AnchorState == ManuscriptAnnotationAnchorState.Current)
+        .ToList();
+    private IReadOnlyList<ManuscriptAnnotationView> OutdatedItems => _items
+        .Where(item => item.AnchorState == ManuscriptAnnotationAnchorState.Outdated)
+        .ToList();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedProject != Guid.Empty && _loadedProject != ProjectId)
+        {
+            _collapsedLoaded = false;
+            _collapsePreferenceExists = false;
+        }
+        if (_loadedProject == ProjectId && _loadedChapter == ChapterId
+            && _loadedTarget == ContentTarget && _loadedSignal == RefreshSignal)
+            return;
+        _loadedProject = ProjectId;
+        _loadedChapter = ChapterId;
+        _loadedTarget = ContentTarget;
+        _loadedSignal = RefreshSignal;
+        await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/annotation-review.js");
+        if (!_collapsedLoaded)
+        {
+            var stored = await _module.InvokeAsync<bool?>("readRailCollapsed", ProjectId.ToString("N"));
+            _collapsePreferenceExists = stored is not null;
+            _collapsed = stored ?? _items.Count == 0;
+            _collapsedLoaded = true;
+            StateHasChanged();
+            return;
+        }
+        await _module.InvokeVoidAsync("startRailPositioning", _rail);
+        if (!_collapsed)
+            await _module.InvokeVoidAsync("positionRailCards", _rail);
+        if (_pendingCardSelection is Guid annotationId)
+        {
+            _pendingCardSelection = null;
+            await _module.InvokeVoidAsync("selectRailCard", _rail, annotationId);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            _items = (await Annotations.ListChapterAsync(ProjectId, ContentTarget, ChapterId)).ToList();
+            if (_collapsedLoaded && _items.Count > 0 && !_collapsePreferenceExists)
+                _collapsed = false;
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+            _items = [];
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private RenderFragment AnnotationCard(ManuscriptAnnotationView annotation) => @<article class="annotation-card @(annotation.AnchorState == ManuscriptAnnotationAnchorState.Outdated ? "annotation-card--outdated" : null) @(_selectedId == annotation.Id ? "annotation-card--selected" : null)" data-annotation-card-id="@annotation.Id" @key="annotation.Id">
+        <button type="button" class="annotation-card-range" disabled="@(annotation.AnchorState == ManuscriptAnnotationAnchorState.Outdated)" @onclick="() => SelectRangeFromCardAsync(annotation.Id)">
+            <span class="annotation-card-kind">@(annotation.Kind == ManuscriptAnnotationKind.Note ? "Note" : "Highlight")</span>
+            <q>@BoundedQuote(annotation.Quote)</q>
+        </button>
+        @if (_editingId == annotation.Id)
+        {
+            <textarea class="form-control form-control-sm" maxlength="8000" rows="4" @bind="_noteDraft"></textarea>
+            <div class="annotation-card-actions">
+                <button type="button" class="btn btn-sm btn-primary" disabled="_busy" @onclick="() => SaveNoteAsync(annotation)">Save note</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelEdit">Cancel</button>
+            </div>
+        }
+        else
+        {
+            @if (annotation.Kind == ManuscriptAnnotationKind.Note)
+            {
+                <p class="annotation-note">@annotation.NoteText</p>
+            }
+            <div class="annotation-card-actions">
+                @if (annotation.Kind == ManuscriptAnnotationKind.Note)
+                {
+                    <button type="button" class="btn btn-sm btn-link" @onclick="() => StartEdit(annotation)">Edit</button>
+                    <button type="button" class="btn btn-sm btn-link" @onclick="() => ConvertAsync(annotation, ManuscriptAnnotationKind.Highlight)">Make highlight</button>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-sm btn-link" @onclick="() => StartEdit(annotation)">Add note</button>
+                }
+                @if (annotation.AnchorState == ManuscriptAnnotationAnchorState.Outdated)
+                {
+                    <button type="button" class="btn btn-sm btn-link" @onclick="() => ReattachAsync(annotation)">Attach to selection</button>
+                }
+                <button type="button" class="btn btn-sm btn-link text-danger" @onclick="() => RequestComplete(annotation)">Complete</button>
+            </div>
+        }
+    </article>;
+
+    private async Task ToggleCollapsedAsync()
+    {
+        _collapsed = !_collapsed;
+        _collapsePreferenceExists = true;
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/annotation-review.js");
+        await _module.InvokeVoidAsync("writeRailCollapsed", ProjectId.ToString("N"), _collapsed);
+    }
+
+    private void StartEdit(ManuscriptAnnotationView annotation)
+    {
+        _editingId = annotation.Id;
+        _noteDraft = annotation.NoteText;
+        _error = null;
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+        _noteDraft = string.Empty;
+    }
+
+    private async Task SaveNoteAsync(ManuscriptAnnotationView annotation)
+    {
+        if (string.IsNullOrWhiteSpace(_noteDraft))
+        {
+            _error = "Enter note text before saving.";
+            return;
+        }
+        await MutateAsync(async () => await Annotations.UpdateNoteAsync(
+            ProjectId, ContentTarget, annotation.Id, _noteDraft, annotation.Revision));
+        CancelEdit();
+    }
+
+    private Task ConvertAsync(ManuscriptAnnotationView annotation, ManuscriptAnnotationKind kind) =>
+        MutateAsync(async () => await Annotations.ConvertAsync(
+            ProjectId, ContentTarget, annotation.Id, kind, annotation.Revision));
+
+    private async Task ReattachAsync(ManuscriptAnnotationView annotation)
+    {
+        if (GetSelectionAsync is null)
+        {
+            _error = "Select the replacement manuscript text in Edit or Read first.";
+            return;
+        }
+        ManuscriptAnnotationRange? range;
+        try { range = await GetSelectionAsync(); }
+        catch { range = null; }
+        if (range is null)
+        {
+            _error = "Select the replacement manuscript text in Edit or Read first.";
+            return;
+        }
+        await MutateAsync(async () =>
+        {
+            var manuscript = await Manuscripts.GetManuscriptAsync(ContentTarget, ChapterId)
+                ?? throw new InvalidOperationException("The chapter manuscript was not found.");
+            return await Annotations.ReattachAsync(
+                ProjectId, ContentTarget, annotation.Id, range, annotation.Revision, manuscript.Revision);
+        });
+    }
+
+    private void RequestComplete(ManuscriptAnnotationView annotation) => _pendingCompletion = annotation;
+    private void CancelComplete() => _pendingCompletion = null;
+
+    private async Task ConfirmCompleteAsync()
+    {
+        if (_pendingCompletion is not { } annotation)
+            return;
+        await MutateAsync(async () =>
+        {
+            await Annotations.CompleteAsync(ProjectId, ContentTarget, annotation.Id, annotation.Revision);
+            return null;
+        });
+        _pendingCompletion = null;
+    }
+
+    private async Task MutateAsync(Func<Task<ManuscriptAnnotationView?>> action)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+            await LoadAsync();
+            await Changed.InvokeAsync(_items);
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string BoundedQuote(string quote) => ManuscriptAnnotationText.Bound(quote, 240);
+
+    private async Task SelectRangeFromCardAsync(Guid annotationId)
+    {
+        _selectedId = annotationId;
+        await SelectAnnotation.InvokeAsync(annotationId);
+    }
+
+    public async Task SelectCardAsync(Guid annotationId)
+    {
+        _selectedId = annotationId;
+        _pendingCardSelection = annotationId;
+        if (_collapsed)
+        {
+            _collapsed = false;
+            _collapsePreferenceExists = true;
+            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/annotation-review.js");
+            await _module.InvokeVoidAsync("writeRailCollapsed", ProjectId.ToString("N"), false);
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try { await _module.InvokeVoidAsync("stopRailPositioning", _rail); } catch { }
+            await _module.DisposeAsync();
+        }
+    }
+}

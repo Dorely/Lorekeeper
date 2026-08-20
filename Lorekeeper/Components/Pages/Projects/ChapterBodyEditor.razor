@@ -10,6 +10,7 @@
 @inject IJSRuntime JS
 @inject IManuscriptStyleService Styles
 @inject IManuscriptService Manuscripts
+@inject IManuscriptAnnotationService Annotations
 @inject IProjectImageService Images
 @inject IProjectFontService Fonts
 @inject Lorekeeper.Composition.ICompositionService Compositions
@@ -38,6 +39,8 @@
     [Parameter] public EventCallback OpenProjectImagePicker { get; set; }
     [Parameter] public EventCallback OpenBookTextStyles { get; set; }
     [Parameter] public EventCallback StyleCatalogChanged { get; set; }
+    [Parameter] public EventCallback AnnotationsChanged { get; set; }
+    [Parameter] public EventCallback<Guid> AnnotationSelected { get; set; }
     [Parameter] public Func<string, string, int, long, Task<object>>? CreateDesignedPageOverrideAsync { get; set; }
     [Parameter] public Func<long, Task<ManuscriptDocument>>? ReadDocumentOverrideAsync { get; set; }
     [Parameter] public Func<Task<SemanticEditorHistoryResult>>? UndoOverrideAsync { get; set; }
@@ -80,6 +83,9 @@
                 var fontFamiliesJson = JsonSerializer.Serialize(
                     await Fonts.ListAsync(ProjectId),
                     ManuscriptCodec.JsonOptions);
+                var annotationsJson = JsonSerializer.Serialize(
+                    await Annotations.ListChapterAsync(ProjectId, ContentTarget, ChapterId),
+                    ManuscriptCodec.JsonOptions);
                 if (_disposed || _disposing)
                     return;
 
@@ -108,7 +114,8 @@
                     "[]",
                     compositionsJson,
                     fontFamiliesJson,
-                    AllowDesignedPages);
+                    AllowDesignedPages,
+                    annotationsJson);
                 if (_disposed || _disposing)
                 {
                     if (handle is not null)
@@ -179,6 +186,67 @@
 
     [JSInvokable]
     public Task OnOpenBookTextStyles() => OpenBookTextStyles.InvokeAsync();
+
+    [JSInvokable]
+    public async Task<ManuscriptAnnotationView> OnCreateAnnotation(
+        string kind,
+        string noteText,
+        ManuscriptAnnotationRange range,
+        long expectedManuscriptRevision)
+    {
+        var parsedKind = Enum.TryParse<ManuscriptAnnotationKind>(kind, ignoreCase: true, out var value)
+            ? value
+            : throw new InvalidDataException("Choose a supported review annotation kind.");
+        var annotation = await Annotations.CreateAsync(
+            ProjectId,
+            ContentTarget,
+            ChapterId,
+            parsedKind,
+            noteText,
+            range,
+            expectedManuscriptRevision);
+        await AnnotationsChanged.InvokeAsync();
+        return annotation;
+    }
+
+    [JSInvokable]
+    public Task OnAnnotationSelected(Guid annotationId) => AnnotationSelected.InvokeAsync(annotationId);
+
+    [JSInvokable]
+    public Task<IReadOnlyList<ManuscriptAnnotationView>> GetReviewAnnotations() =>
+        Annotations.ListChapterAsync(ProjectId, ContentTarget, ChapterId);
+
+    public async Task<ManuscriptAnnotationRange?> GetAnnotationRangeAsync()
+    {
+        if (_disposed || _handle is null)
+            return null;
+        try { return await _handle.InvokeAsync<ManuscriptAnnotationRange>("getAnnotationRange"); }
+        catch (JSException) { return null; }
+        catch (JSDisconnectedException) { return null; }
+    }
+
+    public async Task SelectAnnotationAsync(Guid annotationId)
+    {
+        if (_disposed || _handle is null)
+            return;
+        try { await _handle.InvokeVoidAsync("selectAnnotation", annotationId); }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+    }
+
+    public async Task SetAnnotationsAsync(IReadOnlyList<ManuscriptAnnotationView> annotations)
+    {
+        if (_disposed || _handle is null)
+            return;
+        try
+        {
+            await _handle.InvokeVoidAsync(
+                "setAnnotations",
+                JsonSerializer.Serialize(annotations, ManuscriptCodec.JsonOptions));
+        }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+    }
 
     public async Task SelectProjectImageAsync(ProjectImageView image)
     {
@@ -331,10 +399,16 @@
     public async Task<SemanticEditorHistoryResult> OnUndoAuthoring()
     {
         if (UndoOverrideAsync is not null)
-            return await UndoOverrideAsync();
+        {
+            var overridden = await UndoOverrideAsync();
+            if (overridden.Applied)
+                await AnnotationsChanged.InvokeAsync();
+            return overridden;
+        }
         try
         {
             var result = await Manuscripts.UndoAsync(ContentTarget, ChapterId);
+            await AnnotationsChanged.InvokeAsync();
             return new(true, ManuscriptCodec.Serialize(result.Snapshot.Document), result.Snapshot.Revision,
                 result.History.CanUndo, result.History.CanRedo, result.History.UndoLabel, result.History.RedoLabel,
                 result.SelectionJson, null);
@@ -349,10 +423,16 @@
     public async Task<SemanticEditorHistoryResult> OnRedoAuthoring()
     {
         if (RedoOverrideAsync is not null)
-            return await RedoOverrideAsync();
+        {
+            var overridden = await RedoOverrideAsync();
+            if (overridden.Applied)
+                await AnnotationsChanged.InvokeAsync();
+            return overridden;
+        }
         try
         {
             var result = await Manuscripts.RedoAsync(ContentTarget, ChapterId);
+            await AnnotationsChanged.InvokeAsync();
             return new(true, ManuscriptCodec.Serialize(result.Snapshot.Document), result.Snapshot.Revision,
                 result.History.CanUndo, result.History.CanRedo, result.History.UndoLabel, result.History.RedoLabel,
                 result.SelectionJson, null);

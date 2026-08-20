@@ -27,7 +27,7 @@ public sealed record ProjectExportFile(
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 23;
+    public const int CurrentFormatVersion = 24;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -52,10 +52,32 @@ public sealed record ProjectExportDocument
     public List<ProjectExportFontFamily> FontFamilies { get; init; } = [];
     public List<ProjectExportAct> Acts { get; init; } = [];
     public List<ProjectExportChapter> Chapters { get; init; } = [];
+    public List<ProjectExportManuscriptAnnotation> ManuscriptAnnotations { get; init; } = [];
     public List<ProjectExportNode> Nodes { get; init; } = [];
     public List<ProjectExportEdge> Edges { get; init; } = [];
     public List<string> Warnings { get; init; } = [];
 }
+
+public sealed record ProjectExportManuscriptAnnotation(
+    Guid Id,
+    Guid ChapterId,
+    string ChapterTitle,
+    Guid? EditionId,
+    string? EditionName,
+    ManuscriptAnnotationKind Kind,
+    string NoteText,
+    long Revision,
+    long AnchorManuscriptRevision,
+    ManuscriptAnnotationAnchorState AnchorState,
+    string StartBlockId,
+    int StartOffset,
+    string EndBlockId,
+    int EndOffset,
+    string OriginalQuote,
+    string ContextBefore,
+    string ContextAfter,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
 
 public sealed record ProjectExportProject(
     Guid Id,

@@ -2344,6 +2344,54 @@ fn browser_preview_layout_trace_omits_unused_glyph_payloads() {
 }
 
 #[test]
+fn browser_preview_reports_deterministic_utf16_source_ranges_across_wrapping_and_pages() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["layoutTraceMode"] = json!("browser-preview");
+    job.request["trim"]["widthInches"] = json!(4.0);
+    job.request["trim"]["heightInches"] = json!(5.0);
+    job.request["trim"]["marginInches"] = json!(0.75);
+    let source = "repeat 😀 repeat ".repeat(180);
+    job.request["document"]["includeActHeadings"] = json!(false);
+    job.request["document"]["includeChapterHeadings"] = json!(false);
+    job.request["document"]["publicationSections"] = json!([]);
+    job.request["document"]["sections"] = json!([{
+        "id": "act", "title": "", "includePage": false, "includeHeading": false,
+        "chapters": [{
+            "id": "chapter", "title": "", "includeHeading": false,
+            "blocks": [{
+                "id": "utf16-block", "type": "Paragraph", "styleRole": "body",
+                "content": [
+                    { "type": "Text", "text": &source[..source.len() / 2], "marks": [{"type": "Strong"}] },
+                    { "type": "Text", "text": &source[source.len() / 2..], "marks": [] }
+                ]
+            }]
+        }]
+    }]);
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let pages = trace["pages"].as_array().expect("pages");
+    let lines = pages
+        .iter()
+        .flat_map(|page| page["lines"].as_array().into_iter().flatten())
+        .filter(|line| line["semanticId"] == "utf16-block")
+        .collect::<Vec<_>>();
+    assert!(pages.len() > 1, "fixture must cross a page boundary");
+    assert!(lines.len() > 2, "fixture must wrap into multiple lines");
+    let source_utf16_len = source.encode_utf16().count() as u64;
+    let mut previous_end = 0;
+    for line in lines {
+        let start = line["sourceStartUtf16"].as_u64().expect("source start");
+        let end = line["sourceEndUtf16"].as_u64().expect("source end");
+        assert!(start >= previous_end);
+        assert!(end >= start);
+        assert!(end <= source_utf16_len);
+        previous_end = end;
+    }
+    assert!(previous_end > source_utf16_len / 2);
+}
+
+#[test]
 fn emitted_pdf_text_matrices_match_harfrust_layout_positions() {
     let mut job = PreparedJob::new("kdp-paperback-v1");
     job.request["cover"] = Value::Null;

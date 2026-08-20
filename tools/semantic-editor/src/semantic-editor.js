@@ -1,11 +1,12 @@
 import {DOMParser as ProseMirrorDOMParser, Fragment, Schema, Slice} from "prosemirror-model";
 import {EditorState, NodeSelection, Plugin, PluginKey, TextSelection} from "prosemirror-state";
-import {EditorView} from "prosemirror-view";
+import {Decoration, DecorationSet, EditorView} from "prosemirror-view";
 import {baseKeymap, chainCommands, createParagraphNear, liftEmptyBlock, newlineInCode, toggleMark} from "prosemirror-commands";
 import {GapCursor, gapCursor} from "prosemirror-gapcursor";
 import {keymap} from "prosemirror-keymap";
 
 const idsKey = new PluginKey("lorekeeper-block-ids");
+const annotationsKey = new PluginKey("lorekeeper-review-annotations");
 const blockTypeToNode = {
     paragraph: "paragraph",
     heading: "heading",
@@ -872,6 +873,72 @@ function blockPositionById(doc, blockId) {
         return false;
     });
     return found;
+}
+
+function annotationRangeFromSelection(view) {
+    const {selection, doc} = view.state;
+    if (selection.empty || selection instanceof NodeSelection)
+        throw new Error("Select manuscript text before adding a review annotation.");
+    const pieces = [];
+    doc.forEach((node, position) => {
+        const nodeEnd = position + node.nodeSize;
+        if (!["paragraph", "heading", "blockquote", "list_item", "figure"].includes(node.type.name)
+            && selection.from < nodeEnd && selection.to > position)
+            throw new Error("Review annotations cannot cross Scene Breaks, Designed Pages, or non-flowing content.");
+        const contentStart = position + 1;
+        const contentEnd = contentStart + node.content.size;
+        const from = Math.max(selection.from, contentStart);
+        const to = Math.min(selection.to, contentEnd);
+        if (to <= from) return;
+        if (!["paragraph", "heading", "blockquote", "list_item", "figure"].includes(node.type.name))
+            throw new Error("Review annotations can only cover flowing manuscript text and Figure captions.");
+        pieces.push({
+            blockId: node.attrs.id,
+            startOffset: from - contentStart,
+            endOffset: to - contentStart
+        });
+    });
+    if (pieces.length === 0)
+        throw new Error("Select manuscript text before adding a review annotation.");
+    return {
+        startBlockId: pieces[0].blockId,
+        startOffset: pieces[0].startOffset,
+        endBlockId: pieces.at(-1).blockId,
+        endOffset: pieces.at(-1).endOffset
+    };
+}
+
+function annotationDecorations(doc, annotations) {
+    const decorations = [];
+    for (const annotation of annotations || []) {
+        if (String(annotation.anchorState).toLowerCase() !== "current") continue;
+        const range = annotation.range;
+        const startPosition = blockPositionById(doc, range.startBlockId);
+        const endPosition = blockPositionById(doc, range.endBlockId);
+        if (!Number.isInteger(startPosition) || !Number.isInteger(endPosition)) continue;
+        let active = false;
+        doc.forEach((node, position) => {
+            if (position === startPosition) active = true;
+            if (!active || !node.inlineContent) return;
+            const fromOffset = position === startPosition
+                ? Math.max(0, Math.min(range.startOffset, node.content.size))
+                : 0;
+            const toOffset = position === endPosition
+                ? Math.max(0, Math.min(range.endOffset, node.content.size))
+                : node.content.size;
+            const from = position + 1 + fromOffset;
+            const to = position + 1 + toOffset;
+            if (to > from) {
+                decorations.push(Decoration.inline(from, to, {
+                    class: "manuscript-review-highlight",
+                    "data-annotation-id": annotation.id,
+                    title: annotation.kind === "note" ? "Review note" : "Review highlight"
+                }));
+            }
+            if (position === endPosition) active = false;
+        });
+    }
+    return DecorationSet.create(doc, decorations);
 }
 
 function captureStableSelection(view) {
@@ -1911,7 +1978,7 @@ function hydrateDesignedPageSummaries(document, compositionById) {
     return document;
 }
 
-export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]", fontFamiliesJson = "[]", allowDesignedPages = true) {
+export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]", fontFamiliesJson = "[]", allowDesignedPages = true, annotationsJson = "[]") {
     if (!root || typeof root.replaceChildren !== "function" || root.isConnected === false)
         return null;
 
@@ -1921,6 +1988,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     JSON.parse(editionsJson);
     const pageCompositions = JSON.parse(compositionsJson);
     const fontFamilies = JSON.parse(fontFamiliesJson);
+    let reviewAnnotations = JSON.parse(annotationsJson);
     const imageById = new Map(projectImages.map(image => [String(image.id).toLowerCase(), image]));
     const compositionById = new Map(pageCompositions.map(composition => [String(composition.id).toLowerCase(), composition]));
     const paragraphRoles = new Set([
@@ -2005,6 +2073,12 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         if (caretFrame !== null) cancelAnimationFrame(caretFrame);
         caretFrame = requestAnimationFrame(updatePersistentCaret);
     };
+    const refreshReviewAnnotations = async () => {
+        try {
+            reviewAnnotations = await dotNetRef.invokeMethodAsync("GetReviewAnnotations");
+            view.dispatch(view.state.tr.setMeta(annotationsKey, true));
+        } catch {}
+    };
     const saveNow = () => {
         if (timer) {
             clearTimeout(timer);
@@ -2028,6 +2102,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
                     selectionJson);
                 if (result?.currentManuscriptJson) {
                     replaceDocument(result.currentManuscriptJson);
+                    await refreshReviewAnnotations();
                     persistentHistoryState = await dotNetRef.invokeMethodAsync("GetAuthoringHistoryState");
                     updateFormattingControls();
                     return true;
@@ -2035,6 +2110,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
                 if (!result?.saved) return false;
                 revision = result.revision;
                 savedGeneration = Math.max(savedGeneration, targetGeneration);
+                await refreshReviewAnnotations();
                 try {
                     persistentHistoryState = await dotNetRef.invokeMethodAsync("GetAuthoringHistoryState");
                     updateFormattingControls();
@@ -2075,11 +2151,22 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     };
 
     const initialDocument = documentFromDomain(initial);
+    const annotationsPlugin = new Plugin({
+        key: annotationsKey,
+        state: {
+            init: () => 0,
+            apply: (transaction, value) => transaction.getMeta(annotationsKey) ? value + 1 : value
+        },
+        props: {
+            decorations: state => annotationDecorations(state.doc, reviewAnnotations)
+        }
+    });
     const state = EditorState.create({
         doc: initialDocument,
         selection: initialEditorSelection(initialDocument),
         plugins: [
             blockIdPlugin(),
+            annotationsPlugin,
             gapCursor(),
             keymap({
                 "Mod-z": () => { void performPersistentHistory(false); return true; },
@@ -2125,6 +2212,11 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             },
             click(_view, event) {
                 if (!(event.target instanceof Element)) return false;
+                const annotation = event.target.closest("[data-annotation-id]");
+                if (annotation?.dataset.annotationId) {
+                    void dotNetRef.invokeMethodAsync("OnAnnotationSelected", annotation.dataset.annotationId);
+                    return false;
+                }
                 const figureImage = event.target.closest("figure[data-block-id] img");
                 if (figureImage) {
                     event.preventDefault();
@@ -2285,7 +2377,42 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             void insertDesignedPage(view, dotNetRef, () => revision, saveNow, replaceDocument, root))]
         : [];
 
+    const createAnnotation = async kind => {
+        let range;
+        try {
+            range = annotationRangeFromSelection(view);
+        } catch (error) {
+            showEditorNotice(root, error?.message || "Select flowing manuscript text first.");
+            return;
+        }
+        let noteText = "";
+        if (kind === "note") {
+            const values = await showEditorForm(root, {
+                title: "Add review note",
+                description: "The note stays with this selected manuscript range and is available to the assistant.",
+                submitLabel: "Add note",
+                fields: [{name: "noteText", label: "Note", type: "textarea", required: true}],
+                validate: value => value.noteText.trim().length > 8000 ? "Use 8,000 characters or fewer." : null
+            });
+            if (!values) return;
+            noteText = values.noteText.trim();
+        }
+        if (!await saveNow()) {
+            showEditorNotice(root, "Save the manuscript before adding the annotation.");
+            return;
+        }
+        try {
+            const annotation = await dotNetRef.invokeMethodAsync("OnCreateAnnotation", kind, noteText, range, revision);
+            reviewAnnotations = reviewAnnotations.concat(annotation);
+            view.dispatch(view.state.tr.setMeta(annotationsKey, true));
+        } catch (error) {
+            showEditorNotice(root, error?.message || "The review annotation could not be created.");
+        }
+    };
+
     toolbar.append(
+        button("Highlight", "Highlight the selected text for review", () => void createAnnotation("highlight")),
+        button("Note", "Add a review note to the selected text", () => void createAnnotation("note")),
         selectControl("Block style", [
             ["", "Book text"],
             ["paragraph|body|2", "Body text"],
@@ -2522,6 +2649,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
                 return false;
             }
             replaceDocument(result.manuscriptJson);
+            await refreshReviewAnnotations();
             restoreStableSelection(view, result.selectionJson);
             persistentHistoryState = result;
             updateFormattingControls();
@@ -2554,6 +2682,29 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         },
         setDocument(json) {
             replaceDocument(json);
+        },
+        setAnnotations(json) {
+            reviewAnnotations = typeof json === "string" ? JSON.parse(json) : json;
+            view.dispatch(view.state.tr.setMeta(annotationsKey, true));
+        },
+        getAnnotationRange() {
+            return annotationRangeFromSelection(view);
+        },
+        selectAnnotation(annotationId) {
+            const annotation = reviewAnnotations.find(item => item.id === annotationId);
+            if (!annotation || String(annotation.anchorState).toLowerCase() !== "current") return false;
+            const start = blockPositionById(view.state.doc, annotation.range.startBlockId);
+            const end = blockPositionById(view.state.doc, annotation.range.endBlockId);
+            if (!Number.isInteger(start) || !Number.isInteger(end)) return false;
+            const startNode = view.state.doc.nodeAt(start);
+            const endNode = view.state.doc.nodeAt(end);
+            if (!startNode?.inlineContent || !endNode?.inlineContent) return false;
+            view.dispatch(view.state.tr.setSelection(TextSelection.create(
+                view.state.doc,
+                start + 1 + Math.max(0, Math.min(annotation.range.startOffset, startNode.content.size)),
+                end + 1 + Math.max(0, Math.min(annotation.range.endOffset, endNode.content.size)))).scrollIntoView());
+            view.focus();
+            return true;
         },
         selectProjectImage(image) {
             const imageId = String(image?.id || "").toLowerCase();

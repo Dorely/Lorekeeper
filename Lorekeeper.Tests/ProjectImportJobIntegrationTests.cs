@@ -604,6 +604,98 @@ public sealed class ProjectImportJobIntegrationTests
             mark => mark.Type == ManuscriptMarkType.CharacterStyle && mark.Value == "lead-in");
     }
 
+    [Fact]
+    public async Task V24AnnotationsRemapTargetsAndPreserveInvalidAnchorsAsOutdated()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
+        await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+        await db.Database.MigrateAsync();
+        var project = new Project { Name = "Annotation import", Slug = $"annotations-{Guid.NewGuid():N}" };
+        db.Projects.Add(project);
+        await db.SaveChangesAsync();
+
+        var exportedChapterId = Guid.NewGuid();
+        var manuscript = new ManuscriptDocument
+        {
+            ManuscriptId = exportedChapterId,
+            Revision = 4,
+            Content =
+            [
+                new ManuscriptBlock
+                {
+                    Id = "body",
+                    Type = ManuscriptBlockType.Paragraph,
+                    Content = [new ManuscriptInline { Text = "Hello world" }],
+                },
+            ],
+        };
+        var edition = ExportEdition("Annotated edition", null, null, []);
+        var now = DateTime.UtcNow;
+        var document = new ProjectExportDocument
+        {
+            FormatVersion = 24,
+            ExportKind = ProjectExportKind.Full,
+            Project = new ProjectExportProject(Guid.NewGuid(), "Exported", "exported", string.Empty, true, true),
+            Chapters =
+            [
+                new ProjectExportChapter
+                {
+                    Id = exportedChapterId,
+                    Title = "Annotated chapter",
+                    ManuscriptJson = ManuscriptCodec.Serialize(manuscript),
+                    ManuscriptRevision = manuscript.Revision,
+                },
+            ],
+            PublicationBook = new ProjectExportPublicationBook(
+                1, "Annotated book", string.Empty, "Author", "en", string.Empty, string.Empty,
+                string.Empty, true, true, false, false, true, true, false, false,
+                PublishTitlePageMode.Automatic,
+                [new ProjectExportEditionOutlineItem(Guid.NewGuid(), PublishOutlineTargetKind.Chapter, exportedChapterId, true, 0)],
+                null),
+            PublicationEditions = [edition],
+            ManuscriptAnnotations =
+            [
+                new ProjectExportManuscriptAnnotation(
+                    Guid.NewGuid(), exportedChapterId, "Annotated chapter", edition.Id, edition.Name,
+                    ManuscriptAnnotationKind.Note, "Keep the greeting", 2, manuscript.Revision,
+                    ManuscriptAnnotationAnchorState.Current, "body", 0, "body", 5,
+                    "Hello", string.Empty, " world", now, now),
+                new ProjectExportManuscriptAnnotation(
+                    Guid.NewGuid(), exportedChapterId, "Annotated chapter", null, null,
+                    ManuscriptAnnotationKind.Highlight, string.Empty, 1, manuscript.Revision,
+                    ManuscriptAnnotationAnchorState.Current, "missing", 0, "missing", 4,
+                    "Gone", string.Empty, string.Empty, now, now),
+            ],
+        };
+        var job = AddImportJob(db, project.Id, document);
+        await db.SaveChangesAsync();
+
+        var processor = await CreateProcessorAsync(db, project);
+        await processor.RunAsync(job.Id);
+
+        db.ChangeTracker.Clear();
+        var completed = await db.ProjectImportJobs.AsNoTracking().SingleAsync();
+        Assert.True(completed.Status == ProjectImportJobStatus.Completed, completed.ErrorMessage);
+        var importedChapter = await db.Chapters.AsNoTracking().SingleAsync();
+        var importedEdition = await db.PublicationEditions.AsNoTracking().SingleAsync();
+        Assert.NotEqual(exportedChapterId, importedChapter.Id);
+        Assert.NotEqual(edition.Id, importedEdition.Id);
+        var annotations = await db.ManuscriptAnnotations.AsNoTracking().OrderBy(item => item.Kind).ToListAsync();
+        Assert.Equal(2, annotations.Count);
+        Assert.All(annotations, item => Assert.Equal(importedChapter.Id, item.ChapterId));
+        var note = Assert.Single(annotations, item => item.Kind == ManuscriptAnnotationKind.Note);
+        Assert.Equal(importedEdition.Id, note.EditionId);
+        Assert.Equal(ManuscriptAnnotationAnchorState.Current, note.AnchorState);
+        Assert.Equal("Hello", note.OriginalQuote);
+        var highlight = Assert.Single(annotations, item => item.Kind == ManuscriptAnnotationKind.Highlight);
+        Assert.Null(highlight.EditionId);
+        Assert.Equal(ManuscriptAnnotationAnchorState.Outdated, highlight.AnchorState);
+        Assert.Equal("Gone", highlight.OriginalQuote);
+    }
+
     private static T DefaultProxy<T>() where T : class =>
         DispatchProxy.Create<T, DefaultDispatchProxy>();
 

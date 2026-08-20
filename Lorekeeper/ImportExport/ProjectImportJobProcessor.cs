@@ -168,6 +168,10 @@ public sealed class ProjectImportJobProcessor(
 
                 await ImportEntityVisualExamplesAsync(job, document, state, cancellationToken);
 
+                await ImportManuscriptAnnotationsAsync(job.ProjectId, document, state, cancellationToken);
+                if (document.FormatVersion >= 24)
+                    await StepAsync(job, "Imported manuscript review annotations.", cancellationToken);
+
                 await outlineGraphSync.RepairProjectAsync(project.Id, cancellationToken);
                 await StepAsync(job, "Repaired graph outline links.", cancellationToken);
                 job.Status = ProjectImportJobStatus.Completed;
@@ -444,6 +448,7 @@ public sealed class ProjectImportJobProcessor(
         ValidateChapterPayloads(document);
         ValidatePublicationPayloads(document);
         ValidateIngestSourcePayloads(document);
+        ValidateManuscriptAnnotationPayloads(document);
 
         job.FormatId = document.FormatId;
         job.FormatVersion = document.FormatVersion;
@@ -4052,6 +4057,137 @@ public sealed class ProjectImportJobProcessor(
                 buffer[index++] = char.ToLowerInvariant(ch);
         }
         return new string(buffer[..index]);
+    }
+
+    private async Task ImportManuscriptAnnotationsAsync(
+        Guid projectId,
+        ProjectExportDocument document,
+        ImportState state,
+        CancellationToken cancellationToken)
+    {
+        if (document.FormatVersion < 24 || document.ManuscriptAnnotations.Count == 0)
+            return;
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        operation.ShareWithNestedOperations();
+        var db = operation.Db;
+        foreach (var imported in document.ManuscriptAnnotations)
+        {
+            var chapterId = state.ChapterMap.TryGetValue(imported.ChapterId, out var remappedChapterId)
+                ? remappedChapterId
+                : imported.ChapterId;
+            var chapter = await db.Chapters.SingleOrDefaultAsync(
+                item => item.Id == chapterId && item.ProjectId == projectId,
+                cancellationToken);
+            if (chapter is null && !string.IsNullOrWhiteSpace(imported.ChapterTitle))
+            {
+                var titleMatches = await db.Chapters
+                    .Where(item => item.ProjectId == projectId && item.Title == imported.ChapterTitle)
+                    .Take(2)
+                    .ToListAsync(cancellationToken);
+                chapter = titleMatches.Count == 1 ? titleMatches[0] : null;
+                chapterId = chapter?.Id ?? chapterId;
+            }
+            if (chapter is null)
+                continue;
+
+            Guid? editionId = null;
+            if (imported.EditionId is Guid importedEditionId)
+            {
+                editionId = state.EditionMap.TryGetValue(importedEditionId, out var remappedEditionId)
+                    ? remappedEditionId
+                    : importedEditionId;
+                if (!await db.PublicationEditions.AnyAsync(item => item.Id == editionId && item.ProjectId == projectId, cancellationToken))
+                {
+                    var editionMatches = await db.PublicationEditions
+                        .Where(item => item.ProjectId == projectId && item.Name == imported.EditionName)
+                        .Select(item => item.Id)
+                        .Take(2)
+                        .ToListAsync(cancellationToken);
+                    if (editionMatches.Count != 1)
+                        continue;
+                    editionId = editionMatches[0];
+                }
+            }
+
+            var chapterOverride = editionId is Guid targetEditionId
+                ? await db.PublicationEditionChapterOverrides.AsNoTracking().SingleOrDefaultAsync(
+                    item => item.EditionId == targetEditionId && item.ChapterId == chapterId,
+                    cancellationToken)
+                : null;
+            var revision = chapterOverride?.Revision ?? chapter.ManuscriptRevision;
+            var manuscript = chapterOverride is null
+                ? ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision)
+                : ManuscriptCodec.Deserialize(chapterOverride.ManuscriptJson, chapter.Id, chapterOverride.Revision);
+            var range = new ManuscriptAnnotationRange(
+                imported.StartBlockId,
+                imported.StartOffset,
+                imported.EndBlockId,
+                imported.EndOffset);
+            ManuscriptAnnotationAnchors.Resolved? resolved = null;
+            try { resolved = ManuscriptAnnotationAnchors.TryResolveSelection(manuscript, range); }
+            catch (InvalidDataException) { }
+            var current = imported.AnchorState == ManuscriptAnnotationAnchorState.Current
+                && resolved?.Quote == imported.OriginalQuote;
+            db.ManuscriptAnnotations.Add(new ManuscriptAnnotation
+            {
+                Id = Guid.NewGuid(),
+                ProjectId = projectId,
+                ChapterId = chapterId,
+                EditionId = editionId,
+                Kind = imported.Kind,
+                NoteText = imported.NoteText,
+                Revision = Math.Max(1, imported.Revision),
+                AnchorManuscriptRevision = revision,
+                AnchorState = current
+                    ? ManuscriptAnnotationAnchorState.Current
+                    : ManuscriptAnnotationAnchorState.Outdated,
+                StartBlockId = imported.StartBlockId,
+                StartOffset = imported.StartOffset,
+                EndBlockId = imported.EndBlockId,
+                EndOffset = imported.EndOffset,
+                OriginalQuote = imported.OriginalQuote,
+                ContextBefore = imported.ContextBefore,
+                ContextAfter = imported.ContextAfter,
+                CreatedAt = imported.CreatedAt,
+                UpdatedAt = imported.UpdatedAt,
+            });
+        }
+        await operation.SaveChangesAsync(cancellationToken);
+    }
+
+    internal static void ValidateManuscriptAnnotationPayloads(ProjectExportDocument document)
+    {
+        if (document.FormatVersion < 24)
+            return;
+        var duplicate = document.ManuscriptAnnotations.GroupBy(item => item.Id).FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+            throw new InvalidOperationException($"Import file contains duplicate manuscript annotation '{duplicate.Key}'.");
+        var chapterIds = document.Chapters.Select(item => item.Id).ToHashSet();
+        var editionIds = document.PublicationEditions.Select(item => item.Id).ToHashSet();
+        foreach (var annotation in document.ManuscriptAnnotations)
+        {
+            if (annotation.Id == Guid.Empty || annotation.ChapterId == Guid.Empty || annotation.Revision < 1
+                || string.IsNullOrWhiteSpace(annotation.ChapterTitle)
+                || annotation.EditionId is not null && string.IsNullOrWhiteSpace(annotation.EditionName))
+                throw new InvalidOperationException("Import file contains an annotation with invalid identity metadata.");
+            if (!Enum.IsDefined(annotation.Kind) || !Enum.IsDefined(annotation.AnchorState))
+                throw new InvalidOperationException($"Manuscript annotation '{annotation.Id}' has an unsupported kind or anchor state.");
+            if (annotation.NoteText is null || annotation.OriginalQuote is null
+                || annotation.StartBlockId is null || annotation.EndBlockId is null
+                || annotation.ContextBefore is null || annotation.ContextAfter is null)
+                throw new InvalidOperationException($"Manuscript annotation '{annotation.Id}' has missing text fields.");
+            if (annotation.NoteText.Length > ManuscriptAnnotationService.MaxNoteLength
+                || annotation.Kind == ManuscriptAnnotationKind.Note && string.IsNullOrWhiteSpace(annotation.NoteText)
+                || annotation.Kind == ManuscriptAnnotationKind.Highlight && annotation.NoteText.Length > 0)
+                throw new InvalidOperationException($"Manuscript annotation '{annotation.Id}' has an invalid note body.");
+            if (annotation.OriginalQuote.Length is 0 or > ManuscriptAnnotationService.MaxSelectionLength
+                || annotation.ContextBefore.Length > 96 || annotation.ContextAfter.Length > 96)
+                throw new InvalidOperationException($"Manuscript annotation '{annotation.Id}' exceeds review text limits.");
+            if (document.ExportKind == ProjectExportKind.Full
+                && (!chapterIds.Contains(annotation.ChapterId)
+                    || annotation.EditionId is Guid editionId && !editionIds.Contains(editionId)))
+                throw new InvalidOperationException($"Manuscript annotation '{annotation.Id}' references a missing chapter or edition.");
+        }
     }
 
     internal static void ValidateIngestSourcePayloads(ProjectExportDocument document)

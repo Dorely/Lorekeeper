@@ -59,6 +59,7 @@ public sealed class EditionContentService(
     IAppDatabaseOperationFactory database,
     IProjectSearchIndex projectSearch,
     IVectorStore vectors,
+    IManuscriptAnnotationService annotations,
     IAuthoringHistoryService? authoringHistory = null) : IEditionContentService
 {
     public async Task<IReadOnlyList<EditionContentReleaseView>> ListReleasesAsync(
@@ -152,6 +153,10 @@ public sealed class EditionContentService(
                     await authoringHistory.DeleteDocumentHistoryAsync(projectId, AuthoringHistoryDocumentKind.PageComposition, composition.Id, cancellationToken: cancellationToken);
             db.PageCompositions.RemoveRange(compositions);
             db.PublicationEditionChapterOverrides.RemoveRange(edition.ChapterOverrides);
+            var editionAnnotations = await db.ManuscriptAnnotations
+                .Where(item => item.ProjectId == projectId && item.EditionId == editionId)
+                .ToListAsync(cancellationToken);
+            db.ManuscriptAnnotations.RemoveRange(editionAnnotations);
         }
         edition.EditionSpecificContentEnabled = enabled;
         edition.Revision = checked(edition.Revision + 1);
@@ -224,6 +229,12 @@ public sealed class EditionContentService(
         }
         db.PageCompositions.RemoveRange(compositions);
         db.PublicationEditionChapterOverrides.Remove(chapterOverride);
+        var chapter = await db.Chapters.AsNoTracking().SingleAsync(
+            item => item.Id == chapterId && item.ProjectId == projectId,
+            cancellationToken);
+        var inherited = ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
+        await annotations.RebaseForManuscriptMutationAsync(
+            projectId, EditorContentTarget.ForEdition(editionId), chapterId, inherited, chapter.ManuscriptRevision, cancellationToken);
         edition.Revision = checked(edition.Revision + 1);
         edition.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);

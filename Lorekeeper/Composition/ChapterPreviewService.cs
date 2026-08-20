@@ -81,7 +81,10 @@ public sealed record ChapterPreviewLine(
     IReadOnlyList<ChapterPreviewRun> Runs,
     double WordSpacing,
     double CharacterSpacing,
-    int ZIndex);
+    int ZIndex,
+    string? SemanticId = null,
+    int? SourceStartUtf16 = null,
+    int? SourceEndUtf16 = null);
 
 public sealed record ChapterPreviewRun(
     string Text,

@@ -880,6 +880,8 @@ mod tests {
                 reading_order: None,
                 semantic_id: None,
                 semantic_parent_id: None,
+                source_start_utf16: None,
+                source_end_utf16: None,
                 link_page: None,
             }],
             images: Vec::new(),

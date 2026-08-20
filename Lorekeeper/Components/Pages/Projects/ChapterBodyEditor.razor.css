@@ -400,6 +400,13 @@
     overflow-wrap: break-word;
 }
 
+.semantic-editor ::deep .manuscript-review-highlight {
+    border-radius: .12rem;
+    background: color-mix(in srgb, #ffd84d 62%, transparent);
+    box-shadow: inset 0 -.08em 0 color-mix(in srgb, #d4a900 48%, transparent);
+    cursor: pointer;
+}
+
 .chapter-edit-surface:not(.chapter-edit-surface--locked) ::deep .semantic-prosemirror p:first-child:last-child:has(> br.ProseMirror-trailingBreak:only-child)::before {
     content: "Start writing\2026";
     position: absolute;

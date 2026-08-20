@@ -16,6 +16,7 @@
 @implements IAsyncDisposable
 @inject IChapterService Chapters
 @inject IManuscriptService Manuscripts
+@inject IManuscriptAnnotationService Annotations
 @inject IProjectImageService Images
 @inject ICompositionService Compositions
 @inject IEditionContentService EditionContent
@@ -222,6 +223,7 @@ else
             </div>
 
             <div class="@ChapterEditorClass()">
+                <div class="@AnnotationWorkspaceClass()">
                 @if (_editorDocument is { } editorDocument)
                 {
                     <ChapterBodyEditor @key="EditorKey(editorDocument)"
@@ -236,18 +238,36 @@ else
                                        OpenProjectImagePicker="OpenManuscriptImageModal"
                                        OpenBookTextStyles="OpenBookTextStylesModal"
                                        StyleCatalogChanged="OnEditorStyleCatalogChanged"
+                                       AnnotationsChanged="OnEditorAnnotationsChangedAsync"
+                                       AnnotationSelected="SelectAnnotationCardAsync"
                                        SaveAsync="SaveDocumentAsync" />
                 }
 
                 @if (_mode == EditorMode.Read && _current is not null)
                 {
-                    <ChapterReadPreview ProjectId="Project.Id"
+                    <ChapterReadPreview @ref="_readPreview"
+                                        ProjectId="Project.Id"
                                         ChapterId="_current.Id"
                                         ContentTarget="_contentTarget"
                                         FacingPages="_readFacing"
                                         FacingPagesChanged="SetReadFacingAsync"
+                                        AnnotationsChanged="OnEditorAnnotationsChangedAsync"
+                                        AnnotationSelected="SelectAnnotationCardAsync"
                                         RefreshSignal="_previewRefreshSignal" />
                 }
+
+                @if ((_mode == EditorMode.Edit || _mode == EditorMode.Read) && _current is not null)
+                {
+                    <ManuscriptAnnotationRail @ref="_annotationRail"
+                                              ProjectId="Project.Id"
+                                              ChapterId="_current.Id"
+                                              ContentTarget="_contentTarget"
+                                              RefreshSignal="_annotationRefreshSignal"
+                                              GetSelectionAsync="GetAnnotationSelectionAsync"
+                                              SelectAnnotation="SelectAnnotationRangeAsync"
+                                              Changed="SynchronizeAnnotationsAsync" />
+                }
+                </div>
 
                 @if (_mode == EditorMode.Pages)
                 {
@@ -901,11 +921,13 @@ else
     private Guid? _columnLayoutProjectId;
     private bool _disposed;
     private ChapterBodyEditor? _bodyEditor;
+    private ChapterReadPreview? _readPreview;
     private EditorDocumentState? _editorDocument;
     private long _styleCatalogVersion;
     private long _stylePanelVersion;
     private Guid? _openCompositionId;
     private long _previewRefreshSignal;
+    private int _annotationRefreshSignal;
 
     private SaveState _saveState = SaveState.Idle;
     private DateTime? _lastSavedAt;
@@ -1128,6 +1150,7 @@ else
         var effective = await Manuscripts.GetManuscriptAsync(_contentTarget, fresh.Id)
             ?? throw new InvalidOperationException("The selected chapter manuscript was not found.");
         InstallEditorDocument(effective);
+        _annotationRefreshSignal++;
         UpdateChapterMetrics(effective.PlainText);
         _contentStatus = _contentTarget.EditionId is Guid statusEditionId
             ? await EditionContent.GetChapterStatusAsync(project.Id, statusEditionId, fresh.Id)
@@ -1582,6 +1605,7 @@ else
                     if (_contentTarget.EditionId is Guid statusEditionId && Project is not null)
                         _contentStatus = await EditionContent.GetChapterStatusAsync(Project.Id, statusEditionId, chapterId);
                     _previewRefreshSignal++;
+                    _annotationRefreshSignal++;
                 }
             }
             catch (Exception exception)
@@ -1704,6 +1728,46 @@ else
 
     private string ChapterEditorClass()
         => $"chapter-editor chapter-editor--{_mode.ToString().ToLowerInvariant()}";
+
+    private string AnnotationWorkspaceClass() => _mode is EditorMode.Edit or EditorMode.Read
+        ? "annotation-workspace"
+        : "annotation-workspace annotation-workspace--plain";
+
+    private Task OnEditorAnnotationsChangedAsync()
+    {
+        _annotationRefreshSignal++;
+        _contextRefreshSignal++;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SynchronizeAnnotationsAsync(IReadOnlyList<ManuscriptAnnotationView> annotations)
+    {
+        if (_bodyEditor is not null)
+            await _bodyEditor.SetAnnotationsAsync(annotations);
+        _readPreview?.SetAnnotations(annotations);
+        _annotationRefreshSignal++;
+        _contextRefreshSignal++;
+    }
+
+    private Task<ManuscriptAnnotationRange?> GetAnnotationSelectionAsync() => _mode switch
+    {
+        EditorMode.Edit when _bodyEditor is not null => _bodyEditor.GetAnnotationRangeAsync(),
+        EditorMode.Read when _readPreview is not null => _readPreview.GetAnnotationRangeAsync(),
+        _ => Task.FromResult<ManuscriptAnnotationRange?>(null),
+    };
+
+    private ManuscriptAnnotationRail? _annotationRail;
+
+    private Task SelectAnnotationCardAsync(Guid annotationId) =>
+        _annotationRail?.SelectCardAsync(annotationId) ?? Task.CompletedTask;
+
+    private async Task SelectAnnotationRangeAsync(Guid annotationId)
+    {
+        if (_mode == EditorMode.Read && _readPreview is not null)
+            await _readPreview.SelectAnnotationAsync(annotationId);
+        else if (_bodyEditor is not null)
+            await _bodyEditor.SelectAnnotationAsync(annotationId);
+    }
 
     private EditorDocumentKey EditorKey(EditorDocumentState document) =>
         new(document.ChapterId, _contentTarget.StorageKey, document.RenderVersion, _styleCatalogVersion);

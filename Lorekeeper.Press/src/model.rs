@@ -483,6 +483,10 @@ pub struct LayoutLine {
     pub reading_order: Option<i32>,
     pub semantic_id: Option<String>,
     pub semantic_parent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_start_utf16: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_end_utf16: Option<usize>,
     pub link_page: Option<usize>,
 }
 

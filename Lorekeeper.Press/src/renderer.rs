@@ -1130,6 +1130,8 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                 "semanticRole": line.semantic_role, "artifact": line.artifact,
                 "language": line.language, "readingOrder": line.reading_order,
                 "semanticId": line.semantic_id, "semanticParentId": line.semantic_parent_id,
+                "sourceStartUtf16": line.source_start_utf16,
+                "sourceEndUtf16": line.source_end_utf16,
                 "linkPage": line.link_page, "runs": runs })
         }).collect::<Vec<_>>();
             let kind = match page.kind {
@@ -1839,6 +1841,7 @@ fn paginate_with_cancellation(
     job_root: Option<&Path>,
     tolerance: LayoutTolerance,
 ) -> RenderResult<LayoutDocument> {
+    let browser_preview = request.layout_trace_mode.as_deref() == Some("browser-preview");
     let trim = &request.trim;
     if !(3.5..=12.0).contains(&trim.width_inches)
         || !(5.0..=15.0).contains(&trim.height_inches)
@@ -2112,6 +2115,7 @@ fn paginate_with_cancellation(
                             semantic_order,
                             &semantic_id,
                             semantic_parent_id.as_deref(),
+                            None,
                         );
                         if !block_id.is_empty() {
                             page_map.push(PageMapEntry {
@@ -2281,14 +2285,17 @@ fn paginate_with_cancellation(
                             semantic_order,
                             &semantic_id,
                             semantic_parent_id.as_deref(),
+                            browser_preview
+                                .then(|| string(&block, "caption"))
+                                .as_deref(),
                         );
                         continue;
                     }
                     let style = block_style(document, &block, trim);
                     if style.page_break_before
-                        && pages
-                            .last()
-                            .is_some_and(|page| page.kind == PageKind::Body && !page.lines.is_empty())
+                        && pages.last().is_some_and(|page| {
+                            page.kind == PageKind::Body && !page.lines.is_empty()
+                        })
                     {
                         // page break reset collapsed gap
                         previous_space_after = 0.0;
@@ -2307,12 +2314,16 @@ fn paginate_with_cancellation(
                     } else {
                         block_runs(document, &block, &style)
                     };
-                    let gap_before = if text.trim().is_empty() && !block_type.eq_ignore_ascii_case("SceneBreak") {
+                    let gap_before = if text.trim().is_empty()
+                        && !block_type.eq_ignore_ascii_case("SceneBreak")
+                    {
                         0.0
                     } else {
                         previous_space_after
                     };
-                    let first_page = if text.trim().is_empty() && !block_type.eq_ignore_ascii_case("SceneBreak") {
+                    let first_page = if text.trim().is_empty()
+                        && !block_type.eq_ignore_ascii_case("SceneBreak")
+                    {
                         pages.len().max(1)
                     } else {
                         append_styled_runs_with_gap(
@@ -2332,6 +2343,7 @@ fn paginate_with_cancellation(
                         semantic_order,
                         &semantic_id,
                         semantic_parent_id.as_deref(),
+                        browser_preview.then(|| block_text(&block)).as_deref(),
                     );
                     if !block_id.is_empty() {
                         page_map.push(PageMapEntry {
@@ -2572,6 +2584,8 @@ fn append_inline_illustration(
                 reading_order: None,
                 semantic_id: None,
                 semantic_parent_id: None,
+                source_start_utf16: None,
+                source_end_utf16: None,
                 link_page: None,
             });
             spacer_y -= line_step;
@@ -2608,6 +2622,8 @@ fn append_inline_illustration(
                 reading_order: None,
                 semantic_id: None,
                 semantic_parent_id: None,
+                source_start_utf16: None,
+                source_end_utf16: None,
                 link_page: None,
             });
         }
@@ -2637,6 +2653,8 @@ fn append_inline_illustration(
                 reading_order: None,
                 semantic_id: None,
                 semantic_parent_id: None,
+                source_start_utf16: None,
+                source_end_utf16: None,
                 link_page: None,
             });
         }
@@ -2649,7 +2667,9 @@ fn assign_semantic_order_since(
     block_order: i32,
     semantic_id: &str,
     semantic_parent_id: Option<&str>,
+    source_text: Option<&str>,
 ) {
+    let mut source_cursor = 0usize;
     for (page_index, page) in pages.iter_mut().enumerate() {
         let (line_start, image_start) = snapshot.get(page_index).copied().unwrap_or_default();
         let has_new_image = image_start < page.images.len();
@@ -2665,6 +2685,13 @@ fn assign_semantic_order_since(
                     line.semantic_parent_id = semantic_parent_id.map(str::to_owned);
                 }
             }
+            if let Some(source) = source_text
+                && let Some((start, end)) =
+                    source_utf16_range(source, &mut source_cursor, &line.text)
+            {
+                line.source_start_utf16 = Some(start);
+                line.source_end_utf16 = Some(end);
+            }
         }
         for image in page.images.iter_mut().skip(image_start) {
             let local_order = image.reading_order.unwrap_or_default().clamp(0, 999);
@@ -2677,6 +2704,29 @@ fn assign_semantic_order_since(
             }
         }
     }
+}
+
+fn source_utf16_range(
+    source: &str,
+    cursor: &mut usize,
+    rendered_line: &str,
+) -> Option<(usize, usize)> {
+    let mut searchable = rendered_line.strip_suffix('-').unwrap_or(rendered_line);
+    if *cursor == 0 {
+        searchable = searchable.strip_prefix("• ").unwrap_or(searchable);
+    }
+    if searchable.is_empty() {
+        let offset = source.get(..*cursor)?.encode_utf16().count();
+        return Some((offset, offset));
+    }
+    let relative = source.get(*cursor..)?.find(searchable)?;
+    let start_byte = *cursor + relative;
+    let end_byte = start_byte + searchable.len();
+    *cursor = end_byte;
+    Some((
+        source.get(..start_byte)?.encode_utf16().count(),
+        source.get(..end_byte)?.encode_utf16().count(),
+    ))
 }
 
 fn first_changed_page(pages: &[LayoutPage], snapshot: &[(usize, usize)]) -> usize {
@@ -3222,6 +3272,8 @@ fn designed_page(
                             reading_order: None,
                             semantic_id: None,
                             semantic_parent_id: None,
+                            source_start_utf16: None,
+                            source_end_utf16: None,
                             link_page: None,
                         });
                         page.paint_order.push(LayoutPaint::Line(shadow_index));
@@ -3256,6 +3308,8 @@ fn designed_page(
                             .map(|value| value as i32),
                         semantic_id: Some(string(&item, "id")),
                         semantic_parent_id: None,
+                        source_start_utf16: None,
+                        source_end_utf16: None,
                         link_page: None,
                     });
                     page.paint_order.push(LayoutPaint::Line(paint_index));
@@ -4173,6 +4227,7 @@ fn append_publication_sections(
                     *semantic_order,
                     &block_id,
                     None,
+                    None,
                 );
                 if !block_id.is_empty() {
                     page_map.push(PageMapEntry {
@@ -4347,6 +4402,7 @@ fn append_publication_sections(
                     *semantic_order,
                     &block_id,
                     None,
+                    None,
                 );
                 if !block_id.is_empty() {
                     page_map.push(PageMapEntry {
@@ -4393,6 +4449,7 @@ fn append_publication_sections(
                 *semantic_order,
                 &block_id,
                 None,
+                None,
             );
             if !block_id.is_empty() {
                 page_map.push(PageMapEntry {
@@ -4431,6 +4488,8 @@ fn centered_page(title: &str, subtitle: &str, trim: &crate::model::Trim) -> Layo
             reading_order: None,
             semantic_id: None,
             semantic_parent_id: None,
+            source_start_utf16: None,
+            source_end_utf16: None,
             link_page: None,
         });
     }
@@ -4455,6 +4514,8 @@ fn centered_page(title: &str, subtitle: &str, trim: &crate::model::Trim) -> Layo
             reading_order: None,
             semantic_id: None,
             semantic_parent_id: None,
+            source_start_utf16: None,
+            source_end_utf16: None,
             link_page: None,
         });
     }
@@ -4503,6 +4564,8 @@ fn add_running_heads(pages: &mut [LayoutPage], title: &str, trim: &crate::model:
             reading_order: None,
             semantic_id: None,
             semantic_parent_id: None,
+            source_start_utf16: None,
+            source_end_utf16: None,
             link_page: None,
         });
     }
@@ -4588,6 +4651,8 @@ fn build_toc_pages_with_limit(
                     reading_order: None,
                     semantic_id: None,
                     semantic_parent_id: None,
+                    source_start_utf16: None,
+                    source_end_utf16: None,
                     link_page: Some(*chapter_page),
                 });
             }
@@ -4648,6 +4713,8 @@ fn toc_page(continued: bool, trim: &crate::model::Trim) -> LayoutPage {
             reading_order: None,
             semantic_id: None,
             semantic_parent_id: None,
+            source_start_utf16: None,
+            source_end_utf16: None,
             link_page: None,
         }],
         images: Vec::new(),
@@ -4807,6 +4874,8 @@ fn text_page(lines: Vec<(String, f32)>, trim: &crate::model::Trim) -> LayoutPage
                 reading_order: None,
                 semantic_id: None,
                 semantic_parent_id: None,
+                source_start_utf16: None,
+                source_end_utf16: None,
                 link_page: None,
             };
             y -= size * 1.6;
@@ -4957,7 +5026,11 @@ fn append_styled_runs_with_gap(
         pages.push(empty_body_page());
     }
     while offset < lines.len() {
-        let gap_for_first = if offset == 0 { previous_space_after } else { 0.0 };
+        let gap_for_first = if offset == 0 {
+            previous_space_after
+        } else {
+            0.0
+        };
         let remaining_capacity = pages.last().map_or(0, |page| {
             if page.kind == PageKind::Body {
                 remaining_line_capacity_with_gap(page, trim, style, gap_for_first)
@@ -5029,13 +5102,7 @@ fn append_styled_runs_with_gap(
                 _ => 0.0,
             };
             let y = if offset == 0 && relative_index == 0 {
-                next_flow_baseline_with_gap(
-                    page,
-                    trim,
-                    style,
-                    true,
-                    previous_space_after,
-                )
+                next_flow_baseline_with_gap(page, trim, style, true, previous_space_after)
             } else {
                 next_baseline(page, trim, style, false)
             };
@@ -5059,6 +5126,8 @@ fn append_styled_runs_with_gap(
                 reading_order: None,
                 semantic_id: None,
                 semantic_parent_id: None,
+                source_start_utf16: None,
+                source_end_utf16: None,
                 link_page: None,
             });
         }
@@ -5162,10 +5231,7 @@ fn next_flow_baseline_with_gap(
         .rev()
         .find(|line| line.semantic_role != LayoutSemanticRole::Caption);
     previous.map_or(
-        trim.height_inches * 72.0
-            - trim.margin_inches * 72.0
-            - style.size * 0.82
-            - gap,
+        trim.height_inches * 72.0 - trim.margin_inches * 72.0 - style.size * 0.82 - gap,
         |line| {
             let step = (line.size * style.line_height.max(1.0))
                 .max(style.size * style.line_height.max(1.0));
@@ -5395,16 +5461,10 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             .get("smallCaps")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        if let Some(value) = definition
-            .get("spaceBeforePoints")
-            .and_then(Value::as_f64)
-        {
+        if let Some(value) = definition.get("spaceBeforePoints").and_then(Value::as_f64) {
             style.space_before = value as f32;
         }
-        if let Some(value) = definition
-            .get("spaceAfterPoints")
-            .and_then(Value::as_f64)
-        {
+        if let Some(value) = definition.get("spaceAfterPoints").and_then(Value::as_f64) {
             style.space_after = value as f32;
         }
         style.indent = definition
@@ -5768,6 +5828,8 @@ fn dedicated_figure_page_with_layout(
                 reading_order: None,
                 semantic_id: None,
                 semantic_parent_id: None,
+                source_start_utf16: None,
+                source_end_utf16: None,
                 link_page: None,
             })
             .collect(),
@@ -5912,6 +5974,8 @@ fn cover_layout(
             reading_order: None,
             semantic_id: None,
             semantic_parent_id: None,
+            source_start_utf16: None,
+            source_end_utf16: None,
             link_page: None,
         });
     }
@@ -5938,6 +6002,8 @@ fn cover_layout(
             reading_order: None,
             semantic_id: None,
             semantic_parent_id: None,
+            source_start_utf16: None,
+            source_end_utf16: None,
             link_page: None,
         });
     }
@@ -6303,6 +6369,8 @@ fn cover_text_lines(
             reading_order: None,
             semantic_id: None,
             semantic_parent_id: None,
+            source_start_utf16: None,
+            source_end_utf16: None,
             link_page: None,
         })
         .collect())

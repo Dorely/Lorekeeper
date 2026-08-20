@@ -14,7 +14,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Lorekeeper.Chapters;
 
 public class ChapterService(
-    IVectorStore vectors, IEmbeddingService embeddings, ITextChunker chunker, IProjectSearchIndex projectSearch, IGraphAutoLinkService autoLinks, IOutlineGraphSync outlineGraphSync, IContextIndexingService contextIndexing, IVectorIndexWorkCoordinator indexWork, IAppDatabaseOperationFactory database, IManuscriptStyleService manuscriptStyles, IChapterSemanticProjectionService semanticProjection, IProjectMutationCoordinator projectMutations, IAuthoringHistoryService authoringHistory, IAuthoringMutationContextAccessor authoringMutationContext, ILogger<ChapterService> logger) : IChapterService, IManuscriptService
+    IVectorStore vectors, IEmbeddingService embeddings, ITextChunker chunker, IProjectSearchIndex projectSearch, IGraphAutoLinkService autoLinks, IOutlineGraphSync outlineGraphSync, IContextIndexingService contextIndexing, IVectorIndexWorkCoordinator indexWork, IAppDatabaseOperationFactory database, IManuscriptStyleService manuscriptStyles, IChapterSemanticProjectionService semanticProjection, IProjectMutationCoordinator projectMutations, IAuthoringHistoryService authoringHistory, IAuthoringMutationContextAccessor authoringMutationContext, IManuscriptAnnotationService annotations, ILogger<ChapterService> logger) : IChapterService, IManuscriptService
 {
     public async Task<IReadOnlyList<Chapter>> ListAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -260,6 +260,9 @@ public class ChapterService(
                     db.PublicationEditionChapterOverrides.Remove(editionOverride);
                 edition.Revision = checked(edition.Revision + 1);
                 edition.UpdatedAt = DateTime.UtcNow;
+                var inherited = ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
+                await annotations.RebaseForManuscriptMutationAsync(
+                    chapter.ProjectId, target, chapter.Id, inherited, chapter.ManuscriptRevision, cancellationToken);
                 await db.SaveChangesAsync(cancellationToken);
                 return;
             }
@@ -298,6 +301,8 @@ public class ChapterService(
             edition!.Revision = checked(edition.Revision + 1);
             edition.UpdatedAt = DateTime.UtcNow;
         }
+        await annotations.RebaseForManuscriptMutationAsync(
+            chapter.ProjectId, target, chapter.Id, document, nextRevision, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -586,6 +591,9 @@ public class ChapterService(
         chapter.ManuscriptRevision = document.Revision;
         chapter.UpdatedAt = DateTime.UtcNow;
         chapter.VectorIndexState = VectorIndexState.Stale;
+
+        await annotations.RebaseForManuscriptMutationAsync(
+            chapter.ProjectId, EditorContentTarget.Core, chapter.Id, document, document.Revision, cancellationToken);
 
         var project = await projects.GetByIdAsync(chapter.ProjectId, cancellationToken);
         if (project is not null)
@@ -887,6 +895,8 @@ public class ChapterService(
         chapterOverride.UpdatedAt = DateTime.UtcNow;
         edition.UpdatedAt = DateTime.UtcNow;
         edition.Revision = checked(edition.Revision + 1);
+        await annotations.RebaseForManuscriptMutationAsync(
+            chapter.ProjectId, target, chapter.Id, document, document.Revision, cancellationToken);
         try
         {
             var afterHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
@@ -1042,6 +1052,8 @@ public class ChapterService(
         };
         db.PublicationEditionChapterOverrides.Add(chapterOverride);
         edition.Revision = checked(edition.Revision + 1);
+        await annotations.RebaseForManuscriptMutationAsync(
+            chapter.ProjectId, target, chapter.Id, document, document.Revision, cancellationToken);
         edition.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         await databaseOperation.DisposeAsync();

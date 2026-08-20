@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Composition;
 using Lorekeeper.EntityVisuals;
@@ -18,7 +19,7 @@ using Lorekeeper.Writing;
 namespace Lorekeeper.Context;
 
 public sealed class ContextBuilder(
-IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, ICompositionService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter) : IEditorContextService
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, ICompositionService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
         ContextBuildRequest request,
@@ -92,6 +93,32 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 Body: ContextManuscriptFormatter.SerializeCurrentChapter(currentChapter, manuscriptSnapshot),
                 IsEnabled: IsIncluded(preferenceMap, ContextItemKind.CurrentChapter, EditorContextKeys.CurrentChapter, defaultIncluded: true),
                 IsRemovable: true,
+                IsProtected: true));
+            var chapterAnnotations = await annotations.ListChapterAsync(
+                project.Id,
+                request.ContentTarget,
+                currentChapter.Id,
+                cancellationToken);
+            items.Add(new ContextItem(
+                Key: EditorContextKeys.ManuscriptAnnotations,
+                Kind: ContextItemKind.ManuscriptAnnotations,
+                Label: "Current Chapter Review Annotations",
+                Body: JsonSerializer.Serialize(chapterAnnotations.Select(annotation => new
+                {
+                    annotationId = annotation.Id,
+                    annotation.ChapterId,
+                    annotation.EditionId,
+                    kind = annotation.Kind.ToString(),
+                    state = annotation.AnchorState.ToString(),
+                    annotation.NoteText,
+                    quote = ManuscriptAnnotationText.Bound(annotation.Quote, 1_000),
+                    annotation.Revision,
+                    annotation.AnchorManuscriptRevision,
+                }), ManuscriptCodec.JsonOptions),
+                IsEnabled: true,
+                IsRemovable: false,
+                Badge: "Review",
+                Reason: "Open review notes for the active chapter and exact content target",
                 IsProtected: true));
 
             var visualItem = await BuildChapterVisualLayoutItemAsync(

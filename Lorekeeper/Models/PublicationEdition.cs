@@ -117,6 +117,7 @@ public class PublicationEdition
     public ICollection<PublicationArtifact> Artifacts { get; set; } = [];
     public ICollection<PublicationEditionChapterOverride> ChapterOverrides { get; set; } = [];
     public ICollection<PageComposition> PageCompositions { get; set; } = [];
+    public ICollection<ManuscriptAnnotation> ManuscriptAnnotations { get; set; } = [];
     public ICollection<PublicationSection> PublicationSections { get; set; } = [];
     public PublicationCoverDesign? CoverDesign { get; set; }
 

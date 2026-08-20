@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -22,6 +23,7 @@ public class AppDbContext(
     public DbSet<BookBriefCanonSource> BookBriefCanonSources => Set<BookBriefCanonSource>();
     public DbSet<Act> Acts => Set<Act>();
     public DbSet<Chapter> Chapters => Set<Chapter>();
+    public DbSet<ManuscriptAnnotation> ManuscriptAnnotations => Set<ManuscriptAnnotation>();
     public DbSet<ManuscriptMigrationJournal> ManuscriptMigrationJournals => Set<ManuscriptMigrationJournal>();
     public DbSet<GraphNode> GraphNodes => Set<GraphNode>();
     public DbSet<GraphEdge> GraphEdges => Set<GraphEdge>();
@@ -287,6 +289,32 @@ public class AppDbContext(
                 .WithMany(a => a.Chapters)
                 .HasForeignKey(e => e.ActId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ManuscriptAnnotation>(entity =>
+        {
+            entity.HasIndex(item => new { item.ProjectId, item.EditionId, item.ChapterId });
+            entity.HasIndex(item => new { item.ChapterId, item.AnchorState, item.CreatedAt });
+            entity.Property(item => item.Kind).HasConversion<string>();
+            entity.Property(item => item.AnchorState).HasConversion<string>();
+            entity.Property(item => item.Revision).IsConcurrencyToken();
+            entity.Property(item => item.NoteText).HasMaxLength(ManuscriptAnnotationService.MaxNoteLength);
+            entity.Property(item => item.OriginalQuote).HasMaxLength(ManuscriptAnnotationService.MaxSelectionLength);
+            entity.Property(item => item.ContextBefore).HasMaxLength(96);
+            entity.Property(item => item.ContextAfter).HasMaxLength(96);
+
+            entity.HasOne(item => item.Project)
+                .WithMany(project => project.ManuscriptAnnotations)
+                .HasForeignKey(item => item.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.Chapter)
+                .WithMany(chapter => chapter.ManuscriptAnnotations)
+                .HasForeignKey(item => item.ChapterId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.Edition)
+                .WithMany(edition => edition.ManuscriptAnnotations)
+                .HasForeignKey(item => item.EditionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<OutlineConversation>(entity =>

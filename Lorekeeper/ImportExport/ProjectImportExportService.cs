@@ -318,6 +318,31 @@ public sealed class ProjectImportExportService(
                     .Select(chapter => ProjectChapter(chapter, exportedImageContextIds))
                     .ToList()
                 : [],
+            ManuscriptAnnotations = await db.ManuscriptAnnotations.AsNoTracking()
+                .Where(annotation => annotation.ProjectId == projectId)
+                .OrderBy(annotation => annotation.ChapterId)
+                .ThenBy(annotation => annotation.CreatedAt)
+                .Select(annotation => new ProjectExportManuscriptAnnotation(
+                    annotation.Id,
+                    annotation.ChapterId,
+                    annotation.Chapter.Title,
+                    annotation.EditionId,
+                    annotation.Edition == null ? null : annotation.Edition.Name,
+                    annotation.Kind,
+                    annotation.NoteText,
+                    annotation.Revision,
+                    annotation.AnchorManuscriptRevision,
+                    annotation.AnchorState,
+                    annotation.StartBlockId,
+                    annotation.StartOffset,
+                    annotation.EndBlockId,
+                    annotation.EndOffset,
+                    annotation.OriginalQuote,
+                    annotation.ContextBefore,
+                    annotation.ContextAfter,
+                    annotation.CreatedAt,
+                    annotation.UpdatedAt))
+                .ToListAsync(cancellationToken),
             Nodes = allNodes
                 .Where(node => includedNodeKeys.Contains(NodeStableKey(node)))
                 .Select(node => ProjectNode(node, omittedSourceIds))

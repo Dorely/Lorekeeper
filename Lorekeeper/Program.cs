@@ -166,6 +166,7 @@ builder.Services.AddScoped<ChapterService>();
 builder.Services.AddScoped<IChapterSemanticProjectionService, ChapterSemanticProjectionService>();
 builder.Services.AddScoped<IChapterService>(services => services.GetRequiredService<ChapterService>());
 builder.Services.AddScoped<IManuscriptService>(services => services.GetRequiredService<ChapterService>());
+builder.Services.AddScoped<IManuscriptAnnotationService, ManuscriptAnnotationService>();
 builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringHistoryService, Lorekeeper.Authoring.AuthoringHistoryService>();
 builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringMutationContextAccessor, Lorekeeper.Authoring.AuthoringMutationContextAccessor>();
 builder.Services.AddSingleton<IDatabaseMigrationRecoveryService, DatabaseMigrationRecoveryService>();

@@ -30,6 +30,7 @@ IAppDatabaseOperationFactory database, Guid projectId,
     private readonly List<AiChange> _newChanges = [];
     private readonly HashSet<Guid> _adoptedChangeIds = [];
     private readonly Dictionary<Guid, ManuscriptDocument> _chapterManuscriptDrafts = [];
+    private readonly Dictionary<Guid, Guid> _chapterManuscriptProducerChanges = [];
     private readonly Dictionary<Guid, ManuscriptStyleView> _manuscriptStyleDrafts = [];
     private readonly Dictionary<Guid, Guid> _manuscriptStyleProducerChanges = [];
     private bool _manuscriptStylesLoaded;
@@ -148,7 +149,7 @@ IAppDatabaseOperationFactory database, Guid projectId,
             .Select(style => Resource("ManuscriptStyle", style.Id))
             .Append(Resource("Chapter", chapter.Id))
             .ToList();
-        await StageChangeAsync(
+        var change = await StageChangeAsync(
             summary,
             before,
             after,
@@ -158,7 +159,32 @@ IAppDatabaseOperationFactory database, Guid projectId,
             referencedResources,
             cancellationToken,
             dependsOnChangeIds: styleDependencies);
+        if (change is not null)
+            _chapterManuscriptProducerChanges[chapter.Id] = change.Id;
         _chapterManuscriptDrafts[chapter.Id] = afterDocument;
+    }
+
+    public async Task StageAnnotationCompletionAsync(
+        ManuscriptAnnotationView annotation,
+        string result,
+        CancellationToken cancellationToken = default)
+    {
+        var dependencies = _chapterManuscriptProducerChanges.TryGetValue(annotation.ChapterId, out var manuscriptChangeId)
+            ? new[] { manuscriptChangeId }
+            : [];
+        await StageChangeAsync(
+            $"Complete review annotation {annotation.Id:N}",
+            annotation,
+            after: null,
+            result,
+            resourceKind: "ManuscriptAnnotation",
+            resourceId: Resource("ManuscriptAnnotation", annotation.Id),
+            referencedResources: [
+                Resource("ManuscriptAnnotation", annotation.Id),
+                Resource("Chapter", annotation.ChapterId),
+            ],
+            cancellationToken,
+            dependsOnChangeIds: dependencies);
     }
 
     public async Task<IReadOnlyList<ManuscriptStyleView>> ListManuscriptStyleDraftsAsync(
