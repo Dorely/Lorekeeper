@@ -58,6 +58,20 @@ public sealed class PublishConversationRepository(AppDatabaseReadOperation opera
     public async Task AddConversationAsync(PublishConversation conversation, CancellationToken cancellationToken = default) =>
         await operation.Db.PublishConversations.AddAsync(conversation, cancellationToken);
 
+    public async Task ResetMessagesAsync(
+        PublishConversation conversation,
+        PublishMessage greeting,
+        CancellationToken cancellationToken = default)
+    {
+        var messages = await operation.Db.PublishMessages
+            .Where(message => message.ConversationId == conversation.Id)
+            .ToListAsync(cancellationToken);
+        operation.Db.PublishMessages.RemoveRange(messages);
+        conversation.UpdatedAt = DateTime.UtcNow;
+        greeting.ConversationId = conversation.Id;
+        await operation.Db.PublishMessages.AddAsync(greeting, cancellationToken);
+    }
+
     public void UpdateSelectedProvider(PublishConversation conversation) => operation.Db.MarkModified(conversation);
 
     public async Task AddMessageAsync(PublishMessage message, CancellationToken cancellationToken = default)
@@ -83,5 +97,4 @@ public sealed class PublishConversationRepository(AppDatabaseReadOperation opera
         await operation.Db.PublishMessageVisuals.AddRangeAsync(visuals, cancellationToken);
 
     public void UpdateMessage(PublishMessage message) => operation.Db.MarkModified(message);
-    public void RemoveConversation(PublishConversation conversation) => operation.Db.MarkDeleted(conversation);
 }

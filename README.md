@@ -28,9 +28,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   unselected conversation follows the current working global default, while an
   explicit choice remains sticky across navigation and restarts. Deleted or
   otherwise unavailable explicit choices fail closed until the author chooses a
-  working model or resets the chat. Reset clears the conversation's choice, and
-  these chat transcripts and model choices remain local rather than entering
-  project import/export.
+  working model. Reset clears the transcript and its image attachments, restores
+  the surface's initial greeting, and retains the exact conversation choice,
+  including an unavailable provider ID. These chat transcripts and model choices
+  remain local rather than entering project import/export.
 - Editor chapter selection loads the next manuscript in place, updates the address
   bar without remounting or flashing the project-level Editor Chat, and refreshes
   the chat token estimate for the newly assembled chapter context.

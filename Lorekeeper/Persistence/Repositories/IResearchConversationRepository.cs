@@ -10,6 +10,9 @@ public interface IResearchConversationRepository : IChatMessageStore<ResearchMes
     Task<bool> ExistsAsync(Guid conversationId, CancellationToken cancellationToken = default);
     Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default);
     Task AddConversationAsync(ResearchConversation conversation, CancellationToken cancellationToken = default);
+    Task ResetMessagesAsync(
+        ResearchConversation conversation,
+        ResearchMessage greeting,
+        CancellationToken cancellationToken = default);
     void UpdateSelectedProvider(ResearchConversation conversation);
-    void RemoveConversation(ResearchConversation conversation);
 }

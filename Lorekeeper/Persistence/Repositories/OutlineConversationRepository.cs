@@ -26,6 +26,20 @@ public class OutlineConversationRepository(AppDatabaseReadOperation operation) :
     public async Task AddConversationAsync(OutlineConversation conversation, CancellationToken cancellationToken = default) =>
         await operation.Db.OutlineConversations.AddAsync(conversation, cancellationToken);
 
+    public async Task ResetMessagesAsync(
+        OutlineConversation conversation,
+        OutlineMessage greeting,
+        CancellationToken cancellationToken = default)
+    {
+        var messages = await operation.Db.OutlineMessages
+            .Where(message => message.ConversationId == conversation.Id)
+            .ToListAsync(cancellationToken);
+        operation.Db.OutlineMessages.RemoveRange(messages);
+        conversation.UpdatedAt = DateTime.UtcNow;
+        greeting.ConversationId = conversation.Id;
+        await operation.Db.OutlineMessages.AddAsync(greeting, cancellationToken);
+    }
+
     public void UpdateSelectedProvider(OutlineConversation conversation) => operation.Db.MarkModified(conversation);
 
     public async Task AddMessageAsync(OutlineMessage message, CancellationToken cancellationToken = default)
@@ -49,5 +63,4 @@ public class OutlineConversationRepository(AppDatabaseReadOperation operation) :
 
     public void UpdateMessage(OutlineMessage message) => operation.Db.MarkModified(message);
 
-    public void RemoveConversation(OutlineConversation conversation) => operation.Db.MarkDeleted(conversation);
 }

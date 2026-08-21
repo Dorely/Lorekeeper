@@ -15,7 +15,10 @@ public interface IEditorConversationRepository : IChatMessageStore<EditorMessage
     Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default);
 
     Task AddConversationAsync(EditorConversation conversation, CancellationToken cancellationToken = default);
+    Task ResetMessagesAsync(
+        EditorConversation conversation,
+        EditorMessage greeting,
+        CancellationToken cancellationToken = default);
     void UpdateSelectedProvider(EditorConversation conversation);
     Task AddMessageVisualsAsync(IEnumerable<EditorMessageVisual> visuals, CancellationToken cancellationToken = default);
-    void RemoveConversation(EditorConversation conversation);
 }

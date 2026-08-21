@@ -67,6 +67,13 @@ cancellation path. Active-turn ownership must not move into a component or
 SignalR circuit. Surface-scoped maintenance leases make reset atomic against an
 active or newly starting turn across windows.
 
+Reset keeps the existing conversation root and its exact `SelectedProviderId`,
+including a soft reference to a deleted or unavailable provider. It clears the
+surface's message-owned image attachments, replaces all transcript messages with
+that surface's normal initial greeting in one owning database write, and leaves
+the root available for the panel's existing full reload path. The maintenance
+lease prevents an active or newly starting turn from racing this replacement.
+
 The composer stores unsent text in unencrypted browser/Electron local storage,
 keyed by project and surface. Drafts survive remounts, navigation, and circuit
 reloads without crossing project or assistant boundaries and are deleted on
@@ -81,7 +88,8 @@ follows the current working global default. An explicit selection is usable only
 while that connection/model passes chat readiness. If it is deleted or becomes
 unavailable, the stored selection remains visible and the surface fails closed;
 there is no silent fallback. Choosing the global default clears the override,
-and resetting a conversation clears both transcript and override.
+and resetting a conversation clears only its transcript and attachments; the
+selection remains sticky until the author changes it.
 
 The shared picker groups working models by connection, labels options by model,
 marks the global default, and retains unavailable explicit selections for

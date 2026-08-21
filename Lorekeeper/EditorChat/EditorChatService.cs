@@ -166,7 +166,14 @@ public sealed class EditorChatService(
         var conversations = databaseOperation.Repositories.EditorConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
-        conversations.RemoveConversation(existing);
+        await conversations.ResetMessagesAsync(existing, new EditorMessage
+        {
+            ConversationId = existing.Id,
+            Order = 0,
+            Role = EditorMessageRole.Assistant,
+            Content = _initialAssistantGreeting,
+            Status = EditorMessageStatus.Completed,
+        }, cancellationToken);
         await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 

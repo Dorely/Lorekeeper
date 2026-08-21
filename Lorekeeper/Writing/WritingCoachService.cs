@@ -135,7 +135,14 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
 
-        conversations.RemoveConversation(existing);
+        await conversations.ResetMessagesAsync(existing, new WritingCoachMessage
+        {
+            ConversationId = existing.Id,
+            Order = 0,
+            Role = WritingCoachMessageRole.Assistant,
+            Content = InitialAssistantGreeting,
+            Status = WritingCoachMessageStatus.Completed,
+        }, cancellationToken);
         await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 

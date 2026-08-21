@@ -299,7 +299,14 @@ they commit to a direction, act on it without a second confirmation.
         var conversations = databaseOperation.Repositories.OutlineConversations;
         var existing = await conversations.GetByProjectIdAsync(projectId, cancellationToken);
         if (existing is null) return;
-        conversations.RemoveConversation(existing);
+        await conversations.ResetMessagesAsync(existing, new OutlineMessage
+        {
+            ConversationId = existing.Id,
+            Order = 0,
+            Role = OutlineMessageRole.Assistant,
+            Content = InitialAssistantGreeting,
+            Status = OutlineMessageStatus.Completed,
+        }, cancellationToken);
         await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 

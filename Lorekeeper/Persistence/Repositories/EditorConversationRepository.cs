@@ -70,6 +70,20 @@ public sealed class EditorConversationRepository(AppDatabaseReadOperation operat
     public async Task AddConversationAsync(EditorConversation conversation, CancellationToken cancellationToken = default) =>
         await operation.Db.EditorConversations.AddAsync(conversation, cancellationToken);
 
+    public async Task ResetMessagesAsync(
+        EditorConversation conversation,
+        EditorMessage greeting,
+        CancellationToken cancellationToken = default)
+    {
+        var messages = await operation.Db.EditorMessages
+            .Where(message => message.ConversationId == conversation.Id)
+            .ToListAsync(cancellationToken);
+        operation.Db.EditorMessages.RemoveRange(messages);
+        conversation.UpdatedAt = DateTime.UtcNow;
+        greeting.ConversationId = conversation.Id;
+        await operation.Db.EditorMessages.AddAsync(greeting, cancellationToken);
+    }
+
     public void UpdateSelectedProvider(EditorConversation conversation) => operation.Db.MarkModified(conversation);
 
     public async Task AddMessageAsync(EditorMessage message, CancellationToken cancellationToken = default)
@@ -96,5 +110,4 @@ public sealed class EditorConversationRepository(AppDatabaseReadOperation operat
 
     public void UpdateMessage(EditorMessage message) => operation.Db.MarkModified(message);
 
-    public void RemoveConversation(EditorConversation conversation) => operation.Db.MarkDeleted(conversation);
 }

@@ -39,8 +39,8 @@ public interface IOutlineCollaborationService
     IAsyncEnumerable<OutlineTurnUpdate> SendAsync(Guid projectId, string userText, IReadOnlyList<Guid> imageIds, int providerId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Wipes the project's conversation. The next <see cref="GetOrCreateAsync"/> call
-    /// will re-seed a fresh greeting.
+    /// Replaces the project's transcript with its initial greeting while retaining the
+    /// conversation row and its selected model.
     /// </summary>
     Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default);
 }

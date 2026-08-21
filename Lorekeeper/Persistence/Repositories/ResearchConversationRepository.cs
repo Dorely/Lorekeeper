@@ -28,6 +28,20 @@ public sealed class ResearchConversationRepository(AppDatabaseReadOperation oper
     public async Task AddConversationAsync(ResearchConversation conversation, CancellationToken cancellationToken = default) =>
         await operation.Db.ResearchConversations.AddAsync(conversation, cancellationToken);
 
+    public async Task ResetMessagesAsync(
+        ResearchConversation conversation,
+        ResearchMessage greeting,
+        CancellationToken cancellationToken = default)
+    {
+        var messages = await operation.Db.ResearchMessages
+            .Where(message => message.ConversationId == conversation.Id)
+            .ToListAsync(cancellationToken);
+        operation.Db.ResearchMessages.RemoveRange(messages);
+        conversation.UpdatedAt = DateTime.UtcNow;
+        greeting.ConversationId = conversation.Id;
+        await operation.Db.ResearchMessages.AddAsync(greeting, cancellationToken);
+    }
+
     public void UpdateSelectedProvider(ResearchConversation conversation) => operation.Db.MarkModified(conversation);
 
     public async Task AddMessageAsync(ResearchMessage message, CancellationToken cancellationToken = default)
@@ -51,5 +65,4 @@ public sealed class ResearchConversationRepository(AppDatabaseReadOperation oper
 
     public void UpdateMessage(ResearchMessage message) => operation.Db.MarkModified(message);
 
-    public void RemoveConversation(ResearchConversation conversation) => operation.Db.MarkDeleted(conversation);
 }

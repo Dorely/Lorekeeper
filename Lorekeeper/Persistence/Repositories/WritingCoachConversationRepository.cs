@@ -25,6 +25,20 @@ public class WritingCoachConversationRepository(AppDatabaseReadOperation operati
     public async Task AddConversationAsync(WritingCoachConversation conversation, CancellationToken cancellationToken = default) =>
         await operation.Db.WritingCoachConversations.AddAsync(conversation, cancellationToken);
 
+    public async Task ResetMessagesAsync(
+        WritingCoachConversation conversation,
+        WritingCoachMessage greeting,
+        CancellationToken cancellationToken = default)
+    {
+        var messages = await operation.Db.WritingCoachMessages
+            .Where(message => message.ConversationId == conversation.Id)
+            .ToListAsync(cancellationToken);
+        operation.Db.WritingCoachMessages.RemoveRange(messages);
+        conversation.UpdatedAt = DateTime.UtcNow;
+        greeting.ConversationId = conversation.Id;
+        await operation.Db.WritingCoachMessages.AddAsync(greeting, cancellationToken);
+    }
+
     public void UpdateSelectedProvider(WritingCoachConversation conversation) => operation.Db.MarkModified(conversation);
 
     public async Task AddMessageAsync(WritingCoachMessage message, CancellationToken cancellationToken = default)
@@ -48,5 +62,4 @@ public class WritingCoachConversationRepository(AppDatabaseReadOperation operati
 
     public void UpdateMessage(WritingCoachMessage message) => operation.Db.MarkModified(message);
 
-    public void RemoveConversation(WritingCoachConversation conversation) => operation.Db.MarkDeleted(conversation);
 }

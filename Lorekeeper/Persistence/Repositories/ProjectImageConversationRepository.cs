@@ -25,6 +25,20 @@ public sealed class ProjectImageConversationRepository(AppDatabaseReadOperation 
     public async Task AddConversationAsync(ProjectImageConversation conversation, CancellationToken cancellationToken = default) =>
         await operation.Db.ProjectImageConversations.AddAsync(conversation, cancellationToken);
 
+    public async Task ResetMessagesAsync(
+        ProjectImageConversation conversation,
+        ProjectImageMessage greeting,
+        CancellationToken cancellationToken = default)
+    {
+        var messages = await operation.Db.ProjectImageMessages
+            .Where(message => message.ConversationId == conversation.Id)
+            .ToListAsync(cancellationToken);
+        operation.Db.ProjectImageMessages.RemoveRange(messages);
+        conversation.UpdatedAt = DateTime.UtcNow;
+        greeting.ConversationId = conversation.Id;
+        await operation.Db.ProjectImageMessages.AddAsync(greeting, cancellationToken);
+    }
+
     public void UpdateSelectedProvider(ProjectImageConversation conversation) => operation.Db.MarkModified(conversation);
 
     public async Task AddMessageAsync(ProjectImageMessage message, CancellationToken cancellationToken = default)
@@ -51,6 +65,4 @@ public sealed class ProjectImageConversationRepository(AppDatabaseReadOperation 
 
     public void UpdateMessage(ProjectImageMessage message) => operation.Db.MarkModified(message);
 
-    public void RemoveConversation(ProjectImageConversation conversation) =>
-        operation.Db.MarkDeleted(conversation);
 }

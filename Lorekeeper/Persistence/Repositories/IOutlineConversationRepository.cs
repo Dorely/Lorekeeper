@@ -17,7 +17,9 @@ public interface IOutlineConversationRepository : IChatMessageStore<OutlineMessa
     Task<int> GetMaxOrderAsync(Guid conversationId, CancellationToken cancellationToken = default);
 
     Task AddConversationAsync(OutlineConversation conversation, CancellationToken cancellationToken = default);
+    Task ResetMessagesAsync(
+        OutlineConversation conversation,
+        OutlineMessage greeting,
+        CancellationToken cancellationToken = default);
     void UpdateSelectedProvider(OutlineConversation conversation);
-
-    void RemoveConversation(OutlineConversation conversation);
 }
