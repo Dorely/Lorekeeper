@@ -2,15 +2,20 @@
 
 ## Required Context
 
-- At the start of every session, read `VISION.md`, `FILEMAP.md`, and
-  `docs/architecture.md` completely before doing substantive work.
-- Treat `VISION.md` as product direction, `docs/architecture.md` as the current
-  technical and product-constraint reference, and `FILEMAP.md` as a navigation
-  aid. None of them is proof that a feature is already implemented.
+- At the start of every session, read `VISION.md` and `docs/architecture.md`
+  completely before doing substantive work.
+- Use the routing table in `docs/architecture.md` after initial repository
+  exploration, then read every matching chapter under `docs/architecture/`
+  completely before planning or changing that area. If the discovered impact
+  expands, read the additional chapter before continuing.
+- Treat `VISION.md` as product direction, `docs/architecture.md` as the compact
+  architecture and routing authority, and the routed chapters as the current
+  technical and product-constraint reference. None of them is proof that a
+  feature is already implemented.
 - Confirm current behavior in code before planning or changing it.
 - Keep this file limited to durable agent behavior. Put product direction in
-  `VISION.md` and technical decisions, boundaries, and changing implementation
-  guidance in `docs/architecture.md`.
+  `VISION.md`; put technical decisions, boundaries, and changing implementation
+  guidance in `docs/architecture.md` and its routed chapters.
 
 ## Repository Readiness
 
@@ -144,14 +149,13 @@
 
 ## Documentation Maintenance
 
-- Update `FILEMAP.md` in the same change after adding, deleting, renaming, or
-  materially repurposing a tracked source or project-support file.
-- Keep each `FILEMAP.md` entry to one or two lines and never list generated build
-  output.
-- Update `docs/architecture.md` in the same change whenever work alters the
-  technology stack, project boundaries, component responsibilities, data flow,
-  persistence, provider behavior, platform support, security posture, or
-  validation commands.
+- Update the owning routed architecture chapter in the same change whenever
+  work alters its contracts, component responsibilities, data flow, persistence,
+  provider behavior, platform support, security posture, validation, primary
+  entry points, or key file families.
+- Update `docs/architecture.md` only when global invariants, chapter boundaries,
+  or routing rules change. Keep the index compact and keep file descriptions in
+  exactly one owning chapter rather than duplicating them across consumers.
 - Update `README.md` when user-facing capabilities, requirements, setup, run,
   packaging, release, update, or local-data behavior changes.
 - Update `VISION.md` only when the product direction or scope has intentionally
@@ -163,7 +167,7 @@
 
 - Verify changes in proportion to their impact using the relevant builds,
   existing tests, static checks, runtime checks, and release checks documented in
-  `docs/architecture.md`.
+  `docs/architecture.md` and its routed chapters.
 - Automated tests in `Lorekeeper.Press` may exist only when they map to a
   requirement in the Press conformance evidence matrix. This includes the
   protocol, containment, atomicity, cancellation, determinism, typography,

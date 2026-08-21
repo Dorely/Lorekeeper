@@ -1,0 +1,254 @@
+# Narrative Context, Canon, and Retrieval
+
+## When to read
+
+Read this chapter completely before changing projects, Project Guidance, Book
+Briefs, direct project references, acts, chapters as outline items, beats,
+entities, facts, graph relationships, context selection, retrieval, indexing,
+source ingest, or the narrative evidence exposed to any assistant. Also read it
+when a persistence, import/export, image, or assistant change alters which
+material is authoritative, searchable, canonical, or available across project
+boundaries.
+
+Pair this chapter with [assistants-chat.md](assistants-chat.md) for prompt/tool
+behavior, [manuscript-authoring.md](manuscript-authoring.md) for chapter body
+content, and [persistence-migrations-import.md](persistence-migrations-import.md)
+for schema, transaction, migration, or portable-project changes.
+
+## Scope and ownership
+
+This chapter owns the narrative-information model from the project root through
+outline structure, graph memory, ingested evidence, direct-reference scope, and
+the lexical/vector retrieval projections built from that state. It defines what
+is canon, what is evidence, how provenance survives retrieval, and which service
+boundaries must synchronize graph and indexes.
+
+The project and graph services own durable narrative mutations. Context and
+search services own bounded projections of that state; they never become a
+second source of truth. Ingest owns source extraction, provenance, staging, and
+source-derived graph/index output. Assistant adapters consume these boundaries
+but do not own them. Chapter manuscript structure is owned by
+[manuscript-authoring.md](manuscript-authoring.md), even though its searchable
+projection participates here.
+
+## Current architecture and invariants
+
+### Project direction and outline spine
+
+A `Project` is the ownership root for Project Guidance, one structured Book
+Brief, acts, chapters, writing samples, conversations, images, fonts, jobs,
+publishing state, and graph rows. Project Guidance is optional user-authored
+direction. The Book Brief is canonical high-level direction with validated
+partial updates: `null` means unchanged, while an explicit clear list removes a
+field. Code-owned professional instructions must never be copied into either
+user-owned field.
+
+Acts and chapters form the editable outline spine. Act deletion demotes its
+chapters to Unassigned through `OnDelete.SetNull`; chapter content is not
+deleted merely because its grouping disappears. Structural mutations touch the
+project timestamp, keep graph structure synchronized, and refresh targeted
+context/search projections. Events or beats are graph entities parented to
+chapters rather than a separate manuscript block type.
+
+`IOutlineGraphSync` projects Project, Act, Chapter, and Event structure into
+graph nodes and ordered `HasChild` edges. That projection is derived, but it is
+maintained through the owning project, act, chapter, and entity services. Do not
+write equivalent graph rows directly from UI components, assistants, or import
+helpers.
+
+### Graph-backed story memory
+
+The relational graph is authoritative for structured story memory. Structural
+types include `Project`, `Act`, `Chapter`, `ProjectFact`, and `Event`; default
+narrative types include `Character` and `Location`, while the project-scoped
+type registry permits arbitrary non-structural types. `IEntityService` owns
+entity create/update/delete, parent moves, relationship changes, and the
+associated context-index and auto-link refresh. `IProjectFactService` stores one
+indexed `ProjectFact` node per key/value pair and maintains its link from the
+project root.
+
+Manual entity-to-chapter context uses a `RelevantTo` edge. Every canonical
+entity that appears, affects, constrains, or otherwise matters to a chapter
+needs that chapter-level link; beat links may add precision but do not replace
+it. `AppearsIn` is reserved for Character-to-Event/beat relationships. Existing
+or incoming `AppearsIn` links aimed at a Chapter are normalized to
+`RelevantTo`. Editor context traverses the active chapter and its beats, making
+these explicit chapter links the primary outline-to-drafting handoff.
+
+`GraphAutoLinkService` derives low-priority, read-only `AutoMention` edges from
+exact labels and aliases. They are useful discovery evidence, not user-owned
+relationships. Graph UI and entity tools return manual links before automatic
+ones and refuse to edit managed structural, provenance, or auto-mention edges.
+Changes to names, aliases, source text, or searchable narrative content must
+refresh affected auto links through the owning services.
+
+### Retrieval and context assembly
+
+`IProjectSearchService` fuses SQLite FTS5/BM25 and sqlite-vec results. Search
+results carry source kind, stable source/container identity, snippet or bounded
+content, and owning-project provenance. `IContextIndexingService`, chapter and
+writing-sample services, ingest indexing, and the embedding rebuild worker keep
+lexical and vector projections current. A change to any retrievable model or
+stored text must be traced through both index paths; updating only vectors or
+only FTS leaves inconsistent assistant behavior.
+
+`ContextBuilder` owns the Editor's bounded automatic working context. It starts
+from protected Project Guidance and Book Brief direction, then adds relevant
+prior chapter material, explicit per-chapter include/exclude preferences, graph
+relationships, project-search results, named manuscript styles, page setup,
+annotations, and canonical entity visuals. The active chapter is loaded once as
+a complete compact semantic snapshot with its revision, source hash, stable
+block IDs, text, marks, styles, sparse paragraph formatting, Figures, and
+Designed Page references. Ordinary active-chapter editing therefore should not
+begin with a redundant manuscript read.
+
+Entity context uses a separate compact projection that preserves meaningful
+properties, knowledge, and canonical visual metadata while omitting empty
+fields, graph adjacency, and internal provenance. Complete paginated entity
+reads own relationship traversal. Tool-result adjacency is current-turn context
+and must be reacquired after compaction or on a later turn.
+
+`EditorContextPreference` rows are overrides over automatic defaults, not a
+copy of the underlying material. Reset removes all overrides for the active
+chapter and rebuilds context; it never mutates canon, source data, manuscript
+content, or relationships. Writing Samples are default-on style references, so
+resetting an explicit preference returns them to included. The chapter header's
+word/token value measures chapter plain text only; Assistant Memory measures
+the full enabled prompt context and is intentionally larger.
+
+Model-facing structured payloads use the shared compact serializer and
+`AgentPayloadPaginator`. Pagination repeats identity fields, keeps logical JSON
+records intact where possible, and segments only an individually oversized text
+field with continuation metadata. Assistant tools must not create parallel,
+unbounded response shapes.
+
+### Direct project references and provenance
+
+`ProjectReference` is a direct, read-only continuity link from an active
+referencing project to another project. The composite key prevents duplicates,
+self-links fail at the database and service boundaries, and reciprocal links
+are independent. Reference scope is exactly one hop. Arbitrary foreign project
+IDs and transitive references fail closed.
+
+Deleting a referencing project cascades its outgoing links. Deleting a
+referenced project is restricted, so `IProjectService.DeleteAsync` rechecks
+incoming dependencies in a global write operation and requires an explicit
+detach decision. Adding or removing a link touches only the referencing
+project's update timestamp. Direct-reference rows are deliberately excluded
+from portable project exports and are never inferred from names or slugs during
+import.
+
+Referenced narrative scope is deliberately narrower than the full project. It
+contains the project profile, acts, Core chapters/manuscripts, entities, facts,
+writing samples, and only Book Brief-selected canonical ingest sources. Release
+chapter variants, publication sections and settings, unselected sources, and
+general image-library assets are excluded. Canonical visuals are readable only
+through `EntityVisualExample` associations owned by the referenced project.
+
+Reference-aware search performs independent owning-scope searches and globally
+fuses them without copying referenced data into the active project's index.
+Every discovery and exact-read result retains origin project ID, name, slug, and
+referenced status. The active project's current canon and explicit user
+direction take precedence; foreign material is continuity evidence and
+conflicts must be surfaced rather than silently merged. All six assistants can
+receive the same bounded manifest and origin-qualified list/search/read tools,
+but every mutation remains active-project-only.
+
+### Ingest sources and evidence
+
+Ingest accepts text, Markdown, EPUB, PDF, image, and webpage material. The UI
+accepts at most 50 selected files, reads at most 100 MiB per file, and creates
+one durable job per file sequentially so mixed batches retain independent
+results. A single text/Markdown upload remains editable before submission, and
+that edited text is authoritative over its original bytes.
+
+Preprocessing creates durable `IngestSource` records, page- and block-level
+locators, large logical source chunks, visual candidates, and small lexical and
+vector fragments. Logical chunks are extraction checkpoints; retrieval
+fragments are separate and map back to source character ranges and locator
+metadata. The graph projection is Source to SourceChunk to SourceBlock through
+ordered structural edges, with web/artifact provenance retained on the source.
+
+The ingest processor performs bounded source analysis, stages records, promotes
+simple relationships and canonical knowledge, persists reports/events, and
+indexes final source projections. Restart and delete subtract only that
+source's evidence, citations, legacy assertions, and ingest-owned orphan graph
+output, then refresh affected entity and retrieval projections. They must not
+erase independently authored canon that happens to mention the same entity.
+
+`BookBriefCanonSource` is a relational selection of an actual ingest source;
+source deletion cascades the selection. Selected sources are canonical
+grounding. Unselected sources remain searchable evidence and never become canon
+without a user decision. Provenance fields use the current `sourceEvidence.*`
+terminology. Historical `canonSource.*` payloads are translated only at the
+versioned import boundary.
+
+Research uses a configured web search provider, cache-first webpage candidates,
+safe page/image reading, and reviewable graph changes. URL normalization,
+robots handling, private-network rejection, redirect and byte limits,
+per-host throttling, cooldowns, and fetch provenance belong to research
+services. A prompt or Razor component must not weaken those controls. A cached
+web candidate can be promoted into manual ingest, preserving its URL, hash,
+extraction, and discovery provenance.
+
+Background ingest and embedding work is app-process-owned. Durable job and
+checkpoint rows are the restart/audit boundary; Blazor circuits only subscribe
+to notifier updates. Changing queue behavior must preserve interrupted-job
+reconciliation and must not leave network/model work holding an EF context or a
+database write lease.
+
+Visible source inventories and activity panels are read projections over those
+same durable records. They may summarize progress and provenance, but they must
+not introduce a second canon-selection, relationship, or job-state authority.
+
+## Key files and file families
+
+| File or family | Architectural role |
+|---|---|
+| [`Lorekeeper/Models/Project.cs`](../../Lorekeeper/Models/Project.cs), [`BookBrief.cs`](../../Lorekeeper/Models/BookBrief.cs), and outline/graph/source models | Canonical project direction, outline, direct-reference, graph, ingest-source, and context-preference persistence shapes. |
+| [`Lorekeeper/Projects/`](../../Lorekeeper/Projects/) | Project lifecycle, Book Brief mutation, deletion impact, and validated direct-reference scope. |
+| [`Lorekeeper/Outline/ActService.cs`](../../Lorekeeper/Outline/ActService.cs), [`EntityService.cs`](../../Lorekeeper/Outline/EntityService.cs), [`EntityTypeService.cs`](../../Lorekeeper/Outline/EntityTypeService.cs), [`ProjectFactService.cs`](../../Lorekeeper/Outline/ProjectFactService.cs), and [`OutlineGraphSync.cs`](../../Lorekeeper/Outline/OutlineGraphSync.cs) | Outline-domain lifecycle, graph entity/type/fact ownership, and outline-to-graph synchronization; assistant adapters remain owned by the assistant chapter. |
+| [`Lorekeeper/Graph/`](../../Lorekeeper/Graph/) and [`Lorekeeper/Knowledge/`](../../Lorekeeper/Knowledge/) | Graph UI facade, automatic mention links, graph-store abstraction, relational implementation, and vector-store primitives. |
+| [`Lorekeeper/Search/ProjectSearchModels.cs`](../../Lorekeeper/Search/ProjectSearchModels.cs), [`ProjectSearchService.cs`](../../Lorekeeper/Search/ProjectSearchService.cs), [`ProjectSearchAgentPayload.cs`](../../Lorekeeper/Search/ProjectSearchAgentPayload.cs), and [`SqliteFtsProjectSearchIndex.cs`](../../Lorekeeper/Search/SqliteFtsProjectSearchIndex.cs) | Origin-aware lexical/vector discovery, compact assistant projections, exact narrative reads, and the project FTS5 index; external search adapters belong to providers. |
+| [`Lorekeeper/Context/`](../../Lorekeeper/Context/) | Editor context assembly, recommendations, compact projections, pagination, indexing, and direct-reference manifests. |
+| [`Lorekeeper/Ingest/IngestService.cs`](../../Lorekeeper/Ingest/IngestService.cs), [`BookArtifactPreprocessor.cs`](../../Lorekeeper/Ingest/BookArtifactPreprocessor.cs), [`IngestSourceStructureBuilder.cs`](../../Lorekeeper/Ingest/IngestSourceStructureBuilder.cs), graph/evidence/index services, and [`IngestJobProcessor.cs`](../../Lorekeeper/Ingest/IngestJobProcessor.cs) | Ingest lifecycle, artifact preprocessing, source structure, graph/evidence ownership, retrieval projections, and scoped processing; queue/worker execution belongs to providers. |
+| [`Lorekeeper/Research/WebIngestCandidateService.cs`](../../Lorekeeper/Research/WebIngestCandidateService.cs), [`WebIngestCandidateModels.cs`](../../Lorekeeper/Research/WebIngestCandidateModels.cs), and [`ResearchActivityModels.cs`](../../Lorekeeper/Research/ResearchActivityModels.cs) | Cached source provenance, promotion into ingest, and read models; provider fetch policy and Research chat adapters remain in their owning chapters. |
+| [`Lorekeeper/Components/Pages/Projects/Outline/`](../../Lorekeeper/Components/Pages/Projects/Outline/) and graph/context project components | Application-owned outline, canon-source, graph, reference, and Assistant Memory interaction surfaces. |
+
+## Related chapters
+
+- [assistants-chat.md](assistants-chat.md) owns the shared conversation runtime,
+  system-prompt composition, surface charters, tools, review changes, contests,
+  and revision workers.
+- [manuscript-authoring.md](manuscript-authoring.md) owns manuscript v4, chapter
+  body mutations, editor behavior, annotations, styles, and authoring history.
+- [providers-background.md](providers-background.md) owns LLM/search provider
+  configuration and the shared rules for provider-backed background execution.
+- [composition-media.md](composition-media.md) owns image assets and canonical
+  entity visual associations; this chapter owns how those associations are
+  selected and projected as narrative evidence.
+- [persistence-migrations-import.md](persistence-migrations-import.md) owns EF
+  mappings, write coordination, schema migrations, and portable import/export.
+
+## Relevant verification
+
+- Search every changed narrative concept across services, graph relationships,
+  FTS and vector indexing, context builders, assistant tools, import/export,
+  and UI consumers.
+- Confirm graph mutations flow through owning services and that `RelevantTo`,
+  `AppearsIn`, managed structural links, and read-only `AutoMention` behavior
+  remain distinct.
+- For retrieval changes, inspect both FTS5 and sqlite-vec maintenance, disabled
+  embedding behavior, rebuild behavior, origin provenance, pagination, and
+  exact-read scope validation.
+- For reference changes, verify one-hop scope, foreign-ID rejection, active-only
+  mutation targets, incoming deletion handling, canonical-visual restrictions,
+  and export omission warnings.
+- For ingest/import or startup transformation changes, add or update tests only
+  where they prove allowed migration/import data preservation or fail-closed
+  behavior; ordinary search, graph, context, Research, and assistant behavior is
+  verified through builds and static inspection.
+- Run `dotnet build Lorekeeper.sln` and the documented HTTP startup smoke check
+  for normal source changes. Exercise provider calls, web access, embeddings,
+  ingest models, or browser UI only when that integration is explicitly in
+  scope, and report anything not exercised.

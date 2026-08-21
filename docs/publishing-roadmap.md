@@ -15,10 +15,12 @@ pricing, rights administration, or catalog operations part of artifact
 readiness. Authors may still review files and printed samples, but Lorekeeper
 does not model those activities as publication gates.
 
-Current implementation boundaries live in
-[`architecture.md`](architecture.md). Research evidence and historical renderer
-decisions remain under [`research/`](research/README.md) and
-[`decisions/`](decisions/).
+Current implementation boundaries are routed from
+[`architecture.md`](architecture.md), with the publication model and production
+contracts in [`architecture/publishing-model.md`](architecture/publishing-model.md)
+and [`architecture/press-production.md`](architecture/press-production.md).
+Research evidence and historical renderer decisions remain under
+[`research/`](research/README.md) and [`decisions/`](decisions/).
 
 ## Product and artifact model
 

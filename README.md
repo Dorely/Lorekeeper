@@ -4,8 +4,9 @@ Lorekeeper is a local Blazor Server proof-of-concept for AI-assisted long-form
 story planning, drafting, research, ingest, and publishing.
 
 See [VISION.md](VISION.md) for the product direction and
-[docs/architecture.md](docs/architecture.md) for the current technical
-boundaries, ownership model, and validation guidance. The researched,
+[docs/architecture.md](docs/architecture.md) for the compact technical map and
+task-routed architecture chapters covering current boundaries, ownership, and
+validation guidance. The researched,
 status-labeled path from the current workbench to end-to-end book production is
 in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 

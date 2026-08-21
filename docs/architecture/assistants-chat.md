@@ -1,0 +1,294 @@
+# Assistants, Chat Runtime, and Review Workflows
+
+## When to read
+
+Read this chapter completely before changing any user-facing assistant, shared
+chat UI/runtime, prompt composition, model selection, tool schema or payload,
+tool streaming, transcript persistence, context compaction, Review Edits,
+Contest Mode, or Editor revision workers. Also read it when changing an owning
+domain service in a way that affects assistant parity, mutation notices,
+revision checks, or post-tool refresh behavior.
+
+Pair it with the chapter for every domain a tool reads or mutates. In
+particular, use [narrative-context.md](narrative-context.md) for canon and
+retrieval, [manuscript-authoring.md](manuscript-authoring.md) for manuscript and
+annotation behavior, and [composition-media.md](composition-media.md) or
+[publishing-model.md](publishing-model.md) for visual and publication tools.
+
+## Scope and ownership
+
+This chapter owns the six interactive assistant surfaces—Outline, Editor,
+Writing Coach, Research, Images, and Publish—and their shared conversation
+protocol. It covers active-turn lifetime, transcript replay, model selection,
+tool invocation and streaming, prompt assembly, token accounting and
+compaction, image attachments, mutation refresh signals, durable review
+proposals, contests, and prose revision workers.
+
+Feature adapters choose the charter, automatic context, and intentional subset
+of domain tools for their surface. They do not reimplement domain validation or
+persistence. Every mutation must cross the same owning application service used
+by manual UI actions. Domain chapters remain authoritative for the state being
+read or changed; this chapter is authoritative for how assistants reach those
+boundaries and how the user reviews their work.
+
+## Current architecture and invariants
+
+### Six surfaces over one shared protocol
+
+`ChatTurnSurface` has exactly six user-facing values: `Outline`, `Editor`,
+`Research`, `Images`, `WritingCoach`, and `Publish`. Each surface owns one
+project-scoped persisted conversation and ordered messages, including a nullable
+selected-provider override. Feature services adapt their repository, prompt
+context, tools, and typed streaming updates to the common `ChatTurnEngine`.
+`ChatSurface` provides the shared transcript, composer, model picker, image
+attachments, tool chips, scrolling, and textarea behavior.
+
+The shared engine owns the provider-facing loop: persist the outgoing user
+message, stream assistant text and function-call argument deltas, invoke the
+registered application tools, return correlated results, persist the completed
+visible transcript, and emit typed updates. Tool rounds retain the provider's
+`FunctionCallContent` only until its correlated tool result has been submitted.
+OpenAI-compatible clients must also preserve unknown immediate-round tool-call
+metadata such as Gemini thought signatures. Cross-turn replay is intentionally
+text-only: non-empty system, user, and assistant prose is retained; tool calls,
+tool results, and model-only visual attachments are not replayed.
+
+Because protocol metadata disappears on later turns, assistant prose is the
+durable work log. A tool-using assistant narrates meaningful phases and closes
+with a self-contained account of completed or staged work, decisions,
+verification, diagnostics, and remaining actions. That prose supports historical
+continuity but never replaces fresh context or focused rereads for mutable IDs,
+revisions, or project state.
+
+`ChatTurnRuntime` is a singleton coordinator keyed by project and surface.
+Feature turn runners execute scoped work outside the Razor component lifetime,
+buffer updates for reopened panels, and preserve explicit Stop as the
+cancellation path. Active-turn ownership must not move into a component or
+SignalR circuit. Surface-scoped maintenance leases make reset atomic against an
+active or newly starting turn across windows.
+
+The composer stores unsent text in unencrypted browser/Electron local storage,
+keyed by project and surface. Drafts survive remounts, navigation, and circuit
+reloads without crossing project or assistant boundaries and are deleted on
+send. They are outside SQLite, backups, and project export; clearing site data
+removes them. Temporary selected attachments are not part of the draft, while
+pasted or uploaded images are normal project assets and message associations.
+
+### Model selection, tokens, and compaction
+
+Each conversation's nullable `SelectedProviderId` is a soft reference. `null`
+follows the current working global default. An explicit selection is usable only
+while that connection/model passes chat readiness. If it is deleted or becomes
+unavailable, the stored selection remains visible and the surface fails closed;
+there is no silent fallback. Choosing the global default clears the override,
+and resetting a conversation clears both transcript and override.
+
+The shared picker groups working models by connection, labels options by model,
+marks the global default, and retains unavailable explicit selections for
+recovery. A turn captures provider ID, model ID, display label, vision
+readiness, and token limits in its runtime snapshot. Editing settings during a
+turn cannot switch the provider halfway through client creation, compaction, or
+tool execution. Contest candidates, revision workers, ingest jobs, embeddings,
+image generation, and Press rendering keep their separate selection contracts.
+
+All six surfaces use the active model's configured input-token limit and shared
+token counter. After a complete tool-call batch, reaching 90% of that limit
+removes completed tool-result messages, their function-call protocol entries,
+and tool-derived visual context from the active in-memory request. System and
+user content, assistant prose, and initial visual context remain. Compaction
+never interrupts streaming output or an executing tool.
+
+A runtime-only notice tells the assistant that IDs and state from removed tool
+results must be looked up again. The transcript records a synthetic
+`Chat Compacted` tool row and manifest entry while retaining original tool rows
+for audit. The live token estimate excludes dropped chips and includes the
+notice until the turn ends. Background ingest, contests, revision workers, image
+jobs, and publication workers do not use interactive chat compaction.
+
+### Prompts, context, and tool boundaries
+
+`SystemPromptComposer` owns the single system-role prompt shape. It combines the
+surface charter and code-owned workflow/tool rules with dynamic guidance,
+protected Project Guidance and Book Brief, the direct-reference manifest, and
+the feature's current working context. User-owned direction remains distinguishable
+from code-owned rules and must not be persisted as seeded guidance. The shared
+workflow instructions enforce active-canon precedence, read-only foreign
+references, compact paging and staging, durable work logs, and honest
+verification.
+
+All assistants receive a bounded one-hop direct-reference manifest and
+origin-qualified list/search/read tools. Foreign IDs are valid only through the
+active project's direct links; referenced evidence is read-only and never a
+placement or mutation target. Tools return compact, paged envelopes with stable
+identity and provenance. After compaction or across turns, the assistant must
+reacquire any exact IDs, revisions, or values it needs.
+
+Feature adapters must accept any valid JSON shape returned by a read-only tool.
+Only object envelopes that can carry mutation notices are inspected for
+workspace refresh metadata; arrays and scalars continue normally. Tool schemas,
+prompts, persistence behavior, mutation notices, and UI consumers must evolve
+together. Results should return changed identities, revisions, counts,
+diagnostics, and recovery guidance—not entire unchanged documents or binary
+payloads.
+
+Large or sensitive mutations use bounded, revision-safe staging. Editor
+manuscript changes first create one opaque, turn-local preview; apply accepts
+only that one-use ID and verifies the exact source snapshot. Page and cover
+scenes use persisted, hashed, expiring, project/conversation-scoped stages that
+cannot be replayed. Image generation creates an unattached durable image job;
+another explicit mutation places or associates the completed asset. Failed,
+cancelled, stale, or preview-only calls must not create history or partial
+destination state.
+
+### Surface charters
+
+Outline is structural planning and canon. Its automatic snapshot includes
+Project Guidance, Book Brief, structure-only format guidance, acts, chapters,
+synopses, beats, facts, chapter/beat entity associations, entity/source
+inventories, and canonical-source distinctions. It mutates Book Brief, outline,
+entities, relationships, and facts; it may read chapter bodies only for focused
+reconciliation. It has no manuscript, Figure, Designed Page, page-setup, or
+publication geometry mutation tools. Its only image workflow creates a
+geometry-free canonical appearance candidate and explicitly associates the
+inspected result with an entity.
+
+Editor is the complete Core/release authoring assistant. It receives the active
+chapter's full compact manuscript and style context automatically and can read
+or mutate the outline, canon, manuscript, annotations, Figures, Designed Pages,
+styles, composition, page setup, and image workflows appropriate to the
+protected `EditorContentTarget`. The conversation is project-scoped, not
+chapter-scoped. In release-content mode the target is fixed; outline/canon and
+unsafe shared-style mutations are omitted. Page and canvas previews are the
+visual verification gates for pagination and composition work.
+
+Writing Coach owns project-level coaching around editable writing samples. Its
+tools are read-only for project facts, the current sample, direct-reference
+narrative evidence, and bounded canonical visuals. It does not mutate canon,
+outline, manuscript, or publishing state.
+
+Research combines bounded project/direct-reference reads with configured web
+search, safe cached page reads, image/source promotion, and staged graph
+mutations. Search and fetch security remains in Research services. Its activity
+view derives from touched entities and accessed cached sources rather than a
+separate assistant-authored log.
+
+Images is concept art and visual canon. It can read narrative context for
+grounding and can mutate project images, masks, canonical entity associations,
+and the user-approved Book Brief Visual Direction. It cannot author Figures,
+Designed Pages, covers, or publication placements. Visual Direction uses an
+exact previously-read value so a stale turn cannot overwrite newer direction.
+
+Publish is the Core Book/release production assistant. Each turn receives the
+complete outline and the protected visible Publish surface—overview, cover,
+prose section, or designed section—with exact revisions and selection. It can
+mutate Core/release metadata and settings, publication sections, covers, page
+setup/styles where allowed, and preparation workflows. It cannot mutate chapter
+manuscript or reorder the project outline. Low-level renderer invocation, raw
+profile versions, ISBN invention, and vendor-acceptance claims are unavailable.
+
+### Review Edits and approval
+
+Reviewable tool mutations persist as `AiChangeBatch` and `AiChange` rows.
+Outline and Research stage canon/structure changes through their feature staging
+contexts. Editor manuscript changes can write directly or enter an in-memory
+projected overlay when Review Edits is enabled. `IAiChangeApprovalService` is
+the single approval/rejection boundary; it enforces dependencies, revision and
+semantic concurrency, reconnects approved Editor changes to their originating
+authoring-history turn batch, and leaves genuine conflicts visible and
+rejectable.
+
+Only plain paragraph/scene-break changes use the line-oriented Editor Review
+tab. Figure, Designed Page, inline formatting, named-style, semantic-structure,
+or other visual changes remain in the pending-edits modal with distinct text,
+structure, and visual diffs. A staged Designed Page preallocates its composition
+and block IDs, and acceptance creates its manuscript reference, composition, and
+exact authoring variant atomically. Artwork placement remains a separate
+revision-checked mutation using an already-completed image.
+
+Repository updates for review rows attach or update only the intended root.
+Detached `Batch.Changes` graphs must never be attached during status changes.
+Reads are no-tracking; mutations reuse the locally tracked root inside one short
+write operation and dispose it immediately after commit.
+
+### Contest Mode and revision workers
+
+Contest Mode captures one terminal context and exact target/chapter manuscript
+snapshot, then runs independent selected models without tools. Candidate raw
+responses and validated semantic operation proposals persist independently. The
+Review workspace is reachable while the batch runs, streams candidate status,
+and allows explicit per-candidate resolution. Keeping the chat component mounted
+while its pane is hidden preserves the live subscription.
+
+Editor revision agents are same-turn, prose-only worker sessions assigned to
+specific chapters. The coordinator validates assignments, persists the job and
+session records, runs bounded parallel workers, and receives only compact IDs,
+statuses, summaries, errors, and pending-change IDs. Full prompts, operations,
+proposals, raw responses, and worker transcripts remain in durable session
+detail and never inflate the parent model result.
+
+Each worker uses paginated grounding and filtered source reads, then terminates
+through the semantic manuscript operation boundary. With Review Edits enabled,
+its pending change is correlated to the parent tool call and adopted into the
+active Editor overlay, while the stored chapter remains unchanged until
+approval. The coordinator cancels and awaits any outstanding progress read
+before disposing the async enumerator. Completion, cancellation, and failure
+must leave durable terminal state and no concurrent-disposal error.
+
+## Key files and file families
+
+| File or family | Architectural role |
+|---|---|
+| [`Lorekeeper/ChatTurns/`](../../Lorekeeper/ChatTurns/) | Shared surface identity, active-turn lifetime, protocol engine, text-only replay, compaction, message-store boundary, and image attachments. |
+| [`Lorekeeper/Components/Chat/`](../../Lorekeeper/Components/Chat/) | Shared chat shell, model picker, transcript models/token projection, tool chips, and composer behavior. |
+| [`Lorekeeper/Llm/SystemPromptComposer.cs`](../../Lorekeeper/Llm/SystemPromptComposer.cs) and [`AssistantWorkflowInstructions.cs`](../../Lorekeeper/Llm/AssistantWorkflowInstructions.cs) | One system-role prompt pipeline and code-owned cross-surface workflow/tool rules. |
+| [`Lorekeeper/Outline/OutlineCollaborationService.cs`](../../Lorekeeper/Outline/OutlineCollaborationService.cs), [`OutlineCollaborationTools.cs`](../../Lorekeeper/Outline/OutlineCollaborationTools.cs), working-context/staging/approval helpers, and [`OutlineChatTurnRunner.cs`](../../Lorekeeper/Outline/OutlineChatTurnRunner.cs) | Outline assistant adapter, automatic context, structural/canon tools, review staging/approval, diffs, and turn updates. |
+| [`Lorekeeper/EditorChat/`](../../Lorekeeper/EditorChat/) | Editor adapter/tools, opaque manuscript preview/apply, Review staging, contests, revision jobs/workers, and active-turn updates. |
+| [`Lorekeeper/Writing/`](../../Lorekeeper/Writing/) | Writing Coach service, read-only tool catalog, runner, and writing-sample application boundary. |
+| [`Lorekeeper/Research/ResearchService.cs`](../../Lorekeeper/Research/ResearchService.cs), [`ResearchTools.cs`](../../Lorekeeper/Research/ResearchTools.cs), [`ResearchChatTurnRunner.cs`](../../Lorekeeper/Research/ResearchChatTurnRunner.cs), and [`ResearchTurnUpdate.cs`](../../Lorekeeper/Research/ResearchTurnUpdate.cs) | Research chat adapter/tools, streaming, and turn lifetime; guarded fetch and cached-source ownership remain in providers and narrative context. |
+| [`Lorekeeper/ImagesChat/`](../../Lorekeeper/ImagesChat/) | Images assistant, turn context, visual-canon tools, job reconnection, and streaming updates. |
+| [`Lorekeeper/Publish/PublishChatService.cs`](../../Lorekeeper/Publish/PublishChatService.cs), [`PublishChatTurnRunner.cs`](../../Lorekeeper/Publish/PublishChatTurnRunner.cs), and [`PublishTurnUpdate.cs`](../../Lorekeeper/Publish/PublishTurnUpdate.cs) | Publish conversation, protected visible-target context, turn lifetime, and refresh updates; the publication chapter owns its domain tool catalog. |
+| Conversation/message, `AiChange*`, `Contest*`, and `EditorRevision*` models and repositories | Durable transcript, model-selection, review, contest, and worker audit boundaries for all six surfaces. |
+| Assistant `*ChatPanel.razor` components under `Lorekeeper/Components/Pages/Projects/` | Thin adapters that hydrate transcripts, subscribe to active turns, render review/progress state, and route mutation notices to owning workspaces. |
+
+## Related chapters
+
+- [narrative-context.md](narrative-context.md) owns Project Guidance, Book
+  Brief, canon, outline, graph, retrieval, direct references, ingest evidence,
+  and automatic context projections.
+- [manuscript-authoring.md](manuscript-authoring.md) owns manuscript operations,
+  editor targets, annotations, Book Text Styles, and persistent Undo/Redo.
+- [providers-background.md](providers-background.md) owns provider resolution,
+  OAuth, wire compatibility, request limits, and non-chat background queues.
+- [composition-media.md](composition-media.md) owns project images, generation
+  jobs, Figures' assets, Designed Page/canvas semantics, and visual previews.
+- [publishing-model.md](publishing-model.md) and
+  [press-production.md](press-production.md) own the publication state and
+  truthful validation/rendering claims exposed through Publish tools.
+
+## Relevant verification
+
+- Search all six adapters, their repositories/models, turn runners, panel
+  components, prompt composer, shared engine, and affected domain services when
+  changing a shared contract.
+- Confirm active turns survive component disposal, Stop cancels explicitly,
+  reset acquires maintenance ownership, and no DB context or write lease spans a
+  provider stream or background wait.
+- Verify provider/model snapshots remain stable for the entire turn and that an
+  unavailable explicit selection fails closed without erasing the transcript.
+- Exercise token accounting and compaction at complete tool-batch boundaries;
+  confirm replay stays text-only and the assistant receives the re-lookup
+  notice.
+- For tool changes, inspect schemas, prompt guidance, result shapes, mutation
+  notices, staging/revision checks, persistence, UI refresh consumers, and the
+  owning manual service path together.
+- For Review/Contest/revision changes, confirm dependency handling, exact target
+  ownership, durable terminal state, visible unresolved conflicts, projected
+  overlays, authoring-history correlation, and cancellation cleanup.
+- Do not add ordinary assistant, UI, editor, or service automated tests. Use
+  compilation, static inspection, and explicitly authorized manual integration
+  checks; migration-only persistence changes may use the approved migration
+  safety fixtures.
+- Run `dotnet build Lorekeeper.sln` and the HTTP startup smoke check for normal
+  source changes. Provider calls, model-specific tool behavior, browser UI,
+  image generation, and publishing flows require explicit integration exercise
+  before claiming they work.

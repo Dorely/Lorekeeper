@@ -200,10 +200,10 @@ Run approved migration/import tests, Press formatting/clippy/conformance tests,
 the semantic-editor build, solution build, dependency/license audit, HTTP
 startup smoke check, and explicit host termination.
 
-When this plan is activated, update architecture, README, FILEMAP, VISION
-delivery order, the publishing roadmap, manuscript schema, Press requirements,
-assistant conventions, and DOCX interchange documentation as part of the
-implementation.
+When this plan is activated, update the architecture index and owning routed
+chapters, README, VISION delivery order, the publishing roadmap, manuscript
+schema, Press requirements, assistant conventions, and DOCX interchange
+documentation as part of the implementation.
 
 ## Assumptions and deferred behavior
 

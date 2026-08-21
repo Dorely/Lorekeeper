@@ -1,0 +1,266 @@
+# Composition and media architecture
+
+## When to read
+
+Read this chapter when a change touches project images, image generation or
+editing, canonical entity visuals, Figures, page setup, Designed Pages,
+composition scenes or variants, cover-canvas primitives that are shared with
+Pages, fonts, preview rasterization, image deletion protection, crop or fit
+behavior, geometry-bound generation, image-bearing assistant context, or any
+browser canvas/runtime that presents those capabilities. Read it with
+`publishing-model.md` when the change concerns publication sections, Core or
+release cover materialization, or edition-specific geometry. Read it with
+`press-production.md` when the change affects output rendering, physical
+product geometry, PDF/EPUB artifacts, or production validation. Read it with
+`persistence-migrations-import.md` when a new composition/image/font field,
+asset relationship, history dependency, or migration boundary is involved.
+
+This chapter describes the current runtime contract, not a proposal for a
+second document or rendering model. The semantic manuscript remains the
+searchable and accessible source of meaning. Composition stores an authored
+visual arrangement and media services store reusable assets; neither boundary
+is allowed to become an opaque replacement for manuscript semantics.
+
+## Scope and ownership
+
+The composition/media boundary owns the project image library, image jobs and
+provider-independent image workflow, canonical visual associations, project
+fonts, project authoring page setup, semantic Figure presentation, Designed
+Page semantic fragments and exact-geometry composition variants, visual canvas
+interaction, canvas previews, and the shared layout contracts used by Pages,
+covers, assistants, EPUB projection, and Press requests. Its services are the
+only owners of the corresponding validation, revision, asset-ownership,
+geometry, and preview rules.
+
+`IProjectImageService` owns reusable project assets and local crops. It is the
+authority for metadata, image bytes, usage projections, upload, crop/reuse,
+and deletion guards. `IProjectImageJobService` owns durable generation/edit
+job records and prompt/audit metadata. `IProjectImageGenerationRuntime` owns
+FIFO execution, retry/cancellation propagation, partial previews, and job
+notifications. Provider transport remains behind `IProjectImageProvider`;
+the application never lets a provider-specific response become the asset or
+placement contract.
+
+`IEntityVisualExampleService` owns ordered associations between eligible graph
+entities and project images. An association is canonical visual evidence with
+an origin and source provenance; it is not a general image-library tag.
+`EntityVisualContextService` and `IReferenceVisualService` build bounded,
+read-only visual context for assistants after validating project/reference
+scope. Canonical visual evidence can be read from a directly referenced
+project, but foreign images cannot become active-project mutation or placement
+targets.
+
+`IProjectPageSetupService` owns one project-level authoring width, height,
+margins, body typography, preset, and revision. That setup drives authoring
+previews, Figures, new Designed Pages, and authoring-time generation. It does
+not create a publication release and is not release-owned. A setup change
+reflows the reusable Core cover and every active Designed Page layout in one
+project-scoped transaction while preserving objects and bindings and advancing
+affected revisions.
+
+`ICompositionService` owns Designed Page semantic fragments exactly once and
+revisioned `PageCompositionVariant` scenes by exact geometry fingerprint. The
+canvas is an authoring surface over those contracts. It must not persist HTML,
+DOM coordinates, or a second manuscript body. `ICompositionCanvasPreviewService`
+owns transient complete-scene inspection for Pages and covers; previews are
+not project images and do not enter the library.
+
+The owning publication services remain authoritative for Core/release
+publication sections, release covers, package readiness, and production
+artifacts. This chapter supplies their shared media, canvas, geometry, and
+preview primitives; it does not own publication claims or vendor validation.
+
+## Current architecture and invariants
+
+Project images are reusable assets with bytes, media metadata, crop lineage,
+alt text, prompt/source metadata, masks, and placement relationships. Generated
+or edited work first creates one unattached project image through the shared
+assistant workflow. Placement into a Figure, Designed Page, cover, entity
+visual association, or chat context is a separate revision-safe operation
+using the completed image ID. Generation never embeds a destination, creates a
+partial placement, or silently crops an output to satisfy a target.
+
+The image generation boundary distinguishes a free-standing library request
+from a layout-bound request. Outline and Images requests omit geometry. A
+concrete `LayoutGenerationTargetDescriptor` is used only when art must honor
+physical regions such as a page, frame, or cover. It carries exact aspect,
+moderate authoring raster guidance, final-output raster recommendation,
+effective-DPI expectation, geometry fingerprint, and named trim, bleed, safe,
+gutter, barcode, cover, or reserved-text regions. It is guidance and prompt
+context, not an acceptance rule imposed on provider pixels.
+
+Provider output is stored without layout cropping, resizing, or mismatch
+rejection, apart from supported-format normalization such as WebP to lossless
+PNG. Geometry-bound generation uses a deterministic moderate raster target of
+about 1.57 MP within the provider's flexible-size limits. The result reports
+`rasterMatched` separately from `aspectMatched`. A proportional raster with
+different pixel dimensions remains compatible. Only an aspect error beyond
+the shared 0.001 log-ratio tolerance produces
+`LAYOUT_IMAGE_ASPECT_MISMATCH`. Generation does not infer publication DPI
+readiness; placed-image validation owns DPI diagnostics. The provider-output
+byte boundary is separately configurable and defaults to 64 MiB.
+
+The shared prompt composer gives generation and editing the same spatial
+discipline. A reserved or quiet region must be explicit when copy needs space;
+the rest of the frame must contribute purposeful subject, setting, depth,
+scale, atmosphere, visual flow, or other meaningful information. The Images
+surface owns concept-art iteration and approved Visual Direction. Outline is
+restricted to explicit canonical entity appearance work. Editor consumes a
+completed image for a Figure or Designed Page. Publish consumes it for a
+publication section or cover. Each surface uses the same bounded inspection
+and revision rules, while mutation scope remains surface-specific.
+
+Entity visual examples are ordered associations, not copied image records.
+They carry association origin and source provenance and are reused by image
+prompting, Editor context, Research/Ingest promotion, and entity indexing.
+Canonical-reference reads are bounded, deduplicated, and validated against
+the owning entity and project/reference scope. General-library images are not
+continuity evidence. Changing visual ownership or reference semantics must
+therefore be traced through all of those consumers and through search/vector
+projection where applicable.
+
+The semantic manuscript stores Figure blocks with stable IDs, project image
+IDs, captions, alternative/decorative decisions, language and semantic roles,
+flow/wrap/width/spacing/fit/crop intent, bleed, page-break, and caption
+placement. A Figure is geometry-neutral: the source raster is fitted at
+layout/render time and remains reusable. A Figure's semantic content and
+accessibility data participate in manuscript validation, search/plain-text
+projection where appropriate, EPUB projection, Press requests, and deletion
+guards. Image deletion refuses live Figure, Designed Page, cover, publication,
+or other placement references and repeats the authoritative lookup inside its
+write transaction so stale UI cannot remove a protected asset.
+
+Designed Pages contain semantic fragments and a scene, not duplicate prose.
+Text objects bind stable block/range identities; a newly authored text frame
+creates its own semantic block and writes ordinary manuscript inline marks.
+The canvas intentionally hides reusable-content binding, block IDs, and
+character-offset controls from authors. Legacy range-based layouts remain
+losslessly readable and are materialized into frame-owned blocks when directly
+edited, subject to same-role validation. A mixed-role legacy frame fails
+closed. Meaningful content that cannot be placed remains in an unplaced tray
+with a blocking diagnostic rather than being discarded.
+
+The shared scene vocabulary includes image, text, rectangle, ellipse, line,
+and group objects. Visibility, opacity, locks, grouping, object styles, named
+regions, z-order, and logical reading order have runtime meaning. Authors do
+not manage internal renderer stacking planes. New images enter behind content
+but above older images; new text and shapes enter at the front. Front/back
+actions move to the actual applicable stack edge. Group transforms, opacity,
+visibility, clipping, rotation, and z-order must resolve consistently in the
+canvas, previews, generation-target inspection, EPUB projection, and Press.
+
+Active authoring variants always use the current project page setup and retain
+only single-page or facing-spread mode. A variant is selected by exact
+geometry fingerprint. Opening an older mismatched variant repairs it to the
+current setup; changing setup reflows active layouts transactionally. Publish
+may copy an authoring scene into a separate exact edition variant for review,
+but a publication release never governs authoring geometry. A two-leaf
+`EditionLeaves` spread is split into sequential leaves at output; digital
+output may preserve a wide or independent page box according to Core Book
+presentation settings, while physical output accepts only valid trim leaves or
+two-leaf EditionLeaves variants.
+
+Pages and covers share image-frame layout rules. Fill-canvas uses the complete
+surface. Proportional fitting crops to fill; explicit constraint removal
+permits deliberate stretching. Crop repositioning changes only the image
+position inside a fixed frame and remains an explicit mode until finished or
+another object is selected. Frames retain raster aspect by default. Pointer
+interaction uses measured native image geometry rather than a generation
+request's guessed aspect. Press clips valid out-of-surface paint to the page;
+the authoring editor reports overflow and clipping without silently resizing
+art.
+
+The visual editor uses `CompositionVisualEditorShell`: a one-line view
+toolbar, largest practical canvas, fixed contextual bottom controls, and an
+on-demand details drawer for accessibility, reading order, exact geometry,
+diagnostics, and secondary settings. It does not expose a permanent inspector
+or layer manager that steals canvas width. Saves are serialized per mounted
+workspace. Each save uses an immutable semantic/scene snapshot, adopts returned
+revisions before the next queued save, and clears dirty state only when no
+newer local mutation exists. Revision-checked assistant mutations acquire the
+project mutation lease, reread tracked state, commit, and return the
+authoritative snapshot. Stale or failed mutations cannot leak tracked entities
+into a later operation.
+
+`ICompositionCanvasPreviewService` renders the exact selected scene revision
+as one transient PNG surface. Clean mode returns the composed artwork;
+annotated mode adds safe/trim/gutter/center/bleed/object indicators plus
+overflow and clipping diagnostics. Cache keys include semantic and scene
+revisions and referenced image/font bytes. Editor and Publish persist the
+preview through their transcript visual boundary so the exact image inspected
+by a model is visible in the tool chip and survives transcript reload. A
+preview is an inspection gate, never a new project image. Assistants inspect
+the same current revision before another visual mutation, then validate and
+inspect a clean preview for final verification.
+
+Project fonts include bundled OFL families and imported static TTF/OTF faces.
+The project font catalog owns validation, face resolution, browser URLs, and
+deletion guards. Imported-font deletion is blocked while a paragraph, saved
+style, page, cover, or retained history dependency references its family.
+Browser, Read preview, EPUB, cover, and Press all stage the same referenced
+faces rather than substituting a machine font. Font changes affect manuscript,
+composition, Core/release fingerprints, and artifact freshness.
+
+## Key files and file families
+
+| Path or family | Primary responsibility |
+|---|---|
+| `Lorekeeper/Images/IProjectImageService.cs` / `ProjectImageService.cs` | Reusable image-library reads, uploads, crops, metadata, usage projections, and deletion guards. |
+| `Lorekeeper/Images/IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Durable generation/edit job records, structured briefs, provider audit fields, output validation, and diagnostics. |
+| `Lorekeeper/Images/AgentProjectImageWorkflow.cs` | Assistant generation/edit boundary, terminal-state waiting, reconnectable jobs, target diagnostics, and unattached output semantics. |
+| `Lorekeeper/Images/ImagePromptComposer.cs` | Structured generation/edit briefs, reference labels, reserved regions, spatial guidance, and rendered-text policy. |
+| `Lorekeeper/EntityVisuals/` | Canonical entity-image associations, visual context, bounded reference reads, and provenance. |
+| `Lorekeeper/Composition/CompositionService.cs` | Revision-aware Designed Page aggregates, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |
+| `Lorekeeper/Composition/CompositionSceneResolver.cs` | Group flattening, object visibility/z-order semantics, and shared overlap validation. |
+| `Lorekeeper/Composition/CompositionCanvasPreviewService.cs` | Exact transient clean/annotated page and cover canvas rasterization. |
+| `Lorekeeper/Composition/ProjectPageSetupService.cs` | Project authoring geometry, typography, setup revisions, and transactional reflow. |
+| `Lorekeeper/Composition/CompositionAgentPayloads.cs` | Bounded assistant reads and revision-safe scene/object/style patch envelopes. |
+| `Lorekeeper/Fonts/` and `ProjectFont*` models | Bundled/imported font catalogs, static-face validation, bytes, URLs, and live/history use guards. |
+| `Lorekeeper/Components/Pages/Projects/DesignedPageWorkspace.razor` | Canvas-first authoring interaction, variant selection, autosave, diagnostics, and history refresh. |
+| `Lorekeeper/Components/Pages/Projects/CoverCompositionWorkspace.razor` | Shared visual shell for cover editing; publication ownership remains in Publish services. |
+| `Lorekeeper/wwwroot/js/composition-workspace.js` | Measured stage, pointer capture, image geometry, text editing, selection, and formatting bridges. |
+
+## Related chapters
+
+- [`manuscript-authoring.md`](./manuscript-authoring.md) owns semantic manuscript
+  writes, styles, annotations, authoring history, and Editor/revision behavior.
+- [`publishing-model.md`](./publishing-model.md) owns Core Book, releases,
+  publication sections, edition content, Publish UI, and effective projections.
+- [`press-production.md`](./press-production.md) owns physical products,
+  covers, native rendering, PDF/EPUB validation, artifacts, and packages.
+- [`persistence-migrations-import.md`](./persistence-migrations-import.md)
+  owns SQLite/EF persistence, migrations, recovery, import/export, and durable
+  asset/history relationships.
+- [`assistants-chat.md`](./assistants-chat.md) owns shared chat turns, tool
+  staging, assistant context, and model-visible visual preview protocol.
+
+## Relevant verification
+
+For normal source changes, run `dotnet build Lorekeeper.sln`. The build must
+compile the application and package the same owned Press runtime used by the
+app. For composition/media changes, also inspect the relevant source paths and
+run the project-appropriate native Press checks when output contracts change:
+
+```powershell
+dotnet build Lorekeeper.sln
+dotnet run --project Lorekeeper --launch-profile http
+cd Lorekeeper.Press
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test --locked
+```
+
+Terminate the HTTP host after its startup check. Do not perform browser,
+Playwright, screenshot, or manual UI checks unless explicitly requested.
+Image generation, provider calls, and platform-specific behavior are not
+validated by compilation alone. Report those integrations as unexercised
+unless the relevant provider and target platform were actually used.
+
+When image, Figure, composition, font, or history ownership changes, inspect
+the complete diff and search for every old field/name and every deletion path.
+The minimum static review should cover `IProjectImageService`,
+`IManuscriptService`, `ICompositionService`, `IProjectFontService`, image
+endpoints, EPUB/Press request assembly, history dependency retention, and the
+owning persistence migration. Confirm that no image bytes or font secrets are
+copied into unrelated assistant payloads and that no stale asset can be
+deleted through a UI-only check.
