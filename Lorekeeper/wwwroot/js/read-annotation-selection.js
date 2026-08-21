@@ -28,6 +28,22 @@ function lineProgress(root, line) {
     return lines.length <= 1 ? 0 : index / (lines.length - 1);
 }
 
+function logicalLineProgress(root, line) {
+    const progress = Number(line?.dataset.locationProgress);
+    return Number.isFinite(progress) ? progress : lineProgress(root, line);
+}
+
+function closestLineByProgress(lines, logicalProgress) {
+    const progress = Math.max(0, Math.min(1, Number(logicalProgress)));
+    return lines
+        .map(line => ({
+            line,
+            distance: Math.abs(Number(line.dataset.locationProgress) - progress)
+        }))
+        .filter(candidate => Number.isFinite(candidate.distance))
+        .sort((left, right) => left.distance - right.distance)[0]?.line || null;
+}
+
 function viewportLine(root) {
     const scroll = root.querySelector(".chapter-preview-scroll") || root;
     const bounds = scroll.getBoundingClientRect();
@@ -63,11 +79,8 @@ function locationForLine(root, line, offset = null) {
         node: false,
         anchorOffset: sourceOffset,
         headOffset: sourceOffset,
-        logicalProgress: Number.isFinite(Number(line.dataset.locationProgress))
-            ? Number(line.dataset.locationProgress)
-            : lineProgress(root, line),
-        fallbackLine: Number(line.dataset.reviewLine) || (lineIndex < 0 ? 1 : lineIndex + 1),
-        viewportAnchor: true
+        logicalProgress: logicalLineProgress(root, line),
+        fallbackLine: Number(line.dataset.reviewLine) || (lineIndex < 0 ? 1 : lineIndex + 1)
     };
 }
 
@@ -83,9 +96,8 @@ export function captureLocation(root) {
                     node: false,
                     anchorOffset: focus.offset,
                     headOffset: focus.offset,
-                    logicalProgress: lineProgress(root, focusLine),
-                    fallbackLine: [...root.querySelectorAll(".chapter-preview-line")].indexOf(focusLine) + 1,
-                    viewportAnchor: true
+                    logicalProgress: logicalLineProgress(root, focusLine),
+                    fallbackLine: [...root.querySelectorAll(".chapter-preview-line")].indexOf(focusLine) + 1
                 };
             }
         }
@@ -101,8 +113,7 @@ export function captureLocation(root) {
         anchorOffset: 0,
         headOffset: 0,
         logicalProgress: pages.length <= 1 ? 0 : pages.indexOf(page) / (pages.length - 1),
-        fallbackLine: 1,
-        viewportAnchor: true
+        fallbackLine: 1
     };
 }
 
@@ -128,8 +139,8 @@ function lineForLocation(root, location) {
         return pages[Math.round(progress * (pages.length - 1))];
     }
     if (Number.isFinite(Number(location?.logicalProgress))) {
-        const target = Math.max(0, Math.min(1, Number(location.logicalProgress)));
-        return lines[Math.round(target * (lines.length - 1))];
+        const target = closestLineByProgress(lines, location.logicalProgress);
+        if (target) return target;
     }
     const lineNumber = Math.max(1, Number(location?.fallbackLine) || 1);
     return lines[Math.min(lines.length - 1, lineNumber - 1)];

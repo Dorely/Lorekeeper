@@ -239,7 +239,10 @@
         {
             _selectionModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/read-annotation-selection.js");
             if (await _selectionModule.InvokeAsync<bool>("restoreLocation", _root, location))
+            {
                 _pendingLocation = null;
+                _pendingLocationIdentity = null;
+            }
         }
         catch (Exception exception) when (exception is JSException or JSDisconnectedException or OperationCanceledException)
         {

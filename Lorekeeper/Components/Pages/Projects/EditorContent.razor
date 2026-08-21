@@ -2076,7 +2076,7 @@ else
 
         var locationIdentity = CurrentManuscriptLocationIdentity();
         ManuscriptViewLocation? capturedLocation = null;
-        if (_mode != EditorMode.Pages && mode != EditorMode.Pages && locationIdentity is not null)
+        if (_mode != EditorMode.Pages && locationIdentity is not null)
             capturedLocation = await CaptureCurrentLocationAsync();
 
         if (mode is EditorMode.Read or EditorMode.Pages or EditorMode.Review)
@@ -3378,8 +3378,8 @@ else
             var startOffset = Math.Max(0, lineStart - block.Start);
             var endOffset = Math.Min(block.Text.Length, Math.Max(startOffset, lineEnd - block.Start));
             var progress = blocks.Count <= 1
-                ? (double)startOffset / Math.Max(1, block.Text.Length)
-                : (block.Ordinal + (double)startOffset / Math.Max(1, block.Text.Length)) / blocks.Count;
+                ? 0d
+                : (double)block.Ordinal / (blocks.Count - 1);
             locations[lineIndex] = new ReviewLineLocation(
                 block.Id,
                 startOffset,

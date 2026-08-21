@@ -77,6 +77,17 @@ function reviewLines(container) {
         : [];
 }
 
+function closestReviewLineByProgress(lines, logicalProgress) {
+    const progress = Math.max(0, Math.min(1, Number(logicalProgress)));
+    return lines
+        .map(line => ({
+            line,
+            distance: Math.abs(Number(line.dataset.locationProgress) - progress)
+        }))
+        .filter(candidate => Number.isFinite(candidate.distance))
+        .sort((left, right) => left.distance - right.distance)[0]?.line || null;
+}
+
 export function captureReviewLocation(container) {
     const lines = reviewLines(container);
     if (lines.length === 0) return null;
@@ -101,8 +112,7 @@ export function captureReviewLocation(container) {
         logicalProgress: Number.isFinite(Number(target.dataset.locationProgress))
             ? Number(target.dataset.locationProgress)
             : lines.indexOf(target) / Math.max(1, lines.length - 1),
-        fallbackLine: Number(target.dataset.reviewLine) || lines.indexOf(target) + 1,
-        viewportAnchor: true
+        fallbackLine: Number(target.dataset.reviewLine) || lines.indexOf(target) + 1
     };
 }
 
@@ -117,8 +127,7 @@ export function restoreReviewLocation(container, location) {
             && Number(line.dataset.sourceEndUtf16) >= offset) || matching[0];
     }
     if (!target && Number.isFinite(Number(location?.logicalProgress))) {
-        const progress = Math.max(0, Math.min(1, Number(location.logicalProgress)));
-        target = lines[Math.round(progress * (lines.length - 1))];
+        target = closestReviewLineByProgress(lines, location.logicalProgress);
     }
     if (!target) {
         const lineNumber = Math.max(1, Number(location?.fallbackLine) || 1);

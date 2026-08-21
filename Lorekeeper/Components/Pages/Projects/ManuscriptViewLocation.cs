@@ -13,5 +13,4 @@ internal sealed record ManuscriptViewLocation(
     [property: JsonPropertyName("anchorOffset")] int AnchorOffset = 0,
     [property: JsonPropertyName("headOffset")] int HeadOffset = 0,
     [property: JsonPropertyName("logicalProgress")] double LogicalProgress = 0,
-    [property: JsonPropertyName("fallbackLine")] int? FallbackLine = null,
-    [property: JsonPropertyName("viewportAnchor")] bool IsViewportAnchor = false);
+    [property: JsonPropertyName("fallbackLine")] int? FallbackLine = null);

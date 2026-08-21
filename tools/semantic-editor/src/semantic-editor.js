@@ -971,8 +971,7 @@ function topLevelBlockEntries(doc) {
         entries.push({
             id: node.attrs.id,
             node,
-            position,
-            textLength: Math.max(1, node.textContent?.length || node.content.size)
+            position
         });
     });
     return entries;
@@ -984,22 +983,13 @@ function selectionLocation(view) {
     const entryIndex = stable.blockId
         ? entries.findIndex(entry => entry.id === stable.blockId)
         : -1;
-    const entry = entryIndex >= 0 ? entries[entryIndex] : null;
-    const headOffset = Number.isFinite(Number(stable.headOffset))
-        ? Math.max(0, Number(stable.headOffset))
-        : 0;
-    const withinBlock = entry
-        ? Math.min(headOffset, entry.textLength)
-        : 0;
     const logicalProgress = entries.length <= 1 || entryIndex < 0
-        ? (entries.length <= 1 ? 0 : 0)
-        : Math.max(0, Math.min(1,
-            (entryIndex + withinBlock / entry.textLength) / entries.length));
+        ? 0
+        : entryIndex / (entries.length - 1);
     return {
         ...stable,
         logicalProgress,
-        fallbackLine: entryIndex >= 0 ? entryIndex + 1 : 1,
-        viewportAnchor: false
+        fallbackLine: entryIndex >= 0 ? entryIndex + 1 : 1
     };
 }
 
@@ -1011,7 +1001,7 @@ function fallbackBlockEntry(entries, logicalProgress) {
     return entries[Math.min(entries.length - 1, Math.round(progress * (entries.length - 1)))];
 }
 
-function restoreLocation(view, locationJson) {
+function restoreLocation(view, locationJson, collapseToHead = true) {
     if (!locationJson) return false;
     try {
         const saved = typeof locationJson === "string" ? JSON.parse(locationJson) : locationJson;
@@ -1025,26 +1015,18 @@ function restoreLocation(view, locationJson) {
             position = fallback.position;
             node = fallback.node;
         }
-        if (!saved.node && !node.inlineContent) {
-            const fallback = fallbackBlockEntry(entries, saved?.logicalProgress);
-            if (!fallback || (exact && fallback.id === node.attrs?.id)) return false;
-            position = fallback.position;
-            node = fallback.node;
-        }
         if (!Number.isInteger(position) || !node) return false;
-        if (saved.node) {
+        if (saved.node || !node.inlineContent) {
             view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, position)).scrollIntoView());
             return true;
         }
         const contentStart = position + 1;
         const maxOffset = node.content.size;
-        const fallbackProgress = Number(saved.logicalProgress);
-        const progressOffset = Number.isFinite(fallbackProgress)
-            ? Math.max(0, Math.min(1, fallbackProgress)) * entries.length
-            : 0;
-        const fallbackFraction = Math.max(0, Math.min(1, progressOffset - Math.floor(progressOffset)));
-        const fallbackOffset = exact ? null : fallbackFraction * maxOffset;
-        const anchorOffset = Math.max(0, Math.min(Number.isFinite(fallbackOffset) ? fallbackOffset : Number(saved.anchorOffset) || 0, maxOffset));
+        const fallbackOffset = exact ? null : Number(saved.headOffset) || 0;
+        const savedHeadOffset = Number(saved.headOffset) || 0;
+        const anchorOffset = Math.max(0, Math.min(Number.isFinite(fallbackOffset)
+            ? fallbackOffset
+            : collapseToHead ? savedHeadOffset : Number(saved.anchorOffset) || 0, maxOffset));
         const headOffset = Math.max(0, Math.min(Number.isFinite(fallbackOffset) ? fallbackOffset : Number(saved.headOffset) || 0, maxOffset));
         view.dispatch(view.state.tr.setSelection(TextSelection.create(
             view.state.doc,
@@ -1059,7 +1041,7 @@ function restoreLocation(view, locationJson) {
 
 function restoreStableSelection(view, selectionJson) {
     if (!selectionJson) return;
-    restoreLocation(view, selectionJson);
+    restoreLocation(view, selectionJson, false);
 }
 
 function applyMark(view, markName, value = null) {
