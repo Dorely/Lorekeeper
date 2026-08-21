@@ -599,6 +599,10 @@ same read-only comparison, including body, structure/formatting, Figure, and
 Designed Page reference changes. Undo, Redo, and manual reversion never rewrite
 the anchor. A new assistant pass replaces it only after a net manuscript
 mutation commits. These anchors are not included in project export/import.
+The applied projection reuses Review's collapsed line-oriented rendering and
+dot rail. Text, structure/formatting, and visual changes have independent gutter
+reveals; expanded read-only cards contain human-readable changed-property rows
+and navigation but no approval or editing actions.
 
 History snapshots store references rather than image/font bytes. Dependency
 rows retain project images, imported fonts, and detached compositions required

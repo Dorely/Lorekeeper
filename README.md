@@ -100,7 +100,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   compares the live Current chapter with the saved Before snapshot from before
   that pass, so later manual edits remain visible. Pending and Contest review
   actions retain priority, while the applied comparison is read-only and covers
-  body, structure/formatting, Figures, and Designed Page references.
+  body, structure/formatting, Figures, and Designed Page references. Applied
+  changes use the same collapsed line markers, inline diff cards, and dot rail as
+  active Review, with separate text, formatting, and visual reveal controls.
 - Exact-target review highlights and notes in Edit and Read, with a collapsible
   margin rail, deterministic outdated-anchor handling, assistant context and
   completion tools, and no effect on manuscript formatting or publication output.

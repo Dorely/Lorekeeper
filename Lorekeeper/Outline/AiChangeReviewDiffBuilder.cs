@@ -1,6 +1,8 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Context;
+using Lorekeeper.Fonts;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 
@@ -291,14 +293,14 @@ public static class AiChangeReviewDiffBuilder
             AddOrUpdateField(
                 fields,
                 "Structure and formatting",
-                FormatManuscriptStructure(before.Manuscript),
-                FormatManuscriptStructure(after.Manuscript),
+                FormatManuscriptStructure(before.Manuscript, after.Manuscript, isCurrent: false),
+                FormatManuscriptStructure(after.Manuscript, before.Manuscript, isCurrent: true),
                 ownerChangeId: null);
             AddOrUpdateField(
                 fields,
                 "Figures and designed pages",
-                FormatManuscriptVisualBlocks(before.Manuscript),
-                FormatManuscriptVisualBlocks(after.Manuscript),
+                FormatManuscriptVisualBlocks(before.Manuscript, after.Manuscript, isCurrent: false),
+                FormatManuscriptVisualBlocks(after.Manuscript, before.Manuscript, isCurrent: true),
                 ownerChangeId: null);
             return true;
         }
@@ -463,115 +465,276 @@ public static class AiChangeReviewDiffBuilder
             new DiffFieldInput(
                 "Structure",
                 "Structure and formatting",
-                FormatManuscriptStructure(before.Manuscript),
-                FormatManuscriptStructure(after.Manuscript),
+                FormatManuscriptStructure(before.Manuscript, after.Manuscript, isCurrent: false),
+                FormatManuscriptStructure(after.Manuscript, before.Manuscript, isCurrent: true),
                 OwnerChangeId: null),
             new DiffFieldInput(
                 "Visuals",
                 "Figures and designed pages",
-                FormatManuscriptVisualBlocks(before.Manuscript),
-                FormatManuscriptVisualBlocks(after.Manuscript),
+                FormatManuscriptVisualBlocks(before.Manuscript, after.Manuscript, isCurrent: false),
+                FormatManuscriptVisualBlocks(after.Manuscript, before.Manuscript, isCurrent: true),
                 OwnerChangeId: null),
         ];
 
-    private static string FormatManuscriptStructure(ManuscriptDocument manuscript)
+    private static string FormatManuscriptStructure(
+        ManuscriptDocument manuscript,
+        ManuscriptDocument? counterpart,
+        bool isCurrent)
     {
         var builder = new StringBuilder();
         for (var blockIndex = 0; blockIndex < manuscript.Content.Count; blockIndex++)
         {
             var block = manuscript.Content[blockIndex];
+            var counterpartBlock = FindCounterpartBlock(block, blockIndex, counterpart);
             builder
                 .Append("Block ")
                 .Append(blockIndex + 1)
-                .Append(": id=")
-                .Append(block.Id)
-                .Append("; type=")
-                .Append(block.Type)
-                .Append("; style=")
-                .Append(block.StyleRole);
+                .Append(": ")
+                .Append(ReadableBlockType(block.Type))
+                .AppendLine();
+            AppendDisplayProperty(
+                builder,
+                "Style",
+                ReadableStyleRole(block.StyleRole, counterpartBlock?.StyleRole, isCurrent));
             if (block.HeadingLevel is not null)
-                builder.Append("; heading-level=").Append(block.HeadingLevel.Value);
-            if (block.ImageId is not null)
-                builder.Append("; image-id=").Append(block.ImageId.Value);
+                AppendDisplayProperty(builder, "Heading level", block.HeadingLevel.Value);
             if (block.AltText is not null)
-                builder.Append("; alt=").Append(JsonSerializer.Serialize(block.AltText));
-            builder.AppendLine();
+                AppendDisplayProperty(builder, "Alternative text", JsonSerializer.Serialize(block.AltText));
+            AppendParagraphPresentation(builder, block, counterpartBlock, isCurrent);
 
-            var offset = 0;
             for (var inlineIndex = 0; inlineIndex < block.Content.Count; inlineIndex++)
             {
                 var inline = block.Content[inlineIndex];
+                var counterpartInline = counterpartBlock?.Content.ElementAtOrDefault(inlineIndex);
                 builder
-                    .Append("  Span ")
+                    .Append("  Text span ")
                     .Append(inlineIndex + 1)
-                    .Append(": offsets=")
-                    .Append(offset)
-                    .Append("..")
-                    .Append(offset + inline.Text.Length)
-                    .Append("; marks=");
-                if (inline.Marks.Count == 0)
-                {
-                    builder.Append("none");
-                }
-                else
-                {
-                    builder.Append(string.Join(
-                        ", ",
-                        inline.Marks.Select(mark => mark.Value is null
-                            ? mark.Type.ToString()
-                            : $"{mark.Type}({JsonSerializer.Serialize(mark.Value)})")));
-                }
+                    .Append(" formatting: ");
+                builder.Append(inline.Marks.Count == 0
+                    ? "none"
+                    : string.Join(", ", inline.Marks.Select(mark => ReadableInlineMark(
+                        mark,
+                        counterpartInline?.Marks.FirstOrDefault(item => item.Type == mark.Type),
+                        isCurrent))));
                 builder.AppendLine();
-                offset += inline.Text.Length;
             }
         }
         return builder.ToString().TrimEnd();
     }
 
-    private static string FormatManuscriptVisualBlocks(ManuscriptDocument manuscript)
+    private static string FormatManuscriptVisualBlocks(
+        ManuscriptDocument manuscript,
+        ManuscriptDocument? counterpart,
+        bool isCurrent)
     {
         var builder = new StringBuilder();
         for (var blockIndex = 0; blockIndex < manuscript.Content.Count; blockIndex++)
         {
             var block = manuscript.Content[blockIndex];
+            var counterpartBlock = FindCounterpartBlock(block, blockIndex, counterpart);
             if (block.Type == ManuscriptBlockType.Figure)
             {
                 builder
                     .Append("Block ")
                     .Append(blockIndex + 1)
-                    .Append(": Figure id=")
-                    .Append(block.Id)
-                    .Append("; image-id=")
-                    .Append(block.ImageId)
-                    .Append("; caption=")
-                    .Append(JsonSerializer.Serialize(ManuscriptCodec.Text(block)))
-                    .Append("; decorative=")
-                    .Append(block.Decorative)
-                    .Append("; alt=")
-                    .Append(JsonSerializer.Serialize(block.AltText))
-                    .Append("; language=")
-                    .Append(JsonSerializer.Serialize(block.Language))
-                    .Append("; accessibility-role=")
-                    .Append(block.AccessibilityRole)
-                    .Append("; presentation=")
-                    .Append(JsonSerializer.Serialize(block.FigurePresentation, ManuscriptCodec.JsonOptions))
+                    .Append(": Figure")
                     .AppendLine();
+                AppendDisplayProperty(builder, "Caption", JsonSerializer.Serialize(ManuscriptCodec.Text(block)));
+                AppendDisplayProperty(builder, "Image", ReadableFigureReference(block.ImageId, counterpartBlock, isCurrent));
+                AppendDisplayProperty(builder, "Decorative", block.Decorative ? "Yes" : "No");
+                AppendDisplayProperty(builder, "Alternative text", JsonSerializer.Serialize(block.AltText));
+                AppendDisplayProperty(builder, "Language", JsonSerializer.Serialize(block.Language));
+                AppendDisplayProperty(
+                    builder,
+                    "Accessibility role",
+                    block.AccessibilityRole is { } accessibilityRole
+                        ? DisplayEnumValue(accessibilityRole)
+                        : "Not specified");
+                AppendFigurePresentation(builder, block.FigurePresentation);
             }
             else if (block.Type == ManuscriptBlockType.DesignedPage)
             {
                 builder
                     .Append("Block ")
                     .Append(blockIndex + 1)
-                    .Append(": DesignedPage id=")
-                    .Append(block.Id)
-                    .Append("; composition-id=")
-                    .Append(block.PageCompositionId)
+                    .Append(": Designed Page")
                     .AppendLine();
+                AppendDisplayProperty(
+                    builder,
+                    "Page design",
+                    ReadablePageDesignReference(block.PageCompositionId, counterpartBlock, isCurrent));
             }
         }
 
         return builder.Length == 0 ? "(none)" : builder.ToString().TrimEnd();
     }
+
+    private static ManuscriptBlock? FindCounterpartBlock(
+        ManuscriptBlock block,
+        int blockIndex,
+        ManuscriptDocument? counterpart)
+    {
+        if (counterpart is null)
+            return null;
+
+        return counterpart.Content.FirstOrDefault(item => string.Equals(item.Id, block.Id, StringComparison.Ordinal))
+            ?? (blockIndex < counterpart.Content.Count ? counterpart.Content[blockIndex] : null);
+    }
+
+    private static void AppendDisplayProperty(StringBuilder builder, string label, object? value) =>
+        builder.Append("  ").Append(label).Append(": ").Append(value).AppendLine();
+
+    private static void AppendParagraphPresentation(
+        StringBuilder builder,
+        ManuscriptBlock block,
+        ManuscriptBlock? counterpart,
+        bool isCurrent)
+    {
+        var presentation = block.ParagraphPresentation;
+        if (presentation is null)
+            return;
+
+        if (presentation.FontFamilyKey is not null)
+        {
+            AppendDisplayProperty(
+                builder,
+                "Paragraph font family",
+                ReadableFontFamily(presentation.FontFamilyKey, counterpart?.ParagraphPresentation?.FontFamilyKey, isCurrent));
+        }
+        if (presentation.FontSizePoints is { } fontSize)
+            AppendDisplayProperty(builder, "Paragraph font size", $"{fontSize.ToString("0.##", CultureInfo.InvariantCulture)} pt");
+        if (presentation.FontWeight is { } fontWeight)
+            AppendDisplayProperty(builder, "Paragraph font weight", fontWeight.ToString(CultureInfo.InvariantCulture));
+        if (presentation.Italic is { } italic)
+            AppendDisplayProperty(builder, "Paragraph italic", italic ? "On" : "Off");
+        if (presentation.SmallCaps is { } smallCaps)
+            AppendDisplayProperty(builder, "Paragraph small caps", smallCaps ? "On" : "Off");
+        if (presentation.LineHeight is { } lineHeight)
+            AppendDisplayProperty(builder, "Line height", lineHeight.ToString("0.##", CultureInfo.InvariantCulture));
+        if (presentation.Alignment is { } alignment)
+            AppendDisplayProperty(builder, "Paragraph alignment", DisplayEnumValue(alignment));
+        if (presentation.LeftIndentEm is { } leftIndent)
+            AppendDisplayProperty(builder, "Left indent", $"{leftIndent.ToString("0.##", CultureInfo.InvariantCulture)} em");
+        if (presentation.RightIndentEm is { } rightIndent)
+            AppendDisplayProperty(builder, "Right indent", $"{rightIndent.ToString("0.##", CultureInfo.InvariantCulture)} em");
+        if (presentation.FirstLineIndentEm is { } firstLineIndent)
+            AppendDisplayProperty(builder, "First-line indent", $"{firstLineIndent.ToString("0.##", CultureInfo.InvariantCulture)} em");
+        if (presentation.SpacingBeforePoints is { } spacingBefore)
+            AppendDisplayProperty(builder, "Spacing before", $"{spacingBefore.ToString("0.##", CultureInfo.InvariantCulture)} pt");
+        if (presentation.SpacingAfterPoints is { } spacingAfter)
+            AppendDisplayProperty(builder, "Spacing after", $"{spacingAfter.ToString("0.##", CultureInfo.InvariantCulture)} pt");
+        if (presentation.KeepWithNext is { } keepWithNext)
+            AppendDisplayProperty(builder, "Keep with next", keepWithNext ? "On" : "Off");
+        if (presentation.StartOnNewPage is { } startOnNewPage)
+            AppendDisplayProperty(builder, "Start on new page", startOnNewPage ? "On" : "Off");
+    }
+
+    private static void AppendFigurePresentation(StringBuilder builder, FigurePresentation? presentation)
+    {
+        if (presentation is null)
+            return;
+
+        AppendDisplayProperty(builder, "Placement", DisplayEnumValue(presentation.Placement));
+        AppendDisplayProperty(builder, "Width", $"{presentation.WidthPercent.ToString("0.##", CultureInfo.InvariantCulture)}%");
+        AppendDisplayProperty(builder, "Alignment", DisplayEnumValue(presentation.Alignment));
+        AppendDisplayProperty(builder, "Text wrap", DisplayEnumValue(presentation.TextWrap));
+        AppendDisplayProperty(builder, "Image fit", DisplayEnumValue(presentation.Fit));
+        AppendDisplayProperty(builder, "Horizontal crop", $"{presentation.CropXPercent.ToString("0.##", CultureInfo.InvariantCulture)}%");
+        AppendDisplayProperty(builder, "Vertical crop", $"{presentation.CropYPercent.ToString("0.##", CultureInfo.InvariantCulture)}%");
+        AppendDisplayProperty(builder, "Spacing before", $"{presentation.SpacingBeforePoints.ToString("0.##", CultureInfo.InvariantCulture)} pt");
+        AppendDisplayProperty(builder, "Spacing after", $"{presentation.SpacingAfterPoints.ToString("0.##", CultureInfo.InvariantCulture)} pt");
+        AppendDisplayProperty(builder, "Start on new page", presentation.StartOnNewPage ? "Yes" : "No");
+        AppendDisplayProperty(builder, "Keep with caption", presentation.KeepWithCaption ? "Yes" : "No");
+        AppendDisplayProperty(builder, "Caption placement", DisplayEnumValue(presentation.CaptionPlacement));
+    }
+
+    private static string DisplayEnumValue<T>(T value)
+        where T : struct, Enum
+    {
+        var source = value.ToString();
+        var builder = new StringBuilder(source.Length + 4);
+        for (var index = 0; index < source.Length; index++)
+        {
+            if (index > 0 && char.IsUpper(source[index]) && !char.IsUpper(source[index - 1]))
+                builder.Append(' ');
+            builder.Append(index == 0 ? source[index] : char.ToLowerInvariant(source[index]));
+        }
+        return builder.ToString();
+    }
+
+    private static string ReadableFontFamily(string key, string? counterpartKey, bool isCurrent)
+    {
+        if (PublicationBuiltInFonts.Find(key) is { } builtIn)
+            return builtIn.Name;
+
+        var changed = counterpartKey is not null
+            && !string.Equals(key, counterpartKey, StringComparison.Ordinal);
+        if (key.StartsWith("project:", StringComparison.OrdinalIgnoreCase))
+            return changed ? isCurrent ? "Current imported font" : "Previous imported font" : "Imported font";
+
+        return changed ? isCurrent ? "Current custom font" : "Previous custom font" : "Custom font";
+    }
+
+    private static string ReadableInlineMark(ManuscriptMark mark, ManuscriptMark? counterpart, bool isCurrent)
+    {
+        var label = mark.Type switch
+        {
+            ManuscriptMarkType.Emphasis => "Italic",
+            ManuscriptMarkType.Strong => "Bold",
+            ManuscriptMarkType.Underline => "Underline",
+            ManuscriptMarkType.Strikethrough => "Strikethrough",
+            ManuscriptMarkType.Code => "Code",
+            ManuscriptMarkType.Link => "Link",
+            ManuscriptMarkType.Language => "Language",
+            ManuscriptMarkType.SmallCaps => "Small caps",
+            ManuscriptMarkType.Superscript => "Superscript",
+            ManuscriptMarkType.Subscript => "Subscript",
+            ManuscriptMarkType.CharacterStyle => "Character style",
+            _ => "Formatting",
+        };
+        return counterpart is not null
+            && !string.Equals(mark.Value, counterpart.Value, StringComparison.Ordinal)
+            ? isCurrent ? $"Current {label.ToLowerInvariant()}" : $"Previous {label.ToLowerInvariant()}"
+            : label;
+    }
+
+    private static string ReadableFigureReference(Guid? reference, ManuscriptBlock? counterpart, bool isCurrent) =>
+        counterpart is not null && reference != counterpart.ImageId
+            ? reference is null ? "No image" : isCurrent ? "Current image" : "Previous image"
+            : reference is null ? "No image" : "Image";
+
+    private static string ReadablePageDesignReference(Guid? reference, ManuscriptBlock? counterpart, bool isCurrent) =>
+        counterpart is not null && reference != counterpart.PageCompositionId
+            ? reference is null ? "No page design" : isCurrent ? "Current page design" : "Previous page design"
+            : reference is null ? "No page design" : "Page design";
+
+    private static string ReadableBlockType(ManuscriptBlockType type) => type switch
+    {
+        ManuscriptBlockType.Paragraph => "Paragraph",
+        ManuscriptBlockType.Heading => "Heading",
+        ManuscriptBlockType.SceneBreak => "Scene break",
+        ManuscriptBlockType.BlockQuote => "Block quote",
+        ManuscriptBlockType.ListItem => "List item",
+        ManuscriptBlockType.Figure => "Figure",
+        ManuscriptBlockType.DesignedPage => "Designed Page",
+        _ => "Block",
+    };
+
+    private static string ReadableStyleRole(string styleRole, string? counterpartRole, bool isCurrent) => styleRole switch
+    {
+        ManuscriptStyleRoles.Body => "Body",
+        ManuscriptStyleRoles.ChapterHeading => "Chapter heading",
+        ManuscriptStyleRoles.Subheading => "Subheading",
+        ManuscriptStyleRoles.SceneBreak => "Scene break",
+        ManuscriptStyleRoles.BlockQuote => "Block quote",
+        ManuscriptStyleRoles.ListItem => "List item",
+        ManuscriptStyleRoles.FigureCaption => "Figure caption",
+        ManuscriptStyleRoles.DesignedPage => "Designed Page",
+        _ when counterpartRole is not null
+            && !string.Equals(styleRole, counterpartRole, StringComparison.Ordinal)
+            => isCurrent ? "Current custom style" : "Previous custom style",
+        _ => "Custom style",
+    };
 
     private static string GetPropertyValue(Dictionary<string, string?>? properties, string propertyName, out bool exists)
     {

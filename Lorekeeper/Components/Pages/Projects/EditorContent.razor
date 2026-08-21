@@ -542,28 +542,18 @@ else
                                         <span>Current vs Before</span>
                                     </div>
                                     <div class="small text-muted">This comparison includes later manual edits.</div>
+                                    <div class="chapter-review-toolbar-actions">
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-secondary"
+                                                disabled="@(_reviewBusy || _reviewProjection.Blocks.Count == 0)"
+                                                @onclick="GoToNextReviewBlockAsync">
+                                            Next change
+                                        </button>
+                                    </div>
                                 </div>
                                 @if (_reviewProjection.IsNoDifference)
                                 {
                                     <div class="chapter-review-notice">Current matches the saved Before snapshot; there are no differences right now.</div>
-                                }
-                                else
-                                {
-                                    @foreach (var diffSection in _reviewProjection.Sections.Where(item => !string.Equals(item.Key, "Body", StringComparison.OrdinalIgnoreCase)))
-                                    {
-                                        <section class="review-block review-block--applied-structured">
-                                            <header class="review-block-header">
-                                                <div class="review-block-title-wrap">
-                                                    <div class="review-block-title">@diffSection.Label</div>
-                                                    <div class="review-block-summary">Current vs Before</div>
-                                                </div>
-                                            </header>
-                                            <div class="review-structured-diff">
-                                                <div class="review-structured-diff-old"><strong>Before</strong><pre>@diffSection.OldText</pre></div>
-                                                <div class="review-structured-diff-new"><strong>Current</strong><pre>@diffSection.NewText</pre></div>
-                                            </div>
-                                        </section>
-                                    }
                                 }
                             }
                             else if (!_reviewProjection.HasChanges)
@@ -622,6 +612,22 @@ else
                                                 style="@RailMarkerStyle(block)"
                                                 title="@block.Title"
                                                 aria-label="@block.Title"
+                                                @onclick="() => ExpandAndScrollReviewBlockAsync(block.Id)">
+                                        </button>
+                                    }
+                                </div>
+                            }
+
+                            @if (_reviewProjection.IsReadOnly && !_reviewProjection.IsNoDifference)
+                            {
+                                <div class="chapter-review-scroll-rail" aria-label="Chapter change locations">
+                                    @foreach (var block in _reviewProjection.Blocks)
+                                    {
+                                        <button type="button"
+                                                class="@ReviewRailMarkerClass(block)"
+                                                style="@RailMarkerStyle(block)"
+                                                title="@ReviewBlockMarkerTitle(block)"
+                                                aria-label="@ReviewBlockMarkerTitle(block)"
                                                 @onclick="() => ExpandAndScrollReviewBlockAsync(block.Id)">
                                         </button>
                                     }
@@ -689,6 +695,17 @@ else
                                                         }
                                                     </div>
                                                 }
+                                                else
+                                                {
+                                                    <div class="review-block-actions">
+                                                        <button type="button"
+                                                                class="btn btn-sm btn-outline-secondary"
+                                                                disabled="@_reviewBusy"
+                                                                @onclick="() => ToggleReviewBlockAsync(block.Id)">
+                                                            Hide
+                                                        </button>
+                                                    </div>
+                                                }
                                             </header>
 
                                             @if (IsRejectingReviewBlock(block))
@@ -745,7 +762,24 @@ else
                                     @if (ShouldRenderReviewLine(line))
                                     {
                                         <div class="@ReviewLineClass(line)" @key="line.LineNumber" data-review-line="@line.LineNumber">
-                                            <span class="review-line-number">@line.LineNumber.ToString(_reviewProjection.LineNumberFormat)</span>
+                                            <span class="@(_reviewProjection.IsReadOnly ? "review-line-number review-line-number--with-categories" : "review-line-number")">
+                                                <span>@line.LineNumber.ToString(_reviewProjection.LineNumberFormat)</span>
+                                                @if (_reviewProjection.IsReadOnly)
+                                                {
+                                                    <span class="review-line-category-controls" aria-label="Change categories on this line">
+                                                        @foreach (var category in ReviewLineCategories(line))
+                                                        {
+                                                            <button type="button"
+                                                                    class="@ReviewCategoryButtonClass(_reviewProjection, line, category)"
+                                                                    title="@ReviewCategoryTitle(category)"
+                                                                    aria-label="@ReviewCategoryTitle(category)"
+                                                                    @onclick="() => ToggleReviewCategoryAsync(line, category)">
+                                                                @ReviewCategoryGlyph(category)
+                                                            </button>
+                                                        }
+                                                    </span>
+                                                }
+                                            </span>
                                             <span class="@ReviewStripClass(line)" title="@line.MarkerTitle" aria-hidden="true">
                                                 @if (line.HasDeletionMarker)
                                                 {
@@ -1172,6 +1206,7 @@ else
         if (_activeChapterId is not null && !await FlushAsync())
             return false;
 
+        ResetInlineReviewState();
         _contentTarget = requestedTarget;
         _loadedContentTarget = requestedTarget;
 
@@ -1927,6 +1962,13 @@ else
         if (_mode == EditorMode.Review)
         {
             await RefreshReviewChangesAsync();
+            if (_reviewProjection?.IsReadOnly == true)
+            {
+                _expandedReviewBlockIds.Clear();
+                _activeReviewBlockId = null;
+                _pendingReviewScrollBlockId = null;
+                ClearInlineReviewEditors();
+            }
         }
 
         await RememberEditorModeAsync(_mode);
@@ -2281,6 +2323,29 @@ else
         return Task.CompletedTask;
     }
 
+    private Task ToggleReviewCategoryAsync(ReviewLine line, ReviewBlockCategory category)
+    {
+        var blockIds = ReviewLineBlockIds(line, category);
+        if (blockIds.Count == 0)
+            return Task.CompletedTask;
+
+        var shouldExpand = blockIds.Any(blockId => !_expandedReviewBlockIds.Contains(blockId));
+        foreach (var blockId in blockIds)
+        {
+            if (shouldExpand)
+                _expandedReviewBlockIds.Add(blockId);
+            else
+                _expandedReviewBlockIds.Remove(blockId);
+        }
+
+        _activeReviewBlockId = shouldExpand ? blockIds[0] : null;
+        _pendingReviewScrollBlockId = shouldExpand ? blockIds[0] : null;
+        if (!shouldExpand)
+            ClearInlineReviewEditors();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
     private bool IsReviewBlockExpanded(string blockId) => _expandedReviewBlockIds.Contains(blockId);
 
     private IReadOnlyList<ReviewBlock> CurrentReviewBlocks() =>
@@ -2288,7 +2353,7 @@ else
 
     private IReadOnlyList<ReviewBlock> ReviewBlocksBeforeLine(ReviewProjection? projection, int lineNumber) =>
         projection?.Blocks
-            .Where(block => (projection.IsReadOnly || IsReviewBlockExpanded(block.Id)) && ReviewBlockRenderLine(block) == lineNumber)
+            .Where(block => IsReviewBlockExpanded(block.Id) && ReviewBlockRenderLine(block) == lineNumber)
             .ToList()
         ?? [];
 
@@ -2297,17 +2362,20 @@ else
 
     private bool ShouldRenderReviewLine(ReviewProjection? projection, ReviewLine line) =>
         projection?.Blocks.Any(block =>
-            (projection.IsReadOnly || IsReviewBlockExpanded(block.Id))
+            IsReviewBlockExpanded(block.Id)
             && ReviewBlockCoversLine(block, line.LineNumber)) != true;
 
     private bool ShouldRenderReviewLine(ReviewLine line) =>
         ShouldRenderReviewLine(_reviewProjection, line);
 
     private static int ReviewBlockRenderLine(ReviewBlock block) =>
-        block.NewRow?.NewLineNumber ?? block.AnchorLine;
+        block.Category == ReviewBlockCategory.Text
+            ? block.NewRow?.NewLineNumber ?? block.AnchorLine
+            : block.AnchorLine;
 
     private static bool ReviewBlockCoversLine(ReviewBlock block, int lineNumber) =>
-        block.NewRow?.NewLineNumber == lineNumber;
+        block.Category == ReviewBlockCategory.Text
+        && block.NewRow?.NewLineNumber == lineNumber;
 
     private static string ReviewLineActionClass(string blockId) =>
         "btn btn-sm review-line-action " + (string.IsNullOrWhiteSpace(blockId) ? "btn-outline-secondary" : "btn-outline-success");
@@ -2324,6 +2392,62 @@ else
 
     private static string RailMarkerStyle(ReviewBlock block) =>
         $"top: {block.MarkerTopPercent.ToString("0.###", CultureInfo.InvariantCulture)}%;";
+
+    private static string ReviewBlockMarkerTitle(ReviewBlock block) =>
+        $"{ReviewCategoryTitle(block.Category)}: {block.Title}";
+
+    private static IReadOnlyList<ReviewBlockCategory> ReviewLineCategories(ReviewLine line)
+    {
+        var categories = new List<ReviewBlockCategory>(3);
+        if (line.TextBlockIds.Count > 0)
+            categories.Add(ReviewBlockCategory.Text);
+        if (line.StructureBlockIds.Count > 0)
+            categories.Add(ReviewBlockCategory.Structure);
+        if (line.VisualBlockIds.Count > 0)
+            categories.Add(ReviewBlockCategory.Visual);
+        return categories;
+    }
+
+    private static IReadOnlyList<string> ReviewLineBlockIds(ReviewLine line, ReviewBlockCategory category) => category switch
+    {
+        ReviewBlockCategory.Text => line.TextBlockIds,
+        ReviewBlockCategory.Structure => line.StructureBlockIds,
+        ReviewBlockCategory.Visual => line.VisualBlockIds,
+        _ => [],
+    };
+
+    private string ReviewCategoryButtonClass(
+        ReviewProjection projection,
+        ReviewLine line,
+        ReviewBlockCategory category)
+    {
+        var blockIds = ReviewLineBlockIds(line, category);
+        var blocks = projection.Blocks.Where(block => blockIds.Contains(block.Id, StringComparer.Ordinal)).ToList();
+        var classes = $"review-line-category-toggle review-line-category-toggle--{category.ToString().ToLowerInvariant()}";
+        if (blocks.Any(block => block.HasAdditions))
+            classes += " review-line-category-toggle--added";
+        if (blocks.Any(block => block.HasDeletions))
+            classes += " review-line-category-toggle--removed";
+        if (blocks.All(block => IsReviewBlockExpanded(block.Id)))
+            classes += " review-line-category-toggle--expanded";
+        return classes;
+    }
+
+    private static string ReviewCategoryGlyph(ReviewBlockCategory category) => category switch
+    {
+        ReviewBlockCategory.Text => "T",
+        ReviewBlockCategory.Structure => "¶",
+        ReviewBlockCategory.Visual => "▧",
+        _ => "•",
+    };
+
+    private static string ReviewCategoryTitle(ReviewBlockCategory category) => category switch
+    {
+        ReviewBlockCategory.Text => "Text changes",
+        ReviewBlockCategory.Structure => "Structure and formatting changes",
+        ReviewBlockCategory.Visual => "Figure and Designed Page changes",
+        _ => "Manuscript changes",
+    };
 
     private static string ContestCandidateColumnClass(ContestCandidateProjection candidate)
     {
@@ -2598,7 +2722,8 @@ else
         LatestAssistantReviewSnapshot? latestAssistantReview = null,
         ManuscriptDocument? liveDocument = null,
         ReviewDiff? comparisonDiff = null,
-        bool isReadOnly = false)
+        bool isReadOnly = false,
+        ManuscriptDocument? comparisonCurrentDocument = null)
     {
         var changes = CurrentChapterManuscriptChanges(batches, chapter.Id);
         if (changes.Count == 0 && latestAssistantReview is not null)
@@ -2621,7 +2746,8 @@ else
                         appliedChapter,
                         [],
                         comparisonDiff: appliedDiff,
-                        isReadOnly: true);
+                        isReadOnly: true,
+                        comparisonCurrentDocument: current);
                 }
             }
             catch (Exception exception) when (exception is JsonException or InvalidDataException or ArgumentException)
@@ -2655,7 +2781,7 @@ else
 
         if (comparisonDiff is { } diff)
         {
-            var fallbackChangeId = changes.Count > 0 ? changes[^1].Id : Guid.Empty;
+            var fallbackChangeId = changes.Count > 0 ? changes[^1].Id : isReadOnly ? chapter.Id : Guid.Empty;
             foreach (var section in diff.Sections.Where(section => string.Equals(section.Key, "Body", StringComparison.OrdinalIgnoreCase)))
             {
                 for (var hunkIndex = 0; hunkIndex < section.Hunks.Count; hunkIndex++)
@@ -2665,13 +2791,13 @@ else
                     foreach (var block in ReviewBlocksForHunk(changeId, section, hunk, hunkIndex, drafts.Count))
                     {
                         blocks.Add(block);
+                        AddReviewBlockToDraft(drafts[block.AnchorLine - 1], block);
 
                         if (block.NewRow is { NewLineNumber: int newLineNumber } newRow)
                         {
                             if (newLineNumber < 1 || newLineNumber > drafts.Count) continue;
                             var draft = drafts[newLineNumber - 1];
                             draft.IsAddedOrChanged = true;
-                            draft.BlockIds.Add(block.Id);
                             draft.Segments = ReviewSegmentsForAddedRow(newRow, hunk.Rows, RowIndex(hunk.Rows, newRow));
                         }
 
@@ -2680,7 +2806,37 @@ else
                             if (block.AnchorLine < 1 || block.AnchorLine > drafts.Count) continue;
                             var draft = drafts[block.AnchorLine - 1];
                             draft.HasDeletionMarker = true;
-                            draft.BlockIds.Add(block.Id);
+                        }
+                    }
+                }
+            }
+
+            if (isReadOnly)
+            {
+                foreach (var section in diff.Sections.Where(section => !string.Equals(section.Key, "Body", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var category = ReviewBlockCategoryFor(section);
+                    for (var hunkIndex = 0; hunkIndex < section.Hunks.Count; hunkIndex++)
+                    {
+                        var hunk = section.Hunks[hunkIndex];
+                        foreach (var block in ReviewBlocksForHunk(fallbackChangeId, section, hunk, hunkIndex, drafts.Count, category))
+                        {
+                            var anchorLine = FindStructuredAnchorLine(
+                                block,
+                                comparisonCurrentDocument,
+                                drafts.Count);
+                            var anchoredBlock = block with
+                            {
+                                AnchorLine = anchorLine,
+                                MarkerTopPercent = MarkerTopPercent(anchorLine, drafts.Count),
+                            };
+                            blocks.Add(anchoredBlock);
+                            var anchorDraft = drafts[anchorLine - 1];
+                            AddReviewBlockToDraft(anchorDraft, anchoredBlock);
+                            if (anchoredBlock.HasAdditions)
+                                anchorDraft.IsAddedOrChanged = true;
+                            if (anchoredBlock.HasDeletions)
+                                anchorDraft.HasDeletionMarker = true;
                         }
                     }
                 }
@@ -2709,9 +2865,11 @@ else
                     draft.HasDeletionMarker,
                     draft.BlockIds.Distinct(StringComparer.Ordinal).ToList(),
                     draft.BlockIds.FirstOrDefault(),
-                    MarkerTitle(draft)))
+                    MarkerTitle(draft),
+                    draft.TextBlockIds.Distinct(StringComparer.Ordinal).ToList(),
+                    draft.StructureBlockIds.Distinct(StringComparer.Ordinal).ToList(),
+                    draft.VisualBlockIds.Distinct(StringComparer.Ordinal).ToList()))
                 .ToList(),
-            Sections: sections,
             IsReadOnly: isReadOnly,
             IsNoDifference: isReadOnly && sections.Count == 0);
     }
@@ -3107,6 +3265,106 @@ else
             : 1;
     }
 
+    private static void AddReviewBlockToDraft(ReviewLineDraft draft, ReviewBlock block)
+    {
+        draft.BlockIds.Add(block.Id);
+        switch (block.Category)
+        {
+            case ReviewBlockCategory.Text:
+                draft.TextBlockIds.Add(block.Id);
+                break;
+            case ReviewBlockCategory.Structure:
+                draft.StructureBlockIds.Add(block.Id);
+                break;
+            case ReviewBlockCategory.Visual:
+                draft.VisualBlockIds.Add(block.Id);
+                break;
+        }
+    }
+
+    private static ReviewBlockCategory ReviewBlockCategoryFor(DiffSection section) =>
+        string.Equals(section.Key, "Visuals", StringComparison.OrdinalIgnoreCase)
+            ? ReviewBlockCategory.Visual
+            : ReviewBlockCategory.Structure;
+
+    private static int FindStructuredAnchorLine(
+        ReviewBlock block,
+        ManuscriptDocument? current,
+        int lineCount)
+    {
+        var blockIndex = FindStructuredBlockIndex(block);
+        if (blockIndex is null)
+            return Math.Clamp(FindBlockAnchorLine(block.Hunk.Rows, lineCount), 1, Math.Max(1, lineCount));
+
+        if (current is null)
+            return 1;
+
+        var currentBlocks = current.Content
+            .Where(item => item.Type != ManuscriptBlockType.DesignedPage)
+            .ToList();
+        if (currentBlocks.Count == 0)
+            return 1;
+
+        // A deleted block has no current counterpart. Clamping the old position
+        // to the surviving flowing blocks anchors the marker beside its nearest
+        // remaining line; a wholly visual document falls back to line one.
+        var rawIndex = Math.Clamp(blockIndex.Value - 1, 0, current.Content.Count);
+        var currentIndex = Math.Clamp(
+            current.Content.Take(rawIndex).Count(item => item.Type != ManuscriptBlockType.DesignedPage),
+            0,
+            currentBlocks.Count - 1);
+        var precedingText = string.Join(
+            "\n\n",
+            currentBlocks
+                .Take(currentIndex)
+                .Select(ManuscriptCodec.Text));
+        var line = string.IsNullOrEmpty(precedingText)
+            ? 1
+            : ChapterFormatting.SplitLines(precedingText).Count + 1;
+        return Math.Clamp(line, 1, Math.Max(1, lineCount));
+    }
+
+    private static int? FindStructuredBlockIndex(ReviewBlock block)
+    {
+        var sectionText = block.NewRow is not null
+            ? block.Section.NewText
+            : block.Section.OldText;
+        var sectionLineNumber = block.NewRow?.NewLineNumber ?? block.OldRow?.OldLineNumber;
+        if (sectionLineNumber is { } lineNumber)
+        {
+            var sectionRows = ChapterFormatting.SplitLines(sectionText);
+            var sectionIndex = Math.Min(lineNumber - 1, sectionRows.Count - 1);
+            if (FindStructuredBlockIndex(sectionRows, sectionIndex) is { } sectionBlockIndex)
+                return sectionBlockIndex;
+        }
+
+        return FindStructuredBlockIndex(block.Hunk.Rows.Select(row => row.Text).ToList(), block.HunkRowIndex);
+    }
+
+    private static int? FindStructuredBlockIndex(IReadOnlyList<string> rows, int rowIndex)
+    {
+        for (var index = Math.Min(rowIndex, rows.Count - 1); index >= 0; index--)
+        {
+            const string prefix = "Block ";
+            var start = rows[index].IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+            if (start < 0)
+                continue;
+
+            start += prefix.Length;
+            var end = rows[index].IndexOf(':', start);
+            if (end <= start)
+                continue;
+
+            if (int.TryParse(rows[index][start..end], NumberStyles.Integer, CultureInfo.InvariantCulture, out var blockIndex)
+                && blockIndex > 0)
+            {
+                return blockIndex;
+            }
+        }
+
+        return null;
+    }
+
     private static double MarkerTopPercent(int anchorLine, int lineCount)
     {
         if (lineCount <= 1) return 0;
@@ -3118,7 +3376,8 @@ else
         DiffSection section,
         DiffHunk hunk,
         int hunkIndex,
-        int lineCount)
+        int lineCount,
+        ReviewBlockCategory category = ReviewBlockCategory.Text)
     {
         var consumedPairIds = new HashSet<int>();
         for (var rowIndex = 0; rowIndex < hunk.Rows.Count; rowIndex++)
@@ -3148,13 +3407,13 @@ else
                     }
                 }
 
-                yield return CreateReviewBlock(changeId, section, hunk, hunkIndex, targetRowIndex, lineCount, oldRow, newRow, pairId);
+                yield return CreateReviewBlock(changeId, section, hunk, hunkIndex, targetRowIndex, lineCount, oldRow, newRow, pairId, category);
                 continue;
             }
 
             yield return row.Kind == DiffRowKind.Added
-                ? CreateReviewBlock(changeId, section, hunk, hunkIndex, rowIndex, lineCount, oldRow: null, row, pairId: null)
-                : CreateReviewBlock(changeId, section, hunk, hunkIndex, rowIndex, lineCount, row, newRow: null, pairId: null);
+                ? CreateReviewBlock(changeId, section, hunk, hunkIndex, rowIndex, lineCount, oldRow: null, row, pairId: null, category)
+                : CreateReviewBlock(changeId, section, hunk, hunkIndex, rowIndex, lineCount, row, newRow: null, pairId: null, category);
         }
     }
 
@@ -3167,37 +3426,50 @@ else
         int lineCount,
         DiffRow? oldRow,
         DiffRow? newRow,
-        int? pairId)
+        int? pairId,
+        ReviewBlockCategory category = ReviewBlockCategory.Text)
     {
         var anchorLine = newRow?.NewLineNumber
             ?? (oldRow is null ? FindBlockAnchorLine(hunk.Rows, lineCount) : FindDeletionAnchorLine(hunk.Rows, rowIndex, lineCount));
         anchorLine = Math.Clamp(anchorLine, 1, Math.Max(1, lineCount));
-        var blockId = $"review-{changeId:N}-{hunk.NewStart}-{hunk.OldStart}-{hunkIndex}-{oldRow?.OldLineNumber ?? 0}-{newRow?.NewLineNumber ?? 0}-{pairId ?? 0}-{rowIndex}";
+        var blockId = $"review-{category}-{changeId:N}-{section.Key}-{hunk.NewStart}-{hunk.OldStart}-{hunkIndex}-{oldRow?.OldLineNumber ?? 0}-{newRow?.NewLineNumber ?? 0}-{pairId ?? 0}-{rowIndex}";
 
         return new ReviewBlock(
             blockId,
             changeId,
-            ReviewBlockTitle(oldRow, newRow),
-            ReviewBlockSummary(oldRow, newRow),
+            ReviewBlockTitle(category, section, oldRow, newRow),
+            ReviewBlockSummary(category, oldRow, newRow),
             anchorLine,
             MarkerTopPercent(anchorLine, lineCount),
             section,
             hunk,
             oldRow,
             newRow,
-            pairId);
+            pairId,
+            category,
+            rowIndex);
     }
 
-    private static string ReviewBlockTitle(DiffRow? oldRow, DiffRow? newRow)
+    private static string ReviewBlockTitle(
+        ReviewBlockCategory category,
+        DiffSection section,
+        DiffRow? oldRow,
+        DiffRow? newRow)
     {
+        if (category == ReviewBlockCategory.Structure)
+            return string.IsNullOrWhiteSpace(section.Label) ? "Structure and formatting" : section.Label;
+        if (category == ReviewBlockCategory.Visual)
+            return string.IsNullOrWhiteSpace(section.Label) ? "Figures and Designed Pages" : section.Label;
         if (oldRow is not null && newRow is not null) return "Changed line";
         if (newRow is not null) return "Added line";
         if (oldRow is not null) return "Removed line";
         return "Chapter change";
     }
 
-    private static string ReviewBlockSummary(DiffRow? oldRow, DiffRow? newRow)
+    private static string ReviewBlockSummary(ReviewBlockCategory category, DiffRow? oldRow, DiffRow? newRow)
     {
+        if (category != ReviewBlockCategory.Text)
+            return "Current vs Before";
         if (oldRow is not null && newRow is not null)
             return $"Line {oldRow.OldLineNumber} -> {newRow.NewLineNumber}";
         if (newRow is not null)
@@ -4009,7 +4281,6 @@ else
         string LineNumberFormat,
         IReadOnlyList<ReviewBlock> Blocks,
         IReadOnlyList<ReviewLine> Lines,
-        IReadOnlyList<DiffSection> Sections,
         bool IsReadOnly = false,
         bool IsNoDifference = false);
 
@@ -4038,7 +4309,10 @@ else
         bool HasDeletionMarker,
         IReadOnlyList<string> BlockIds,
         string? PrimaryBlockId,
-        string? MarkerTitle);
+        string? MarkerTitle,
+        IReadOnlyList<string> TextBlockIds,
+        IReadOnlyList<string> StructureBlockIds,
+        IReadOnlyList<string> VisualBlockIds);
 
     private sealed record ReviewSegment(string Text, bool IsAddedToken);
 
@@ -4054,6 +4328,8 @@ else
         DiffRow? OldRow,
         DiffRow? NewRow,
         int? PairId,
+        ReviewBlockCategory Category = ReviewBlockCategory.Text,
+        int HunkRowIndex = 0,
         Guid? ContestCandidateId = null,
         ContestCandidateLineDecisionKind? ContestDecision = null,
         bool HasContestConflict = false,
@@ -4062,6 +4338,13 @@ else
         public bool HasAdditions => NewRow is not null;
         public bool HasDeletions => OldRow is not null;
         public bool CanEdit => OldRow is not null || NewRow is not null;
+    }
+
+    private enum ReviewBlockCategory
+    {
+        Text,
+        Structure,
+        Visual,
     }
 
     private sealed record ContestCandidateReviewState(List<ContestCandidateLineDecision> Lines);
@@ -4100,6 +4383,9 @@ else
         public bool IsAddedOrChanged { get; set; }
         public bool HasDeletionMarker { get; set; }
         public List<string> BlockIds { get; } = [];
+        public List<string> TextBlockIds { get; } = [];
+        public List<string> StructureBlockIds { get; } = [];
+        public List<string> VisualBlockIds { get; } = [];
     }
 
     private sealed class ReviewBlockEdit(
