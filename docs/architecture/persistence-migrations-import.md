@@ -138,6 +138,17 @@ anchor hashes, projection equality, normalized-text hashes, and visual anchor
 mapping before commit. Legacy illustrated-prose layouts use runtime-authoritative
 paragraph indices; stale advisory hashes may be recorded, but malformed hashes,
 invalid indices, ambiguous mappings, and projection mismatches fail closed.
+The authoring-history retirement is an ordered forward transition: an additive
+table first stores exact-target assistant Review baselines, startup validates and
+backfills the newest committed baseline from populated legacy columns or
+Brotli-compressed committed history entries, and only then a cleanup migration
+drops the obsolete history stream, entry, batch, and dependency tables. Open
+assistant batches are not committed review evidence. The transition runs inside
+the protected startup backup/recovery boundary and validates manuscript identity
+and hashes before accepting any baseline. `DetachedAt` remains current schema;
+startup removes history-only detached composition remnants because process-memory
+Undo/Redo is necessarily empty after launch.
+
 The composition, authoring-page, Core Book, edition-content, physical-product,
 and publication-section cutovers each preserve semantic IDs, assets, foreign
 keys, artifacts, hashes, packages, audits, and unaffected rows while removing
@@ -153,8 +164,9 @@ cover surfaces, Book Text Styles, visual references, and project-owned font
 families/faces with binary hashes. Non-structural exports omit source bodies,
 selections, and evidence and include a warning. Jobs, staging rows, temporary
 visual candidates, unselected source bodies/provenance, assistant transcripts,
-model selections, open history streams, dependencies, and open assistant
-batches remain working-database state and are excluded.
+model selections and durable assistant review baselines remain working-database
+state and are excluded. Manual Undo/Redo is process memory only and therefore is
+also absent from every export without adding database rows.
 
 Direct `ProjectReference` rows are deliberately omitted from both export kinds.
 When outgoing links exist, the serialized document warning and returned file
@@ -218,7 +230,8 @@ security architecture change expands exposure.
 ## Related chapters
 
 - [`manuscript-authoring.md`](./manuscript-authoring.md) owns manuscript,
-  styles, annotations, authoring history, and semantic editor contracts.
+  styles, annotations, in-process authoring history, durable assistant review
+  baselines, and semantic editor contracts.
 - [`composition-media.md`](./composition-media.md) owns image/font/composition
   relationships, deletion guards, page setup, variants, and canvas previews.
 - [`publishing-model.md`](./publishing-model.md) owns Core/release/section

@@ -257,7 +257,9 @@ must leave durable terminal state and no concurrent-disposal error.
   Brief, canon, outline, graph, retrieval, direct references, ingest evidence,
   and automatic context projections.
 - [manuscript-authoring.md](manuscript-authoring.md) owns manuscript operations,
-  editor targets, annotations, Book Text Styles, and persistent Undo/Redo.
+  editor targets, annotations, Book Text Styles, process-lifetime manual
+  Undo/Redo, and durable Review Edits baselines. Successful assistant mutations
+  invalidate affected manual history and are not themselves undoable.
 - [providers-background.md](providers-background.md) owns provider resolution,
   OAuth, wire compatibility, request limits, and non-chat background queues.
 - [composition-media.md](composition-media.md) owns project images, generation

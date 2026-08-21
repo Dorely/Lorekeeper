@@ -97,12 +97,12 @@ public sealed record PublicationCoverHistoryResult(
 
 public sealed class PublicationBookService(
     IAppDatabaseOperationFactory database,
-    IAuthoringHistoryService? authoringHistory = null,
+    IAuthoringHistoryRuntime? authoringHistory = null,
     IAuthoringMutationContextAccessor? authoringMutationContext = null) : IPublicationBookService
 {
     public Task<AuthoringHistoryState> GetCoverHistoryStateAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         authoringHistory?.ReadStateAsync(CoreCoverHistoryTarget(projectId), cancellationToken)
-        ?? Task.FromResult(new AuthoringHistoryState(0, false, false, null, null, 0, 0));
+        ?? Task.FromResult(new AuthoringHistoryState(false, false, null, null));
 
     public Task<PublicationCoverHistoryResult> UndoCoverAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         MoveCoverHistoryAsync(projectId, redo: false, cancellationToken);
@@ -344,6 +344,10 @@ public sealed class PublicationBookService(
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
         var book = await GetTrackedBookAsync(projectId, patch.ExpectedRevision, cancellationToken);
+        var coverDesign = await db.PublicationBookCoverDesigns.SingleAsync(
+            item => item.ProjectId == projectId,
+            cancellationToken);
+        var beforeCoverHistory = CaptureCoreCover(book, coverDesign);
 
         var clear = (patch.ClearFields ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
         book.Title = Value(patch.Title, book.Title, clear, nameof(patch.Title));
@@ -391,6 +395,19 @@ public sealed class PublicationBookService(
             },
             cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        var afterCoverHistory = CaptureCoreCover(book, coverDesign);
+        if (authoringHistory is not null
+            && !string.Equals(beforeCoverHistory, afterCoverHistory, StringComparison.Ordinal))
+        {
+            var context = authoringMutationContext?.Current;
+            if (context?.IsAssistant == true)
+                await authoringHistory.ResetToCurrentAsync(
+                    CoreCoverHistoryTarget(projectId), afterCoverHistory, CancellationToken.None);
+            else
+                await authoringHistory.RecordManualActionAsync(
+                    CoreCoverHistoryTarget(projectId), beforeCoverHistory, afterCoverHistory,
+                    "Edit Core cover copy", cancellationToken: CancellationToken.None);
+        }
         return (await ReadViewAsync(projectId, cancellationToken))!;
     }
 
@@ -471,6 +488,7 @@ public sealed class PublicationBookService(
         var setup = await db.ProjectPageSetups.AsNoTracking().SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         var edition = CoreCoverEdition(projectId, setup);
         var template = CoreCoverTemplate(setup);
+        var beforeHistory = CaptureCoreCover(book, design);
         var scene = JsonSerializer.Deserialize<CompositionScene>(design.CompositionSceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The Core cover composition is empty.");
         scene = PublicationCoverService.ReflowToCurrentGeometry(
@@ -489,7 +507,13 @@ public sealed class PublicationBookService(
             book.UpdatedAt = DateTime.UtcNow;
             var project = await db.Projects.SingleAsync(item => item.Id == projectId, cancellationToken);
             project.UpdatedAt = DateTime.UtcNow;
+            var afterHistory = CaptureCoreCover(book, design);
             await db.SaveChangesAsync(cancellationToken);
+            if (authoringHistory is not null)
+            {
+                await authoringHistory.ResetToCurrentAsync(
+                    CoreCoverHistoryTarget(projectId), afterHistory, CancellationToken.None);
+            }
         }
 
         return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design);
@@ -558,17 +582,22 @@ public sealed class PublicationBookService(
         if (db.Entry(design).State == EntityState.Detached)
             db.PublicationBookCoverDesigns.Add(design);
         var afterHistory = CaptureCoreCover(book, design);
+        if (string.Equals(beforeHistory, afterHistory, StringComparison.Ordinal))
+        {
+            db.ChangeTracker.Clear();
+            design.Revision = update.ExpectedRevision;
+            return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design);
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         if (authoringHistory is not null)
         {
             var context = authoringMutationContext?.Current;
             if (context?.IsAssistant == true)
-                await authoringHistory.UpdateAssistantTurnBatchAsync(CoreCoverHistoryTarget(projectId), context.AssistantTurnId, beforeHistory, afterHistory, context.ActionLabel, cancellationToken: cancellationToken);
+                await authoringHistory.ResetToCurrentAsync(CoreCoverHistoryTarget(projectId), afterHistory, CancellationToken.None);
             else
-                await authoringHistory.RecordManualActionAsync(CoreCoverHistoryTarget(projectId), beforeHistory, afterHistory, "Edit Core cover", cancellationToken: cancellationToken);
+                await authoringHistory.RecordManualActionAsync(CoreCoverHistoryTarget(projectId), beforeHistory, afterHistory, "Edit Core cover", cancellationToken: CancellationToken.None);
         }
-        else
-            await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
         return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design);
     }
 
@@ -581,7 +610,7 @@ public sealed class PublicationBookService(
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
         if (authoringHistory is null)
-            throw new NotSupportedException("Persistent Core-cover history is unavailable.");
+            throw new NotSupportedException("In-process Core-cover history is unavailable.");
         var book = await db.PublicationBooks.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         var design = await db.PublicationBookCoverDesigns.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
         var current = CaptureCoreCover(book, design);
@@ -600,6 +629,7 @@ public sealed class PublicationBookService(
             design.CompositionSceneJson = JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
             design.Revision = checked(design.Revision + 1);
             design.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
         }
         var result = redo
             ? await authoringHistory.RedoAsync(CoreCoverHistoryTarget(projectId), current, Apply, cancellationToken)
@@ -700,17 +730,25 @@ public sealed class PublicationBookService(
         book.UpdatedAt = DateTime.UtcNow;
         stage.AppliedAt = DateTime.UtcNow;
         var afterHistory = CaptureCoreCover(book, cover);
+        if (string.Equals(beforeHistory, afterHistory, StringComparison.Ordinal))
+        {
+            db.Entry(book).State = EntityState.Unchanged;
+            db.Entry(cover).State = EntityState.Unchanged;
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            cover.Revision = expectedCoverRevision;
+            return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, cover);
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         if (authoringHistory is not null)
         {
             var context = authoringMutationContext?.Current;
             if (context?.IsAssistant == true)
-                await authoringHistory.UpdateAssistantTurnBatchAsync(CoreCoverHistoryTarget(projectId), context.AssistantTurnId, beforeHistory, afterHistory, context.ActionLabel, cancellationToken: cancellationToken);
+                await authoringHistory.ResetToCurrentAsync(CoreCoverHistoryTarget(projectId), afterHistory, CancellationToken.None);
             else
-                await authoringHistory.RecordManualActionAsync(CoreCoverHistoryTarget(projectId), beforeHistory, afterHistory, "Edit Core cover", cancellationToken: cancellationToken);
+                await authoringHistory.RecordManualActionAsync(CoreCoverHistoryTarget(projectId), beforeHistory, afterHistory, "Edit Core cover", cancellationToken: CancellationToken.None);
         }
-        else
-            await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
         return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, cover);
     }
 

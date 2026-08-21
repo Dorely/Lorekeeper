@@ -1,10 +1,16 @@
+using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
+using Lorekeeper.Publish;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Lorekeeper.Tests;
@@ -12,7 +18,53 @@ namespace Lorekeeper.Tests;
 public sealed class ManuscriptAnnotationMigrationTests
 {
     private const string PreviousMigration = "20260818064325_AddLlmProviderMaxTokens";
-    private const string AuthoringHistoryPreviousMigration = "20260820130000_AddChatConversationModelSelection";
+    private const string AuthoringHistoryPreviousMigration = "20260820230218_AddLatestAssistantReviewBaseline";
+
+    private sealed class TestDbContextFactory(DbContextOptions<AppDbContext> options) : IDbContextFactory<AppDbContext>
+    {
+        public AppDbContext CreateDbContext() => new(options, NullLogger<AppDbContext>.Instance);
+    }
+
+    private sealed class NoopManuscriptService : IManuscriptService
+    {
+        public Task<ManuscriptSnapshot?> GetManuscriptAsync(
+            EditorContentTarget target,
+            Guid chapterId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<ManuscriptSnapshot?>(null);
+
+        public Task<ManuscriptMutationResult> ReplaceDocumentAsync(
+            EditorContentTarget target,
+            Guid chapterId,
+            long expectedRevision,
+            ManuscriptDocument document,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<ManuscriptMutationResult>(new NotSupportedException());
+
+        public Task<ManuscriptMutationResult> ApplyAsync(
+            EditorContentTarget target,
+            Guid chapterId,
+            long expectedRevision,
+            IReadOnlyList<ManuscriptOperation> operations,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<ManuscriptMutationResult>(new NotSupportedException());
+
+        public Task<ManuscriptMutationResult> ApplyUnderProjectMutationLeaseAsync(
+            EditorContentTarget target,
+            Guid chapterId,
+            long expectedRevision,
+            IReadOnlyList<ManuscriptOperation> operations,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<ManuscriptMutationResult>(new NotSupportedException());
+
+        public Task ValidateDocumentReferencesAsync(
+            EditorContentTarget target,
+            Guid chapterId,
+            ManuscriptDocument document,
+            IReadOnlyList<ManuscriptStyleView>? styleCatalog = null,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+    }
 
     [Fact]
     public async Task AdditiveMigrationPreservesProjectManuscriptPublicationAndArtifactData()
@@ -105,7 +157,7 @@ public sealed class ManuscriptAnnotationMigrationTests
     }
 
     [Fact]
-    public async Task LatestReviewBaselineMigrationPreservesAuthoringHistoryAndInitializesNullableFields()
+    public async Task AuthoringHistoryCleanupBackfillsDurableAndLegacyReviewBaselines()
     {
         var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -116,12 +168,17 @@ public sealed class ManuscriptAnnotationMigrationTests
                 .Options;
             var projectId = Guid.NewGuid();
             var chapterId = Guid.NewGuid();
-            var streamId = Guid.NewGuid();
+            var durableOnlyChapterId = Guid.NewGuid();
+            var durableStreamId = Guid.NewGuid();
+            var durableOnlyStreamId = Guid.NewGuid();
+            var legacyStreamId = Guid.NewGuid();
             var batchId = Guid.NewGuid();
-            var entryId = Guid.NewGuid();
+            var durableEntryId = Guid.NewGuid();
+            var legacyEntryId = Guid.NewGuid();
+            var durableTurnId = Guid.NewGuid();
+            var durableOnlyTurnId = Guid.NewGuid();
+            var editionId = Guid.NewGuid();
             var now = DateTime.UtcNow;
-            var baselineBytes = new byte[] { 1, 2, 3 };
-            var resultBytes = new byte[] { 4, 5, 6 };
             var manuscript = ManuscriptCodec.Serialize(new ManuscriptDocument
             {
                 ManuscriptId = chapterId,
@@ -136,6 +193,53 @@ public sealed class ManuscriptAnnotationMigrationTests
                     },
                 ],
             });
+            var afterManuscript = ManuscriptCodec.Serialize(new ManuscriptDocument
+            {
+                ManuscriptId = chapterId,
+                Revision = 5,
+                Content =
+                [
+                    new ManuscriptBlock
+                    {
+                        Id = "body",
+                        Type = ManuscriptBlockType.Paragraph,
+                        Content = [new ManuscriptInline { Text = "After assistant mutation" }],
+                    },
+                ],
+            });
+            var durableOnlyManuscript = ManuscriptCodec.Serialize(new ManuscriptDocument
+            {
+                ManuscriptId = durableOnlyChapterId,
+                Revision = 2,
+                Content =
+                [
+                    new ManuscriptBlock
+                    {
+                        Id = "body",
+                        Type = ManuscriptBlockType.Paragraph,
+                        Content = [new ManuscriptInline { Text = "Durable review columns remain intact" }],
+                    },
+                ],
+            });
+            var legacyBeforeManuscript = ManuscriptCodec.Serialize(new ManuscriptDocument
+            {
+                ManuscriptId = chapterId,
+                Revision = 3,
+                Content =
+                [
+                    new ManuscriptBlock
+                    {
+                        Id = "body",
+                        Type = ManuscriptBlockType.Paragraph,
+                        Content = [new ManuscriptInline { Text = "Legacy before committed assistant mutation" }],
+                    },
+                ],
+            });
+            var baselineBytes = CompressSnapshot(legacyBeforeManuscript);
+            var resultBytes = CompressSnapshot(afterManuscript);
+            var manuscriptHash = Hash(manuscript);
+            var legacyBeforeHash = Hash(legacyBeforeManuscript);
+            var durableOnlyHash = Hash(durableOnlyManuscript);
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
@@ -149,15 +253,96 @@ public sealed class ManuscriptAnnotationMigrationTests
                     ManuscriptJson = manuscript,
                     ManuscriptRevision = 4,
                 });
+                db.Chapters.Add(new Chapter
+                {
+                    Id = durableOnlyChapterId,
+                    ProjectId = projectId,
+                    Title = "Durable baseline chapter",
+                    ManuscriptJson = durableOnlyManuscript,
+                    ManuscriptRevision = 2,
+                });
+                db.PublicationEditions.Add(new PublicationEdition
+                {
+                    Id = editionId,
+                    ProjectId = projectId,
+                    Name = "Review baseline release",
+                });
+                await db.SaveChangesAsync();
+                db.ManuscriptMigrationJournals.AddRange(
+                    new[]
+                    {
+                        ManuscriptMigrationService.MigrationName,
+                        ManuscriptMigrationService.SchemaV2MigrationName,
+                        ManuscriptMigrationService.SchemaV3MigrationName,
+                        VisualCompositionMigrationService.MigrationName,
+                        VisualCompositionMigrationService.GeometryPolicyMigrationName,
+                        VisualCompositionMigrationService.AccessibilityDecisionMigrationName,
+                        AuthoringPageMigrationService.MigrationName,
+                        EditionContentMigrationService.MigrationName,
+                        PublicationCoreMigrationService.MigrationName,
+                        PublicationSectionMigrationService.MigrationName,
+                    }.Select(name => new ManuscriptMigrationJournal
+                    {
+                        MigrationName = name,
+                        Phase = ManuscriptMigrationPhase.Complete,
+                        Status = ManuscriptMigrationStatus.Completed,
+                        CompletedAt = now,
+                    }));
+                db.PublicationEditionMigrationJournals.AddRange(
+                    new[]
+                    {
+                        PublicationEditionMigrationService.MigrationName,
+                        PublicationPressMigrationService.MigrationName,
+                        PrintProductMigrationService.MigrationName,
+                    }.Select(name => new PublicationEditionMigrationJournal
+                    {
+                        MigrationName = name,
+                        Status = "Completed",
+                        CompletedAt = now,
+                    }));
                 await db.SaveChangesAsync();
 
                 await db.Database.ExecuteSqlInterpolatedAsync($"""
                     INSERT INTO AuthoringHistoryStreams
                         (Id, ProjectId, StreamKey, DocumentKind, DocumentId, EditionId,
                          BaselineSnapshot, BaselineHash, FirstSequence, LastSequence,
+                         CursorSequence, Revision, CreatedAt, UpdatedAt,
+                         LatestReviewBeforeJson, LatestReviewBeforeHash,
+                         LatestReviewAssistantTurnId, LatestReviewActionLabel,
+                         LatestReviewCapturedAt)
+                    VALUES
+                        ({durableStreamId}, {projectId}, {"core:chapter:" + chapterId.ToString("D")}, {"CoreChapter"}, {chapterId}, NULL,
+                         {baselineBytes}, {"baseline-hash"}, 1, 2, 2, 3, {now}, {now},
+                         {manuscript}, {manuscriptHash}, {durableTurnId}, {"Durable review"}, {now});
+                    """);
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO AuthoringHistoryEntries
+                        (Id, StreamId, Sequence, ActionLabel, Origin, AssistantTurnId,
+                         ResultSnapshot, ResultHash, SelectionJson, CreatedAt)
+                    VALUES
+                        ({durableEntryId}, {durableStreamId}, 2, {"Newer committed review"}, {"Assistant"}, {durableTurnId},
+                         {resultBytes}, {"result-hash"}, {""}, {now.AddMinutes(1)});
+                    """);
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO AuthoringHistoryStreams
+                        (Id, ProjectId, StreamKey, DocumentKind, DocumentId, EditionId,
+                         BaselineSnapshot, BaselineHash, FirstSequence, LastSequence,
+                         CursorSequence, Revision, CreatedAt, UpdatedAt,
+                         LatestReviewBeforeJson, LatestReviewBeforeHash,
+                         LatestReviewAssistantTurnId, LatestReviewActionLabel,
+                         LatestReviewCapturedAt)
+                    VALUES
+                        ({durableOnlyStreamId}, {projectId}, {"core:chapter:" + durableOnlyChapterId.ToString("D")}, {"CoreChapter"}, {durableOnlyChapterId}, NULL,
+                         {CompressSnapshot(durableOnlyManuscript)}, {"baseline-hash"}, 1, 1, 1, 2, {now}, {now},
+                         {durableOnlyManuscript}, {durableOnlyHash}, {durableOnlyTurnId}, {"Durable columns"}, {now});
+                    """);
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO AuthoringHistoryStreams
+                        (Id, ProjectId, StreamKey, DocumentKind, DocumentId, EditionId,
+                         BaselineSnapshot, BaselineHash, FirstSequence, LastSequence,
                          CursorSequence, Revision, CreatedAt, UpdatedAt)
                     VALUES
-                        ({streamId}, {projectId}, {"core:chapter:" + chapterId.ToString("D")}, {"CoreChapter"}, {chapterId}, NULL,
+                        ({legacyStreamId}, {projectId}, {"release:" + editionId.ToString("D") + ":chapter:" + chapterId.ToString("D")}, {"EditionChapter"}, {chapterId}, {editionId},
                          {baselineBytes}, {"baseline-hash"}, 1, 1, 1, 2, {now}, {now});
                     """);
                 await db.Database.ExecuteSqlInterpolatedAsync($"""
@@ -165,7 +350,7 @@ public sealed class ManuscriptAnnotationMigrationTests
                         (Id, StreamId, Sequence, ActionLabel, Origin, AssistantTurnId,
                          ResultSnapshot, ResultHash, SelectionJson, CreatedAt)
                     VALUES
-                        ({entryId}, {streamId}, 1, {"Assistant change"}, {"Assistant"}, NULL,
+                        ({legacyEntryId}, {legacyStreamId}, 1, {"Assistant change"}, {"Assistant"}, NULL,
                          {resultBytes}, {"result-hash"}, {""}, {now});
                     """);
                 await db.Database.ExecuteSqlInterpolatedAsync($"""
@@ -174,14 +359,120 @@ public sealed class ManuscriptAnnotationMigrationTests
                          BeforeHash, AfterSnapshot, AfterHash, SelectionJson, Status,
                          CreatedAt, UpdatedAt, FinalizedAt)
                     VALUES
-                        ({batchId}, {streamId}, {Guid.NewGuid()}, {"Assistant change"},
+                        ({batchId}, {legacyStreamId}, {Guid.NewGuid()}, {"Open assistant change"},
                          {baselineBytes}, {"before-hash"}, {resultBytes}, {"after-hash"},
-                         {""}, {"Completed"}, {now}, {now}, {now});
+                         {""}, {"Open"}, {now}, {now}, NULL);
                     """);
             }
 
+            var configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:DefaultConnection"] = $"Data Source={Path.Combine(directory, "review-baseline.db")}",
+                })
+                .Build();
+            var recovery = new DatabaseMigrationRecoveryService(
+                configuration,
+                NullLogger<DatabaseMigrationRecoveryService>.Instance);
+            var database = new AppDatabaseOperationFactory(
+                new TestDbContextFactory(options),
+                new AppDatabaseWriteCoordinator(),
+                new ProjectMutationCoordinator());
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
-                await db.Database.MigrateAsync();
+            {
+                var startupMigration = new DatabaseStartupMigrationService(
+                    database,
+                    new ManuscriptMigrationService(
+                        configuration,
+                        recovery,
+                        NullLogger<ManuscriptMigrationService>.Instance),
+                    new PublicationEditionMigrationService(
+                        configuration,
+                        recovery,
+                        NullLogger<PublicationEditionMigrationService>.Instance),
+                    new PublicationPressMigrationService(
+                        configuration,
+                        recovery,
+                        NullLogger<PublicationPressMigrationService>.Instance),
+                    new VisualCompositionMigrationService(
+                        recovery,
+                        NullLogger<VisualCompositionMigrationService>.Instance),
+                    new AuthoringPageMigrationService(
+                        recovery,
+                        NullLogger<AuthoringPageMigrationService>.Instance),
+                    new PublicationCoreMigrationService(
+                        database,
+                        recovery,
+                        NullLogger<PublicationCoreMigrationService>.Instance),
+                    new EditionContentMigrationService(
+                        recovery,
+                        new NoopManuscriptService(),
+                        NullLogger<EditionContentMigrationService>.Instance),
+                    new PublicationSectionMigrationService(
+                        recovery,
+                        NullLogger<PublicationSectionMigrationService>.Instance),
+                    new PrintProductMigrationService(
+                        recovery,
+                        new PrintProductRegistry(),
+                        NullLogger<PrintProductMigrationService>.Instance),
+                    recovery);
+                Assert.True(await startupMigration.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+
+                var detachedCompositionId = Guid.NewGuid();
+                var detachedVariantId = Guid.NewGuid();
+                var retainedCompositionId = Guid.NewGuid();
+                var retainedVariantId = Guid.NewGuid();
+                var sceneJson = JsonSerializer.Serialize(new CompositionScene(), ManuscriptCodec.JsonOptions);
+                db.PageCompositions.AddRange(
+                    new PageComposition
+                    {
+                        Id = detachedCompositionId,
+                        ProjectId = projectId,
+                        Name = "Detached history-only page",
+                        SemanticManuscriptJson = manuscript,
+                        Revision = 1,
+                        DetachedAt = DateTime.UtcNow,
+                    },
+                    new PageComposition
+                    {
+                        Id = retainedCompositionId,
+                        ProjectId = projectId,
+                        Name = "Retained page with live variant",
+                        SemanticManuscriptJson = manuscript,
+                        Revision = 1,
+                        DetachedAt = DateTime.UtcNow,
+                    });
+                db.PageCompositionVariants.AddRange(
+                    new PageCompositionVariant
+                    {
+                        Id = detachedVariantId,
+                        CompositionId = detachedCompositionId,
+                        GeometryKey = "detached",
+                        SceneJson = sceneJson,
+                        Revision = 1,
+                        DetachedAt = DateTime.UtcNow,
+                    },
+                    new PageCompositionVariant
+                    {
+                        Id = retainedVariantId,
+                        CompositionId = retainedCompositionId,
+                        GeometryKey = "retained",
+                        SceneJson = sceneJson,
+                        Revision = 1,
+                    });
+                await db.SaveChangesAsync();
+
+                Assert.True(await startupMigration.ApplyAsync(), (await recovery.GetStateAsync()).Error);
+                db.ChangeTracker.Clear();
+                Assert.Null(await db.PageCompositionVariants.AsNoTracking()
+                    .SingleOrDefaultAsync(item => item.Id == detachedVariantId));
+                Assert.Null(await db.PageCompositions.AsNoTracking()
+                    .SingleOrDefaultAsync(item => item.Id == detachedCompositionId));
+                Assert.NotNull(await db.PageCompositionVariants.AsNoTracking()
+                    .SingleOrDefaultAsync(item => item.Id == retainedVariantId));
+                Assert.NotNull(await db.PageCompositions.AsNoTracking()
+                    .SingleOrDefaultAsync(item => item.Id == retainedCompositionId));
+            }
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
@@ -189,17 +480,25 @@ public sealed class ManuscriptAnnotationMigrationTests
                 var chapter = await db.Chapters.AsNoTracking().SingleAsync(item => item.Id == chapterId);
                 Assert.Equal(4, chapter.ManuscriptRevision);
                 Assert.Equal(manuscript, chapter.ManuscriptJson);
-                var stream = await db.AuthoringHistoryStreams.AsNoTracking().SingleAsync(item => item.Id == streamId);
-                Assert.Equal(baselineBytes, stream.BaselineSnapshot);
-                Assert.Null(stream.LatestReviewBeforeJson);
-                Assert.Null(stream.LatestReviewBeforeHash);
-                Assert.Null(stream.LatestReviewAssistantTurnId);
-                Assert.Null(stream.LatestReviewActionLabel);
-                Assert.Null(stream.LatestReviewCapturedAt);
-                Assert.Equal(resultBytes, (await db.AuthoringHistoryEntries.AsNoTracking().SingleAsync()).ResultSnapshot);
-                var batch = await db.AuthoringTurnHistoryBatches.AsNoTracking().SingleAsync(item => item.Id == batchId);
-                Assert.Equal(resultBytes, batch.AfterSnapshot);
-                Assert.Null(batch.ReviewBaselineManuscriptJson);
+                var baselines = await db.AssistantReviewBaselines.AsNoTracking().ToListAsync();
+                Assert.Equal(3, baselines.Count);
+                var durable = baselines.Single(item => item.ChapterId == chapterId && item.TargetKey == "core");
+                Assert.Equal(legacyBeforeManuscript, durable.BeforeManuscriptJson);
+                Assert.Equal(legacyBeforeHash, durable.BeforeHash);
+                Assert.Equal(durableTurnId, durable.AssistantTurnId);
+                Assert.Equal("Newer committed review", durable.ActionLabel);
+                var durableOnly = baselines.Single(item => item.ChapterId == durableOnlyChapterId && item.TargetKey == "core");
+                Assert.Equal(durableOnlyManuscript, durableOnly.BeforeManuscriptJson);
+                Assert.Equal(durableOnlyHash, durableOnly.BeforeHash);
+                Assert.Equal(durableOnlyTurnId, durableOnly.AssistantTurnId);
+                Assert.Equal("Durable columns", durableOnly.ActionLabel);
+                var legacy = baselines.Single(item => item.TargetKey == $"edition:{editionId:N}");
+                Assert.Equal(legacyBeforeManuscript, legacy.BeforeManuscriptJson);
+                Assert.Equal(legacyBeforeHash, legacy.BeforeHash);
+                Assert.Null(await db.Database.SqlQueryRaw<string>(
+                    "SELECT name AS Value FROM sqlite_master WHERE type = 'table' AND name LIKE 'AuthoringHistory%'").FirstOrDefaultAsync());
+                Assert.Null(await db.Database.SqlQueryRaw<string>(
+                    "SELECT name AS Value FROM sqlite_master WHERE type = 'table' AND name = 'AuthoringTurnHistoryBatches'").FirstOrDefaultAsync());
             }
         }
         finally
@@ -208,4 +507,17 @@ public sealed class ManuscriptAnnotationMigrationTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    private static byte[] CompressSnapshot(string manuscriptJson)
+    {
+        var payload = JsonSerializer.Serialize(new { manuscriptJson, compositions = Array.Empty<object>(), inherited = false });
+        using var output = new MemoryStream();
+        using (var brotli = new BrotliStream(output, CompressionLevel.Fastest, leaveOpen: true))
+            using (var writer = new StreamWriter(brotli, Encoding.UTF8, leaveOpen: true))
+                writer.Write(payload);
+        return output.ToArray();
+    }
+
+    private static string Hash(string value) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 }

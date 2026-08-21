@@ -114,18 +114,6 @@ public sealed class PublishAssistantTools(
         IList<AITool> tools =
         [
             AIFunctionFactory.Create(
-                method: () => ReadAuthoringHistoryAsync(context),
-                name: "read_authoring_history",
-                description: "Read compact Undo/Redo state for the protected publication section page/prose or cover currently visible in Publish. No target IDs or history payloads are accepted."),
-            AIFunctionFactory.Create(
-                method: () => MoveAuthoringHistoryAsync(context, redo: false),
-                name: "undo_authoring_action",
-                description: "Undo the latest completed action in the protected publication document currently visible in Publish."),
-            AIFunctionFactory.Create(
-                method: () => MoveAuthoringHistoryAsync(context, redo: true),
-                name: "redo_authoring_action",
-                description: "Redo the next action in the protected publication document currently visible in Publish."),
-            AIFunctionFactory.Create(
                 method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
                     ListSearchSourcesAsync(context, query, sourceTypes, topK),
                 name: "list_search_sources",
@@ -474,7 +462,6 @@ public sealed class PublishAssistantTools(
         ];
         var currentTools = new HashSet<string>(StringComparer.Ordinal)
         {
-            "read_authoring_history", "undo_authoring_action", "redo_authoring_action",
             "list_search_sources", "read_project_source", "search_project", "list_project_images", "read_project_image",
             "read_publication_book", "patch_publication_book", "list_publication_releases",
             "list_compatible_print_products", "read_print_product_geometry",
@@ -501,108 +488,6 @@ public sealed class PublishAssistantTools(
         return Task.FromResult<IList<AITool>>(tools
             .Where(tool => tool is AIFunction function && currentTools.Contains(function.Name))
             .ToList());
-    }
-
-    private async Task<string> ReadAuthoringHistoryAsync(PublishAssistantContext context)
-    {
-        var (state, targetId, targetKind) = await ReadCurrentHistoryStateAsync(context);
-        return JsonSerializer.Serialize(new
-        {
-            ok = true,
-            targetId,
-            targetKind,
-            revision = state.Revision,
-            state.CanUndo,
-            state.CanRedo,
-            state.UndoLabel,
-            state.RedoLabel,
-            state.RetainedActions,
-            summary = "Current publication document authoring history read."
-        });
-    }
-
-    private async Task<string> MoveAuthoringHistoryAsync(PublishAssistantContext context, bool redo)
-    {
-        var workspace = context.WorkspaceContext
-            ?? throw new InvalidOperationException("Open a publication prose section, Designed Page, or cover before using authoring history.");
-        object result;
-        Guid targetId;
-        string targetKind;
-        if (workspace.Surface == "publication-section-prose" && workspace.SectionId is Guid sectionId)
-        {
-            var target = new PublicationSectionTarget(context.ProjectId, context.SelectedEditionId);
-            var moved = redo
-                ? await publicationSections.RedoAsync(target, sectionId, context.TurnCancellationToken)
-                : await publicationSections.UndoAsync(target, sectionId, context.TurnCancellationToken);
-            result = new { revision = moved.Section.Revision, action = moved.ActionLabel, moved.History.CanUndo, moved.History.CanRedo };
-            targetId = sectionId;
-            targetKind = "publicationSection";
-        }
-        else if (workspace.Surface == "publication-section-canvas" && workspace.CompositionId is Guid compositionId && compositions is not null)
-        {
-            var editorTarget = context.SelectedEditionId is Guid editionId
-                ? EditorContentTarget.ForEdition(editionId)
-                : EditorContentTarget.Core;
-            var moved = redo
-                ? await compositions.RedoAsync(editorTarget, context.ProjectId, compositionId, context.TurnCancellationToken)
-                : await compositions.UndoAsync(editorTarget, context.ProjectId, compositionId, context.TurnCancellationToken);
-            result = new { revision = moved.Composition.Revision, action = moved.ActionLabel, moved.History.CanUndo, moved.History.CanRedo };
-            targetId = compositionId;
-            targetKind = "pageComposition";
-        }
-        else if (workspace.Surface == "cover-canvas")
-        {
-            if (context.SelectedEditionId is Guid editionId)
-            {
-                var moved = redo
-                    ? await covers.RedoAsync(context.ProjectId, editionId, context.TurnCancellationToken)
-                    : await covers.UndoAsync(context.ProjectId, editionId, context.TurnCancellationToken);
-                result = new { revision = moved.Cover.Revision, action = moved.ActionLabel, moved.History.CanUndo, moved.History.CanRedo };
-                targetId = editionId;
-                targetKind = "releaseCover";
-            }
-            else
-            {
-                var moved = redo
-                    ? await books.RedoCoverAsync(context.ProjectId, context.TurnCancellationToken)
-                    : await books.UndoCoverAsync(context.ProjectId, context.TurnCancellationToken);
-                result = new { revision = moved.Cover.Revision, action = moved.ActionLabel, moved.History.CanUndo, moved.History.CanRedo };
-                targetId = context.ProjectId;
-                targetKind = "coreCover";
-            }
-        }
-        else
-        {
-            throw new InvalidOperationException("Open a publication prose section, Designed Page, or cover before using authoring history.");
-        }
-
-        return JsonSerializer.Serialize(new
-        {
-            ok = true,
-            targetId,
-            targetKind,
-            result,
-            summary = redo ? "Authoring action redone." : "Authoring action undone.",
-            mutation = new { kind = targetKind, id = targetId }
-        });
-    }
-
-    private async Task<(Lorekeeper.Authoring.AuthoringHistoryState State, Guid TargetId, string TargetKind)> ReadCurrentHistoryStateAsync(
-        PublishAssistantContext context)
-    {
-        var workspace = context.WorkspaceContext
-            ?? throw new InvalidOperationException("Open a publication prose section, Designed Page, or cover before using authoring history.");
-        if (workspace.Surface == "publication-section-prose" && workspace.SectionId is Guid sectionId)
-            return (await publicationSections.GetHistoryStateAsync(new PublicationSectionTarget(context.ProjectId, context.SelectedEditionId), sectionId, context.TurnCancellationToken), sectionId, "publicationSection");
-        if (workspace.Surface == "publication-section-canvas" && workspace.CompositionId is Guid compositionId && compositions is not null)
-            return (await compositions.GetHistoryStateAsync(context.ProjectId, compositionId, context.TurnCancellationToken), compositionId, "pageComposition");
-        if (workspace.Surface == "cover-canvas")
-        {
-            if (context.SelectedEditionId is Guid editionId)
-                return (await covers.GetHistoryStateAsync(context.ProjectId, editionId, context.TurnCancellationToken), editionId, "releaseCover");
-            return (await books.GetCoverHistoryStateAsync(context.ProjectId, context.TurnCancellationToken), context.ProjectId, "coreCover");
-        }
-        throw new InvalidOperationException("Open a publication prose section, Designed Page, or cover before using authoring history.");
     }
 
     private async Task<string> ListSearchSourcesAsync(

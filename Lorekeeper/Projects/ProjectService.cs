@@ -1,4 +1,5 @@
 using System.Text;
+using Lorekeeper.Authoring;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Context;
 using Lorekeeper.Models;
@@ -15,7 +16,8 @@ public class ProjectService(
     IProjectSearchIndex projectSearch,
     IOutlineGraphSync outlineGraphSync,
     IBookBriefService bookBriefs,
-    IContextIndexingService contextIndexing) : IProjectService
+    IContextIndexingService contextIndexing,
+    IAuthoringHistoryRuntime authoringHistory) : IProjectService
 {
     public async Task<IReadOnlyList<Project>> ListAsync(CancellationToken cancellationToken = default)
     {
@@ -174,6 +176,7 @@ public class ProjectService(
 
         repo.Remove(project);
         await databaseOperation.SaveChangesAsync(cancellationToken);
+        await authoringHistory.ClearProjectAsync(id, CancellationToken.None);
     }
 
     private async Task<string> GenerateUniqueSlugAsync(string name, CancellationToken cancellationToken)

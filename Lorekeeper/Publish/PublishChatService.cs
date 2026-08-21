@@ -34,7 +34,7 @@ public interface IPublishChatService
 }
 
 public sealed class PublishChatService(
-IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providers, IChatClientFactory clients, IContextBuilder contextBuilder, IPublishAssistantTools tools, IPublicationActorContext actorContext, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IAuthoringHistoryService authoringHistory, IAuthoringMutationContextAccessor authoringMutationContext, IOptions<AgentOptions> options, ILogger<PublishChatService> logger, IEntityVisualContextService? entityVisualContext = null, ICompositionService? compositions = null) : IPublishChatService
+IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providers, IChatClientFactory clients, IContextBuilder contextBuilder, IPublishAssistantTools tools, IPublicationActorContext actorContext, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IAuthoringMutationContextAccessor authoringMutationContext, IOptions<AgentOptions> options, ILogger<PublishChatService> logger, IEntityVisualContextService? entityVisualContext = null, ICompositionService? compositions = null) : IPublishChatService
 {
     internal const string WorkflowInstructions = """
         You are Lorekeeper's conversational Publish assistant. You maintain Core Book and prepare optional publication releases through the supplied tools.
@@ -135,8 +135,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         "add_project_image_to_release_cover",
         "generate_project_image",
         "edit_project_image",
-        "undo_authoring_action",
-        "redo_authoring_action",
     ];
 
     public async Task<PublishConversation> GetOrCreateAsync(
@@ -374,11 +372,9 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
             userMessage.Id,
             imageIds,
             cancellationToken);
-        await using var authoringTurn = new AuthoringTurnHistoryScope(
-            authoringHistory,
-            authoringMutationContext,
+        using var authoringTurn = authoringMutationContext.BeginAssistantTurn(
             userMessage.Id,
-            BuildAssistantHistoryLabel(userText));
+            BuildAssistantActionLabel(userText));
 
         IChatClient? chat = null;
         IList<AITool>? aiTools = null;
@@ -415,7 +411,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         }
         if (setupException is not null)
         {
-            if (setupCancelled) authoringTurn.Cancel(); else authoringTurn.Fail();
             yield return new PublishTurnError(
                 setupCancelled ? "Cancelled." : setupException.Message,
                 setupCancelled);
@@ -493,7 +488,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                                 : PublishMessageStatus.Failed;
                             activeAssistant.ErrorMessage = failed.Cancelled ? "Cancelled by user." : failed.Message;
                             await SafePersistAsync(activeAssistant);
-                            if (failed.Cancelled) authoringTurn.Cancel(); else authoringTurn.Fail();
                             yield return new PublishTurnError(failed.Message, failed.Cancelled);
                             yield break;
                     }
@@ -504,7 +498,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     activeAssistant.Status = PublishMessageStatus.Failed;
                     activeAssistant.ErrorMessage = "Publish chat streaming ended without a completed round.";
                     await SafePersistAsync(activeAssistant);
-                    authoringTurn.Fail();
                     yield return new PublishTurnError(activeAssistant.ErrorMessage, Cancelled: false);
                     yield break;
                 }
@@ -514,7 +507,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     activeAssistant.Content = completedRound.Text;
                     activeAssistant.Status = PublishMessageStatus.Completed;
                     await SafePersistAsync(activeAssistant);
-                    authoringTurn.Complete();
                     yield return new PublishAssistantMessageCompleted(activeAssistant.Id);
                     yield break;
                 }
@@ -539,7 +531,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                         activeAssistant.Status = PublishMessageStatus.Cancelled;
                         activeAssistant.ErrorMessage = "Cancelled by user.";
                         await SafePersistAsync(activeAssistant);
-                        authoringTurn.Cancel();
                         yield return new PublishTurnError("Cancelled.", Cancelled: true);
                         yield break;
                     }
@@ -552,7 +543,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                         activeAssistant.Status = PublishMessageStatus.Cancelled;
                         activeAssistant.ErrorMessage = "Cancelled by user.";
                         await SafePersistAsync(activeAssistant);
-                        authoringTurn.Cancel();
                         yield return new PublishTurnError("Cancelled.", Cancelled: true);
                         yield break;
                     }
@@ -681,7 +671,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     activeAssistant.Status = PublishMessageStatus.Failed;
                     activeAssistant.ErrorMessage = ChatTurnEngine.ToolLoopLimitError(maxIterations);
                     await SafePersistAsync(activeAssistant);
-                    authoringTurn.Fail();
                     yield return new PublishTurnError(
                         activeAssistant.ErrorMessage,
                         Cancelled: false);
@@ -695,7 +684,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         }
     }
 
-    private static string BuildAssistantHistoryLabel(string userText)
+    private static string BuildAssistantActionLabel(string userText)
     {
         var compact = string.Join(' ', userText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         if (compact.Length > 120)

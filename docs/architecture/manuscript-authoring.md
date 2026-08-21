@@ -4,7 +4,7 @@
 
 Read this chapter completely before changing the manuscript schema, chapter
 body persistence, semantic operations, editor bridge or toolbar, Core/release
-content targets, Book Text Styles, review annotations, persistent Undo/Redo,
+content targets, Book Text Styles, review annotations, process-lifetime Undo/Redo,
 assistant manuscript staging, authoring migrations, or any projection that
 turns semantic manuscript content into text or searchable/readable order.
 
@@ -21,7 +21,7 @@ schema/data upgrades.
 This chapter owns the current manuscript v4 document contract, target-aware
 chapter content, semantic editing operations, the ProseMirror adapter boundary,
 Book Text Styles and direct paragraph presentation, review annotations, and
-persistent authoring history. It also owns the manuscript-facing side of Figure
+in-process manual authoring history. It also owns the manuscript-facing side of Figure
 and Designed Page references; image bytes and composition scenes belong to the
 composition/media chapter.
 
@@ -227,47 +227,55 @@ assistant context. Tools can page open annotations and complete them, but not
 create or rewrite them. Under Review Edits, completion is a dependent staged
 change so rejecting the manuscript proposal preserves the annotation.
 
-### Persistent history and latest assistant review
+### In-process manual history and durable latest assistant review
 
-`IAuthoringHistoryService` owns SQLite-backed Undo/Redo for Core and release
-chapters, publication prose sections, complete Designed Page aggregates, and
-Core/release covers. Each stream stores a Brotli-compressed baseline and at most
-100 resulting action snapshots. Restoring an older snapshot always advances
-the domain revision. If the live snapshot no longer matches the stream cursor,
-the live document wins: the service discards the stale stream, establishes a
-new baseline, and treats the stale Undo/Redo request as a no-op. New work after
-Undo deletes the Redo branch.
+The singleton `IAuthoringHistoryRuntime` owns process-lifetime Undo/Redo for Core
+and release chapters, publication prose sections, complete Designed Page
+aggregates, and Core/release covers. It has no EF or SQLite dependency. Each
+target-isolated stream stores Brotli-fast compressed snapshots, retains at most
+100 manual actions, and participates in a 128 MiB process-wide budget. Navigation
+and page reloads retain streams while Lorekeeper is running; a full process exit
+clears them. History is never exported.
 
-Adjacent typing and IME activity within 500 ms coalesce into one persisted
-action. Paste, formatting, block conversion, Figure changes, and structural
-mutations force a boundary. Selection anchors use stable block IDs and offsets
-with a nearest-valid fallback. Removing a Designed Page detaches its composition
-instead of destroying it; Undo can restore the original IDs and scene, and
-pruning deletes detached resources only after live content and retained history
-stop referencing them.
+The owning domain service first commits the live document with its next revision,
+then records the successful manual before/after pair in memory. Undo and Redo
+restore through that same domain boundary and move the in-memory cursor only
+after the live commit succeeds. If the current live snapshot no longer matches
+the cursor, the live document wins: the runtime clears the stale stream, adopts
+the authoritative state, and treats the stale request as a no-op. New manual
+work after Undo deletes the Redo branch.
 
-Assistant history batches use the persisted outgoing user-message ID. The first
-successful mutation opens a batch per affected document, later tools update its
-after-state, and completion, Stop, cancellation, or failure finalizes committed
-work as one action. Startup finalizes abandoned batches from their last committed
-snapshot. Preview, conflict, failed, and staging-only calls create no action.
-Approval reconnects staged Editor changes to the originating turn so separate
-accepted tool calls still form one authoring action.
+Adjacent typing and IME activity within 500 ms coalesce into one action. Paste,
+formatting, block conversion, Figure changes, and structural mutations force a
+boundary. Selection anchors use stable block IDs and offsets with a nearest-valid
+fallback. Removing a Designed Page detaches its composition instead of destroying
+it; Undo can restore the original IDs and exact scene. At startup no in-memory
+stream can retain detached data, so orphaned detached compositions and variants
+are removed safely.
 
-Each chapter stream also keeps one latest applied-assistant review anchor: the
-immediately preceding manuscript JSON/hash, source turn, action label, and
-capture time. Once pending and Contest projections are resolved, Review compares
-that fixed Before state with live Current, so later manual edits remain visible.
-Undo, Redo, and manual reversion do not rewrite the anchor; a new assistant pass
-replaces it only after a net mutation commits. History and latest-review state
-are working-database data and are excluded from project export/import.
+Direct assistant mutations are never Undo/Redo actions. After a successful
+assistant commit, the owning service resets the affected target to the committed
+current snapshot, immediately invalidating its manual Undo/Redo buttons. Failed,
+cancelled, staged-only, conflicted, and no-op assistant work leaves history
+unchanged. Assistant history batches, completion statuses, abandoned-batch
+recovery, approval reconnection, and assistant-facing history tools are obsolete.
 
-History snapshots reference image, font, and composition dependencies rather
-than copying binary assets. Live dependencies are hard deletion blockers.
-History-only image/font deletion requires explicit Lorekeeper-owned confirmation
-and atomically clears affected streams. Deleting a chapter, publication section,
-release, or edition-content branch clears its owned history as lifecycle cleanup,
-not as an Undo action.
+`IAssistantReviewBaselineService` separately stores the latest applied-assistant
+review anchor for an exact Core/release chapter target: the immediately preceding
+canonical manuscript JSON/hash, source turn, action label, and capture time. The
+first successful chapter mutation in a turn stages this row in the same database
+commit as the manuscript; later mutations in that turn retain the first baseline.
+Once pending and Contest projections are resolved, Review compares that durable
+Before state with live Current, so later manual edits remain visible. Undo, Redo,
+and manual reversion do not rewrite it. A later successful assistant turn replaces
+it. Review baselines are working-database data and are excluded from export/import.
+
+In-memory snapshots index image, font, and composition dependencies rather than
+copying binary assets. Live dependencies are hard deletion blockers. History-only
+image/font deletion requires explicit Lorekeeper-owned confirmation to delete and
+clear the affected current-process streams. Deleting a chapter, publication
+section, release, edition-content branch, or entire project clears its owned
+streams as lifecycle cleanup, not as an Undo action.
 
 ### Migration and projection boundaries
 
@@ -298,7 +306,7 @@ every one of those consumers.
 | [`Lorekeeper/Manuscripts/EditorContentTarget.cs`](../../Lorekeeper/Manuscripts/EditorContentTarget.cs) | Protected Core/release target carried through manuscript, review, context, apply, and assistant operations. |
 | [`Lorekeeper/Manuscripts/ManuscriptStyleService.cs`](../../Lorekeeper/Manuscripts/ManuscriptStyleService.cs) and [`ManuscriptStyleTemplateExtractor.cs`](../../Lorekeeper/Manuscripts/ManuscriptStyleTemplateExtractor.cs) | Revision-safe Book Text Style ownership and the shared manual/assistant style-capture policy. |
 | [`Lorekeeper/Manuscripts/ManuscriptAnnotationModels.cs`](../../Lorekeeper/Manuscripts/ManuscriptAnnotationModels.cs) and [`ManuscriptAnnotationService.cs`](../../Lorekeeper/Manuscripts/ManuscriptAnnotationService.cs) | Exact-target sidecar annotation contract, rebasing, paging, state, and completion. |
-| [`Lorekeeper/Authoring/`](../../Lorekeeper/Authoring/) and [`Lorekeeper/Models/AuthoringHistoryModels.cs`](../../Lorekeeper/Models/AuthoringHistoryModels.cs) | Persistent history snapshots, assistant mutation batches, latest-review anchors, selection state, and dependency retention. |
+| [`Lorekeeper/Authoring/`](../../Lorekeeper/Authoring/) and [`Lorekeeper/Models/AssistantReviewBaseline.cs`](../../Lorekeeper/Models/AssistantReviewBaseline.cs) | In-process manual history runtime, selection/dependency state, assistant mutation identity, and the separate durable latest-review baseline. |
 | [`Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor`](../../Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor) and related Editor components | Shared semantic editor host, revision-aware autosave, Figure/style controls, Read/Review modes, annotations, and authoring workspace state. |
 | [`tools/semantic-editor/`](../../tools/semantic-editor/) and shipped bundle under `Lorekeeper/wwwroot/js/` | Exact-pinned ProseMirror schema/adapter source, deterministic build, shipped runtime, and notices. |
 | [`Lorekeeper/EditorChat/EditorManuscriptApplyService.cs`](../../Lorekeeper/EditorChat/EditorManuscriptApplyService.cs) | One-step assistant manuscript operation validation and apply/stage bridge over the canonical manuscript service. |

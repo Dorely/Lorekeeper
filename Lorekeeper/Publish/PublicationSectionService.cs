@@ -81,7 +81,7 @@ public sealed class PublicationSectionService(
     IPublicationBookService books,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IManuscriptStyleService manuscriptStyles,
-    IAuthoringHistoryService authoringHistory,
+    IAuthoringHistoryRuntime authoringHistory,
     IAuthoringMutationContextAccessor authoringMutationContext) : IPublicationSectionService
 {
     public async Task EnsureSystemSectionsAsync(Guid projectId, CancellationToken cancellationToken = default)
@@ -200,6 +200,7 @@ public sealed class PublicationSectionService(
 
         PublicationSection row;
         string? beforeHistory = null;
+        string? beforeSectionState = null;
         if (input.Id is Guid id)
         {
             row = await db.PublicationSections.SingleOrDefaultAsync(item => item.Id == id && item.ProjectId == target.ProjectId, cancellationToken)
@@ -223,6 +224,7 @@ public sealed class PublicationSectionService(
             var previousDocument = ManuscriptCodec.Deserialize(row.ManuscriptJson, row.Id, row.Revision);
             beforeHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
                 db, previousDocument, target.ProjectId, null, row.Id, target.EditionId, cancellationToken);
+            beforeSectionState = CaptureSectionState(row);
         }
         else
         {
@@ -240,21 +242,30 @@ public sealed class PublicationSectionService(
 
         Apply(row, input, document);
         await TouchTargetAsync(target, cancellationToken);
+        string? afterHistory = null;
         if (beforeHistory is not null)
         {
             var committedDocument = ManuscriptCodec.Deserialize(row.ManuscriptJson, row.Id, row.Revision);
-            var afterHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
+            afterHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
                 db, committedDocument, target.ProjectId, null, row.Id, target.EditionId, cancellationToken);
+            if (string.Equals(beforeHistory, afterHistory, StringComparison.Ordinal)
+                && string.Equals(beforeSectionState, CaptureSectionState(row), StringComparison.Ordinal))
+            {
+                db.ChangeTracker.Clear();
+                return await GetStoredAsync(target, row.Id, cancellationToken);
+            }
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        if (beforeHistory is not null && afterHistory is not null)
+        {
             var historyTarget = SectionHistoryTarget(target, row.Id);
             var context = authoringMutationContext.Current;
             if (context?.IsAssistant == true)
-                await authoringHistory.UpdateAssistantTurnBatchAsync(historyTarget, context.AssistantTurnId, beforeHistory, afterHistory, context.ActionLabel, cancellationToken: cancellationToken);
+                await authoringHistory.ResetToCurrentAsync(historyTarget, afterHistory, CancellationToken.None);
             else
                 await authoringHistory.RecordManualActionAsync(historyTarget, beforeHistory, afterHistory,
-                    AuthoringSnapshotCodec.DescribeManuscriptAction(beforeHistory, afterHistory, "publication section"), cancellationToken: cancellationToken);
+                    AuthoringSnapshotCodec.DescribeManuscriptAction(beforeHistory, afterHistory, "publication section"), cancellationToken: CancellationToken.None);
         }
-        else
-            await db.SaveChangesAsync(cancellationToken);
         return await GetStoredAsync(target, row.Id, cancellationToken);
     }
 
@@ -372,6 +383,7 @@ public sealed class PublicationSectionService(
             row.ManuscriptJson = ManuscriptCodec.Serialize(document);
             row.UpdatedAt = DateTime.UtcNow;
             await TouchTargetAsync(target, ct);
+            await db.SaveChangesAsync(ct);
         }
         var result = redo
             ? await authoringHistory.RedoAsync(historyTarget, current, Apply, cancellationToken)
@@ -573,10 +585,11 @@ public sealed class PublicationSectionService(
             ?? throw new KeyNotFoundException("Release publication section was not found.");
         if (row.CoreSectionId is null)
             throw new InvalidOperationException("A release-only section cannot be reset to Core Book.");
-        await ClearOwnedHistoryAsync(row, cancellationToken);
+        var historyTargets = await OwnedHistoryTargetsAsync(row, cancellationToken);
         db.PublicationSections.Remove(row);
         await TouchEditionAsync(editionId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        await ClearHistoryTargetsAsync(historyTargets, CancellationToken.None);
     }
 
     public async Task DeleteAsync(PublicationSectionTarget target, Guid sectionId, CancellationToken cancellationToken = default)
@@ -625,30 +638,42 @@ public sealed class PublicationSectionService(
                 throw new InvalidOperationException("The publication section belongs to another target.");
             if (row.SystemRole != PublicationSectionSystemRole.None)
                 throw new InvalidOperationException("Generated publication sections can be omitted but not deleted.");
-            await ClearOwnedHistoryAsync(row, cancellationToken);
+            var historyTargets = await OwnedHistoryTargetsAsync(row, cancellationToken);
             db.PublicationSections.Remove(row);
             await TouchTargetAsync(target, cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            await ClearHistoryTargetsAsync(historyTargets, CancellationToken.None);
+            return;
         }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private async Task ClearOwnedHistoryAsync(PublicationSection row, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<AuthoringHistoryTarget>> OwnedHistoryTargetsAsync(
+        PublicationSection row,
+        CancellationToken cancellationToken)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var db = databaseOperation.Db;
-        await authoringHistory.DeleteDocumentHistoryAsync(
-            row.ProjectId,
-            AuthoringHistoryDocumentKind.PublicationSection,
-            row.Id,
-            row.EditionId,
-            cancellationToken);
         var compositionIds = await db.PageCompositions.IgnoreQueryFilters().AsNoTracking()
             .Where(item => item.PublicationSectionId == row.Id)
             .Select(item => item.Id)
             .ToListAsync(cancellationToken);
-        foreach (var compositionId in compositionIds)
-            await authoringHistory.DeleteDocumentHistoryAsync(row.ProjectId, AuthoringHistoryDocumentKind.PageComposition, compositionId, cancellationToken: cancellationToken);
+        return
+        [
+            new AuthoringHistoryTarget(row.ProjectId, AuthoringHistoryDocumentKind.PublicationSection, row.Id, row.EditionId),
+            .. compositionIds.Select(compositionId =>
+                new AuthoringHistoryTarget(row.ProjectId, AuthoringHistoryDocumentKind.PageComposition, compositionId)),
+        ];
+    }
+
+    private async Task ClearHistoryTargetsAsync(
+        IReadOnlyList<AuthoringHistoryTarget> targets,
+        CancellationToken cancellationToken)
+    {
+        foreach (var target in targets)
+            await authoringHistory.ClearAsync(target, cancellationToken);
     }
 
     public async Task ReorderWithinAnchorAsync(
@@ -1146,6 +1171,22 @@ public sealed class PublicationSectionService(
         });
         row.UpdatedAt = DateTime.UtcNow;
     }
+
+    private static string CaptureSectionState(PublicationSection row) =>
+        AuthoringSnapshotCodec.Serialize(new
+        {
+            row.Title,
+            row.Kind,
+            row.Anchor,
+            row.TargetKind,
+            row.TargetId,
+            row.ActId,
+            row.ChapterId,
+            row.InclusionMode,
+            row.StartSide,
+            row.IsExcluded,
+            row.LocalOrder,
+        });
 
     private static void ValidateAnchor(PublicationSectionAnchor anchor, PublishOutlineTargetKind? kind, Guid? targetId)
     {

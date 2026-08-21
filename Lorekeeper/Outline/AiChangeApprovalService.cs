@@ -16,7 +16,7 @@ using Lorekeeper.Persistence.Repositories;
 namespace Lorekeeper.Outline;
 
 public sealed class AiChangeApprovalService(
-IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, ICompositionService compositions, IManuscriptStyleService manuscriptStyles, IEntityService entities, IVectorIndexWorkCoordinator indexWork, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages, IAuthoringHistoryService authoringHistory, IAuthoringMutationContextAccessor authoringMutationContext, ILogger<AiChangeApprovalService> logger) : IAiChangeApprovalService
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, ICompositionService compositions, IManuscriptStyleService manuscriptStyles, IEntityService entities, IVectorIndexWorkCoordinator indexWork, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages, IAuthoringMutationContextAccessor authoringMutationContext, ILogger<AiChangeApprovalService> logger) : IAiChangeApprovalService
 {
     private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
     {
@@ -165,10 +165,10 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             throw new InvalidOperationException(
                 "Line-by-line review is unavailable for edition-specific content. Keep or reject the complete structured manuscript change.");
 
-        // A line decision is still part of the originating assistant turn. Keep
-        // it on that turn's history stream so the first Keep/Edit pins the
-        // manuscript from before staging instead of recording a manual action.
-        await using var authoringTurn = await BeginReviewedEditorTurnAsync(aggregate.Batch, cancellationToken);
+        // A kept line remains assistant-authored. Carry the originating turn and
+        // staged before-state into the commit so Review compares the right baseline
+        // while process-lifetime manual Undo/Redo is invalidated.
+        using var authoringTurn = await BeginReviewedEditorTurnAsync(aggregate.Batch, cancellationToken);
 
         var chapter = await chapters.GetAsync(chapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {chapterId} not found.");
@@ -250,7 +250,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
 
         UpdateBatchStatus(aggregate.Batch);
         await databaseOperation.SaveChangesAsync(cancellationToken);
-        authoringTurn?.Complete();
     }
 
     public async Task ApplyBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
@@ -269,7 +268,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                     : conflict.ErrorMessage);
         }
 
-        await using var authoringTurn = await BeginReviewedEditorTurnAsync(batch, cancellationToken);
+        using var authoringTurn = await BeginReviewedEditorTurnAsync(batch, cancellationToken);
         await using var indexDeferral = indexWork.BeginDeferral();
         ExceptionDispatchInfo? capturedException = null;
         try
@@ -283,7 +282,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         }
         finally
         {
-            if (capturedException is null) authoringTurn?.Complete(); else authoringTurn?.Fail();
             UpdateBatchStatus(batch);
             await databaseOperation.SaveChangesAsync(CancellationToken.None);
             await indexDeferral.FlushAsync(CancellationToken.None);
@@ -300,7 +298,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         var change = await changes.GetChangeAsync(changeId, cancellationToken)
             ?? throw new InvalidOperationException($"AI change {changeId} not found.");
 
-        await using var authoringTurn = await BeginReviewedEditorTurnAsync(change.Batch, cancellationToken);
+        using var authoringTurn = await BeginReviewedEditorTurnAsync(change.Batch, cancellationToken);
         await using var indexDeferral = indexWork.BeginDeferral();
         ExceptionDispatchInfo? capturedException = null;
         try
@@ -313,7 +311,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         }
         finally
         {
-            if (capturedException is null) authoringTurn?.Complete(); else authoringTurn?.Fail();
             UpdateBatchStatus(change.Batch);
             await databaseOperation.SaveChangesAsync(CancellationToken.None);
             await indexDeferral.FlushAsync(CancellationToken.None);
@@ -353,24 +350,9 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 .GroupBy(change => change.Batch)
                 .OrderBy(group => group.Key.CreatedAt))
             {
-                var authoringTurn = await BeginReviewedEditorTurnAsync(group.Key, cancellationToken);
-                var groupFailed = false;
-                try
-                {
-                    foreach (var change in group.OrderBy(change => change.Order))
-                        await ApplyChangeCoreAsync(change.Batch, change, cancellationToken);
-                }
-                catch
-                {
-                    groupFailed = true;
-                    throw;
-                }
-                finally
-                {
-                    if (groupFailed) authoringTurn?.Fail(); else authoringTurn?.Complete();
-                    if (authoringTurn is not null)
-                        await authoringTurn.DisposeAsync();
-                }
+                using var authoringTurn = await BeginReviewedEditorTurnAsync(group.Key, cancellationToken);
+                foreach (var change in group.OrderBy(change => change.Order))
+                    await ApplyChangeCoreAsync(change.Batch, change, cancellationToken);
             }
         }
         catch (Exception ex)
@@ -388,7 +370,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         capturedException?.Throw();
     }
 
-    private async Task<AuthoringTurnHistoryScope?> BeginReviewedEditorTurnAsync(
+    private async Task<IDisposable?> BeginReviewedEditorTurnAsync(
         AiChangeBatch batch,
         CancellationToken cancellationToken)
     {
@@ -410,9 +392,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             : request.Content.Trim();
         if (summary.Length > 140)
             summary = summary[..140].TrimEnd() + "...";
-        return new AuthoringTurnHistoryScope(
-            authoringHistory,
-            authoringMutationContext,
+        return authoringMutationContext.BeginAssistantTurn(
             turnId,
             $"Assistant: {summary}",
             ReviewBaselinesFor(batch));

@@ -14,7 +14,7 @@
 @inject IProjectImageService Images
 @inject IProjectFontService Fonts
 @inject Lorekeeper.Composition.ICompositionService Compositions
-@inject IAuthoringHistoryService AuthoringHistory
+@inject IAuthoringHistoryRuntime AuthoringHistory
 
 <div class="@RootClass()">
     <div @ref="_root"></div>
@@ -390,7 +390,7 @@
     public async Task<object> GetAuthoringHistoryState()
     {
         var state = ReadHistoryOverrideAsync is null
-            ? await Manuscripts.GetHistoryStateAsync(ContentTarget, ChapterId)
+            ? await AuthoringHistory.ReadStateAsync(HistoryTarget())
             : await ReadHistoryOverrideAsync();
         return HistoryPayload(state);
     }
@@ -409,7 +409,8 @@
         {
             var result = await Manuscripts.UndoAsync(ContentTarget, ChapterId);
             await AnnotationsChanged.InvokeAsync();
-            return new(true, ManuscriptCodec.Serialize(result.Snapshot.Document), result.Snapshot.Revision,
+            var applied = !string.IsNullOrEmpty(result.ActionLabel);
+            return new(applied, applied ? ManuscriptCodec.Serialize(result.Snapshot.Document) : null, result.Snapshot.Revision,
                 result.History.CanUndo, result.History.CanRedo, result.History.UndoLabel, result.History.RedoLabel,
                 result.SelectionJson, null);
         }
@@ -433,7 +434,8 @@
         {
             var result = await Manuscripts.RedoAsync(ContentTarget, ChapterId);
             await AnnotationsChanged.InvokeAsync();
-            return new(true, ManuscriptCodec.Serialize(result.Snapshot.Document), result.Snapshot.Revision,
+            var applied = !string.IsNullOrEmpty(result.ActionLabel);
+            return new(applied, applied ? ManuscriptCodec.Serialize(result.Snapshot.Document) : null, result.Snapshot.Revision,
                 result.History.CanUndo, result.History.CanRedo, result.History.UndoLabel, result.History.RedoLabel,
                 result.SelectionJson, null);
         }
@@ -449,7 +451,6 @@
         state.CanRedo,
         state.UndoLabel,
         state.RedoLabel,
-        state.Revision,
     };
 
     private AuthoringHistoryTarget HistoryTarget()

@@ -4,6 +4,11 @@ using Lorekeeper.Startup;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using System.Data.Common;
+using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 
 namespace Lorekeeper.Persistence;
 
@@ -29,6 +34,8 @@ public sealed class DatabaseStartupMigrationService(
 {
     private const string PublicationSectionOrderMigrationId = "20260813204554_AddPublicationSectionOrderOverrides";
     private const string AuthoringHistoryMigrationId = "20260814202943_AddPersistentAuthoringHistoryV29";
+    internal const string AssistantReviewBaselineMigrationId = "20260821100000_AddAssistantReviewBaselines";
+    internal const string AuthoringHistoryCleanupMigrationId = "20260821100100_RemovePersistentAuthoringHistory";
 
     public async Task<bool> ApplyAsync(
         CancellationToken cancellationToken = default,
@@ -153,10 +160,409 @@ public sealed class DatabaseStartupMigrationService(
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await RemovePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await RemoveAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
+        // Run the review-baseline transition only after the existing startup
+        // migration stages have brought the schema to their final boundary.
+        // Calling EF Migrate to the new additive migration at the beginning
+        // would skip the owner services for earlier data migrations.
+        await PrepareAssistantReviewBaselineTransitionAsync(db, cancellationToken);
+        if (await recovery.IsRecoveryRequiredAsync(cancellationToken))
+            return false;
         await db.GetService<IMigrator>().MigrateAsync(cancellationToken: cancellationToken);
+        await CleanupDetachedCompositionsAsync(db, cancellationToken);
         await publicationSectionMigration.RepairSemanticRevisionDriftAsync(db, cancellationToken);
         return !await recovery.IsRecoveryRequiredAsync(cancellationToken);
     }
+
+    internal static async Task CleanupDetachedCompositionsAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        // Detached rows are retained only while an in-process history snapshot
+        // can restore them. History is empty before the first startup request,
+        // so remove detached variants first, then detached compositions with
+        // no remaining live variants. The guarded predicate preserves any
+        // unexpectedly live composition and all of its IDs/content.
+        await db.Database.ExecuteSqlRawAsync(
+            "DELETE FROM \"PageCompositionVariants\" WHERE \"DetachedAt\" IS NOT NULL;",
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            DELETE FROM "PageCompositions"
+            WHERE "DetachedAt" IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM "PageCompositionVariants" AS variants
+                  WHERE variants."CompositionId" = "PageCompositions"."Id");
+            """,
+            cancellationToken);
+        db.ChangeTracker.Clear();
+    }
+
+    private async Task PrepareAssistantReviewBaselineTransitionAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
+            .ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(AuthoringHistoryCleanupMigrationId))
+            return;
+
+        // The baseline backfill reads the legacy history and the following
+        // migration drops every history table. Keep both schema changes and
+        // the data transform behind one protected recovery boundary so a
+        // partially completed transition can always restore the source DB.
+        var backupPath = await recovery.CreateBackupAsync(
+            "authoring",
+            "pre-review-baseline-cleanup",
+            cancellationToken);
+        try
+        {
+            if (!applied.Contains(AssistantReviewBaselineMigrationId))
+            {
+                await db.GetService<IMigrator>().MigrateAsync(
+                    AssistantReviewBaselineMigrationId,
+                    cancellationToken);
+                db.ChangeTracker.Clear();
+            }
+
+            await BackfillAssistantReviewBaselinesAsync(db, cancellationToken);
+            await db.GetService<IMigrator>().MigrateAsync(
+                AuthoringHistoryCleanupMigrationId,
+                cancellationToken);
+            db.ChangeTracker.Clear();
+        }
+        catch (Exception exception)
+        {
+            await recovery.EnterRecoveryModeAsync(
+                db,
+                backupPath,
+                "assistant-review-baseline-v1",
+                29,
+                31,
+                exception,
+                cancellationToken);
+        }
+    }
+
+    internal static async Task BackfillAssistantReviewBaselinesAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        if (!await HasTableAsync(db, "AssistantReviewBaselines", cancellationToken)
+            || !await HasTableAsync(db, "AuthoringHistoryStreams", cancellationToken))
+            return;
+
+        var connection = db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+            await connection.OpenAsync(cancellationToken);
+
+        var streams = new List<LegacyReviewStream>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT Id, ProjectId, DocumentKind, DocumentId, EditionId,
+                       BaselineSnapshot, CursorSequence,
+                       LatestReviewBeforeJson, LatestReviewBeforeHash,
+                       LatestReviewAssistantTurnId, LatestReviewActionLabel,
+                       LatestReviewCapturedAt
+                FROM AuthoringHistoryStreams;
+                """;
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var kind = reader.GetString(2);
+                if (!string.Equals(kind, "CoreChapter", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(kind, "EditionChapter", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                streams.Add(new LegacyReviewStream(
+                    ReadGuid(reader, 0),
+                    ReadGuid(reader, 1),
+                    kind,
+                    ReadGuid(reader, 3),
+                    ReadNullableGuid(reader, 4),
+                    reader.IsDBNull(5) ? [] : (byte[])reader.GetValue(5),
+                    reader.GetInt64(6),
+                    reader.IsDBNull(7) ? null : reader.GetString(7),
+                    reader.IsDBNull(8) ? null : reader.GetString(8),
+                    ReadNullableGuid(reader, 9),
+                    reader.IsDBNull(10) ? null : reader.GetString(10),
+                    reader.IsDBNull(11) ? null : reader.GetDateTime(11)));
+            }
+        }
+
+        foreach (var stream in streams)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var target = TryReadChapterTarget(stream);
+            if (target is null)
+                continue;
+
+            var durableCandidate = TryReadDurableReviewCandidate(stream, target.ChapterId);
+            var entries = await ReadLegacyEntriesAsync(connection, stream.Id, stream.CursorSequence, cancellationToken);
+            var legacyCandidate = await FindLegacyReviewCandidateAsync(
+                stream,
+                target.ChapterId,
+                entries,
+                cancellationToken);
+            var candidate = durableCandidate;
+            if (legacyCandidate is not null
+                && (candidate is null || legacyCandidate.CapturedAt > candidate.CapturedAt))
+            {
+                candidate = legacyCandidate;
+            }
+            if (candidate is null)
+                continue;
+
+            var existing = await db.AssistantReviewBaselines
+                .AsTracking()
+                .SingleOrDefaultAsync(item => item.ProjectId == stream.ProjectId
+                    && item.ChapterId == target.ChapterId
+                    && item.TargetKey == target.TargetKey, cancellationToken);
+            if (existing is null)
+            {
+                db.AssistantReviewBaselines.Add(new Lorekeeper.Models.AssistantReviewBaseline
+                {
+                    ProjectId = stream.ProjectId,
+                    ChapterId = target.ChapterId,
+                    TargetKind = target.TargetKind,
+                    EditionId = target.EditionId,
+                    TargetKey = target.TargetKey,
+                    BeforeManuscriptJson = candidate.BeforeJson,
+                    BeforeHash = candidate.BeforeHash,
+                    AssistantTurnId = candidate.AssistantTurnId,
+                    ActionLabel = candidate.ActionLabel,
+                    CapturedAt = candidate.CapturedAt,
+                });
+            }
+            else if (candidate.CapturedAt > existing.CapturedAt)
+            {
+                existing.TargetKind = target.TargetKind;
+                existing.EditionId = target.EditionId;
+                existing.BeforeManuscriptJson = candidate.BeforeJson;
+                existing.BeforeHash = candidate.BeforeHash;
+                existing.AssistantTurnId = candidate.AssistantTurnId;
+                existing.ActionLabel = candidate.ActionLabel;
+                existing.CapturedAt = candidate.CapturedAt;
+            }
+        }
+
+        if (db.ChangeTracker.HasChanges())
+            await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static ReviewTarget? TryReadChapterTarget(LegacyReviewStream stream)
+    {
+        if (string.Equals(stream.DocumentKind, "CoreChapter", StringComparison.OrdinalIgnoreCase))
+            return new(EditorContentTargetKind.Core, null, "core", stream.DocumentId);
+        if (string.Equals(stream.DocumentKind, "EditionChapter", StringComparison.OrdinalIgnoreCase)
+            && stream.EditionId is Guid editionId
+            && editionId != Guid.Empty)
+        {
+            return new(
+                EditorContentTargetKind.Edition,
+                editionId,
+                $"edition:{editionId:N}",
+                stream.DocumentId);
+        }
+        return null;
+    }
+
+    private static ReviewCandidate? TryReadDurableReviewCandidate(
+        LegacyReviewStream stream,
+        Guid chapterId)
+    {
+        if (stream.LatestReviewCapturedAt is not DateTime capturedAt
+            || string.IsNullOrWhiteSpace(stream.LatestReviewBeforeJson)
+            || string.IsNullOrWhiteSpace(stream.LatestReviewBeforeHash))
+            return null;
+        return ValidateReviewCandidate(
+            stream.LatestReviewBeforeJson,
+            stream.LatestReviewBeforeHash,
+            chapterId,
+            stream.LatestReviewAssistantTurnId,
+            stream.LatestReviewActionLabel,
+            capturedAt);
+    }
+
+    private static Task<ReviewCandidate?> FindLegacyReviewCandidateAsync(
+        LegacyReviewStream stream,
+        Guid chapterId,
+        IReadOnlyList<LegacyReviewEntry> entries,
+        CancellationToken cancellationToken)
+    {
+        foreach (var entry in entries
+                     .Where(item => string.Equals(item.Origin, "Assistant", StringComparison.OrdinalIgnoreCase))
+                     .OrderByDescending(item => item.Sequence))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var preceding = entries.LastOrDefault(item => item.Sequence < entry.Sequence)?.ResultSnapshot
+                ?? stream.BaselineSnapshot;
+            var beforeJson = TryReadManuscriptJson(preceding);
+            if (beforeJson is null)
+                continue;
+            var candidate = ValidateReviewCandidate(
+                beforeJson,
+                Hash(beforeJson),
+                chapterId,
+                entry.AssistantTurnId,
+                entry.ActionLabel,
+                entry.CreatedAt);
+            if (candidate is not null)
+                return Task.FromResult<ReviewCandidate?>(candidate);
+        }
+        return Task.FromResult<ReviewCandidate?>(null);
+    }
+
+    private static ReviewCandidate? ValidateReviewCandidate(
+        string beforeJson,
+        string expectedHash,
+        Guid chapterId,
+        Guid? assistantTurnId,
+        string? actionLabel,
+        DateTime capturedAt)
+    {
+        try
+        {
+            var document = ManuscriptCodec.Deserialize(beforeJson);
+            if (document.ManuscriptId != chapterId
+                || !FixedEquals(Hash(beforeJson), expectedHash))
+                return null;
+            return new(
+                beforeJson,
+                Hash(beforeJson),
+                assistantTurnId,
+                string.IsNullOrWhiteSpace(actionLabel) ? "Assistant change" : actionLabel.Trim(),
+                capturedAt);
+        }
+        catch (Exception exception) when (exception is InvalidDataException or JsonException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static async Task<IReadOnlyList<LegacyReviewEntry>> ReadLegacyEntriesAsync(
+        DbConnection connection,
+        Guid streamId,
+        long cursorSequence,
+        CancellationToken cancellationToken)
+    {
+        var entries = new List<LegacyReviewEntry>();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT Sequence, Origin, AssistantTurnId, ResultSnapshot,
+                   ActionLabel, CreatedAt
+            FROM AuthoringHistoryEntries
+            WHERE StreamId = $streamId AND Sequence <= $cursorSequence
+            ORDER BY Sequence;
+            """;
+        AddParameter(command, "$streamId", streamId);
+        AddParameter(command, "$cursorSequence", cursorSequence);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            entries.Add(new LegacyReviewEntry(
+                reader.GetInt64(0),
+                reader.GetString(1),
+                ReadNullableGuid(reader, 2),
+                reader.IsDBNull(3) ? [] : (byte[])reader.GetValue(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4),
+                reader.GetDateTime(5)));
+        }
+        return entries;
+    }
+
+    private static string? TryReadManuscriptJson(byte[] compressedSnapshot)
+    {
+        if (compressedSnapshot.Length == 0)
+            return null;
+        try
+        {
+            using var input = new MemoryStream(compressedSnapshot);
+            using var brotli = new BrotliStream(input, CompressionMode.Decompress);
+            using var reader = new StreamReader(brotli, Encoding.UTF8);
+            using var document = JsonDocument.Parse(reader.ReadToEnd());
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                return null;
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (string.Equals(property.Name, "manuscriptJson", StringComparison.OrdinalIgnoreCase)
+                    && property.Value.ValueKind == JsonValueKind.String)
+                    return property.Value.GetString();
+            }
+        }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or JsonException)
+        {
+            // A corrupt or non-manuscript history snapshot must not block
+            // startup or become a Review baseline.
+        }
+        return null;
+    }
+
+    private static void AddParameter(DbCommand command, string name, object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
+    }
+
+    private static Guid ReadGuid(DbDataReader reader, int ordinal)
+    {
+        var value = reader.GetValue(ordinal);
+        return value switch
+        {
+            Guid id => id,
+            byte[] bytes when bytes.Length == 16 => new Guid(bytes),
+            _ => Guid.Parse(value.ToString()!),
+        };
+    }
+
+    private static Guid? ReadNullableGuid(DbDataReader reader, int ordinal) =>
+        reader.IsDBNull(ordinal) ? null : ReadGuid(reader, ordinal);
+
+    private static bool FixedEquals(string left, string right) =>
+        CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(left),
+            Encoding.UTF8.GetBytes(right));
+
+    private static string Hash(string value) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private sealed record LegacyReviewStream(
+        Guid Id,
+        Guid ProjectId,
+        string DocumentKind,
+        Guid DocumentId,
+        Guid? EditionId,
+        byte[] BaselineSnapshot,
+        long CursorSequence,
+        string? LatestReviewBeforeJson,
+        string? LatestReviewBeforeHash,
+        Guid? LatestReviewAssistantTurnId,
+        string? LatestReviewActionLabel,
+        DateTime? LatestReviewCapturedAt);
+
+    private sealed record LegacyReviewEntry(
+        long Sequence,
+        string Origin,
+        Guid? AssistantTurnId,
+        byte[] ResultSnapshot,
+        string? ActionLabel,
+        DateTime CreatedAt);
+
+    private sealed record ReviewTarget(
+        EditorContentTargetKind TargetKind,
+        Guid? EditionId,
+        string TargetKey,
+        Guid ChapterId);
+
+    private sealed record ReviewCandidate(
+        string BeforeJson,
+        string BeforeHash,
+        Guid? AssistantTurnId,
+        string ActionLabel,
+        DateTime CapturedAt);
 
     private static void Report(
         IProgress<DatabaseStartupMigrationProgress>? progress,

@@ -106,7 +106,7 @@ usage and affect every actual reference.
 The Editor assistant is locked to the selected target. Edition mode omits
 outline/canon mutations and cannot update or delete an existing shared style,
 although it may create and apply a reusable copy. Review annotations,
-contests, revision workers, history, Figures, Designed Pages, and previews all
+  contests, revision workers, process-lifetime manual history, Figures, Designed Pages, and previews all
 carry the same protected target. Publish can link to the exact Editor target
 for a difference or diagnostic, but does not become an edition manuscript
 authoring surface.
@@ -196,7 +196,7 @@ and cloning creates the editable continuation.
 |---|---|
 | `Lorekeeper/Publish/PublicationBookService.cs` | Core Book creation, metadata/presentation patches, chapter inclusion, reusable cover coordination, revisions, source fingerprints, and Core-plus-release effective configuration resolution. |
 | `Lorekeeper/Publish/IPublicationEditionService.cs` / `PublicationEditionService.cs` | Release lifecycle, sparse overrides, naming, cloning, archiving, comparison, and effective fingerprints. |
-| `Lorekeeper/Publish/PublicationSectionService.cs` | Core/release section lifecycle, inclusion, anchors, prose/designed boundaries, bindings, history, and release materialization. |
+| `Lorekeeper/Publish/PublicationSectionService.cs` | Core/release section lifecycle, inclusion, anchors, prose/designed boundaries, bindings, in-process manual history, and release materialization. |
 | `Lorekeeper/Publish/EditionContentService.cs` | Opt-in release content, chapter reset/discard, Core-drift differences, and release Designed Page diagnostics. |
 | `Lorekeeper/Publish/PublicationReleasePresetService.cs` | Safe release defaults for paperback, hardcover, EPUB ebook, and PDF ebook products. |
 | `Lorekeeper/Publish/PublishModels.cs` | Core/release targets, effective workspace/readiness, sparse mutations, sections, covers, preparation, and artifact contracts. |
@@ -228,7 +228,7 @@ and cloning creates the editable continuation.
   owns durable release/section/render rows, lock order, migrations, recovery,
   and import/export boundaries.
 - [`assistants-chat.md`](./assistants-chat.md) owns shared chat runtime,
-  context compaction, assistant turn history, and general tool protocol.
+  context compaction, assistant mutation identity, and general tool protocol.
 
 ## Relevant verification
 

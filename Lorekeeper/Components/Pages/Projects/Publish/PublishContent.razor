@@ -1,4 +1,5 @@
 @using Lorekeeper.Models
+@using Lorekeeper.Authoring
 @using Lorekeeper.Publish
 @using Lorekeeper.Manuscripts
 @using Lorekeeper.Composition
@@ -1167,7 +1168,7 @@ else
 
     private Task<Lorekeeper.Authoring.AuthoringHistoryState> ReadPublicationSectionHistoryAsync() =>
         _editingSection is null
-            ? Task.FromResult(new Lorekeeper.Authoring.AuthoringHistoryState(0, false, false, null, null, 0, 0))
+            ? Task.FromResult(new Lorekeeper.Authoring.AuthoringHistoryState(false, false, null, null))
             : PublicationSections.GetHistoryStateAsync(CurrentPublicationSectionTarget(), _editingSection.Id);
 
     private Task<ChapterBodyEditor.SemanticEditorHistoryResult> UndoPublicationSectionAsync() =>

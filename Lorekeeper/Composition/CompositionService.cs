@@ -57,7 +57,7 @@ public sealed class CompositionService(
     IManuscriptService manuscripts,
     IPublicationCoverService covers,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
-    IAuthoringHistoryService authoringHistory,
+    IAuthoringHistoryRuntime authoringHistory,
     IAuthoringMutationContextAccessor authoringMutationContext,
     ICompositionCanvasPreviewService canvasPreviews) : ICompositionService
 {
@@ -134,6 +134,7 @@ public sealed class CompositionService(
                 variant.DetachedAt = null;
             }
             await TouchProjectAsync(projectId, ct);
+            await db.SaveChangesAsync(ct);
         }
         var result = redo
             ? await authoringHistory.RedoAsync(historyTarget, current, Apply, cancellationToken)
@@ -157,7 +158,7 @@ public sealed class CompositionService(
         var target = CompositionHistoryTarget(projectId, composition.Id);
         var context = authoringMutationContext.Current;
         if (context?.IsAssistant == true)
-            await authoringHistory.UpdateAssistantTurnBatchAsync(target, context.AssistantTurnId, beforeHistory, afterHistory, context.ActionLabel, cancellationToken: cancellationToken);
+            await authoringHistory.ResetToCurrentAsync(target, afterHistory, cancellationToken);
         else
             await authoringHistory.RecordManualActionAsync(target, beforeHistory, afterHistory, label, cancellationToken: cancellationToken);
     }
@@ -845,7 +846,16 @@ public sealed class CompositionService(
         }
         variant.Composition.ActiveAuthoringVariantId = variant.Id;
         await TouchProjectAsync(projectId, cancellationToken);
-        await RecordCompositionMutationAsync(projectId, variant.Composition, beforeHistory, "Edit page layout", cancellationToken);
+        var afterHistory = AuthoringSnapshotCodec.CaptureComposition(variant.Composition);
+        if (string.Equals(beforeHistory, afterHistory, StringComparison.Ordinal))
+        {
+            db.ChangeTracker.Clear();
+            return await db.PageCompositionVariants.AsNoTracking()
+                .Include(item => item.Composition)
+                .SingleAsync(item => item.Id == variantId && item.Composition.ProjectId == projectId, cancellationToken);
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        await RecordCompositionMutationAsync(projectId, variant.Composition, beforeHistory, "Edit page layout", CancellationToken.None);
         return variant;
     }
 
@@ -1156,8 +1166,19 @@ public sealed class CompositionService(
         }
         composition.ActiveAuthoringVariantId = variant.Id;
         await TouchProjectAsync(projectId, cancellationToken);
-        await RecordCompositionMutationAsync(projectId, composition, beforeHistory, "Edit page layout", cancellationToken);
+        var afterHistory = AuthoringSnapshotCodec.CaptureComposition(composition);
+        if (string.Equals(beforeHistory, afterHistory, StringComparison.Ordinal))
+        {
+            db.ChangeTracker.Clear();
+            var currentVariant = await db.PageCompositionVariants.AsNoTracking()
+                .Include(item => item.Composition)
+                .ThenInclude(item => item.Variants.Where(other => other.DetachedAt == null))
+                .SingleAsync(item => item.Id == variantId && item.CompositionId == compositionId, cancellationToken);
+            return new CompositionWorkspaceSaveResult(currentVariant.Composition, currentVariant);
+        }
+        await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await RecordCompositionMutationAsync(projectId, composition, beforeHistory, "Edit page layout", CancellationToken.None);
         if (composition.ChapterId is Guid chapterId)
             await manuscripts.RefreshDerivedStateAsync(target, chapterId, cancellationToken);
         return new CompositionWorkspaceSaveResult(composition, variant);
@@ -1270,8 +1291,20 @@ public sealed class CompositionService(
         var chapterId = variant.Composition.ChapterId;
         db.CompositionMutationStages.Remove(stage);
         await TouchProjectAsync(projectId, cancellationToken);
-        await RecordCompositionMutationAsync(projectId, variant.Composition, beforeHistory, "Edit page layout", cancellationToken);
+        var afterHistory = AuthoringSnapshotCodec.CaptureComposition(variant.Composition);
+        if (string.Equals(beforeHistory, afterHistory, StringComparison.Ordinal))
+        {
+            db.ChangeTracker.Clear();
+            db.Entry(stage).State = EntityState.Deleted;
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return await db.PageCompositionVariants.AsNoTracking()
+                .Include(item => item.Composition)
+                .SingleAsync(item => item.Id == stage.TargetId && item.Composition.ProjectId == projectId, cancellationToken);
+        }
+        await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await RecordCompositionMutationAsync(projectId, variant.Composition, beforeHistory, "Edit page layout", CancellationToken.None);
         if (chapterId is Guid owningChapterId)
             await manuscripts.RefreshDerivedStateAsync(target, owningChapterId, cancellationToken);
         return variant;
@@ -1384,8 +1417,21 @@ public sealed class CompositionService(
         var chapterId = composition.ChapterId;
         db.CompositionMutationStages.Remove(stage);
         await TouchProjectAsync(projectId, cancellationToken);
-        await RecordCompositionMutationAsync(projectId, composition, beforeHistory, "Edit page text", cancellationToken);
+        var afterHistory = AuthoringSnapshotCodec.CaptureComposition(composition);
+        if (string.Equals(beforeHistory, afterHistory, StringComparison.Ordinal))
+        {
+            db.ChangeTracker.Clear();
+            db.Entry(stage).State = EntityState.Deleted;
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            var currentComposition = await db.PageCompositions.AsNoTracking()
+                .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
+                .SingleAsync(item => item.Id == stage.TargetId && item.ProjectId == projectId, cancellationToken);
+            return new CompositionSemanticMutationResult(currentComposition, []);
+        }
+        await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await RecordCompositionMutationAsync(projectId, composition, beforeHistory, "Edit page text", CancellationToken.None);
         if (chapterId is Guid owningChapterId)
             await manuscripts.RefreshDerivedStateAsync(target, owningChapterId, cancellationToken);
         return new CompositionSemanticMutationResult(composition, applied.ChangedBlockIds);
@@ -1537,8 +1583,22 @@ public sealed class CompositionService(
         variant.Composition.ActiveAuthoringVariantId = variant.Id;
         db.CompositionMutationStages.Remove(stage);
         await TouchProjectAsync(projectId, cancellationToken);
-        await RecordCompositionMutationAsync(projectId, variant.Composition, beforeHistory, "Edit page layout", cancellationToken);
+        var afterHistory = AuthoringSnapshotCodec.CaptureComposition(variant.Composition);
+        if (string.Equals(beforeHistory, afterHistory, StringComparison.Ordinal))
+        {
+            db.ChangeTracker.Clear();
+            db.Entry(stage).State = EntityState.Deleted;
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            var currentVariant = await db.PageCompositionVariants.AsNoTracking()
+                .Include(item => item.Composition)
+                .ThenInclude(item => item.Variants.Where(other => other.DetachedAt == null))
+                .SingleAsync(item => item.Id == payload.VariantId && item.CompositionId == stage.TargetId, cancellationToken);
+            return new CompositionWorkspaceMutationResult(currentVariant.Composition, currentVariant, []);
+        }
+        await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        await RecordCompositionMutationAsync(projectId, variant.Composition, beforeHistory, "Edit page layout", CancellationToken.None);
         if (variant.Composition.ChapterId is Guid chapterId)
             await manuscripts.RefreshDerivedStateAsync(target, chapterId, cancellationToken);
         return new CompositionWorkspaceMutationResult(variant.Composition, variant, applied.ChangedBlockIds);

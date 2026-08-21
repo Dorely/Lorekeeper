@@ -21,7 +21,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorChatService(
-    IAppDatabaseOperationFactory database, IChapterService chapters, IChatImageAttachmentService imageAttachments, IContextBuilder contextBuilder, IProjectImageService projectImages, IEntityVisualContextService entityVisualContext, IProjectImageGenerationRuntime imageRuntime, ILlmProviderService providerService, IChatClientFactory chatClientFactory, EditorChatTools tools, OutlineCollaborationTools outlineTools, IEditorContestService contestService, IEditorRevisionJobNotifier revisionJobNotifier, IEditorRevisionAgentService revisionAgents, IAiChangeApprovalService changeApproval, IServiceScopeFactory scopeFactory, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IAuthoringHistoryService authoringHistory, IAuthoringMutationContextAccessor authoringMutationContext, IOptions<AgentOptions> options, ILogger<EditorChatService> logger) : IEditorChatService
+    IAppDatabaseOperationFactory database, IChapterService chapters, IChatImageAttachmentService imageAttachments, IContextBuilder contextBuilder, IProjectImageService projectImages, IEntityVisualContextService entityVisualContext, IProjectImageGenerationRuntime imageRuntime, ILlmProviderService providerService, IChatClientFactory chatClientFactory, EditorChatTools tools, OutlineCollaborationTools outlineTools, IEditorContestService contestService, IEditorRevisionJobNotifier revisionJobNotifier, IEditorRevisionAgentService revisionAgents, IAiChangeApprovalService changeApproval, IServiceScopeFactory scopeFactory, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IAuthoringMutationContextAccessor authoringMutationContext, IOptions<AgentOptions> options, ILogger<EditorChatService> logger) : IEditorChatService
 {
     private const string _initialAssistantGreeting =
         "I'm ready to work on the draft with you. Tell me what you want to shape, revise, or check in the current chapter.";
@@ -245,11 +245,9 @@ public sealed class EditorChatService(
         conversation.UpdatedAt = DateTime.UtcNow;
         await turnEngine.AddMessageAsync(repositories => repositories.EditorConversations, userMessage, cancellationToken);
         await imageAttachments.PersistAsync(projectId, ChatTurnSurface.Editor, userMessage.Id, imageIds, cancellationToken);
-        await using var authoringTurn = new AuthoringTurnHistoryScope(
-            authoringHistory,
-            authoringMutationContext,
+        using var authoringTurn = authoringMutationContext.BeginAssistantTurn(
             userMessage.Id,
-            BuildAssistantHistoryLabel(userText, "Edit"));
+            BuildAssistantActionLabel(userText, "Edit"));
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
@@ -329,7 +327,6 @@ public sealed class EditorChatService(
         }
         if (setupError is not null)
         {
-            authoringTurn.Fail();
             yield return new EditorChatTurnError(setupError, Cancelled: false);
             yield break;
         }
@@ -402,7 +399,6 @@ public sealed class EditorChatService(
                             : EditorMessageStatus.Failed;
                         activeAssistant.ErrorMessage = failed.Cancelled ? "Cancelled by user." : failed.Message;
                         await SafePersistAsync(activeAssistant);
-                        if (failed.Cancelled) authoringTurn.Cancel(); else authoringTurn.Fail();
                         yield return new EditorChatTurnError(failed.Message, failed.Cancelled);
                         yield break;
                 }
@@ -414,7 +410,6 @@ public sealed class EditorChatService(
                 activeAssistant.Status = EditorMessageStatus.Failed;
                 activeAssistant.ErrorMessage = "Editor chat streaming ended without a completed round.";
                 await SafePersistAsync(activeAssistant);
-                authoringTurn.Fail();
                 yield return new EditorChatTurnError(activeAssistant.ErrorMessage, Cancelled: false);
                 yield break;
             }
@@ -428,8 +423,6 @@ public sealed class EditorChatService(
                 activeAssistant.Status = EditorMessageStatus.Completed;
                 await SafePersistAsync(activeAssistant);
 
-                authoringTurn.Complete();
-                await authoringTurn.DisposeAsync();
                 yield return new EditorChatAssistantMessageCompleted(activeAssistant.Id);
                 yield break;
             }
@@ -441,7 +434,6 @@ public sealed class EditorChatService(
                 activeAssistant.Status = EditorMessageStatus.Failed;
                 activeAssistant.ErrorMessage = "start_contest must be the final tool call in a Contest Mode turn.";
                 await SafePersistAsync(activeAssistant);
-                authoringTurn.Fail();
                 yield return new EditorChatTurnError(activeAssistant.ErrorMessage, Cancelled: false);
                 yield break;
             }
@@ -471,7 +463,6 @@ public sealed class EditorChatService(
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    authoringTurn.Cancel();
                     yield return new EditorChatTurnError("Cancelled.", Cancelled: true);
                     yield break;
                 }
@@ -713,8 +704,6 @@ public sealed class EditorChatService(
                         }
                     }
 
-                    authoringTurn.Complete();
-                    await authoringTurn.DisposeAsync();
                     yield return new EditorChatAssistantMessageCompleted(activeAssistant.Id);
                     yield break;
                 }
@@ -763,7 +752,6 @@ public sealed class EditorChatService(
 
             if (iteration == maxIterations - 1)
             {
-                authoringTurn.Fail();
                 yield return new EditorChatTurnError(ChatTurnEngine.ToolLoopLimitError(maxIterations), Cancelled: false);
                 yield break;
             }
@@ -1126,7 +1114,7 @@ public sealed class EditorChatService(
         }
     }
 
-    private static string BuildAssistantHistoryLabel(string userText, string surface)
+    private static string BuildAssistantActionLabel(string userText, string surface)
     {
         var compact = string.Join(' ', userText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         if (compact.Length > 120)

@@ -2649,6 +2649,10 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             const result = await dotNetRef.invokeMethodAsync(
                 redoDirection ? "OnRedoAuthoring" : "OnUndoAuthoring");
             if (!result?.applied) {
+                if (result) {
+                    persistentHistoryState = result;
+                    updateFormattingControls();
+                }
                 status.textContent = result?.error || (redoDirection ? "Nothing to redo." : "Nothing to undo.");
                 return false;
             }
@@ -2686,6 +2690,10 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         },
         setDocument(json) {
             replaceDocument(json);
+            return dotNetRef.invokeMethodAsync("GetAuthoringHistoryState").then(state => {
+                persistentHistoryState = state;
+                updateFormattingControls();
+            }).catch(() => {});
         },
         setAnnotations(json) {
             reviewAnnotations = typeof json === "string" ? JSON.parse(json) : json;

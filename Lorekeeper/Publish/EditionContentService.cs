@@ -60,7 +60,7 @@ public sealed class EditionContentService(
     IProjectSearchIndex projectSearch,
     IVectorStore vectors,
     IManuscriptAnnotationService annotations,
-    IAuthoringHistoryService? authoringHistory = null) : IEditionContentService
+    IAuthoringHistoryRuntime? authoringHistory = null) : IEditionContentService
 {
     public async Task<IReadOnlyList<EditionContentReleaseView>> ListReleasesAsync(
         Guid projectId,
@@ -112,6 +112,7 @@ public sealed class EditionContentService(
         if (!enabled && edition.ChapterOverrides.Count > 0 && !confirmDiscard)
             throw new InvalidOperationException("Disabling edition-specific content will discard every divergent chapter and its edition layouts. Confirmation is required.");
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var discardedHistoryTargets = new List<AuthoringHistoryTarget>();
         if (!enabled)
         {
             var activeReview = await db.AiChangeBatches.AsNoTracking().AnyAsync(
@@ -145,12 +146,16 @@ public sealed class EditionContentService(
                 var sourceId = chapterOverride.Id.ToString("N");
                 await projectSearch.DeleteBySourceAsync(ProjectSearchSourceTypes.EditionChapter, sourceId, scopeKey, cancellationToken);
                 await vectors.DeleteBySourceAsync(ProjectSearchSourceTypes.EditionChapter, sourceId, scopeKey, cancellationToken);
-                if (authoringHistory is not null)
-                    await authoringHistory.DeleteDocumentHistoryAsync(projectId, AuthoringHistoryDocumentKind.EditionChapter, chapterOverride.ChapterId, editionId, cancellationToken);
+                discardedHistoryTargets.Add(new(
+                    projectId,
+                    AuthoringHistoryDocumentKind.EditionChapter,
+                    chapterOverride.ChapterId,
+                    editionId));
             }
-            if (authoringHistory is not null)
-                foreach (var composition in compositions)
-                    await authoringHistory.DeleteDocumentHistoryAsync(projectId, AuthoringHistoryDocumentKind.PageComposition, composition.Id, cancellationToken: cancellationToken);
+            discardedHistoryTargets.AddRange(compositions.Select(composition => new AuthoringHistoryTarget(
+                projectId,
+                AuthoringHistoryDocumentKind.PageComposition,
+                composition.Id)));
             db.PageCompositions.RemoveRange(compositions);
             db.PublicationEditionChapterOverrides.RemoveRange(edition.ChapterOverrides);
             var editionAnnotations = await db.ManuscriptAnnotations
@@ -163,6 +168,9 @@ public sealed class EditionContentService(
         edition.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        if (authoringHistory is not null)
+            foreach (var historyTarget in discardedHistoryTargets)
+                await authoringHistory.ClearAsync(historyTarget, CancellationToken.None);
         return new EditionContentReleaseView(edition.Id, edition.Name, enabled, false, enabled ? edition.ChapterOverrides.Count : 0);
     }
 
@@ -221,12 +229,14 @@ public sealed class EditionContentService(
         var sourceId = chapterOverride.Id.ToString("N");
         await projectSearch.DeleteBySourceAsync(ProjectSearchSourceTypes.EditionChapter, sourceId, scopeKey, cancellationToken);
         await vectors.DeleteBySourceAsync(ProjectSearchSourceTypes.EditionChapter, sourceId, scopeKey, cancellationToken);
-        if (authoringHistory is not null)
+        var discardedHistoryTargets = new List<AuthoringHistoryTarget>
         {
-            await authoringHistory.DeleteDocumentHistoryAsync(projectId, AuthoringHistoryDocumentKind.EditionChapter, chapterId, editionId, cancellationToken);
-            foreach (var composition in compositions)
-                await authoringHistory.DeleteDocumentHistoryAsync(projectId, AuthoringHistoryDocumentKind.PageComposition, composition.Id, cancellationToken: cancellationToken);
-        }
+            new(projectId, AuthoringHistoryDocumentKind.EditionChapter, chapterId, editionId),
+        };
+        discardedHistoryTargets.AddRange(compositions.Select(composition => new AuthoringHistoryTarget(
+            projectId,
+            AuthoringHistoryDocumentKind.PageComposition,
+            composition.Id)));
         db.PageCompositions.RemoveRange(compositions);
         db.PublicationEditionChapterOverrides.Remove(chapterOverride);
         var chapter = await db.Chapters.AsNoTracking().SingleAsync(
@@ -239,6 +249,9 @@ public sealed class EditionContentService(
         edition.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        if (authoringHistory is not null)
+            foreach (var historyTarget in discardedHistoryTargets)
+                await authoringHistory.ClearAsync(historyTarget, CancellationToken.None);
     }
 
     public async Task<IReadOnlyList<EditionChapterDifference>> ReadDifferencesAsync(

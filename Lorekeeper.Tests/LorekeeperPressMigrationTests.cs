@@ -533,7 +533,7 @@ public sealed class LorekeeperPressMigrationTests
                     reference => Assert.Equal(pictureSecondBlockId, reference.BlockId));
                 Assert.Equal(32, text.FontSizePoints);
                 Assert.Equal(CompositionTextShadow.Soft, text.TextShadow);
-                var history = new AuthoringHistoryService(database);
+                var history = new AuthoringHistoryRuntime();
                 var historyTarget = new AuthoringHistoryTarget(
                     pictureProjectId,
                     AuthoringHistoryDocumentKind.PageComposition,
@@ -544,10 +544,18 @@ public sealed class LorekeeperPressMigrationTests
                     "{\"state\":\"after\"}",
                     "Migration history usability check");
                 Assert.True(historyState.CanUndo);
-                Assert.Single(await db.AuthoringHistoryStreams.AsNoTracking()
-                    .Where(item => item.ProjectId == pictureProjectId)
-                    .ToListAsync());
-                Assert.Single(await db.AuthoringHistoryEntries.AsNoTracking().ToListAsync());
+                var obsoleteHistoryTables = await db.Database.SqlQueryRaw<int>(
+                    """
+                    SELECT COUNT(*) AS Value
+                    FROM sqlite_master
+                    WHERE type = 'table'
+                      AND name IN (
+                          'AuthoringHistoryStreams',
+                          'AuthoringHistoryEntries',
+                          'AuthoringTurnHistoryBatches',
+                          'AuthoringHistoryDependencies')
+                    """).SingleAsync();
+                Assert.Equal(0, obsoleteHistoryTables);
                 Assert.Equal(
                     pictureImageBytes,
                     (await db.PublishAssets.AsNoTracking().SingleAsync(item => item.Id == pictureImageId)).Data);

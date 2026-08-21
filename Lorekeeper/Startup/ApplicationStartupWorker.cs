@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using Lorekeeper.Authoring;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
@@ -31,16 +30,9 @@ public sealed class ApplicationStartupWorker(
             }
 
             startup.ReportInitialization(
-                "Recovering interrupted work",
-                "Closing authoring batches that were interrupted by an earlier shutdown.",
-                76);
-            await scope.ServiceProvider.GetRequiredService<IAuthoringHistoryService>()
-                .FinalizeAbandonedBatchesAsync(stoppingToken);
-
-            startup.ReportInitialization(
                 "Preparing search memory",
                 "Initializing local search and semantic-memory storage.",
-                84);
+                76);
             var database = scope.ServiceProvider.GetRequiredService<IAppDatabaseOperationFactory>();
             int? embeddingDimensions;
             IReadOnlyList<Guid> projectIds;

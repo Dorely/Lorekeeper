@@ -215,7 +215,7 @@ composition, Core/release fingerprints, and artifact freshness.
 | `Lorekeeper/Composition/CompositionCanvasPreviewService.cs` | Exact transient clean/annotated page and cover canvas rasterization. |
 | `Lorekeeper/Composition/ProjectPageSetupService.cs` | Project authoring geometry, typography, setup revisions, and transactional reflow. |
 | `Lorekeeper/Composition/CompositionAgentPayloads.cs` | Bounded assistant reads and revision-safe scene/object/style patch envelopes. |
-| `Lorekeeper/Fonts/` and `ProjectFont*` models | Bundled/imported font catalogs, static-face validation, bytes, URLs, and live/history use guards. |
+| `Lorekeeper/Fonts/` and `ProjectFont*` models | Bundled/imported font catalogs, static-face validation, bytes, URLs, and live/in-process-history use guards. |
 | `Lorekeeper/Components/Pages/Projects/DesignedPageWorkspace.razor` | Canvas-first authoring interaction, variant selection, autosave, diagnostics, and history refresh. |
 | `Lorekeeper/Components/Pages/Projects/CoverCompositionWorkspace.razor` | Shared visual shell for cover editing; publication ownership remains in Publish services. |
 | `Lorekeeper/wwwroot/js/composition-workspace.js` | Measured stage, pointer capture, image geometry, text editing, selection, and formatting bridges. |
@@ -230,7 +230,7 @@ composition, Core/release fingerprints, and artifact freshness.
   covers, native rendering, PDF/EPUB validation, artifacts, and packages.
 - [`persistence-migrations-import.md`](./persistence-migrations-import.md)
   owns SQLite/EF persistence, migrations, recovery, import/export, and durable
-  asset/history relationships.
+  live-asset relationships. Manual history dependency retention is process memory.
 - [`assistants-chat.md`](./assistants-chat.md) owns shared chat turns, tool
   staging, assistant context, and model-visible visual preview protocol.
 

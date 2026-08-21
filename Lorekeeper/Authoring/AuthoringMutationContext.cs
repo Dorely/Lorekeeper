@@ -1,7 +1,5 @@
 namespace Lorekeeper.Authoring;
 
-using Lorekeeper.Models;
-
 public sealed record AuthoringMutationContext(
     Guid AssistantTurnId,
     string ActionLabel,
@@ -56,39 +54,5 @@ public sealed class AuthoringMutationContextAccessor : IAuthoringMutationContext
     {
         private Action? _dispose = dispose;
         public void Dispose() => Interlocked.Exchange(ref _dispose, null)?.Invoke();
-    }
-}
-
-public sealed class AuthoringTurnHistoryScope : IAsyncDisposable
-{
-    private readonly IAuthoringHistoryService _history;
-    private readonly Guid _turnId;
-    private readonly IDisposable _mutationScope;
-    private AuthoringTurnHistoryBatchStatus _status = AuthoringTurnHistoryBatchStatus.Stopped;
-    private bool _disposed;
-
-    public AuthoringTurnHistoryScope(
-        IAuthoringHistoryService history,
-        IAuthoringMutationContextAccessor mutationContext,
-        Guid turnId,
-        string actionLabel,
-        IReadOnlyDictionary<Guid, string>? reviewBaselineManuscripts = null)
-    {
-        _history = history;
-        _turnId = turnId;
-        _mutationScope = mutationContext.BeginAssistantTurn(turnId, actionLabel, reviewBaselineManuscripts);
-    }
-
-    public void Complete() => _status = AuthoringTurnHistoryBatchStatus.Completed;
-    public void Fail() => _status = AuthoringTurnHistoryBatchStatus.Failed;
-    public void Cancel() => _status = AuthoringTurnHistoryBatchStatus.Cancelled;
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_disposed)
-            return;
-        _disposed = true;
-        _mutationScope.Dispose();
-        await _history.FinalizeAssistantTurnAsync(_turnId, _status, CancellationToken.None);
     }
 }

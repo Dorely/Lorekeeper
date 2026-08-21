@@ -15,7 +15,7 @@ public sealed class ProjectImageService(
     IProjectImageGenerationRuntime imageRuntime,
     IOptions<ProjectImageGenerationOptions> imageOptions,
     IContextIndexingService contextIndexing,
-    IAuthoringHistoryService authoringHistory) : IProjectImageService
+    IAuthoringHistoryRuntime authoringHistory) : IProjectImageService
 {
     public async Task<IReadOnlyList<ProjectImageView>> ListAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -399,14 +399,14 @@ public sealed class ProjectImageService(
         var dependentHistory = await authoringHistory.FindDependentStreamsAsync(
             projectId, AuthoringHistoryDependencyKind.ProjectImage, imageId, cancellationToken);
         if (dependentHistory.Count > 0 && !clearAffectedHistory)
-            throw new InvalidOperationException($"AUTHORING_HISTORY_DEPENDENCY: This image is retained by {dependentHistory.Count} Undo/Redo histor{(dependentHistory.Count == 1 ? "y" : "ies")}. Delete it and clear the affected history?");
-        if (dependentHistory.Count > 0)
-            await authoringHistory.ClearDependentStreamsAsync(projectId, AuthoringHistoryDependencyKind.ProjectImage, imageId, cancellationToken);
+            throw new InvalidOperationException($"AUTHORING_HISTORY_DEPENDENCY: This image is retained by {dependentHistory.Count} current in-process Undo/Redo histor{(dependentHistory.Count == 1 ? "y" : "ies")}. Delete it and clear the affected history?");
 
         db.PublishAssets.Remove(asset);
         project.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        if (dependentHistory.Count > 0)
+            await authoringHistory.ClearDependentStreamsAsync(projectId, AuthoringHistoryDependencyKind.ProjectImage, imageId, CancellationToken.None);
         await transaction.DisposeAsync();
         await databaseOperation.DisposeAsync();
         foreach (var entityId in entityIds)

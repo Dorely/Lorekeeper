@@ -11,7 +11,7 @@
 @inject IManuscriptService Manuscripts
 @inject IProjectImageService Images
 @inject IProjectFontService ProjectFonts
-@inject IAuthoringHistoryService AuthoringHistory
+@inject IAuthoringHistoryRuntime AuthoringHistory
 @inject IJSRuntime JS
 
 <section class="composition-workspace @(InteractionLocked ? "composition-workspace--locked" : null)" aria-label="Designed page workspace" aria-disabled="@InteractionLocked" inert="@(InteractionLocked ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
@@ -302,7 +302,7 @@
     private CompositionEditionGeometry? _authoringGeometry;
     private IReadOnlyList<ProjectImageView> _images = [];
     private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = [];
-    private Lorekeeper.Authoring.AuthoringHistoryState _history = new(0, false, false, null, null, 0, 0);
+    private Lorekeeper.Authoring.AuthoringHistoryState _history = new(false, false, null, null);
     private string UndoTitle => _history.UndoLabel is null ? "Nothing to undo" : $"Undo {_history.UndoLabel}";
     private string RedoTitle => _history.RedoLabel is null ? "Nothing to redo" : $"Redo {_history.RedoLabel}";
     private bool _newRetainAspectRatio = true;

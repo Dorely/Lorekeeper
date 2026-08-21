@@ -12,7 +12,7 @@
 @inject IPublicationEditionService Editions
 @inject IProjectImageService Images
 @inject IProjectFontService ProjectFonts
-@inject IAuthoringHistoryService AuthoringHistory
+@inject IAuthoringHistoryRuntime AuthoringHistory
 @inject IPrintProductRegistry PrintProducts
 @inject IJSRuntime JS
 
@@ -240,7 +240,7 @@
     [Parameter] public EventCallback Back { get; set; }
     private PublicationCoverDesignView? _cover; private PublicationEditionSummary? _edition; private CompositionScene? _scene;
     private List<CompositionObject> _objects = []; private List<CompositionLayer> _layers = []; private List<CompositionObjectStyle> _styles = []; private IReadOnlyList<ProjectImageView> _images = []; private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = []; private Guid? _selectedId;
-    private Lorekeeper.Authoring.AuthoringHistoryState _history = new(0, false, false, null, null, 0, 0);
+    private Lorekeeper.Authoring.AuthoringHistoryState _history = new(false, false, null, null);
     private string UndoTitle => _history.UndoLabel is null ? "Nothing to undo" : $"Undo {_history.UndoLabel}";
     private string RedoTitle => _history.RedoLabel is null ? "Nothing to redo" : $"Redo {_history.RedoLabel}";
     private readonly SemaphoreSlim _saveGate = new(1, 1);
