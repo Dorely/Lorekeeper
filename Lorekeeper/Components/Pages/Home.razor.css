@@ -16,7 +16,8 @@
 .project-name { font-family: Georgia, "Times New Roman", serif; font-size: 1.12rem; font-weight: 650; }
 .project-meta { color: var(--lk-accent); font-size: 0.72rem; margin-top: 0.15rem; overflow-wrap: anywhere; }
 .project-updated { color: var(--lk-muted); font-size: 0.75rem; margin-top: auto; padding-top: 1rem; }
-.project-card-actions { align-items: center; background: var(--lk-soft); border-top: 1px solid var(--lk-line); display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0.55rem 0.65rem; }
+.project-card-actions { align-items: center; background: var(--lk-soft); border-top: 1px solid var(--lk-line); display: flex; flex-wrap: nowrap; gap: 0.3rem; padding: 0.55rem 0.6rem; }
+.project-card-actions .btn { padding-inline: 0.35rem; white-space: nowrap; }
 .project-card-state { display: grid; gap: 0.75rem; padding: 1rem; }
 .project-card-state h3 { font-family: Georgia, "Times New Roman", serif; font-size: 1.05rem; margin: 0; }
 .project-card-state p { color: var(--lk-muted); font-size: 0.82rem; margin: 0; }
