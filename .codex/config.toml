@@ -1,0 +1,23 @@
+[mcp_servers.roslynk]
+command = "dotnet"
+args = ["dnx", "Roslynk@1.1.0", "--yes", "--", "stdio"]
+enabled = true
+required = false
+startup_timeout_sec = 120
+tool_timeout_sec = 180
+enabled_tools = [
+  "open_solution",
+  "get_solution_status",
+  "get_diagnostics",
+  "find_references",
+  "get_callers",
+  "find_definition",
+  "find_implementations",
+  "get_members",
+  "get_symbol",
+  "get_type_hierarchy",
+  "search_symbols",
+  "find_dead_code",
+  "find_dead_conditionals",
+  "get_code_actions",
+]

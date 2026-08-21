@@ -23,6 +23,7 @@
 | `global.json` | Pins the .NET SDK version (`rollForward: latestFeature`). |
 | `.editorconfig` | C#/Razor formatting and naming rules. |
 | `.gitignore` | Standard .NET ignore patterns plus Lorekeeper local SQLite/temp data; publish output is scoped to the repo-root `/publish/` folder so source folders named `Publish` remain trackable. |
+| `.codex/config.toml` | Project-scoped Codex MCP configuration pinning Roslynk with a read-only semantic-analysis tool allowlist. |
 | `.vscode/launch.json` | VS Code debug configurations; default F5 entry launches the Electron desktop shell, with a secondary web-hosted profile. |
 | `.vscode/tasks.json` | VS Code build task used by debug launch configurations. |
 | `.github/workflows/build-macos-release.yml` | Dispatch-only Apple Silicon macOS release builder and verifier; uploads one correlated arm64 DMG for the Windows release orchestrator. |

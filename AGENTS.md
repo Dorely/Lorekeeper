@@ -49,6 +49,37 @@
 - For nontrivial work, form an impact plan before editing and keep it current as
   new dependencies are discovered.
 
+## Roslynk Semantic Workflow
+
+- The project-scoped `.codex/config.toml` pins Roslynk and intentionally exposes
+  only its read-only tools. When available, use Roslynk first for compiled C# and
+  Razor semantic questions: diagnostics, symbols, definitions, references,
+  callers, implementations, type hierarchies, code-action discovery, and
+  dead-code candidates. Continue to use `rg` and host file reads for text search
+  and files outside the compiled solution, and use the host `apply_patch` tool
+  for edits.
+  Roslynk is not required, so fall back to normal repository tools if it cannot
+  start without weakening verification.
+- Start a Roslynk session by calling `open_solution` with the absolute path to
+  `Lorekeeper.sln`. If indexing is incomplete, poll `get_solution_status` before
+  relying on other results.
+- Roslynk supplements rather than replaces repository impact analysis. Continue
+  to use `rg`, inspect callers and consumers, and run all required builds, tests,
+  startup checks, native checks, JavaScript checks, and documentation review.
+  Treat Roslynk diagnostics as fast edit-loop feedback, not final verification.
+- Do not call `reload_solution` proactively. Roslynk watches the workspace; if
+  its view appears stale, report the evidence and ask before forcing a reload.
+- Treat dead-code and missing-code-action results as candidates, not proof.
+  Confirm reflection, dependency-injection, serialization, external-boundary,
+  and analyzer behavior in source. Roslynk 1.1.0 does not reliably surface code
+  fixes from every third-party analyzer.
+- Open only this trusted solution. Roslyn analysis can execute the solution's
+  analyzers and source generators in the local Roslynk process, so the read-only
+  tool allowlist is not a security sandbox. The loopback daemon may outlive its
+  stdio bridge and write `%LOCALAPPDATA%\Roslynk\daemon.log`; never expose it or
+  load unrelated sensitive workspaces. Daemon-wide status can include every
+  solution that process has loaded.
+
 ## Implementation Standards
 
 - Deliver the smallest coherent change that fully completes the requested

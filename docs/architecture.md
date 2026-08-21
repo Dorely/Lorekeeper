@@ -1816,6 +1816,13 @@ OAuth, persistence, Blazor limits, token counting, image generation, ingest,
 embeddings, agents, and web research. Avoid hard-coding configuration in
 components or feature entities.
 
+Project-only Codex development tooling lives in `.codex/config.toml`. Roslynk is
+pinned there as an optional, read-only MCP semantic-analysis aid; it is not an
+application runtime dependency or a substitute for repository searches, builds,
+tests, and startup validation. Opening a solution can execute its analyzers and
+source generators in the local Roslynk process, so only trusted Lorekeeper
+workspaces may be loaded.
+
 LLM and search API keys are stored on their provider rows; Codex OAuth access and
 refresh tokens are stored in dedicated SQLite rows. This is local persistence,
 not an operating-system credential vault, encryption-at-rest claim, or permission
