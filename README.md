@@ -277,7 +277,7 @@ Build the current Windows packages without publishing them:
 .\scripts\build-windows-release.ps1
 ```
 
-The project version is currently `0.3.8`. Pass `-Version <version>` only when
+The project version is currently `0.3.9`. Pass `-Version <version>` only when
 validating a different future SemVer. This build-only script verifies the
 solution, audits NuGet and the shipped npm/Electron runtime, probes the packaged
 Press protocol/registry contract, and produces the installer and portable
@@ -303,7 +303,7 @@ install and authenticate [GitHub CLI](https://cli.github.com/), then run:
 
 ```powershell
 gh auth login
-.\scripts\publish-release.ps1 -Version 0.3.8 -WindowsOnly
+.\scripts\publish-release.ps1 -Version 0.3.9 -WindowsOnly
 ```
 
 The Windows-only path builds locally, does not dispatch the macOS workflow, and
@@ -318,7 +318,7 @@ run the same command without `-WindowsOnly`:
 
 ```powershell
 gh auth login
-.\scripts\publish-release.ps1 -Version 0.3.8
+.\scripts\publish-release.ps1 -Version 0.3.9
 ```
 
 The publisher requires a clean local `main` that exactly matches `origin/main`.
@@ -339,7 +339,7 @@ Each completed release contains the Windows installer, portable executable,
 updater metadata and blockmap, `Lorekeeper-<version>-arm64.dmg`, and one checksum
 file covering every asset. Add
 `-Notes "..."` or `-NotesFile .\release-notes.md` for custom notes. SemVer
-prereleases such as `0.3.8-beta.1` are published as GitHub prereleases.
+prereleases such as `0.3.9-beta.1` are published as GitHub prereleases.
 Published versions are immutable; fixes require a higher version.
 
 Installed Windows builds use automatic updates and require the Setup executable,
