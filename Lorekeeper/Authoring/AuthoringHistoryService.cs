@@ -164,10 +164,12 @@ public sealed class AuthoringHistoryService(IAppDatabaseOperationFactory databas
             .Include(item => item.Dependencies)
             .SingleOrDefaultAsync(item => item.StreamId == stream.Id && item.AssistantTurnId == turnId, cancellationToken);
         var beforeHash = Hash(beforeSnapshot);
-        var currentHash = await CurrentResultHashAsync(stream, cancellationToken);
-        if (!FixedEquals(beforeHash, currentHash)
-            || batch is { Status: AuthoringTurnHistoryBatchStatus.Open }
-                && !FixedEquals(batch.AfterHash, beforeHash))
+        // An open batch is the current in-turn state; the persisted stream cursor still
+        // points at the last completed history entry until the turn is finalized.
+        var diverged = batch is { Status: AuthoringTurnHistoryBatchStatus.Open }
+            ? !FixedEquals(batch.AfterHash, beforeHash)
+            : !FixedEquals(beforeHash, await CurrentResultHashAsync(stream, cancellationToken));
+        if (diverged)
         {
             await ResetStreamAsync(db, stream, beforeSnapshot, cancellationToken);
             batch = null;
