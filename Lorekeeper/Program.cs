@@ -302,7 +302,7 @@ builder.Services.AddScoped<IContextIndexingService, ContextIndexingService>();
 builder.Services.AddScoped<IContextRecommendationService, ContextRecommendationService>();
 builder.Services.AddScoped<IEntityRelationContextService, EntityRelationContextService>();
 builder.Services.AddScoped<EditorChatTools>();
-builder.Services.AddScoped<EditorManuscriptPreviewService>();
+builder.Services.AddScoped<EditorManuscriptApplyService>();
 builder.Services.AddScoped<IEditorContestService, EditorContestService>();
 builder.Services.AddSingleton<IEditorRevisionJobNotifier, EditorRevisionJobNotifier>();
 builder.Services.AddScoped<EditorRevisionAgentProcessor>();

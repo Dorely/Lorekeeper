@@ -49,7 +49,7 @@ IAppDatabaseOperationFactory database, IActService acts,
     IChapterPreviewService chapterPreviews,
     ICompositionCanvasPreviewService canvasPreviews,
     IChapterSemanticProjectionService semanticProjection,
-    EditorManuscriptPreviewService manuscriptPreviews,
+    EditorManuscriptApplyService manuscriptApplies,
     IOptions<EditorChatOptions> editorOptions,
     IOptions<ProjectImageGenerationOptions> imageOptions)
 {
@@ -219,7 +219,7 @@ IAppDatabaseOperationFactory database, IActService acts,
                 name: "read_manuscript",
                 description:
                     "Read bounded semantic manuscript blocks with stable block IDs, inline marks, style roles, source hash, and the current revision token. " +
-                    "The active Context Feed normally already includes the complete current manuscript snapshot for direct edits. Use this tool when that snapshot is missing, incomplete, stale, non-active, or insufficient; then pass the returned revision and operations once to preview_manuscript_operations, followed by only its previewId to apply_manuscript_operations. For reusable formatting, use the focused Book Text Style tools instead of emitting one operation per block."),
+                    "The active Context Feed normally already includes the complete current manuscript snapshot for direct edits. Use this tool when that snapshot is missing, incomplete, stale, non-active, or insufficient; then pass the returned revision and operations once to apply_manuscript_operations. For reusable formatting, use the focused Book Text Style tools instead of emitting one operation per block."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, string? query = null, string? blockType = null, string? styleRole = null, int start = 0, int count = 40) =>
@@ -231,18 +231,11 @@ IAppDatabaseOperationFactory database, IActService acts,
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, long expectedRevision, ManuscriptOperationInput[] operations) =>
-                    manuscriptPreviews.PreviewAsync(context, chapterId, expectedRevision, operations),
-                name: "preview_manuscript_operations",
-                description:
-                    "Validate and stage semantic insert, replace, delete, move, split, merge, block-type, focused block-style, inline-mark, and paragraph-presentation operations without saving. " + ManuscriptOperationInput.ToolOperationGuidance + " Use apply_manuscript_style for chapter-wide or repeated reusable styling. " +
-                    "Submit the operation payload here exactly once. Returns a compact opaque previewId, changed stable block IDs, projected counts, hashes, and next revision; it does not echo the manuscript. Stale revisions fail closed."),
-
-            AIFunctionFactory.Create(
-                method: (Guid previewId) => manuscriptPreviews.ApplyAsync(context, previewId),
+                    manuscriptApplies.ApplyAsync(context, chapterId, expectedRevision, operations),
                 name: "apply_manuscript_operations",
                 description:
-                    "Persist the exact document already validated and staged by preview_manuscript_operations. Pass only that call's opaque previewId; never repeat chapterId, expectedRevision, or operations. " +
-                    "Preview IDs are turn-local, chapter-specific, one-use tokens. Returns changed stable block IDs, the new revision, and source hash; missing, superseded, reused, or stale previews fail closed."),
+                    "Validate and apply one complete semantic manuscript operation set in a single revision-checked call. " + ManuscriptOperationInput.ToolOperationGuidance + " Use apply_manuscript_style for chapter-wide or repeated reusable styling. " +
+                    "Submit chapterId, expectedRevision, and the operation payload exactly once; in Review Edits mode the result is staged for approval, otherwise it is persisted immediately. Returns compact changed IDs and the new revision without echoing the manuscript. Stale revisions and invalid operations fail closed."),
 
             AIFunctionFactory.Create(
                 method: () => ReadManuscriptMigrationStateAsync(context),

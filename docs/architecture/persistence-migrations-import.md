@@ -93,8 +93,8 @@ Application-managed revision tokens are the concurrency contract. Explicit
 revision predicates treat zero affected rows as conflicts, while EF concurrency
 misses identify stale work without graph-wide merging. Interactive editors
 reread and adopt the authoritative snapshot; out-of-order autosaves are
-ignored rather than replacing the editing surface with an error. Exact-snapshot
-assistant previews, guarded imports, and atomic server workflows reject stale
+ignored rather than replacing the editing surface with an error. Revision-checked
+assistant applies, guarded imports, and atomic server workflows reject stale
 mutations before partial writes. The only bounded ordinary save retry is for
 transient SQLite locks. Protected migrations may intentionally retain a
 tracking context across explicit backup/schema/validation phases, and guarded

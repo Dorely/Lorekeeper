@@ -132,12 +132,13 @@ diagnostics, and recovery guidance—not entire unchanged documents or binary
 payloads.
 
 Large or sensitive mutations use bounded, revision-safe staging. Editor
-manuscript changes first create one opaque, turn-local preview; apply accepts
-only that one-use ID and verifies the exact source snapshot. Page and cover
-scenes use persisted, hashed, expiring, project/conversation-scoped stages that
-cannot be replayed. Image generation creates an unattached durable image job;
-another explicit mutation places or associates the completed asset. Failed,
-cancelled, stale, or preview-only calls must not create history or partial
+manuscript changes validate and apply one complete operation set in a single
+call against the exact source revision; when Review Edits is enabled, that same
+call creates the in-memory projected overlay and pending change for approval.
+Page and cover scenes use persisted, hashed, expiring, project/conversation-
+scoped stages that cannot be replayed. Image generation creates an unattached
+durable image job; another explicit mutation places or associates the completed
+asset. Failed, cancelled, or stale calls must not create history or partial
 destination state.
 
 ### Surface charters
@@ -242,7 +243,7 @@ must leave durable terminal state and no concurrent-disposal error.
 | [`Lorekeeper/Components/Chat/`](../../Lorekeeper/Components/Chat/) | Shared chat shell, model picker, transcript models/token projection, tool chips, and composer behavior. |
 | [`Lorekeeper/Llm/SystemPromptComposer.cs`](../../Lorekeeper/Llm/SystemPromptComposer.cs) and [`AssistantWorkflowInstructions.cs`](../../Lorekeeper/Llm/AssistantWorkflowInstructions.cs) | One system-role prompt pipeline and code-owned cross-surface workflow/tool rules. |
 | [`Lorekeeper/Outline/OutlineCollaborationService.cs`](../../Lorekeeper/Outline/OutlineCollaborationService.cs), [`OutlineCollaborationTools.cs`](../../Lorekeeper/Outline/OutlineCollaborationTools.cs), working-context/staging/approval helpers, and [`OutlineChatTurnRunner.cs`](../../Lorekeeper/Outline/OutlineChatTurnRunner.cs) | Outline assistant adapter, automatic context, structural/canon tools, review staging/approval, diffs, and turn updates. |
-| [`Lorekeeper/EditorChat/`](../../Lorekeeper/EditorChat/) | Editor adapter/tools, opaque manuscript preview/apply, Review staging, contests, revision jobs/workers, and active-turn updates. |
+| [`Lorekeeper/EditorChat/`](../../Lorekeeper/EditorChat/) | Editor adapter/tools, one-step revision-safe manuscript apply, Review staging, contests, revision jobs/workers, and active-turn updates. |
 | [`Lorekeeper/Writing/`](../../Lorekeeper/Writing/) | Writing Coach service, read-only tool catalog, runner, and writing-sample application boundary. |
 | [`Lorekeeper/Research/ResearchService.cs`](../../Lorekeeper/Research/ResearchService.cs), [`ResearchTools.cs`](../../Lorekeeper/Research/ResearchTools.cs), [`ResearchChatTurnRunner.cs`](../../Lorekeeper/Research/ResearchChatTurnRunner.cs), and [`ResearchTurnUpdate.cs`](../../Lorekeeper/Research/ResearchTurnUpdate.cs) | Research chat adapter/tools, streaming, and turn lifetime; guarded fetch and cached-source ownership remain in providers and narrative context. |
 | [`Lorekeeper/ImagesChat/`](../../Lorekeeper/ImagesChat/) | Images assistant, turn context, visual-canon tools, job reconnection, and streaming updates. |

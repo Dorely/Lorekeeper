@@ -119,7 +119,7 @@ Optimistic concurrency plus the project mutation lease prevents simultaneous
 editors, assistants, imports, and image deletion from producing dangling or
 lost references.
 
-### Semantic operations and assistant previews
+### Semantic operations and assistant apply
 
 `ManuscriptOperations` is the canonical transactional transformation engine for
 insert, replace, delete, move, split, merge, block-type, style, mark, paragraph
@@ -130,12 +130,12 @@ are canonicalized. An inserted block may supply its stable ID so later
 operations in the same atomic batch can target it.
 
 Editor assistants never send a full projected document back to an apply call.
-`EditorManuscriptPreviewService` validates the operation batch once, retains the
-exact result in turn-local memory, and returns an opaque, chapter-specific,
-one-use preview ID plus hashes, revisions, and counts. Apply accepts only that
-ID, verifies the source snapshot remains identical, and writes the retained
-document through `IManuscriptService` or the Review Edits overlay. A newer
-preview for the chapter supersedes the older one, and IDs never survive a turn.
+`EditorManuscriptApplyService` converts and validates one complete operation
+batch, verifies the protected source revision, and writes the resulting document
+through `IManuscriptService` or the Review Edits overlay in that same call. The
+result reports compact changed IDs, counts, the committed hash when available,
+and the committed or staged revision; no turn-local preview ID or projected
+document is retained.
 
 `ManuscriptInspection` supplies shared validation, normalization diagnostics,
 and structural search to Editor and revision workers. Prompt/tool guidance and
@@ -295,13 +295,13 @@ every one of those consumers.
 | [`Lorekeeper/Manuscripts/ManuscriptModels.cs`](../../Lorekeeper/Manuscripts/ManuscriptModels.cs) and [`docs/schemas/manuscript-v4.schema.json`](../schemas/manuscript-v4.schema.json) | Current v4 document, block, inline, mark, Figure, presentation, and schema contract. |
 | [`Lorekeeper/Manuscripts/ManuscriptCodec.cs`](../../Lorekeeper/Manuscripts/ManuscriptCodec.cs), [`ManuscriptOperations.cs`](../../Lorekeeper/Manuscripts/ManuscriptOperations.cs), and inspection/range helpers | Validation, normalization, hashing, stable-ID lookup, semantic operations, structural inspection, and exact UTF-16 range resolution. |
 | [`Lorekeeper/Manuscripts/IManuscriptService.cs`](../../Lorekeeper/Manuscripts/IManuscriptService.cs) and [`Lorekeeper/Chapters/`](../../Lorekeeper/Chapters/) | Sole target-aware runtime chapter-manuscript boundary plus chapter lifecycle, copy-on-write release content, projections, and side effects. |
-| [`Lorekeeper/Manuscripts/EditorContentTarget.cs`](../../Lorekeeper/Manuscripts/EditorContentTarget.cs) | Protected Core/release target carried through manuscript, review, context, preview, and assistant operations. |
+| [`Lorekeeper/Manuscripts/EditorContentTarget.cs`](../../Lorekeeper/Manuscripts/EditorContentTarget.cs) | Protected Core/release target carried through manuscript, review, context, apply, and assistant operations. |
 | [`Lorekeeper/Manuscripts/ManuscriptStyleService.cs`](../../Lorekeeper/Manuscripts/ManuscriptStyleService.cs) and [`ManuscriptStyleTemplateExtractor.cs`](../../Lorekeeper/Manuscripts/ManuscriptStyleTemplateExtractor.cs) | Revision-safe Book Text Style ownership and the shared manual/assistant style-capture policy. |
 | [`Lorekeeper/Manuscripts/ManuscriptAnnotationModels.cs`](../../Lorekeeper/Manuscripts/ManuscriptAnnotationModels.cs) and [`ManuscriptAnnotationService.cs`](../../Lorekeeper/Manuscripts/ManuscriptAnnotationService.cs) | Exact-target sidecar annotation contract, rebasing, paging, state, and completion. |
 | [`Lorekeeper/Authoring/`](../../Lorekeeper/Authoring/) and [`Lorekeeper/Models/AuthoringHistoryModels.cs`](../../Lorekeeper/Models/AuthoringHistoryModels.cs) | Persistent history snapshots, assistant mutation batches, latest-review anchors, selection state, and dependency retention. |
 | [`Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor`](../../Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor) and related Editor components | Shared semantic editor host, revision-aware autosave, Figure/style controls, Read/Review modes, annotations, and authoring workspace state. |
 | [`tools/semantic-editor/`](../../tools/semantic-editor/) and shipped bundle under `Lorekeeper/wwwroot/js/` | Exact-pinned ProseMirror schema/adapter source, deterministic build, shipped runtime, and notices. |
-| [`Lorekeeper/EditorChat/EditorManuscriptPreviewService.cs`](../../Lorekeeper/EditorChat/EditorManuscriptPreviewService.cs) | Opaque one-use assistant preview/apply bridge over the canonical manuscript service. |
+| [`Lorekeeper/EditorChat/EditorManuscriptApplyService.cs`](../../Lorekeeper/EditorChat/EditorManuscriptApplyService.cs) | One-step assistant manuscript operation validation and apply/stage bridge over the canonical manuscript service. |
 | [`Lorekeeper/Manuscripts/ManuscriptSchemaUpgrade.cs`](../../Lorekeeper/Manuscripts/ManuscriptSchemaUpgrade.cs) | Strict lossless v1-v3 document and nested historical-payload upgrade logic used only by migration/import owners. |
 
 ## Related chapters
