@@ -156,6 +156,7 @@ builder.Services.AddScoped<IChatImageAttachmentService, ChatImageAttachmentServi
 
 // Projects
 builder.Services.AddScoped<IProjectService, ProjectService>();
+builder.Services.AddScoped<IProjectReferenceService, ProjectReferenceService>();
 builder.Services.AddScoped<IBookBriefService, BookBriefService>();
 builder.Services.AddScoped<IChatClientFactory, ChatClientFactory>();
 builder.Services.AddScoped<IVisionModelClientFactory, VisionModelClientFactory>();
@@ -187,6 +188,7 @@ builder.Services.AddScoped<Lorekeeper.Composition.ICompositionCanvasPreviewServi
 builder.Services.Configure<EntityVisualContextOptions>(builder.Configuration.GetSection(EntityVisualContextOptions.SectionName));
 builder.Services.AddScoped<IEntityVisualExampleService, EntityVisualExampleService>();
 builder.Services.AddScoped<IEntityVisualContextService, EntityVisualContextService>();
+builder.Services.AddScoped<IReferenceVisualService, ReferenceVisualService>();
 builder.Services.AddOptions<ProjectImageGenerationOptions>()
     .Bind(builder.Configuration.GetSection(ProjectImageGenerationOptions.SectionName))
     .Validate(options => options.MaxProviderOutputBytes > 0, "Images:MaxProviderOutputBytes must be greater than zero.")

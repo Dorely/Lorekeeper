@@ -75,6 +75,7 @@ public enum ContextItemKind
     ManuscriptStyles,
     ProjectOutline,
     ProjectFacts,
+    ProjectReferences,
     WritingSample,
     Entity,
     ChapterReference,

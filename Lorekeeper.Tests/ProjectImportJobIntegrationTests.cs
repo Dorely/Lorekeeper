@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
@@ -387,7 +388,7 @@ public sealed class ProjectImportJobIntegrationTests
             outline,
             DefaultProxy<IContextIndexingService>(),
             DefaultProxy<IEntityVisualExampleService>(),
-            new BookBriefService(database),
+            new BookBriefService(database, DefaultProxy<IContextIndexingService>()),
             new ManuscriptStyleService(database),
             DefaultProxy<IIngestVectorIndexingService>(),
             indexWork,
@@ -561,7 +562,7 @@ public sealed class ProjectImportJobIntegrationTests
             outline,
             contextIndexing,
             DefaultProxy<IEntityVisualExampleService>(),
-            new BookBriefService(database),
+            new BookBriefService(database, contextIndexing),
             new ManuscriptStyleService(database),
             DefaultProxy<IIngestVectorIndexingService>(),
             indexWork,
@@ -696,6 +697,59 @@ public sealed class ProjectImportJobIntegrationTests
         Assert.Equal("Gone", highlight.OriginalQuote);
     }
 
+    [Fact]
+    public async Task V24ExportWarnsAndImportDoesNotInferProjectReferences()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
+        await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+        await db.Database.MigrateAsync();
+
+        var referenced = new Project { Name = "First volume", Slug = "first-volume" };
+        var source = new Project { Name = "Second volume", Slug = "second-volume" };
+        var destination = new Project { Name = "Imported destination", Slug = "imported-destination" };
+        db.Projects.AddRange(referenced, source, destination);
+        db.PublicationBooks.Add(new PublicationBook { ProjectId = source.Id });
+        db.ProjectReferences.Add(new ProjectReference
+        {
+            ReferencingProjectId = source.Id,
+            ReferencedProjectId = referenced.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var database = Database(db);
+        var exporter = new ProjectImportExportService(
+            database,
+            new EntityTypeService(database),
+            new ProjectImportJobQueue(),
+            new ProjectImportJobNotifier());
+        var file = await exporter.ExportProjectAsync(source.Id, ProjectExportKind.Full);
+        var json = Encoding.UTF8.GetString(file.Content);
+        var document = JsonSerializer.Deserialize<ProjectExportDocument>(
+            file.Content,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        var warning = ProjectExportWarningText.OutgoingReferencesOmitted(1, referenced.Name);
+
+        Assert.DoesNotContain("\"projectReferences\"", json, StringComparison.Ordinal);
+        Assert.Equal([warning], file.Warnings);
+        Assert.Equal(file.Warnings, document.Warnings);
+        Assert.Contains(warning, document.Warnings);
+
+        var import = await exporter.CreateImportJobAsync(destination.Id, file.FileName, json);
+        var processor = await CreateProcessorAsync(db, destination);
+        await processor.RunAsync(import.Id);
+
+        db.ChangeTracker.Clear();
+        var completed = await db.ProjectImportJobs.AsNoTracking().SingleAsync(job => job.Id == import.Id);
+        Assert.True(completed.Status == ProjectImportJobStatus.Completed, completed.ErrorMessage);
+        Assert.Empty(await db.ProjectReferences.AsNoTracking()
+            .Where(reference => reference.ReferencingProjectId == destination.Id)
+            .ToListAsync());
+        Assert.Single(await db.ProjectReferences.AsNoTracking().ToListAsync());
+    }
+
     private static T DefaultProxy<T>() where T : class =>
         DispatchProxy.Create<T, DefaultDispatchProxy>();
 
@@ -717,7 +771,7 @@ public sealed class ProjectImportJobIntegrationTests
             outline,
             DefaultProxy<IContextIndexingService>(),
             DefaultProxy<IEntityVisualExampleService>(),
-            new BookBriefService(database),
+            new BookBriefService(database, DefaultProxy<IContextIndexingService>()),
             new ManuscriptStyleService(database),
             DefaultProxy<IIngestVectorIndexingService>(),
             new VectorIndexWorkCoordinator(NullLogger<VectorIndexWorkCoordinator>.Instance),
@@ -898,6 +952,27 @@ public sealed class ProjectImportJobIntegrationTests
         public Task DeleteIngestSourceChunkAsync(
             Guid projectId,
             Guid sourceChunkId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task ReindexProjectProfileAsync(
+            Guid projectId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task DeleteProjectProfileAsync(
+            Guid projectId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task ReindexWritingSampleAsync(
+            Guid sampleId,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task DeleteWritingSampleAsync(
+            Guid projectId,
+            Guid sampleId,
             CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 

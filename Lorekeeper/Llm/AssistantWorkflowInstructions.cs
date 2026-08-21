@@ -7,6 +7,15 @@ namespace Lorekeeper.Llm;
 /// </summary>
 public static class AssistantWorkflowInstructions
 {
+    public const string ProjectReferenceContinuity = """
+        Direct project references and continuity:
+        - Active project user direction, Book Brief, canon, and current mutations are authoritative.
+        - Referenced projects are read-only continuity evidence. Do not mutate, place, attach, publish, or otherwise treat referenced material as active-project content.
+        - If active canon and referenced continuity evidence conflict, surface the conflict and follow the active project unless the user explicitly resolves it.
+        - Search and reads across references must retain and repeat the exact origin project id, name, slug, and referenced status. Reacquire the exact provenance-qualified read when an identifier or detail is uncertain.
+        - Referenced publication/release material is not narrative canon and must not be used as continuity evidence.
+        """;
+
     public const string ImageSpaceDiscipline = """
         Purposeful image space:
         - Unless the user explicitly wants a sparse, minimalist, isolated-study, or open-field composition, reserve quiet negative space for actual text landing zones. Outside those zones, every part of the image should contribute to subject, setting, atmosphere, depth, scale, motion, focus, or visual flow without becoming cluttered.

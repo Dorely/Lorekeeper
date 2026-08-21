@@ -78,6 +78,17 @@ public sealed class ProjectImportExportService(
             .Select(NodeStableKey)
             .ToHashSet(StringComparer.Ordinal);
         var warnings = new List<string>();
+        var outgoingReferences = await db.ProjectReferences
+            .AsNoTracking()
+            .Include(reference => reference.ReferencedProject)
+            .Where(reference => reference.ReferencingProjectId == projectId)
+            .OrderBy(reference => reference.ReferencedProject.Name)
+            .ToListAsync(cancellationToken);
+        if (outgoingReferences.Count > 0)
+        {
+            var names = string.Join(", ", outgoingReferences.Select(reference => reference.ReferencedProject.Name));
+            warnings.Add(ProjectExportWarningText.OutgoingReferencesOmitted(outgoingReferences.Count, names));
+        }
         var exportedIngestSources = kind == ProjectExportKind.Full
             ? (await db.IngestSources
                 .AsNoTracking()
@@ -355,7 +366,8 @@ public sealed class ProjectImportExportService(
         return new ProjectExportFile(
             FileName: $"{SafeFileName(project.Slug)}-{kind.ToString().ToLowerInvariant()}-graph.lorekeeper.json",
             ContentType: "application/json; charset=utf-8",
-            Content: bytes);
+            Content: bytes,
+            Warnings: warnings);
     }
 
     public async Task<ProjectImportJobListItem> CreateImportJobAsync(

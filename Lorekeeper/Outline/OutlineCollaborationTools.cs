@@ -43,10 +43,12 @@ public sealed class OutlineCollaborationContext(
     OutlineToolStagingContext? staging = null,
     bool visionReady = false,
     Action<IEnumerable<EntityVisualContextReference>>? onVisualsQueued = null,
+    Action<ReferenceVisualReadResult>? onReferenceVisualQueued = null,
     BookBriefUpdatePolicy bookBriefUpdatePolicy = BookBriefUpdatePolicy.OutlineMaintainer,
     OutlineToolSurface surface = OutlineToolSurface.Outline)
 {
     private readonly List<EntityVisualContextReference> _pendingVisuals = [];
+    private readonly List<ReferenceVisualReadResult> _pendingReferenceVisuals = [];
     private readonly HashSet<Guid> _imageGenerationJobIds = [];
     public Guid ProjectId { get; } = projectId;
     public Action OnMutated { get; } = onMutated;
@@ -68,6 +70,20 @@ public sealed class OutlineCollaborationContext(
         _pendingVisuals.Clear();
         return result;
     }
+    public void QueueReferenceVisual(ReferenceVisualReadResult visual)
+    {
+        if (visual.DataDelivered)
+        {
+            _pendingReferenceVisuals.Add(visual);
+            onReferenceVisualQueued?.Invoke(visual);
+        }
+    }
+    public IReadOnlyList<ReferenceVisualReadResult> DrainReferenceVisuals()
+    {
+        var result = _pendingReferenceVisuals.ToList();
+        _pendingReferenceVisuals.Clear();
+        return result;
+    }
 }
 
 /// <summary>
@@ -77,7 +93,7 @@ public sealed class OutlineCollaborationContext(
 /// without ambient state.
 /// </summary>
 public sealed class OutlineCollaborationTools(
-IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IEntityService entities, IEntityTypeService entityTypes, IProjectFactService projectFacts, IEntityRelationContextService entityRelations, IProjectSearchService projectSearch, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages, IManuscriptService manuscripts, IBookBriefService bookBriefs, IBookFormatGuidanceService formatGuidance, IAgentProjectImageWorkflow? imageWorkflow = null)
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IEntityService entities, IEntityTypeService entityTypes, IProjectFactService projectFacts, IEntityRelationContextService entityRelations, IProjectSearchService projectSearch, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages, IManuscriptService manuscripts, IBookBriefService bookBriefs, IBookFormatGuidanceService formatGuidance, IReferenceVisualService referenceVisuals, IAgentProjectImageWorkflow? imageWorkflow = null)
 {
     private const string UnassignedSentinel = "unassigned";
     /// <summary>Canonical entity type for chapter-scoped beats.</summary>
@@ -95,6 +111,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
     private static readonly HashSet<string> ResearchSharedToolNames =
     [
         "list_entity_types", "list_search_sources", "read_project_source", "search_project",
+        "list_reference_visuals", "read_reference_visual",
         "search_entities", "create_entity", "update_entity", "link_entities",
         "list_entity_canonical_references", "attach_entity_canonical_reference",
         "update_entity_canonical_reference", "detach_entity_canonical_reference", "crop_project_image",
@@ -179,7 +196,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
                     ListSearchSourcesAsync(context, query, sourceTypes, topK),
                 name: "list_search_sources",
-                description: "Return compact source discovery with complete IDs, total/returned counts, completeness, and exact read_project_source arguments."),
+                description: "Return compact current-project and direct-reference source discovery with origin project provenance and exact read_project_source arguments. References are read-only continuity evidence."),
 
             AIFunctionFactory.Create(
                 method: (string? query = null, bool? canonOnly = null, int page = 1) =>
@@ -188,10 +205,10 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 description: "List ingested sources only, in concise pages with canonical-selection status and exact read_project_source arguments. Use canonOnly=true for Book Brief canonical sources; follow nextPageArguments until complete."),
 
             AIFunctionFactory.Create(
-                method: (string sourceType, Guid sourceId, int? pageNumber = null) =>
-                    ReadProjectSourceAsync(context, sourceType, sourceId, pageNumber),
+                method: (string sourceType, Guid sourceId, int? pageNumber = null, Guid? originProjectId = null) =>
+                    ReadProjectSourceAsync(context, sourceType, sourceId, pageNumber, originProjectId),
                 name: "read_project_source",
-                description: "Read one paginated project source by sourceType and sourceId. Supports chapters, acts, entities, ingest sources, raw ingest source text, and ingest source chunks. Use this before searching only inside a specific source text."),
+                description: "Read one paginated active-project or direct-reference source. Pass the exact originProjectId returned by discovery for referenced continuity evidence; arbitrary foreign project IDs are rejected."),
 
             AIFunctionFactory.Create(
                 method: (
@@ -203,7 +220,17 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                     bool lexicalOnly = false) =>
                     SearchProjectAsync(context, query, topK, sourceTypes, sourceIds, containerSourceId, lexicalOnly),
                 name: "search_project",
-                description: "Hybrid keyword + semantic compact discovery with full IDs, total/returned counts, labeled previews, and exact read_project_source arguments. Use filters and lexicalOnly for source-scoped exact lookup."),
+                description: "Hybrid keyword + semantic compact discovery across the active project and direct references, with origin provenance and exact origin-qualified read arguments. References are read-only."),
+
+            AIFunctionFactory.Create(
+                method: () => ListReferenceVisualsAsync(context),
+                name: "list_reference_visuals",
+                description: "List bounded canonical entity visuals from direct referenced projects only. Results include origin project/entity/image provenance and are read-only continuity evidence."),
+
+            AIFunctionFactory.Create(
+                method: (Guid originProjectId, Guid imageId) => ReadReferenceVisualAsync(context, originProjectId, imageId),
+                name: "read_reference_visual",
+                description: "Read one canonical entity visual attached to a direct referenced project. Both originProjectId and imageId must come from list_reference_visuals; general-library and active-project images are rejected. Vision-ready providers receive bounded bytes on the next round; this never authorizes placement or mutation."),
 
             AIFunctionFactory.Create(
                 method: () => ListOutlineAsync(context),
@@ -507,8 +534,39 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         int topK)
     {
         topK = Math.Clamp(topK, 1, 30);
-        var sources = await projectSearch.ListSourcesAsync(ctx.ProjectId, query, sourceTypes, topK);
+        var sources = await projectSearch.ListSourcesAsync(ctx.ProjectId, query, sourceTypes, topK, includeReferencedProjects: true);
         return ProjectSearchAgentPayload.SerializeSources(sources);
+    }
+
+    private async Task<string> ListReferenceVisualsAsync(OutlineCollaborationContext ctx)
+    {
+        var visuals = await referenceVisuals.ListAsync(ctx.ProjectId);
+        return JsonSerializer.Serialize(new
+        {
+            resultKind = "referenceVisualDiscovery",
+            returnedCount = visuals.Count,
+            boundedLimit = ReferenceVisualService.MaximumListResults,
+            mayHaveMore = visuals.Count == ReferenceVisualService.MaximumListResults,
+            note = "Canonical visuals are read-only continuity evidence from direct references. Use read_reference_visual with the exact originProjectId and imageId; they cannot be attached or placed in the active project.",
+            visuals,
+        });
+    }
+
+    private async Task<string> ReadReferenceVisualAsync(OutlineCollaborationContext ctx, Guid originProjectId, Guid imageId)
+    {
+        var visual = await referenceVisuals.ReadAsync(ctx.ProjectId, originProjectId, imageId, ctx.VisionReady);
+        if (visual is null)
+            return $"Error: image {imageId:N} is not an eligible canonical visual on a direct referenced project.";
+        if (visual.DataDelivered) ctx.QueueReferenceVisual(visual);
+        return JsonSerializer.Serialize(new
+        {
+            visual.OriginProjectId, visual.OriginProjectName, visual.OriginProjectSlug,
+            visual.EntityId, visual.EntityType, visual.EntityName, visual.CanonicalReferenceId,
+            visual.Label, visual.SortOrder, visual.ImageId, visual.FileName, visual.ContentType,
+            visual.PreviewUrl, visual.AltText, visual.Prompt, visual.ImageSource,
+            visual.IsReferenced, visual.DataDelivered,
+            detailReadArguments = new { originProjectId = visual.OriginProjectId, imageId = visual.ImageId },
+        });
     }
 
     private async Task<string> UpdateBookBriefCanonSourcesAsync(
@@ -598,9 +656,10 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         OutlineCollaborationContext ctx,
         string sourceType,
         Guid sourceId,
-        int? pageNumber)
+        int? pageNumber,
+        Guid? originProjectId)
     {
-        var result = await projectSearch.ReadSourceAsync(ctx.ProjectId, sourceType, sourceId, pageNumber);
+        var result = await projectSearch.ReadSourceAsync(ctx.ProjectId, sourceType, sourceId, pageNumber, originProjectId: originProjectId);
         if (result is null)
             return $"Error: source {sourceType}/{sourceId:N} was not found in this project.";
         if (string.Equals(sourceType, ProjectSearchSourceTypes.Entity, StringComparison.OrdinalIgnoreCase))
@@ -840,7 +899,8 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             sourceTypes,
             parsedSourceIds,
             containerSourceId,
-            lexicalOnly));
+            lexicalOnly,
+            IncludeReferencedProjects: true));
 
         return ProjectSearchAgentPayload.SerializeResults(query.Trim(), results);
     }

@@ -7,6 +7,8 @@ public static class ProjectSearchSourceTypes
     public const string Chapter = "chapter";
     public const string EditionChapter = "edition_chapter";
     public const string RawIngestSource = "ingest_source";
+    public const string ProjectProfile = Context.ContextVectorSourceTypes.ProjectProfile;
+    public const string WritingSample = Context.ContextVectorSourceTypes.WritingSample;
     public const string Entity = Context.ContextVectorSourceTypes.Entity;
     public const string ContextChapter = Context.ContextVectorSourceTypes.Chapter;
     public const string Act = Context.ContextVectorSourceTypes.Act;
@@ -18,12 +20,28 @@ public static class ProjectSearchSourceTypes
         Chapter,
         EditionChapter,
         RawIngestSource,
+        ProjectProfile,
+        WritingSample,
         Entity,
         ContextChapter,
         Act,
         IngestSource,
         IngestSourceChunk,
     };
+
+    public static readonly IReadOnlySet<string> DirectReferenceNarrativeTypes =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Chapter,
+            ProjectProfile,
+            WritingSample,
+            Entity,
+            ContextChapter,
+            Act,
+            IngestSource,
+            RawIngestSource,
+            IngestSourceChunk,
+        };
 
     public static string Normalize(string sourceType)
     {
@@ -41,6 +59,8 @@ public static class ProjectSearchSourceTypes
             "source" or "sources" or "ingestsource" or "ingest_source_reference" or "context_ingest_source" => IngestSource,
             "sourcechunk" or "source_chunk" or "source chunks" or "ingest_source_chunk" or "context_ingest_source_chunk" => IngestSourceChunk,
             "rawsource" or "raw_source" or "raw_ingest_source" or "ingest_source" => RawIngestSource,
+            "project_profile" or "context_project_profile" or "project profile" or "profile" => ProjectProfile,
+            "writing_sample" or "context_writing_sample" or "writing sample" or "writingsample" => WritingSample,
             _ => value,
         };
     }
@@ -56,7 +76,8 @@ public sealed record ProjectSearchRequest(
     IReadOnlyCollection<string>? SourceTypes = null,
     IReadOnlyCollection<Guid>? SourceIds = null,
     Guid? ContainerSourceId = null,
-    bool LexicalOnly = false);
+    bool LexicalOnly = false,
+    bool IncludeReferencedProjects = false);
 
 public sealed record ProjectSearchResponse(
     IReadOnlyList<ProjectSearchResult> Results,
@@ -78,7 +99,11 @@ public sealed record ProjectSearchResult(
     double? VectorDistance,
     int? VectorPosition,
     double Score,
-    IReadOnlyList<string> Reasons);
+    IReadOnlyList<string> Reasons,
+    Guid OriginProjectId = default,
+    string OriginProjectName = "",
+    string OriginProjectSlug = "",
+    bool IsReferenced = false);
 
 public sealed record ProjectSearchSource(
     string SourceType,
@@ -86,7 +111,11 @@ public sealed record ProjectSearchSource(
     Guid? ContainerSourceId,
     string Title,
     string Subtitle,
-    string Preview);
+    string Preview,
+    Guid OriginProjectId = default,
+    string OriginProjectName = "",
+    string OriginProjectSlug = "",
+    bool IsReferenced = false);
 
 public sealed record ProjectSearchSourceResponse(
     IReadOnlyList<ProjectSearchSource> Sources,
@@ -103,7 +132,11 @@ public sealed record ProjectSourceReadResult(
     int PageCount,
     bool HasPreviousPage,
     bool HasNextPage,
-    string Content);
+    string Content,
+    Guid OriginProjectId = default,
+    string OriginProjectName = "",
+    string OriginProjectSlug = "",
+    bool IsReferenced = false);
 
 public sealed record ProjectLexicalSearchRequest(
     string ScopeKey,
@@ -111,7 +144,8 @@ public sealed record ProjectLexicalSearchRequest(
     int TopK,
     IReadOnlyCollection<string>? SourceTypes = null,
     IReadOnlyCollection<string>? SourceIds = null,
-    string? ContainerSourceId = null);
+    string? ContainerSourceId = null,
+    IReadOnlyCollection<string>? ScopeKeys = null);
 
 public sealed record ProjectLexicalSearchResult(
     long RowId,
@@ -123,7 +157,8 @@ public sealed record ProjectLexicalSearchResult(
     string Snippet,
     string? Metadata,
     int? ChunkIndex,
-    double Rank);
+    double Rank,
+    string ScopeKey);
 
 public sealed record ProjectSearchIndexChunk(
     string Content,

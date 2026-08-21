@@ -13,6 +13,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 
 - Project-scoped outline, Book Brief, story-graph, project-fact, writing-sample,
   and chapter workspaces.
+- Projects can directly reference other projects for read-only continuity evidence,
+  such as a sequel reading its predecessor. References are one-hop and live: the
+  active project's canon and user direction win conflicts, while referenced projects
+  remain intact and independently editable.
 - Six persistent assistant surfaces for outline collaboration, chapter editing,
   writing coaching, research, project images, and publishing, including streaming tools,
   reviewable changes, visual context, background revision agents, and project/surface-
@@ -84,8 +88,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Full project export format v24 preserves manuscript review annotations and only the Book Brief's selected
   canonical ingest sources (source text, chunks, pages, blocks, metadata, and
   selection mapping), remaps their provenance on import, and rebuilds retrieval
-  indexes without rerunning extraction. Non-structural exports omit source bodies,
-  selections, and evidence and report that omission.
+  indexes without rerunning extraction. Project-reference links are intentionally
+  omitted from v24 exports; exports with outgoing links warn that imports never infer
+  links. Non-structural exports omit source bodies, selections, and evidence and
+  report that omission.
 - Project-owned authoring page setup, Press-backed current-chapter Read preview,
   and contextual Edit/Read/Pages/Review modes. Read shows actual pagination,
   line breaks, images, captions, and Designed Pages with single/facing and zoom
@@ -370,6 +376,12 @@ application can be restarted after the cause is addressed.
 On a recovery start, Lorekeeper applies an explicitly scheduled restore first;
 otherwise it honors the existing recovery marker before opening the projectless
 database or running any normal migration service.
+
+The Projects hub provides a References action for each project. It manages direct
+read-only continuity links with in-surface validation and keeps current-project-only
+behavior when no links exist. Deleting a project uses an application-owned
+confirmation; if other projects depend on it, the confirmation lists them and makes
+clear that confirmation detaches those links without deleting the dependent projects.
 
 When an older database first adopts structured manuscripts, Lorekeeper creates a
 WAL-consistent backup in `.migration-backups/manuscripts`, validates the

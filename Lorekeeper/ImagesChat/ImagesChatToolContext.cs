@@ -12,6 +12,7 @@ public sealed class ImagesChatToolContext(
 {
     private readonly List<ImagesChatVisualAttachment> _visuals = [];
     private readonly List<ProjectImageView> _modelOnlyImages = [];
+    private readonly List<ImagesChatModelOnlyImage> _modelOnlyImagePayloads = [];
     private readonly HashSet<Guid> _imageGenerationJobIds = [];
 
     public Guid ProjectId { get; } = projectId;
@@ -59,9 +60,24 @@ public sealed class ImagesChatToolContext(
         return result;
     }
 
+    public void AddModelOnlyImage(ProjectImageView image, byte[] data)
+    {
+        if (VisionReady && data.Length > 0)
+            _modelOnlyImagePayloads.Add(new ImagesChatModelOnlyImage(image, data));
+    }
+
+    public IReadOnlyList<ImagesChatModelOnlyImage> DrainModelOnlyImagePayloads()
+    {
+        var result = _modelOnlyImagePayloads.ToList();
+        _modelOnlyImagePayloads.Clear();
+        return result;
+    }
+
     public void MarkMutated() => onMutated();
 
     public void TrackImageGenerationJob(Guid jobId) => _imageGenerationJobIds.Add(jobId);
 
     public IReadOnlyList<Guid> ImageGenerationJobIds => _imageGenerationJobIds.ToList();
 }
+
+public sealed record ImagesChatModelOnlyImage(ProjectImageView Image, byte[] Data);

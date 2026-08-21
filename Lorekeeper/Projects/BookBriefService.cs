@@ -1,12 +1,15 @@
 using System.Globalization;
 using System.Text;
+using Lorekeeper.Context;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Projects;
 
-public sealed class BookBriefService(IAppDatabaseOperationFactory database) : IBookBriefService
+public sealed class BookBriefService(
+    IAppDatabaseOperationFactory database,
+    IContextIndexingService contextIndexing) : IBookBriefService
 {
     public async Task<BookBrief> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -24,6 +27,7 @@ public sealed class BookBriefService(IAppDatabaseOperationFactory database) : IB
         var brief = new BookBrief { ProjectId = projectId };
         db.BookBriefs.Add(brief);
         await db.SaveChangesAsync(cancellationToken);
+        await contextIndexing.ReindexProjectProfileAsync(projectId, cancellationToken);
         return brief;
     }
 
@@ -53,6 +57,7 @@ public sealed class BookBriefService(IAppDatabaseOperationFactory database) : IB
         if (isNew)
             db.BookBriefs.Add(brief);
         await db.SaveChangesAsync(cancellationToken);
+        await contextIndexing.ReindexProjectProfileAsync(projectId, cancellationToken);
         return brief;
     }
 
@@ -98,9 +103,11 @@ public sealed class BookBriefService(IAppDatabaseOperationFactory database) : IB
         {
             trackedEntry.CurrentValues.SetValues(updated);
             trackedEntry.State = EntityState.Unchanged;
+            await contextIndexing.ReindexProjectProfileAsync(projectId, cancellationToken);
             return trackedEntry.Entity;
         }
 
+        await contextIndexing.ReindexProjectProfileAsync(projectId, cancellationToken);
         return updated;
     }
 
@@ -174,6 +181,7 @@ public sealed class BookBriefService(IAppDatabaseOperationFactory database) : IB
             .Select(sourceId => new BookBriefCanonSource { BookBriefId = brief.Id, IngestSourceId = sourceId }));
         brief.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        await contextIndexing.ReindexProjectProfileAsync(projectId, cancellationToken);
     }
 
     public string FormatForPrompt(BookBrief brief)

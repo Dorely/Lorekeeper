@@ -232,6 +232,43 @@ Brief data, Project Guidance, or the underlying source material. Project Writing
 Samples are default-on style references, so a reset removes an explicit hide or
 include override and leaves each sample enabled by its default rule.
 
+### Direct Project References and Provenance
+
+`ProjectReference` is a direct, read-only continuity link from one project to another.
+The composite `(ReferencingProjectId, ReferencedProjectId)` key prevents duplicate
+pairs, a database check rejects self-links, and reciprocal links are valid independent
+rows. The referencing-project foreign key cascades when its owner is deleted; the
+referenced-project foreign key restricts deletion. `IProjectService.DeleteAsync` therefore
+rechecks incoming dependencies inside one global write operation and requires an
+explicit detach flag before removing those links. Adding or removing a link touches
+only the referencing project's `UpdatedAt`.
+
+Reference scope is resolved only through the active project's direct links. Ordinary
+search/list/read callers remain current-project-only; reference-aware callers receive
+the active scope plus explicitly requested one-hop scopes, and arbitrary foreign project
+IDs fail closed. Lexical FTS5 and sqlite-vec results preserve their owning scope
+provenance (origin project ID, name, slug, and `isReferenced`) so a later read cannot
+silently cross projects. Referenced projects are never copied into the active index.
+
+The referenced narrative corpus is bounded to the project profile (Project Guidance
+and the complete Book Brief), acts, chapters/manuscripts, entities/facts, writing
+samples, and only Book Brief-selected canonical ingest sources. Edition chapters,
+publication/release content, and every other source type are excluded from referenced
+lexical and vector results. Canonical visual reads are likewise limited to
+`EntityVisualExample` associations owned by the referenced project; general-library
+images are not continuity evidence and can never become valid mutation/placement
+targets. ContextBuilder adds a bounded direct-reference manifest and per-turn evidence
+retrieval only when references exist, qualifying foreign IDs by origin and stating that
+active canon and current user direction take precedence.
+
+All six user-facing assistants — Outline, Editor, Writing Coach, Research, Images, and
+Publish — receive the same compact direct-reference manifest. Their shared
+list/search/read tools can inspect direct-reference evidence with origin-qualified
+arguments, while mutation tools remain active-project-only. Vision-capable surfaces
+may receive bounded, validated canonical-reference image bytes; Writing Coach uses the
+same bounded read-only visual path when vision is available. Conflicts are surfaced as
+continuity evidence rather than silently merged into active canon.
+
 ### Assistant Conversations and Review
 
 The six user-facing assistant surfaces are Outline, Editor, Writing Coach,
@@ -1454,7 +1491,10 @@ migrations.
 Project export format v24 includes Core/release review annotations in Full and
 Non-structural exports. Full exports include only Book Brief-selected canonical ingest
 sources: source records/text, chunks, pages, blocks, metadata,
-and the selection mapping. Jobs, staging rows, temporary visual candidates, and
+and the selection mapping. Direct `ProjectReference` rows are deliberately omitted
+from both export kinds. When outgoing links exist, the export document's `Warnings`
+collection and the returned file warning contain the same explicit v24 omission text;
+imports never infer links from matching project names or slugs. Jobs, staging rows, temporary visual candidates, and
 unselected source bodies/provenance are excluded. Import remaps source and child
 IDs inside graph evidence/citations, restores the selection, rebuilds lexical and
 context indexes, and marks then rebuilds provider search vectors without rerunning
@@ -1852,6 +1892,17 @@ backup/recovery behavior, resumability, and fail-closed conversion boundaries:
 dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj
 npm ci --prefix tools/semantic-editor
 npm run build --prefix tools/semantic-editor
+```
+
+The project-reference compatibility fixtures start from migration
+`20260820230218_AddLatestAssistantReviewBaseline`, run the real forward migration
+against populated projects, and then exercise the real v24 export/queued-import path.
+They verify preservation of existing content, valid foreign-key links, omission of
+reference rows from JSON, identical serialized/returned warnings, successful import,
+and no inferred links. A focused run is:
+
+```powershell
+dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj --no-restore -c Release --filter "FullyQualifiedName~ProjectReferenceMigrationTests|FullyQualifiedName~V24ExportWarnsAndImportDoesNotInferProjectReferences"
 ```
 
 The owned Press project runs the complete PDF-conformance evidence suite. Its

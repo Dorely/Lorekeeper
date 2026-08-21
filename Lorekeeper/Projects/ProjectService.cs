@@ -1,5 +1,6 @@
 using System.Text;
 using Lorekeeper.Knowledge;
+using Lorekeeper.Context;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
@@ -13,7 +14,8 @@ public class ProjectService(
     IVectorStore vectors,
     IProjectSearchIndex projectSearch,
     IOutlineGraphSync outlineGraphSync,
-    IBookBriefService bookBriefs) : IProjectService
+    IBookBriefService bookBriefs,
+    IContextIndexingService contextIndexing) : IProjectService
 {
     public async Task<IReadOnlyList<Project>> ListAsync(CancellationToken cancellationToken = default)
     {
@@ -75,6 +77,7 @@ public class ProjectService(
         repo.Update(project);
         await databaseOperation.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.EnsureProjectAsync(project, cancellationToken);
+        await contextIndexing.ReindexProjectProfileAsync(project.Id, cancellationToken);
         return project;
     }
 
@@ -90,6 +93,7 @@ public class ProjectService(
         project.UpdatedAt = DateTime.UtcNow;
         repo.Update(project);
         await databaseOperation.SaveChangesAsync(cancellationToken);
+        await contextIndexing.ReindexProjectProfileAsync(project.Id, cancellationToken);
         return project;
     }
 
@@ -129,13 +133,38 @@ public class ProjectService(
         return project;
     }
 
-    public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    public Task DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
+        DeleteAsync(id, detachIncomingReferences: false, cancellationToken);
+
+    public async Task DeleteAsync(
+        Guid id,
+        bool detachIncomingReferences,
+        CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var repo = databaseOperation.Repositories.Projects;
         var project = await repo.GetByIdAsync(id, cancellationToken);
         if (project is null) return;
+
+        // Recheck incoming links while holding the write operation. Restricting the
+        // referenced FK keeps an accidental direct delete from bypassing this guard.
+        var incomingReferences = await databaseOperation.Repositories.ProjectReferences
+            .ListByReferencedProjectAsync(id, cancellationToken);
+        if (incomingReferences.Count > 0 && !detachIncomingReferences)
+        {
+            var referencingProjects = string.Join(", ", incomingReferences.Select(reference => reference.ReferencingProject.Name));
+            throw new InvalidOperationException(
+                $"Project {id} is referenced by {referencingProjects}. Explicitly confirm detaching incoming references before deleting it.");
+        }
+
+        var detachedAt = DateTime.UtcNow;
+        foreach (var reference in incomingReferences)
+        {
+            databaseOperation.Repositories.ProjectReferences.Remove(reference);
+            reference.ReferencingProject.UpdatedAt = detachedAt;
+            databaseOperation.Repositories.Projects.Update(reference.ReferencingProject);
+        }
 
         // Wipe vector chunks first; if this fails we'd rather leave the project row in place
         // than orphan vectors with no owning scope.

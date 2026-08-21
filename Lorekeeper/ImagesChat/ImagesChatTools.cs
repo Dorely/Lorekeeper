@@ -20,6 +20,7 @@ namespace Lorekeeper.ImagesChat;
 public sealed class ImagesChatTools(
     IChapterService chapters,
     IProjectSearchService projectSearch,
+    IReferenceVisualService referenceVisuals,
     IProjectImageService projectImages,
     IEntityVisualExampleService entityVisualExamples,
     IEntityService entities,
@@ -44,19 +45,29 @@ public sealed class ImagesChatTools(
                 method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
                     ListSearchSourcesAsync(context, query, sourceTypes, topK),
                 name: "list_search_sources",
-                description: "Return compact source discovery with complete IDs, total/returned counts, completeness, and exact read_project_source arguments."),
+                description: "Return compact current-project and direct-reference source discovery with origin project provenance and exact read_project_source arguments. References are read-only continuity evidence."),
 
             AIFunctionFactory.Create(
-                method: (string sourceType, Guid sourceId, int? pageNumber = null) =>
-                    ReadProjectSourceAsync(context, sourceType, sourceId, pageNumber),
+                method: (string sourceType, Guid sourceId, int? pageNumber = null, Guid? originProjectId = null) =>
+                    ReadProjectSourceAsync(context, sourceType, sourceId, pageNumber, originProjectId),
                 name: "read_project_source",
-                description: "Read one paginated project source by sourceType and sourceId. Supports chapters, acts, entities, ingest sources, and chunks."),
+                description: "Read one paginated active-project or direct-reference source. Pass the exact originProjectId returned by discovery; arbitrary foreign IDs are rejected."),
 
             AIFunctionFactory.Create(
                 method: (string query, int topK = 8, string[]? sourceTypes = null, string[]? sourceIds = null, Guid? containerSourceId = null, bool lexicalOnly = false) =>
                     SearchProjectAsync(context, query, topK, sourceTypes, sourceIds, containerSourceId, lexicalOnly),
                 name: "search_project",
-                description: "Hybrid keyword + semantic compact discovery with full IDs, total/returned counts, labeled previews, and exact read_project_source arguments. Use source filters to narrow scope."),
+                description: "Hybrid keyword + semantic compact discovery across the active project and direct references, with origin provenance and exact origin-qualified read arguments. References are read-only."),
+
+            AIFunctionFactory.Create(
+                method: () => ListReferenceVisualsAsync(context),
+                name: "list_reference_visuals",
+                description: "List canonical entity visuals from direct referenced projects only with project/entity/image provenance."),
+
+            AIFunctionFactory.Create(
+                method: (Guid originProjectId, Guid imageId) => ReadReferenceVisualAsync(context, originProjectId, imageId),
+                name: "read_reference_visual",
+                description: "Read one canonical visual attached to a direct referenced project. Arbitrary foreign or general-library images fail closed; bytes are model-only and never valid for mutation or placement."),
 
             AIFunctionFactory.Create(
                 method: () => ListChaptersAsync(context),
@@ -165,13 +176,43 @@ public sealed class ImagesChatTools(
     private async Task<string> ListSearchSourcesAsync(ImagesChatToolContext ctx, string? query, string[]? sourceTypes, int topK)
     {
         topK = Math.Clamp(topK, 1, 30);
-        var sources = await projectSearch.ListSourcesAsync(ctx.ProjectId, query, sourceTypes, topK);
+        var sources = await projectSearch.ListSourcesAsync(ctx.ProjectId, query, sourceTypes, topK, includeReferencedProjects: true);
         return ProjectSearchAgentPayload.SerializeSources(sources);
     }
 
-    private async Task<string> ReadProjectSourceAsync(ImagesChatToolContext ctx, string sourceType, Guid sourceId, int? pageNumber)
+    private async Task<string> ListReferenceVisualsAsync(ImagesChatToolContext ctx)
     {
-        var result = await projectSearch.ReadSourceAsync(ctx.ProjectId, sourceType, sourceId, pageNumber);
+        var visuals = await referenceVisuals.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken);
+        return JsonSerializer.Serialize(new
+        {
+            resultKind = "referenceVisualDiscovery", returnedCount = visuals.Count,
+            boundedLimit = ReferenceVisualService.MaximumListResults,
+            mayHaveMore = visuals.Count == ReferenceVisualService.MaximumListResults,
+            note = "Direct-reference canonical visuals are read-only continuity evidence and cannot be placed or mutated in the active project.",
+            visuals,
+        }, JsonOptions);
+    }
+
+    private async Task<string> ReadReferenceVisualAsync(ImagesChatToolContext ctx, Guid originProjectId, Guid imageId)
+    {
+        var visual = await referenceVisuals.ReadAsync(ctx.ProjectId, originProjectId, imageId, ctx.VisionReady, ctx.TurnCancellationToken);
+        if (visual is null) return $"Error: image {imageId:N} is not an eligible canonical visual on a direct referenced project.";
+        if (visual.Data is not null)
+            ctx.AddModelOnlyImage(new ProjectImageView(visual.ImageId, visual.FileName, visual.ContentType, visual.PreviewUrl, visual.AltText, visual.ImageSource, visual.Prompt, string.Empty, string.Empty, DateTime.UtcNow, DateTime.UtcNow, visual.Data.LongLength), visual.Data);
+        return JsonSerializer.Serialize(new
+        {
+            visual.OriginProjectId, visual.OriginProjectName, visual.OriginProjectSlug,
+            visual.EntityId, visual.EntityType, visual.EntityName, visual.CanonicalReferenceId,
+            visual.Label, visual.SortOrder, visual.ImageId, visual.FileName, visual.ContentType,
+            visual.PreviewUrl, visual.AltText, visual.Prompt, visual.ImageSource,
+            visual.IsReferenced, visual.DataDelivered,
+            detailReadArguments = new { originProjectId = visual.OriginProjectId, imageId = visual.ImageId },
+        }, JsonOptions);
+    }
+
+    private async Task<string> ReadProjectSourceAsync(ImagesChatToolContext ctx, string sourceType, Guid sourceId, int? pageNumber, Guid? originProjectId)
+    {
+        var result = await projectSearch.ReadSourceAsync(ctx.ProjectId, sourceType, sourceId, pageNumber, originProjectId: originProjectId);
         if (result is null) return $"Error: source {sourceType}/{sourceId:N} was not found in this project.";
         if (string.Equals(sourceType, ProjectSearchSourceTypes.Entity, StringComparison.OrdinalIgnoreCase))
             await QueueEntityVisualsAsync(ctx, sourceId);
@@ -290,7 +331,8 @@ public sealed class ImagesChatTools(
             sourceTypes,
             parsedSourceIds,
             containerSourceId,
-            lexicalOnly));
+            lexicalOnly,
+            IncludeReferencedProjects: true));
 
         return ProjectSearchAgentPayload.SerializeResults(query.Trim(), results);
     }

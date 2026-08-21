@@ -19,7 +19,7 @@ using Lorekeeper.Writing;
 namespace Lorekeeper.Context;
 
 public sealed class ContextBuilder(
-IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, ICompositionService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter) : IEditorContextService
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, ICompositionService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, IProjectReferenceService projectReferences, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
         ContextBuildRequest request,
@@ -46,6 +46,9 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             assistantWorkflow,
             currentChapter));
         var items = composition.Sections.Select(ToContextItem).ToList();
+        var projectReferencesItem = await BuildProjectReferencesItemAsync(project.Id, cancellationToken);
+        if (projectReferencesItem is not null)
+            items.Add(projectReferencesItem);
 
         if (request.Purpose is ContextBuildPurpose.Images or ContextBuildPurpose.Research or ContextBuildPurpose.Publish)
         {
@@ -281,6 +284,28 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             IsRemovable: false,
             Badge: section.IsUserOwned ? "Author" : "App",
             Origin: section.IsUserOwned ? ContextItemOrigin.User : ContextItemOrigin.Application,
+            IsProtected: true);
+    }
+
+    private async Task<ContextItem?> BuildProjectReferencesItemAsync(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        var references = await projectReferences.ListReferenceManifestsAsync(projectId, cancellationToken);
+        var body = ProjectReferenceManifestFormatter.Format(references);
+        if (body is null)
+            return null;
+
+        return new ContextItem(
+            Key: "project-references",
+            Kind: ContextItemKind.ProjectReferences,
+            Label: "Project References and Canon Precedence",
+            Body: body,
+            IsEnabled: true,
+            IsRemovable: false,
+            Badge: "Read-only continuity",
+            Reason: "Direct project references available as bounded continuity evidence",
+            Origin: ContextItemOrigin.DirectLink,
             IsProtected: true);
     }
 
@@ -947,7 +972,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         try
         {
             response = await projectSearch.SearchAsync(
-                new ProjectSearchRequest(projectId, userMessage.Trim(), TopK: 24),
+                new ProjectSearchRequest(projectId, userMessage.Trim(), TopK: 24, IncludeReferencedProjects: true),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -969,6 +994,10 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 break;
             if (!TryMapTurnResult(result.SourceType, sourceId, out var kind, out var key))
                 continue;
+            if (result.IsReferenced)
+            {
+                key = $"project:{result.OriginProjectId:N}|{key}";
+            }
             if (kind == ContextItemKind.ChapterReference && sourceId == currentChapterId)
                 continue;
             if (existingKeys.Contains(key) || IsExplicitlyExcluded(preferenceMap, kind, key))
@@ -985,6 +1014,9 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 ? result.Snippet
                 : result.Content;
             var body = $$"""
+                Origin project: {{result.OriginProjectName}} ({{result.OriginProjectId:N}})
+                Origin project slug: {{result.OriginProjectSlug}}
+                Reference status: {{(result.IsReferenced ? "Read-only continuity evidence; active project canon and mutation rules take precedence." : "Active project canon and mutation scope.")}}
                 Source type: {{result.SourceType}}
                 Source id: {{sourceId}}
                 Retrieval reason: {{reasons}}
@@ -1041,6 +1073,14 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             case ProjectSearchSourceTypes.IngestSourceChunk:
                 kind = ContextItemKind.IngestSourceChunkReference;
                 key = EditorContextKeys.IngestSourceChunkReference(sourceId);
+                return true;
+            case ProjectSearchSourceTypes.ProjectProfile:
+                kind = ContextItemKind.ProjectReferences;
+                key = "project-references";
+                return true;
+            case ProjectSearchSourceTypes.WritingSample:
+                kind = ContextItemKind.WritingSample;
+                key = EditorContextKeys.WritingSample(sourceId);
                 return true;
             default:
                 kind = default;

@@ -43,8 +43,12 @@ public static class ProjectSearchAgentPayload
                 source.Subtitle,
                 previewText = source.Preview,
                 previewIsComplete = false,
+                originProjectId = source.OriginProjectId,
+                originProjectName = source.OriginProjectName,
+                originProjectSlug = source.OriginProjectSlug,
+                isReferenced = source.IsReferenced,
                 detailReadTool = "read_project_source",
-                detailReadArguments = new { sourceType = source.SourceType, sourceId = source.SourceId, pageNumber = 1 },
+                detailReadArguments = new { sourceType = source.SourceType, sourceId = source.SourceId, pageNumber = 1, originProjectId = source.OriginProjectId },
             }),
         });
 
@@ -57,6 +61,10 @@ public static class ProjectSearchAgentPayload
             result.SourceId,
             result.ContainerSourceId,
             result.Title,
+            result.OriginProjectId,
+            result.OriginProjectName,
+            result.OriginProjectSlug,
+            result.IsReferenced,
             snippetPreview = result.Snippet,
             result.Metadata,
             result.ChunkIndex,
@@ -75,7 +83,7 @@ public static class ProjectSearchAgentPayload
             },
             detailReadTool = result.SourceId is null ? null : "read_project_source",
             detailReadArguments = result.SourceId is Guid sourceId
-                ? new { sourceType = result.SourceType, sourceId, pageNumber = 1 }
+                ? new { sourceType = result.SourceType, sourceId, pageNumber = 1, originProjectId = result.OriginProjectId }
                 : null,
         };
     }

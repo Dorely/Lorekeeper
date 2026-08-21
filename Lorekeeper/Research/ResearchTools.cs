@@ -20,6 +20,7 @@ public sealed class ResearchToolContext(
     bool visionReady = false)
 {
     private readonly List<EntityVisualContextReference> _entityVisuals = [];
+    private readonly List<ReferenceVisualReadResult> _referenceVisuals = [];
     private readonly List<SourceVisualCandidateData> _sourceVisuals = [];
     public Guid ProjectId { get; } = projectId;
     public Guid ConversationId { get; } = conversationId;
@@ -27,9 +28,11 @@ public sealed class ResearchToolContext(
     public OutlineToolStagingContext? Staging { get; } = staging;
     public bool VisionReady { get; } = visionReady;
     public void QueueEntityVisuals(IEnumerable<EntityVisualContextReference> values) => _entityVisuals.AddRange(values);
+    public void QueueReferenceVisual(ReferenceVisualReadResult value) { if (value.DataDelivered) _referenceVisuals.Add(value); }
     public void QueueSourceVisual(SourceVisualCandidateData value) => _sourceVisuals.Add(value);
     public IReadOnlyList<EntityVisualContextReference> DrainEntityVisuals() { var result = _entityVisuals.ToList(); _entityVisuals.Clear(); return result; }
     public IReadOnlyList<SourceVisualCandidateData> DrainSourceVisuals() { var result = _sourceVisuals.ToList(); _sourceVisuals.Clear(); return result; }
+    public IReadOnlyList<ReferenceVisualReadResult> DrainReferenceVisuals() { var result = _referenceVisuals.ToList(); _referenceVisuals.Clear(); return result; }
 }
 
 public sealed class ResearchTools(
@@ -115,7 +118,7 @@ public sealed class ResearchTools(
         };
 
         var outlineContext = new OutlineCollaborationContext(
-            context.ProjectId, context.OnMutated, context.Staging, context.VisionReady, context.QueueEntityVisuals);
+            context.ProjectId, context.OnMutated, context.Staging, context.VisionReady, context.QueueEntityVisuals, context.QueueReferenceVisual);
         tools.AddRange(await outlineTools.BuildResearchSharedAsync(outlineContext));
 
         return tools;

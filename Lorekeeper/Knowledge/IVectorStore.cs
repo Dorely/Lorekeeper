@@ -7,7 +7,8 @@ public record KnowledgeResult(
     string? SourceId,
     long RowId,
     string? Metadata,
-    int? ChunkIndex);
+    int? ChunkIndex,
+    string ScopeKey);
 
 /// <summary>
 /// Backend-agnostic vector storage. Today implemented over sqlite-vec; a Postgres impl

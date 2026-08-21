@@ -1,11 +1,13 @@
 using Lorekeeper.Models;
+using Lorekeeper.Context;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 
 namespace Lorekeeper.Writing;
 
 public sealed class WritingSampleService(
-IAppDatabaseOperationFactory database) : IWritingSampleService
+IAppDatabaseOperationFactory database,
+IContextIndexingService contextIndexing) : IWritingSampleService
 {
     public async Task<IReadOnlyList<WritingSample>> ListAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -47,6 +49,7 @@ IAppDatabaseOperationFactory database) : IWritingSampleService
         project.UpdatedAt = DateTime.UtcNow;
         projects.Update(project);
         await databaseOperation.SaveChangesAsync(cancellationToken);
+        await contextIndexing.ReindexWritingSampleAsync(sample.Id, cancellationToken);
         return sample;
     }
 
@@ -91,6 +94,7 @@ IAppDatabaseOperationFactory database) : IWritingSampleService
         }
 
         await databaseOperation.SaveChangesAsync(cancellationToken);
+        await contextIndexing.ReindexWritingSampleAsync(sample.Id, cancellationToken);
         return sample;
     }
 
@@ -114,5 +118,6 @@ IAppDatabaseOperationFactory database) : IWritingSampleService
         }
 
         await databaseOperation.SaveChangesAsync(cancellationToken);
+        await contextIndexing.DeleteWritingSampleAsync(projectId, sampleId, cancellationToken);
     }
 }

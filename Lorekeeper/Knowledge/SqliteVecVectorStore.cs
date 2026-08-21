@@ -77,7 +77,7 @@ public class SqliteVecVectorStore(
         var typeFilter = sourceTypeFilter is not null ? " AND k.source_type = @sourceType" : "";
         cmd.CommandText =
             $"""
-            SELECT v.rowid, v.distance, k.content, k.source_type, k.source_id, k.metadata, k.chunk_index
+            SELECT v.rowid, v.distance, k.content, k.source_type, k.source_id, k.metadata, k.chunk_index, k.scope_key
             FROM (
                 SELECT rowid, distance
                 FROM vec_knowledge
@@ -126,7 +126,7 @@ public class SqliteVecVectorStore(
 
         cmd.CommandText =
             $"""
-            SELECT v.rowid, v.distance, k.content, k.source_type, k.source_id, k.metadata, k.chunk_index
+            SELECT v.rowid, v.distance, k.content, k.source_type, k.source_id, k.metadata, k.chunk_index, k.scope_key
             FROM (
                 SELECT rowid, distance
                 FROM vec_knowledge
@@ -252,7 +252,8 @@ public class SqliteVecVectorStore(
                 SourceId: reader.IsDBNull(4) ? null : reader.GetString(4),
                 RowId: reader.GetInt64(0),
                 Metadata: reader.IsDBNull(5) ? null : reader.GetString(5),
-                ChunkIndex: reader.IsDBNull(6) ? null : reader.GetInt32(6)
+                ChunkIndex: reader.IsDBNull(6) ? null : reader.GetInt32(6),
+                ScopeKey: reader.GetString(7)
             ));
         }
         return results;

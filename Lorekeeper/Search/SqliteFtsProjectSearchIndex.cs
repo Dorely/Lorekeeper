@@ -87,9 +87,23 @@ public sealed partial class SqliteFtsProjectSearchIndex(
         {
             await using var connection = await OpenAsync(cancellationToken);
             await using var cmd = connection.CreateCommand();
-            var filters = new List<string> { $"{TableName} MATCH @query", "scope_key = @scopeKey" };
+            var scopeKeys = request.ScopeKeys?
+                .Where(scope => !string.IsNullOrWhiteSpace(scope))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (scopeKeys is not { Count: > 0 })
+                scopeKeys = [request.ScopeKey];
+
+            var scopeParameters = new List<string>();
+            for (var index = 0; index < scopeKeys.Count; index++)
+            {
+                var parameterName = $"@scope{index}";
+                scopeParameters.Add(parameterName);
+                cmd.Parameters.AddWithValue(parameterName, scopeKeys[index]);
+            }
+
+            var filters = new List<string> { $"{TableName} MATCH @query", $"scope_key IN ({string.Join(", ", scopeParameters)})" };
             cmd.Parameters.AddWithValue("@query", matchQuery);
-            cmd.Parameters.AddWithValue("@scopeKey", request.ScopeKey);
             cmd.Parameters.AddWithValue("@topK", Math.Clamp(request.TopK, 1, 100));
 
             AddStringListFilter(cmd, filters, "source_type", "type", request.SourceTypes);
@@ -111,7 +125,8 @@ public sealed partial class SqliteFtsProjectSearchIndex(
                        snippet({TableName}, 1, '[', ']', '...', 32) AS snippet,
                        metadata,
                        chunk_index,
-                       bm25({TableName}) AS rank
+                       bm25({TableName}) AS rank,
+                       scope_key
                 FROM {TableName}
                 WHERE {string.Join(" AND ", filters)}
                 ORDER BY rank, rowid
@@ -132,7 +147,8 @@ public sealed partial class SqliteFtsProjectSearchIndex(
                     reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
                     reader.IsDBNull(7) ? null : reader.GetString(7),
                     reader.IsDBNull(8) ? null : reader.GetInt32(8),
-                    reader.GetDouble(9)));
+                    reader.GetDouble(9),
+                    reader.GetString(10)));
             }
 
             return results;

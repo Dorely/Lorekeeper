@@ -446,6 +446,7 @@ public sealed class ImagesChatService(
 
             var resultContents = new List<AIContent>();
             var modelOnlyImagesForNextRound = new List<ProjectImageView>();
+            var modelOnlyImagePayloadsForNextRound = new List<ImagesChatModelOnlyImage>();
             foreach (var pendingCall in pendingCalls)
             {
                 if (cancellationToken.IsCancellationRequested)
@@ -486,6 +487,9 @@ public sealed class ImagesChatService(
                 var modelImages = toolContext.DrainModelOnlyImages();
                 if (modelImages.Count > 0)
                     modelOnlyImagesForNextRound.AddRange(modelImages);
+                var modelImagePayloads = toolContext.DrainModelOnlyImagePayloads();
+                if (modelImagePayloads.Count > 0)
+                    modelOnlyImagePayloadsForNextRound.AddRange(modelImagePayloads);
 
                 yield return new ImagesChatToolCallCompleted(
                     pendingCall.CallId,
@@ -500,9 +504,9 @@ public sealed class ImagesChatService(
             }
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
-            if (modelOnlyImagesForNextRound.Count > 0)
+            if (modelOnlyImagesForNextRound.Count > 0 || modelOnlyImagePayloadsForNextRound.Count > 0)
                 messages.Add(ChatTurnEngine.MarkToolContextMessage(
-                    await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound)));
+                    await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound, modelOnlyImagePayloadsForNextRound)));
 
             if (turnEngine.TryCompactContext(messages, chatProvider.ModelId) is { } compaction)
             {
@@ -659,7 +663,7 @@ public sealed class ImagesChatService(
         return new ChatMessage(ChatRole.User, contents);
     }
 
-    private async Task<ChatMessage> BuildModelOnlyImageMessageAsync(Guid projectId, IReadOnlyList<ProjectImageView> images)
+    private async Task<ChatMessage> BuildModelOnlyImageMessageAsync(Guid projectId, IReadOnlyList<ProjectImageView> images, IReadOnlyList<ImagesChatModelOnlyImage> payloads)
     {
         var contents = new List<AIContent>
         {
@@ -676,6 +680,12 @@ public sealed class ImagesChatService(
             {
                 Name = data.FileName,
             });
+        }
+
+        foreach (var payload in payloads.DistinctBy(item => item.Image.Id))
+        {
+            contents.Add(new TextContent($"\nDirect-reference canonical visual {payload.Image.Id:N}: {payload.Image.FileName}; read-only continuity evidence."));
+            contents.Add(new DataContent(payload.Data, payload.Image.ContentType) { Name = payload.Image.FileName });
         }
 
         return new ChatMessage(ChatRole.User, contents);

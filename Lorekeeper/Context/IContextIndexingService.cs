@@ -7,6 +7,8 @@ public static class ContextVectorSourceTypes
     public const string Act = "context_act";
     public const string IngestSource = "context_ingest_source";
     public const string IngestSourceChunk = "context_ingest_source_chunk";
+    public const string ProjectProfile = "context_project_profile";
+    public const string WritingSample = "context_writing_sample";
 
     public static readonly IReadOnlyList<string> All =
     [
@@ -15,6 +17,8 @@ public static class ContextVectorSourceTypes
         Act,
         IngestSource,
         IngestSourceChunk,
+        ProjectProfile,
+        WritingSample,
     ];
 }
 
@@ -30,4 +34,8 @@ public interface IContextIndexingService
     Task DeleteIngestSourceAsync(Guid projectId, Guid sourceId, CancellationToken cancellationToken = default);
     Task ReindexIngestSourceChunkAsync(Guid sourceChunkId, CancellationToken cancellationToken = default);
     Task DeleteIngestSourceChunkAsync(Guid projectId, Guid sourceChunkId, CancellationToken cancellationToken = default);
+    Task ReindexProjectProfileAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task DeleteProjectProfileAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task ReindexWritingSampleAsync(Guid sampleId, CancellationToken cancellationToken = default);
+    Task DeleteWritingSampleAsync(Guid projectId, Guid sampleId, CancellationToken cancellationToken = default);
 }

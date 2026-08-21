@@ -2,11 +2,12 @@ using Lorekeeper.Knowledge;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Context;
 
 namespace Lorekeeper.Outline;
 
 public sealed class ProjectFactService(
-IAppDatabaseOperationFactory database, IGraphStore graph, IOutlineGraphSync outlineGraphSync, IEntityService entities) : IProjectFactService
+IAppDatabaseOperationFactory database, IGraphStore graph, IOutlineGraphSync outlineGraphSync, IEntityService entities, IContextIndexingService contextIndexing) : IProjectFactService
 {
     private const string KeyProperty = "key";
     private const string ValueProperty = "value";
@@ -94,6 +95,7 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IOutlineGraphSync outl
         await databaseOperation.SaveChangesAsync(cancellationToken);
 
         var nodeId = Guid.ParseExact(node.Key, "N");
+        await contextIndexing.ReindexEntityAsync(projectId, nodeId, cancellationToken);
         return await ProjectAsync(projectId, node, nodeId, cancellationToken);
     }
 
@@ -111,6 +113,7 @@ IAppDatabaseOperationFactory database, IGraphStore graph, IOutlineGraphSync outl
         await graph.RemoveNodeAsync(node.Id, cancellationToken);
         TouchProject(project);
         await databaseOperation.SaveChangesAsync(cancellationToken);
+        await contextIndexing.DeleteEntityAsync(projectId, factId, cancellationToken);
     }
 
     private async Task<GraphNode?> FindByFactKeyAsync(Guid projectId, string key, CancellationToken cancellationToken)

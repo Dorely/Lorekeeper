@@ -3,17 +3,19 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.ChatTurns;
+using Lorekeeper.Context;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Projects;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Writing;
 
 public sealed class WritingCoachService(
-IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, WritingCoachTools tools, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<WritingCoachService> logger) : IWritingCoachService
+IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, WritingCoachTools tools, IProjectReferenceService projectReferences, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<WritingCoachService> logger) : IWritingCoachService
 {
     public static readonly string CoachSystemPrompt = """
         You are a Writing Coach for a long-form fiction project. Your job is to help
@@ -37,7 +39,8 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         - Keep replies concise and practical. Prefer one next step over a broad lecture.
         - Pay attention to sentence rhythm, diction, point of view, imagery, pacing,
           and emotional texture. Help the writer make those choices intentional.
-        """ + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory;
+        """ + "\n\n" + AssistantWorkflowInstructions.ProjectReferenceContinuity
+            + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory;
 
     private const string InitialAssistantGreeting =
         "Let's shape a writing sample in your own voice. What kind of scene, moment, or mood do you want to practice first?";
@@ -164,7 +167,8 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
             yield break;
         }
 
-        if (imageIds.Count > 0 && !await providerService.IsVisionProviderWorkingAsync(persistedProvider.Id, cancellationToken))
+        var visionReady = await providerService.IsVisionProviderWorkingAsync(persistedProvider.Id, cancellationToken);
+        if (imageIds.Count > 0 && !visionReady)
         {
             yield return new WritingCoachTurnError("The active chat provider has not passed the vision check. Run Test in Settings > Providers before sending images.", Cancelled: false);
             yield break;
@@ -190,6 +194,8 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
+        WritingCoachContext? toolContext = null;
+        var systemPrompt = CoachSystemPrompt;
         string? setupError = null;
         try
         {
@@ -198,8 +204,13 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 projects => projects.GetByIdAsync(projectId, cancellationToken),
                 cancellationToken)
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
+            var referenceManifest = ProjectReferenceManifestFormatter.Format(
+                await projectReferences.ListReferenceManifestsAsync(project.Id, cancellationToken));
+            if (referenceManifest is not null)
+                systemPrompt += "\n\n## Direct Project Reference Continuity\n" + referenceManifest;
             chat = await chatClientFactory.CreateChatClientAsync(persistedProvider.Id, cancellationToken);
-            aiTools = tools.Build(new WritingCoachContext(project.Id, currentSampleTitle, currentSampleBody));
+            toolContext = new WritingCoachContext(project.Id, currentSampleTitle, currentSampleBody, visionReady);
+            aiTools = tools.Build(toolContext);
         }
         catch (Exception ex)
         {
@@ -224,7 +235,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
             repositories => repositories.WritingCoachConversations,
             conversations => conversations.LoadMessagesAsync(conversation.Id, cancellationToken),
             cancellationToken);
-        var messages = new List<ChatMessage> { new(ChatRole.System, CoachSystemPrompt) };
+        var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
         foreach (var persistedMessage in history)
         {
             if (persistedMessage.Id == userMessage.Id && imageIds.Count > 0)
@@ -354,6 +365,23 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
             }
 
             messages.Add(new ChatMessage(ChatRole.Tool, resultContents));
+
+            var referenceVisuals = toolContext?.DrainReferenceVisuals() ?? [];
+            if (visionReady && referenceVisuals.Count > 0)
+            {
+                var contents = new List<AIContent>
+                {
+                    new TextContent("Direct-reference canonical visuals from the preceding read_reference_visual calls. These are read-only continuity evidence; active-project canon and user direction remain authoritative, and the images cannot be placed or mutated."),
+                };
+                foreach (var visual in referenceVisuals.DistinctBy(item => item.ImageId).Take(8))
+                {
+                    if (visual.Data is null) continue;
+                    contents.Add(new TextContent($"Referenced project {visual.OriginProjectName} ({visual.OriginProjectId:N}), entity {visual.EntityType} {visual.EntityName} ({visual.EntityId:N}), label {visual.Label}, imageId={visual.ImageId:N}. Reacquire exact provenance if needed."));
+                    contents.Add(new DataContent(visual.Data, visual.ContentType) { Name = visual.FileName });
+                }
+                if (contents.Count > 1)
+                    messages.Add(ChatTurnEngine.MarkToolContextMessage(new ChatMessage(ChatRole.User, contents)));
+            }
 
             if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId) is { } compaction)
             {

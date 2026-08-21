@@ -82,6 +82,11 @@ public sealed class SystemPromptComposer(
                 "Operating and Tool Rules",
                 request.OperatingRules.Trim()),
             new(
+                "project-reference-continuity",
+                SystemPromptSectionKind.OperatingRules,
+                "Direct Project Reference Continuity",
+                AssistantWorkflowInstructions.ProjectReferenceContinuity),
+            new(
                 "dynamic-guidance",
                 SystemPromptSectionKind.DynamicGuidance,
                 "Book and Active-Page Guidance",

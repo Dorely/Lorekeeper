@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.ChatTurns;
+using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
@@ -15,7 +16,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Outline;
 
 public sealed class OutlineCollaborationService(
-IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, OutlineCollaborationTools tools, IEntityVisualContextService entityVisualContext, IAiChangeApprovalService changeApproval, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IOutlineWorkingContextBuilder workingContext, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
+IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, OutlineCollaborationTools tools, IEntityVisualContextService entityVisualContext, IAiChangeApprovalService changeApproval, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IOutlineWorkingContextBuilder workingContext, IProjectReferenceService projectReferences, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
 {
     /// <summary>
     /// Code-owned operating rules composed with the professional charter, Project Guidance,
@@ -567,6 +568,23 @@ they commit to a direction, act on it without a second confirmation.
                     cancellationToken);
                 if (visualMessage is not null)
                     messages.Add(ChatTurnEngine.MarkToolContextMessage(visualMessage));
+
+                var referenceVisuals = toolContext.DrainReferenceVisuals();
+                if (toolContext.VisionReady && referenceVisuals.Count > 0)
+                {
+                    var contents = new List<AIContent>
+                    {
+                        new TextContent("Direct-reference canonical visuals from the preceding read_reference_visual calls. These are read-only continuity evidence; active-project canon and user direction remain authoritative, and these images cannot be placed or mutated."),
+                    };
+                    foreach (var visual in referenceVisuals.DistinctBy(item => item.ImageId).Take(8))
+                    {
+                        if (visual.Data is null) continue;
+                        contents.Add(new TextContent($"Referenced project {visual.OriginProjectName} ({visual.OriginProjectId:N}), entity {visual.EntityType} {visual.EntityName} ({visual.EntityId:N}), label {visual.Label}, imageId={visual.ImageId:N}. Reacquire exact provenance if needed."));
+                        contents.Add(new DataContent(visual.Data, visual.ContentType) { Name = visual.FileName });
+                    }
+                    if (contents.Count > 1)
+                        messages.Add(ChatTurnEngine.MarkToolContextMessage(new ChatMessage(ChatRole.User, contents)));
+                }
             }
 
             if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId) is { } compaction)
@@ -613,12 +631,17 @@ they commit to a direction, act on it without a second confirmation.
     {
         var brief = await bookBriefs.GetOrCreateAsync(project.Id, cancellationToken);
         var context = await workingContext.BuildAsync(project.Id, cancellationToken);
-        return systemPrompts.Compose(new(
+        var prompt = systemPrompts.Compose(new(
             project,
             brief,
             SystemPromptAgentRole.Outline,
             CollaborationOperatingRules,
             WorkingContext: context)).Prompt;
+        var referenceManifest = ProjectReferenceManifestFormatter.Format(
+            await projectReferences.ListReferenceManifestsAsync(project.Id, cancellationToken));
+        return referenceManifest is null
+            ? prompt
+            : prompt + "\n\n## Direct Project Reference Continuity\n" + referenceManifest;
     }
 
     // -- mutation flag (drained between yields so the UI can refresh the tree) --

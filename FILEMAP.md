@@ -67,8 +67,9 @@
 | `Lorekeeper.Tests.csproj` / `Usings.cs` | xUnit project restricted to startup database and versioned project import/export migration-safety fixtures. |
 | `ManuscriptMigrationIntegrationTests.cs` | Actual legacy-schema WAL migration with plain-text audit compatibility, backup/journal/hash validation, confirmation, and restore drills. |
 | `ProjectExportCompatibilityTests.cs` | Current v24 manuscript/annotation/source/page-setup/composition/Core Book/publication-section/order/PDF-presentation/edition-content/print-product/cover/font fixtures plus isolated older fail-closed import-boundary checks. |
+| `ProjectReferenceMigrationTests.cs` | Populated pre-reference startup-migration fixture proving existing projects/content survive, the new table starts empty, and a valid foreign-key link can be added. |
 | `SourceEvidenceMigrationTests.cs` | Populated pre-v23 database fixture proving source-evidence property renaming, chapter-link migration, canon selection persistence, and source-delete cascade behavior. |
-| `ProjectImportJobIntegrationTests.cs` | Real SQLite import-job round trips for manuscript/image/annotation ID remapping, invalid-anchor preservation, current and legacy cover-image conversion, and whole-import rollback on late publication conflicts. |
+| `ProjectImportJobIntegrationTests.cs` | Real SQLite import/export-job round trips for v24 reference-warning/omission behavior, manuscript/image/annotation ID remapping, invalid-anchor preservation, current and legacy cover-image conversion, and whole-import rollback on late publication conflicts. |
 | `ManuscriptAnnotationMigrationTests.cs` | Populated pre-annotation and pre-review-baseline startup-migration fixtures proving additive migrations preserve project, manuscript, edition, publication-artifact, and authoring-history data while initializing nullable review anchors safely. |
 | `PublishConversationMigrationTests.cs` | Populated pre-v13 upgrade fixture proving manuscript, edition, render, artifact hash/bytes, and new Publish transcript persistence survive unchanged. |
 | `ChatConversationModelSelectionMigrationTests.cs` | Populated six-surface startup-migration fixture proving existing chat transcripts/messages survive and nullable selected-provider overrides initialize empty. |
@@ -165,7 +166,7 @@
 
 | File | Description |
 |------|-------------|
-| `Home.razor` (+ `.razor.css`) | Project-selection hub at `/` with project cards, create/rename/delete-with-confirm, and entry cards for the three application configuration areas. |
+| `Home.razor` (+ `.razor.css`) | Project-selection hub at `/` with project cards, create/rename, direct read-only reference management, incoming-dependency-aware shared confirmation deletion, and entry cards for the three application configuration areas. |
 | `Error.razor` | Error page rendered by exception handler middleware. |
 | `NotFound.razor` | 404 page wired through `UseStatusCodePagesWithReExecute`. |
 
@@ -196,6 +197,7 @@
 | `IngestPage.razor` | Ingest tab at `/projects/{Slug}/ingest`; wraps `ProjectLayout` and hosts `Ingest.IngestContent`. |
 | `ResearchPage.razor` | Research tab at `/projects/{Slug}/research`; wraps `ProjectLayout` and hosts `Research.ResearchContent` when an active search provider is configured. |
 | `ImportExportPage.razor` | Import / Export tab at `/projects/{Slug}/import-export`; wraps `ProjectLayout` and hosts `ImportExport.ImportExportContent`. |
+| `ProjectReferencesModal.razor` (+ `.razor.css`) | Application-owned direct-reference manager showing current links, eligible candidates, read-only/live scope rules, and in-surface add/remove validation. |
 | `ImagesPage.razor` | Images tab at `/projects/{Slug}/images`; wraps `ProjectLayout` and hosts `Images.ImagesContent`. |
 | `PublishPage.razor` | Publish tab at `/projects/{Slug}/publish`; wraps `ProjectLayout` and hosts `Publish.PublishContent`. |
 | `OutlinePage.razor` | Outline tab route; wraps `ProjectLayout` + `Outline.OutlineContent`. |
@@ -218,7 +220,7 @@
 
 | File | Description |
 |------|-------------|
-| `ImportExportContent.razor` (+ `.razor.css`) | Graph-focused Import / Export workspace: downloads Full/Non-structural Lorekeeper graph JSON, uploads export JSON, queues import jobs, subscribes to live job updates, and shows progress/report history. |
+| `ImportExportContent.razor` (+ `.razor.css`) | Graph-focused Import / Export workspace: downloads Full/Non-structural Lorekeeper graph JSON, surfaces v24 outgoing-reference omission warnings, uploads export JSON, queues import jobs, subscribes to live job updates, and shows progress/report history. |
 
 ### Components/Pages/Projects/Images/
 
@@ -277,7 +279,8 @@
 | `LlmMaxTokensField.cs` | Enum selecting the max-tokens request field: `Default` (endpoint auto), `Standard` (`max_completion_tokens`), or `Legacy` (`max_tokens`). |
 | `EmbeddingConfiguration.cs` | Singleton EF entity for the active embedding setup: top-level provider connection, embedding API kind, model id, dimensions, last-tested snapshot, and timestamps. |
 | `OAuthToken.cs` | EF entity holding access/refresh tokens for an OAuth-backed provider. |
-| `Project.cs` | EF project root with optional user-owned `ProjectGuidance`, stable slug/settings, one `BookBrief`, and navigation to conversations, images, fonts, jobs, publishing, and graph rows. |
+| `Project.cs` | EF project root with optional user-owned `ProjectGuidance`, stable slug/settings, one `BookBrief`, direct incoming/outgoing reference navigations, and navigation to conversations, images, fonts, jobs, publishing, and graph rows. |
+| `ProjectReference.cs` | Composite-key direct continuity link with explicit referencing/referenced project foreign keys, timestamps, self-link protection, and read-only lifecycle semantics. |
 | `BookBrief.cs` | Canonical high-level authorial-direction model, relational selected-canonical-ingest-source mapping, `BookKind` enum, and partial-patch contract whose null values are unchanged and `ClearFields` explicitly removes values. |
 | `Act.cs` | EF entity for a top-level outline grouping (Title/Synopsis/Order) under a `Project`. Cascade-deleted with the project. Owned chapters survive act deletion (FK `OnDelete.SetNull`). |
 | `Chapter.cs` | EF chapter with canonical manuscript-v4 JSON/revision and computed plain-text/document projections, plus title/synopsis/order, optional act, and vector-index state. |
@@ -372,7 +375,7 @@
 | `ProjectMutationCoordinator.cs` | Project-scoped async serialization for manuscript-reference writes and style/image deletion integrity. |
 | `PersistenceServiceCollectionExtensions.cs` | `AddLorekeeperPersistence` switch on `Persistence:Provider` (SQLite today; Postgres slot for future); registers the no-tracking `IDbContextFactory`, database-operation factory, and singleton write coordinator. |
 | `SqliteConnectionSettings.cs` | Shared SQLite connection-string and startup PRAGMA settings, including project-root development and packaged per-user database-path resolution, busy timeout, WAL journal mode, and normal synchronous mode. |
-| `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, publication-release, Publish-chat, per-conversation chat-model-selection, Press, authoring-page, Core Book, edition-content, physical-product/cover-surface, source-evidence/canonical-source selection, persistent authoring-history, latest assistant review-baseline, and cleanup migrations with the current model snapshot. |
+| `Migrations/` | Immutable EF history plus structured-manuscript, semantic-editor, publication-release, Publish-chat, per-conversation chat-model-selection, Press, authoring-page, Core Book, edition-content, physical-product/cover-surface, source-evidence/canonical-source selection, persistent authoring-history, latest assistant review-baseline, and `20260821052001_AddProjectReferences.cs` / `.Designer.cs` forward migration with the current model snapshot. |
 
 ### Persistence/Repositories/
 
@@ -383,6 +386,7 @@
 | `IEmbeddingConfigurationRepository.cs` / `EmbeddingConfigurationRepository.cs` | Persistence for the singleton active embedding configuration, eager-loading its selected provider connection. |
 | `IOAuthTokenRepository.cs` / `OAuthTokenRepository.cs` | Fresh no-tracking latest/valid OAuth token reads plus atomic replace-for-provider persistence. |
 | `IProjectRepository.cs` / `ProjectRepository.cs` | Project CRUD plus materialized UI lists/slug reads and an explicit id snapshot; slug uniqueness check; ordered list by `UpdatedAt`. |
+| `IProjectReferenceRepository.cs` / `ProjectReferenceRepository.cs` | Direct-reference CRUD and incoming/dependent projections, including duplicate-safe link lookup and project-scoped candidate/readable-scope queries. |
 | `IGraphNodeRepository.cs` / `GraphNodeRepository.cs` | Node CRUD plus project/type/id-list projections for graph/entity/fact/beat reads. |
 | `IGraphEdgeRepository.cs` / `GraphEdgeRepository.cs` | Edge CRUD plus fresh no-tracking directional/project read projections. Defines `EdgeDirection` enum. |
 | `IGraphEntityTypeRepository.cs` / `GraphEntityTypeRepository.cs` | Project-scoped CRUD for lightweight graph type registry rows. |
@@ -426,7 +430,7 @@
 | `EmbeddingRebuildOptions.cs` | Throttling/retry options for bulk project re-embedding, bound from `Embeddings:Rebuild`. |
 | `EmbeddingRebuildQueue.cs` | Singleton rebuild coordinator: queues full re-embed requests, versions pending work, and cancels/awaits active rebuilds before embedding config changes. |
 | `EmbeddingRebuildWorker.cs` | Hosted worker that drains rebuild requests one at a time, runs scoped rebuilds with coordinator cancellation, and avoids parallel project floods. |
-| `EmbeddingRebuildService.cs` | Bulk rebuild service: recreates sqlite-vec dimensions, marks indexes stale, reindexes chapter bodies, ingest source fragments, and context vectors with batch delay and retry backoff. |
+| `EmbeddingRebuildService.cs` | Bulk rebuild service: recreates sqlite-vec dimensions, marks indexes stale, and reindexes project profiles, writing samples, facts/entities, chapters, acts, and ingest-source context with batch delay and retry backoff. |
 | `ILlmProviderService.cs` / `LlmProviderService.cs` | Provider/model CRUD, connection-wide shared-field propagation and grouped deletion, credential resolution, working chat-provider listing, `ChatModelOption`/`ChatModelSelection` contracts, explicit/default availability resolution, persisted chat/vision readiness, working-default selection, and Codex connection checks. |
 | `CodexProvider.cs` | Shared Codex provider name/endpoints/defaults plus OAuth JWT account-id parsing for Codex chat, images, and embeddings. |
 | `ICodexAuthService.cs` / `CodexAuthService.cs` | OpenAI Codex PKCE OAuth flow with configured local callback, serialized refresh, non-destructive reconnect handling for rejected sessions, and explicit revoke. |
@@ -445,8 +449,8 @@
 | `IModelCatalogService.cs` / `ModelCatalogService.cs` | Model discovery over OpenAI-compatible `GET /models` (including the Codex platform endpoint) and Ollama `GET /api/tags`, with endpoint normalization and normalized errors for graceful manual-entry fallback. |
 | `LlmConnectionResolver.cs` | Shared credential resolution following `CredentialSourceId` for chat, vision, and model-catalog clients. |
 | `LlmErrorNormalizer.cs` | Shared normalization of provider HTTP error bodies into concise user-presentable messages. |
-| `AssistantWorkflowInstructions.cs` | Current code-owned AI workflow/tool rules for durable narrated work logs, automatic-context-first and canonical-state Outline work, proactive Editor execution, user-owned review annotation completion, visual-development canon, publication craft/design, exact IDs, compact paging/staging, image generation, validation, and Contest preparation. |
-| `SystemPromptComposer.cs` | Central composer for the one actual system-role prompt, including specialized Images concept-art and Publish production charters, tool rules, dynamic guidance, Project Guidance, Book Brief, then working context. |
+| `AssistantWorkflowInstructions.cs` | Current code-owned AI workflow/tool rules, including active-canon precedence and read-only direct-reference provenance, durable work logs, compact paging/staging, image generation, validation, and surface-specific craft. |
+| `SystemPromptComposer.cs` | Central composer for the one actual system-role prompt, including direct-reference continuity rules, specialized Images/Publish charters, tool rules, dynamic guidance, Project Guidance, Book Brief, then working context. |
 | `AgentOptions.cs` | Shared agent options bound from `Agents:*`; caps iterative tool-call rounds, configures transient ingest LLM retry attempts/delays, and sets Codex/OAuth request timeout. |
 | `SeedSystemPrompt.cs` | Frozen historical seed retained only so legacy migrations can identify and clear untouched seeded guidance; runtime prompts no longer use it. |
 
@@ -460,17 +464,17 @@
 | `ISearchProviderService.cs` / `SearchProviderService.cs` | Application service for search-provider CRUD, active-provider readiness, provider tests, and active-provider search execution. |
 | `SerpApiWebSearchClient.cs` | SerpApi Google-search client; maps `organic_results` into normalized `WebSearchResult`s. |
 | `BraveWebSearchClient.cs` | Brave Search API client; maps `web.results` into normalized `WebSearchResult`s. |
-| `ProjectSearchModels.cs` | Internal project-search source-type constants plus request/result envelopes with total/completeness metadata and source/read/index chunk records. |
-| `ProjectSearchAgentPayload.cs` | Shared model-facing compact discovery envelopes for project searches/source lists, with labeled previews, complete IDs, counts, and exact paginated detail-read arguments. |
-| `IProjectSearchIndex.cs` / `SqliteFtsProjectSearchIndex.cs` | FTS5-backed lexical/BM25 index for chapters, acts, entities, ingest sources, and source chunks, including source/container filters and snippets. |
-| `IProjectSearchService.cs` / `ProjectSearchService.cs` | App/tool facade for internal project search: returns counted candidate/search envelopes, reads paginated source text, and fuses FTS5 keyword hits with sqlite-vec semantic hits via Reciprocal Rank Fusion. |
+| `ProjectSearchModels.cs` | Project-search source types plus readable-scope requests/results carrying origin project ID/name/slug and referenced status through discovery and exact reads. |
+| `ProjectSearchAgentPayload.cs` | Compact model-facing discovery envelopes with labeled previews, project provenance, counts, and exact origin-qualified paginated read arguments. |
+| `IProjectSearchIndex.cs` / `SqliteFtsProjectSearchIndex.cs` | FTS5 lexical/BM25 index with multi-scope, source/container filtering, snippets, and owning-scope provenance. |
+| `IProjectSearchService.cs` / `ProjectSearchService.cs` | Provenance-aware active/direct-reference search facade: inventories and paginates validated sources, filters referenced evidence to narrative/selected-canonical scope, and globally fuses owning-scope FTS5/sqlite-vec hits. |
 
 ### Research/
 
 | File | Description |
 |------|-------------|
 | `IResearchService.cs` / `ResearchService.cs` | Research adapter over the shared chat engine with per-conversation model selection; builds project context, supplies cache-first web/graph tools, stages Review edits, and derives activity from compact or paginated entity envelopes. |
-| `ResearchTools.cs` | Research tools for explicitly paginated entity/link and web-page reads, compact web discoveries, safe image inspection, single-entity canonical-reference import/crop, and staged graph mutations. |
+| `ResearchTools.cs` | Research tools for origin-qualified active/direct-reference corpus and canonical-visual reads, paginated entity/link and web-page reads, compact web discovery, active-project canonical-reference import/crop, and staged graph mutations. |
 | `ResearchTurnUpdate.cs` | Streaming update records consumed by `ResearchChatPanel`: text/tool updates, pending AI change creation, graph mutation refreshes, assistant completion, and turn errors/cancellation. |
 | `ResearchChatTurnRunner.cs` | Background turn runner for Research chat: keeps active turns alive across component disposal and provides buffered update subscriptions. |
 | `ResearchActivityModels.cs` | Read models for Research Activity sidebar entity/source summaries and cache-only source detail modals. |
@@ -502,16 +506,17 @@
 
 | File | Description |
 |------|-------------|
-| `IProjectService.cs` / `ProjectService.cs` | Project CRUD and blank optional Project Guidance persistence; creates the Book Brief, syncs graph defaults, preserves stable slugs, and performs indexed-project cleanup on delete. |
+| `IProjectService.cs` / `ProjectService.cs` | Project CRUD and blank optional Project Guidance persistence; creates the Book Brief, syncs graph defaults, preserves stable slugs, and performs indexed-project cleanup plus explicit incoming-reference detachment on delete. |
 | `IBookBriefService.cs` / `BookBriefService.cs` | Get/create, validated partial update, explicit field clearing, stale-write-protected Visual Direction update, canonical-ingest-source list/replace operations, and compact system-prompt formatting for the Book Brief. |
+| `IProjectReferenceService.cs` / `ProjectReferenceService.cs` | Validated direct-link lifecycle, eligible-candidate/readable-scope resolution, incoming deletion impact, and compact reference manifest reads. |
 
 ### Writing/
 
 | File | Description |
 |------|-------------|
-| `IWritingSampleService.cs` / `WritingSampleService.cs` | UI-facing facade for project-scoped writing samples: create/list/get/update/delete, title validation, sample body persistence, and project `UpdatedAt` touches. |
-| `IWritingCoachService.cs` / `WritingCoachService.cs` | Resettable Writing Coach adapter over the shared chat engine with per-conversation model selection, coach-specific guidance, current-draft context, and a read-only tool set. |
-| `WritingCoachTools.cs` | Read-only Writing Coach tool builder. Exposes `read_current_section` for the latest editor draft and `list_project_facts` for graph-backed ProjectFact context. |
+| `IWritingSampleService.cs` / `WritingSampleService.cs` | Project-scoped writing-sample CRUD with title validation, `UpdatedAt` touches, and owning-scope lexical/vector maintenance. |
+| `IWritingCoachService.cs` / `WritingCoachService.cs` | Resettable coach adapter with per-conversation models, current-draft context, bounded direct-reference manifest, and validated read-only continuity visuals. |
+| `WritingCoachTools.cs` | Read-only Writing Coach tools for the current draft/facts plus origin-qualified direct-reference list/search/read and bounded canonical-visual evidence. |
 | `WritingCoachTurnUpdate.cs` | Streaming update records consumed by the Writing Coach panel: text deltas, tool-call start/argument/completion updates, assistant completion, and turn errors/cancellation. |
 | `WritingCoachTurnRunner.cs` | Background turn runner for Writing Coach: owns per-project active turns, fresh scoped service execution, buffered UI subscription, and Stop-only cancellation. |
 
@@ -519,14 +524,16 @@
 
 | File | Description |
 |------|-------------|
-| `IContextBuilder.cs` / `ContextBuilder.cs` | Turn-aware one-system-message assembly with protected authorial direction, complete active-manuscript/style state, default-on Writing Samples, project page setup and active Designed Page geometry, canonical visuals, bounded retrieval, exclusions, token estimates, and provenance snapshots. |
+| `IContextBuilder.cs` / `ContextBuilder.cs` | Turn-aware one-system-message assembly with protected authorial direction/reference manifest, active manuscript/style state, default-on Writing Samples, page geometry, canonical visuals, origin-qualified direct-reference retrieval, exclusions, token estimates, and provenance snapshots. |
 | `AgentPayloadPaginator.cs` | Shared soft-target model payload paginator with an opt-in compact-object page shape; repeats identity fields, packs logical JSON records, and segments only individually oversized text fields with explicit continuation metadata. |
 | `ContextPayloadJson.cs` | Shared compact JSON serializer settings for model-facing automatic context projections. |
 | `ContextManuscriptFormatter.cs` | Compact complete active-manuscript and Book Text Style context projections with revisions, stable block IDs, inline marks, roles, and sparse formatting metadata. |
 | `ContextEntityPayloadFormatter.cs` | Compact automatic entity projection that preserves meaningful data and canonical visual-reference metadata while omitting graph relationships; direct entity/link tools own paginated relationship reads. |
 | `IEditorContextService.cs` | Context facade with Project Guidance/Book Brief keys, explicit per-chapter inclusions/exclusions, default reset, project-image context, and recommendation key sets. |
 | `IContextRecommendationService.cs` / `ContextRecommendationService.cs` | Produces active-chapter context recommendations from second-degree graph links, direct context-vector hits, and manual search across entities plus structural references. |
-| `IContextIndexingService.cs` / `ContextIndexingService.cs` | Maintains targeted direct vector rows and internal lexical search chunks for addable context items: graph entities, chapters, acts, ingest sources, and ingest source chunks; refreshes source-scoped auto mention links. |
+| `IContextIndexingService.cs` / `ContextIndexingService.cs` | Maintains targeted direct vector rows and internal lexical search chunks for addable context items: project profiles, writing samples, graph entities, chapters, acts, ingest sources, and ingest source chunks; refreshes source-scoped auto mention links. |
+| `ProjectProfileFormatter.cs` | Complete project-profile projection used by profile reads and owning-scope profile indexing. |
+| `ProjectReferenceManifestFormatter.cs` | Bounded direct-reference manifest formatter with project metadata, Book Brief summary, corpus counts, and precedence/search/read guidance. |
 | `VectorIndexWorkCoordinator.cs` | Scoped coordinator that can defer and dedupe expensive chapter/body/context vector index work during review apply, while normal calls run immediately. |
 | `IEntityRelationContextService.cs` / `EntityRelationContextService.cs` | Shared bounded graph relation/traversal map builder for Context Feed and agent tool payloads that return entity information. |
 | `ChapterFormatting.cs` | `WithLineNumbers` / `SplitLines` / `JoinLines` helpers shared by the editor gutter and line-oriented AI chapter reads. |
@@ -539,6 +546,7 @@
 | `EntityVisualContextOptions.cs` | Limits for images per entity/turn, model input edge, and source visuals per ingest chunk. |
 | `IEntityVisualExampleService.cs` / `EntityVisualExampleService.cs` | Association/candidate reads and mutations, non-throwing entity-target validation, promotion, cleanup, and entity reindexing. |
 | `EntityVisualContextService.cs` | Bounded, deduplicated canonical-reference context assembly with explicit association-origin and image-source metadata for multimodal agent turns. |
+| `IReferenceVisualService.cs` | Read-only canonical-reference visual list/read boundary that validates direct-reference scope and `EntityVisualExample` ownership before returning image provenance. |
 
 ### Tokens/
 
@@ -578,8 +586,8 @@
 
 | File | Description |
 |------|-------------|
-| `ProjectExportModels.cs` | Current v24 portable DTOs with v4 manuscripts, Core/release annotations, selected canonical ingest sources, page setup, authoring/edition variants, Core Book publication sections/PDF presentation, sparse release ordering, print products/templates, cover surfaces, accessibility data, and custom fonts; retains isolated older input adapters. |
-| `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON, includes only selected canonical source bodies/evidence in Full exports, warns on Non-structural omissions, queues jobs, and emits notifications. |
+| `ProjectExportModels.cs` | Current v24 portable DTOs with v4 manuscripts, Core/release annotations, selected canonical ingest sources, explicit outgoing-reference omission warnings, page setup, authoring/edition variants, Core Book publication sections/PDF presentation, sparse release ordering, print products/templates, cover surfaces, accessibility data, and custom fonts; retains isolated older input adapters. |
+| `IProjectImportExportService.cs` / `ProjectImportExportService.cs` | UI-facing import/export facade: builds Full/Non-structural JSON without project-reference rows, returns the same v24 omission warnings serialized into the document, includes only selected canonical source bodies/evidence in Full exports, queues jobs, and emits notifications. |
 | `ProjectImportUiModels.cs` | Lightweight read-model records for the Import / Export tab job list, detail view, and report rows. |
 | `ProjectImportJobQueue.cs` | In-process import job queue used by the hosted worker. |
 | `ProjectImportJobNotifier.cs` | In-process pub/sub for live import job updates consumed by the Blazor Import / Export tab. |
@@ -609,7 +617,7 @@
 | File | Description |
 |------|-------------|
 | `IImagesChatService.cs` / `ImagesChatService.cs` | Concept-art and visual-canon adapter over the shared chat engine with per-conversation model selection, automatic/attached visual context, persisted transcript visuals, approved Visual Direction, and terminal free-standing generation/edit workflows. |
-| `ImagesChatTools.cs` | Images tools for grounded read-only project/manuscript context, conditional Visual Direction updates, canonical-reference mutations/crops, free-standing generation/editing, reconnectable jobs, and masks; manuscript, page, and cover mutations are absent. |
+| `ImagesChatTools.cs` | Images tools for origin-qualified active/direct-reference corpus and canonical-visual reads, active-project Visual Direction/canonical-reference work, free-standing generation/editing, reconnectable jobs, and masks; foreign mutations are absent. |
 | `ImagesChatToolContext.cs` | Per-turn Images Chat tool context carrying provider/vision readiness, cancellation and owned image jobs, current tool metadata, visible/model-only images, and mutation signaling. |
 | `ImagesChatTurnUpdate.cs` | Streaming update records consumed by `ImagesChatPanel`: text deltas, tool start/argument/completion with visuals, mutation refresh, assistant completion, and turn errors. |
 | `ImagesChatTurnRunner.cs` | Background turn runner for Images Chat: executes scoped chat turns outside component lifetime and replays buffered live updates to reopened panels. |
@@ -659,7 +667,7 @@
 | `PublicationMigrationLock.cs` | Database-scoped process and crash-releasing file lease shared by edition recovery and Press schema advancement so the v14 rebuild/history window has one migration owner. |
 | `PublicationPressMigrationService.cs` | Guarded v15 Press cutover/reconciliation owner with protected backup, atomic marker, integrity and byte/hash invariants, journal evidence, and recovery-shell fallback. |
 | `PublicationActorContext.cs` | Scoped UI/assistant actor attribution carried into immutable publication-edition audit entries. |
-| `PublishAssistantTools.cs` | Compact Core/release read/patch, metadata-only publication-section creation plus focused prose mutations, bounded project search/image/font and immutable EPUB spine/text inspection, target-aware section variants and staged page operations, edition links, cover operations, terminal unattached image generation, direct previews, validation, preparation, and artifacts; raw manuscript replacement, chapter mutations, and raw profiles are absent. |
+| `PublishAssistantTools.cs` | Compact Core/release work plus origin-qualified active/direct-reference narrative and canonical-visual reads, bounded active-project image/font/EPUB inspection, staged page/cover operations, previews, validation, preparation, and artifacts; foreign mutation targets are rejected. |
 | `PublishChatService.cs` / `PublishChatTurnRunner.cs` / `PublishTurnUpdate.cs` | Project-scoped persisted Publish chat orchestration with per-conversation model selection, full outline and protected visible-workspace context, narrated durable work history, shared Editor page/typography/image-design guidance, persisted user-visible and model-visible direct canvas previews, active-turn streaming/reconnection, and Core/release-targeted mutation notices. |
 | `PublicationPressRuntime.cs` | Fail-closed exact-manifest resolver for the packaged native renderer, dynamic capabilities, integrity evidence, and empty controlled child environment with no machine-tool fallback. |
 | `PublicationRenderService.cs` | Persisted/recoverable queue, metadata-only artifact listings, canonically ordered protocol-v7 image/font staging, bounded native progress ingestion, hash-verified print/Book PDF artifacts, semantic page maps, renderer/registry staleness, and comparison. |
@@ -687,7 +695,7 @@
 | `IEditorChatService.cs` | Project-wide editor chat contract plus per-conversation model selection and per-turn context for compact tools, opaque one-use manuscript previews, composition stages, persisted/model-visible visuals, and generation jobs. |
 | `EditorChatService.cs` | Editor adapter using current semantic Figure/Designed Page prompt guidance, persisted turn context and per-document assistant history batching, shape-safe post-tool mutation projection, complete composition mutation identities, Review edits, contests, cancellation-safe worker progress, and image-job progress. |
 | `EditorChatOptions.cs` | Configuration for editor-chat-specific paginated chapter reads and prose-only revision worker concurrency/iteration limits. |
-| `EditorChatTools.cs` | Editor tools for grounded reads, protected current-chapter/current-page history, shared outline/entity mutations, Press page preview plus direct complete-canvas inspection, compact font/style application, manuscript preview/apply, focused Figures/Designed Pages, composition, exact-target generation, canonical visuals/crops, Book Brief updates, revision agents, and Contest preparation. |
+| `EditorChatTools.cs` | Editor tools for origin-qualified active/direct-reference corpus and canonical-visual reads, protected current-page history, active-project outline/entity/manuscript/composition work, Press previews, exact-target generation, Book Brief updates, revision agents, and Contest preparation. |
 | `EditorManuscriptPreviewService.cs` | Turn-local manuscript preview/apply protocol: validates once, returns compact opaque IDs, rejects stale/reused previews, and persists or review-stages the exact projected document. |
 | `EditorChatChangeStagingContext.cs` | Editor chat staging helper for chapter-body edits; creates pending `AiChange` rows owned by the editor transcript when Review edits is enabled. |
 | `EditorChatTurnUpdate.cs` | `[JsonDerivedType]`-decorated streaming update records consumed by `EditorChatPanel`: text deltas, tool start/argument/end updates with visuals, image-generation progress, pending changes, contest progress/raw JSON, mutation refresh, assistant completion, and turn errors. |
@@ -706,7 +714,7 @@
 | `IActService.cs` / `ActService.cs` | Act CRUD facade. `CreateAsync` auto-orders to the end. `DeleteAsync` lets the FK demote owned chapters to Unassigned (`OnDelete.SetNull`). Touches `Project.UpdatedAt`, keeps Act graph nodes/structural edges synchronized, and updates targeted act context vectors on mutations. |
 | `IOutlineCollaborationService.cs` / `OutlineCollaborationService.cs` | Structure-focused Outline adapter with per-conversation model selection; its prompt includes Project Guidance, Book Brief, shared current-outline/entity/source context, standalone canonical-state prose rules, and concise structure-only genre guidance while maintaining staged outline/canon changes. |
 | `IOutlineWorkingContextBuilder.cs` / `OutlineWorkingContextBuilder.cs` | Builds the one automatic Outline working context: full outline/beats, chapter/beat entity associations, per-category origin counts/samples, and canonical versus evidentiary source inventory. |
-| `OutlineCollaborationTools.cs` | Shared structural/canon tool catalog plus the restricted Outline surface: Book Brief and explicit canon-source selection, full outline, paginated entity/source discovery and reads, chapter-first `RelevantTo` links, facts, canonical references, and explicit appearance generation. Editor imports an intentional structural subset and owns manuscript/composition tools. |
+| `OutlineCollaborationTools.cs` | Shared structural/canon catalog with origin-qualified active/direct-reference corpus and canonical-visual reads; active-project-only Book Brief, canon-source, outline, entity/fact/link, canonical-reference, and appearance mutations remain explicit. |
 | `BookFormatGuidanceService.cs` | Compact/paginated fiction, nonfiction, picture-book, illustrated-book, poetry, hybrid, audience, extent, accessibility, and constraint recommendations with explicit structure-only and publication-aware scopes. |
 | `OutlineMutationPayloads.cs` | Shared compact entity/endpoint envelopes used by direct and staged outline mutation tools without serializing full knowledge or relationship traversals. |
 | `OutlineChatTurnRunner.cs` | Background turn runner for Outline chat: owns active turn cancellation/subscription outside the Blazor component lifetime. |
@@ -717,7 +725,7 @@
 | `AiChangeReviewDiffBuilder.cs` | Builds pending and read-only current-vs-before manuscript review diff models, including identifier-free human-readable structure/visual property rows, line-review eligibility, fuzzy line alignment, and intraline highlights. |
 | `IEntityService.cs` / `EntityService.cs` | Single contract for every story-graph entity (Characters, Locations, Events/beats, ...). Entities persist as `GraphNode`s via `IGraphStore`; create/update/delete, parent moves, and relationship mutations refresh affected context/search indexes and auto mentions. `ListLinksAsync` returns manual links before low-priority read-only auto links. |
 | `IEntityTypeService.cs` / `EntityTypeService.cs` | Lightweight graph type registry facade. Seeds structural/default types (`Project`, `Act`, `Chapter`, `ProjectFact`, `Event`, `Character`, `Location`), discovers arbitrary node types, and creates custom non-structural types for the side panel. |
-| `IProjectFactService.cs` / `ProjectFactService.cs` | Project-level graph fact facade. Stores one `ProjectFact` graph node per key/value pair, ensures a Project → ProjectFact `HasChild` edge, enforces case-insensitive key upserts, touches `Project.UpdatedAt`, and projects linked graph entities for UI/prompt display. |
+| `IProjectFactService.cs` / `ProjectFactService.cs` | Project-level graph fact facade. Stores one indexed `ProjectFact` node per key/value pair, maintains its lexical/vector row and Project → ProjectFact link, touches `Project.UpdatedAt`, and projects linked entities for UI/prompt display. |
 | `IOutlineGraphSync.cs` / `OutlineGraphSync.cs` | Synchronizes the EF outline spine into graph nodes and `HasChild` edges: Project → Acts / unassigned Chapters, Act → Chapters, Chapter → Events. Used by project/act/chapter services and startup repair. |
 | `OutlineTurnUpdate.cs` | `[JsonDerivedType]`-decorated abstract record for streaming chat updates: text deltas, tool-call start/argument/completion updates, assistant completion, outline mutation refresh, and turn errors. |
 

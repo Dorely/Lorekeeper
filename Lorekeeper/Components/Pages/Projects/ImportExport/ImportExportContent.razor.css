@@ -50,6 +50,11 @@
     flex-wrap: wrap;
 }
 
+.transfer-export-warning {
+    display: grid;
+    gap: .2rem;
+}
+
 .transfer-file-name {
     font-size: 0.85rem;
     color: var(--lk-muted);

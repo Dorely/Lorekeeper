@@ -24,4 +24,14 @@ public interface IProjectService
     /// and to all vector chunks stored under the project's scope key.
     /// </summary>
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes the project. A project with incoming references can only be deleted when
+    /// <paramref name="detachIncomingReferences"/> is explicitly true; the recheck and
+    /// detachment occur in the same write operation as the delete.
+    /// </summary>
+    Task DeleteAsync(
+        Guid id,
+        bool detachIncomingReferences,
+        CancellationToken cancellationToken = default);
 }

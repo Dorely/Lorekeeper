@@ -20,6 +20,7 @@ public sealed class DatabaseRepositories(AppDatabaseReadOperation operation)
     public IProjectImageConversationRepository ProjectImageConversations { get; } = new ProjectImageConversationRepository(operation);
     public IProjectImportRepository ProjectImports { get; } = new ProjectImportRepository(operation);
     public IProjectRepository Projects { get; } = new ProjectRepository(operation);
+    public IProjectReferenceRepository ProjectReferences { get; } = new ProjectReferenceRepository(operation);
     public IPublishConversationRepository PublishConversations { get; } = new PublishConversationRepository(operation);
     public IResearchConversationRepository ResearchConversations { get; } = new ResearchConversationRepository(operation);
     public ISearchProviderRepository SearchProviders { get; } = new SearchProviderRepository(operation);

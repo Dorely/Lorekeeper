@@ -46,6 +46,7 @@ IAppDatabaseOperationFactory database, IEmbeddingConfigurationService configurat
             IReadOnlyList<IngestSource> sources;
             IReadOnlyList<GraphNode> nodes;
             IReadOnlyList<Act> acts;
+            IReadOnlyList<WritingSample> writingSamples;
             await using (var readOperation = await database.OpenReadAsync(cancellationToken))
             {
                 var repositories = readOperation.Repositories;
@@ -53,6 +54,18 @@ IAppDatabaseOperationFactory database, IEmbeddingConfigurationService configurat
                 sources = await repositories.Ingest.ListSourcesByProjectAsync(project.Id, cancellationToken);
                 nodes = await repositories.GraphNodes.ListByProjectAsync(project.Id, cancellationToken);
                 acts = await repositories.Acts.ListByProjectAsync(project.Id, cancellationToken);
+                writingSamples = await repositories.WritingSamples.ListByProjectAsync(project.Id, cancellationToken);
+            }
+
+            await RunThrottledAsync(
+                () => contextIndexing.ReindexProjectProfileAsync(project.Id, cancellationToken),
+                cancellationToken);
+
+            foreach (var writingSample in writingSamples)
+            {
+                await RunThrottledAsync(
+                    () => contextIndexing.ReindexWritingSampleAsync(writingSample.Id, cancellationToken),
+                    cancellationToken);
             }
 
             foreach (var chapter in chapters)
@@ -153,7 +166,6 @@ IAppDatabaseOperationFactory database, IEmbeddingConfigurationService configurat
         !string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.ActNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
-        && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);

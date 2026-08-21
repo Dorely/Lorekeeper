@@ -19,6 +19,7 @@ public class AppDbContext(
     public DbSet<SearchProvider> SearchProviders => Set<SearchProvider>();
     public DbSet<OAuthToken> OAuthTokens => Set<OAuthToken>();
     public DbSet<Project> Projects => Set<Project>();
+    public DbSet<ProjectReference> ProjectReferences => Set<ProjectReference>();
     public DbSet<BookBrief> BookBriefs => Set<BookBrief>();
     public DbSet<BookBriefCanonSource> BookBriefCanonSources => Set<BookBriefCanonSource>();
     public DbSet<Act> Acts => Set<Act>();
@@ -224,6 +225,25 @@ public class AppDbContext(
         modelBuilder.Entity<Project>(entity =>
         {
             entity.HasIndex(e => e.Slug).IsUnique();
+        });
+
+        modelBuilder.Entity<ProjectReference>(entity =>
+        {
+            entity.HasKey(reference => new { reference.ReferencingProjectId, reference.ReferencedProjectId });
+            entity.HasIndex(reference => reference.ReferencedProjectId);
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_ProjectReferences_NotSelf",
+                "\"ReferencingProjectId\" <> \"ReferencedProjectId\""));
+
+            entity.HasOne(reference => reference.ReferencingProject)
+                .WithMany(project => project.OutgoingReferences)
+                .HasForeignKey(reference => reference.ReferencingProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(reference => reference.ReferencedProject)
+                .WithMany(project => project.IncomingReferences)
+                .HasForeignKey(reference => reference.ReferencedProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<BookBrief>(entity =>

@@ -98,7 +98,8 @@ public sealed class PublishAssistantTools(
     ICompositionCanvasPreviewService? canvasPreviews = null,
     ICompositionService? compositions = null,
     IAgentProjectImageWorkflow? imageWorkflow = null,
-    IProjectSearchService? projectSearch = null) : IPublishAssistantTools
+    IProjectSearchService? projectSearch = null,
+    IReferenceVisualService? referenceVisuals = null) : IPublishAssistantTools
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -128,17 +129,25 @@ public sealed class PublishAssistantTools(
                 method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
                     ListSearchSourcesAsync(context, query, sourceTypes, topK),
                 name: "list_search_sources",
-                description: "Discover bounded project sources with stable IDs and exact read arguments."),
+                description: "Discover bounded active-project and direct-reference sources with stable IDs, origin provenance, and exact origin-qualified read arguments. References are read-only continuity evidence."),
             AIFunctionFactory.Create(
-                method: (string sourceType, Guid sourceId, int? pageNumber = null) =>
-                    ReadProjectSourceAsync(context, sourceType, sourceId, pageNumber),
+                method: (string sourceType, Guid sourceId, int? pageNumber = null, Guid? originProjectId = null) =>
+                    ReadProjectSourceAsync(context, sourceType, sourceId, pageNumber, originProjectId),
                 name: "read_project_source",
-                description: "Read one paginated project source, including chapter bodies, research sources, acts, entities, and ingest material."),
+                description: "Read one paginated active-project or direct-reference source. Pass the exact originProjectId returned by discovery; arbitrary foreign IDs are rejected."),
             AIFunctionFactory.Create(
                 method: (string query, int topK = 8, string[]? sourceTypes = null, string[]? sourceIds = null, Guid? containerSourceId = null, bool lexicalOnly = false) =>
                     SearchProjectAsync(context, query, topK, sourceTypes, sourceIds, containerSourceId, lexicalOnly),
                 name: "search_project",
-                description: "Run bounded hybrid project search and return stable source IDs, compact excerpts, and exact detail-read arguments."),
+                description: "Run bounded hybrid search across the active project and direct references with stable provenance and exact origin-qualified detail-read arguments."),
+            AIFunctionFactory.Create(
+                method: () => ListReferenceVisualsAsync(context),
+                name: "list_reference_visuals",
+                description: "List canonical entity visuals from direct referenced projects only with project/entity/image provenance."),
+            AIFunctionFactory.Create(
+                method: (Guid originProjectId, Guid imageId) => ReadReferenceVisualAsync(context, originProjectId, imageId),
+                name: "read_reference_visual",
+                description: "Read one canonical visual attached to a direct referenced project. Arbitrary foreign or general-library images fail closed; bytes are read-only and never valid for placement or mutation."),
             AIFunctionFactory.Create(
                 method: () => ReadPublicationBookAsync(context),
                 name: "read_publication_book",
@@ -608,19 +617,66 @@ public sealed class PublishAssistantTools(
             context.ProjectId,
             query,
             sourceTypes,
-            Math.Clamp(topK, 1, 30));
+            Math.Clamp(topK, 1, 30),
+            includeReferencedProjects: true);
         return ProjectSearchAgentPayload.SerializeSources(sources);
+    }
+
+    private async Task<string> ListReferenceVisualsAsync(PublishAssistantContext context)
+    {
+        if (referenceVisuals is null)
+            return Serialize(new { ok = false, code = "REFERENCE_VISUALS_UNAVAILABLE", summary = "Reference visual access is unavailable." });
+        var visuals = await referenceVisuals.ListAsync(context.ProjectId, context.TurnCancellationToken);
+        return Serialize(new
+        {
+            resultKind = "referenceVisualDiscovery", returnedCount = visuals.Count,
+            boundedLimit = ReferenceVisualService.MaximumListResults,
+            mayHaveMore = visuals.Count == ReferenceVisualService.MaximumListResults,
+            note = "Direct-reference canonical visuals are read-only continuity evidence and cannot be placed or mutated in the active project.",
+            visuals,
+        });
+    }
+
+    private async Task<string> ReadReferenceVisualAsync(PublishAssistantContext context, Guid originProjectId, Guid imageId)
+    {
+        if (referenceVisuals is null)
+            return Serialize(new { ok = false, code = "REFERENCE_VISUALS_UNAVAILABLE", summary = "Reference visual access is unavailable." });
+        var visual = await referenceVisuals.ReadAsync(context.ProjectId, originProjectId, imageId, context.VisionReady, context.TurnCancellationToken);
+        if (visual is null)
+            return Serialize(new { ok = false, code = "NOT_FOUND", originProjectId, imageId, summary = "The image is not an eligible canonical visual on a direct referenced project." });
+        if (visual.Data is not null)
+            context.AddTransientVisual(new(
+                visual.ImageId,
+                $"Referenced canonical visual: {visual.EntityName}",
+                visual.FileName,
+                visual.ContentType,
+                visual.Data,
+                $"Referenced project {visual.OriginProjectName} ({visual.OriginProjectId:N}); entity {visual.EntityType} {visual.EntityName} ({visual.EntityId:N}); label {visual.Label}; read-only continuity evidence.",
+                null,
+                null,
+                "referencedCanonicalVisual",
+                visual.ImageId));
+        return Serialize(new
+        {
+            visual.OriginProjectId, visual.OriginProjectName, visual.OriginProjectSlug,
+            visual.EntityId, visual.EntityType, visual.EntityName, visual.CanonicalReferenceId,
+            visual.Label, visual.SortOrder, visual.ImageId, visual.FileName, visual.ContentType,
+            visual.PreviewUrl, visual.AltText, visual.Prompt, visual.ImageSource,
+            visual.IsReferenced, visual.DataDelivered,
+            detailReadArguments = new { originProjectId = visual.OriginProjectId, imageId = visual.ImageId },
+        });
     }
 
     private async Task<string> ReadProjectSourceAsync(
         PublishAssistantContext context,
         string sourceType,
         Guid sourceId,
-        int? pageNumber)
+        int? pageNumber,
+        Guid? originProjectId)
     {
         if (projectSearch is null)
             return Serialize(new { ok = false, code = "SEARCH_UNAVAILABLE", summary = "Project search is unavailable." });
-        var result = await projectSearch.ReadSourceAsync(context.ProjectId, sourceType, sourceId, pageNumber);
+        var result = await projectSearch.ReadSourceAsync(context.ProjectId, sourceType, sourceId, pageNumber, originProjectId: originProjectId);
         return result is null
             ? Serialize(new { ok = false, code = "NOT_FOUND", sourceType, sourceId, summary = "Project source was not found." })
             : JsonSerializer.Serialize(result, JsonOptions);
@@ -656,7 +712,8 @@ public sealed class PublishAssistantTools(
             sourceTypes,
             parsedIds,
             containerSourceId,
-            lexicalOnly), context.TurnCancellationToken);
+            lexicalOnly,
+            IncludeReferencedProjects: true), context.TurnCancellationToken);
         return ProjectSearchAgentPayload.SerializeResults(query.Trim(), result);
     }
 

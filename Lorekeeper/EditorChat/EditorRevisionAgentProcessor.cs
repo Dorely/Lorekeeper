@@ -318,13 +318,13 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
                 method: (string? query = null, string[]? sourceTypes = null, int topK = 10) =>
                     ListSearchSourcesAsync(projectId, query, sourceTypes, topK),
                 name: "list_search_sources",
-                description: "Return compact source discovery with complete IDs, total/returned counts, completeness, and exact read_project_source arguments."),
+                description: "Return compact current-project and direct-reference source discovery with origin project provenance and exact read_project_source arguments. References are read-only continuity evidence."),
 
             AIFunctionFactory.Create(
-                method: (string sourceType, Guid sourceId, int? pageNumber = null) =>
-                    ReadProjectSourceAsync(projectId, sourceType, sourceId, pageNumber),
+                method: (string sourceType, Guid sourceId, int? pageNumber = null, Guid? originProjectId = null) =>
+                    ReadProjectSourceAsync(projectId, sourceType, sourceId, pageNumber, originProjectId),
                 name: "read_project_source",
-                description: "Read one paginated project source by sourceType and sourceId. Use this before searching only inside a specific source text."),
+                description: "Read one paginated active-project or direct-reference source. Pass the exact originProjectId returned by discovery; arbitrary foreign IDs are rejected."),
 
             AIFunctionFactory.Create(
                 method: (
@@ -336,7 +336,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
                     bool lexicalOnly = false) =>
                     SearchProjectAsync(projectId, query, topK, sourceTypes, sourceIds, containerSourceId, lexicalOnly),
                 name: "search_project",
-                description: "Hybrid keyword + semantic compact discovery with full IDs, total/returned counts, labeled previews, and exact read_project_source arguments. Use filters and lexicalOnly for source-scoped exact lookup."),
+                description: "Hybrid keyword + semantic compact discovery across the active project and direct references, with origin provenance and exact origin-qualified read arguments. References are read-only."),
 
             AIFunctionFactory.Create(
                 method: () => ListChaptersAsync(projectId),
@@ -488,13 +488,13 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
     private async Task<string> ListSearchSourcesAsync(Guid projectId, string? query, string[]? sourceTypes, int topK)
     {
         topK = Math.Clamp(topK, 1, 30);
-        var sources = await projectSearch.ListSourcesAsync(projectId, query, sourceTypes, topK);
+        var sources = await projectSearch.ListSourcesAsync(projectId, query, sourceTypes, topK, includeReferencedProjects: true);
         return ProjectSearchAgentPayload.SerializeSources(sources);
     }
 
-    private async Task<string> ReadProjectSourceAsync(Guid projectId, string sourceType, Guid sourceId, int? pageNumber)
+    private async Task<string> ReadProjectSourceAsync(Guid projectId, string sourceType, Guid sourceId, int? pageNumber, Guid? originProjectId)
     {
-        var result = await projectSearch.ReadSourceAsync(projectId, sourceType, sourceId, pageNumber);
+        var result = await projectSearch.ReadSourceAsync(projectId, sourceType, sourceId, pageNumber, originProjectId: originProjectId);
         return result is null
             ? $"Error: source {sourceType}/{sourceId:N} was not found in this project."
             : JsonSerializer.Serialize(result, JsonOptions);
@@ -520,7 +520,8 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             sourceTypes,
             parsedSourceIds,
             containerSourceId,
-            lexicalOnly));
+            lexicalOnly,
+            IncludeReferencedProjects: true));
 
         return ProjectSearchAgentPayload.SerializeResults(query.Trim(), results);
     }

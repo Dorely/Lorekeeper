@@ -166,6 +166,77 @@ public sealed class ContextIndexingService(
     public Task DeleteIngestSourceChunkAsync(Guid projectId, Guid sourceChunkId, CancellationToken cancellationToken = default) =>
         DeleteBySourceAsync(projectId, ContextVectorSourceTypes.IngestSourceChunk, sourceChunkId, cancellationToken);
 
+    public async Task ReindexProjectProfileAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            Project? project;
+            BookBrief? brief;
+            await using (var operation = await database.OpenReadAsync(cancellationToken))
+            {
+                project = await operation.Repositories.Projects.GetSnapshotByIdAsync(projectId, cancellationToken);
+                brief = await operation.Db.BookBriefs
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
+            }
+
+            if (project is null)
+            {
+                await DeleteProjectProfileAsync(projectId, cancellationToken);
+                return;
+            }
+
+            await StoreChunksAsync(
+                projectId,
+                ContextVectorSourceTypes.ProjectProfile,
+                projectId,
+                $"Project profile {project.Name}",
+                ProjectProfileFormatter.Build(project, brief),
+                null,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to reindex project profile {ProjectId}", projectId);
+        }
+    }
+
+    public Task DeleteProjectProfileAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        DeleteBySourceAsync(projectId, ContextVectorSourceTypes.ProjectProfile, projectId, cancellationToken);
+
+    public async Task ReindexWritingSampleAsync(Guid sampleId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            WritingSample? sample;
+            await using (var operation = await database.OpenReadAsync(cancellationToken))
+            {
+                sample = await operation.Repositories.WritingSamples.GetByIdAsync(sampleId, cancellationToken);
+            }
+
+            if (sample is null)
+            {
+                return;
+            }
+
+            await StoreChunksAsync(
+                sample.ProjectId,
+                ContextVectorSourceTypes.WritingSample,
+                sample.Id,
+                $"Writing sample {sample.Title}",
+                BuildWritingSampleText(sample),
+                null,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Failed to reindex writing sample {SampleId}", sampleId);
+        }
+    }
+
+    public Task DeleteWritingSampleAsync(Guid projectId, Guid sampleId, CancellationToken cancellationToken = default) =>
+        DeleteBySourceAsync(projectId, ContextVectorSourceTypes.WritingSample, sampleId, cancellationToken);
+
     private async Task ReindexEntityNodeAsync(GraphNode node, CancellationToken cancellationToken)
     {
         try
@@ -326,6 +397,9 @@ public sealed class ContextIndexingService(
             logger.LogWarning(ex, "Failed to delete context vectors for {SourceType}/{SourceId}", sourceType, sourceId);
         }
     }
+
+    private static string BuildWritingSampleText(WritingSample sample) =>
+        $"# {sample.Title}\n\n{(string.IsNullOrWhiteSpace(sample.Body) ? "(empty)" : sample.Body.Trim())}";
 
     private async Task<string> BuildEntityTextAsync(GraphNode node, CancellationToken cancellationToken)
     {
@@ -529,7 +603,6 @@ public sealed class ContextIndexingService(
         !string.Equals(type, EntityTypeService.ProjectNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.ActNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.ChapterNodeType, StringComparison.OrdinalIgnoreCase)
-        && !string.Equals(type, EntityTypeService.ProjectFactNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.Graph;
 using Lorekeeper.Ingest;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
@@ -10,6 +11,8 @@ using Lorekeeper.Models;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.Projects;
+using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Search;
 
@@ -28,21 +31,28 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         if (string.IsNullOrWhiteSpace(request.Query))
             return new ProjectSearchResponse([], 0, true, Math.Clamp(request.TopK, 1, 50));
 
+        var scopes = await ResolveScopesAsync(request.ProjectId, request.IncludeReferencedProjects, cancellationToken);
+        if (scopes.Count == 0)
+            return new ProjectSearchResponse([], 0, true, Math.Clamp(request.TopK, 1, 50));
+
         var topK = Math.Clamp(request.TopK, 1, 50);
         var sourceTypes = NormalizeSourceTypes(request.SourceTypes);
         var sourceIds = NormalizeSourceIds(request.SourceIds);
         if (request.ContainerSourceId is Guid containerId)
             sourceIds = await ExpandContainerSourceFilterAsync(sourceIds, sourceTypes, containerId, cancellationToken);
 
-        var lexical = await index.SearchAsync(
-            new ProjectLexicalSearchRequest(
-                Project.ScopeKey(request.ProjectId),
+        var lexical = new List<ProjectLexicalSearchResult>();
+        foreach (var scope in scopes)
+        {
+            lexical.AddRange(await SearchLexicalAsync(
+                scope,
                 request.Query.Trim(),
-                Math.Min(100, topK * 6),
                 sourceTypes,
                 sourceIds,
-                request.ContainerSourceId?.ToString("N")),
-            cancellationToken);
+                request.ContainerSourceId,
+                Math.Min(100, topK * 6),
+                cancellationToken));
+        }
         if (request.LexicalOnly)
         {
             var exactMatches = lexical
@@ -52,14 +62,20 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
                 lexical = exactMatches;
         }
 
+        lexical = lexical
+            .OrderBy(result => result.Rank)
+            .ThenBy(result => result.ScopeKey, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(result => result.RowId)
+            .ToList();
+
         var merged = new Dictionary<string, MutableProjectSearchResult>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < lexical.Count; i++)
         {
             var item = lexical[i];
-            var key = ResultKey(item.SourceType, item.SourceId, item.ChunkIndex, item.Content);
+            var key = ResultKey(item.ScopeKey, item.SourceType, item.SourceId, item.ChunkIndex, item.Content);
             if (!merged.TryGetValue(key, out var existing))
             {
-                existing = MutableProjectSearchResult.FromLexical(item);
+                existing = MutableProjectSearchResult.FromLexical(item, FindScope(scopes, item.ScopeKey));
                 merged[key] = existing;
             }
 
@@ -75,7 +91,7 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
             {
                 var embedding = await embeddings.GenerateEmbeddingAsync(request.Query.Trim(), cancellationToken);
                 var vectorResults = await SearchVectorsAsync(
-                    request.ProjectId,
+                    scopes,
                     embedding,
                     sourceTypes,
                     sourceIds,
@@ -86,10 +102,10 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
                 for (var i = 0; i < vectorResults.Count; i++)
                 {
                     var item = vectorResults[i];
-                    var key = ResultKey(item.SourceType, item.SourceId, item.ChunkIndex, item.Content);
+                    var key = ResultKey(item.ScopeKey, item.SourceType, item.SourceId, item.ChunkIndex, item.Content);
                     if (!merged.TryGetValue(key, out var existing))
                     {
-                        existing = MutableProjectSearchResult.FromVector(item);
+                        existing = MutableProjectSearchResult.FromVector(item, FindScope(scopes, item.ScopeKey));
                         merged[key] = existing;
                     }
 
@@ -119,16 +135,45 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         string? query = null,
         IReadOnlyCollection<string>? sourceTypes = null,
         int topK = 10,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool includeReferencedProjects = false)
     {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        databaseOperation.ShareWithNestedOperations();
+        var scopes = await ResolveScopesAsync(projectId, includeReferencedProjects, cancellationToken);
+        var types = NormalizeSourceTypes(sourceTypes);
+        var limit = Math.Clamp(topK, 1, 50);
+        var results = new List<ProjectSearchSource>();
+        foreach (var scope in scopes)
+        {
+            var scopedResults = await ListSourcesForProjectAsync(scope, query, types, cancellationToken);
+            results.AddRange(scopedResults.Select(source => source with
+            {
+                OriginProjectId = scope.ProjectId,
+                OriginProjectName = scope.Name,
+                OriginProjectSlug = scope.Slug,
+                IsReferenced = scope.IsReferenced,
+            }));
+        }
+
+        var ordered = results
+            .OrderBy(source => SourceTypeSort(source.SourceType))
+            .ThenBy(source => source.OriginProjectName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(source => source.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return new ProjectSearchSourceResponse(ordered.Take(limit).ToList(), ordered.Count, true, limit);
+    }
+
+    private async Task<IReadOnlyList<ProjectSearchSource>> ListSourcesForProjectAsync(
+        SearchScope scope,
+        string? query,
+        IReadOnlyCollection<string>? types,
+        CancellationToken cancellationToken)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var projectId = scope.ProjectId;
         var chapters = databaseOperation.Repositories.Chapters;
         var acts = databaseOperation.Repositories.Acts;
         var nodes = databaseOperation.Repositories.GraphNodes;
         var ingest = databaseOperation.Repositories.Ingest;
-        var types = NormalizeSourceTypes(sourceTypes);
-        var limit = Math.Clamp(topK, 1, 50);
         var results = new List<ProjectSearchSource>();
 
         bool Include(string type) => types is null || types.Contains(type);
@@ -175,7 +220,12 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
             {
                 if (!Guid.TryParseExact(node.Key, "N", out var entityId) || !IsSearchEntityType(node.NodeType))
                     continue;
-                var text = BuildEntityText(node);
+                var text = await BuildEntityTextAsync(
+                    node,
+                    databaseOperation.Db,
+                    databaseOperation.Repositories.GraphEdges,
+                    nodes,
+                    cancellationToken);
                 if (!Matches(node.Label, node.NodeType, text)) continue;
                 results.Add(new ProjectSearchSource(
                     ProjectSearchSourceTypes.Entity,
@@ -191,6 +241,8 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         {
             foreach (var source in await ingest.ListSourcesByProjectAsync(projectId, cancellationToken))
             {
+                if (scope.IsReferenced && !scope.CanonicalIngestSourceIds.Contains(source.Id.ToString("N")))
+                    continue;
                 if (!Matches(source.Title, source.SourceKind, source.Description, source.Synopsis, source.SourceText)) continue;
                 results.Add(new ProjectSearchSource(
                     ProjectSearchSourceTypes.RawIngestSource,
@@ -206,8 +258,14 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         {
             foreach (var source in await ingest.ListSourcesByProjectAsync(projectId, cancellationToken))
             {
+                if (scope.IsReferenced && !scope.CanonicalIngestSourceIds.Contains(source.Id.ToString("N")))
+                    continue;
                 foreach (var chunk in await ingest.ListSourceChunksAsync(source.Id, cancellationToken))
                 {
+                    if (scope.IsReferenced
+                        && !scope.CanonicalIngestSourceIds.Contains(source.Id.ToString("N"))
+                        && !scope.CanonicalIngestSourceIds.Contains(chunk.Id.ToString("N")))
+                        continue;
                     var excerpt = await ingest.GetSourceChunkExcerptAsync(chunk.Id, 2_000, cancellationToken);
                     if (!Matches(source.Title, chunk.Title, chunk.HeadingPath, chunk.Summary, chunk.AgentNotes, excerpt?.Text)) continue;
                     results.Add(new ProjectSearchSource(
@@ -221,11 +279,41 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
             }
         }
 
-        var ordered = results
-            .OrderBy(source => SourceTypeSort(source.SourceType))
-            .ThenBy(source => source.Title, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        return new ProjectSearchSourceResponse(ordered.Take(limit).ToList(), ordered.Count, true, limit);
+        if (Include(ProjectSearchSourceTypes.ProjectProfile))
+        {
+            var project = await databaseOperation.Repositories.Projects.GetSnapshotByIdAsync(projectId, cancellationToken);
+            var brief = await databaseOperation.Db.BookBriefs
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
+            var profile = project is null ? null : ProjectProfileFormatter.Build(project, brief);
+            if (project is not null && Matches(project.Name, project.Slug, profile))
+            {
+                results.Add(new ProjectSearchSource(
+                    ProjectSearchSourceTypes.ProjectProfile,
+                    project.Id,
+                    null,
+                    project.Name,
+                    "Project profile",
+                    Preview(profile)));
+            }
+        }
+
+        if (Include(ProjectSearchSourceTypes.WritingSample))
+        {
+            foreach (var sample in await databaseOperation.Repositories.WritingSamples.ListByProjectAsync(projectId, cancellationToken))
+            {
+                if (!Matches(sample.Title, sample.Body)) continue;
+                results.Add(new ProjectSearchSource(
+                    ProjectSearchSourceTypes.WritingSample,
+                    sample.Id,
+                    null,
+                    sample.Title,
+                    "Writing sample",
+                    Preview(sample.Body)));
+            }
+        }
+
+        return results;
     }
 
     public async Task<ProjectSourceReadResult?> ReadSourceAsync(
@@ -233,21 +321,42 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         string sourceType,
         Guid sourceId,
         int? pageNumber = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? originProjectId = null)
     {
+        var scopes = await ResolveScopesAsync(projectId, includeReferencedProjects: true, cancellationToken);
+        var scope = scopes.FirstOrDefault(candidate => candidate.ProjectId == (originProjectId ?? projectId));
+        if (scope is null)
+            return null;
+
         var normalizedType = ProjectSearchSourceTypes.Normalize(sourceType);
+        if (scope.IsReferenced)
+        {
+            if (!ProjectSearchSourceTypes.DirectReferenceNarrativeTypes.Contains(normalizedType))
+                return null;
+            if (IsIngestSourceType(normalizedType)
+                && !await IsCanonicalIngestSourceAsync(scope, normalizedType, sourceId, cancellationToken))
+                return null;
+        }
+
         var (title, containerSourceId, content) = normalizedType switch
         {
             ProjectSearchSourceTypes.Chapter or ProjectSearchSourceTypes.ContextChapter
-                => await ReadChapterAsync(projectId, sourceId, cancellationToken),
+                => await ReadChapterAsync(scope.ProjectId, sourceId, cancellationToken),
             ProjectSearchSourceTypes.Act
-                => await ReadActAsync(projectId, sourceId, cancellationToken),
+                => await ReadActAsync(scope.ProjectId, sourceId, cancellationToken),
             ProjectSearchSourceTypes.Entity
-                => await ReadEntityAsync(projectId, sourceId, cancellationToken),
+                => await ReadEntityAsync(scope.ProjectId, sourceId, cancellationToken),
             ProjectSearchSourceTypes.IngestSource or ProjectSearchSourceTypes.RawIngestSource
-                => await ReadIngestSourceAsync(projectId, sourceId, cancellationToken),
+                => await ReadIngestSourceAsync(scope.ProjectId, sourceId, cancellationToken),
             ProjectSearchSourceTypes.IngestSourceChunk
-                => await ReadIngestSourceChunkAsync(projectId, sourceId, cancellationToken),
+                => await ReadIngestSourceChunkAsync(scope.ProjectId, sourceId, cancellationToken),
+            ProjectSearchSourceTypes.ProjectProfile
+                => sourceId == scope.ProjectId
+                    ? await ReadProjectProfileAsync(scope.ProjectId, cancellationToken)
+                    : (null, null, null),
+            ProjectSearchSourceTypes.WritingSample
+                => await ReadWritingSampleAsync(scope.ProjectId, sourceId, cancellationToken),
             _ => (null, null, null),
         };
 
@@ -269,11 +378,15 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
             pageCount,
             page > 1,
             page < pageCount,
-            pageText);
+            pageText,
+            scope.ProjectId,
+            scope.Name,
+            scope.Slug,
+            scope.IsReferenced);
     }
 
     private async Task<List<KnowledgeResult>> SearchVectorsAsync(
-        Guid projectId,
+        IReadOnlyList<SearchScope> scopes,
         float[] embedding,
         IReadOnlyCollection<string>? sourceTypes,
         IReadOnlyCollection<string>? sourceIds,
@@ -281,22 +394,35 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         int fetchLimit,
         CancellationToken cancellationToken)
     {
-        var scopeKey = Project.ScopeKey(projectId);
+        var scopeKeys = scopes.Select(scope => Project.ScopeKey(scope.ProjectId)).ToList();
         List<KnowledgeResult> results;
         if (sourceTypes is { Count: > 0 })
         {
             results = [];
             foreach (var type in sourceTypes)
-                results.AddRange(await vectors.SearchAsync(embedding, scopeKey, fetchLimit, type, cancellationToken));
+                results.AddRange(await vectors.SearchMultiScopeAsync(embedding, scopeKeys, fetchLimit, type, cancellationToken));
         }
         else
         {
-            results = await vectors.SearchAsync(embedding, scopeKey, fetchLimit, cancellationToken: cancellationToken);
+            results = await vectors.SearchMultiScopeAsync(embedding, scopeKeys, fetchLimit, cancellationToken: cancellationToken);
         }
 
         var sourceIdSet = sourceIds?.ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (sourceIdSet is not null)
             results = results.Where(result => result.SourceId is not null && sourceIdSet.Contains(result.SourceId)).ToList();
+
+        results = results
+            .Where(result =>
+            {
+                var scope = FindScope(scopes, result.ScopeKey);
+                return scope is not null
+                    && (!scope.IsReferenced
+                    || (ProjectSearchSourceTypes.DirectReferenceNarrativeTypes.Contains(
+                            ProjectSearchSourceTypes.Normalize(result.SourceType))
+                        && (!IsIngestSourceType(result.SourceType)
+                            || (result.SourceId is not null && scope.CanonicalIngestSourceIds.Contains(result.SourceId)))));
+            })
+            .ToList();
 
         if (containerSourceId is Guid container)
         {
@@ -348,6 +474,190 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
 
         return expanded;
     }
+
+    private async Task<List<ProjectLexicalSearchResult>> SearchLexicalAsync(
+        SearchScope scope,
+        string query,
+        IReadOnlyCollection<string>? sourceTypes,
+        IReadOnlyCollection<string>? sourceIds,
+        Guid? containerSourceId,
+        int topK,
+        CancellationToken cancellationToken)
+    {
+        var scopeKey = Project.ScopeKey(scope.ProjectId);
+        if (!scope.IsReferenced)
+        {
+            return (await index.SearchAsync(
+                new ProjectLexicalSearchRequest(
+                    scopeKey,
+                    query,
+                    topK,
+                    sourceTypes,
+                    sourceIds,
+                    containerSourceId?.ToString("N")),
+                cancellationToken)).ToList();
+        }
+
+        var requestedTypes = (sourceTypes?.ToList() ?? ProjectSearchSourceTypes.All.ToList())
+            .Where(ProjectSearchSourceTypes.DirectReferenceNarrativeTypes.Contains)
+            .ToList();
+        var ingestTypes = requestedTypes.Where(IsIngestSourceType).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var nonIngestTypes = requestedTypes.Where(type => !IsIngestSourceType(type)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var results = new List<ProjectLexicalSearchResult>();
+
+        if (nonIngestTypes.Count > 0)
+        {
+            results.AddRange(await index.SearchAsync(
+                new ProjectLexicalSearchRequest(
+                    scopeKey,
+                    query,
+                    topK,
+                    nonIngestTypes,
+                    sourceIds,
+                    containerSourceId?.ToString("N")),
+                cancellationToken));
+        }
+
+        if (ingestTypes.Count > 0 && scope.CanonicalIngestSourceIds.Count > 0)
+        {
+            var canonicalIds = sourceIds is null
+                ? scope.CanonicalIngestSourceIds.ToList()
+                : sourceIds.Intersect(scope.CanonicalIngestSourceIds, StringComparer.OrdinalIgnoreCase).ToList();
+            if (canonicalIds.Count > 0)
+            {
+                results.AddRange(await index.SearchAsync(
+                    new ProjectLexicalSearchRequest(
+                        scopeKey,
+                        query,
+                        topK,
+                        ingestTypes,
+                        canonicalIds,
+                        containerSourceId?.ToString("N")),
+                    cancellationToken));
+            }
+        }
+
+        return results;
+    }
+
+    private async Task<IReadOnlyList<SearchScope>> ResolveScopesAsync(
+        Guid projectId,
+        bool includeReferencedProjects,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<ProjectReadableScope> readableScopes;
+        if (includeReferencedProjects)
+        {
+            await using var operation = await database.OpenReadAsync(cancellationToken);
+            var project = await operation.Repositories.Projects.GetSnapshotByIdAsync(projectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectId} not found.");
+            var references = await operation.Repositories.ProjectReferences
+                .ListByReferencingProjectAsync(projectId, cancellationToken);
+            readableScopes =
+            [
+                new ProjectReadableScope(project.Id, project.Name, project.Slug, IsReferenced: false),
+                .. references.Select(reference => new ProjectReadableScope(
+                    reference.ReferencedProjectId,
+                    reference.ReferencedProject.Name,
+                    reference.ReferencedProject.Slug,
+                    IsReferenced: true)),
+            ];
+        }
+        else
+        {
+            await using var operation = await database.OpenReadAsync(cancellationToken);
+            var project = await operation.Repositories.Projects.GetSnapshotByIdAsync(projectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectId} not found.");
+            readableScopes = [new ProjectReadableScope(project.Id, project.Name, project.Slug, IsReferenced: false)];
+        }
+
+        var referencedIds = readableScopes
+            .Where(scope => scope.IsReferenced)
+            .Select(scope => scope.ProjectId)
+            .ToList();
+        var canonicalByProject = referencedIds.ToDictionary(id => id, _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        if (referencedIds.Count > 0)
+        {
+            await using var operation = await database.OpenReadAsync(cancellationToken);
+            var selected = await operation.Db.BookBriefCanonSources
+                .AsNoTracking()
+                .Where(selection => referencedIds.Contains(selection.BookBrief.ProjectId))
+                .Select(selection => new { ProjectId = selection.BookBrief.ProjectId, selection.IngestSourceId })
+                .ToListAsync(cancellationToken);
+            foreach (var item in selected)
+                canonicalByProject[item.ProjectId].Add(item.IngestSourceId.ToString("N"));
+
+            var sourceIds = selected.Select(item => item.IngestSourceId).ToList();
+            if (sourceIds.Count > 0)
+            {
+                var chunks = await operation.Db.IngestSourceChunks
+                    .AsNoTracking()
+                    .Where(chunk => sourceIds.Contains(chunk.SourceId))
+                    .Select(chunk => new { chunk.Source.ProjectId, chunk.Id })
+                    .ToListAsync(cancellationToken);
+                foreach (var chunk in chunks)
+                    canonicalByProject[chunk.ProjectId].Add(chunk.Id.ToString("N"));
+            }
+        }
+
+        return readableScopes
+            .Select(scope => new SearchScope(
+                scope.ProjectId,
+                scope.Name,
+                scope.Slug,
+                scope.IsReferenced,
+                canonicalByProject.GetValueOrDefault(scope.ProjectId) ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase)))
+            .ToList();
+    }
+
+    private static SearchScope? FindScope(IReadOnlyList<SearchScope> scopes, string scopeKey) =>
+        scopes.FirstOrDefault(scope => string.Equals(Project.ScopeKey(scope.ProjectId), scopeKey, StringComparison.OrdinalIgnoreCase));
+
+    private async Task<bool> IsCanonicalIngestSourceAsync(
+        SearchScope scope,
+        string sourceType,
+        Guid sourceId,
+        CancellationToken cancellationToken)
+    {
+        if (!scope.IsReferenced) return true;
+        if (sourceType is ProjectSearchSourceTypes.IngestSource or ProjectSearchSourceTypes.RawIngestSource)
+            return scope.CanonicalIngestSourceIds.Contains(sourceId.ToString("N"));
+
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        var chunk = await operation.Repositories.Ingest.GetSourceChunkAsync(sourceId, cancellationToken);
+        return chunk is not null
+            && scope.CanonicalIngestSourceIds.Contains(chunk.SourceId.ToString("N"));
+    }
+
+    private async Task<(string? Title, Guid? ContainerSourceId, string? Content)> ReadProjectProfileAsync(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        var project = await operation.Repositories.Projects.GetSnapshotByIdAsync(projectId, cancellationToken);
+        if (project is null) return (null, null, null);
+        var brief = await operation.Db.BookBriefs
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
+        var content = ProjectProfileFormatter.Build(project, brief);
+        return (project.Name, null, content);
+    }
+
+    private async Task<(string? Title, Guid? ContainerSourceId, string? Content)> ReadWritingSampleAsync(
+        Guid projectId,
+        Guid sampleId,
+        CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenReadAsync(cancellationToken);
+        var sample = await operation.Repositories.WritingSamples.GetByIdAsync(sampleId, cancellationToken);
+        if (sample is null || sample.ProjectId != projectId) return (null, null, null);
+        return (sample.Title, null, $"# {sample.Title}\n\n{(string.IsNullOrWhiteSpace(sample.Body) ? "(empty)" : sample.Body.Trim())}");
+    }
+
+    private static bool IsIngestSourceType(string sourceType) =>
+        sourceType is ProjectSearchSourceTypes.IngestSource
+            or ProjectSearchSourceTypes.RawIngestSource
+            or ProjectSearchSourceTypes.IngestSourceChunk;
 
     private async Task<(string? Title, Guid? ContainerSourceId, string? Content)> ReadChapterAsync(
         Guid projectId,
@@ -402,7 +712,15 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         var node = await nodes.FindByKeyAsync(projectId, entityId.ToString("N"), cancellationToken);
         if (node is null) return (null, null, null);
         var title = $"{node.NodeType}: {node.Label ?? node.Key}";
-        return (title, null, BuildEntityText(node));
+        return (
+            title,
+            null,
+            await BuildEntityTextAsync(
+                node,
+                databaseOperation.Db,
+                databaseOperation.Repositories.GraphEdges,
+                nodes,
+                cancellationToken));
     }
 
     private async Task<(string? Title, Guid? ContainerSourceId, string? Content)> ReadIngestSourceAsync(
@@ -466,8 +784,8 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         return normalized is { Count: > 0 } ? normalized : null;
     }
 
-    private static string ResultKey(string sourceType, string? sourceId, int? chunkIndex, string content) =>
-        $"{sourceType}|{sourceId}|{chunkIndex?.ToString() ?? "?"}|{StableContentKey(content)}";
+    private static string ResultKey(string scopeKey, string sourceType, string? sourceId, int? chunkIndex, string content) =>
+        $"{scopeKey}|{sourceType}|{sourceId}|{chunkIndex?.ToString() ?? "?"}|{StableContentKey(content)}";
 
     private static string StableContentKey(string content)
     {
@@ -485,10 +803,17 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         ProjectSearchSourceTypes.IngestSource => 3,
         ProjectSearchSourceTypes.RawIngestSource => 4,
         ProjectSearchSourceTypes.IngestSourceChunk => 5,
+        ProjectSearchSourceTypes.ProjectProfile => 6,
+        ProjectSearchSourceTypes.WritingSample => 7,
         _ => 20,
     };
 
-    private static string BuildEntityText(GraphNode node)
+    private static async Task<string> BuildEntityTextAsync(
+        GraphNode node,
+        AppDbContext db,
+        IGraphEdgeRepository edges,
+        IGraphNodeRepository nodes,
+        CancellationToken cancellationToken)
     {
         var sb = new StringBuilder();
         sb.Append("Type: ").AppendLine(node.NodeType);
@@ -518,6 +843,50 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
             sb.AppendLine(source.Markdown);
         }
 
+        var visualExamples = await db.EntityVisualExamples
+            .AsNoTracking()
+            .Include(example => example.Image)
+            .Where(example => example.GraphNodeId == node.Id)
+            .OrderBy(example => example.SortOrder)
+            .ToListAsync(cancellationToken);
+        if (visualExamples.Count > 0)
+        {
+            sb.AppendLine("Canonical visual references:");
+            foreach (var example in visualExamples)
+            {
+                sb.Append("- ").Append(example.Label)
+                    .Append(" [imageId: ").Append(example.ImageId.ToString("N")).AppendLine("]");
+                AppendOptional(sb, "  Alt text", example.Image.AltText);
+                AppendOptional(sb, "  Prompt", example.Image.Prompt);
+            }
+        }
+
+        var adjacent = (await edges.GetAdjacentAsync(
+                node.Id,
+                EdgeDirection.Both,
+                edgeTypes: null,
+                maxResults: 30,
+                cancellationToken))
+            .Where(edge => !GraphAutoLinkService.IsAutoMentionEdge(edge))
+            .ToList();
+        if (adjacent.Count > 0)
+        {
+            var otherIds = adjacent
+                .Select(edge => edge.FromNodeId == node.Id ? edge.ToNodeId : edge.FromNodeId)
+                .Distinct();
+            var otherNodes = (await nodes.GetByIdsAsync(otherIds, cancellationToken)).ToDictionary(other => other.Id);
+            sb.AppendLine("Relationships:");
+            foreach (var edge in adjacent)
+            {
+                var otherNodeId = edge.FromNodeId == node.Id ? edge.ToNodeId : edge.FromNodeId;
+                if (!otherNodes.TryGetValue(otherNodeId, out var other)) continue;
+                var direction = edge.FromNodeId == node.Id ? "->" : "<-";
+                sb.Append("- ").Append(direction).Append(' ').Append(edge.EdgeType).Append(' ')
+                    .Append(other.Label ?? other.Key).Append(" (").Append(other.NodeType).AppendLine(")");
+                AppendOptional(sb, "  Summary", ReadProperty(edge.Properties, IngestWikiSheet.SummaryProperty));
+            }
+        }
+
         return sb.ToString().TrimEnd();
     }
 
@@ -533,6 +902,9 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         if (string.IsNullOrWhiteSpace(value)) return;
         sb.Append(label).Append(": ").AppendLine(value.Trim());
     }
+
+    private static string ReadProperty(IReadOnlyDictionary<string, object?> properties, string key) =>
+        properties.TryGetValue(key, out var value) ? value?.ToString() ?? string.Empty : string.Empty;
 
     private static bool ContainsExactText(string value, string query)
     {
@@ -564,8 +936,19 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         && !string.Equals(type, EntityTypeService.SourceChunkNodeType, StringComparison.OrdinalIgnoreCase)
         && !string.Equals(type, EntityTypeService.SourceBlockNodeType, StringComparison.OrdinalIgnoreCase);
 
+    private sealed record SearchScope(
+        Guid ProjectId,
+        string Name,
+        string Slug,
+        bool IsReferenced,
+        IReadOnlySet<string> CanonicalIngestSourceIds);
+
     private sealed class MutableProjectSearchResult
     {
+        public required Guid OriginProjectId { get; init; }
+        public required string OriginProjectName { get; init; }
+        public required string OriginProjectSlug { get; init; }
+        public bool IsReferenced { get; init; }
         public required string SourceType { get; init; }
         public Guid? SourceId { get; init; }
         public Guid? ContainerSourceId { get; init; }
@@ -581,8 +964,12 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
         public double Score { get; set; }
         public HashSet<string> Reasons { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public static MutableProjectSearchResult FromLexical(ProjectLexicalSearchResult result) => new()
+        public static MutableProjectSearchResult FromLexical(ProjectLexicalSearchResult result, SearchScope? scope) => new()
         {
+            OriginProjectId = scope?.ProjectId ?? Guid.Empty,
+            OriginProjectName = scope?.Name ?? string.Empty,
+            OriginProjectSlug = scope?.Slug ?? string.Empty,
+            IsReferenced = scope?.IsReferenced ?? false,
             SourceType = result.SourceType,
             SourceId = ParseGuid(result.SourceId),
             ContainerSourceId = ParseGuid(result.ContainerSourceId),
@@ -593,8 +980,12 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
             ChunkIndex = result.ChunkIndex,
         };
 
-        public static MutableProjectSearchResult FromVector(KnowledgeResult result) => new()
+        public static MutableProjectSearchResult FromVector(KnowledgeResult result, SearchScope? scope) => new()
         {
+            OriginProjectId = scope?.ProjectId ?? Guid.Empty,
+            OriginProjectName = scope?.Name ?? string.Empty,
+            OriginProjectSlug = scope?.Slug ?? string.Empty,
+            IsReferenced = scope?.IsReferenced ?? false,
             SourceType = result.SourceType,
             SourceId = ParseGuid(result.SourceId),
             ContainerSourceId = null,
@@ -619,7 +1010,11 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
             VectorDistance,
             VectorPosition,
             Score,
-            Reasons.OrderBy(reason => reason, StringComparer.OrdinalIgnoreCase).ToList());
+            Reasons.OrderBy(reason => reason, StringComparer.OrdinalIgnoreCase).ToList(),
+            OriginProjectId,
+            OriginProjectName,
+            OriginProjectSlug,
+            IsReferenced);
 
         private static Guid? ParseGuid(string? value) =>
             !string.IsNullOrWhiteSpace(value) && Guid.TryParseExact(value, "N", out var parsed)

@@ -1,0 +1,163 @@
+@using Lorekeeper.Projects
+@using Lorekeeper.Models
+@inject IProjectReferenceService References
+
+@if (IsOpen)
+{
+    <div class="project-reference-backdrop" role="presentation" @onclick="CloseAsync">
+        <section class="project-reference-dialog" role="dialog" aria-modal="true" aria-labelledby="project-reference-title" @onclick:stopPropagation="true">
+            <header class="project-reference-header">
+                <div>
+                    <span class="lk-section-kicker">Continuity</span>
+                    <h2 id="project-reference-title">Project references</h2>
+                    <p>Choose projects that <strong>@ProjectName</strong> may read as direct, read-only continuity evidence.</p>
+                </div>
+                <button type="button" class="btn-close" aria-label="Close project references" disabled="@_busy" @onclick="CloseAsync"></button>
+            </header>
+
+            <div class="project-reference-body">
+                <div class="project-reference-explanation">
+                    <strong>Direct references only.</strong>
+                    <span>Referenced projects stay intact and are never mutated by this project. Active-project canon and user direction remain authoritative when continuity evidence conflicts.</span>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_error))
+                {
+                    <div class="alert alert-danger py-2 small" role="alert">@_error</div>
+                }
+
+                @if (_loading)
+                {
+                    <p class="text-muted small" role="status"><span class="spinner-border spinner-border-sm me-1"></span>Loading references…</p>
+                }
+                else
+                {
+                    <section class="project-reference-section" aria-labelledby="current-references-title">
+                        <div class="project-reference-section-heading">
+                            <h3 id="current-references-title">Current references</h3>
+                            <span>@_references.Count direct link@(_references.Count == 1 ? string.Empty : "s")</span>
+                        </div>
+                        @if (_references.Count == 0)
+                        {
+                            <p class="project-reference-empty">No references yet. This project keeps its existing current-only behavior.</p>
+                        }
+                        else
+                        {
+                            <div class="project-reference-list">
+                                @foreach (var reference in _references)
+                                {
+                                    <div class="project-reference-row" @key="reference.ProjectId">
+                                        <div>
+                                            <strong>@reference.Name</strong>
+                                            <span>/@reference.Slug · updated @reference.UpdatedAt.ToLocalTime().ToString("MMM d, yyyy")</span>
+                                        </div>
+                                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@_busy" @onclick="() => RemoveAsync(reference.ProjectId)">Remove</button>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </section>
+
+                    <section class="project-reference-section" aria-labelledby="add-reference-title">
+                        <div class="project-reference-section-heading">
+                            <h3 id="add-reference-title">Add a reference</h3>
+                            <span>Eligible projects</span>
+                        </div>
+                        <div class="project-reference-add">
+                            <select class="form-select" aria-label="Eligible project to reference" @bind="_selectedCandidateId" disabled="@_busy">
+                                <option value="">Choose a project…</option>
+                                @foreach (var candidate in _candidates.Where(candidate => !candidate.IsReferenced))
+                                {
+                                    <option value="@candidate.ProjectId">@candidate.Name (/@candidate.Slug)</option>
+                                }
+                            </select>
+                            <button type="button" class="btn btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_selectedCandidateId))" @onclick="AddAsync">Add reference</button>
+                        </div>
+                        @if (_candidates.All(candidate => candidate.IsReferenced))
+                        {
+                            <p class="project-reference-empty">No other eligible projects are available.</p>
+                        }
+                    </section>
+                }
+            </div>
+
+            <footer class="project-reference-footer">
+                <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="CloseAsync">Done</button>
+            </footer>
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public Guid ProjectId { get; set; }
+    [Parameter] public string ProjectName { get; set; } = string.Empty;
+    [Parameter] public EventCallback OnClosed { get; set; }
+
+    private IReadOnlyList<ProjectReferenceSummary> _references = [];
+    private IReadOnlyList<ProjectReferenceCandidate> _candidates = [];
+    private Guid _loadedProjectId;
+    private bool _wasOpen;
+    private bool _loading;
+    private bool _busy;
+    private string _selectedCandidateId = string.Empty;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (IsOpen && ProjectId != Guid.Empty && (!_wasOpen || ProjectId != _loadedProjectId))
+        {
+            _loadedProjectId = ProjectId;
+            await LoadAsync();
+        }
+        _wasOpen = IsOpen;
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        _selectedCandidateId = string.Empty;
+        try
+        {
+            _references = await References.ListAsync(ProjectId);
+            _candidates = await References.ListCandidatesAsync(ProjectId);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task AddAsync()
+    {
+        if (!Guid.TryParse(_selectedCandidateId, out var referencedProjectId))
+        {
+            _error = "Choose an eligible project before adding a reference.";
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await References.AddAsync(ProjectId, referencedProjectId);
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task RemoveAsync(Guid referencedProjectId)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await References.RemoveAsync(ProjectId, referencedProjectId);
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private Task CloseAsync() => _busy ? Task.CompletedTask : OnClosed.InvokeAsync();
+}

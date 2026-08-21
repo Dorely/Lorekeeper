@@ -22,7 +22,14 @@ public enum ProjectExportKind
 public sealed record ProjectExportFile(
     string FileName,
     string ContentType,
-    byte[] Content);
+    byte[] Content,
+    IReadOnlyList<string>? Warnings = null);
+
+public static class ProjectExportWarningText
+{
+    public static string OutgoingReferencesOmitted(int referenceCount, string referencedProjectNames) =>
+        $"This format v24 export omits {referenceCount} direct project reference link(s) ({referencedProjectNames}). Imports never infer project links; recreate them manually after import.";
+}
 
 public sealed record ProjectExportDocument
 {

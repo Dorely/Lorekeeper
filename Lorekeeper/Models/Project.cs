@@ -114,6 +114,12 @@ public class Project
     public ICollection<ProjectFontFamily> FontFamilies { get; set; } = [];
     public ICollection<ManuscriptStyleDefinition> ManuscriptStyles { get; set; } = [];
 
+    /// <summary>Projects this project directly references for read-only continuity context.</summary>
+    public ICollection<ProjectReference> OutgoingReferences { get; set; } = [];
+
+    /// <summary>Projects that directly reference this project.</summary>
+    public ICollection<ProjectReference> IncomingReferences { get; set; } = [];
+
     /// <summary>Single source of truth for the vector-store scope key for a project.</summary>
     public static string ScopeKey(Guid id) => $"project:{id:N}";
 

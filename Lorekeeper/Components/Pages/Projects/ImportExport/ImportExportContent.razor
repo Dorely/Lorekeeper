@@ -1,8 +1,10 @@
 @using Lorekeeper.ImportExport
 @using Lorekeeper.Models
+@using Lorekeeper.Projects
 @implements IAsyncDisposable
 @inject IProjectImportExportService Transfers
 @inject IProjectImportJobNotifier Notifier
+@inject IProjectReferenceService References
 @inject IJSRuntime JS
 
 @if (Project is null)
@@ -18,6 +20,16 @@ else
                 @if (!string.IsNullOrWhiteSpace(_exportError))
                 {
                     <div class="alert alert-danger py-2 small">@_exportError</div>
+                }
+                @if (_exportWarnings.Count > 0)
+                {
+                    <div class="alert alert-warning py-2 small transfer-export-warning" role="status">
+                        <strong>Export warning</strong>
+                        @foreach (var warning in _exportWarnings)
+                        {
+                            <div>@warning</div>
+                        }
+                    </div>
                 }
 
                 <div class="transfer-export-group">
@@ -169,6 +181,7 @@ else
     private string _importContent = string.Empty;
     private string? _formError;
     private string? _exportError;
+    private IReadOnlyList<string> _exportWarnings = [];
     private string? _jobActionError;
     private IJSObjectReference? _downloadModule;
     private IProjectImportJobUpdateSubscription? _subscription;
@@ -188,6 +201,12 @@ else
         _loadedProjectId = Project.Id;
         await StopSubscriptionAsync();
         StartSubscription(Project.Id);
+        var references = await References.ListAsync(Project.Id);
+        _exportWarnings = references.Count == 0
+            ? []
+            : [ProjectExportWarningText.OutgoingReferencesOmitted(
+                references.Count,
+                string.Join(", ", references.Select(reference => reference.Name)))];
         await ReloadJobsAsync();
     }
 
@@ -302,6 +321,7 @@ else
         try
         {
             var file = await Transfers.ExportProjectAsync(Project.Id, kind);
+            _exportWarnings = file.Warnings ?? [];
             await _downloadModule.InvokeVoidAsync("downloadBytes", file.FileName, file.ContentType, Convert.ToBase64String(file.Content));
         }
         catch (Exception ex)
