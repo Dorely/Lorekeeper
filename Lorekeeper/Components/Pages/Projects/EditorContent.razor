@@ -2732,7 +2732,9 @@ else
         {
             try
             {
-                var before = ManuscriptCodec.Deserialize(latestAssistantReview.BeforeManuscriptJson, chapter.Id, 0);
+                var before = ManuscriptCodec.Deserialize(latestAssistantReview.BeforeManuscriptJson);
+                if (before.ManuscriptId != chapter.Id)
+                    throw new InvalidDataException("The saved Before snapshot belongs to another chapter.");
                 var current = liveDocument ?? chapter.Manuscript;
                 if (AiChangeReviewDiffBuilder.TryBuild(before, current, chapter.Title, out var appliedDiff))
                 {
