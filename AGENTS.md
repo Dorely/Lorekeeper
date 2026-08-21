@@ -165,9 +165,10 @@
 
 ## Verification
 
-- Verify changes in proportion to their impact using the relevant builds,
-  existing tests, static checks, runtime checks, and release checks documented in
-  `docs/architecture.md` and its routed chapters.
+- Beyond the mandatory repository-wide commit gate below, verify changes in
+  proportion to their impact using the relevant static checks, runtime checks,
+  and release checks documented in `docs/architecture.md` and its routed
+  chapters.
 - Automated tests in `Lorekeeper.Press` may exist only when they map to a
   requirement in the Press conformance evidence matrix. This includes the
   protocol, containment, atomicity, cancellation, determinism, typography,
@@ -180,6 +181,25 @@
   through builds, static inspection, and user-authorized manual or browser
   checks. A user request to add tests does not broaden this repository boundary
   unless the user explicitly changes the two approved test purposes.
+- Every commit, regardless of its apparent scope, must pass the full repository
+  commit gate on the exact final worktree that will be committed:
+
+  ```powershell
+  dotnet build Lorekeeper.sln
+  dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj
+  Push-Location Lorekeeper.Press
+  cargo fmt --check
+  cargo clippy --all-targets -- -D warnings
+  cargo test --locked
+  Pop-Location
+  ```
+
+  Earlier results from another commit or from before the final edit do not
+  satisfy this gate. A failure blocks the commit even when the failing test
+  appears unrelated, pre-existing, intermittent, or outside the changed area.
+  Diagnose the failure; then either correct it and rerun the entire gate, or stop
+  and report the blocker. Never commit, push, tag, or publish while any command
+  in this gate is failing.
 - Verify normal source changes with `dotnet build Lorekeeper.sln`. After a
   successful build, start the browser-hosted app with
   `dotnet run --project Lorekeeper --launch-profile http`, confirm the local host
@@ -201,14 +221,20 @@
   unperformed.
 - Before completion, search for obsolete names and paths, inspect the complete
   diff, and confirm that documentation matches the resulting code.
+- Immediately before a release version-preparation commit and again before
+  invoking a release publisher, run the full repository commit gate. Release
+  packaging checks are additional evidence; they never replace the repository
+  gate. The exact commit being released must be the verified commit.
 
 ## Completion and Commits
 
 - A feature is complete only when its full impact area is implemented, obsolete
   runtime code is removed, documentation is current, and relevant verification
   succeeds.
-- Once a feature is complete, inspect the final diff and status, stage only that
-  feature's files, and create a focused commit with a descriptive message.
+- Once a feature is complete and the full repository commit gate plus all
+  impact-specific verification succeeds, inspect the final diff and status,
+  stage only that feature's files, and create a focused commit with a descriptive
+  message.
 - Commit every completed feature before beginning another one. Do not combine
   unrelated work in a single commit.
 - After committing, verify that the working tree is clean. Do not amend, squash,

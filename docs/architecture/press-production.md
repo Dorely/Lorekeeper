@@ -105,6 +105,9 @@ bleed, captions, structured Designed Pages and cover scenes, reusable styles,
 vector shapes, reading order, page-size overrides for eligible Digital PDFs,
 full-wrap geometry, EAN-13 bars, and PDF serialization. Structured text
 remains selectable text rather than a rasterized page image.
+Block spacing collapses across adjacent semantic blocks. A flowing Figure's
+declared after-spacing participates in that same baseline calculation so the
+following prose enters and remains within the active float exclusion region.
 
 Physical print profiles differ deliberately. KDP and Generic print products
 emit PDF 1.7 and extend page-edge art through the vendor bleed box while the

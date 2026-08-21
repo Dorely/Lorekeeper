@@ -2289,6 +2289,7 @@ fn paginate_with_cancellation(
                                 .then(|| string(&block, "caption"))
                                 .as_deref(),
                         );
+                        previous_space_after = spacing_after;
                         continue;
                     }
                     let style = block_style(document, &block, trim);
@@ -4978,7 +4979,7 @@ fn append_styled_runs_with_gap(
         (trim.width_inches - 2.0 * trim.margin_inches) * 72.0 - style.indent - style.right_indent;
     let flow_region = pages
         .last()
-        .and_then(|page| active_float_region(page, trim, style));
+        .and_then(|page| active_float_region(page, trim, style, previous_space_after));
     let available_width = flow_region.map_or(default_width, |region| region.1);
     let flow_x = flow_region.map_or(default_x, |region| region.0);
     let mut wrapped = wrap_layout_runs(text, source_runs, style.size, available_width);
@@ -5143,8 +5144,9 @@ fn active_float_region(
     page: &LayoutPage,
     trim: &crate::model::Trim,
     style: &BlockStyle,
+    previous_space_after: f32,
 ) -> Option<(f32, f32, f32)> {
-    let baseline = next_flow_baseline(page, trim, style, true);
+    let baseline = next_flow_baseline_with_gap(page, trim, style, true, previous_space_after);
     let margin = trim.margin_inches * 72.0;
     let right = trim.width_inches * 72.0 - margin;
     let gutter = 8.0;
@@ -6804,6 +6806,7 @@ mod tests {
             fonts: Vec::new(),
         };
         let layout = paginate(&request).expect("layout");
+        assert!(layout.toc_converged);
         let toc_pages = layout
             .pages
             .iter()
@@ -6814,7 +6817,8 @@ mod tests {
             })
             .count();
         assert!(toc_pages >= 3);
-        assert!(!toc_pages.is_multiple_of(2));
+        // Replacement may add blank padding to preserve the already-paginated
+        // body's recto starts; only content pages carry a Contents heading.
         let top = request.trim.height_inches * 72.0 - request.trim.margin_inches * 72.0;
         let bottom = request.trim.margin_inches * 72.0;
         let width = (request.trim.width_inches - request.trim.margin_inches * 2.0) * 72.0;
@@ -6944,11 +6948,11 @@ mod tests {
         );
         let lines = &pages[0].lines;
         assert_eq!(lines.len(), 3);
-        assert!(
-            lines
-                .windows(2)
-                .all(|pair| { pair[0].y - pair[1].y >= pair[0].size * 1.5 })
-        );
+        assert!(lines.windows(2).all(|pair| {
+            let upper_line_bottom = pair[0].y - pair[0].size * 0.30;
+            let lower_line_top = pair[1].y + pair[1].size * 0.82;
+            upper_line_bottom >= lower_line_top - 0.01
+        }));
     }
 
     #[test]

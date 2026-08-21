@@ -1432,7 +1432,7 @@ fn floated_figure_wraps_following_prose_on_the_requested_side() {
     let prose_y = prose["y"].as_f64().expect("prose y");
     assert!(
         prose_y > image_bottom && prose_y < image_top,
-        "prose must share the figure's vertical band"
+        "prose must share the figure's vertical band: prose_x={prose_x}, image_left={image_left}, prose_y={prose_y}, image_bottom={image_bottom}, image_top={image_top}"
     );
     assert!(
         prose_x < image_left,
