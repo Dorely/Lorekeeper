@@ -2,6 +2,7 @@
 @using Lorekeeper.Manuscripts
 @using Lorekeeper.Models
 @using Lorekeeper.Publish
+@using System.Globalization
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
 @inject IChapterPreviewService Preview
@@ -164,7 +165,7 @@
             yield return [left, null];
     }
 
-    private RenderFragment RenderPage(ChapterPreviewPage page) => @<article id="@($"page-{page.PhysicalPage}")" class="chapter-preview-page" data-page-kind="@(page.Kind)" style="@PageStyle(page)" aria-label="Page @(page.PageLabel ?? page.PhysicalPage.ToString())">
+    private RenderFragment RenderPage(ChapterPreviewPage page) => @<article id="@($"page-{page.PhysicalPage}")" class="chapter-preview-page" data-page-kind="@(page.Kind)" data-page-block-id="@PageBlockId(page)" style="@PageStyle(page)" aria-label="Page @(page.PageLabel ?? page.PhysicalPage.ToString())">
                 @foreach (var shape in page.Shapes)
                 {
                     <span class="chapter-preview-shape" style="@ShapeStyle(page, shape)"></span>
@@ -179,15 +180,18 @@
                 {
                     @if (line.Link is { } link)
                     {
-                        <a class="chapter-preview-line" href="@link" style="@LineStyle(page, line)" data-block-id="@FlowBlockId(line)" data-source-start-utf16="@line.SourceStartUtf16" data-source-end-utf16="@line.SourceEndUtf16">@RunContent(line)</a>
+                        <a class="chapter-preview-line" href="@link" style="@LineStyle(page, line)" data-block-id="@FlowBlockId(line)" data-source-start-utf16="@line.SourceStartUtf16" data-source-end-utf16="@line.SourceEndUtf16" data-location-progress="@FlowLocationProgress(line).ToString(CultureInfo.InvariantCulture)">@RunContent(line)</a>
                     }
                     else
                     {
-                        <span class="chapter-preview-line" style="@LineStyle(page, line)" data-block-id="@FlowBlockId(line)" data-source-start-utf16="@line.SourceStartUtf16" data-source-end-utf16="@line.SourceEndUtf16">@RunContent(line)</span>
+                        <span class="chapter-preview-line" style="@LineStyle(page, line)" data-block-id="@FlowBlockId(line)" data-source-start-utf16="@line.SourceStartUtf16" data-source-end-utf16="@line.SourceEndUtf16" data-location-progress="@FlowLocationProgress(line).ToString(CultureInfo.InvariantCulture)">@RunContent(line)</span>
                     }
                 }
                 <footer>@(page.PageLabel ?? string.Empty)</footer>
             </article>;
+
+    private string? PageBlockId(ChapterPreviewPage page) => _result?.PageMap
+        .FirstOrDefault(item => item.PhysicalPage == page.PhysicalPage)?.BlockId;
 
     private ChapterPreviewResult? _result;
     private ProjectPageSetup? _setup;
@@ -217,6 +221,31 @@
     private string _noteDraft = string.Empty;
     private ManuscriptAnnotationRange? _noteRange;
     private string? _selectionError;
+    private ManuscriptViewLocation? _pendingLocation;
+    private PreviewLocationIdentity? _pendingLocationIdentity;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_disposed || _pendingLocation is not { } location || _result is null || _loading)
+            return;
+        if (_pendingLocationIdentity != CurrentLocationIdentity())
+        {
+            _pendingLocation = null;
+            _pendingLocationIdentity = null;
+            return;
+        }
+
+        try
+        {
+            _selectionModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/read-annotation-selection.js");
+            if (await _selectionModule.InvokeAsync<bool>("restoreLocation", _root, location))
+                _pendingLocation = null;
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            // Keep the pending location for the next render if the module is not ready yet.
+        }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -226,6 +255,11 @@
         _loadedChapter = ChapterId;
         _loadedTarget = ContentTarget;
         _loadedSignal = RefreshSignal;
+        if (_pendingLocationIdentity is not null && _pendingLocationIdentity != CurrentLocationIdentity())
+        {
+            _pendingLocation = null;
+            _pendingLocationIdentity = null;
+        }
         _setup = await PageSetups.GetOrCreateAsync(ProjectId);
         CopySetup();
         await LoadAsync();
@@ -503,6 +537,14 @@
         var id => id,
     };
 
+    private double FlowLocationProgress(ChapterPreviewLine line)
+    {
+        var blockId = FlowBlockId(line);
+        if (blockId is null || !_blockOrder.TryGetValue(blockId, out var index) || _blockOrder.Count <= 1)
+            return 0;
+        return (double)index / (_blockOrder.Count - 1);
+    }
+
     private async Task OpenReadNoteAsync()
     {
         _noteRange = await GetAnnotationRangeAsync();
@@ -562,6 +604,52 @@
         }
     }
 
+    internal async Task<ManuscriptViewLocation?> CaptureLocationAsync()
+    {
+        if (_disposed || _result is null)
+            return null;
+
+        try
+        {
+            _selectionModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/read-annotation-selection.js");
+            return await _selectionModule.InvokeAsync<ManuscriptViewLocation?>("captureLocation", _root);
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    internal async Task<bool> RestoreLocationAsync(ManuscriptViewLocation location)
+    {
+        if (_disposed)
+            return false;
+        if (_result is null || _loading)
+        {
+            _pendingLocation = location;
+            _pendingLocationIdentity = CurrentLocationIdentity();
+            return false;
+        }
+
+        try
+        {
+            _selectionModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/read-annotation-selection.js");
+            var restored = await _selectionModule.InvokeAsync<bool>("restoreLocation", _root, location);
+            if (restored)
+            {
+                _pendingLocation = null;
+                _pendingLocationIdentity = null;
+            }
+            return restored;
+        }
+        catch (Exception exception) when (exception is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            _pendingLocation = location;
+            _pendingLocationIdentity = CurrentLocationIdentity();
+            return false;
+        }
+    }
+
     public async Task SelectAnnotationAsync(Guid annotationId)
     {
         var annotation = _annotations.FirstOrDefault(item => item.Id == annotationId);
@@ -586,6 +674,10 @@
 
     private sealed record PreviewTextPiece(string Text, string Style, bool Highlighted, Guid? AnnotationId = null);
     private sealed record ReadSelectionResult(ManuscriptAnnotationRange? Range, string? Error);
+    private sealed record PreviewLocationIdentity(Guid ProjectId, Guid ChapterId, EditorContentTarget ContentTarget);
+
+    private PreviewLocationIdentity CurrentLocationIdentity() =>
+        new(ProjectId, ChapterId, ContentTarget);
 
     public async ValueTask DisposeAsync()
     {

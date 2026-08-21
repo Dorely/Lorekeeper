@@ -964,28 +964,102 @@ function captureStableSelection(view) {
     };
 }
 
+function topLevelBlockEntries(doc) {
+    const entries = [];
+    doc.forEach((node, position) => {
+        if (!node.attrs?.id) return;
+        entries.push({
+            id: node.attrs.id,
+            node,
+            position,
+            textLength: Math.max(1, node.textContent?.length || node.content.size)
+        });
+    });
+    return entries;
+}
+
+function selectionLocation(view) {
+    const stable = captureStableSelection(view);
+    const entries = topLevelBlockEntries(view.state.doc);
+    const entryIndex = stable.blockId
+        ? entries.findIndex(entry => entry.id === stable.blockId)
+        : -1;
+    const entry = entryIndex >= 0 ? entries[entryIndex] : null;
+    const headOffset = Number.isFinite(Number(stable.headOffset))
+        ? Math.max(0, Number(stable.headOffset))
+        : 0;
+    const withinBlock = entry
+        ? Math.min(headOffset, entry.textLength)
+        : 0;
+    const logicalProgress = entries.length <= 1 || entryIndex < 0
+        ? (entries.length <= 1 ? 0 : 0)
+        : Math.max(0, Math.min(1,
+            (entryIndex + withinBlock / entry.textLength) / entries.length));
+    return {
+        ...stable,
+        logicalProgress,
+        fallbackLine: entryIndex >= 0 ? entryIndex + 1 : 1,
+        viewportAnchor: false
+    };
+}
+
+function fallbackBlockEntry(entries, logicalProgress) {
+    if (entries.length === 0) return null;
+    const progress = Number.isFinite(Number(logicalProgress))
+        ? Math.max(0, Math.min(1, Number(logicalProgress)))
+        : 0;
+    return entries[Math.min(entries.length - 1, Math.round(progress * (entries.length - 1)))];
+}
+
+function restoreLocation(view, locationJson) {
+    if (!locationJson) return false;
+    try {
+        const saved = typeof locationJson === "string" ? JSON.parse(locationJson) : locationJson;
+        const entries = topLevelBlockEntries(view.state.doc);
+        let position = saved?.blockId ? blockPositionById(view.state.doc, saved.blockId) : null;
+        let node = Number.isInteger(position) ? view.state.doc.nodeAt(position) : null;
+        const exact = !!node;
+        if (!node) {
+            const fallback = fallbackBlockEntry(entries, saved?.logicalProgress);
+            if (!fallback) return false;
+            position = fallback.position;
+            node = fallback.node;
+        }
+        if (!saved.node && !node.inlineContent) {
+            const fallback = fallbackBlockEntry(entries, saved?.logicalProgress);
+            if (!fallback || (exact && fallback.id === node.attrs?.id)) return false;
+            position = fallback.position;
+            node = fallback.node;
+        }
+        if (!Number.isInteger(position) || !node) return false;
+        if (saved.node) {
+            view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, position)).scrollIntoView());
+            return true;
+        }
+        const contentStart = position + 1;
+        const maxOffset = node.content.size;
+        const fallbackProgress = Number(saved.logicalProgress);
+        const progressOffset = Number.isFinite(fallbackProgress)
+            ? Math.max(0, Math.min(1, fallbackProgress)) * entries.length
+            : 0;
+        const fallbackFraction = Math.max(0, Math.min(1, progressOffset - Math.floor(progressOffset)));
+        const fallbackOffset = exact ? null : fallbackFraction * maxOffset;
+        const anchorOffset = Math.max(0, Math.min(Number.isFinite(fallbackOffset) ? fallbackOffset : Number(saved.anchorOffset) || 0, maxOffset));
+        const headOffset = Math.max(0, Math.min(Number.isFinite(fallbackOffset) ? fallbackOffset : Number(saved.headOffset) || 0, maxOffset));
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(
+            view.state.doc,
+            contentStart + Math.min(anchorOffset, headOffset),
+            contentStart + Math.max(anchorOffset, headOffset))).scrollIntoView());
+        return true;
+    } catch {
+        // Location restoration is best-effort; the document remains authoritative.
+        return false;
+    }
+}
+
 function restoreStableSelection(view, selectionJson) {
     if (!selectionJson) return;
-    try {
-        const saved = typeof selectionJson === "string" ? JSON.parse(selectionJson) : selectionJson;
-        if (!saved?.blockId) return;
-        const position = blockPositionById(view.state.doc, saved.blockId);
-        if (!Number.isInteger(position)) {
-            view.dispatch(view.state.tr.setSelection(TextSelection.atStart(view.state.doc)));
-            return;
-        }
-        const node = view.state.doc.nodeAt(position);
-        if (!node) return;
-        const selection = saved.node
-            ? NodeSelection.create(view.state.doc, position)
-            : TextSelection.create(
-                view.state.doc,
-                position + 1 + Math.min(Number(saved.anchorOffset) || 0, node.content.size),
-                position + 1 + Math.min(Number(saved.headOffset) || 0, node.content.size));
-        view.dispatch(view.state.tr.setSelection(selection).scrollIntoView());
-    } catch {
-        // Selection restoration is best-effort; the restored document remains authoritative.
-    }
+    restoreLocation(view, selectionJson);
 }
 
 function applyMark(view, markName, value = null) {
@@ -2701,6 +2775,12 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         },
         getAnnotationRange() {
             return annotationRangeFromSelection(view);
+        },
+        getLocation() {
+            return selectionLocation(view);
+        },
+        setLocation(location) {
+            return restoreLocation(view, location);
         },
         selectAnnotation(annotationId) {
             const annotation = reviewAnnotations.find(item => item.id === annotationId);

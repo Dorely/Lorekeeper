@@ -71,6 +71,63 @@ export function setEditorContentTarget(projectId, target) {
     writeWorkspacePreferences(projectId, preferences);
 }
 
+function reviewLines(container) {
+    return container
+        ? [...container.querySelectorAll("[data-review-line]")]
+        : [];
+}
+
+export function captureReviewLocation(container) {
+    const lines = reviewLines(container);
+    if (lines.length === 0) return null;
+    const bounds = container.getBoundingClientRect();
+    const center = bounds.top + bounds.height / 2;
+    const target = lines
+        .map(line => ({
+            line,
+            distance: Math.abs(line.getBoundingClientRect().top + line.getBoundingClientRect().height / 2 - center)
+        }))
+        .sort((left, right) => left.distance - right.distance)[0].line;
+    const start = Number(target.dataset.sourceStartUtf16);
+    const end = Number(target.dataset.sourceEndUtf16);
+    const hasExactAnchor = target.dataset.manuscriptBlockId
+        && Number.isFinite(start)
+        && Number.isFinite(end);
+    return {
+        blockId: hasExactAnchor ? target.dataset.manuscriptBlockId : null,
+        node: false,
+        anchorOffset: hasExactAnchor ? start : 0,
+        headOffset: hasExactAnchor ? start : 0,
+        logicalProgress: Number.isFinite(Number(target.dataset.locationProgress))
+            ? Number(target.dataset.locationProgress)
+            : lines.indexOf(target) / Math.max(1, lines.length - 1),
+        fallbackLine: Number(target.dataset.reviewLine) || lines.indexOf(target) + 1,
+        viewportAnchor: true
+    };
+}
+
+export function restoreReviewLocation(container, location) {
+    const lines = reviewLines(container);
+    if (lines.length === 0) return false;
+    let target = null;
+    if (location?.blockId) {
+        const offset = Number(location.headOffset ?? location.anchorOffset ?? 0);
+        const matching = lines.filter(line => line.dataset.manuscriptBlockId === location.blockId);
+        target = matching.find(line => Number(line.dataset.sourceStartUtf16) <= offset
+            && Number(line.dataset.sourceEndUtf16) >= offset) || matching[0];
+    }
+    if (!target && Number.isFinite(Number(location?.logicalProgress))) {
+        const progress = Math.max(0, Math.min(1, Number(location.logicalProgress)));
+        target = lines[Math.round(progress * (lines.length - 1))];
+    }
+    if (!target) {
+        const lineNumber = Math.max(1, Number(location?.fallbackLine) || 1);
+        target = lines[Math.min(lines.length - 1, lineNumber - 1)];
+    }
+    target.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+    return true;
+}
+
 export function attachColumnLayout(elements, projectId) {
     const grid = elements?.grid;
     const chatSplitter = elements?.chatSplitter;

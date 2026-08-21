@@ -181,6 +181,20 @@ Core/release presentation. It is a private selected-chapter trace, not a full
 publication render. Read annotation ranges map rendered text back to stable
 semantic blocks without changing the Press protocol.
 
+Edit, Read, and Review also share a transient `ManuscriptViewLocation` scoped to
+the current project, chapter, and Core/release target; it is never persisted as
+manuscript data or workspace preference. Edit records the semantic block ID,
+selection offsets, and normalized progress so a collapsed caret or non-text
+node can be restored exactly, with nearest-progress fallback after a document
+change. Read records the selected endpoint when available, otherwise the
+viewport-center semantic line, and restores only the preview scroll position.
+Review lines expose exact block/source metadata when the projected line can be
+derived from the manuscript and otherwise carry normalized progress; Review
+restoration scrolls the viewport-center line without changing expanded review
+blocks. Pages neither consumes nor replaces this location. Async capture and
+restore must re-check the chapter/target identity, and failed saves leave the
+previous location untouched.
+
 ### Book Text Styles and fonts
 
 `ManuscriptStyleService` owns project-wide Book Text Styles. Each style has a
@@ -307,7 +321,7 @@ every one of those consumers.
 | [`Lorekeeper/Manuscripts/ManuscriptStyleService.cs`](../../Lorekeeper/Manuscripts/ManuscriptStyleService.cs) and [`ManuscriptStyleTemplateExtractor.cs`](../../Lorekeeper/Manuscripts/ManuscriptStyleTemplateExtractor.cs) | Revision-safe Book Text Style ownership and the shared manual/assistant style-capture policy. |
 | [`Lorekeeper/Manuscripts/ManuscriptAnnotationModels.cs`](../../Lorekeeper/Manuscripts/ManuscriptAnnotationModels.cs) and [`ManuscriptAnnotationService.cs`](../../Lorekeeper/Manuscripts/ManuscriptAnnotationService.cs) | Exact-target sidecar annotation contract, rebasing, paging, state, and completion. |
 | [`Lorekeeper/Authoring/`](../../Lorekeeper/Authoring/) and [`Lorekeeper/Models/AssistantReviewBaseline.cs`](../../Lorekeeper/Models/AssistantReviewBaseline.cs) | In-process manual history runtime, selection/dependency state, assistant mutation identity, and the separate durable latest-review baseline. |
-| [`Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor`](../../Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor) and related Editor components | Shared semantic editor host, revision-aware autosave, Figure/style controls, Read/Review modes, annotations, and authoring workspace state. |
+| [`Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor`](../../Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor), [`ManuscriptViewLocation.cs`](../../Lorekeeper/Components/Pages/Projects/ManuscriptViewLocation.cs), and related Editor components | Shared semantic editor host, revision-aware autosave, transient cross-view location, Figure/style controls, Read/Review modes, annotations, and authoring workspace state. |
 | [`tools/semantic-editor/`](../../tools/semantic-editor/) and shipped bundle under `Lorekeeper/wwwroot/js/` | Exact-pinned ProseMirror schema/adapter source, deterministic build, shipped runtime, and notices. |
 | [`Lorekeeper/EditorChat/EditorManuscriptApplyService.cs`](../../Lorekeeper/EditorChat/EditorManuscriptApplyService.cs) | One-step assistant manuscript operation validation and apply/stage bridge over the canonical manuscript service. |
 | [`Lorekeeper/Manuscripts/ManuscriptSchemaUpgrade.cs`](../../Lorekeeper/Manuscripts/ManuscriptSchemaUpgrade.cs) | Strict lossless v1-v3 document and nested historical-payload upgrade logic used only by migration/import owners. |
@@ -341,9 +355,10 @@ every one of those consumers.
   handling, and prove live plus historical payload conversion under the guarded
   migration boundary.
 - For editor changes, rebuild the exact-pinned semantic editor, verify the
-  committed bundle is current, and inspect conflict reconciliation, selection,
-  non-text blocks, paste diagnostics, and action grouping. Browser UI checks
-  require explicit authorization.
+  committed bundle is current, and inspect conflict reconciliation, exact
+  cross-view location anchors, normalized fallback, selection/non-text blocks,
+  paste diagnostics, and action grouping. Browser UI checks require explicit
+  authorization.
 - For annotation/history changes, verify same-transaction rebasing, inherited
   release behavior, outdated-state fallback, action coalescing, stale-stream
   reconciliation, assistant-batch finalization, dependency retention, and

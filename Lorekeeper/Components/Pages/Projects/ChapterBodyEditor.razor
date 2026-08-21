@@ -60,6 +60,7 @@
     private bool _disposed;
     private bool _disposing;
     private string? _pasteWarning;
+    private ManuscriptViewLocation? _pendingLocation;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -126,6 +127,7 @@
                     return;
                 }
                 _handle = handle;
+                await ApplyPendingLocationAsync();
             }
             catch (JSDisconnectedException) { }
             catch (OperationCanceledException) { }
@@ -509,6 +511,52 @@
         catch (JSDisconnectedException) { }
         catch (OperationCanceledException) { }
         catch (JSException) { }
+    }
+
+    internal async Task<ManuscriptViewLocation?> CaptureLocationAsync()
+    {
+        if (_disposed || _handle is null)
+            return null;
+
+        try
+        {
+            return await _handle.InvokeAsync<ManuscriptViewLocation?>("getLocation");
+        }
+        catch (JSDisconnectedException) { return null; }
+        catch (OperationCanceledException) { return null; }
+        catch (JSException) { return null; }
+    }
+
+    internal async Task<bool> RestoreLocationAsync(ManuscriptViewLocation location)
+    {
+        if (_disposed)
+            return false;
+
+        if (_handle is null)
+        {
+            _pendingLocation = location;
+            return false;
+        }
+
+        try
+        {
+            var restored = await _handle.InvokeAsync<bool>("setLocation", location);
+            if (restored && IsVisible && !IsReadOnly)
+                await _handle.InvokeVoidAsync("focus");
+            return restored;
+        }
+        catch (JSDisconnectedException) { return false; }
+        catch (OperationCanceledException) { return false; }
+        catch (JSException) { return false; }
+    }
+
+    private async Task ApplyPendingLocationAsync()
+    {
+        if (_pendingLocation is not { } location || _handle is null)
+            return;
+
+        _pendingLocation = null;
+        await RestoreLocationAsync(location);
     }
 
     private async Task FocusAsync()

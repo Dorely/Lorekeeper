@@ -106,6 +106,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   instead of preventing the chapter from opening. Editor Chat can also
   request a Press-rendered page image by stable paragraph block or chapter-local
   typeset page to visually verify applied typography and typesetting.
+- Switching between Edit, Read, and Review carries the current chapter position;
+  Edit restores a semantic caret or node, while Read and Review restore the
+  corresponding manuscript viewport without changing Review expansion state.
 - Review remains populated after an assistant manuscript pass is applied: it
   compares the live Current chapter with the saved Before snapshot from before
   that pass, so later manual edits remain visible. Pending and Contest review
