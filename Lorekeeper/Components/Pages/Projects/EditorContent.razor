@@ -2174,14 +2174,16 @@ else
             _contestReviewProjection = null;
             await ChangeApproval.PrepareChapterBodyLineReviewAsync(Project.Id, _current.Id);
             _reviewPendingBatches = await Chat.ListPendingChangesAsync(Project.Id);
+            // Review compares the durable Before anchor with authoritative live
+            // content, never with a potentially stale editor-component cache.
+            var currentReviewManuscript = await Manuscripts.GetManuscriptAsync(_contentTarget, _current.Id)
+                ?? throw new InvalidOperationException("The current chapter manuscript was not found.");
             _latestAssistantReview = await Manuscripts.GetLatestAssistantReviewAsync(_contentTarget, _current.Id);
             _reviewProjection = BuildReviewProjection(
                 _current,
                 _reviewPendingBatches,
                 _latestAssistantReview,
-                _editorDocument is { } editorDocument
-                    ? ManuscriptCodec.Deserialize(editorDocument.ManuscriptJson, editorDocument.ChapterId, editorDocument.ManuscriptRevision)
-                    : null);
+                currentReviewManuscript.Document);
             _reviewError = null;
             PruneInlineReviewState();
         }
@@ -2190,14 +2192,14 @@ else
             _contestReviewBatches = await Chat.ListCurrentContestBatchesAsync(Project.Id);
             _contestReviewProjection = null;
             _reviewPendingBatches = await Chat.ListPendingChangesAsync(Project.Id);
+            var currentReviewManuscript = await Manuscripts.GetManuscriptAsync(_contentTarget, _current.Id)
+                ?? throw new InvalidOperationException("The current chapter manuscript was not found.");
             _latestAssistantReview = await Manuscripts.GetLatestAssistantReviewAsync(_contentTarget, _current.Id);
             _reviewProjection = BuildReviewProjection(
                 _current,
                 _reviewPendingBatches,
                 _latestAssistantReview,
-                _editorDocument is { } editorDocument
-                    ? ManuscriptCodec.Deserialize(editorDocument.ManuscriptJson, editorDocument.ChapterId, editorDocument.ManuscriptRevision)
-                    : null);
+                currentReviewManuscript.Document);
             _reviewError = ex.Message;
             PruneInlineReviewState();
         }
