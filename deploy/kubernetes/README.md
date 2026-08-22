@@ -32,13 +32,15 @@ the `image:` in `deployment.yaml`.
 ## 2. Generate login credentials
 
 ```bash
-docker run --rm lorekeeper:0.3.9 auth-setup \
+docker run --rm -t lorekeeper:0.3.9 auth-setup \
   --username <name> --password '<a long password>'
 ```
 
 Copy `secret.example.yaml` to `secret.yaml` (it is not committed), paste the
-three printed values into it, and add the printed `otpauth://` URI to your
-authenticator app. The plaintext password is never stored anywhere.
+three printed values into it, and scan the printed QR code with your
+authenticator app (the `-t` flag gives the command the terminal it needs to
+draw it; the `otpauth://` URI is printed as a manual fallback). The plaintext
+password is never stored anywhere.
 
 ## 3. Deploy
 

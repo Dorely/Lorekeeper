@@ -1,3 +1,5 @@
+using QRCoder;
+
 namespace Lorekeeper.Auth;
 
 /// <summary>
@@ -54,10 +56,45 @@ public static class SingleUserCredentialTool
         Console.WriteLine($"Auth__SingleUser__Username={username}");
         Console.WriteLine($"Auth__SingleUser__PasswordHash={passwordHash}");
         Console.WriteLine($"Auth__SingleUser__TotpSecret={totpSecret}");
+        var otpauthUri = TotpAuthenticator.BuildOtpauthUri(username, totpSecret);
         Console.WriteLine();
         Console.WriteLine("# Add the authenticator entry with this Base32 secret, or the otpauth URI below:");
-        Console.WriteLine(TotpAuthenticator.BuildOtpauthUri(username, totpSecret));
+        Console.WriteLine(otpauthUri);
+        PrintEnrollmentQr(otpauthUri);
         return 0;
+    }
+
+    /// <summary>
+    /// Renders the enrollment URI as a scannable QR code on stderr when it is a
+    /// terminal, using explicit black/white ANSI colors so the code stays valid on
+    /// dark terminal themes. Redirected output receives only the machine-readable
+    /// values on stdout.
+    /// </summary>
+    private static void PrintEnrollmentQr(string otpauthUri)
+    {
+        if (Console.IsErrorRedirected)
+            return;
+
+        using var generator = new QRCodeGenerator();
+        using var qrData = generator.CreateQrCode(otpauthUri, QRCodeGenerator.ECCLevel.M);
+        var modules = qrData.ModuleMatrix;
+        var size = modules.Count;
+        var qr = new System.Text.StringBuilder();
+        for (var y = 0; y < size; y += 2)
+        {
+            for (var x = 0; x < size; x++)
+            {
+                var topDark = modules[y][x];
+                var bottomDark = y + 1 < size && modules[y + 1][x];
+                qr.Append($"\x1b[{(topDark ? 30 : 97)};{(bottomDark ? 40 : 107)}m▀");
+            }
+
+            qr.AppendLine("\x1b[0m");
+        }
+
+        Console.Error.WriteLine();
+        Console.Error.WriteLine("Or scan this with your authenticator app:");
+        Console.Error.Write(qr);
     }
 
     private static string? PromptForPassword()

@@ -259,7 +259,8 @@ dotnet run --project Lorekeeper -- auth-setup --username <name>
 ```
 
 Set the printed `Auth__SingleUser__*` environment variables before starting the
-host and add the printed `otpauth://` URI to an authenticator app. Every page and
+host and scan the printed QR code with an authenticator app (the `otpauth://`
+URI is also printed for manual entry). Every page and
 endpoint then requires the sign-in; without those variables the host remains a
 local, unauthenticated development server. `Server__EnableHttpsRedirection=false`
 permits deliberate plain-HTTP hosting on a trusted network or behind a reverse
