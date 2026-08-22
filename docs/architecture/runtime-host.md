@@ -235,6 +235,18 @@ selection. The graph visualization is intentionally always dark, while print and
 publication output render on white; do not reinterpret those exceptions as
 missing theme support.
 
+Core palette colors are user-customizable per theme. `IAppearanceService`
+(`Lorekeeper/Appearance/`) stores overridden core tokens as a database-backed
+singleton row, and `AppearanceCss` emits a strictly hex-validated stylesheet
+that `App.razor` injects after the base stylesheets, deriving dependent shades
+(hover, tints, borders, focus, translucency, and the Bootstrap bridge
+variables) with CSS `color-mix` so the token system stays cohesive. The
+built-in light/dark core values are mirrored as `AppearanceCss`
+Light/DarkDefaults and must be kept in sync with `app.css`. The Settings
+"Appearance" page owns editing, live preview via an injected preview style
+element, and reset; component stylesheets must keep consuming tokens rather
+than raw colors for customization to reach them.
+
 ### Configuration boundary
 
 Host configuration belongs in
@@ -273,6 +285,7 @@ settings. Provider-owned keys are described in the providers chapter.
 | [`Lorekeeper/Components/Layout/`](../../Lorekeeper/Components/Layout/) | Shared application chrome, update control, theme switch, configuration shell, print layout, headings, and reconnect UI. |
 | [`Lorekeeper/Components/ConfirmationDialog.razor`](../../Lorekeeper/Components/ConfirmationDialog.razor) | Required application-owned destructive/consequential confirmation surface. |
 | [`Lorekeeper/wwwroot/app.css`](../../Lorekeeper/wwwroot/app.css) and [`wwwroot/branding/`](../../Lorekeeper/wwwroot/branding/) | Global design tokens and application identity assets shared by browser and desktop hosts. |
+| [`Lorekeeper/Appearance/`](../../Lorekeeper/Appearance/) and [`Components/Pages/Settings/Appearance.razor`](../../Lorekeeper/Components/Pages/Settings/Appearance.razor) family | Database-backed custom theme palettes: validated core-token storage, derived-shade CSS emission injected by `App.razor`, and the Settings editing/preview surface. |
 | [`Lorekeeper/Desktop/`](../../Lorekeeper/Desktop/) | Desktop update state and constrained public-release discovery; platform-specific Electron mechanics remain invoked from the composition root. |
 | [`Dockerfile`](../../Dockerfile), [`.dockerignore`](../../.dockerignore), and [`deploy/kubernetes/`](../../deploy/kubernetes/) | Server container build (including the contained Press runtime) and the single-replica Kubernetes deployment: volume-backed data, secret-provided login credentials, and health-probe wiring. |
 

@@ -78,6 +78,8 @@ builder.Services.AddSingleton(new ApplicationStartupOptions(
     TimeSpan.FromMilliseconds(minimumStartupSplashMilliseconds)));
 builder.Services.AddHostedService<ApplicationStartupWorker>();
 
+builder.Services.AddSingleton<Lorekeeper.Appearance.IAppearanceService, Lorekeeper.Appearance.AppearanceService>();
+
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IDesktopReleaseUpdateChecker, GitHubDesktopReleaseUpdateChecker>(client =>
 {

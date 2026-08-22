@@ -267,6 +267,15 @@ permits deliberate plain-HTTP hosting on a trusted network or behind a reverse
 proxy, and `Server__DataProtectionKeysDirectory` keeps sign-in cookies valid
 across restarts.
 
+### Custom theme colors
+
+Settings → Appearance customizes the core colors of the light and night themes —
+accent, page background, surface, text, muted text, and borders — with an
+immediate live preview and per-color or full reset to the built-in palettes.
+Dependent shades (hovers, tints, focus rings) derive automatically so the whole
+interface stays cohesive. Choices are stored in the database, so they follow the
+workspace across browsers, backups, and database imports.
+
 ### Moving a whole workspace
 
 Settings → Data import replaces this installation's entire database with a

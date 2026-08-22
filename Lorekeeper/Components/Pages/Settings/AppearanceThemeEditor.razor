@@ -1,0 +1,61 @@
+@using Lorekeeper.Appearance
+
+@foreach (var token in Tokens)
+{
+    var current = token.Get(Palette);
+    <div class="border rounded p-2 mb-2 d-flex align-items-center gap-3">
+        <input type="color"
+               style="width: 3rem; height: 2.2rem; padding: 0.15rem; cursor: pointer;"
+               value="@(current ?? token.Get(Defaults))"
+               disabled="@Disabled"
+               @onchange="value => SetTokenAsync(token, (string?)value.Value)" />
+        <div class="flex-grow-1">
+            <strong>@token.Label</strong>
+            <div class="text-muted small">@token.Hint</div>
+        </div>
+        @if (current is not null)
+        {
+            <button class="btn btn-sm btn-outline-secondary"
+                    disabled="@Disabled"
+                    @onclick="() => SetTokenAsync(token, null)">
+                Use default
+            </button>
+        }
+    </div>
+}
+
+@code {
+    private sealed record TokenEditor(
+        string Label,
+        string Hint,
+        Func<AppearancePalette, string?> Get,
+        Func<AppearancePalette, string?, AppearancePalette> Set);
+
+    private static readonly TokenEditor[] Tokens =
+    [
+        new("Accent", "Buttons, links, highlights, and focus outlines.",
+            palette => palette.Accent, (palette, value) => palette with { Accent = value }),
+        new("Page background", "The canvas behind every page.",
+            palette => palette.Canvas, (palette, value) => palette with { Canvas = value }),
+        new("Surface", "Cards, panels, and dialogs.",
+            palette => palette.Surface, (palette, value) => palette with { Surface = value }),
+        new("Text", "Primary reading text.",
+            palette => palette.Ink, (palette, value) => palette with { Ink = value }),
+        new("Muted text", "Secondary labels and descriptions.",
+            palette => palette.Muted, (palette, value) => palette with { Muted = value }),
+        new("Borders", "Lines, dividers, and input outlines.",
+            palette => palette.Line, (palette, value) => palette with { Line = value }),
+    ];
+
+    [Parameter, EditorRequired] public AppearancePalette Palette { get; set; } = AppearancePalette.Empty;
+    [Parameter, EditorRequired] public AppearancePalette Defaults { get; set; } = AppearancePalette.Empty;
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public EventCallback<AppearancePalette> PaletteChanged { get; set; }
+
+    private Task SetTokenAsync(TokenEditor token, string? value)
+    {
+        if (value is not null && !AppearanceCss.IsValidHexColor(value))
+            return Task.CompletedTask;
+        return PaletteChanged.InvokeAsync(token.Set(Palette, value));
+    }
+}

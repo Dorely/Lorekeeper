@@ -14,6 +14,7 @@ public class AppDbContext(
 {
     private const int _maxLockedSaveAttempts = 6;
 
+    public DbSet<AppearanceSettings> AppearanceSettings => Set<AppearanceSettings>();
     public DbSet<LlmProvider> LlmProviders => Set<LlmProvider>();
     public DbSet<EmbeddingConfiguration> EmbeddingConfigurations => Set<EmbeddingConfiguration>();
     public DbSet<SearchProvider> SearchProviders => Set<SearchProvider>();
