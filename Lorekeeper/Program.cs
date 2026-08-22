@@ -186,6 +186,7 @@ builder.Services.AddSingleton<Lorekeeper.Authoring.IAuthoringHistoryRuntime, Lor
 builder.Services.AddScoped<Lorekeeper.Authoring.IAssistantReviewBaselineService, Lorekeeper.Authoring.AssistantReviewBaselineService>();
 builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringMutationContextAccessor, Lorekeeper.Authoring.AuthoringMutationContextAccessor>();
 builder.Services.AddSingleton<IDatabaseMigrationRecoveryService, DatabaseMigrationRecoveryService>();
+builder.Services.AddScoped<IDatabaseImportService, DatabaseImportService>();
 builder.Services.AddSingleton<IManuscriptMigrationService, ManuscriptMigrationService>();
 builder.Services.AddScoped<IDatabaseStartupMigrationService, DatabaseStartupMigrationService>();
 builder.Services.AddScoped<IVisualCompositionMigrationService, VisualCompositionMigrationService>();

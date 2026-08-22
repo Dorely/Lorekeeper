@@ -55,6 +55,8 @@ public sealed class DatabaseMigrationRecoveryService(
     IConfiguration configuration,
     ILogger<DatabaseMigrationRecoveryService> logger) : IDatabaseMigrationRecoveryService
 {
+    public const string BackupDirectoryName = ".migration-backups";
+
     private static readonly TimeSpan RestoreTokenLifetime = TimeSpan.FromMinutes(10);
     private readonly Dictionary<string, (string Path, DateTime ExpiresAt)> _restoreTokens = [];
     private readonly object _restoreTokenLock = new();
@@ -350,7 +352,7 @@ public sealed class DatabaseMigrationRecoveryService(
 
     private string BackupRoot()
     {
-        var root = Path.Combine(Path.GetDirectoryName(DatabasePath())!, ".migration-backups");
+        var root = Path.Combine(Path.GetDirectoryName(DatabasePath())!, BackupDirectoryName);
         Directory.CreateDirectory(root);
         RestrictDirectory(root);
         return root;

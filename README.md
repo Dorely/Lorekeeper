@@ -267,6 +267,16 @@ permits deliberate plain-HTTP hosting on a trusted network or behind a reverse
 proxy, and `Server__DataProtectionKeysDirectory` keeps sign-in cookies valid
 across restarts.
 
+### Moving a whole workspace
+
+Settings → Data import replaces this installation's entire database with a
+`lorekeeper.db` file uploaded from another installation (close Lorekeeper on the
+source machine before copying its database). The upload is validated before
+anything changes, the current database is preserved automatically as a protected
+backup restorable from Data recovery, and the imported database is migrated to
+the current version on the next start. This is the easiest way to move a desktop
+workspace into a self-hosted server.
+
 ### Container and Kubernetes hosting
 
 The repository `Dockerfile` builds a self-hosted server image, including the
