@@ -1,3 +1,5 @@
+// Shared browser-local page-color display preference (paper/dim/night) used by
+// the chapter Read preview and the Publish PDF preview.
 const STORAGE_KEY = "Lorekeeper.ui.pdfPreviewDisplay";
 const MODES = ["paper", "dim", "night"];
 

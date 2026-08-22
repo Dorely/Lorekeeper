@@ -212,7 +212,7 @@ and cloning creates the editable continuation.
 | `Lorekeeper/Publish/PublishAssistantTools.cs` | Compact revision-safe Publish reads/mutations, section/canvas/cover stages, readiness, preparation, and artifact metadata. |
 | `Lorekeeper/Components/Pages/Projects/Publish/PublishContent.razor` | Progressive Core/release workspace, Front/Main/Back flow, readiness, inclusion/order controls, and downloads. |
 | `Lorekeeper/Components/Pages/Projects/Publish/PublishChatPanel.razor` | Refresh-safe Publish chat adapter, flush-before-turn context, streaming, attachments, and workspace callbacks. |
-| `Lorekeeper/Components/Pages/Projects/Publish/PublicationPdfPreview.razor` | Lorekeeper-owned immutable PDF page/facing preview surface with browser-local paper/dim/night display modes; the rendered artifact stays print-true. |
+| `Lorekeeper/Components/Pages/Projects/Publish/PublicationPdfPreview.razor` | Lorekeeper-owned immutable PDF page/facing preview surface with paper/dim/night display modes; the rendered artifact stays print-true, and the browser-local preference (`wwwroot/js/page-display-mode.js`) is shared with the chapter Read preview. |
 | `Lorekeeper/Components/Pages/Projects/Publish/PublicationEpubPreview.razor` | Artifact-backed sandboxed EPUB reader and spine/navigation inspection. |
 | `Lorekeeper/Publish/PublicationPreparationService.cs` | Persisted one-action Core/release preparation, progress, blockers, cancellation, and retained Core warnings. |
 | `Lorekeeper/Publish/PublicationDiagnosticPresentationService.cs` | Safe user-facing resolution of Press/preparation diagnostics to chapters, sections, pages, covers, and editor links. |

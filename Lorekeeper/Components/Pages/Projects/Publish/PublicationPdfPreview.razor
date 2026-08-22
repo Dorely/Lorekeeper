@@ -97,8 +97,7 @@
     {
         if (!firstRender)
             return;
-        _module = await JS.InvokeAsync<IJSObjectReference>(
-            "import", "./Components/Pages/Projects/Publish/PublicationPdfPreview.razor.js");
+        _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/page-display-mode.js");
         var stored = await _module.InvokeAsync<string>("getDisplayMode");
         if (stored != _displayMode)
         {
