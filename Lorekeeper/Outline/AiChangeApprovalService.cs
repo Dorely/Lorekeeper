@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Lorekeeper.Authoring;
 using Lorekeeper.Chapters;
+using Lorekeeper.ChatTurns;
 using Lorekeeper.Composition;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
@@ -12,11 +13,12 @@ using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
+using Lorekeeper.VersionHistory.Services;
 
 namespace Lorekeeper.Outline;
 
 public sealed class AiChangeApprovalService(
-IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, ICompositionService compositions, IManuscriptStyleService manuscriptStyles, IEntityService entities, IVectorIndexWorkCoordinator indexWork, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages, IAuthoringMutationContextAccessor authoringMutationContext, ILogger<AiChangeApprovalService> logger) : IAiChangeApprovalService
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, ICompositionService compositions, IManuscriptStyleService manuscriptStyles, IEntityService entities, IVectorIndexWorkCoordinator indexWork, IEntityVisualExampleService entityVisualExamples, IProjectImageService projectImages, IAuthoringMutationContextAccessor authoringMutationContext, IAssistantVersionCheckpointService versionCheckpoints, ILogger<AiChangeApprovalService> logger) : IAiChangeApprovalService
 {
     private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
     {
@@ -267,6 +269,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                     ? "This batch contains a conflicted change. Reject it and rerun the assistant request against the current project state."
                     : conflict.ErrorMessage);
         }
+        var hadPendingChanges = batch.Changes.Any(change => change.Status == AiChangeStatus.Pending);
 
         using var authoringTurn = await BeginReviewedEditorTurnAsync(batch, cancellationToken);
         await using var indexDeferral = indexWork.BeginDeferral();
@@ -288,6 +291,8 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         }
 
         capturedException?.Throw();
+        if (hadPendingChanges)
+            await versionCheckpoints.TryCheckpointAsync(batch.ProjectId, SurfaceFor(batch.ConversationKind), CancellationToken.None);
     }
 
     public async Task ApplyChangeAsync(Guid changeId, CancellationToken cancellationToken = default)
@@ -297,6 +302,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         var changes = databaseOperation.Repositories.AiChanges;
         var change = await changes.GetChangeAsync(changeId, cancellationToken)
             ?? throw new InvalidOperationException($"AI change {changeId} not found.");
+        var wasPending = change.Status == AiChangeStatus.Pending;
 
         using var authoringTurn = await BeginReviewedEditorTurnAsync(change.Batch, cancellationToken);
         await using var indexDeferral = indexWork.BeginDeferral();
@@ -317,6 +323,8 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         }
 
         capturedException?.Throw();
+        if (wasPending)
+            await versionCheckpoints.TryCheckpointAsync(change.Batch.ProjectId, SurfaceFor(change.Batch.ConversationKind), CancellationToken.None);
     }
 
     public async Task ApplyChangesAsync(IReadOnlyCollection<Guid> changeIds, CancellationToken cancellationToken = default)
@@ -340,6 +348,11 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             .Select(change => change.Batch)
             .GroupBy(batch => batch.Id)
             .Select(group => group.First())
+            .ToList();
+        var checkpointTargets = selectedChanges
+            .Where(change => change.Status == AiChangeStatus.Pending)
+            .Select(change => (change.Batch.ProjectId, Surface: SurfaceFor(change.Batch.ConversationKind)))
+            .Distinct()
             .ToList();
 
         await using var indexDeferral = indexWork.BeginDeferral();
@@ -368,7 +381,16 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         }
 
         capturedException?.Throw();
+        foreach (var (projectId, surface) in checkpointTargets)
+            await versionCheckpoints.TryCheckpointAsync(projectId, surface, CancellationToken.None);
     }
+
+    private static ChatTurnSurface SurfaceFor(AiChangeConversationKind conversationKind) => conversationKind switch
+    {
+        AiChangeConversationKind.Editor => ChatTurnSurface.Editor,
+        AiChangeConversationKind.Research => ChatTurnSurface.Research,
+        _ => ChatTurnSurface.Outline,
+    };
 
     private async Task<IDisposable?> BeginReviewedEditorTurnAsync(
         AiChangeBatch batch,

@@ -129,6 +129,16 @@ server errors, and malformed responses remain errors. The Providers surface catc
 those at the card boundary so one unavailable OAuth endpoint cannot break the
 settings page.
 
+Version-control GitHub access is a separate provider-owned boundary. Its device
+authorization and REST client bind `VersionHistory:GitHub:ClientId` (or the
+standard `VersionHistory__GitHub__ClientId` environment override), store the
+resulting access token only in `GitHubConnection`, and expose non-secret account
+and repository metadata to the History surface. Device authorization, repository
+listing/creation, fetch, push, and remote checkout are explicit user-started
+network actions; loading cached connection or remote status does not contact
+GitHub. Snapshot manifests, Git metadata, logs, and assistant payloads never
+carry the token or device code.
+
 ### Embedding configuration and rebuilds
 
 One persisted embedding configuration selects a provider connection, API kind,
@@ -249,6 +259,8 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 - [Composition and media](composition-media.md) — project assets, generation targets, Figures, Designed Pages, and provider-output placement.
 - [Persistence, migrations, and import](persistence-migrations-import.md) — credential/job persistence, database-operation lifetimes, import atomicity, and recovery.
 - [Press production](press-production.md) — publication preparation/render queues and native process containment.
+- [Version history and synchronization](version-history-sync.md) — GitHub
+  device-flow use, explicit remote transport, and snapshot credential boundary.
 
 ## Relevant verification
 

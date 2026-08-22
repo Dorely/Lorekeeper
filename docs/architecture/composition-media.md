@@ -196,7 +196,9 @@ inspect a clean preview for final verification.
 Project fonts include bundled OFL families and imported static TTF/OTF faces.
 The project font catalog owns validation, face resolution, browser URLs, and
 deletion guards. Imported-font deletion is blocked while a paragraph, saved
-style, page, cover, or retained history dependency references its family.
+style, page, cover, or retained in-process Undo/Redo stream references its
+family. Version-history snapshots retain the canonical font bytes as ordinary
+Git blobs, but do not create a live-asset deletion blocker.
 Browser, Read preview, EPUB, cover, and Press all stage the same referenced
 faces rather than substituting a machine font. Font changes affect manuscript,
 composition, Core/release fingerprints, and artifact freshness.
@@ -230,7 +232,11 @@ composition, Core/release fingerprints, and artifact freshness.
   covers, native rendering, PDF/EPUB validation, artifacts, and packages.
 - [`persistence-migrations-import.md`](./persistence-migrations-import.md)
   owns SQLite/EF persistence, migrations, recovery, import/export, and durable
-  live-asset relationships. Manual history dependency retention is process memory.
+  live-asset relationships. Manual Undo/Redo dependency retention is process
+  memory; durable version history is the separate Git snapshot boundary.
+- [`version-history-sync.md`](./version-history-sync.md) owns deterministic
+  image/font blob capture and restore; this chapter owns the live asset and
+  scene semantics those snapshots represent.
 - [`assistants-chat.md`](./assistants-chat.md) owns shared chat turns, tool
   staging, assistant context, and model-visible visual preview protocol.
 
@@ -260,7 +266,8 @@ When image, Figure, composition, font, or history ownership changes, inspect
 the complete diff and search for every old field/name and every deletion path.
 The minimum static review should cover `IProjectImageService`,
 `IManuscriptService`, `ICompositionService`, `IProjectFontService`, image
-endpoints, EPUB/Press request assembly, history dependency retention, and the
-owning persistence migration. Confirm that no image bytes or font secrets are
+endpoints, EPUB/Press request assembly, in-process history dependency
+retention, version-history blob validation, and the owning persistence
+migration. Confirm that no image bytes or font secrets are
 copied into unrelated assistant payloads and that no stale asset can be
 deleted through a UI-only check.

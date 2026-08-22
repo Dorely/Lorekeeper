@@ -30,6 +30,12 @@ the current runtime. Source inspection remains the proof of what is implemented.
 - SQLite and the current domain models are authoritative durable state. Runtime
   code uses short operation-owned database contexts and the documented lock
   order; it does not retain a circuit-scoped `AppDbContext`.
+- Version history is a deterministic, app-managed Git snapshot of selected
+  canonical creative state, not a SQLite mirror. Secrets, chats, jobs,
+  projections, render artifacts, and other operational state stay outside the
+  snapshot; restore rebuilds derived projections through their owning services.
+  Remote actions are explicit, clean-workspace, fast-forward-only operations;
+  divergence is preserved rather than silently merged or overwritten.
 - Manuscripts persist as semantic manuscript v4 documents. Older v1-v3 forms
   survive only at immutable migration history and versioned import boundaries.
 - The graph, FTS5, and sqlite-vec projections are maintained through owning
@@ -72,6 +78,7 @@ hints; concepts and downstream consumers determine the final impact area.
 | Core Book, releases, inheritance, publication sections, edition content, Publish UI/tools, TXT/Markdown/EPUB projections, `Publish/` | [`publishing-model.md`](architecture/publishing-model.md) | Manuscript and composition for authored content; Press for production artifacts |
 | Product registry, physical geometry, covers, renderer protocol, PDF/EPUB validation, artifacts, packages, previews, `Lorekeeper.Press/` | [`press-production.md`](architecture/press-production.md) | Publishing for effective inputs; composition for scenes; validation for release evidence |
 | EF model, repositories, write coordination, migrations, recovery, import/export, local data and credential storage, `Persistence/`, `ImportExport/` | [`persistence-migrations-import.md`](architecture/persistence-migrations-import.md) | Every domain whose stored contract changes |
+| Deterministic snapshots, local Git history, checkpoints, compare/restore, remote sync, clone import, GitHub version-control connections, `VersionHistory/`, History and Version control surfaces | [`version-history-sync.md`](architecture/version-history-sync.md) | Persistence for SQLite/identity; narrative, manuscript, composition, publishing, assistants, providers, and runtime for captured or excluded state |
 | Build, tests, startup smoke checks, native validation, documentation hierarchy, release scripts, research, decisions | [`validation-documentation.md`](architecture/validation-documentation.md) | Every changed implementation chapter |
 
 Representative cross-layer routes are intentional: a manuscript persistence

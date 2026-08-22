@@ -1,0 +1,220 @@
+using Lorekeeper.ImportExport;
+using Lorekeeper.Models;
+
+namespace Lorekeeper.VersionHistory.Snapshots;
+
+public static class VersionHistorySnapshotContract
+{
+    public const string FormatId = "lorekeeper.version-history-snapshot";
+    public const int SchemaVersion = 1;
+    public const string ManifestFileName = "manifest.json";
+
+    public static readonly IReadOnlyList<string> IncludedAreas =
+    [
+        "project",
+        "narrative",
+        "graph",
+        "sources",
+        "assets",
+        "manuscript",
+        "composition",
+        "publication",
+    ];
+}
+
+public sealed record VersionHistorySnapshotFile(
+    string Path,
+    long Length,
+    string Sha256);
+
+public sealed record VersionHistorySnapshotManifest(
+    string FormatId,
+    int SchemaVersion,
+    Guid RepositoryId,
+    Guid ProjectId,
+    IReadOnlyList<string> IncludedAreas,
+    string ContentHash,
+    string ManifestHash,
+    IReadOnlyList<VersionHistorySnapshotFile> Files);
+
+public sealed record VersionHistorySnapshotArtifact(
+    string RootDirectory,
+    VersionHistorySnapshotManifest Manifest,
+    VersionHistorySnapshotPayload Payload);
+
+public sealed record VersionHistorySnapshotProjectArea(
+    ProjectExportProject Project,
+    ProjectExportPageSetup? PageSetup,
+    bool ContestModeEnabled,
+    IReadOnlyList<VersionHistoryProjectReference> References);
+
+public sealed record VersionHistorySnapshotNarrativeArea(
+    ProjectExportBookBrief? BookBrief,
+    IReadOnlyList<Guid> BookBriefCanonSourceIds,
+    IReadOnlyList<ProjectExportEntityType> EntityTypes,
+    IReadOnlyList<ProjectExportAct> Acts,
+    IReadOnlyList<ProjectExportChapter> Chapters,
+    IReadOnlyList<VersionHistoryWritingSample> WritingSamples,
+    IReadOnlyList<VersionHistoryContextPreference> ContextPreferences,
+    IReadOnlyList<ProjectExportManuscriptAnnotation> Annotations);
+
+public sealed record VersionHistorySnapshotGraphArea(
+    IReadOnlyList<ProjectExportNode> Nodes,
+    IReadOnlyList<ProjectExportEdge> Edges);
+
+public sealed record VersionHistorySnapshotSourcesArea(
+    IReadOnlyList<ProjectExportIngestSource> Sources);
+
+public sealed record VersionHistorySnapshotAssetsArea(
+    IReadOnlyList<VersionHistoryImageAsset> Images,
+    IReadOnlyList<ProjectExportEntityVisualExample> EntityVisualExamples,
+    IReadOnlyList<VersionHistoryFontFamily> FontFamilies);
+
+public sealed record VersionHistorySnapshotManuscriptArea(
+    IReadOnlyList<ProjectExportManuscriptStyle> Styles);
+
+public sealed record VersionHistorySnapshotCompositionArea(
+    IReadOnlyList<ProjectExportPageComposition> PageCompositions);
+
+public sealed record VersionHistorySnapshotPublicationArea(
+    ProjectExportPublicationBook? PublicationBook,
+    IReadOnlyList<ProjectExportPublicationEdition> PublicationEditions,
+    IReadOnlyList<ProjectExportPublicationSection> PublicationSections);
+
+public sealed record VersionHistoryProjectReference(
+    Guid ReferenceId,
+    Guid ReferencingProjectId,
+    Guid ReferencedProjectId,
+    Guid? ReferencedRepositoryId,
+    string ReferencedProjectName,
+    string ReferencedProjectSlug);
+
+public sealed record VersionHistoryWritingSample(
+    Guid Id,
+    string Title,
+    string Body);
+
+public sealed record VersionHistoryContextPreference(
+    Guid Id,
+    Guid ChapterId,
+    string Kind,
+    string Key,
+    bool IsIncluded,
+    int? SortOrder);
+
+public sealed record VersionHistoryImageAsset(
+    Guid Id,
+    string FileName,
+    string ContentType,
+    string BlobPath,
+    string Sha256,
+    long ByteLength,
+    string AltText,
+    PublishAssetSource Source,
+    string Prompt,
+    string GenerationModel,
+    string SourceMetadataJson,
+    Guid? DerivedFromImageId,
+    double? CropXPercent,
+    double? CropYPercent,
+    double? CropWidthPercent,
+    double? CropHeightPercent);
+
+public sealed record VersionHistoryFontFamily(
+    Guid Id,
+    string Name,
+    bool EmbeddingRightsConfirmed,
+    string RightsDeclaration,
+    IReadOnlyList<VersionHistoryFontFace> Faces);
+
+public sealed record VersionHistoryFontFace(
+    Guid Id,
+    string SubfamilyName,
+    string FileName,
+    string ContentType,
+    int Weight,
+    bool Italic,
+    string BlobPath,
+    string Sha256,
+    long ByteLength);
+
+public sealed record VersionHistorySnapshotPayload(
+    Guid RepositoryId,
+    Guid ProjectId,
+    VersionHistorySnapshotProjectArea Project,
+    VersionHistorySnapshotNarrativeArea Narrative,
+    VersionHistorySnapshotGraphArea Graph,
+    VersionHistorySnapshotSourcesArea Sources,
+    VersionHistorySnapshotAssetsArea Assets,
+    VersionHistorySnapshotManuscriptArea Manuscript,
+    VersionHistorySnapshotCompositionArea Composition,
+    VersionHistorySnapshotPublicationArea Publication)
+{
+    public IReadOnlyDictionary<Guid, byte[]> ImageData { get; init; } = new Dictionary<Guid, byte[]>();
+
+    public IReadOnlyDictionary<Guid, byte[]> FontFaceData { get; init; } = new Dictionary<Guid, byte[]>();
+
+    public ProjectExportDocument ToProjectExportDocument() => new()
+    {
+        ExportKind = ProjectExportKind.Full,
+        Project = Project.Project,
+        PageSetup = Project.PageSetup,
+        BookBrief = Narrative.BookBrief,
+        IngestSources = Sources.Sources.ToList(),
+        BookBriefCanonSourceIds = Narrative.BookBriefCanonSourceIds.ToList(),
+        EntityTypes = Narrative.EntityTypes.ToList(),
+        Images = Assets.Images
+            .Select(image => image.ToProjectExportImage(ImageData.GetValueOrDefault(image.Id) ?? []))
+            .ToList(),
+        FontFamilies = Assets.FontFamilies
+            .Select(family => new ProjectExportFontFamily(
+                family.Id,
+                family.Name,
+                family.Faces.Select(face => new ProjectExportFontFace(
+                    face.Id,
+                    face.SubfamilyName,
+                    face.FileName,
+                    face.ContentType,
+                    face.Weight,
+                    face.Italic,
+                    FontFaceData.GetValueOrDefault(face.Id) ?? [],
+                    face.Sha256)).ToList(),
+                family.EmbeddingRightsConfirmed,
+                family.RightsDeclaration))
+            .ToList(),
+        EntityVisualExamples = Assets.EntityVisualExamples.ToList(),
+        PublicationBook = Publication.PublicationBook,
+        PublicationEditions = Publication.PublicationEditions.ToList(),
+        PageCompositions = Composition.PageCompositions.ToList(),
+        PublicationSections = Publication.PublicationSections.ToList(),
+        ManuscriptStyles = Manuscript.Styles.ToList(),
+        Acts = Narrative.Acts.ToList(),
+        Chapters = Narrative.Chapters.ToList(),
+        ManuscriptAnnotations = Narrative.Annotations.ToList(),
+        Nodes = Graph.Nodes.ToList(),
+        Edges = Graph.Edges.ToList(),
+    };
+}
+
+internal static class VersionHistorySnapshotConversions
+{
+    public static ProjectExportImage ToProjectExportImage(this VersionHistoryImageAsset image, byte[] data) =>
+        new(
+            image.Id,
+            image.FileName,
+            image.ContentType,
+            data,
+            image.AltText,
+            image.Source,
+            image.Prompt,
+            image.GenerationModel,
+            image.SourceMetadataJson,
+            image.DerivedFromImageId,
+            image.CropXPercent,
+            image.CropYPercent,
+            image.CropWidthPercent,
+            image.CropHeightPercent,
+            DateTime.UnixEpoch,
+            DateTime.UnixEpoch);
+
+}

@@ -149,8 +149,11 @@ chapter.
 Development uses the repository-local database by default. Packaged builds use a
 per-user application-data location so installers, portable executables, and
 mounted DMGs remain disposable. Database-path and migration safety details belong
-to the persistence chapter. Release orchestration and platform evidence belong to
-the validation chapter.
+to the persistence chapter. Version history follows the same split through
+`GitRepositoryStoreOptions`: development repositories live under the ignored
+`History/` directory beside the app data base, while packaged repositories live
+under `%LocalAppData%/Lorekeeper/History/<repository-id>.git`. Release
+orchestration and platform evidence belong to the validation chapter.
 
 ### Application-owned interaction surfaces
 
@@ -202,7 +205,11 @@ entities.
 `Desktop:UpdateCheckIntervalMinutes` and `Desktop:ReleaseApiUrl` define update
 discovery; `Startup:MinimumSplashMilliseconds` controls the minimum startup
 surface duration; and `Blazor:MaximumReceiveMessageSizeBytes` bounds interactive
-payloads. Provider-owned keys are described in the providers chapter.
+payloads. `VersionHistory:HistoryRoot` optionally overrides the local Git
+history root, while `VersionHistory:GitHub:ClientId` configures the
+version-control device-flow application (with standard environment-variable
+overrides). The version-history chapter owns those feature contracts;
+provider-owned keys are described in the providers chapter.
 
 ## Key files and file families
 
@@ -227,6 +234,8 @@ payloads. Provider-owned keys are described in the providers chapter.
 - [Persistence, migrations, and import](persistence-migrations-import.md) — database operations, startup migration order, recovery, and data paths.
 - [Assistants and chat](assistants-chat.md) — Blazor-independent conversation runtimes and shared chat surfaces.
 - [Composition and media](composition-media.md) — shared image UI and visual-workspace browser bridges.
+- [Version history and synchronization](version-history-sync.md) — local Git
+  paths, checkpoint/restore boundaries, and explicit remote actions.
 - [Press production](press-production.md) — packaged native renderer and publication job processing.
 - [Validation and documentation](validation-documentation.md) — required build/startup checks and desktop/release validation.
 

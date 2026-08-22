@@ -7,6 +7,8 @@ using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Search;
+using Lorekeeper.VersionHistory.Git;
+using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Projects;
 
@@ -17,7 +19,9 @@ public class ProjectService(
     IOutlineGraphSync outlineGraphSync,
     IBookBriefService bookBriefs,
     IContextIndexingService contextIndexing,
-    IAuthoringHistoryRuntime authoringHistory) : IProjectService
+    IAuthoringHistoryRuntime authoringHistory,
+    IProjectMutationCoordinator projectMutations,
+    IGitRepositoryStore historyStore) : IProjectService
 {
     public async Task<IReadOnlyList<Project>> ListAsync(CancellationToken cancellationToken = default)
     {
@@ -77,6 +81,17 @@ public class ProjectService(
         project.Name = trimmed;
         project.UpdatedAt = DateTime.UtcNow;
         repo.Update(project);
+
+        var incomingReferences = await databaseOperation.Repositories.ProjectReferences
+            .ListByReferencedProjectAsync(id, cancellationToken);
+        foreach (var reference in incomingReferences)
+        {
+            reference.ReferencedProjectName = project.Name;
+            reference.ReferencedProjectSlug = project.Slug;
+            reference.ResolvedAt = DateTime.UtcNow;
+            databaseOperation.Repositories.ProjectReferences.Update(reference);
+        }
+
         await databaseOperation.SaveChangesAsync(cancellationToken);
         await outlineGraphSync.EnsureProjectAsync(project, cancellationToken);
         await contextIndexing.ReindexProjectProfileAsync(project.Id, cancellationToken);
@@ -143,14 +158,15 @@ public class ProjectService(
         bool detachIncomingReferences,
         CancellationToken cancellationToken = default)
     {
+        await using var projectLease = await projectMutations.AcquireAsync(id, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var repo = databaseOperation.Repositories.Projects;
         var project = await repo.GetByIdAsync(id, cancellationToken);
         if (project is null) return;
 
-        // Recheck incoming links while holding the write operation. Restricting the
-        // referenced FK keeps an accidental direct delete from bypassing this guard.
+        // Recheck resolved incoming links while holding the write operation so a
+        // normal delete requires explicit confirmation before detaching context.
         var incomingReferences = await databaseOperation.Repositories.ProjectReferences
             .ListByReferencedProjectAsync(id, cancellationToken);
         if (incomingReferences.Count > 0 && !detachIncomingReferences)
@@ -163,20 +179,66 @@ public class ProjectService(
         var detachedAt = DateTime.UtcNow;
         foreach (var reference in incomingReferences)
         {
-            databaseOperation.Repositories.ProjectReferences.Remove(reference);
+            reference.ResolvedProjectId = null;
+            reference.ResolvedAt = null;
+            databaseOperation.Repositories.ProjectReferences.Update(reference);
             reference.ReferencingProject.UpdatedAt = detachedAt;
             databaseOperation.Repositories.Projects.Update(reference.ReferencingProject);
         }
 
-        // Wipe vector chunks first; if this fails we'd rather leave the project row in place
-        // than orphan vectors with no owning scope.
-        var scopeKey = Project.ScopeKey(id);
-        await vectors.DeleteByScopeAsync(scopeKey, cancellationToken);
-        await projectSearch.DeleteByScopeAsync(scopeKey, cancellationToken);
+        var historyRepository = await databaseOperation.Db.ProjectVersionRepositories
+            .AsNoTracking()
+            .SingleOrDefaultAsync(repository => repository.ProjectId == id, cancellationToken);
+        GitRepositoryDeletionStage? historyStage = null;
+        try
+        {
+            if (historyRepository is not null)
+                historyStage = historyStore.StageRepositoryDeletion(historyRepository.Id);
 
-        repo.Remove(project);
-        await databaseOperation.SaveChangesAsync(cancellationToken);
+            // Wipe vector chunks first; if this fails we'd rather leave the project row in place
+            // than orphan vectors with no owning scope.
+            var scopeKey = Project.ScopeKey(id);
+            await vectors.DeleteByScopeAsync(scopeKey, cancellationToken);
+            await projectSearch.DeleteByScopeAsync(scopeKey, cancellationToken);
+
+            repo.Remove(project);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception deletionFailure)
+        {
+            if (historyStage is not null)
+            {
+                try
+                {
+                    historyStore.RollbackRepositoryDeletion(historyStage);
+                }
+                catch (Exception rollbackFailure)
+                {
+                    throw new InvalidOperationException(
+                        $"Project deletion failed and its local history could not be restored. The staged history remains recoverable at '{historyStage.StagedPath}'.",
+                        new AggregateException(deletionFailure, rollbackFailure));
+                }
+            }
+
+            throw;
+        }
+
+        GitRepositoryDeletionException? historyCleanupFailure = null;
+        if (historyStage is not null)
+        {
+            try
+            {
+                historyStore.FinalizeRepositoryDeletion(historyStage);
+            }
+            catch (GitRepositoryDeletionException exception)
+            {
+                historyCleanupFailure = exception;
+            }
+        }
+
         await authoringHistory.ClearProjectAsync(id, CancellationToken.None);
+        if (historyCleanupFailure is not null)
+            throw historyCleanupFailure;
     }
 
     private async Task<string> GenerateUniqueSlugAsync(string name, CancellationToken cancellationToken)

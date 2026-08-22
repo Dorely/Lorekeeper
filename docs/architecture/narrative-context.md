@@ -132,10 +132,12 @@ object paginator.
 ### Direct project references and provenance
 
 `ProjectReference` is a direct, read-only continuity link from an active
-referencing project to another project. The composite key prevents duplicates,
-self-links fail at the database and service boundaries, and reciprocal links
-are independent. Reference scope is exactly one hop. Arbitrary foreign project
-IDs and transitive references fail closed.
+referencing project to another project. Its stable target identity is the pair
+`ReferencedRepositoryId` and `ReferencedProjectId`; local resolution is a
+nullable convenience, not the identity. The composite identity prevents
+duplicates, self-links fail only when both repository and project identity
+match, and reciprocal links are independent. Reference scope is exactly one
+hop. Arbitrary foreign project IDs and transitive references fail closed.
 
 Deleting a referencing project cascades its outgoing links. Deleting a
 referenced project is restricted, so `IProjectService.DeleteAsync` rechecks
@@ -143,7 +145,9 @@ incoming dependencies in a global write operation and requires an explicit
 detach decision. Adding or removing a link touches only the referencing
 project's update timestamp. Direct-reference rows are deliberately excluded
 from portable project exports and are never inferred from names or slugs during
-import.
+import. Version-history snapshots preserve outgoing reference repository/project
+identity and cached labels; restore relinks only to an exact local identity and
+otherwise leaves the reference unresolved.
 
 Referenced narrative scope is deliberately narrower than the full project. It
 contains the project profile, acts, Core chapters/manuscripts, entities, facts,
@@ -236,6 +240,9 @@ not introduce a second canon-selection, relationship, or job-state authority.
   selected and projected as narrative evidence.
 - [persistence-migrations-import.md](persistence-migrations-import.md) owns EF
   mappings, write coordination, schema migrations, and portable import/export.
+- [version-history-sync.md](version-history-sync.md) owns deterministic project
+  snapshots and restore/sync transport; this chapter owns the canonical graph,
+  outline, ingest, reference, and retrieval state they capture or rebuild.
 
 ## Relevant verification
 

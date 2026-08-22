@@ -146,8 +146,10 @@ call creates the in-memory projected overlay and pending change for approval.
 Page and cover scenes use persisted, hashed, expiring, project/conversation-
 scoped stages that cannot be replayed. Image generation creates an unattached
 durable image job; another explicit mutation places or associates the completed
-asset. Failed, cancelled, or stale calls must not create history or partial
-destination state.
+asset. Failed, cancelled, or stale calls must not create partial destination
+state. A completed assistant mutation may be captured by the separate
+version-history checkpoint service; that durable Git snapshot history is not
+the process-lifetime Undo/Redo history described by the manuscript chapter.
 
 ### Surface charters
 
@@ -284,6 +286,9 @@ must leave durable terminal state and no concurrent-disposal error.
 - [publishing-model.md](publishing-model.md) and
   [press-production.md](press-production.md) own the publication state and
   truthful validation/rendering claims exposed through Publish tools.
+- [version-history-sync.md](version-history-sync.md) owns deterministic
+  creative snapshots and assistant checkpoint capture; chat transcripts,
+  messages, and composer state remain outside those snapshots.
 
 ## Relevant verification
 

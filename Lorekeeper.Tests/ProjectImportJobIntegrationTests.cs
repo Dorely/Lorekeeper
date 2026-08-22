@@ -711,11 +711,23 @@ public sealed class ProjectImportJobIntegrationTests
         var source = new Project { Name = "Second volume", Slug = "second-volume" };
         var destination = new Project { Name = "Imported destination", Slug = "imported-destination" };
         db.Projects.AddRange(referenced, source, destination);
+        var referencedRepository = new ProjectVersionRepository
+        {
+            ProjectId = referenced.Id,
+            CreativeRevision = 0,
+        };
+        db.ProjectVersionRepositories.Add(referencedRepository);
         db.PublicationBooks.Add(new PublicationBook { ProjectId = source.Id });
         db.ProjectReferences.Add(new ProjectReference
         {
+            Id = Guid.NewGuid(),
             ReferencingProjectId = source.Id,
+            ReferencedRepositoryId = referencedRepository.Id,
             ReferencedProjectId = referenced.Id,
+            ResolvedProjectId = referenced.Id,
+            ReferencedProjectName = referenced.Name,
+            ReferencedProjectSlug = referenced.Slug,
+            ResolvedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
 

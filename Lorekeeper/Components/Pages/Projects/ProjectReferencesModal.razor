@@ -46,12 +46,25 @@
                             <div class="project-reference-list">
                                 @foreach (var reference in _references)
                                 {
-                                    <div class="project-reference-row" @key="reference.ProjectId">
+                                    <div class="project-reference-row" @key="reference.ReferenceId">
                                         <div>
                                             <strong>@reference.Name</strong>
-                                            <span>/@reference.Slug · updated @reference.UpdatedAt.ToLocalTime().ToString("MMM d, yyyy")</span>
+                                            @if (reference.ResolvedProjectId is null)
+                                            {
+                                                <span class="text-warning">Unresolved · /@reference.Slug · repository @reference.ReferencedRepositoryId.ToString("N")</span>
+                                            }
+                                            else
+                                            {
+                                                <span>/@reference.Slug · updated @reference.UpdatedAt.ToLocalTime().ToString("MMM d, yyyy")</span>
+                                            }
                                         </div>
-                                        <button type="button" class="btn btn-sm btn-outline-danger" disabled="@_busy" @onclick="() => RemoveAsync(reference.ProjectId)">Remove</button>
+                                        <div class="d-flex gap-2">
+                                            @if (reference.ResolvedProjectId is null)
+                                            {
+                                                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_busy" @onclick="() => RelinkAsync(reference.ReferenceId)">Relink if available</button>
+                                            }
+                                            <button type="button" class="btn btn-sm btn-outline-danger" disabled="@_busy" @onclick="() => RemoveAsync(reference.ReferenceId)">Remove</button>
+                                        </div>
                                     </div>
                                 }
                             </div>
@@ -139,20 +152,41 @@
         _error = null;
         try
         {
-            await References.AddAsync(ProjectId, referencedProjectId);
+            var candidate = _candidates.SingleOrDefault(item => item.ProjectId == referencedProjectId);
+            if (candidate is null)
+            {
+                _error = "That project is no longer available. Reload the references and try again.";
+                return;
+            }
+
+            await References.AddAsync(ProjectId, candidate.ReferencedRepositoryId ?? Guid.Empty, referencedProjectId);
             await LoadAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }
     }
 
-    private async Task RemoveAsync(Guid referencedProjectId)
+    private async Task RelinkAsync(Guid referenceId)
     {
         _busy = true;
         _error = null;
         try
         {
-            await References.RemoveAsync(ProjectId, referencedProjectId);
+            if (!await References.RelinkAvailableAsync(referenceId))
+                _error = "The exact repository and project identity is not available on this machine yet.";
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task RemoveAsync(Guid referenceId)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await References.RemoveAsync(referenceId);
             await LoadAsync();
         }
         catch (Exception ex) { _error = ex.Message; }

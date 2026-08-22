@@ -1,0 +1,406 @@
+@page "/settings/version-control"
+@using Lorekeeper.VersionHistory.GitHub
+@rendermode InteractiveServer
+@inject IGitHubConnectionService GitHub
+@implements IDisposable
+
+<PageTitle>Version control - Lorekeeper</PageTitle>
+
+<ConfigurationShell Title="Version control"
+                    Description="Connect reusable GitHub accounts for local version history and optional per-project synchronization.">
+    @if (_configurationMissing)
+    {
+        <div class="alert alert-warning" role="alert">
+            GitHub device authorization is not configured. Set
+            <code>VersionHistory:GitHub:ClientId</code> to the OAuth app client ID before connecting an account.
+            Lorekeeper never displays that client ID or any access token here.
+        </div>
+    }
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            @_error
+            <button type="button" class="btn-close" aria-label="Dismiss" @onclick="ClearStatus"></button>
+        </div>
+    }
+    @if (_message is not null)
+    {
+        <div class="alert alert-info alert-dismissible fade show" role="status">
+            @_message
+            <button type="button" class="btn-close" aria-label="Dismiss" @onclick="ClearStatus"></button>
+        </div>
+    }
+
+    <section class="lk-section-card version-control-connect-card" aria-labelledby="github-connect-title">
+        <div class="lk-section-heading">
+            <div>
+                <span class="lk-section-kicker">GitHub account</span>
+                <h2 id="github-connect-title">Connect GitHub</h2>
+                <p>Authorize Lorekeeper with GitHub's device flow. The account can then be selected for a remote from a project's History workspace.</p>
+            </div>
+        </div>
+
+        <div class="version-control-actions">
+            @if (_authorization is null)
+            {
+                <button type="button" class="btn btn-primary" disabled="@(_starting || _polling)" @onclick="StartAuthorizationAsync">
+                    @(_starting ? "Starting authorization…" : "Connect GitHub")
+                </button>
+            }
+            else
+            {
+                <button type="button" class="btn btn-outline-secondary" disabled="@(_starting || _polling)" @onclick="StartAuthorizationAsync">Start over</button>
+            }
+            <span class="version-control-help">GitHub opens in your browser only when you choose the authorization link below.</span>
+        </div>
+
+        @if (_authorization is { } authorization)
+        {
+            <div class="device-flow-panel" role="region" aria-labelledby="device-flow-title">
+                <div>
+                    <span class="lk-section-kicker">Device authorization</span>
+                    <h3 id="device-flow-title">Approve Lorekeeper in GitHub</h3>
+                    <p>Open GitHub, enter the one-time code, then return here. Lorekeeper will poll GitHub only while this operation is active.</p>
+                </div>
+                <div class="device-flow-details">
+                    <div class="device-code-block">
+                        <span>Your one-time code</span>
+                        <code>@authorization.UserCode</code>
+                    </div>
+                    <div class="device-flow-link">
+                        <a class="btn btn-outline-primary" href="@(authorization.VerificationUriComplete ?? authorization.VerificationUri)" target="_blank" rel="noopener noreferrer">
+                            Open GitHub authorization
+                        </a>
+                        <small>Expires @authorization.ExpiresAt.ToLocalTime().ToString("g")</small>
+                    </div>
+                </div>
+                <div class="device-flow-actions">
+                    <button type="button" class="btn btn-primary" disabled="@(_starting || _polling)" @onclick="CompleteAuthorizationAsync">
+                        @(_polling ? "Waiting for GitHub approval…" : "Check authorization")
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" disabled="@(_starting || _polling)" @onclick="CancelAuthorization">Cancel</button>
+                </div>
+            </div>
+        }
+    </section>
+
+    <section class="version-control-connections" aria-labelledby="github-connections-title">
+        <div class="home-section-heading">
+            <div>
+                <span class="lk-section-kicker">Reusable connections</span>
+                <h2 id="github-connections-title">Connected GitHub accounts</h2>
+            </div>
+            <span>@_connections.Count account(s)</span>
+        </div>
+
+        @if (_loading)
+        {
+            <div class="lk-empty-state"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Loading GitHub connections…</span></div>
+        }
+        else if (_connections.Count == 0)
+        {
+            <div class="lk-empty-state">
+                <h2>No GitHub accounts connected</h2>
+                <p>Connect an account above, then attach one of its repositories from a project's History workspace.</p>
+            </div>
+        }
+        else
+        {
+            <div class="version-control-connection-grid">
+                @foreach (var connection in _connections)
+                {
+                    <article class="version-control-connection-card">
+                        <header class="version-control-connection-header">
+                            <div class="version-control-connection-identity">
+                                <span class="version-control-mark" aria-hidden="true">GH</span>
+                                <div>
+                                    <span class="lk-section-kicker">GitHub account</span>
+                                    <h3>@connection.AccountLogin</h3>
+                                    <p>GitHub user ID @connection.GitHubUserId</p>
+                                </div>
+                            </div>
+                            <span class="lk-status-pill @(ConnectionStatusClass(connection))">@ConnectionStatus(connection)</span>
+                        </header>
+                        <dl class="version-control-connection-details">
+                            <div><dt>Scope</dt><dd>@(string.IsNullOrWhiteSpace(connection.Scope) ? "Not reported" : connection.Scope)</dd></div>
+                            <div><dt>Last validated</dt><dd>@FormatDate(connection.LastValidatedAt)</dd></div>
+                            <div><dt>Access expiry</dt><dd>@FormatDate(connection.AccessTokenExpiresAt)</dd></div>
+                        </dl>
+                        <footer class="version-control-connection-actions">
+                            <button type="button" class="btn btn-sm btn-outline-info" disabled="@(_validatingId is not null || _disconnectBusy)" @onclick="() => ValidateAsync(connection)">
+                                @(_validatingId == connection.Id ? "Validating…" : "Validate connection")
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-danger ms-auto" disabled="@(_validatingId is not null || _disconnectBusy)" @onclick="() => RequestDisconnect(connection)">Disconnect</button>
+                        </footer>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+
+    <p class="version-control-note">GitHub accounts are reusable credentials only. Individual remotes are attached, updated, and removed per project from History; disconnecting an account is blocked while any project still uses it.</p>
+
+    <ConfirmationDialog IsOpen="@(_disconnectTarget is not null)"
+                        Title="Disconnect GitHub account"
+                        Message="@DisconnectMessage"
+                        ConfirmLabel="Disconnect account"
+                        CancelLabel="Keep connected"
+                        Destructive="true"
+                        Busy="_disconnectBusy"
+                        OnConfirm="DisconnectConfirmedAsync"
+                        OnCancel="CancelDisconnect" />
+</ConfigurationShell>
+
+@code {
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private IReadOnlyList<GitHubConnectionSummary> _connections = [];
+    private GitHubDeviceAuthorization? _authorization;
+    private CancellationTokenSource? _oauthCancellation;
+    private GitHubConnectionSummary? _disconnectTarget;
+    private string? _error;
+    private string? _message;
+    private bool _loading = true;
+    private bool _starting;
+    private bool _polling;
+    private bool _disconnectBusy;
+    private Guid? _validatingId;
+    private bool _configurationMissing;
+    private bool _disposed;
+
+    private string DisconnectMessage => _disconnectTarget is null
+        ? string.Empty
+        : $"Disconnect @{_disconnectTarget.AccountLogin}? Project remotes using this connection must be removed or relinked first.";
+
+    protected override async Task OnInitializedAsync() => await LoadConnectionsAsync();
+
+    private async Task LoadConnectionsAsync()
+    {
+        _loading = true;
+        try
+        {
+            _connections = await GitHub.ListConnectionsAsync(_lifetimeCancellation.Token);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (GitHubConnectionException exception)
+        {
+            SetGitHubError(exception);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task StartAuthorizationAsync()
+    {
+        if (_starting || _polling || _disposed)
+            return;
+
+        ClearStatus();
+        CancelAuthorization();
+        _starting = true;
+        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+        _oauthCancellation = cancellation;
+        try
+        {
+            var authorization = await GitHub.StartDeviceAuthorizationAsync(cancellationToken: cancellation.Token);
+            if (!_disposed && !cancellation.IsCancellationRequested)
+            {
+                _authorization = authorization;
+                _configurationMissing = false;
+                _message = "GitHub authorization is ready. Open the verification link, enter the code, and then check authorization here.";
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            if (!_disposed)
+                _message = "GitHub authorization was canceled.";
+        }
+        catch (GitHubConnectionException exception)
+        {
+            _authorization = null;
+            SetGitHubError(exception);
+        }
+        finally
+        {
+            _starting = false;
+            if (_authorization is null)
+                DisposeOAuthCancellation(cancellation);
+        }
+    }
+
+    private async Task CompleteAuthorizationAsync()
+    {
+        if (_authorization is null || _oauthCancellation is null || _polling || _disposed)
+            return;
+
+        var authorization = _authorization;
+        var cancellation = _oauthCancellation;
+        _polling = true;
+        ClearStatus();
+        try
+        {
+            var connection = await GitHub.CompleteDeviceAuthorizationAsync(authorization, cancellation.Token);
+            _authorization = null;
+            _configurationMissing = false;
+            _message = $"GitHub account @{connection.AccountLogin} connected. It is ready to attach to a project from History.";
+            await LoadConnectionsAsync();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            if (!_disposed)
+                _message = "GitHub authorization polling was canceled.";
+        }
+        catch (GitHubConnectionException exception)
+        {
+            if (!_disposed)
+            {
+                _authorization = null;
+                SetGitHubError(exception);
+            }
+        }
+        finally
+        {
+            _polling = false;
+            DisposeOAuthCancellation(cancellation);
+        }
+    }
+
+    private async Task ValidateAsync(GitHubConnectionSummary connection)
+    {
+        if (_validatingId is not null || _disconnectBusy || _disposed)
+            return;
+
+        ClearStatus();
+        _validatingId = connection.Id;
+        try
+        {
+            var validated = await GitHub.ValidateConnectionAsync(connection.Id, _lifetimeCancellation.Token);
+            _configurationMissing = false;
+            _connections = _connections
+                .Where(item => item.Id != validated.Id)
+                .Append(validated)
+                .OrderBy(item => item.AccountLogin)
+                .ThenBy(item => item.CreatedAt)
+                .ToList();
+            _message = $"GitHub account @{validated.AccountLogin} is valid.";
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (GitHubConnectionException exception)
+        {
+            SetGitHubError(exception);
+        }
+        finally
+        {
+            _validatingId = null;
+        }
+    }
+
+    private void RequestDisconnect(GitHubConnectionSummary connection)
+    {
+        ClearStatus();
+        _disconnectTarget = connection;
+    }
+
+    private void CancelDisconnect() => _disconnectTarget = null;
+
+    private async Task DisconnectConfirmedAsync()
+    {
+        if (_disconnectTarget is not { } connection || _disconnectBusy || _disposed)
+            return;
+
+        _disconnectBusy = true;
+        ClearStatus();
+        try
+        {
+            await GitHub.DisconnectAsync(connection.Id, _lifetimeCancellation.Token);
+            _connections = _connections.Where(item => item.Id != connection.Id).ToList();
+            _disconnectTarget = null;
+            _message = $"GitHub account @{connection.AccountLogin} was disconnected.";
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (GitHubConnectionException exception)
+        {
+            SetGitHubError(exception);
+        }
+        finally
+        {
+            _disconnectBusy = false;
+        }
+    }
+
+    private void CancelAuthorization()
+    {
+        _authorization = null;
+        if (_oauthCancellation is { } cancellation)
+        {
+            _oauthCancellation = null;
+            cancellation.Cancel();
+            cancellation.Dispose();
+        }
+    }
+
+    private void DisposeOAuthCancellation(CancellationTokenSource cancellation)
+    {
+        if (ReferenceEquals(_oauthCancellation, cancellation))
+            _oauthCancellation = null;
+        cancellation.Dispose();
+    }
+
+    private void SetGitHubError(GitHubConnectionException exception)
+    {
+        _configurationMissing = exception.Code == GitHubConnectionErrorCode.InvalidConfiguration;
+        _error = exception.Code switch
+        {
+            GitHubConnectionErrorCode.InvalidConfiguration => "GitHub is not configured. Set VersionHistory:GitHub:ClientId to the OAuth app client ID, then try again.",
+            GitHubConnectionErrorCode.AccessDenied => "GitHub denied authorization. Approve the request or start a new connection.",
+            GitHubConnectionErrorCode.ExpiredToken => "The GitHub authorization expired. Start a new connection.",
+            GitHubConnectionErrorCode.ConnectionInUse => "This account is still used by a project remote. Remove or relink those project remotes from History before disconnecting it.",
+            GitHubConnectionErrorCode.ConnectionNotFound => "That GitHub connection no longer exists. Refresh this page and try again.",
+            GitHubConnectionErrorCode.Unauthorized => "GitHub did not accept this connection. Validate the account again or reconnect it.",
+            GitHubConnectionErrorCode.Forbidden => "GitHub refused this account operation. Check the account permissions and try again.",
+            GitHubConnectionErrorCode.TransportFailure => "GitHub could not be reached. Check the network connection and try again.",
+            _ => "GitHub returned an error. Try again or reconnect the account.",
+        };
+    }
+
+    private void ClearStatus()
+    {
+        _error = null;
+        _message = null;
+    }
+
+    private static string ConnectionStatus(GitHubConnectionSummary connection) =>
+        connection.RevokedAt is not null ? "Needs attention" : "Connected";
+
+    private static string ConnectionStatusClass(GitHubConnectionSummary connection) =>
+        connection.RevokedAt is not null ? "is-warning" : "is-success";
+
+    private static string FormatDate(DateTime? value) =>
+        value is { } date ? date.ToLocalTime().ToString("g") : "Not available";
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _disposed = true;
+        _lifetimeCancellation.Cancel();
+        if (_oauthCancellation is { } cancellation)
+        {
+            cancellation.Cancel();
+            if (!_starting && !_polling)
+            {
+                _oauthCancellation = null;
+                cancellation.Dispose();
+            }
+        }
+        _lifetimeCancellation.Dispose();
+    }
+}

@@ -11,7 +11,9 @@ approved migration/import test boundaries. Read it with
 package freshness, and native artifact semantics. Read it with
 `manuscript-authoring.md` for manuscript/schema/history data, and with
 `composition-media.md` for image/font/composition ownership and migration
-relationships.
+relationships. Read it with [`version-history-sync.md`](version-history-sync.md)
+for the separate deterministic Git snapshot, checkpoint, restore, and remote
+transport boundary.
 
 This chapter is the persistence and data-safety authority. Runtime services
 must use its operation and repository boundaries rather than circuit-scoped
@@ -55,6 +57,15 @@ application of a validated versioned document, ID remapping, reference/source
 scope rules, report rows, and post-commit index refresh. Import jobs and other
 background work use durable records, queues, and workers; a Blazor circuit or
 renderer process never owns their lifetime.
+
+Version history is a separate transformation boundary. SQLite remains the live
+authority; `VersionHistorySnapshotWriter` emits only the deterministic canonical
+creative areas documented in [`version-history-sync.md`](version-history-sync.md)
+to an app-managed bare Git repository. It never serializes the SQLite file,
+provider credentials, chats, jobs, derived projections, or generated
+publication artifacts. Restore/import uses the same project mutation lease,
+database write lease, and transaction ordering as other guarded transformations
+and repairs projections only after canonical rows commit.
 
 Credential/API-key rows, OAuth token rows, and provider configuration remain
 within the provider persistence boundary. The local database is not an
@@ -198,7 +209,10 @@ resolve per-user application-data storage so installed, portable, and mounted
 DMG locations remain disposable. Database files, verification databases,
 temporary migration backups, and publish output are local ignored state. Port
 and OAuth redirect configuration remain local-host-only unless an explicit
-security architecture change expands exposure.
+security architecture change expands exposure. Version-history repositories use
+the separate development `History/` root (ignored by the source repository) or
+packaged `%LocalAppData%/Lorekeeper/History/<repository-id>.git`; they are not a
+SQLite backup or a portable v24 export.
 
 ## Key files and file families
 
@@ -220,6 +234,7 @@ security architecture change expands exposure.
 | `Lorekeeper/ImportExport/ProjectImportExportService.cs` | UI-facing Full/Non-structural export, warnings, queueing, and import job lifecycle. |
 | `Lorekeeper/ImportExport/ProjectImportJobProcessor.cs` | Transactional v24 import, ID remapping, rollback/report behavior, legacy conversion, and post-commit indexing. |
 | `Lorekeeper/ImportExport/ProjectImportJobQueue.cs` / `ProjectImportJobNotifier.cs` | Import job dispatch and ephemeral live UI updates; the provider/background chapter owns hosted worker execution. |
+| `Lorekeeper/VersionHistory/Snapshots/`, `Git/`, `Services/`, `Restore/`, and `Sync/` | Deterministic creative snapshot trees, bare Git/checkpoint metadata, guarded restore/import, and explicit remote transport; detailed ownership is in `version-history-sync.md`. |
 | `Lorekeeper.Tests/DatabaseMigrationRecoveryTests.cs` | Recovery markers, protected backup retention, and fail-closed startup behavior. |
 | `Lorekeeper.Tests/ManuscriptMigrationIntegrationTests.cs` | Real legacy WAL migration, backup/journal/hash validation, restore, and audit compatibility. |
 | `Lorekeeper.Tests/ProjectExportCompatibilityTests.cs` / `ProjectImportJobIntegrationTests.cs` | v24 export/import preservation, warnings, remapping, rollback, and legacy adapters. |
@@ -241,6 +256,9 @@ security architecture change expands exposure.
 - [`assistants-chat.md`](./assistants-chat.md) owns transcript/runtime state;
   assistant conversations and model selections are intentionally excluded from
   project export/import.
+- [`version-history-sync.md`](./version-history-sync.md) owns the Git-backed
+  snapshot, checkpoint, restore, clone, and synchronization boundary; SQLite
+  rows remain the live state and Git history is not a database backup.
 
 ## Relevant verification
 

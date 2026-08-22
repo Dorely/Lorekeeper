@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Lorekeeper.ChatTurns;
+using Lorekeeper.VersionHistory.Services;
 
 namespace Lorekeeper.Outline;
 
@@ -42,7 +43,12 @@ public sealed class OutlineChatTurnRunner(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var chat = scope.ServiceProvider.GetRequiredService<IOutlineCollaborationService>();
+        var checkpoints = scope.ServiceProvider.GetRequiredService<IAssistantVersionCheckpointService>();
         await foreach (var update in chat.SendAsync(projectId, userText, imageIds, providerId, cancellationToken))
+        {
+            if (update is AssistantMessageCompleted)
+                await checkpoints.TryCheckpointAsync(projectId, ChatTurnSurface.Outline, cancellationToken);
             yield return update;
+        }
     }
 }

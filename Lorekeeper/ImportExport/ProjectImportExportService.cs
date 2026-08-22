@@ -80,13 +80,15 @@ public sealed class ProjectImportExportService(
         var warnings = new List<string>();
         var outgoingReferences = await db.ProjectReferences
             .AsNoTracking()
-            .Include(reference => reference.ReferencedProject)
             .Where(reference => reference.ReferencingProjectId == projectId)
-            .OrderBy(reference => reference.ReferencedProject.Name)
+            .OrderBy(reference => reference.ReferencedProjectName)
             .ToListAsync(cancellationToken);
         if (outgoingReferences.Count > 0)
         {
-            var names = string.Join(", ", outgoingReferences.Select(reference => reference.ReferencedProject.Name));
+            var names = string.Join(", ", outgoingReferences.Select(reference =>
+                reference.ResolvedProjectId is null
+                    ? $"{reference.ReferencedProjectName} (unresolved)"
+                    : reference.ReferencedProjectName));
             warnings.Add(ProjectExportWarningText.OutgoingReferencesOmitted(outgoingReferences.Count, names));
         }
         var exportedIngestSources = kind == ProjectExportKind.Full
@@ -704,6 +706,10 @@ public sealed class ProjectImportExportService(
                 preference.ProjectId == projectId
                 && preference.IsIncluded
                 && preference.Kind == ContextItemKind.ProjectImage.ToString())
+            .OrderBy(preference => preference.ChapterId)
+            .ThenBy(preference => preference.SortOrder)
+            .ThenBy(preference => preference.Key)
+            .ThenBy(preference => preference.Id)
             .ToListAsync(cancellationToken);
 
         return preferences
@@ -718,7 +724,11 @@ public sealed class ProjectImportExportService(
             .GroupBy(item => item.ChapterId)
             .ToDictionary(
                 group => group.Key,
-                group => (IReadOnlyList<Guid>)group.Select(item => item.ImageId!.Value).Distinct().ToList());
+                group => (IReadOnlyList<Guid>)group
+                    .Select(item => item.ImageId!.Value)
+                    .Distinct()
+                    .OrderBy(id => id)
+                    .ToList());
     }
 
     private static string NodeStableKey(GraphNode node) =>

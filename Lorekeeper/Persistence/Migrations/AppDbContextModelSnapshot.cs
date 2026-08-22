@@ -1131,6 +1131,49 @@ namespace Lorekeeper.Persistence.Migrations
                     b.ToTable("EntityVisualExamples");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.GitHubConnection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AccessToken")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("AccessTokenExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AccountLogin")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("GitHubUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("LastValidatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Scope")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GitHubUserId")
+                        .IsUnique();
+
+                    b.ToTable("GitHubConnections");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.GraphEdge", b =>
                 {
                     b.Property<long>("Id")
@@ -2567,6 +2610,61 @@ namespace Lorekeeper.Persistence.Migrations
                     b.ToTable("ProjectFontFamilies");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.ProjectGitRemote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CloneUrl")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DefaultBranch")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("GitHubConnectionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("GitHubRepositoryId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Owner")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectVersionRepositoryId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RemoteName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RepositoryName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WebUrl")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GitHubConnectionId");
+
+                    b.HasIndex("ProjectVersionRepositoryId", "RemoteName")
+                        .IsUnique();
+
+                    b.HasIndex("ProjectVersionRepositoryId", "Owner", "RepositoryName")
+                        .IsUnique();
+
+                    b.ToTable("ProjectGitRemotes");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.ProjectImageChatAttachment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3122,23 +3220,201 @@ namespace Lorekeeper.Persistence.Migrations
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectReference", b =>
                 {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("ReferencingProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ReferencedRepositoryId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("ReferencedProjectId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ReferencedProjectName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReferencedProjectSlug")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
-                    b.HasKey("ReferencingProjectId", "ReferencedProjectId");
+                    b.Property<Guid?>("ResolvedProjectId")
+                        .HasColumnType("TEXT");
 
-                    b.HasIndex("ReferencedProjectId");
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReferencingProjectId", "ReferencedRepositoryId", "ReferencedProjectId")
+                        .IsUnique();
+
+                    b.HasIndex("ResolvedProjectId");
 
                     b.ToTable("ProjectReferences", t =>
                         {
-                            t.HasCheckConstraint("CK_ProjectReferences_NotSelf", "\"ReferencingProjectId\" <> \"ReferencedProjectId\"");
+                            t.HasCheckConstraint("CK_ProjectReferences_ResolvedNotSelf", "\"ResolvedProjectId\" IS NULL OR \"ReferencingProjectId\" <> \"ResolvedProjectId\"");
                         });
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ProjectVersionCheckpoint", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CommitSha")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreativeRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManifestHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ManifestSchemaVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Message")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ParentCommitSha")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectVersionRepositoryId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectVersionRepositoryId", "ContentHash");
+
+                    b.HasIndex("ProjectVersionRepositoryId", "CreatedAt");
+
+                    b.ToTable("ProjectVersionCheckpoints");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ProjectVersionOperation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ErrorCode")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("HeartbeatAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsResumable")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ProjectVersionRepositoryId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequestKey")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectVersionRepositoryId", "CreatedAt");
+
+                    b.HasIndex("ProjectVersionRepositoryId", "RequestKey")
+                        .IsUnique();
+
+                    b.HasIndex("ProjectVersionRepositoryId", "Status", "UpdatedAt");
+
+                    b.ToTable("ProjectVersionOperations");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ProjectVersionRepository", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreativeRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("HeadCommitSha")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("HeadContentHash")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastCheckpointAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastCheckpointContentHash")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LastCheckpointRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId")
+                        .IsUnique();
+
+                    b.HasIndex("HeadCommitSha", "HeadContentHash");
+
+                    b.ToTable("ProjectVersionRepositories");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationArtifact", b =>
@@ -5634,6 +5910,24 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.ProjectGitRemote", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.GitHubConnection", "GitHubConnection")
+                        .WithMany("GitRemotes")
+                        .HasForeignKey("GitHubConnectionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Lorekeeper.Models.ProjectVersionRepository", "Repository")
+                        .WithMany("GitRemotes")
+                        .HasForeignKey("ProjectVersionRepositoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("GitHubConnection");
+
+                    b.Navigation("Repository");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.ProjectImageChatAttachment", b =>
                 {
                     b.HasOne("Lorekeeper.Models.PublishAsset", "Image")
@@ -5751,11 +6045,10 @@ namespace Lorekeeper.Persistence.Migrations
 
             modelBuilder.Entity("Lorekeeper.Models.ProjectReference", b =>
                 {
-                    b.HasOne("Lorekeeper.Models.Project", "ReferencedProject")
-                        .WithMany("IncomingReferences")
-                        .HasForeignKey("ReferencedProjectId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                    b.HasOne("Lorekeeper.Models.Project", "ResolvedProject")
+                        .WithMany("ResolvedIncomingReferences")
+                        .HasForeignKey("ResolvedProjectId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("Lorekeeper.Models.Project", "ReferencingProject")
                         .WithMany("OutgoingReferences")
@@ -5763,9 +6056,42 @@ namespace Lorekeeper.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("ReferencedProject");
+                    b.Navigation("ResolvedProject");
 
                     b.Navigation("ReferencingProject");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ProjectVersionCheckpoint", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.ProjectVersionRepository", "Repository")
+                        .WithMany("Checkpoints")
+                        .HasForeignKey("ProjectVersionRepositoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Repository");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ProjectVersionOperation", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.ProjectVersionRepository", "Repository")
+                        .WithMany("Operations")
+                        .HasForeignKey("ProjectVersionRepositoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Repository");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ProjectVersionRepository", b =>
+                {
+                    b.HasOne("Lorekeeper.Models.Project", "Project")
+                        .WithOne("VersionHistoryRepository")
+                        .HasForeignKey("Lorekeeper.Models.ProjectVersionRepository", "ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationArtifact", b =>
@@ -6330,6 +6656,11 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Messages");
                 });
 
+            modelBuilder.Entity("Lorekeeper.Models.GitHubConnection", b =>
+                {
+                    b.Navigation("GitRemotes");
+                });
+
             modelBuilder.Entity("Lorekeeper.Models.GraphNode", b =>
                 {
                     b.Navigation("IncomingEdges");
@@ -6426,7 +6757,7 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.Navigation("FontFamilies");
 
-                    b.Navigation("IncomingReferences");
+                    b.Navigation("ResolvedIncomingReferences");
 
                     b.Navigation("IngestJobs");
 
@@ -6447,6 +6778,8 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("PageSetup");
 
                     b.Navigation("ProjectImageChatAttachments");
+
+                    b.Navigation("VersionHistoryRepository");
 
                     b.Navigation("ProjectImageConversations");
 
@@ -6499,6 +6832,15 @@ namespace Lorekeeper.Persistence.Migrations
             modelBuilder.Entity("Lorekeeper.Models.ProjectImportJob", b =>
                 {
                     b.Navigation("ReportItems");
+                });
+
+            modelBuilder.Entity("Lorekeeper.Models.ProjectVersionRepository", b =>
+                {
+                    b.Navigation("Checkpoints");
+
+                    b.Navigation("GitRemotes");
+
+                    b.Navigation("Operations");
                 });
 
             modelBuilder.Entity("Lorekeeper.Models.PublicationBook", b =>

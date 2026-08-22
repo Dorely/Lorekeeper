@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Lorekeeper.ChatTurns;
+using Lorekeeper.VersionHistory.Services;
 
 namespace Lorekeeper.ImagesChat;
 
@@ -42,7 +43,12 @@ public sealed class ImagesChatTurnRunner(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var chat = scope.ServiceProvider.GetRequiredService<IImagesChatService>();
+        var checkpoints = scope.ServiceProvider.GetRequiredService<IAssistantVersionCheckpointService>();
         await foreach (var update in chat.SendAsync(projectId, userText, imageIds, providerId, cancellationToken))
+        {
+            if (update is ImagesChatAssistantMessageCompleted)
+                await checkpoints.TryCheckpointAsync(projectId, ChatTurnSurface.Images, cancellationToken);
             yield return update;
+        }
     }
 }

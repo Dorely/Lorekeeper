@@ -20,6 +20,11 @@ public class AppDbContext(
     public DbSet<OAuthToken> OAuthTokens => Set<OAuthToken>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<ProjectReference> ProjectReferences => Set<ProjectReference>();
+    public DbSet<ProjectVersionRepository> ProjectVersionRepositories => Set<ProjectVersionRepository>();
+    public DbSet<ProjectVersionCheckpoint> ProjectVersionCheckpoints => Set<ProjectVersionCheckpoint>();
+    public DbSet<ProjectVersionOperation> ProjectVersionOperations => Set<ProjectVersionOperation>();
+    public DbSet<GitHubConnection> GitHubConnections => Set<GitHubConnection>();
+    public DbSet<ProjectGitRemote> ProjectGitRemotes => Set<ProjectGitRemote>();
     public DbSet<BookBrief> BookBriefs => Set<BookBrief>();
     public DbSet<BookBriefCanonSource> BookBriefCanonSources => Set<BookBriefCanonSource>();
     public DbSet<Act> Acts => Set<Act>();
@@ -224,23 +229,87 @@ public class AppDbContext(
             entity.HasIndex(e => e.Slug).IsUnique();
         });
 
+        modelBuilder.Entity<ProjectVersionRepository>(entity =>
+        {
+            entity.HasIndex(e => e.ProjectId).IsUnique();
+            entity.HasIndex(e => new { e.HeadCommitSha, e.HeadContentHash });
+        });
+
+        modelBuilder.Entity<Project>()
+            .HasOne(e => e.VersionHistoryRepository)
+            .WithOne(e => e.Project)
+            .HasForeignKey<ProjectVersionRepository>(e => e.ProjectId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ProjectVersionCheckpoint>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectVersionRepositoryId, e.CreatedAt });
+            entity.HasIndex(e => new { e.ProjectVersionRepositoryId, e.ContentHash });
+            entity.Property(e => e.Kind).HasConversion<string>();
+            entity.Property(e => e.Source).HasConversion<string>();
+            entity.HasOne(e => e.Repository)
+                .WithMany(e => e.Checkpoints)
+                .HasForeignKey(e => e.ProjectVersionRepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectVersionOperation>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectVersionRepositoryId, e.CreatedAt });
+            entity.HasIndex(e => new { e.ProjectVersionRepositoryId, e.Status, e.UpdatedAt });
+            entity.HasIndex(e => new { e.ProjectVersionRepositoryId, e.RequestKey }).IsUnique();
+            entity.Property(e => e.Kind).HasConversion<string>();
+            entity.Property(e => e.Status).HasConversion<string>();
+            entity.HasOne(e => e.Repository)
+                .WithMany(e => e.Operations)
+                .HasForeignKey(e => e.ProjectVersionRepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<GitHubConnection>(entity =>
+        {
+            entity.HasIndex(e => e.GitHubUserId).IsUnique();
+        });
+
+        modelBuilder.Entity<ProjectGitRemote>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectVersionRepositoryId, e.RemoteName }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectVersionRepositoryId, e.Owner, e.RepositoryName }).IsUnique();
+            entity.HasOne(e => e.Repository)
+                .WithMany(e => e.GitRemotes)
+                .HasForeignKey(e => e.ProjectVersionRepositoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.GitHubConnection)
+                .WithMany(e => e.GitRemotes)
+                .HasForeignKey(e => e.GitHubConnectionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<ProjectReference>(entity =>
         {
-            entity.HasKey(reference => new { reference.ReferencingProjectId, reference.ReferencedProjectId });
-            entity.HasIndex(reference => reference.ReferencedProjectId);
+            entity.HasKey(reference => reference.Id);
+            entity.HasIndex(reference => new
+            {
+                reference.ReferencingProjectId,
+                reference.ReferencedRepositoryId,
+                reference.ReferencedProjectId,
+            }).IsUnique();
+            entity.HasIndex(reference => reference.ResolvedProjectId);
+            entity.Property(reference => reference.ReferencedProjectName).IsRequired();
+            entity.Property(reference => reference.ReferencedProjectSlug).IsRequired();
             entity.ToTable(table => table.HasCheckConstraint(
-                "CK_ProjectReferences_NotSelf",
-                "\"ReferencingProjectId\" <> \"ReferencedProjectId\""));
+                "CK_ProjectReferences_ResolvedNotSelf",
+                "\"ResolvedProjectId\" IS NULL OR \"ReferencingProjectId\" <> \"ResolvedProjectId\""));
 
             entity.HasOne(reference => reference.ReferencingProject)
                 .WithMany(project => project.OutgoingReferences)
                 .HasForeignKey(reference => reference.ReferencingProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasOne(reference => reference.ReferencedProject)
-                .WithMany(project => project.IncomingReferences)
-                .HasForeignKey(reference => reference.ReferencedProjectId)
-                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(reference => reference.ResolvedProject)
+                .WithMany(project => project.ResolvedIncomingReferences)
+                .HasForeignKey(reference => reference.ResolvedProjectId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<BookBrief>(entity =>

@@ -2,9 +2,14 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Projects
 @using Lorekeeper.Components.Pages.Projects
+@using Lorekeeper.VersionHistory.Git
+@using Lorekeeper.VersionHistory.GitHub
+@using Lorekeeper.VersionHistory.Sync
 @rendermode InteractiveServer
 @inject IProjectService Projects
 @inject IProjectReferenceService ProjectReferences
+@inject IGitHubConnectionService GitHub
+@inject IProjectVersionCloneImportService CloneImport
 @inject NavigationManager Nav
 
 <PageTitle>Projects</PageTitle>
@@ -17,6 +22,7 @@
             @if (!_creating)
             {
                 <button type="button" class="btn btn-primary" @onclick="StartCreate">New project</button>
+                <button type="button" class="btn btn-outline-primary" @onclick="StartImportAsync">Import from GitHub</button>
             }
         </Actions>
     </PageHeader>
@@ -51,6 +57,106 @@
                     <button type="button" class="btn btn-outline-secondary" @onclick="CancelCreate">Cancel</button>
                 </div>
             </div>
+        </section>
+    }
+
+    @if (_importing)
+    {
+        <section class="lk-section-card import-project-card" aria-labelledby="import-project-title">
+            <div class="lk-section-heading">
+                <div>
+                    <span class="lk-section-kicker">Cross-machine project</span>
+                    <h2 id="import-project-title">Import from GitHub</h2>
+                    <p>Choose a saved GitHub connection, load repositories on demand, and import a validated Lorekeeper history as a new project.</p>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_importBusy" @onclick="CancelImport">Cancel</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_importError))
+            {
+                <div class="alert alert-danger" role="alert">@_importError</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_importMessage))
+            {
+                <div class="alert alert-info" role="status">@_importMessage</div>
+            }
+
+            @if (_importConnections.Count == 0 && !_importLoadingConnections)
+            {
+                <div class="lk-empty-state import-empty-state">
+                    <strong>No saved GitHub connections.</strong>
+                    <p>Connect GitHub in Settings first. Import reads saved connections locally and does not contact GitHub until you load repositories.</p>
+                    <a class="btn btn-sm btn-outline-primary" href="/settings/version-control">Open version-control settings</a>
+                </div>
+            }
+            else
+            {
+                <div class="import-connection-list">
+                    @if (_importLoadingConnections)
+                    {
+                        <span class="text-muted" role="status">Loading saved connections…</span>
+                    }
+                    @foreach (var connection in _importConnections)
+                    {
+                        var selected = _importConnectionId == connection.Id;
+                        <article class="import-connection-option @(selected ? "is-selected" : null)">
+                            <div>
+                                <strong>@("@" + connection.AccountLogin)</strong>
+                                <span>@(connection.RevokedAt is null ? "Connected" : "Needs attention")</span>
+                            </div>
+                            <button type="button" class="btn btn-sm @(selected ? "btn-primary" : "btn-outline-primary")" disabled="@_importBusy" @onclick="() => LoadImportRepositoriesAsync(connection)">
+                                @(selected && _importLoadingRepositories ? "Loading…" : selected ? "Reload repositories" : "Load repositories")
+                            </button>
+                        </article>
+                    }
+                </div>
+
+                @if (_importConnectionId is not null && !_importLoadingConnections)
+                {
+                    <div class="import-repository-picker">
+                        @if (_importLoadingRepositories)
+                        {
+                            <p class="text-muted" role="status">Loading repositories from GitHub…</p>
+                        }
+                        else if (_importRepositories.Count == 0)
+                        {
+                            <p class="text-muted">No repositories were returned for this connection.</p>
+                        }
+                        else
+                        {
+                            <label for="import-repository-select">GitHub repository</label>
+                            <select id="import-repository-select" class="form-select" @bind="_importRepositoryFullName">
+                                <option value="">Choose a repository…</option>
+                                @foreach (var repository in _importRepositories)
+                                {
+                                    <option value="@repository.FullName">@repository.FullName @(repository.IsPrivate ? "(private)" : "(public)")</option>
+                                }
+                            </select>
+                            <button type="button" class="btn btn-primary" disabled="@(!CanImportSelectedRepository)" @onclick="ImportSelectedRepositoryAsync">
+                                @(_importBusy ? "Importing…" : "Import selected repository")
+                            </button>
+                        }
+                    </div>
+                }
+            }
+
+            @if (_importResult is not null)
+            {
+                <div class="import-result" role="status">
+                    <strong>Import completed.</strong>
+                    <p>The project <em>@_importResult.CloneResult.Artifact.Payload.Project.Project.Name</em> is ready locally. Remote attachment: @_importResult.RemoteAttachment.Message</p>
+                    @if (_importResult.Warnings.Count > 0)
+                    {
+                        <h3>Warnings</h3>
+                        <ul>@foreach (var warning in _importResult.Warnings) { <li>@warning</li> }</ul>
+                    }
+                    @if (!_importResult.RemoteAttachment.Succeeded)
+                    {
+                        <p class="text-warning">The local project was imported, but its remote attachment needs attention.</p>
+                    }
+                    <button type="button" class="btn btn-primary" @onclick="OpenImportedProject">Open imported project</button>
+                </div>
+            }
         </section>
     }
 
@@ -160,6 +266,12 @@
                 <span>Connect the web search service used by Research and source discovery.</span>
                 <em>Configure search →</em>
             </a>
+            <a class="configuration-card" href="/settings/version-control">
+                <span class="configuration-number">04</span>
+                <strong>Version control</strong>
+                <span>Connect reusable GitHub accounts for local history and optional project remotes.</span>
+                <em>Configure version control →</em>
+            </a>
         </div>
     </section>
 </div>
@@ -175,12 +287,31 @@
     private IReadOnlyList<ProjectReferenceImpact> _incomingReferences = [];
     private bool _deleting;
     private string? _error;
+    private bool _importing;
+    private bool _importBusy;
+    private bool _importLoadingConnections;
+    private bool _importLoadingRepositories;
+    private IReadOnlyList<GitHubConnectionSummary> _importConnections = [];
+    private IReadOnlyList<GitHubRepositoryInfo> _importRepositories = [];
+    private Guid? _importConnectionId;
+    private string _importRepositoryFullName = string.Empty;
+    private string? _importError;
+    private string? _importMessage;
+    private VersionHistoryCloneImportResult? _importResult;
+
+    private bool CanImportSelectedRepository =>
+        !_importBusy
+        && _importConnectionId is not null
+        && _importRepositories.Any(repository => string.Equals(
+            repository.FullName,
+            _importRepositoryFullName,
+            StringComparison.Ordinal));
 
     private string DeleteConfirmationMessage => _deleteProject is null
         ? string.Empty
         : _incomingReferences.Count == 0
-            ? $"This permanently removes “{_deleteProject.Name}”, including its chapters, story graph, images, conversations, and search memory."
-            : $"This permanently removes “{_deleteProject.Name}”, including its chapters, story graph, images, conversations, and search memory. {_deleteProject.Name} is referenced by {string.Join(", ", _incomingReferences.Select(reference => reference.ReferencingProjectName))}. Confirming will detach those incoming links, but it will not delete or alter the dependent projects.";
+            ? $"This permanently removes “{_deleteProject.Name}”, including its chapters, story graph, images, conversations, search memory, and app-managed local version history. Any GitHub remote copies remain untouched."
+            : $"This permanently removes “{_deleteProject.Name}”, including its chapters, story graph, images, conversations, search memory, and app-managed local version history. Any GitHub remote copies remain untouched. {_deleteProject.Name} is referenced by {string.Join(", ", _incomingReferences.Select(reference => reference.ReferencingProjectName))}. Confirming will detach those incoming links, but it will not delete or alter the dependent projects.";
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
     private async Task LoadAsync() => _projects = (await Projects.ListAsync()).ToList();
@@ -282,8 +413,143 @@
             _incomingReferences = [];
             await LoadAsync();
         }
+        catch (GitRepositoryDeletionException ex)
+        {
+            await LoadAsync();
+            if (_projects?.Any(item => item.Id == project.Id) == false)
+            {
+                _deleteProject = null;
+                _incomingReferences = [];
+                _error = "The project was deleted, but its staged local history could not be removed. Cleanup will be retried when Lorekeeper starts again.";
+            }
+            else
+            {
+                _error = ex.Message;
+            }
+        }
         catch (Exception ex) { _error = ex.Message; }
         finally { _deleting = false; }
+    }
+
+    private async Task StartImportAsync()
+    {
+        if (_importBusy)
+            return;
+
+        _creating = false;
+        _importing = true;
+        _importBusy = true;
+        _importLoadingConnections = true;
+        _importError = null;
+        _importMessage = null;
+        _importResult = null;
+        _importConnections = [];
+        _importRepositories = [];
+        _importConnectionId = null;
+        _importRepositoryFullName = string.Empty;
+        try
+        {
+            // Connection summaries are durable local cache rows. No GitHub
+            // request occurs until the user explicitly loads repositories.
+            _importConnections = await GitHub.ListConnectionsAsync();
+        }
+        catch (Exception exception)
+        {
+            _importError = exception.Message;
+        }
+        finally
+        {
+            _importLoadingConnections = false;
+            _importBusy = false;
+        }
+    }
+
+    private void CancelImport()
+    {
+        if (_importBusy)
+            return;
+
+        _importing = false;
+        _importConnections = [];
+        _importRepositories = [];
+        _importConnectionId = null;
+        _importRepositoryFullName = string.Empty;
+        _importError = null;
+        _importMessage = null;
+        _importResult = null;
+    }
+
+    private async Task LoadImportRepositoriesAsync(GitHubConnectionSummary connection)
+    {
+        if (_importBusy)
+            return;
+
+        _importBusy = true;
+        _importLoadingRepositories = true;
+        _importConnectionId = connection.Id;
+        _importRepositoryFullName = string.Empty;
+        _importRepositories = [];
+        _importError = null;
+        _importMessage = null;
+        try
+        {
+            _importRepositories = await GitHub.ListRepositoriesAsync(connection.Id);
+            _importMessage = $"Loaded {_importRepositories.Count} repositories for @{connection.AccountLogin}.";
+        }
+        catch (Exception exception)
+        {
+            _importError = exception.Message;
+        }
+        finally
+        {
+            _importLoadingRepositories = false;
+            _importBusy = false;
+        }
+    }
+
+    private async Task ImportSelectedRepositoryAsync()
+    {
+        if (!CanImportSelectedRepository || _importConnectionId is not { } connectionId)
+            return;
+
+        var repository = _importRepositories.FirstOrDefault(item => string.Equals(
+            item.FullName,
+            _importRepositoryFullName,
+            StringComparison.Ordinal));
+        if (repository is null)
+            return;
+
+        _importBusy = true;
+        _importError = null;
+        _importMessage = null;
+        try
+        {
+            _importResult = await CloneImport.ImportCloneAsync(
+                new VersionHistoryCloneImportRequest(
+                    new VersionHistoryImportCloneRequest(connectionId, repository)));
+            _importMessage = "The repository was cloned, validated, and imported. Review any warnings before opening the project.";
+        }
+        catch (OperationCanceledException)
+        {
+            _importError = "The GitHub import was canceled.";
+        }
+        catch (Exception exception)
+        {
+            _importError = exception.Message;
+        }
+        finally
+        {
+            _importBusy = false;
+        }
+    }
+
+    private void OpenImportedProject()
+    {
+        if (_importResult is null)
+            return;
+
+        var slug = _importResult.CloneResult.Artifact.Payload.Project.Project.Slug;
+        Nav.NavigateTo($"/projects/{Uri.EscapeDataString(slug)}/history");
     }
 
     private void Open(Project project) => Nav.NavigateTo($"/projects/{project.Slug}/editor");

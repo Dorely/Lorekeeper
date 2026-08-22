@@ -14,10 +14,17 @@ public interface IProjectReferenceRepository
 
     Task<ProjectReference?> GetAsync(
         Guid referencingProjectId,
+        Guid referencedRepositoryId,
         Guid referencedProjectId,
         CancellationToken cancellationToken = default);
 
+    Task<ProjectReference?> GetByIdAsync(
+        Guid referenceId,
+        CancellationToken cancellationToken = default);
+
     Task AddAsync(ProjectReference reference, CancellationToken cancellationToken = default);
+
+    void Update(ProjectReference reference);
 
     void Remove(ProjectReference reference);
 }

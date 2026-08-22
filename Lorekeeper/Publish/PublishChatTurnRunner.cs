@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Lorekeeper.ChatTurns;
+using Lorekeeper.VersionHistory.Services;
 
 namespace Lorekeeper.Publish;
 
@@ -61,6 +62,7 @@ public sealed class PublishChatTurnRunner(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var chat = scope.ServiceProvider.GetRequiredService<IPublishChatService>();
+        var checkpoints = scope.ServiceProvider.GetRequiredService<IAssistantVersionCheckpointService>();
         await foreach (var update in chat.SendAsync(
             projectId,
             selectedEditionId,
@@ -70,6 +72,8 @@ public sealed class PublishChatTurnRunner(
             providerId,
             cancellationToken))
         {
+            if (update is PublishAssistantMessageCompleted)
+                await checkpoints.TryCheckpointAsync(projectId, ChatTurnSurface.Publish, cancellationToken);
             yield return update;
         }
     }

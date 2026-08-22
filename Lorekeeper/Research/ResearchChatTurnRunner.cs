@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Lorekeeper.ChatTurns;
+using Lorekeeper.VersionHistory.Services;
 
 namespace Lorekeeper.Research;
 
@@ -42,7 +43,12 @@ public sealed class ResearchChatTurnRunner(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var chat = scope.ServiceProvider.GetRequiredService<IResearchService>();
+        var checkpoints = scope.ServiceProvider.GetRequiredService<IAssistantVersionCheckpointService>();
         await foreach (var update in chat.SendAsync(projectId, userText, imageIds, providerId, cancellationToken))
+        {
+            if (update is ResearchAssistantMessageCompleted)
+                await checkpoints.TryCheckpointAsync(projectId, ChatTurnSurface.Research, cancellationToken);
             yield return update;
+        }
     }
 }

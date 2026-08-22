@@ -96,6 +96,12 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   omitted from v24 exports; exports with outgoing links warn that imports never infer
   links. Non-structural exports omit source bodies, selections, and evidence and
   report that omission.
+- Local version history captures deterministic checkpoints of the creative
+  project in an app-managed Git repository. History includes canonical project,
+  narrative, graph, source, asset, manuscript, composition, and publication
+  state; it excludes chats, credentials, jobs, search/vector projections,
+  render artifacts, and other operational state. Images and fonts are ordinary
+  Git blobs with the snapshot metadata, hashes, and lengths needed for a clone.
 - Project-owned authoring page setup, Press-backed current-chapter Read preview,
   and contextual Edit/Read/Pages/Review modes. Read shows actual pagination,
   line breaks, images, captions, and Designed Pages with single/facing and zoom
@@ -223,6 +229,60 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   paperback interior/cover saves, and one Digital PDF Book save. EPUB export is
   restricted to EPUB editions.
 - Configurable Codex/OpenAI-compatible chat and embedding providers — with provider presets, model discovery, combined chat+vision verification, per-model reasoning effort, output-token budget, and endpoint-aware wire compatibility — configurable web search, and local SQLite persistence.
+
+## Version history and optional synchronization
+
+Lorekeeper keeps the live project in SQLite and records explicit creative
+checkpoints in one local bare Git repository per project repository identity.
+During development the default path is `History/<repository-id>.git` beside the
+app data base; the repository-root `History/` directory is ignored by Git.
+Packaged builds use `%LocalAppData%/Lorekeeper/History/<repository-id>.git`.
+The repository contains deterministic UTF-8 snapshot files and ordinary Git
+blobs for project images and imported fonts; it is not a SQLite backup or a
+working checkout.
+
+Snapshots preserve the authored creative areas—project settings and references,
+narrative and chapters, canonical graph data, ingest sources, images/fonts and
+visual examples, manuscript styles, compositions, and publication Core/edition
+state. They deliberately omit conversations and drafts, provider credentials and
+OAuth tokens, AI/review/job/staging rows, FTS/vector/context projections,
+visual candidates, render artifacts and page maps, audits, migration journals,
+and process-lifetime Undo/Redo. Derived indexes are rebuilt after restore.
+
+The History page can create a semantic checkpoint, compare two checkpoints, and
+restore a whole project, selected major areas, or selected chapter IDs. Chapter
+restore replaces/adds/removes by stable ID and makes annotation inclusion
+explicit. Restore validates identities and dependencies, creates a safety
+checkpoint first, applies canonical rows atomically, and records a restored
+checkpoint afterward; unresolved project references remain unresolved rather
+than being guessed from a name or slug.
+
+GitHub synchronization is optional and explicit. Fetch updates only local
+remote-tracking state. Apply-remote and push require a clean project and use
+fast-forward-only rules; no merge, rebase, force-push, or silent overwrite is
+performed. Diverged or unrelated histories remain visible for a deliberate
+decision. Creating a GitHub remote also requires acknowledging that manuscript
+text, sources, images, and fonts may be uploaded; review repository privacy and
+asset licensing first.
+
+Configure the GitHub OAuth application client ID as
+`VersionHistory:GitHub:ClientId` in configuration or
+`VersionHistory__GitHub__ClientId` as an environment variable. Lorekeeper stores
+the resulting access token only in its provider-owned local credential row. GitHub
+device authorization, repository listing/creation, fetch, push, and remote
+checkout contact the network only after the corresponding action is selected.
+
+A validated clone/import path can read a Lorekeeper repository head, reject
+project/repository/slug collisions, create a new local project and repository
+from the manifest identities, apply the snapshot atomically, and attach the
+remote. Deleting a project removes its app-managed local history after the
+database deletion succeeds; it never deletes the remote GitHub repository.
+Removing a remote attachment likewise leaves local history and tracking refs.
+
+The current repository has not yet been validated against a real GitHub account,
+OAuth flow, network fetch/push/clone, or manual History/Version control UI
+exercise. Those integration and manual checks remain pending; local builds and
+automated versioned-transformation checks do not establish them.
 
 ## Requirements
 

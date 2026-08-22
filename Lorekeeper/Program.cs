@@ -26,6 +26,13 @@ using Lorekeeper.Research;
 using Lorekeeper.Search;
 using Lorekeeper.Startup;
 using Lorekeeper.Tokens;
+using Lorekeeper.VersionHistory.Compare;
+using Lorekeeper.VersionHistory.Git;
+using Lorekeeper.VersionHistory.GitHub;
+using Lorekeeper.VersionHistory.Restore;
+using Lorekeeper.VersionHistory.Services;
+using Lorekeeper.VersionHistory.Snapshots;
+using Lorekeeper.VersionHistory.Sync;
 using Lorekeeper.Writing;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -97,6 +104,33 @@ else
 builder.Services.AddLorekeeperPersistence(builder.Configuration);
 builder.Services.AddSingleton<IProjectMutationCoordinator>(
     _ => new ProjectMutationCoordinator(databaseConnectionString));
+
+// Version history
+builder.Services.AddSingleton(new GitRepositoryStoreOptions
+{
+    HistoryRoot = builder.Configuration["VersionHistory:HistoryRoot"],
+    IsPackaged = usePerUserDataDirectory,
+    DevelopmentDataRoot = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..")),
+});
+builder.Services.AddSingleton<IGitRepositoryStore, GitRepositoryStore>();
+builder.Services.AddSingleton<IVersionHistorySnapshotReader, VersionHistorySnapshotReader>();
+builder.Services.AddSingleton<IVersionHistorySnapshotComparer, VersionHistorySnapshotComparer>();
+builder.Services.AddScoped<IVersionHistorySnapshotWriter, VersionHistorySnapshotWriter>();
+builder.Services.AddScoped<IProjectVersionHistoryService, ProjectVersionHistoryService>();
+builder.Services.AddScoped<IProjectVersionHistoryReconciliationService, ProjectVersionHistoryReconciliationService>();
+builder.Services.AddScoped<IAssistantVersionCheckpointService, AssistantVersionCheckpointService>();
+builder.Services.AddScoped<ProjectVersionRestoreService>();
+builder.Services.AddScoped<IProjectVersionRestoreService>(services =>
+    services.GetRequiredService<ProjectVersionRestoreService>());
+builder.Services.Configure<GitHubConnectionOptions>(
+    builder.Configuration.GetSection(GitHubConnectionOptions.SectionName));
+builder.Services.AddHttpClient<IGitHubConnectionService, GitHubConnectionService>(client =>
+    client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddScoped<ProjectVersionSyncService>();
+builder.Services.AddScoped<IProjectVersionSyncService>(services =>
+    services.GetRequiredService<ProjectVersionSyncService>());
+builder.Services.AddScoped<IProjectVersionCloneImportService, ProjectVersionCloneImportService>();
+builder.Services.AddScoped<IProjectVersionRemoteUpdateService, ProjectVersionRemoteUpdateService>();
 
 // Knowledge
 builder.Services.AddScoped<SqliteVecVectorStore>();

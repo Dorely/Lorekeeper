@@ -22,7 +22,7 @@ public sealed class ProjectReferenceService(
             .ListByReferencingProjectAsync(referencingProjectId, cancellationToken);
 
         return references
-            .Select(ToSummary)
+            .Select(reference => ToSummary(reference))
             .ToList();
     }
 
@@ -34,10 +34,16 @@ public sealed class ProjectReferenceService(
         var source = await operation.Repositories.Projects.GetSnapshotByIdAsync(referencingProjectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {referencingProjectId} not found.");
         var projects = await operation.Repositories.Projects.ListAsync(cancellationToken);
-        var referencedIds = (await operation.Repositories.ProjectReferences
-                .ListByReferencingProjectAsync(referencingProjectId, cancellationToken))
-            .Select(reference => reference.ReferencedProjectId)
+        var references = await operation.Repositories.ProjectReferences
+            .ListByReferencingProjectAsync(referencingProjectId, cancellationToken);
+        var referencedPairs = references
+            .Select(reference => (reference.ReferencedRepositoryId, reference.ReferencedProjectId))
             .ToHashSet();
+        var projectIds = projects.Select(project => project.Id).ToArray();
+        var repositoryIds = await operation.Db.ProjectVersionRepositories
+            .AsNoTracking()
+            .Where(repository => projectIds.Contains(repository.ProjectId))
+            .ToDictionaryAsync(repository => repository.ProjectId, repository => repository.Id, cancellationToken);
 
         return projects
             .Where(project => project.Id != source.Id)
@@ -46,12 +52,15 @@ public sealed class ProjectReferenceService(
                 project.Name,
                 project.Slug,
                 project.UpdatedAt,
-                referencedIds.Contains(project.Id)))
+                repositoryIds.TryGetValue(project.Id, out var repositoryId)
+                    && referencedPairs.Contains((repositoryId, project.Id)),
+                repositoryIds.GetValueOrDefault(project.Id)))
             .ToList();
     }
 
     public async Task<ProjectReferenceSummary> AddAsync(
         Guid referencingProjectId,
+        Guid referencedRepositoryId,
         Guid referencedProjectId,
         CancellationToken cancellationToken = default)
     {
@@ -59,8 +68,6 @@ public sealed class ProjectReferenceService(
             throw new ArgumentException("Referencing project id is required.", nameof(referencingProjectId));
         if (referencedProjectId == Guid.Empty)
             throw new ArgumentException("Referenced project id is required.", nameof(referencedProjectId));
-        if (referencingProjectId == referencedProjectId)
-            throw new InvalidOperationException("A project cannot reference itself.");
 
         await using var operation = await database.OpenWriteAsync(referencingProjectId, cancellationToken);
         operation.ShareWithNestedOperations();
@@ -70,13 +77,51 @@ public sealed class ProjectReferenceService(
             ?? throw new InvalidOperationException($"Project {referencingProjectId} not found.");
         var target = await projects.GetSnapshotByIdAsync(referencedProjectId, cancellationToken)
             ?? throw new InvalidOperationException($"Referenced project {referencedProjectId} not found.");
-        if (await references.GetAsync(referencingProjectId, referencedProjectId, cancellationToken) is not null)
-            throw new InvalidOperationException($"Project {referencingProjectId} already references project {referencedProjectId}.");
+
+        var targetRepository = await operation.Db.ProjectVersionRepositories
+            .SingleOrDefaultAsync(repository => repository.ProjectId == target.Id, cancellationToken);
+        if (targetRepository is null)
+        {
+            targetRepository = new ProjectVersionRepository
+            {
+                ProjectId = target.Id,
+                CreativeRevision = 0,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            operation.Db.ProjectVersionRepositories.Add(targetRepository);
+        }
+
+        if (referencedRepositoryId != Guid.Empty && referencedRepositoryId != targetRepository.Id)
+        {
+            throw new InvalidOperationException("The selected repository identity does not belong to the selected target project.");
+        }
+
+        if (target.Id == source.Id)
+        {
+            var sourceRepositoryId = await operation.Db.ProjectVersionRepositories
+                .Where(repository => repository.ProjectId == source.Id)
+                .Select(repository => repository.Id)
+                .SingleOrDefaultAsync(cancellationToken);
+            if (sourceRepositoryId == Guid.Empty)
+                sourceRepositoryId = targetRepository.Id;
+            if (sourceRepositoryId == targetRepository.Id)
+                throw new InvalidOperationException("A project cannot reference itself by repository and project identity.");
+        }
+
+        if (await references.GetAsync(referencingProjectId, targetRepository.Id, referencedProjectId, cancellationToken) is not null)
+            throw new InvalidOperationException($"Project {referencingProjectId} already references this target repository and project identity.");
 
         var reference = new ProjectReference
         {
+            Id = Guid.NewGuid(),
             ReferencingProjectId = referencingProjectId,
+            ReferencedRepositoryId = targetRepository.Id,
             ReferencedProjectId = referencedProjectId,
+            ResolvedProjectId = target.Id,
+            ReferencedProjectName = target.Name,
+            ReferencedProjectSlug = target.Slug,
+            ResolvedAt = DateTime.UtcNow,
         };
         await references.AddAsync(reference, cancellationToken);
         source.UpdatedAt = DateTime.UtcNow;
@@ -85,28 +130,34 @@ public sealed class ProjectReferenceService(
 
         await BackfillReferencedIndexesAsync(target.Id, operation, cancellationToken);
 
-        return new ProjectReferenceSummary(
-            target.Id,
-            target.Name,
-            target.Slug,
-            target.UpdatedAt,
-            reference.CreatedAt);
+        return ToSummary(reference, target);
     }
 
     public async Task RemoveAsync(
-        Guid referencingProjectId,
-        Guid referencedProjectId,
+        Guid referenceId,
         CancellationToken cancellationToken = default)
     {
-        await using var operation = await database.OpenWriteAsync(referencingProjectId, cancellationToken);
+        Guid? referencingProjectId;
+        await using (var read = await database.OpenReadAsync(cancellationToken))
+        {
+            referencingProjectId = await read.Db.ProjectReferences
+                .AsNoTracking()
+                .Where(reference => reference.Id == referenceId)
+                .Select(reference => (Guid?)reference.ReferencingProjectId)
+                .SingleOrDefaultAsync(cancellationToken);
+        }
+        if (referencingProjectId is not Guid sourceId)
+            return;
+
+        await using var operation = await database.OpenWriteAsync(sourceId, cancellationToken);
         operation.ShareWithNestedOperations();
         var references = operation.Repositories.ProjectReferences;
-        var reference = await references.GetAsync(referencingProjectId, referencedProjectId, cancellationToken);
+        var reference = await references.GetByIdAsync(referenceId, cancellationToken);
         if (reference is null)
             return;
 
         references.Remove(reference);
-        var source = await operation.Repositories.Projects.GetByIdAsync(referencingProjectId, cancellationToken);
+        var source = await operation.Repositories.Projects.GetByIdAsync(sourceId, cancellationToken);
         if (source is not null)
         {
             source.UpdatedAt = DateTime.UtcNow;
@@ -114,6 +165,54 @@ public sealed class ProjectReferenceService(
         }
 
         await operation.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<bool> RelinkAvailableAsync(
+        Guid referenceId,
+        CancellationToken cancellationToken = default)
+    {
+        Guid? referencingProjectId;
+        await using (var read = await database.OpenReadAsync(cancellationToken))
+        {
+            referencingProjectId = await read.Db.ProjectReferences
+                .AsNoTracking()
+                .Where(reference => reference.Id == referenceId)
+                .Select(reference => (Guid?)reference.ReferencingProjectId)
+                .SingleOrDefaultAsync(cancellationToken);
+        }
+        if (referencingProjectId is not Guid sourceId)
+            return false;
+
+        await using var operation = await database.OpenWriteAsync(sourceId, cancellationToken);
+        operation.ShareWithNestedOperations();
+        var reference = await operation.Repositories.ProjectReferences
+            .GetByIdAsync(referenceId, cancellationToken);
+        if (reference is null)
+            return false;
+
+        var targetRepository = await operation.Db.ProjectVersionRepositories
+            .Include(repository => repository.Project)
+            .SingleOrDefaultAsync(repository => repository.Id == reference.ReferencedRepositoryId
+                && repository.ProjectId == reference.ReferencedProjectId, cancellationToken);
+        if (targetRepository?.Project is null)
+            return false;
+        if (targetRepository.ProjectId == reference.ReferencingProjectId)
+        {
+            var sourceRepositoryId = await operation.Db.ProjectVersionRepositories
+                .Where(repository => repository.ProjectId == reference.ReferencingProjectId)
+                .Select(repository => repository.Id)
+                .SingleOrDefaultAsync(cancellationToken);
+            if (sourceRepositoryId == Guid.Empty || sourceRepositoryId == targetRepository.Id)
+                throw new InvalidOperationException("A project cannot reference itself by repository and project identity.");
+        }
+
+        reference.ResolvedProjectId = targetRepository.Project.Id;
+        reference.ReferencedProjectName = targetRepository.Project.Name;
+        reference.ReferencedProjectSlug = targetRepository.Project.Slug;
+        reference.ResolvedAt = DateTime.UtcNow;
+        await operation.SaveChangesAsync(cancellationToken);
+        await BackfillReferencedIndexesAsync(targetRepository.Project.Id, operation, cancellationToken);
+        return true;
     }
 
     public async Task<IReadOnlyList<ProjectReadableScope>> ListReadableScopesAsync(
@@ -125,14 +224,23 @@ public sealed class ProjectReferenceService(
             ?? throw new InvalidOperationException($"Project {referencingProjectId} not found.");
         var references = await operation.Repositories.ProjectReferences
             .ListByReferencingProjectAsync(referencingProjectId, cancellationToken);
+        var repositoryId = await operation.Db.ProjectVersionRepositories
+            .AsNoTracking()
+            .Where(repository => repository.ProjectId == source.Id)
+            .Select(repository => (Guid?)repository.Id)
+            .SingleOrDefaultAsync(cancellationToken);
+        var resolvedReferences = references
+            .Where(reference => reference.ResolvedProjectId is not null && reference.ResolvedProject is not null)
+            .ToList();
 
         return [
-            new ProjectReadableScope(source.Id, source.Name, source.Slug, IsReferenced: false),
-            .. references.Select(reference => new ProjectReadableScope(
-                reference.ReferencedProjectId,
-                reference.ReferencedProject.Name,
-                reference.ReferencedProject.Slug,
-                IsReferenced: true)),
+            new ProjectReadableScope(source.Id, source.Name, source.Slug, IsReferenced: false, repositoryId),
+            .. resolvedReferences.Select(reference => new ProjectReadableScope(
+                reference.ResolvedProject!.Id,
+                reference.ResolvedProject.Name,
+                reference.ResolvedProject.Slug,
+                IsReferenced: true,
+                reference.ReferencedRepositoryId)),
         ];
     }
 
@@ -146,11 +254,14 @@ public sealed class ProjectReferenceService(
 
         var references = await operation.Repositories.ProjectReferences
             .ListByReferencingProjectAsync(referencingProjectId, cancellationToken);
+        references = references
+            .Where(reference => reference.ResolvedProjectId is not null && reference.ResolvedProject is not null)
+            .ToList();
         if (references.Count == 0)
             return [];
 
         var referencedIds = references
-            .Select(reference => reference.ReferencedProjectId)
+            .Select(reference => reference.ResolvedProjectId!.Value)
             .ToArray();
         var db = operation.Db;
         var excludedStructuralTypes = new[]
@@ -215,10 +326,13 @@ public sealed class ProjectReferenceService(
         return references
             .Select(reference =>
             {
-                var project = reference.ReferencedProject;
+                var project = reference.ResolvedProject!;
                 briefs.TryGetValue(project.Id, out var brief);
                 return new ProjectReferenceManifest(
+                    reference.Id,
+                    reference.ReferencedRepositoryId,
                     project.Id,
+                    reference.ResolvedProjectId!.Value,
                     project.Name,
                     project.Slug,
                     project.UpdatedAt,
@@ -254,12 +368,22 @@ public sealed class ProjectReferenceService(
             .ToList();
     }
 
-    private static ProjectReferenceSummary ToSummary(ProjectReference reference) => new(
-        reference.ReferencedProjectId,
-        reference.ReferencedProject.Name,
-        reference.ReferencedProject.Slug,
-        reference.ReferencedProject.UpdatedAt,
-        reference.CreatedAt);
+    private static ProjectReferenceSummary ToSummary(
+        ProjectReference reference,
+        Project? resolvedProject = null)
+    {
+        resolvedProject ??= reference.ResolvedProject;
+        return new ProjectReferenceSummary(
+            reference.Id,
+            reference.ReferencedRepositoryId,
+            reference.ReferencedProjectId,
+            reference.ResolvedProjectId,
+            resolvedProject?.Name ?? reference.ReferencedProjectName,
+            resolvedProject?.Slug ?? reference.ReferencedProjectSlug,
+            resolvedProject?.UpdatedAt,
+            reference.CreatedAt,
+            reference.ResolvedAt);
+    }
 
     private async Task BackfillReferencedIndexesAsync(
         Guid referencedProjectId,

@@ -1,0 +1,1478 @@
+@using System.ComponentModel.DataAnnotations
+@using Lorekeeper.Models
+@using Lorekeeper.Projects
+@using Lorekeeper.VersionHistory.Compare
+@using Lorekeeper.VersionHistory.Git
+@using Lorekeeper.VersionHistory.GitHub
+@using Lorekeeper.VersionHistory.Restore
+@using Lorekeeper.VersionHistory.Services
+@using Lorekeeper.VersionHistory.Snapshots
+@using Lorekeeper.VersionHistory.Sync
+@implements IDisposable
+@inject IProjectVersionHistoryService VersionHistory
+@inject IVersionHistorySnapshotComparer SnapshotComparer
+@inject IProjectVersionRestoreService VersionRestore
+@inject IProjectService Projects
+@inject IGitHubConnectionService GitHub
+@inject IProjectVersionSyncService VersionSync
+@inject IProjectVersionRemoteUpdateService VersionRemoteUpdate
+
+<div class="history-page" aria-labelledby="history-page-title">
+    @if (_loading)
+    {
+        <div class="history-state" role="status" aria-live="polite">
+            <strong>Loading project history…</strong>
+            <span>Checking the local repository and timeline.</span>
+        </div>
+    }
+    else if (Project is null)
+    {
+        <div class="history-state history-state-error" role="alert">
+            <strong>Project history is unavailable.</strong>
+            <span>The project could not be resolved for this route.</span>
+        </div>
+    }
+    else if (!string.IsNullOrWhiteSpace(_loadError))
+    {
+        <div class="history-state history-state-error" role="alert">
+            <strong>History could not be loaded.</strong>
+            <span>@_loadError</span>
+        </div>
+    }
+    else
+    {
+        <header class="history-header">
+            <div>
+                <p class="history-eyebrow">Project history</p>
+                <h1 id="history-page-title">Snapshots of @Project.Name</h1>
+                <p class="history-intro">
+                    Local checkpoints preserve the creative project as a reviewable timeline.
+                    Snapshot content hashes are the source of truth for change detection.
+                </p>
+            </div>
+            <div class="history-header-actions">
+                <span class="history-status-pill @HealthClass(Repository?.Health)">
+                    <span aria-hidden="true">●</span> @HealthLabel(Repository?.Health)
+                </span>
+                <span class="history-status-pill @(Repository?.IsDirty == true ? "is-dirty" : "is-clean")">
+                    @(Repository?.IsDirty == true ? "Changes since checkpoint" : "Checkpointed")
+                </span>
+            </div>
+        </header>
+
+        @if (!string.IsNullOrWhiteSpace(_actionError))
+        {
+            <div class="alert alert-danger history-alert" role="alert">@_actionError</div>
+        }
+
+        <div class="history-layout">
+            <div class="history-main-column">
+                <section class="history-card history-checkpoint-card" aria-labelledby="new-checkpoint-title">
+                    <div class="history-card-heading">
+                        <div>
+                            <p class="history-eyebrow">Capture current work</p>
+                            <h2 id="new-checkpoint-title">Create a checkpoint</h2>
+                        </div>
+                        <span class="history-revision-label">Creative revision @Repository?.CreativeRevision</span>
+                    </div>
+                    <p class="history-muted">
+                        Give this point in the project a short semantic description. The snapshot is written locally and added to the timeline.
+                    </p>
+                    <EditForm Model="_checkpointDraft" OnValidSubmit="CreateManualCheckpointAsync" class="history-checkpoint-form">
+                        <DataAnnotationsValidator />
+                        <label for="checkpoint-message">Checkpoint message</label>
+                        <div class="history-form-row">
+                            <InputText id="checkpoint-message"
+                                       class="form-control"
+                                       @bind-Value="_checkpointDraft.Message"
+                                       placeholder="For example: Reworked the opening chapter" />
+                            <button type="submit" class="btn btn-primary" disabled="@(_isBusy || Project is null)">
+                                @(_isBusy ? "Saving…" : "Create checkpoint")
+                            </button>
+                        </div>
+                        <ValidationMessage For="@(() => _checkpointDraft.Message)" />
+                    </EditForm>
+                </section>
+
+                <section class="history-card" aria-labelledby="timeline-title">
+                    <div class="history-card-heading">
+                        <div>
+                            <p class="history-eyebrow">Local timeline</p>
+                            <h2 id="timeline-title">Checkpoints</h2>
+                        </div>
+                        <span class="history-muted">Select two commits to compare</span>
+                    </div>
+
+                    @if (Timeline?.Checkpoints.Count is null or 0)
+                    {
+                        <div class="history-empty" role="status">
+                            <strong>No checkpoints yet.</strong>
+                            <span>The first checkpoint will appear after the current project is captured.</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="history-timeline" aria-label="Project checkpoint timeline">
+                            @foreach (var checkpoint in Timeline!.Checkpoints)
+                            {
+                                var commitSha = checkpoint.CommitSha;
+                                var selected = commitSha is not null && _selectedCommitShas.Contains(commitSha, StringComparer.Ordinal);
+                                var isCurrent = commitSha is not null && string.Equals(commitSha, Repository?.HeadCommitSha, StringComparison.Ordinal);
+                                <article class="history-timeline-item @(selected ? "is-selected" : null)" @key="checkpoint.Id">
+                                    <div class="history-timeline-marker" aria-hidden="true"></div>
+                                    <div class="history-timeline-body">
+                                        <div class="history-timeline-heading">
+                                            <div>
+                                                <h3>@CheckpointTitle(checkpoint)</h3>
+                                                <p class="history-timeline-message">@(string.IsNullOrWhiteSpace(checkpoint.Message) ? "No semantic message" : checkpoint.Message)</p>
+                                            </div>
+                                            <div class="history-timeline-actions">
+                                                @if (isCurrent)
+                                                {
+                                                    <span class="history-current-label">Current</span>
+                                                }
+                                                @if (!string.IsNullOrWhiteSpace(commitSha))
+                                                {
+                                                    <button type="button"
+                                                            class="btn btn-sm @(selected ? "btn-primary" : "btn-outline-primary") history-select-button"
+                                                            aria-pressed="@selected"
+                                                            disabled="@(_isBusy || (_selectedCommitShas.Count >= 2 && !selected))"
+                                                            @onclick="() => ToggleCommit(commitSha!)">
+                                                        @(selected ? "Selected" : "Select")
+                                                    </button>
+                                                    @if (!isCurrent)
+                                                    {
+                                                        <button type="button"
+                                                                class="btn btn-sm btn-outline-secondary"
+                                                                disabled="@(_isBusy || _restoreBusy || _restoreLoading)"
+                                                                @onclick="() => OpenRestoreAsync(checkpoint)">
+                                                            Restore
+                                                        </button>
+                                                    }
+                                                }
+                                            </div>
+                                        </div>
+                                        <div class="history-timeline-meta">
+                                            <span class="history-kind">@checkpoint.Kind · @checkpoint.Source</span>
+                                            <time datetime="@IsoDate(checkpoint.CreatedAt)">@DisplayDate(checkpoint.CreatedAt)</time>
+                                            <code title="@commitSha">@ShortSha(commitSha)</code>
+                                        </div>
+                                    </div>
+                                </article>
+                            }
+                        </div>
+
+                        <div class="history-compare-controls" aria-live="polite">
+                            <span>@_selectedCommitShas.Count of 2 commits selected.</span>
+                            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_selectedCommitShas.Count != 2 || _isComparing || _isBusy)" @onclick="CompareSelectedAsync">
+                                @(_isComparing ? "Comparing…" : "Compare selected")
+                            </button>
+                            @if (_selectedCommitShas.Count > 0)
+                            {
+                                <button type="button" class="btn btn-sm btn-link" disabled="@(_isComparing || _isBusy)" @onclick="ClearSelection">Clear selection</button>
+                            }
+                        </div>
+                    }
+                </section>
+
+                @if (!string.IsNullOrWhiteSpace(_comparisonError))
+                {
+                    <div class="alert alert-danger history-alert" role="alert">Comparison failed: @_comparisonError</div>
+                }
+
+                @if (_comparison is not null)
+                {
+                    <section class="history-card history-comparison" aria-labelledby="comparison-title">
+                        <div class="history-card-heading">
+                            <div>
+                                <p class="history-eyebrow">Semantic comparison</p>
+                                <h2 id="comparison-title">Selected snapshots</h2>
+                            </div>
+                            <span class="history-comparison-result">
+                                @(_comparison.IsIdentical ? "No creative differences" : "Creative differences found")
+                            </span>
+                        </div>
+
+                        <div class="history-area-grid">
+                            @foreach (var area in _comparison.Areas)
+                            {
+                                <article class="history-area-card @(area.Summary.HasChanges ? "has-changes" : "unchanged")">
+                                    <div class="history-area-heading">
+                                        <h3>@AreaLabel(area.Area)</h3>
+                                        <span>@(area.Summary.HasChanges ? "Changed" : "Unchanged")</span>
+                                    </div>
+                                    <div class="history-area-summary" aria-label="@AreaSummaryLabel(area.Summary)">
+                                        <span class="added">+@area.Summary.Added added</span>
+                                        <span class="removed">−@area.Summary.Removed removed</span>
+                                        <span class="changed">@area.Summary.Changed changed</span>
+                                    </div>
+                                    @if (area.Entries.Count > 0)
+                                    {
+                                        <details class="history-change-details">
+                                            <summary>View @area.Entries.Count detail@(area.Entries.Count == 1 ? "" : "s")</summary>
+                                            <ul>
+                                                @foreach (var entry in area.Entries)
+                                                {
+                                                    <li>
+                                                        <span class="history-change-kind @ChangeClass(entry.Change)">@entry.Change</span>
+                                                        <span><strong>@entry.Label</strong> <span class="history-change-category">@entry.Category</span></span>
+                                                        @if (entry.Change == VersionHistorySnapshotChangeKind.Changed)
+                                                        {
+                                                            <span class="history-change-flags">@ChangeFlags(entry)</span>
+                                                        }
+                                                    </li>
+                                                }
+                                            </ul>
+                                        </details>
+                                    }
+                                </article>
+                            }
+                        </div>
+                        <p class="history-binary-note">Comparisons report metadata, manuscript, and binary-asset changes without displaying binary data.</p>
+                    </section>
+                }
+            </div>
+
+            <aside class="history-side-column" aria-label="History details">
+                <section class="history-card" aria-labelledby="health-title">
+                    <p class="history-eyebrow">Repository health</p>
+                    <h2 id="health-title">@HealthLabel(Repository?.Health)</h2>
+                    <dl class="history-health-list">
+                        <div><dt>Head</dt><dd><code>@ShortSha(Repository?.HeadCommitSha)</code></dd></div>
+                        <div><dt>Last checkpoint</dt><dd>@(Repository?.LastCheckpointAt is { } checkpointAt ? DisplayDate(checkpointAt) : "None")</dd></div>
+                        <div><dt>Revision</dt><dd>@(Repository?.CreativeRevision.ToString() ?? "—")</dd></div>
+                    </dl>
+                    @if (!string.IsNullOrWhiteSpace(Repository?.Diagnostic))
+                    {
+                        <p class="history-diagnostic" role="status">@Repository.Diagnostic</p>
+                    }
+                </section>
+
+                @if (Timeline?.Operations.Any(operation => operation.Status == ProjectVersionOperationStatus.Failed) == true)
+                {
+                    <section class="history-card history-failures" aria-labelledby="failures-title">
+                        <p class="history-eyebrow">Operation journal</p>
+                        <h2 id="failures-title">Failed operations</h2>
+                        <div class="history-failure-list">
+                            @foreach (var operation in Timeline!.Operations.Where(operation => operation.Status == ProjectVersionOperationStatus.Failed))
+                            {
+                                <article class="history-failure" @key="operation.Id">
+                                    <strong>@operation.Kind</strong>
+                                    <time datetime="@IsoDate(operation.UpdatedAt)">@DisplayDate(operation.UpdatedAt)</time>
+                                    <p>@(string.IsNullOrWhiteSpace(operation.ErrorMessage) ? "The operation failed without a recorded message." : operation.ErrorMessage)</p>
+                                    @if (operation.IsResumable)
+                                    {
+                                        <span class="history-muted">Recovery is available to a later operation.</span>
+                                    }
+                                </article>
+                            }
+                        </div>
+                    </section>
+                }
+
+                <section class="history-card history-remote-card" aria-labelledby="remote-title">
+                    <div class="history-card-heading">
+                        <div>
+                            <p class="history-eyebrow">Optional synchronization</p>
+                            <h2 id="remote-title">GitHub remote</h2>
+                        </div>
+                        @if (_remoteLoading)
+                        {
+                            <span class="history-muted" role="status">Loading saved connections…</span>
+                        }
+                    </div>
+
+                    <p class="history-muted">
+                        Remotes are configured per project. Loading saved connections and attached remotes reads only local cached data; GitHub is contacted only after you choose a repository or sync action.
+                    </p>
+
+                    @if (!string.IsNullOrWhiteSpace(_remoteError))
+                    {
+                        <div class="alert alert-danger history-alert history-remote-alert" role="alert">@_remoteError</div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_remoteMessage))
+                    {
+                        <div class="alert alert-info history-alert history-remote-alert" role="status">@_remoteMessage</div>
+                    }
+
+                    @if (_remotes.Count == 0 && !_remoteLoading)
+                    {
+                        <div class="history-empty history-remote-empty">
+                            <strong>No remote attached.</strong>
+                            <span>Connect an account below, then choose a repository to attach.</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="history-remote-list">
+                            @foreach (var remote in _remotes)
+                            {
+                                var remoteStatus = _remoteStatuses.GetValueOrDefault(remote.Id);
+                                var remoteBusy = _remoteBusy && _remoteBusyRemoteId == remote.Id;
+                                <article class="history-remote-item" @key="remote.Id">
+                                    <header class="history-remote-heading">
+                                        <div>
+                                            <h3>@remote.Owner/@remote.RepositoryName</h3>
+                                            <p class="history-remote-meta">@remote.RemoteName · @(remote.DefaultBranch ?? "main") · @(remote.AccountLogin is null ? "Connection unavailable" : "@" + remote.AccountLogin)</p>
+                                        </div>
+                                        <span class="history-status-pill @SyncStatusClass(remoteStatus)">@SyncStatusLabel(remoteStatus)</span>
+                                    </header>
+                                    @if (remoteStatus is null)
+                                    {
+                                        <p class="history-muted">Cached relationship is unavailable.</p>
+                                    }
+                                    else
+                                    {
+                                        <p class="history-remote-status">@remoteStatus.Message</p>
+                                        <dl class="history-remote-details">
+                                            <div><dt>Local</dt><dd><code>@ShortSha(remoteStatus.LocalCommitSha)</code></dd></div>
+                                            <div><dt>Remote</dt><dd><code>@ShortSha(remoteStatus.RemoteCommitSha)</code></dd></div>
+                                            <div><dt>Relation</dt><dd>@RelationLabel(remoteStatus.Relation)</dd></div>
+                                        </dl>
+                                        @if (remoteStatus.Relation is GitHistoryRelation.Diverged or GitHistoryRelation.Unrelated)
+                                        {
+                                            <p class="history-remote-conflict" role="status">
+                                                These histories are @RelationLabel(remoteStatus.Relation). Lorekeeper will not merge, overwrite, or discard either history here.
+                                            </p>
+                                        }
+                                        @if (Repository?.IsDirty == true && remoteStatus.Relation == GitHistoryRelation.CandidateFastForward)
+                                        {
+                                            <p class="history-remote-conflict" role="status">Apply remote changes is disabled while this project has changes since its last checkpoint. Create a local checkpoint first.</p>
+                                        }
+                                        @if (Repository?.IsDirty == true && remoteStatus.Relation == GitHistoryRelation.CurrentFastForward)
+                                        {
+                                            <p class="history-remote-conflict" role="status">Push is disabled while this project has changes since its last checkpoint. Create a local checkpoint first.</p>
+                                        }
+                                    }
+                                    <footer class="history-remote-actions">
+                                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_remoteBusy || _remoteLoading)" @onclick="() => FetchRemoteAsync(remote)">
+                                            @(remoteBusy && _remoteBusyAction == RemoteAction.Fetch ? "Fetching…" : "Fetch")
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_remoteBusy || !CanFastForward(remoteStatus))" @onclick="() => FastForwardRemoteAsync(remote)">
+                                            @(remoteBusy && _remoteBusyAction == RemoteAction.FastForward ? "Applying…" : "Apply remote changes")
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(_remoteBusy || !CanPush(remoteStatus) || !_rightsAcknowledged)" @onclick="() => PushRemoteAsync(remote)">
+                                            @(remoteBusy && _remoteBusyAction == RemoteAction.Push ? "Pushing…" : "Push")
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-danger ms-auto" disabled="@_remoteBusy" @onclick="() => RequestRemoveRemote(remote)">Remove</button>
+                                    </footer>
+                                </article>
+                            }
+                        </div>
+                    }
+
+                    <div class="history-rights-acknowledgement">
+                        <label>
+                            <input type="checkbox" @bind="_rightsAcknowledged" disabled="@(_remoteBusy || _remoteSetupBusy)" />
+                            <span>I understand this project may upload creative material to the selected GitHub repository.</span>
+                        </label>
+                        <p>
+                            This includes manuscript text, source material, images, and fonts. Review repository access and licensing before attaching or pushing.
+                        </p>
+                    </div>
+
+                    @if (_connections.Count == 0 && !_remoteLoading)
+                    {
+                        <div class="history-remote-connect">
+                            <p class="history-muted">No reusable GitHub connections are saved.</p>
+                            <a class="btn btn-sm btn-outline-primary" href="/settings/version-control">Connect GitHub in Settings</a>
+                        </div>
+                    }
+                    else if (!_remoteLoading)
+                    {
+                        <div class="history-connection-picker">
+                            <div class="history-connection-picker-heading">
+                                <div>
+                                    <p class="history-eyebrow">Attach a repository</p>
+                                    <h3>Reusable GitHub connections</h3>
+                                </div>
+                                <a href="/settings/version-control" class="history-muted">Manage connections</a>
+                            </div>
+                            <div class="history-connection-list">
+                                @foreach (var connection in _connections)
+                                {
+                                    var selectedConnection = _selectedConnectionId == connection.Id;
+                                    <article class="history-connection-option @(selectedConnection ? "is-selected" : null)">
+                                        <div>
+                                            <strong>@("@" + connection.AccountLogin)</strong>
+                                            <span>@ConnectionStatus(connection)</span>
+                                        </div>
+                                        <button type="button" class="btn btn-sm @(selectedConnection ? "btn-primary" : "btn-outline-primary")" disabled="@_remoteBusy" @onclick="() => SelectConnectionAsync(connection)">
+                                            @(selectedConnection ? "Selected" : "Load repositories")
+                                        </button>
+                                    </article>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    @if (_selectedConnectionId is not null && !_remoteLoading)
+                    {
+                        <div class="history-repository-picker" aria-live="polite">
+                            @if (_repositoryLoading)
+                            {
+                                <p class="history-muted" role="status">Loading repositories from GitHub…</p>
+                            }
+                            else if (_repositories.Count == 0)
+                            {
+                                <p class="history-muted">No repositories were returned for this connection. You can create one below.</p>
+                            }
+                            else
+                            {
+                                <label for="history-repository-select">Existing repository</label>
+                                <select id="history-repository-select" class="form-select" @bind="_selectedRepositoryFullName">
+                                    <option value="">Choose a repository…</option>
+                                    @foreach (var repository in _repositories)
+                                    {
+                                        <option value="@repository.FullName">@repository.FullName @(repository.IsPrivate ? "(private)" : "(public)")</option>
+                                    }
+                                </select>
+                                <label for="history-remote-name">Local remote name</label>
+                                <input id="history-remote-name" class="form-control" @bind="_remoteName" maxlength="64" />
+                                <button type="button" class="btn btn-sm btn-primary" disabled="@(!CanAttachExisting)" @onclick="AttachSelectedRepositoryAsync">
+                                    @(_remoteSetupBusy ? "Attaching…" : "Attach selected repository")
+                                </button>
+                            }
+
+                            <div class="history-create-repository">
+                                <p class="history-eyebrow">New repository</p>
+                                <label for="history-new-repository-name">Repository name</label>
+                                <input id="history-new-repository-name" class="form-control" @bind="_newRepositoryName" maxlength="100" placeholder="my-lorekeeper-project" />
+                                <label class="history-private-toggle">
+                                    <input type="checkbox" @bind="_newRepositoryPrivate" />
+                                    <span>Private repository (recommended)</span>
+                                </label>
+                                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!CanCreateRepository)" @onclick="CreateAndAttachRepositoryAsync">
+                                    @(_remoteSetupBusy ? "Creating…" : "Create repository and attach")
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </section>
+
+                @if (_restoreTarget is not null)
+                {
+                    <section class="history-card history-restore-card" aria-labelledby="restore-title">
+                        <div class="history-card-heading">
+                            <div>
+                                <p class="history-eyebrow">Controlled restore</p>
+                                <h2 id="restore-title">Restore @CheckpointTitle(_restoreTarget)</h2>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-link" disabled="@(_restoreBusy || _restoreLoading)" @onclick="CloseRestoreWorkflow">Close</button>
+                        </div>
+                        <p class="history-muted">
+                            Restore copies validated creative state from <code>@ShortSha(_restoreTarget.CommitSha)</code> into this project. A safety checkpoint is created before application.
+                        </p>
+
+                        @if (!string.IsNullOrWhiteSpace(_restoreError))
+                        {
+                            <div class="alert alert-danger history-alert" role="alert">@_restoreError</div>
+                        }
+
+                        @if (_restoreLoading)
+                        {
+                            <div class="history-empty" role="status"><strong>Preparing restore…</strong><span>Loading the current and target snapshots.</span></div>
+                        }
+                        else if (_restoreTargetLoaded is not null && _restoreCurrentLoaded is not null && _restoreStep == RestoreStep.Configure)
+                        {
+                            <fieldset class="history-restore-options" disabled="@_restoreBusy">
+                                <legend>Choose what to restore</legend>
+                                <label class="history-radio-option">
+                                    <input type="radio" name="restore-scope" checked="@(_restoreScope == VersionHistoryRestoreScope.WholeProject)" @onchange="() => SetRestoreScope(VersionHistoryRestoreScope.WholeProject)" />
+                                    <span><strong>Whole project</strong><small>Replace all captured areas with the selected checkpoint.</small></span>
+                                </label>
+                                <label class="history-radio-option">
+                                    <input type="radio" name="restore-scope" checked="@(_restoreScope == VersionHistoryRestoreScope.MajorAreas)" @onchange="() => SetRestoreScope(VersionHistoryRestoreScope.MajorAreas)" />
+                                    <span><strong>Selected major areas</strong><small>Choose project, narrative, graph, sources, assets, manuscript, composition, or publication.</small></span>
+                                </label>
+                                <label class="history-radio-option">
+                                    <input type="radio" name="restore-scope" checked="@(_restoreScope == VersionHistoryRestoreScope.SelectedChapters)" @onchange="() => SetRestoreScope(VersionHistoryRestoreScope.SelectedChapters)" />
+                                    <span><strong>Selected chapters</strong><small>Apply only the chosen chapter records and manuscript content.</small></span>
+                                </label>
+                            </fieldset>
+
+                            @if (_restoreScope == VersionHistoryRestoreScope.MajorAreas)
+                            {
+                                <div class="history-restore-area-options">
+                                    <p class="history-eyebrow">Major areas</p>
+                                    @foreach (var area in VersionHistorySnapshotContract.IncludedAreas)
+                                    {
+                                        <label>
+                                            <input type="checkbox" checked="@_restoreAreas.Contains(area)" @onchange="() => ToggleRestoreArea(area)" />
+                                            <span>@AreaLabel(area)</span>
+                                        </label>
+                                    }
+                                </div>
+                            }
+
+                            @if (_restoreScope == VersionHistoryRestoreScope.SelectedChapters)
+                            {
+                                <div class="history-restore-chapters">
+                                    <p class="history-eyebrow">Chapter selection</p>
+                                    <p class="history-muted">The list is the union of the current and target checkpoints. Selecting a chapter marked “only in current” removes it; selecting one marked “only in target” adds it.</p>
+                                    @if (_restoreChapterOptions.Count == 0)
+                                    {
+                                        <p class="history-muted">Neither checkpoint contains chapters to select.</p>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var chapter in _restoreChapterOptions)
+                                        {
+                                            <label class="history-chapter-option">
+                                                <input type="checkbox"
+                                                       checked="@_restoreChapterIds.Contains(chapter.Id)"
+                                                       @onchange="() => ToggleRestoreChapter(chapter.Id)" />
+                                                <span>
+                                                    <strong>@chapter.Title</strong>
+                                                    <small>
+                                                        @if (!chapter.InCurrent)
+                                                        {
+                                                            <span class="history-chapter-warning">Only in target · adds this chapter</span>
+                                                        }
+                                                        else if (!chapter.InTarget)
+                                                        {
+                                                            <span class="history-chapter-warning">Only in current · removes this chapter</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span>Present in both checkpoints</span>
+                                                        }
+                                                    </small>
+                                                </span>
+                                            </label>
+                                        }
+                                    }
+                                    <label for="restore-annotations">Chapter annotations</label>
+                                    <select id="restore-annotations" class="form-select" @bind="_restoreAnnotationMode">
+                                        <option value="@VersionHistoryAnnotationRestoreMode.Exclude">Exclude annotations</option>
+                                        <option value="@VersionHistoryAnnotationRestoreMode.SelectedChapterAnnotations">Include selected-chapter annotations</option>
+                                    </select>
+                                </div>
+                            }
+
+                            @if (_restoreScope != VersionHistoryRestoreScope.SelectedChapters)
+                            {
+                                <p class="history-restore-annotation-note">Chapter annotations are @( _restoreScope == VersionHistoryRestoreScope.WholeProject || _restoreAreas.Contains("narrative") ? "included with the narrative area" : "excluded because narrative is not selected" ).</p>
+                            }
+
+                            @if (!string.IsNullOrWhiteSpace(_restoreSelectionError))
+                            {
+                                <p class="history-diagnostic" role="alert">@_restoreSelectionError</p>
+                            }
+                            <div class="history-restore-actions">
+                                <button type="button" class="btn btn-primary" disabled="@_restoreBusy" @onclick="ReviewRestoreAsync">Review restore</button>
+                                <button type="button" class="btn btn-outline-secondary" disabled="@_restoreBusy" @onclick="CloseRestoreWorkflow">Cancel</button>
+                            </div>
+                        }
+                        else if (_restoreStep == RestoreStep.Confirm)
+                        {
+                            <div class="history-restore-confirmation" role="alert">
+                                <p class="history-eyebrow">Step 2 of 2 · Confirm application</p>
+                                <h3>Apply this restore?</h3>
+                                <p>@RestoreSummary()</p>
+                                <p class="history-restore-warning">This changes the live project and rebuilds its derived indexes. Lorekeeper will keep the current state in a pre-restore safety checkpoint, but the selected target content will become live.</p>
+                            </div>
+                            <div class="history-restore-actions">
+                                <button type="button" class="btn btn-danger" disabled="@_restoreBusy" @onclick="ApplyRestoreAsync">
+                                    @(_restoreBusy ? "Applying restore…" : "Apply restore")
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" disabled="@_restoreBusy" @onclick="() => _restoreStep = RestoreStep.Configure">Back</button>
+                            </div>
+                        }
+                        else if (_restoreStep == RestoreStep.Result && _restoreResult is not null)
+                        {
+                            <div class="history-restore-result" role="status">
+                                <h3>Restore applied</h3>
+                                <p>The selected content is now live. A safety checkpoint and a restored checkpoint were added to the local timeline.</p>
+                                @if (_restoreResult.Warnings.Count > 0)
+                                {
+                                    <h4>Warnings</h4>
+                                    <ul>@foreach (var warning in _restoreResult.Warnings) { <li>@warning</li> }</ul>
+                                }
+                                @if (_restoreResult.UnresolvedReferences.Count > 0)
+                                {
+                                    <h4>Unresolved project references</h4>
+                                    <ul>
+                                        @foreach (var reference in _restoreResult.UnresolvedReferences)
+                                        {
+                                            <li><strong>@reference.ReferencedProjectName</strong> (@reference.ReferencedProjectSlug): @reference.Reason</li>
+                                        }
+                                    </ul>
+                                }
+                                @if (_restoreResult.Warnings.Count == 0 && _restoreResult.UnresolvedReferences.Count == 0)
+                                {
+                                    <p class="history-muted">No warnings or unresolved references were reported.</p>
+                                }
+                            </div>
+                            <div class="history-restore-actions">
+                                <button type="button" class="btn btn-primary" @onclick="CloseRestoreWorkflow">Done</button>
+                            </div>
+                        }
+                    </section>
+                }
+
+                <ConfirmationDialog IsOpen="@(_removeRemoteTarget is not null)"
+                                    Title="Remove project remote"
+                                    Message="@RemoveRemoteMessage"
+                                    ConfirmLabel="Remove remote"
+                                    CancelLabel="Keep remote"
+                                    Destructive="true"
+                                    Busy="@_remoteBusy"
+                                    OnConfirm="RemoveRemoteConfirmedAsync"
+                                    OnCancel="CancelRemoveRemote" />
+            </aside>
+        </div>
+    }
+</div>
+
+@code {
+    [CascadingParameter] public Project? Project { get; set; }
+
+    private readonly ManualCheckpointDraft _checkpointDraft = new();
+    private readonly List<string> _selectedCommitShas = [];
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private IReadOnlyList<GitHubConnectionSummary> _connections = [];
+    private IReadOnlyList<ProjectVersionRemoteView> _remotes = [];
+    private readonly Dictionary<Guid, ProjectVersionSyncStatus> _remoteStatuses = [];
+    private IReadOnlyList<GitHubRepositoryInfo> _repositories = [];
+    private Guid? _selectedConnectionId;
+    private string _selectedRepositoryFullName = string.Empty;
+    private string _remoteName = "origin";
+    private string _newRepositoryName = string.Empty;
+    private bool _newRepositoryPrivate = true;
+    private bool _rightsAcknowledged;
+    private bool _remoteLoading;
+    private bool _repositoryLoading;
+    private bool _remoteSetupBusy;
+    private bool _remoteBusy;
+    private Guid? _remoteBusyRemoteId;
+    private RemoteAction? _remoteBusyAction;
+    private ProjectVersionRemoteView? _removeRemoteTarget;
+    private string? _remoteError;
+    private string? _remoteMessage;
+    private bool _disposed;
+    private Guid? _loadedProjectId;
+    private bool _loading = true;
+    private bool _isBusy;
+    private bool _isComparing;
+    private string? _loadError;
+    private string? _actionError;
+    private string? _comparisonError;
+    private ProjectVersionTimelineView? Timeline { get; set; }
+    private ProjectVersionStatusView? _status;
+    private VersionHistorySnapshotComparison? _comparison;
+    private ProjectVersionCheckpointView? _restoreTarget;
+    private ProjectVersionLoadedCheckpoint? _restoreTargetLoaded;
+    private ProjectVersionLoadedCheckpoint? _restoreCurrentLoaded;
+    private VersionHistoryRestoreResult? _restoreResult;
+    private readonly HashSet<string> _restoreAreas = new(StringComparer.Ordinal);
+    private readonly HashSet<Guid> _restoreChapterIds = [];
+    private IReadOnlyList<RestoreChapterOption> _restoreChapterOptions = [];
+    private VersionHistoryRestoreScope _restoreScope = VersionHistoryRestoreScope.WholeProject;
+    private VersionHistoryAnnotationRestoreMode _restoreAnnotationMode = VersionHistoryAnnotationRestoreMode.SelectedChapterAnnotations;
+    private RestoreStep _restoreStep = RestoreStep.Configure;
+    private bool _restoreLoading;
+    private bool _restoreBusy;
+    private string? _restoreError;
+    private string? _restoreSelectionError;
+
+    private ProjectVersionRepositoryView? Repository => _status?.Repository ?? Timeline?.Repository;
+
+    private GitHubConnectionSummary? SelectedConnection =>
+        _selectedConnectionId is { } connectionId
+            ? _connections.FirstOrDefault(connection => connection.Id == connectionId)
+            : null;
+
+    private GitHubRepositoryInfo? SelectedRepository =>
+        string.IsNullOrWhiteSpace(_selectedRepositoryFullName)
+            ? null
+            : _repositories.FirstOrDefault(repository =>
+                string.Equals(repository.FullName, _selectedRepositoryFullName, StringComparison.Ordinal));
+
+    private bool CanAttachExisting =>
+        !_remoteBusy && !_remoteSetupBusy && _rightsAcknowledged && SelectedConnection is not null && SelectedRepository is not null && !string.IsNullOrWhiteSpace(_remoteName);
+
+    private bool CanCreateRepository =>
+        !_remoteBusy && !_remoteSetupBusy && _rightsAcknowledged && SelectedConnection is not null &&
+        !string.IsNullOrWhiteSpace(_newRepositoryName) && !string.IsNullOrWhiteSpace(_remoteName);
+
+    private string RemoveRemoteMessage => _removeRemoteTarget is null
+        ? string.Empty
+        : $"Remove {_removeRemoteTarget.Owner}/{_removeRemoteTarget.RepositoryName} from this project? Existing local history and preserved remote-tracking refs will remain; only the project attachment is removed.";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Project is null)
+        {
+            _loadedProjectId = null;
+            _loading = false;
+            return;
+        }
+
+        if (_loadedProjectId == Project.Id)
+            return;
+
+        _loadedProjectId = Project.Id;
+        _selectedCommitShas.Clear();
+        _comparison = null;
+        _comparisonError = null;
+        _connections = [];
+        _remotes = [];
+        _remoteStatuses.Clear();
+        _repositories = [];
+        _selectedConnectionId = null;
+        _selectedRepositoryFullName = string.Empty;
+        _remoteName = "origin";
+        _newRepositoryName = string.Empty;
+        _rightsAcknowledged = false;
+        _remoteError = null;
+        _remoteMessage = null;
+        await LoadHistoryAsync(Project.Id);
+    }
+
+    private async Task LoadHistoryAsync(Guid projectId)
+    {
+        _loading = true;
+        _loadError = null;
+        _actionError = null;
+        try
+        {
+            await VersionHistory.EnsureRepositoryAsync(projectId);
+            await RefreshHistoryAsync(projectId);
+
+            if (Timeline is { Checkpoints.Count: 0 })
+            {
+                _isBusy = true;
+                await VersionHistory.CreateCheckpointAsync(
+                    projectId,
+                    ProjectVersionCheckpointKind.Initial,
+                    "Initial project checkpoint");
+                await RefreshHistoryAsync(projectId);
+            }
+
+            await LoadRemoteDataAsync(projectId);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (Timeline is null)
+                _loadError = exception.Message;
+            else
+                _actionError = exception.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+            _loading = false;
+        }
+    }
+
+    private async Task RefreshHistoryAsync(Guid projectId)
+    {
+        var timeline = await VersionHistory.GetTimelineAsync(projectId);
+        var status = await VersionHistory.GetStatusAsync(projectId);
+        Timeline = timeline;
+        _status = status;
+
+        var available = timeline?.Checkpoints
+            .Where(checkpoint => !string.IsNullOrWhiteSpace(checkpoint.CommitSha))
+            .Select(checkpoint => checkpoint.CommitSha!)
+            .ToHashSet(StringComparer.Ordinal) ?? [];
+        _selectedCommitShas.RemoveAll(commitSha => !available.Contains(commitSha));
+    }
+
+    private async Task RefreshProjectHistoryAndRemoteAsync(Guid projectId)
+    {
+        var refreshedProject = await Projects.GetByIdAsync(projectId, _lifetimeCancellation.Token);
+        if (refreshedProject is not null)
+            Project = refreshedProject;
+
+        await RefreshHistoryAsync(projectId);
+        if (Repository is not null)
+            await LoadRemoteDataAsync(projectId);
+    }
+
+    private async Task LoadRemoteDataAsync(Guid projectId)
+    {
+        if (_disposed || Repository is not { } repository)
+            return;
+
+        _remoteLoading = true;
+        _remoteError = null;
+        try
+        {
+            var cancellationToken = _lifetimeCancellation.Token;
+            _connections = await GitHub.ListConnectionsAsync(cancellationToken);
+            _remotes = await VersionSync.ListRemotesAsync(repository.RepositoryId, cancellationToken);
+            await RefreshRemoteStatusesAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _remoteError = RemoteErrorMessage(exception);
+        }
+        finally
+        {
+            _remoteLoading = false;
+        }
+    }
+
+    private async Task RefreshRemoteStatusesAsync(CancellationToken cancellationToken)
+    {
+        _remoteStatuses.Clear();
+        foreach (var remote in _remotes)
+        {
+            try
+            {
+                _remoteStatuses[remote.Id] = await VersionSync.GetCachedStatusAsync(remote.Id, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                _remoteError ??= RemoteErrorMessage(exception);
+            }
+        }
+    }
+
+    private async Task SelectConnectionAsync(GitHubConnectionSummary connection)
+    {
+        if (_remoteBusy || _disposed)
+            return;
+
+        _remoteBusy = true;
+        _remoteBusyAction = null;
+        _remoteBusyRemoteId = null;
+        _repositoryLoading = true;
+        _selectedConnectionId = connection.Id;
+        _selectedRepositoryFullName = string.Empty;
+        _repositories = [];
+        _remoteError = null;
+        _remoteMessage = null;
+        try
+        {
+            _repositories = await GitHub.ListRepositoriesAsync(connection.Id, cancellationToken: _lifetimeCancellation.Token);
+            _remoteMessage = $"Loaded {_repositories.Count} repositories for @{connection.AccountLogin}.";
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _remoteError = RemoteErrorMessage(exception);
+        }
+        finally
+        {
+            _repositoryLoading = false;
+            _remoteBusy = false;
+        }
+    }
+
+    private async Task AttachSelectedRepositoryAsync()
+    {
+        if (!CanAttachExisting || Repository is not { } localRepository || SelectedConnection is not { } connection || SelectedRepository is not { } repository)
+            return;
+
+        _remoteSetupBusy = true;
+        _remoteError = null;
+        _remoteMessage = null;
+        try
+        {
+            var selection = new GitHubRepositorySelection(connection.Id, repository, _remoteName.Trim());
+            var status = await VersionSync.AttachRemoteAsync(localRepository.RepositoryId, selection, _lifetimeCancellation.Token);
+            _remoteMessage = status.Message;
+            await LoadRemoteDataAsync(localRepository.ProjectId);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _remoteError = RemoteErrorMessage(exception);
+        }
+        finally
+        {
+            _remoteSetupBusy = false;
+        }
+    }
+
+    private async Task CreateAndAttachRepositoryAsync()
+    {
+        if (!CanCreateRepository || Repository is not { } localRepository || SelectedConnection is not { } connection)
+            return;
+
+        _remoteSetupBusy = true;
+        _remoteError = null;
+        _remoteMessage = null;
+        try
+        {
+            var repository = await GitHub.CreateRepositoryAsync(
+                connection.Id,
+                new GitHubRepositoryCreateRequest(
+                    _newRepositoryName.Trim(),
+                    Description: $"Lorekeeper project history for {Project?.Name}",
+                    IsPrivate: _newRepositoryPrivate,
+                    AutoInit: false),
+                _lifetimeCancellation.Token);
+            var selection = new GitHubRepositorySelection(connection.Id, repository, _remoteName.Trim());
+            var status = await VersionSync.AttachRemoteAsync(localRepository.RepositoryId, selection, _lifetimeCancellation.Token);
+            _newRepositoryName = string.Empty;
+            _remoteMessage = $"Created and attached {repository.FullName}. {status.Message}";
+            await LoadRemoteDataAsync(localRepository.ProjectId);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _remoteError = RemoteErrorMessage(exception);
+        }
+        finally
+        {
+            _remoteSetupBusy = false;
+        }
+    }
+
+    private async Task FetchRemoteAsync(ProjectVersionRemoteView remote)
+    {
+        await RunRemoteActionAsync(remote, RemoteAction.Fetch, () => VersionSync.FetchAsync(remote.Id, _lifetimeCancellation.Token));
+    }
+
+    private async Task FastForwardRemoteAsync(ProjectVersionRemoteView remote)
+    {
+        var succeeded = await RunRemoteActionAsync(
+            remote,
+            RemoteAction.FastForward,
+            async () =>
+            {
+                await VersionRemoteUpdate.FastForwardAndApplyAsync(remote.Id, _lifetimeCancellation.Token);
+                return await VersionSync.GetCachedStatusAsync(remote.Id, _lifetimeCancellation.Token);
+            });
+        if (succeeded && Project is not null && !_disposed && !_remoteBusy)
+        {
+            await RefreshProjectHistoryAndRemoteAsync(Project.Id);
+        }
+    }
+
+    private async Task PushRemoteAsync(ProjectVersionRemoteView remote)
+    {
+        await RunRemoteActionAsync(remote, RemoteAction.Push, () => VersionSync.PushAsync(remote.Id, _lifetimeCancellation.Token));
+    }
+
+    private async Task<bool> RunRemoteActionAsync(
+        ProjectVersionRemoteView remote,
+        RemoteAction action,
+        Func<Task<ProjectVersionSyncStatus>> operation)
+    {
+        if (_remoteBusy || _remoteSetupBusy || _disposed)
+            return false;
+
+        _remoteBusy = true;
+        _remoteBusyRemoteId = remote.Id;
+        _remoteBusyAction = action;
+        _remoteError = null;
+        _remoteMessage = null;
+        try
+        {
+            var status = await operation();
+            _remoteStatuses[remote.Id] = status;
+            _remoteMessage = status.Message;
+            return true;
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (Exception exception)
+        {
+            _remoteError = RemoteErrorMessage(exception);
+            return false;
+        }
+        finally
+        {
+            _remoteBusy = false;
+            _remoteBusyRemoteId = null;
+            _remoteBusyAction = null;
+        }
+    }
+
+    private void RequestRemoveRemote(ProjectVersionRemoteView remote)
+    {
+        if (_remoteBusy || _remoteSetupBusy)
+            return;
+
+        _remoteError = null;
+        _remoteMessage = null;
+        _removeRemoteTarget = remote;
+    }
+
+    private void CancelRemoveRemote() => _removeRemoteTarget = null;
+
+    private async Task RemoveRemoteConfirmedAsync()
+    {
+        if (_removeRemoteTarget is not { } remote || _remoteBusy || _disposed)
+            return;
+
+        _remoteBusy = true;
+        _remoteBusyRemoteId = remote.Id;
+        _remoteBusyAction = RemoteAction.Remove;
+        _remoteError = null;
+        try
+        {
+            var status = await VersionSync.RemoveRemoteAsync(remote.Id, _lifetimeCancellation.Token);
+            _removeRemoteTarget = null;
+            _remoteMessage = status.Message;
+            if (Project is not null)
+                await LoadRemoteDataAsync(Project.Id);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _remoteError = RemoteErrorMessage(exception);
+        }
+        finally
+        {
+            _remoteBusy = false;
+            _remoteBusyRemoteId = null;
+            _remoteBusyAction = null;
+        }
+    }
+
+    private async Task CreateManualCheckpointAsync()
+    {
+        if (Project is null || _isBusy)
+            return;
+
+        _isBusy = true;
+        _actionError = null;
+        try
+        {
+            await VersionHistory.CreateCheckpointAsync(
+                Project.Id,
+                ProjectVersionCheckpointKind.Manual,
+                _checkpointDraft.Message.Trim());
+            _checkpointDraft.Message = string.Empty;
+            _comparison = null;
+            _selectedCommitShas.Clear();
+            await RefreshHistoryAsync(Project.Id);
+        }
+        catch (Exception exception)
+        {
+            _actionError = exception.Message;
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private void ToggleCommit(string commitSha)
+    {
+        if (_isBusy || _isComparing)
+            return;
+
+        var existing = _selectedCommitShas.FindIndex(item => string.Equals(item, commitSha, StringComparison.Ordinal));
+        if (existing >= 0)
+        {
+            _selectedCommitShas.RemoveAt(existing);
+            _comparison = null;
+            _comparisonError = null;
+        }
+        else if (_selectedCommitShas.Count < 2)
+        {
+            _selectedCommitShas.Add(commitSha);
+            _comparison = null;
+            _comparisonError = null;
+        }
+    }
+
+    private void ClearSelection()
+    {
+        if (_isBusy || _isComparing)
+            return;
+
+        _selectedCommitShas.Clear();
+        _comparison = null;
+        _comparisonError = null;
+    }
+
+    private async Task CompareSelectedAsync()
+    {
+        if (Project is null || _selectedCommitShas.Count != 2 || _isBusy || _isComparing)
+            return;
+
+        _isComparing = true;
+        _comparisonError = null;
+        try
+        {
+            var baseline = await VersionHistory.LoadCheckpointAsync(Project.Id, _selectedCommitShas[0]);
+            var candidate = await VersionHistory.LoadCheckpointAsync(Project.Id, _selectedCommitShas[1]);
+            _comparison = SnapshotComparer.Compare(baseline.Payload, candidate.Payload);
+        }
+        catch (Exception exception)
+        {
+            _comparison = null;
+            _comparisonError = exception.Message;
+        }
+        finally
+        {
+            _isComparing = false;
+        }
+    }
+
+    private async Task OpenRestoreAsync(ProjectVersionCheckpointView checkpoint)
+    {
+        if (Project is null || string.IsNullOrWhiteSpace(checkpoint.CommitSha) || _isBusy || _restoreBusy)
+            return;
+
+        _restoreTarget = checkpoint;
+        _restoreTargetLoaded = null;
+        _restoreCurrentLoaded = null;
+        _restoreResult = null;
+        _restoreError = null;
+        _restoreSelectionError = null;
+        _restoreStep = RestoreStep.Configure;
+        _restoreScope = VersionHistoryRestoreScope.WholeProject;
+        _restoreAreas.Clear();
+        _restoreAreas.UnionWith(VersionHistorySnapshotContract.IncludedAreas);
+        _restoreChapterIds.Clear();
+        _restoreChapterOptions = [];
+        _restoreLoading = true;
+        try
+        {
+            var currentSha = Repository?.HeadCommitSha;
+            if (string.IsNullOrWhiteSpace(currentSha))
+                throw new InvalidOperationException("The project has no current checkpoint to restore from.");
+
+            var target = await VersionHistory.LoadCheckpointAsync(Project.Id, checkpoint.CommitSha, _lifetimeCancellation.Token);
+            var current = await VersionHistory.LoadCheckpointAsync(Project.Id, currentSha, _lifetimeCancellation.Token);
+            if (target.Payload.ProjectId != Project.Id || current.Payload.ProjectId != Project.Id)
+                throw new InvalidOperationException("The selected checkpoint does not belong to this project.");
+
+            _restoreTargetLoaded = target;
+            _restoreCurrentLoaded = current;
+            _restoreChapterOptions = BuildChapterOptions(current.Payload, target.Payload);
+            _restoreChapterIds.UnionWith(target.Payload.Narrative.Chapters.Select(chapter => chapter.Id));
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _restoreError = exception.Message;
+        }
+        finally
+        {
+            _restoreLoading = false;
+        }
+    }
+
+    private void SetRestoreScope(VersionHistoryRestoreScope scope)
+    {
+        if (_restoreBusy)
+            return;
+
+        _restoreScope = scope;
+        _restoreSelectionError = null;
+    }
+
+    private void ToggleRestoreArea(string area)
+    {
+        if (_restoreBusy)
+            return;
+
+        if (!_restoreAreas.Add(area))
+            _restoreAreas.Remove(area);
+        _restoreSelectionError = null;
+    }
+
+    private void ToggleRestoreChapter(Guid chapterId)
+    {
+        if (_restoreBusy)
+            return;
+
+        if (!_restoreChapterIds.Add(chapterId))
+            _restoreChapterIds.Remove(chapterId);
+        _restoreSelectionError = null;
+    }
+
+    private Task ReviewRestoreAsync()
+    {
+        if (_restoreBusy)
+            return Task.CompletedTask;
+
+        try
+        {
+            _ = BuildRestoreSelection();
+            _restoreSelectionError = null;
+            _restoreStep = RestoreStep.Confirm;
+        }
+        catch (Exception exception)
+        {
+            _restoreSelectionError = exception.Message;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ApplyRestoreAsync()
+    {
+        if (Project is null || _restoreTarget?.CommitSha is not { } targetCommitSha || _restoreBusy)
+            return;
+
+        VersionHistoryRestoreSelection selection;
+        try
+        {
+            selection = BuildRestoreSelection();
+        }
+        catch (Exception exception)
+        {
+            _restoreSelectionError = exception.Message;
+            _restoreStep = RestoreStep.Configure;
+            return;
+        }
+
+        _restoreBusy = true;
+        _restoreError = null;
+        try
+        {
+            _restoreResult = await VersionRestore.RestoreAsync(
+                Project.Id,
+                targetCommitSha,
+                selection,
+                safetyMessage: $"Safety checkpoint before restoring {ShortSha(targetCommitSha)}",
+                cancellationToken: _lifetimeCancellation.Token);
+            _restoreStep = RestoreStep.Result;
+            await RefreshProjectHistoryAndRemoteAsync(Project.Id);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _restoreError = exception.Message;
+        }
+        finally
+        {
+            _restoreBusy = false;
+        }
+    }
+
+    private void CloseRestoreWorkflow()
+    {
+        if (_restoreBusy)
+            return;
+
+        _restoreTarget = null;
+        _restoreTargetLoaded = null;
+        _restoreCurrentLoaded = null;
+        _restoreResult = null;
+        _restoreChapterOptions = [];
+        _restoreChapterIds.Clear();
+        _restoreAreas.Clear();
+        _restoreError = null;
+        _restoreSelectionError = null;
+        _restoreLoading = false;
+    }
+
+    private VersionHistoryRestoreSelection BuildRestoreSelection() =>
+        _restoreScope switch
+        {
+            VersionHistoryRestoreScope.WholeProject => VersionHistoryRestoreSelection.ForWholeProject(),
+            VersionHistoryRestoreScope.MajorAreas => VersionHistoryRestoreSelection.ForMajorAreas(_restoreAreas),
+            VersionHistoryRestoreScope.SelectedChapters => VersionHistoryRestoreSelection.ForSelectedChapters(
+                _restoreChapterIds,
+                _restoreAnnotationMode),
+            _ => throw new InvalidOperationException("Choose a restore scope."),
+        };
+
+    private string RestoreSummary() =>
+        _restoreScope switch
+        {
+            VersionHistoryRestoreScope.WholeProject => "The whole project will be replaced with the selected checkpoint.",
+            VersionHistoryRestoreScope.MajorAreas => $"These areas will be replaced: {string.Join(", ", _restoreAreas.OrderBy(area => area, StringComparer.Ordinal).Select(AreaLabel))}.",
+            VersionHistoryRestoreScope.SelectedChapters => $"{_restoreChapterIds.Count} selected chapter(s) will be restored. Chapters only in the current checkpoint are removed when selected; chapters only in the target checkpoint are added. Annotations are {_restoreAnnotationMode switch { VersionHistoryAnnotationRestoreMode.Exclude => "excluded", _ => "included for selected chapters" }}.",
+            _ => "The selected restore scope will be applied.",
+        };
+
+    private static IReadOnlyList<RestoreChapterOption> BuildChapterOptions(
+        VersionHistorySnapshotPayload current,
+        VersionHistorySnapshotPayload target)
+    {
+        var currentChapters = current.Narrative.Chapters.ToDictionary(chapter => chapter.Id);
+        var targetChapters = target.Narrative.Chapters.ToDictionary(chapter => chapter.Id);
+        return currentChapters.Keys
+            .Union(targetChapters.Keys)
+            .OrderBy(id => id)
+            .Select(id => new RestoreChapterOption(
+                id,
+                targetChapters.TryGetValue(id, out var targetChapter)
+                    ? targetChapter.Title
+                    : currentChapters[id].Title,
+                currentChapters.ContainsKey(id),
+                targetChapters.ContainsKey(id)))
+            .ToList();
+    }
+
+    private static string CheckpointTitle(ProjectVersionCheckpointView checkpoint) =>
+        checkpoint.Kind switch
+        {
+            ProjectVersionCheckpointKind.Initial => "Initial checkpoint",
+            ProjectVersionCheckpointKind.Manual => "Manual checkpoint",
+            ProjectVersionCheckpointKind.Assistant => "Assistant checkpoint",
+            ProjectVersionCheckpointKind.Imported => "Imported checkpoint",
+            ProjectVersionCheckpointKind.Restored => "Restored checkpoint",
+            _ => "Checkpoint",
+        };
+
+    private static string ShortSha(string? sha) =>
+        string.IsNullOrWhiteSpace(sha) ? "No commit" : sha.Length <= 10 ? sha : sha[..10];
+
+    private static string IsoDate(DateTime value) => value.ToUniversalTime().ToString("O");
+
+    private static string DisplayDate(DateTime value) => value.ToLocalTime().ToString("g");
+
+    private static string HealthLabel(ProjectVersionRepositoryHealth? health) =>
+        health switch
+        {
+            ProjectVersionRepositoryHealth.Healthy => "Healthy",
+            ProjectVersionRepositoryHealth.Dirty => "Changes pending",
+            ProjectVersionRepositoryHealth.Missing => "Repository missing",
+            ProjectVersionRepositoryHealth.Corrupt => "Repository needs attention",
+            ProjectVersionRepositoryHealth.Diverged => "Repository diverged",
+            _ => "Not initialized",
+        };
+
+    private static string HealthClass(ProjectVersionRepositoryHealth? health) =>
+        health switch
+        {
+            ProjectVersionRepositoryHealth.Healthy => "is-healthy",
+            ProjectVersionRepositoryHealth.Dirty => "is-dirty",
+            ProjectVersionRepositoryHealth.Missing or ProjectVersionRepositoryHealth.Corrupt or ProjectVersionRepositoryHealth.Diverged => "is-error",
+            _ => "is-neutral",
+        };
+
+    private static string AreaLabel(string area) =>
+        area.Replace('-', ' ').Replace('_', ' ') switch
+        {
+            var value when value.Length == 0 => area,
+            var value => char.ToUpperInvariant(value[0]) + value[1..],
+        };
+
+    private static string AreaSummaryLabel(VersionHistorySnapshotAreaSummary summary) =>
+        $"{summary.Area}: {summary.Added} added, {summary.Removed} removed, {summary.Changed} changed";
+
+    private static string ChangeClass(VersionHistorySnapshotChangeKind change) =>
+        change switch
+        {
+            VersionHistorySnapshotChangeKind.Added => "is-added",
+            VersionHistorySnapshotChangeKind.Removed => "is-removed",
+            _ => "is-changed",
+        };
+
+    private static string ChangeFlags(VersionHistorySnapshotChangeEntry entry)
+    {
+        var flags = new List<string>();
+        if (entry.ManuscriptChanged) flags.Add("manuscript");
+        if (entry.MetadataChanged) flags.Add("metadata");
+        if (entry.BinaryChanged) flags.Add("binary asset");
+        return flags.Count == 0 ? "content" : string.Join(", ", flags);
+    }
+
+    private static string ConnectionStatus(GitHubConnectionSummary connection) =>
+        connection.RevokedAt is not null ? "Needs attention" : "Connected";
+
+    private static string SyncStatusLabel(ProjectVersionSyncStatus? status) =>
+        status is null ? "Status unavailable" : status.Relation switch
+        {
+            GitHistoryRelation.Empty => "Attached",
+            GitHistoryRelation.Identical => "Synchronized",
+            GitHistoryRelation.CandidateFastForward => "Remote ahead",
+            GitHistoryRelation.CurrentFastForward => "Local ahead",
+            GitHistoryRelation.Diverged => "Diverged",
+            GitHistoryRelation.Unrelated => "Unrelated histories",
+            _ => status.Disposition.ToString(),
+        };
+
+    private static string SyncStatusClass(ProjectVersionSyncStatus? status) =>
+        status?.Relation switch
+        {
+            GitHistoryRelation.Identical => "is-healthy",
+            GitHistoryRelation.CurrentFastForward => "is-dirty",
+            GitHistoryRelation.CandidateFastForward => "is-dirty",
+            GitHistoryRelation.Diverged or GitHistoryRelation.Unrelated => "is-error",
+            _ => "is-neutral",
+        };
+
+    private static string RelationLabel(GitHistoryRelation relation) =>
+        relation switch
+        {
+            GitHistoryRelation.Empty => "not fetched",
+            GitHistoryRelation.Identical => "synchronized",
+            GitHistoryRelation.CandidateFastForward => "remote ahead",
+            GitHistoryRelation.CurrentFastForward => "local ahead",
+            GitHistoryRelation.Diverged => "diverged",
+            GitHistoryRelation.Unrelated => "unrelated histories",
+            _ => relation.ToString(),
+        };
+
+    private bool CanFastForward(ProjectVersionSyncStatus? status) =>
+        !_remoteBusy && !_remoteSetupBusy && Repository?.IsDirty != true && status?.Relation == GitHistoryRelation.CandidateFastForward;
+
+    private bool CanPush(ProjectVersionSyncStatus? status) =>
+        !_remoteBusy && !_remoteSetupBusy && Repository?.IsDirty != true && status?.LocalCommitSha is not null &&
+        status.Relation is GitHistoryRelation.Empty or GitHistoryRelation.CurrentFastForward;
+
+    private static string RemoteErrorMessage(Exception exception) => exception switch
+    {
+        ProjectVersionSyncException syncException => syncException.Message,
+        GitHubConnectionException githubException => githubException.Message,
+        _ => exception.Message,
+    };
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _disposed = true;
+        _lifetimeCancellation.Cancel();
+        _lifetimeCancellation.Dispose();
+    }
+
+    private enum RemoteAction
+    {
+        Fetch,
+        FastForward,
+        Push,
+        Remove,
+    }
+
+    private enum RestoreStep
+    {
+        Configure,
+        Confirm,
+        Result,
+    }
+
+    private sealed record RestoreChapterOption(
+        Guid Id,
+        string Title,
+        bool InCurrent,
+        bool InTarget);
+
+    private sealed class ManualCheckpointDraft
+    {
+        [Required(ErrorMessage = "Enter a semantic message for this checkpoint.")]
+        [StringLength(500, ErrorMessage = "Checkpoint messages must be 500 characters or fewer.")]
+        public string Message { get; set; } = string.Empty;
+    }
+}

@@ -14,12 +14,16 @@ public interface IProjectReferenceService
 
     Task<ProjectReferenceSummary> AddAsync(
         Guid referencingProjectId,
+        Guid referencedRepositoryId,
         Guid referencedProjectId,
         CancellationToken cancellationToken = default);
 
     Task RemoveAsync(
-        Guid referencingProjectId,
-        Guid referencedProjectId,
+        Guid referenceId,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> RelinkAvailableAsync(
+        Guid referenceId,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<ProjectReadableScope>> ListReadableScopesAsync(
@@ -36,18 +40,26 @@ public interface IProjectReferenceService
 }
 
 public sealed record ProjectReferenceSummary(
+    Guid ReferenceId,
+    Guid ReferencedRepositoryId,
     Guid ProjectId,
+    Guid? ResolvedProjectId,
     string Name,
     string Slug,
-    DateTime UpdatedAt,
-    DateTime CreatedAt);
+    DateTime? ResolvedProjectUpdatedAt,
+    DateTime CreatedAt,
+    DateTime? ResolvedAt)
+{
+    public DateTime UpdatedAt => ResolvedProjectUpdatedAt ?? CreatedAt;
+}
 
 public sealed record ProjectReferenceCandidate(
     Guid ProjectId,
     string Name,
     string Slug,
     DateTime UpdatedAt,
-    bool IsReferenced);
+    bool IsReferenced,
+    Guid? ReferencedRepositoryId);
 
 /// <summary>
 /// A project scope readable from an active project. The active project is always
@@ -57,10 +69,14 @@ public sealed record ProjectReadableScope(
     Guid ProjectId,
     string Name,
     string Slug,
-    bool IsReferenced);
+    bool IsReferenced,
+    Guid? RepositoryId = null);
 
 public sealed record ProjectReferenceManifest(
+    Guid ReferenceId,
+    Guid ReferencedRepositoryId,
     Guid ProjectId,
+    Guid ResolvedProjectId,
     string Name,
     string Slug,
     DateTime UpdatedAt,

@@ -553,14 +553,18 @@ IAppDatabaseOperationFactory database, IProjectSearchIndex index, IVectorStore v
                 ?? throw new InvalidOperationException($"Project {projectId} not found.");
             var references = await operation.Repositories.ProjectReferences
                 .ListByReferencingProjectAsync(projectId, cancellationToken);
+            references = references
+                .Where(reference => reference.ResolvedProjectId is not null && reference.ResolvedProject is not null)
+                .ToList();
             readableScopes =
             [
                 new ProjectReadableScope(project.Id, project.Name, project.Slug, IsReferenced: false),
                 .. references.Select(reference => new ProjectReadableScope(
-                    reference.ReferencedProjectId,
-                    reference.ReferencedProject.Name,
-                    reference.ReferencedProject.Slug,
-                    IsReferenced: true)),
+                    reference.ResolvedProject!.Id,
+                    reference.ResolvedProject.Name,
+                    reference.ResolvedProject.Slug,
+                    IsReferenced: true,
+                    reference.ReferencedRepositoryId)),
             ];
         }
         else

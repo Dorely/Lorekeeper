@@ -82,6 +82,19 @@ external tools.
 - Prefer permissively licensed, inspectable production components and make
   dependency obligations explicit.
 
+### 6. Durable, author-controlled project history
+
+- Preserve the authored creative state as deterministic, inspectable local
+  checkpoints that can be compared and restored without turning SQLite,
+  credentials, conversations, jobs, or derived indexes into portable project
+  content.
+- Keep images, fonts, manuscript, narrative, design, and publication intent
+  together so a project can travel between machines without a hidden asset
+  store.
+- Make remote carrying optional and explicit. Never silently merge, overwrite,
+  force-push, or infer a cross-machine project reference; authors should see
+  divergence and choose what happens next.
+
 ## Delivery shape
 
 Lorekeeper will grow through deliberate publication milestones:
@@ -107,6 +120,8 @@ Lorekeeper succeeds when:
 - authors understand what context and changes AI assistants use;
 - manual and assistant actions follow the same validation and review paths;
 - existing projects survive structural evolution without content loss;
+- an author can inspect, compare, carry, and restore project history while
+  retaining control of credentials, remote publication, and conflict decisions;
 - a supported release can be created, edited, designed, rendered, validated,
   previewed, and downloaded inside the application;
 - publication claims are backed by repeatable automated checks, independent

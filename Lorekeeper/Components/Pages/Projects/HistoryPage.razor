@@ -1,0 +1,13 @@
+@page "/projects/{Slug}/history"
+@rendermode InteractiveServer
+@using Lorekeeper.Components.Pages.Projects.History
+
+<PageTitle>History</PageTitle>
+
+<ProjectLayout Slug="@Slug" Tab="history">
+    <HistoryContent />
+</ProjectLayout>
+
+@code {
+    [Parameter] public string Slug { get; set; } = string.Empty;
+}

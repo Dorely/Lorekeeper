@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Lorekeeper.ChatTurns;
+using Lorekeeper.VersionHistory.Services;
 
 namespace Lorekeeper.Writing;
 
@@ -44,7 +45,12 @@ public sealed class WritingCoachTurnRunner(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var coach = scope.ServiceProvider.GetRequiredService<IWritingCoachService>();
+        var checkpoints = scope.ServiceProvider.GetRequiredService<IAssistantVersionCheckpointService>();
         await foreach (var update in coach.SendAsync(projectId, userText, currentSampleTitle, currentSampleBody, imageIds, providerId, cancellationToken))
+        {
+            if (update is WritingCoachAssistantMessageCompleted)
+                await checkpoints.TryCheckpointAsync(projectId, ChatTurnSurface.WritingCoach, cancellationToken);
             yield return update;
+        }
     }
 }

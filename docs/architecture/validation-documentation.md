@@ -48,6 +48,8 @@ Documentation is authoritative by responsibility:
 3. Each architecture chapter owns current contracts and key file families for one
    coherent responsibility. Relevant chapters are conditionally mandatory, not
    optional background reading.
+   The version-history owner chapter covers deterministic Git snapshots,
+   checkpoint/restore, clone import, and explicit remote synchronization.
 4. [`README.md`](../../README.md) describes user-facing capabilities, setup, run,
    packaging, release/update behavior, and local-data expectations.
 5. [`docs/publishing-roadmap.md`](../publishing-roadmap.md) sequences researched
@@ -278,6 +280,7 @@ behavior solely from compilation or static inspection.
 | [`AGENTS.md`](../../AGENTS.md), [`CLAUDE.md`](../../CLAUDE.md), and [Copilot instructions](../../.github/copilot-instructions.md) | Authoritative workflow rules and compatibility entry points for required routed reading, repository safety, verification, branches, pull requests, documentation, and commits. |
 | [`CONTRIBUTING.md`](../../CONTRIBUTING.md), [pull-request template](../../.github/pull_request_template.md), [pull-request validation](../../.github/workflows/pull-request-validation.yml), and [GitHub settings checklist](../github-repository-settings.md) | Human contribution workflow, review evidence, exact repository commit gate, and maintainer-owned server protection settings. |
 | [`VISION.md`](../../VISION.md), [architecture index](../architecture.md), and [`README.md`](../../README.md) | Product direction, current technical routing/contracts, and user-facing behavior/setup respectively. |
+| [`version-history-sync.md`](version-history-sync.md) | Current deterministic snapshot, local Git, restore/import, remote-sync, and version-control credential boundary. |
 | [`docs/publishing-roadmap.md`](../publishing-roadmap.md), [`docs/research/`](../research/), [`docs/decisions/`](../decisions/), and [`docs/plans/`](../plans/) | Delivery gates, sourced evidence, historical architectural decisions, and deferred plans; none supersedes current code. |
 | [`Lorekeeper.sln`](../../Lorekeeper.sln), [`global.json`](../../global.json), and [`.editorconfig`](../../.editorconfig) | Solution boundary, pinned .NET SDK, and source formatting/naming authority. |
 | [`Lorekeeper.Tests/Lorekeeper.Tests.csproj`](../../Lorekeeper.Tests/Lorekeeper.Tests.csproj) and [`Usings.cs`](../../Lorekeeper.Tests/Usings.cs) | Authorized test-project boundary for startup-migration and versioned import/export preservation/fail-closed fixtures only. |
@@ -300,6 +303,8 @@ behavior solely from compilation or static inspection.
   current manuscript contract.
 - [Press production](press-production.md) — native conformance evidence and
   truthful artifact claims.
+- [Version history and synchronization](version-history-sync.md) — deterministic
+  snapshot, restore, clone, and remote-sync claim boundaries.
 
 ## Relevant verification
 

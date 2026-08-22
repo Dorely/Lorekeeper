@@ -276,7 +276,9 @@ aggregates, and Core/release covers. It has no EF or SQLite dependency. Each
 target-isolated stream stores Brotli-fast compressed snapshots, retains at most
 100 manual actions, and participates in a 128 MiB process-wide budget. Navigation
 and page reloads retain streams while Lorekeeper is running; a full process exit
-clears them. History is never exported.
+clears them. This process-lifetime history is never exported; the separate
+version-history system captures selected canonical manuscript/style state in
+deterministic Git snapshots.
 
 The owning domain service first commits the live document with its next revision,
 then records the successful manual before/after pair in memory. Undo and Redo
@@ -312,9 +314,11 @@ and manual reversion do not rewrite it. A later successful assistant turn replac
 it. Review baselines are working-database data and are excluded from export/import.
 
 In-memory snapshots index image, font, and composition dependencies rather than
-copying binary assets. Live dependencies are hard deletion blockers. History-only
-image/font deletion requires explicit Lorekeeper-owned confirmation to delete and
-clear the affected current-process streams. Deleting a chapter, publication
+copying binary assets. Live dependencies are hard deletion blockers. A
+history-only image/font dependency means a current-process Undo/Redo stream and
+requires explicit Lorekeeper-owned confirmation to delete and clear the affected
+streams; Git version-history blobs are durable history and do not act as live
+asset-deletion blockers. Deleting a chapter, publication
 section, release, edition-content branch, or entire project clears its owned
 streams as lifecycle cleanup, not as an Undo action.
 
@@ -369,6 +373,9 @@ every one of those consumers.
 - [persistence-migrations-import.md](persistence-migrations-import.md) owns the
   database operation model, startup orchestration, protected backups/recovery,
   EF migrations, and import/export transactions.
+- [version-history-sync.md](version-history-sync.md) owns durable deterministic
+  Git snapshots and restore; this chapter owns process-lifetime Undo/Redo and
+  the canonical manuscript/style/annotation state captured by that boundary.
 
 ## Relevant verification
 

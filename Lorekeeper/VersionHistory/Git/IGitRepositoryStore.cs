@@ -1,0 +1,56 @@
+namespace Lorekeeper.VersionHistory.Git;
+
+/// <summary>
+/// Local repository operations used by version-history orchestration and
+/// transport adapters.
+/// </summary>
+public interface IGitRepositoryStore
+{
+    string HistoryRoot { get; }
+
+    string GetRepositoryPath(Guid repositoryId);
+
+    GitRepositoryDeletionStage StageRepositoryDeletion(Guid repositoryId);
+
+    void RollbackRepositoryDeletion(GitRepositoryDeletionStage stage);
+
+    void FinalizeRepositoryDeletion(GitRepositoryDeletionStage stage);
+
+    IReadOnlyList<GitRepositoryDeletionTombstone> ListDeletionTombstones();
+
+    GitRepositoryDeletionStage ReadDeletionTombstone(
+        GitRepositoryDeletionTombstone tombstone);
+
+    void InitializeRepository(Guid repositoryId);
+
+    GitHeadInfo GetHead(Guid repositoryId);
+
+    GitCommitWriteResult WriteSnapshot(
+        Guid repositoryId,
+        IReadOnlyDictionary<string, byte[]> files,
+        string semanticMessage,
+        DateTimeOffset authoredAt);
+
+    IReadOnlyDictionary<string, byte[]> ReadTree(Guid repositoryId, string? commitSha = null);
+
+    GitCommitMetadata GetCommitMetadata(Guid repositoryId, string commitSha);
+
+    IReadOnlyList<GitCommitMetadata> ListCommits(Guid repositoryId, int maxCount = 100);
+
+    GitCommitMetadata? FindMergeBase(Guid repositoryId, string currentCommitSha, string candidateCommitSha);
+
+    GitHistoryComparison CompareHistory(
+        Guid repositoryId,
+        string? currentCommitSha,
+        string? candidateCommitSha);
+
+    GitHeadInfo FastForwardMain(
+        Guid repositoryId,
+        string? expectedCurrentCommitSha,
+        string targetCommitSha);
+
+    GitHeadInfo RollbackMain(
+        Guid repositoryId,
+        string expectedCurrentCommitSha,
+        string previousCommitSha);
+}

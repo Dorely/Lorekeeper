@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
+using Lorekeeper.VersionHistory.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Startup;
@@ -27,6 +28,35 @@ public sealed class ApplicationStartupWorker(
                 await WaitForMinimumSplashDurationAsync(elapsed, stoppingToken);
                 startup.CompleteRecovery();
                 return;
+            }
+
+            startup.ReportInitialization(
+                "Checking project history",
+                "Reconciling local project checkpoints.",
+                72);
+            var historyReconciliation = scope.ServiceProvider
+                .GetRequiredService<IProjectVersionHistoryReconciliationService>();
+            var historyReport = await historyReconciliation.ReconcileAsync(stoppingToken);
+            foreach (var item in historyReport.Items.Where(item => item.State is
+                         ProjectVersionReconciliationState.Missing
+                         or ProjectVersionReconciliationState.Corrupt
+                         or ProjectVersionReconciliationState.Diverged))
+            {
+                logger.LogWarning(
+                    "Project history reconciliation reported {State} for project {ProjectId} and repository {RepositoryId}: {Diagnostic}",
+                    item.State,
+                    item.ProjectId,
+                    item.RepositoryId,
+                    item.Diagnostic);
+            }
+            foreach (var tombstone in historyReport.DeletionTombstones.Where(item =>
+                         item.State == ProjectVersionDeletionTombstoneState.Preserved))
+            {
+                logger.LogWarning(
+                    "Project history deletion tombstone was preserved at {Path} for repository {RepositoryId}: {Diagnostic}",
+                    tombstone.Path,
+                    tombstone.RepositoryId,
+                    tombstone.Diagnostic);
             }
 
             startup.ReportInitialization(

@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Lorekeeper.ChatTurns;
 using Lorekeeper.Manuscripts;
+using Lorekeeper.VersionHistory.Services;
 
 namespace Lorekeeper.EditorChat;
 
@@ -46,7 +47,12 @@ public sealed class EditorChatTurnRunner(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var chat = scope.ServiceProvider.GetRequiredService<IEditorChatService>();
+        var checkpoints = scope.ServiceProvider.GetRequiredService<IAssistantVersionCheckpointService>();
         await foreach (var update in chat.SendAsync(projectId, currentChapterId, currentCompositionId, contentTarget, userText, imageIds, providerId, cancellationToken))
+        {
+            if (update is EditorChatAssistantMessageCompleted)
+                await checkpoints.TryCheckpointAsync(projectId, ChatTurnSurface.Editor, cancellationToken);
             yield return update;
+        }
     }
 }

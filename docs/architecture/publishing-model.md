@@ -198,6 +198,12 @@ changes stale only the artifacts they affect. Archived releases are immutable
 at owning mutation boundaries; existing artifacts remain readable/exportable,
 and cloning creates the editable continuation.
 
+Version-history snapshots capture the canonical Core Book, publication editions,
+and publication sections so authored publication intent can be restored. They
+exclude preparation jobs, render/package bytes, page maps, audits, migration
+journals, and other derived or operational production state; those artifacts
+are regenerated after restore through the Press boundary.
+
 ## Key files and file families
 
 | Path or family | Primary responsibility |
@@ -235,6 +241,9 @@ and cloning creates the editable continuation.
 - [`persistence-migrations-import.md`](./persistence-migrations-import.md)
   owns durable release/section/render rows, lock order, migrations, recovery,
   and import/export boundaries.
+- [`version-history-sync.md`](./version-history-sync.md) owns deterministic
+  capture/restore of publication core state; generated artifacts and packages
+  remain owned by Press and are intentionally absent from snapshots.
 - [`assistants-chat.md`](./assistants-chat.md) owns shared chat runtime,
   context compaction, assistant mutation identity, and general tool protocol.
 
