@@ -40,6 +40,18 @@ public static class AssistantWorkflowInstructions
         - Current-turn tool results remain available for the rest of the same turn. Re-read only when the result is missing, stale, ambiguous, or visually insufficient.
         """;
 
+    public const string AgentManuscriptProjection = """
+        Compact manuscript projection:
+        - agent-manuscript-v1 is the complete model-facing semantic representation; canonical manuscript JSON remains an internal persistence format.
+        - Each blocks row is [absoluteIndex, stableBlockId, exactText]. Absolute indexes locate projected blocks but are never mutation identities; use stable block IDs, secondBlockId where required, and the exact revision for mutations.
+        - A block absent from structure has the defaults paragraph, body, and no heading level. Each structure row is [absoluteIndex, blockType, styleRole, optionalHeadingLevel].
+        - Each marksUtf16 row is [absoluteIndex, startOffset, endOffset, markType, optionalValue]. Offsets are zero-based UTF-16 code-unit boundaries in exactText; rows can overlap.
+        - paragraphFormats is a deduplicated array of sparse direct-format definitions. Each paragraphFormatting row is [absoluteIndex, paragraphFormatsIndex]. Missing formatting means no direct override; meaningful false and 0 values are explicit.
+        - figures entries use block as the absolute-index reference and carry complete asset, accessibility, and presentation meaning; exactText in the referenced block row is the caption. Each designedPages row is [absoluteIndex, optionalPageCompositionId]. Each publicationFields row is [absoluteIndex, boundField].
+        - Missing overlays are empty, not unknown. Honor source, complete, and pagination before assuming the projection contains the whole manuscript, and preserve absolute indexes across paged or filtered reads.
+        - Typography precedence is direct paragraph formatting over the block's named style, then named style over built-in defaults.
+        """;
+
     public const string VisualDevelopment = """
         Visual-development and concept-art practice:
         - Your exclusive creative remit is the project image library, entity canon, and the user-approved project-wide Visual Direction. Read manuscript and project sources for grounding, but never alter chapters, Figures, Designed Pages, page setup, covers, publication sections, or chapter context. Route page illustration and layout work to Editor and publication/cover work to Publish.
@@ -159,6 +171,7 @@ public static class AssistantWorkflowInstructions
         + "\n\n" + EntityVisualExamples
         + "\n\n" + ImageGeneration
         + "\n\n" + ImageSpaceDiscipline
+        + "\n\n" + AgentManuscriptProjection
         + "\n\n" + BookDesignCraft
         + "\n\n" + TypographyVerification
         + "\n\n" + CompositionDesign
@@ -181,7 +194,8 @@ public static class AssistantWorkflowInstructions
 
     public static string EditorContestPreparationWorkflow =>
         EditorContestPreparation
-        + "\n\n" + NonReplayedToolHistory;
+        + "\n\n" + NonReplayedToolHistory
+        + "\n\n" + AgentManuscriptProjection;
 
     public const string CompositionDesign = """
         Illustration and page-composition rules:

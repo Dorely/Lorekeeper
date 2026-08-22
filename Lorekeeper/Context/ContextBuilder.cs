@@ -87,7 +87,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 IsProtected: true));
             items.Add(await BuildManuscriptStylesItemAsync(
                 project.Id,
-                manuscriptSnapshot,
                 cancellationToken));
             items.Add(new ContextItem(
                 Key: EditorContextKeys.CurrentChapter,
@@ -234,7 +233,9 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 AssistantWorkflowInstructions.EditorContestPreparationWorkflow,
             ContextBuildPurpose.Editor =>
                 AssistantWorkflowInstructions.EditorChatFor(await embeddings.IsAvailableAsync(cancellationToken)),
-            ContextBuildPurpose.EditorRevision => AssistantWorkflowInstructions.EditorRevisionWorker,
+            ContextBuildPurpose.EditorRevision =>
+                AssistantWorkflowInstructions.EditorRevisionWorker
+                + "\n\n" + AssistantWorkflowInstructions.AgentManuscriptProjection,
             ContextBuildPurpose.Images => AssistantWorkflowInstructions.VisualCreationWorkflow,
             ContextBuildPurpose.Research =>
                 "Use the supplied research tools to gather, attribute, compare, and synthesize evidence. Distinguish sourced facts from editorial inference and never fabricate a source.",
@@ -543,19 +544,18 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
 
     private async Task<ContextItem> BuildManuscriptStylesItemAsync(
         Guid projectId,
-        ManuscriptSnapshot? manuscriptSnapshot,
         CancellationToken cancellationToken)
     {
         var styles = await manuscriptStyles.ListAsync(projectId, cancellationToken);
         return new ContextItem(
             Key: EditorContextKeys.ManuscriptStyles,
             Kind: ContextItemKind.ManuscriptStyles,
-            Label: "Book Text Styles and Active Formatting",
-            Body: ContextManuscriptFormatter.SerializeStyles(styles, manuscriptSnapshot?.Document),
+            Label: "Book Text Styles",
+            Body: ContextManuscriptFormatter.SerializeStyles(styles),
             IsEnabled: true,
             IsRemovable: false,
             Badge: "Style",
-            Reason: "Named styles and active manuscript formatting",
+            Reason: "Versioned named-style definitions",
             IsProtected: true);
     }
 

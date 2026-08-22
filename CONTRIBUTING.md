@@ -39,10 +39,16 @@ Also run the impact-specific checks routed by `docs/architecture.md`. Update the
 owning architecture chapter and README when the change alters their documented
 contracts or user-facing behavior.
 
-## Open and review the pull request
+## Accumulate changes and open the pull request
 
-Push the work branch and open a pull request targeting `main`. Complete the pull
-request checklist, keep the change focused, and explain any validation that was
+Keep coherent, verified commits on the work branch while the requested work is
+still accumulating. Completing an individual change does not require a new pull
+request. Push the branch when it needs to be shared or backed up.
+
+When the maintainer decides the accumulated branch is ready to merge, fetch and
+incorporate the latest `origin/main`, rerun the full repository gate on the exact
+head, inspect the complete branch diff, and open one pull request targeting
+`main`. Complete the pull request checklist and explain any validation that was
 not performed.
 
 A pull request may merge only after:

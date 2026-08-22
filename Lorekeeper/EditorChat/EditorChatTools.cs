@@ -200,7 +200,7 @@ IAppDatabaseOperationFactory database, IActService acts,
                     ReadManuscriptAsync(context, chapterId, startBlock, blockCount),
                 name: "read_manuscript",
                 description:
-                    "Read bounded semantic manuscript blocks with stable block IDs, inline marks, style roles, source hash, and the current revision token. " +
+                    "Read bounded agent-manuscript-v1 semantic rows with stable block IDs, exact text, sparse structure, UTF-16 inline marks, interned paragraph formatting, Figure/Designed Page metadata, source hash, and the current revision token. " +
                     "The active Context Feed normally already includes the complete current manuscript snapshot for direct edits. Use this tool when that snapshot is missing, incomplete, stale, non-active, or insufficient; then pass the returned revision and operations once to apply_manuscript_operations. For reusable formatting, use the focused Book Text Style tools instead of emitting one operation per block."),
 
             AIFunctionFactory.Create(
@@ -209,7 +209,7 @@ IAppDatabaseOperationFactory database, IActService acts,
                 name: "inspect_manuscript",
                 description:
                     "Validate a manuscript and structurally search all blocks by optional text, blockType, and semantic styleRole. " +
-                    "Returns at most 40 matching stable blocks plus bounded normalization/schema diagnostics, total counts, start, and hasMore. Review mode inspects the current staged manuscript."),
+                    "Returns at most 40 matching agent-manuscript-v1 rows plus bounded normalization/schema diagnostics, total counts, start, and hasMore. Review mode inspects the current staged manuscript."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, long expectedRevision, ManuscriptOperationInput[] operations) =>
@@ -1912,23 +1912,14 @@ IAppDatabaseOperationFactory database, IActService acts,
                 : snapshot.Document;
         startBlock = Math.Clamp(startBlock, 0, document.Content.Count);
         blockCount = Math.Clamp(blockCount, 1, 100);
-        var blocks = document.Content.Skip(startBlock).Take(blockCount).ToList();
-        return JsonSerializer.Serialize(new
-        {
-            chapter = new { chapter.Id, chapter.Title },
-            document.Revision,
-            sourceHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(document)),
-            source = ReferenceEquals(document, snapshot.Document) ? "persisted" : "stagedDraft",
-            pagination = new
-            {
-                startBlock,
-                returnedBlockCount = blocks.Count,
-                totalBlockCount = document.Content.Count,
-                hasMore = startBlock + blocks.Count < document.Content.Count,
-                nextStartBlock = startBlock + blocks.Count,
-            },
-            blocks,
-        }, ManuscriptCodec.JsonOptions);
+        return AgentManuscriptProjection.SerializeDocument(
+            document,
+            ReferenceEquals(document, snapshot.Document) ? "persisted" : "stagedDraft",
+            startBlock,
+            blockCount,
+            chapter.Id,
+            chapter.Title,
+            ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(document)));
     }
 
     private async Task<string> InspectManuscriptAsync(
@@ -1946,18 +1937,19 @@ IAppDatabaseOperationFactory database, IActService acts,
         var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken);
         if (snapshot is null)
             return $"Error: manuscript {chapterId:N} was not found.";
-        var document = ctx.ReviewEdits
+        var stagedDraft = ctx.ReviewEdits
             && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
-                ? staged
-                : snapshot.Document;
-        return JsonSerializer.Serialize(
-            new
-            {
-                chapter = new { chapter.Id, chapter.Title },
-                document.Revision,
-                inspection = ManuscriptInspection.Inspect(document, query, blockType, styleRole, start, count),
-            },
-            ManuscriptCodec.JsonOptions);
+            ? staged
+            : null;
+        var document = stagedDraft ?? snapshot.Document;
+        var inspection = ManuscriptInspection.Inspect(document, query, blockType, styleRole, start, count);
+        return AgentManuscriptProjection.SerializeInspection(
+            document,
+            stagedDraft is not null ? "stagedDraft" : "persisted",
+            inspection,
+            chapter.Id,
+            chapter.Title,
+            ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(document)));
     }
 
     private async Task<string> ReadManuscriptMigrationStateAsync(EditorChatContext ctx)

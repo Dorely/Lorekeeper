@@ -97,10 +97,14 @@ from protected Project Guidance and Book Brief direction, then adds relevant
 prior chapter material, explicit per-chapter include/exclude preferences, graph
 relationships, project-search results, named manuscript styles, page setup,
 annotations, and canonical entity visuals. The active chapter is loaded once as
-a complete compact semantic snapshot with its revision, source hash, stable
-block IDs, text, marks, styles, sparse paragraph formatting, Figures, and
-Designed Page references. Ordinary active-chapter editing therefore should not
-begin with a redundant manuscript read.
+a complete `agent-manuscript-v1` snapshot with source/completeness metadata,
+revision, source hash, stable block IDs, exact text, sparse UTF-16 marks,
+structure, interned direct paragraph formatting, Figures, Designed Pages, and
+publication bindings. Block rows use absolute indexes as compact overlay
+cross-references while stable IDs remain the only mutation identities. Named
+styles arrive separately as versioned definitions; direct formatting overrides
+named styles, which override built-in defaults. Ordinary active-chapter editing
+therefore should not begin with a redundant manuscript read.
 
 Entity context uses a separate compact projection that preserves meaningful
 properties, knowledge, and canonical visual metadata while omitting empty
@@ -120,7 +124,10 @@ Model-facing structured payloads use the shared compact serializer and
 `AgentPayloadPaginator`. Pagination repeats identity fields, keeps logical JSON
 records intact where possible, and segments only an individually oversized text
 field with continuation metadata. Assistant tools must not create parallel,
-unbounded response shapes.
+unbounded response shapes. Manuscript context is the narrower exception owned
+by `AgentManuscriptProjection`: its paged and filtered results preserve absolute
+document indexes and omit empty semantic overlays rather than using a generic
+object paginator.
 
 ### Direct project references and provenance
 

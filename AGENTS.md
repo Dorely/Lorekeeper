@@ -47,20 +47,24 @@
   workflow configuration, must enter `main` through a pull request from a
   non-`main` branch. Direct pushes to `main` are prohibited even for
   administrators and urgent fixes.
-- Before opening or updating a pull request, fetch `origin`, incorporate the
-  latest `origin/main`, inspect the complete branch diff, and rerun all required
-  verification on the exact proposed head.
-- Push only the focused work branch. Open or update one pull request targeting
-  `main`, keep its scope coherent, and wait for the required status check and at
-  least one approving review from someone other than the last pusher. Resolve
-  every review conversation before merge.
+- Accumulate coherent, verified commits on the focused work branch until the user
+  decides that branch is ready for review and merge. Do not open or update a pull
+  request merely because an individual change or commit is complete.
+- When the user decides to merge the accumulated work, fetch `origin`, incorporate
+  the latest `origin/main`, inspect the complete branch diff, rerun all required
+  verification on the exact proposed head, and push only the focused work branch.
+  Then open or update one pull request targeting `main`, keep its scope coherent,
+  and wait for the required status check and at least one approving review from
+  someone other than the last pusher. Resolve every review conversation before
+  merge.
 - Never approve or merge your own pull request. Agents may prepare, push, and
   open a pull request, but merging requires an authorized human or a separately
   authorized reviewer after repository protections pass.
-- Treat a local commit as implementation-complete, a pushed pull request as
-  review-ready, and the change as repository-integrated only after GitHub reports
-  the pull request merged into `main`. A closed or still-open pull request is not
-  merged work.
+- Treat a local commit as implementation-complete and part of the accumulated
+  work branch. The branch becomes review-ready only when the user decides to open
+  or update its pull request, and the change is repository-integrated only after
+  GitHub reports that pull request merged into `main`. A closed or still-open pull
+  request is not merged work.
 - Use the repository's pull-request template and `CONTRIBUTING.md`. Keep GitHub
   Actions permissions read-only by default; do not make a workflow token capable
   of approving pull requests.
@@ -275,11 +279,14 @@
   stage only that feature's files, and create a focused commit with a descriptive
   message.
 - Commit every completed feature before beginning another one. Do not combine
-  unrelated work in a single commit. Fetch again, confirm the branch remains
-  current, push the feature branch, and open or update its pull request.
-- After committing and after pushing, verify that the working tree is clean. Do
-  not amend, squash, force-push, or otherwise rewrite history unless explicitly
-  requested. Repository integration is complete only after the pull request is
-  reviewed, all required checks pass, and GitHub reports it merged.
+  unrelated work in a single commit. Keep subsequent coherent commits on the
+  same work branch until the user decides the accumulated branch is ready to
+  merge; do not create a pull request after every commit or feature.
+- After committing, verify that the working tree is clean. Push the branch when
+  requested or needed for collaboration or backup, but open or update its pull
+  request only when the user decides to merge the accumulated work. Do not amend,
+  squash, force-push, or otherwise rewrite history unless explicitly requested.
+  Repository integration is complete only after the pull request is reviewed,
+  all required checks pass, and GitHub reports it merged.
 - If a required commit cannot be created, report the blocker and do not describe
   the feature as completed.

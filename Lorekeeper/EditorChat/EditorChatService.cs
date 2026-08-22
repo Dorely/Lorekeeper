@@ -263,6 +263,7 @@ public sealed class EditorChatService(
         var contestModeEnabled = false;
         IReadOnlyList<EntityVisualContextReference> initialEntityVisuals = [];
         string systemPrompt = string.Empty;
+        string contestSystemPrompt = string.Empty;
         string? setupError = null;
         try
         {
@@ -285,6 +286,11 @@ public sealed class EditorChatService(
             initialEntityVisuals = assembly.Visuals;
             contestModeEnabled = project.ContestModeEnabled;
             systemPrompt = assembly.Assemble();
+            contestSystemPrompt = new ContextAssembly(
+                assembly.Items
+                    .Where(item => item.Kind != ContextItemKind.CurrentChapter)
+                    .ToList())
+                .Assemble();
             if (!contentTarget.IsCore)
             {
                 var edition = await turnEngine.ReadAsync(
@@ -292,7 +298,9 @@ public sealed class EditorChatService(
                         item => item.Id == contentTarget.EditionId && item.ProjectId == projectId && item.EditionSpecificContentEnabled,
                         cancellationToken),
                     cancellationToken) ?? throw new InvalidOperationException("The selected edition content target is unavailable.");
-                systemPrompt += $"\n\n## Selected Editor content target\nYou are editing the publication release '{edition.Name}' ({edition.Id:D}). All manuscript, Figure, Designed Page, review, contest, and revision operations apply only to this selected release. Do not mutate the shared outline, Book Brief, canon, entities, links, or project facts. Saved Book Text Styles are shared project resources: you may create and apply a new style, but never update or delete an existing shared style from this edition turn. The release ID is protected context and must not be requested from the user or supplied as a tool argument.";
+                var targetPrompt = $"\n\n## Selected Editor content target\nYou are editing the publication release '{edition.Name}' ({edition.Id:D}). All manuscript, Figure, Designed Page, review, contest, and revision operations apply only to this selected release. Do not mutate the shared outline, Book Brief, canon, entities, links, or project facts. Saved Book Text Styles are shared project resources: you may create and apply a new style, but never update or delete an existing shared style from this edition turn. The release ID is protected context and must not be requested from the user or supplied as a tool argument.";
+                systemPrompt += targetPrompt;
+                contestSystemPrompt += targetPrompt;
             }
             userMessage.ContextSnapshotJson = assembly.SnapshotJson();
             await turnEngine.UpdateMessageAsync(repositories => repositories.EditorConversations, userMessage, cancellationToken);
@@ -683,7 +691,7 @@ public sealed class EditorChatService(
                         .Cast<AIContent>()
                         .ToList();
                     var snapshot = new ContestTurnSnapshot(
-                        BuildContestSnapshotMessages(messages, contestSnapshotToolResults),
+                        BuildContestSnapshotMessages(messages, contestSnapshotToolResults, contestSystemPrompt),
                         initialEntityVisuals);
 
                     await foreach (var contestUpdate in contestService.StartContestAsync(
@@ -866,10 +874,13 @@ public sealed class EditorChatService(
 
     private static IReadOnlyList<ContestChatMessageSnapshot> BuildContestSnapshotMessages(
         IReadOnlyList<ChatMessage> messages,
-        IReadOnlyList<AIContent> pendingToolResults)
+        IReadOnlyList<AIContent> pendingToolResults,
+        string contestSystemPrompt)
     {
         var snapshot = messages
-            .Select(ToContestChatMessageSnapshot)
+            .Select((message, index) => index == 0 && message.Role == ChatRole.System
+                ? new ContestChatMessageSnapshot("System", contestSystemPrompt)
+                : ToContestChatMessageSnapshot(message))
             .Where(message => !string.IsNullOrWhiteSpace(message.Content))
             .ToList();
 
