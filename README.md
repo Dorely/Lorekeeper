@@ -249,6 +249,23 @@ The HTTP launch profile is pinned to `http://localhost:1455` for the Codex OAuth
 callback. Use this explicit profile for browser-driven UI validation; the Electron
 profile intentionally remains the default development target.
 
+### Secured browser hosting
+
+Browser hosting can require a single-user sign-in with a username, password, and
+authenticator code. Generate the credentials once:
+
+```bash
+dotnet run --project Lorekeeper -- auth-setup --username <name>
+```
+
+Set the printed `Auth__SingleUser__*` environment variables before starting the
+host and add the printed `otpauth://` URI to an authenticator app. Every page and
+endpoint then requires the sign-in; without those variables the host remains a
+local, unauthenticated development server. `Server__EnableHttpsRedirection=false`
+permits deliberate plain-HTTP hosting on a trusted network or behind a reverse
+proxy, and `Server__DataProtectionKeysDirectory` keeps sign-in cookies valid
+across restarts.
+
 ## Desktop Development
 
 Run the Electron.NET desktop shell:
