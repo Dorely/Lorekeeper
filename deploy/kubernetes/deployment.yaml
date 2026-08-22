@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lorekeeper
+  namespace: lorekeeper
+  labels:
+    app: lorekeeper
+spec:
+  # SQLite and the process-wide write lease require exactly one instance.
+  # Never scale above one replica; Recreate prevents two pods from ever
+  # sharing the database volume during a rollout.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: lorekeeper
+  template:
+    metadata:
+      labels:
+        app: lorekeeper
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: lorekeeper
+          # Replace with your registry/tag after building from the repository
+          # Dockerfile, e.g. registry.local/lorekeeper:0.3.9.
+          image: lorekeeper:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: lorekeeper-auth
+          # Database migrations run before readiness; give first startup after
+          # an upgrade generous time before restarting the pod.
+          startupProbe:
+            httpGet:
+              path: /healthz/ready
+              port: http
+            periodSeconds: 5
+            failureThreshold: 120
+          readinessProbe:
+            httpGet:
+              path: /healthz/ready
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 4Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: lorekeeper-data

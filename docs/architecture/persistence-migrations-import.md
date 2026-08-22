@@ -195,7 +195,11 @@ path as the application rather than a parallel test-only migration sequence.
 
 Desktop development stores SQLite in the repository by default. Packaged builds
 resolve per-user application-data storage so installed, portable, and mounted
-DMG locations remain disposable. Database files, verification databases,
+DMG locations remain disposable. The server container overrides
+`ConnectionStrings:DefaultConnection` to an absolute path on a mounted volume
+that also holds the protected migration backups and Data Protection keys, so a
+volume snapshot is the complete backup boundary; the SQLite engine, WAL mode,
+and every migration and recovery contract in this chapter are unchanged there. Database files, verification databases,
 temporary migration backups, and publish output are local ignored state. Port
 and OAuth redirect configuration remain local-host-only unless an explicit
 security architecture change expands exposure.

@@ -154,7 +154,8 @@ browser development and validation. Both development profiles use
 `localhost:1455`; Codex OAuth depends on
 `http://localhost:1455/auth/callback`. A port change must update the desktop
 binding and an accepted OAuth redirect together. The host remains local-only
-unless a deliberate architecture and security change expands its exposure.
+except for the deliberate container deployment below, which must run behind the
+single-user login.
 
 Electron-only responsibilities include hardened binding, desktop-window creation,
 shutdown, installed-Windows automatic updates, and opening deliberate external
@@ -178,6 +179,25 @@ per-user application-data location so installers, portable executables, and
 mounted DMGs remain disposable. Database-path and migration safety details belong
 to the persistence chapter. Release orchestration and platform evidence belong to
 the validation chapter.
+
+### Container and Kubernetes hosting
+
+The repository `Dockerfile` packages the browser-hosted server: the build stage
+publishes the linux-x64 application with the contained Press runtime through the
+same `eng/BuildPressRuntime.ps1` integration as local builds, and the runtime
+stage runs as a non-root user with the SQLite database, protected migration
+backups, and Data Protection keys on a `/data` volume. The image disables the
+HTTPS redirect for trusted-network hosting and relies on the single-user login
+for access control; deployments supply the `Auth__SingleUser__*` values as
+secrets rather than baking them into the image.
+
+The manifests under [`deploy/kubernetes/`](../../deploy/kubernetes/) deploy that
+image as a single-replica `Recreate` Deployment with a PersistentVolumeClaim,
+Secret-provided credentials, and probes wired to `/healthz` (liveness) and
+`/healthz/ready` (startup readiness gate), so traffic is withheld until guarded
+migrations finish. SQLite and the process-wide write lease make one replica a
+hard correctness bound, not a tuning default. Electron packaging, automatic
+updates, and per-user data placement do not apply to this hosting shape.
 
 ### Application-owned interaction surfaces
 
@@ -253,6 +273,7 @@ settings. Provider-owned keys are described in the providers chapter.
 | [`Lorekeeper/Components/ConfirmationDialog.razor`](../../Lorekeeper/Components/ConfirmationDialog.razor) | Required application-owned destructive/consequential confirmation surface. |
 | [`Lorekeeper/wwwroot/app.css`](../../Lorekeeper/wwwroot/app.css) and [`wwwroot/branding/`](../../Lorekeeper/wwwroot/branding/) | Global design tokens and application identity assets shared by browser and desktop hosts. |
 | [`Lorekeeper/Desktop/`](../../Lorekeeper/Desktop/) | Desktop update state and constrained public-release discovery; platform-specific Electron mechanics remain invoked from the composition root. |
+| [`Dockerfile`](../../Dockerfile), [`.dockerignore`](../../.dockerignore), and [`deploy/kubernetes/`](../../deploy/kubernetes/) | Server container build (including the contained Press runtime) and the single-replica Kubernetes deployment: volume-backed data, secret-provided login credentials, and health-probe wiring. |
 
 ## Related chapters
 
@@ -271,6 +292,13 @@ explicit HTTP profile, confirm the local host reaches a safe startup state witho
 startup exceptions, and terminate it. Do not reorder launch profiles to make HTTP
 the default. Electron startup is checked only when explicitly required, and that
 process must also be terminated afterward.
+
+For container hosting changes, build the image from the repository `Dockerfile`,
+start it with a disposable volume and test credentials, confirm `/healthz/ready`
+reaches readiness and the login gate behaves, and remove the container. Validate
+manifest changes with `kubectl apply --dry-run=client -f deploy/kubernetes/`.
+A local container run does not prove any particular cluster's storage or
+networking behavior.
 
 For theming or shared layout changes, static inspection must confirm all surfaces
 use the shared tokens and application-owned dialog policy. Browser automation,

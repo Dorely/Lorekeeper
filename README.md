@@ -266,6 +266,17 @@ permits deliberate plain-HTTP hosting on a trusted network or behind a reverse
 proxy, and `Server__DataProtectionKeysDirectory` keeps sign-in cookies valid
 across restarts.
 
+### Container and Kubernetes hosting
+
+The repository `Dockerfile` builds a self-hosted server image, including the
+contained Press PDF runtime, that stores the database and session keys on a
+`/data` volume and requires the single-user sign-in. The manifests and
+step-by-step instructions in
+[`deploy/kubernetes/`](deploy/kubernetes/README.md) deploy it as a
+single-replica Kubernetes workload with persistent storage, secret-provided
+credentials, and health probes. The database stays SQLite on the mounted
+volume — exactly one replica, and the volume is the backup boundary.
+
 ## Desktop Development
 
 Run the Electron.NET desktop shell:

@@ -1,0 +1,13 @@
+# Durable storage for the SQLite database, its protected migration backups, and
+# the Data Protection keys. Snapshot or back up this volume to back up Lorekeeper.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lorekeeper-data
+  namespace: lorekeeper
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

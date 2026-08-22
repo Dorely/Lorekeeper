@@ -1,0 +1,17 @@
+.git/
+.github/
+.codex/
+.vscode/
+docs/
+scripts/
+deploy/
+Dockerfile
+**/bin/
+**/obj/
+**/target/
+**/node_modules/
+*.db
+*.db-wal
+*.db-shm
+migration-backups/
+publish/
