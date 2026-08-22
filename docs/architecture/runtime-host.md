@@ -192,6 +192,13 @@ HTTPS redirect for trusted-network hosting and relies on the single-user login
 for access control; deployments supply the `Auth__SingleUser__*` values as
 secrets rather than baking them into the image.
 
+Plain-HTTP LAN hosting is not a browser secure context, so secure-context-only
+APIs are unavailable there. `App.razor`'s pre-paint script therefore polyfills
+`crypto.randomUUID` (required by the pinned semantic-editor bundle and the graph
+library) from `crypto.getRandomValues`; new client code must not assume other
+secure-context APIs without the same consideration. The image also sets a
+writable `XDG_CACHE_HOME` so Fontconfig can cache font scans.
+
 The manifests under [`deploy/kubernetes/`](../../deploy/kubernetes/) deploy that
 image as a single-replica `Recreate` Deployment with a PersistentVolumeClaim,
 Secret-provided credentials, and probes wired to `/healthz` (liveness) and

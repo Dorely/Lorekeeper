@@ -39,7 +39,8 @@ USER lorekeeper
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080 \
     ConnectionStrings__DefaultConnection="Data Source=/data/lorekeeper.db" \
     Server__EnableHttpsRedirection=false \
-    Server__DataProtectionKeysDirectory=/data/keys
+    Server__DataProtectionKeysDirectory=/data/keys \
+    XDG_CACHE_HOME=/tmp/cache
 EXPOSE 8080
 VOLUME ["/data"]
 ENTRYPOINT ["dotnet", "Lorekeeper.dll"]
