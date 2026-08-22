@@ -378,7 +378,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
                 method: (int startBlock = 0, int blockCount = 40) =>
                     ReadAssignedManuscriptAsync(contentTarget, assignedChapterId, startBlock, blockCount),
                 name: "read_assigned_manuscript",
-                description: "Read at most 40 assigned semantic manuscript blocks with stable IDs, inline marks, style roles, total/hasMore metadata, source hash, and required revision token. The complete assigned snapshot is normally already in the Context Feed; use this only when it is missing, stale, or insufficient."),
+                description: "Read at most 40 assigned semantic manuscript rows in agent-manuscript-v1 format: stable IDs, exact text, sparse structure, UTF-16 inline marks, interned paragraph formatting, figure/page metadata, total/hasMore metadata, source hash, and required revision token. The complete assigned snapshot is normally already in the Context Feed; use this only when it is missing, stale, or insufficient."),
 
             AIFunctionFactory.Create(
                 method: (string? query = null, string? blockType = null, string? styleRole = null, int start = 0, int count = 40) =>
@@ -386,7 +386,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
                 name: "inspect_assigned_manuscript",
                 description:
                     "Validate and structurally search the assigned manuscript by optional text, blockType, and semantic styleRole. " +
-                    "Returns at most 40 matching stable blocks with pagination metadata and bounded normalization/schema diagnostics."),
+                    "Returns at most 40 matching agent-manuscript-v1 rows with sparse semantic metadata, pagination, and bounded normalization/schema diagnostics."),
 
             AIFunctionFactory.Create(
                 method: (
@@ -766,17 +766,13 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         blockCount = Math.Clamp(blockCount, 1, 40);
         var snapshot = await manuscripts.GetManuscriptAsync(contentTarget, chapterId)
             ?? throw new InvalidOperationException($"Assigned manuscript {chapterId:N} was not found.");
-        var blocks = snapshot.Document.Content.Skip(startBlock).Take(blockCount).ToList();
-        return JsonSerializer.Serialize(new
-        {
-            snapshot.ChapterId,
-            snapshot.Revision,
-            snapshot.SourceHash,
-            totalBlocks = snapshot.Document.Content.Count,
+        return AgentManuscriptProjection.SerializeDocument(
+            snapshot.Document,
+            "persisted",
             startBlock,
-            blocks,
-            hasMore = startBlock + blocks.Count < snapshot.Document.Content.Count,
-        }, ManuscriptCodec.JsonOptions);
+            blockCount,
+            snapshot.ChapterId,
+            sourceHash: snapshot.SourceHash);
     }
 
     private async Task<string> InspectAssignedManuscriptAsync(
@@ -790,20 +786,19 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
     {
         var snapshot = await manuscripts.GetManuscriptAsync(contentTarget, chapterId)
             ?? throw new InvalidOperationException($"Assigned manuscript {chapterId:N} was not found.");
-        return JsonSerializer.Serialize(
-            new
-            {
-                snapshot.ChapterId,
-                snapshot.Revision,
-                inspection = ManuscriptInspection.Inspect(
-                    snapshot.Document,
-                    query,
-                    blockType,
-                    styleRole,
-                    start,
-                    count),
-            },
-            ManuscriptCodec.JsonOptions);
+        var inspection = ManuscriptInspection.Inspect(
+            snapshot.Document,
+            query,
+            blockType,
+            styleRole,
+            start,
+            count);
+        return AgentManuscriptProjection.SerializeInspection(
+            snapshot.Document,
+            "persisted",
+            inspection,
+            snapshot.ChapterId,
+            sourceHash: snapshot.SourceHash);
     }
 
     private Task<string> CaptureAssignedManuscriptOperationsAsync(

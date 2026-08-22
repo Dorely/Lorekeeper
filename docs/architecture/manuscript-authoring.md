@@ -64,6 +64,33 @@ payloads fail closed. Historical `AiChange.ResultJson` may retain legacy plain
 text, and the literal JSON `null` may represent an absent historical snapshot;
 those bytes remain audit history rather than a runtime editing route.
 
+### Model-facing manuscript projection
+
+`AgentManuscriptProjection` is the single model-facing manuscript serializer.
+It emits `agent-manuscript-v1` without changing canonical manuscript v4
+persistence, import/export, audit rows, or stable-ID mutation contracts. The
+projection repeats identity, v4 schema version, revision, plain-text source
+hash, source state, completeness, and pagination. Each included block appears
+exactly once as `[absoluteIndex, stableBlockId, exactText]`; absolute indexes
+remain document-relative for bounded and filtered reads but are compact
+cross-references, never mutation identities.
+
+Sparse overlays carry only applicable meaning: structure rows, overlapping
+UTF-16 mark ranges and optional values, first-use deterministic interned
+paragraph formats and block references, complete Figure asset/accessibility/
+presentation data, Designed Page composition references, and bound publication
+fields. Null and empty overlays are omitted while meaningful `false` and `0`
+values remain explicit. Inline-node segmentation may normalize away when it
+does not change text or mark ranges. Direct paragraph formatting overrides a
+named Book Text Style, which overrides built-in defaults.
+
+The active Editor/revision-worker chapter context, manuscript read and inspect
+tools, Publish section reads, and Contest candidate source all use this shared
+projection. Named-style context is a separate
+`agent-manuscript-styles-v1` payload containing only versioned definitions;
+per-block direct formatting and structural roles remain solely in the
+manuscript projection.
+
 ### Semantic blocks, Figures, and Designed Pages
 
 Text blocks carry semantic style roles and optional sparse paragraph
@@ -315,6 +342,7 @@ every one of those consumers.
 | File or family | Architectural role |
 |---|---|
 | [`Lorekeeper/Manuscripts/ManuscriptModels.cs`](../../Lorekeeper/Manuscripts/ManuscriptModels.cs) and [`docs/schemas/manuscript-v4.schema.json`](../schemas/manuscript-v4.schema.json) | Current v4 document, block, inline, mark, Figure, presentation, and schema contract. |
+| [`Lorekeeper/Context/AgentManuscriptProjection.cs`](../../Lorekeeper/Context/AgentManuscriptProjection.cs) and [`ContextManuscriptFormatter.cs`](../../Lorekeeper/Context/ContextManuscriptFormatter.cs) | Shared versioned model-facing manuscript and named-style projections; canonical v4 serialization remains in `ManuscriptCodec`. |
 | [`Lorekeeper/Manuscripts/ManuscriptCodec.cs`](../../Lorekeeper/Manuscripts/ManuscriptCodec.cs), [`ManuscriptOperations.cs`](../../Lorekeeper/Manuscripts/ManuscriptOperations.cs), and inspection/range helpers | Validation, normalization, hashing, stable-ID lookup, semantic operations, structural inspection, and exact UTF-16 range resolution. |
 | [`Lorekeeper/Manuscripts/IManuscriptService.cs`](../../Lorekeeper/Manuscripts/IManuscriptService.cs) and [`Lorekeeper/Chapters/`](../../Lorekeeper/Chapters/) | Sole target-aware runtime chapter-manuscript boundary plus chapter lifecycle, copy-on-write release content, projections, and side effects. |
 | [`Lorekeeper/Manuscripts/EditorContentTarget.cs`](../../Lorekeeper/Manuscripts/EditorContentTarget.cs) | Protected Core/release target carried through manuscript, review, context, apply, and assistant operations. |

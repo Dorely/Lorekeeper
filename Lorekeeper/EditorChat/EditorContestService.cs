@@ -1013,7 +1013,8 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         - Use only semantic manuscript operations. Do not propose outline, fact, entity, or relationship changes.
         - Preserve unrelated prose unless the user's request explicitly asks for a full rewrite.
         - Respect the supplied chat context, context feed, and read-only tool results as authoritative story evidence.
-        """;
+        """
+        + "\n\n" + AssistantWorkflowInstructions.AgentManuscriptProjection;
 
     private static string BuildContestUserPrompt(
         ContestBatch batch,
@@ -1037,8 +1038,13 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         }
 
         sb.AppendLine("# Current Semantic Manuscript");
-        sb.AppendLine($"Chapter: {batch.ChapterTitle}");
-        sb.AppendLine(batch.OriginalManuscriptJson);
+        var source = ManuscriptCodec.Deserialize(batch.OriginalManuscriptJson);
+        sb.AppendLine(AgentManuscriptProjection.SerializeDocument(
+            source,
+            "persisted",
+            chapterId: batch.ChapterId,
+            chapterTitle: batch.ChapterTitle,
+            sourceHash: ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(source))));
 
         return sb.ToString();
     }

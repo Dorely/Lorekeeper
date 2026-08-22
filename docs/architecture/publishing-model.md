@@ -164,6 +164,14 @@ target. The assistant cannot reorder chapters or mutate chapter manuscript
 content from Publish. Physical-product selection, exact geometry, and cover
 surface rules belong to the Press production boundary.
 
+`read_publication_section` returns section metadata, canvas summaries, and the
+shared `agent-manuscript-v1` projection for its bounded prose blocks. Core or
+customized section reads retain the persisted source label; live release
+inheritance is labeled inherited. Absolute block indexes, source hash,
+revision, completeness, pagination, Figure semantics, Designed Page references,
+and publication-bound fields remain intact, while empty overlays and null fields
+are omitted.
+
 `IPublishService` projects every included ordered semantic-matter document into
 TXT, Markdown, EPUB, and contained Press output. Display-ready numbered titles
 are carried by the projection; Press-side title numbering is disabled so a

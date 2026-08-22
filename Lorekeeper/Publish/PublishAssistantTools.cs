@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Fonts;
 using Lorekeeper.Images;
@@ -210,7 +212,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid sectionId, Guid? releaseId = null, int blockStart = 0, int blockCount = 30) => ReadPublicationSectionAsync(context, releaseId, sectionId, blockStart, blockCount),
                 name: "read_publication_section",
-                description: "Read one Core or release publication section with bounded semantic blocks. Designed-page blocks expose pageCompositionId; use it with read_publication_page_composition and preview_publication_section_page_canvas before editing."),
+                description: "Read one Core or release publication section with a bounded agent-manuscript-v1 semantic projection: compact rows, sparse structure and UTF-16 marks, interned paragraph formatting, figure/publication metadata, and designed-page pageCompositionId values. Use pageCompositionId with read_publication_page_composition and preview_publication_section_page_canvas before editing."),
             AIFunctionFactory.Create(
                 method: (PublicationSectionToolInput input, Guid? releaseId = null) => UpsertPublicationSectionAsync(context, releaseId, input),
                 name: "upsert_publication_section",
@@ -729,7 +731,9 @@ public sealed class PublishAssistantTools(
         blockStart = Math.Max(0, blockStart);
         blockCount = Math.Clamp(blockCount, 1, 50);
         var item = await publicationSections.GetAsync(new(context.ProjectId, releaseId), sectionId, context.TurnCancellationToken);
-        var blocks = item.Manuscript.Content.Skip(blockStart).Take(blockCount).ToList();
+        var returnedBlockCount = blockStart >= item.Manuscript.Content.Count
+            ? 0
+            : Math.Min(blockCount, item.Manuscript.Content.Count - blockStart);
         var pageCanvases = new List<object>();
         foreach (var compositionId in item.Manuscript.Content
             .Where(block => block.PageCompositionId.HasValue)
@@ -755,12 +759,20 @@ public sealed class PublishAssistantTools(
                 requiresReleaseCustomization = releaseId is not null && composition.EditionId is null,
             });
         }
-        return Serialize(new
+        var projection = JsonNode.Parse(AgentManuscriptProjection.SerializeDocument(
+            item.Manuscript,
+            item.IsInherited ? "inherited" : "persisted",
+            blockStart,
+            blockCount,
+            sourceHash: null))?.AsObject()
+            ?? throw new InvalidOperationException("The manuscript projection could not be created.");
+        projection["ok"] = true;
+        projection["targetId"] = item.Id;
+        projection["sectionId"] = item.Id;
+        if (releaseId is Guid releaseValue)
+            projection["releaseId"] = releaseValue;
+        projection["section"] = JsonSerializer.SerializeToNode(new
         {
-            ok = true,
-            targetId = item.Id,
-            sectionId = item.Id,
-            releaseId,
             item.CoreSectionId,
             item.Title,
             item.Kind,
@@ -772,10 +784,12 @@ public sealed class PublishAssistantTools(
             item.StartSide,
             item.IsInherited,
             item.Revision,
-            blocks,
-            pageCanvases,
-            continuation = Continuation(blockStart, blocks.Count, item.Manuscript.Content.Count),
-        });
+        }, ContextPayloadJson.Options);
+        projection["pageCanvases"] = JsonSerializer.SerializeToNode(pageCanvases, JsonOptions);
+        projection["continuation"] = JsonSerializer.SerializeToNode(
+            Continuation(blockStart, returnedBlockCount, item.Manuscript.Content.Count),
+            JsonOptions);
+        return projection.ToJsonString(ContextPayloadJson.Options);
     }
 
     private async Task<string> UpsertPublicationSectionAsync(

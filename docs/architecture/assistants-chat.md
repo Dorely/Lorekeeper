@@ -162,7 +162,8 @@ geometry-free canonical appearance candidate and explicitly associates the
 inspected result with an entity.
 
 Editor is the complete Core/release authoring assistant. It receives the active
-chapter's full compact manuscript and style context automatically and can read
+chapter's full `agent-manuscript-v1` projection and versioned named-style
+definitions automatically and can read
 or mutate the outline, canon, manuscript, annotations, Figures, Designed Pages,
 styles, composition, page setup, and image workflows appropriate to the
 protected `EditorContentTarget`. The conversation is project-scoped, not
@@ -228,6 +229,12 @@ Review workspace is reachable while the batch runs, streams candidate status,
 and allows explicit per-candidate resolution. Keeping the chat component mounted
 while its pane is hidden preserves the live subscription.
 
+The captured Contest system transcript excludes the automatic Current Chapter
+context item. Each candidate instead receives the exact batch-source
+`agent-manuscript-v1` projection once, generated from the canonical manuscript
+stored on the batch. Canonical `OriginalManuscriptJson` remains the durable
+validation/audit source and is never appended raw to a candidate prompt.
+
 Editor revision agents are same-turn, prose-only worker sessions assigned to
 specific chapters. The coordinator validates assignments, persists the job and
 session records, runs bounded parallel workers, and receives only compact IDs,
@@ -236,7 +243,9 @@ proposals, raw responses, and worker transcripts remain in durable session
 detail and never inflate the parent model result.
 
 Each worker uses paginated grounding and filtered source reads, then terminates
-through the semantic manuscript operation boundary. With Review Edits enabled,
+through the semantic manuscript operation boundary. Its automatic manuscript
+context plus read/inspect tools use the same sparse projection and preserve
+absolute indexes, revision, source hash, and stable IDs. With Review Edits enabled,
 its pending change is correlated to the parent tool call and adopted into the
 active Editor overlay, while the stored chapter remains unchanged until
 approval. The coordinator cancels and awaits any outstanding progress read
