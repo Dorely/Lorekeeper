@@ -673,7 +673,14 @@ public sealed class ProjectImportExportService(
 
     private static List<PublicationEditionOverrideField> ParseOverrideFields(string json)
     {
-        try { return JsonSerializer.Deserialize<List<PublicationEditionOverrideField>>(json) ?? []; }
+        try
+        {
+            return (JsonSerializer.Deserialize<List<PublicationEditionOverrideField>>(json) ?? [])
+                .Where(Enum.IsDefined)
+                .Distinct()
+                .Order()
+                .ToList();
+        }
         catch (JsonException) { return []; }
     }
 

@@ -250,7 +250,10 @@ visual candidates, render artifacts and page maps, audits, migration journals,
 and process-lifetime Undo/Redo. Derived indexes are rebuilt after restore.
 
 The History page can create a semantic checkpoint, compare two checkpoints, and
-restore a whole project, selected major areas, or selected chapter IDs. Chapter
+restore a whole project, selected major areas, or selected chapter IDs. A
+message-free **Checkpoint** shortcut beside the theme control captures current
+work from any project page and disables itself when the project is already
+checkpointed or history is unavailable. Chapter
 restore replaces/adds/removes by stable ID and makes annotation inclusion
 explicit. Restore validates identities and dependencies, creates a safety
 checkpoint first, applies canonical rows atomically, and records a restored

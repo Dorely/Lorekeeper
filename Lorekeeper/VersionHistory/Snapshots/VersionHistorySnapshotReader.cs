@@ -277,11 +277,22 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
 
         var nodeKeys = payload.Graph.Nodes
             .Select(node => $"{node.NodeType}/{node.Key}")
+            .Concat(["Project/" + payload.ProjectId.ToString("N")])
+            .Concat(payload.Narrative.Acts.Select(act => "Act/" + act.Id.ToString("N")))
+            .Concat(payload.Narrative.Chapters.Select(chapter => "Chapter/" + chapter.Id.ToString("N")))
+            .Concat(payload.Sources.Sources.Select(source => "Source/" + source.Id.ToString("N")))
+            .Concat(payload.Sources.Sources.SelectMany(source =>
+                source.Chunks.Select(chunk => "SourceChunk/" + chunk.Id.ToString("N"))))
             .ToHashSet(StringComparer.Ordinal);
         foreach (var edge in payload.Graph.Edges)
         {
             if (!nodeKeys.Contains(edge.From.StableKey) || !nodeKeys.Contains(edge.To.StableKey))
                 throw new InvalidDataException($"Graph edge '{edge.From.StableKey} -> {edge.To.StableKey}' references a missing node.");
+        }
+        foreach (var example in payload.Assets.EntityVisualExamples)
+        {
+            if (!nodeKeys.Contains(example.Entity.StableKey))
+                throw new InvalidDataException($"Entity visual references missing graph entity '{example.Entity.StableKey}'.");
         }
 
         var sourceIds = payload.Sources.Sources.Select(source => source.Id).ToHashSet();

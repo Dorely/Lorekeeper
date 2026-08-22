@@ -288,11 +288,12 @@ public sealed class VersionHistorySnapshotWriter(
 
         var writingSamples = await db.WritingSamples.AsNoTracking()
             .Where(item => item.ProjectId == projectId)
-            .Select(item => new VersionHistoryWritingSample(item.Id, item.Title, item.Body))
             .OrderBy(item => item.Id)
+            .Select(item => new VersionHistoryWritingSample(item.Id, item.Title, item.Body))
             .ToListAsync(cancellationToken);
         var contextPreferences = await db.EditorContextPreferences.AsNoTracking()
             .Where(item => item.ProjectId == projectId)
+            .OrderBy(item => item.Id)
             .Select(item => new VersionHistoryContextPreference(
                 item.Id,
                 item.ChapterId,
@@ -300,7 +301,6 @@ public sealed class VersionHistorySnapshotWriter(
                 item.Key,
                 item.IsIncluded,
                 item.SortOrder))
-            .OrderBy(item => item.Id)
             .ToListAsync(cancellationToken);
         var references = await db.ProjectReferences.AsNoTracking()
             .Where(item => item.ReferencingProjectId == projectId)
@@ -404,14 +404,14 @@ public sealed class VersionHistorySnapshotWriter(
 
 internal static class VersionHistoryProjectExportExtensions
 {
+    private static readonly System.Text.Json.JsonSerializerOptions ProjectExportCompatibilityOptions =
+        new(System.Text.Json.JsonSerializerDefaults.Web);
+
     public static ProjectExportDocument Document(this ProjectExportFile file)
     {
         var document = System.Text.Json.JsonSerializer.Deserialize<ProjectExportDocument>(
             file.Content,
-            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
-            {
-                Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase, allowIntegerValues: false) },
-            });
+            ProjectExportCompatibilityOptions);
         return document ?? throw new InvalidDataException("Project export returned no document.");
     }
 }

@@ -1,0 +1,254 @@
+@using Lorekeeper.Models
+@using Lorekeeper.Projects
+@using Lorekeeper.VersionHistory.Services
+@implements IDisposable
+@inject NavigationManager Navigation
+@inject IProjectService Projects
+@inject IProjectVersionHistoryService VersionHistory
+
+<div class="project-checkpoint-control" @onmouseenter="RefreshStatusAsync" @onfocusin="RefreshStatusAsync">
+    <button type="button"
+            class="project-checkpoint-button"
+            title="@CheckpointTitle"
+            aria-label="@CheckpointTitle"
+            aria-busy="@_busy"
+            disabled="@(!CanCheckpoint)"
+            @onclick="CreateCheckpointAsync">
+        @if (_busy)
+        {
+            <span aria-hidden="true" class="project-checkpoint-spinner"></span>
+            <span>Checkpointing…</span>
+        }
+        else
+        {
+            <span aria-hidden="true">✓</span>
+            <span>Checkpoint</span>
+        }
+    </button>
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <span class="project-checkpoint-feedback project-checkpoint-error" role="alert">@_error</span>
+    }
+    else if (!string.IsNullOrWhiteSpace(_message))
+    {
+        <span class="project-checkpoint-feedback" role="status" aria-live="polite">@_message</span>
+    }
+</div>
+
+@code {
+    private const string SemanticMessage = "Checkpoint current work";
+
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private Project? _project;
+    private ProjectVersionStatusView? _status;
+    private string? _error;
+    private string? _message;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _refreshing;
+    private bool _disposed;
+    private int _loadGeneration;
+
+    private bool HistoryAvailable => _status?.Repository.Health is
+        ProjectVersionRepositoryHealth.Uninitialized or
+        ProjectVersionRepositoryHealth.Healthy or
+        ProjectVersionRepositoryHealth.Dirty;
+
+    private bool CanCheckpoint => !_loading
+        && !_busy
+        && _project is not null
+        && HistoryAvailable
+        && (_status?.Repository.HeadCommitSha is null || _status.Repository.IsDirty);
+
+    private string CheckpointTitle => _busy
+        ? "Saving a local checkpoint"
+        : _project is null
+            ? "Open a project to create a checkpoint"
+            : _status is null || !HistoryAvailable
+                ? "Project history is unavailable"
+                : _status.Repository.HeadCommitSha is null
+                    ? "Create the first local checkpoint"
+                    : _status.Repository.IsDirty
+                    ? "Save the current project as a local checkpoint"
+                    : "There are no uncheckpointed changes";
+
+    protected override void OnInitialized()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCurrentProjectAsync();
+    }
+
+    private async void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        if (_disposed)
+            return;
+
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadCurrentProjectAsync();
+                if (!_disposed)
+                    StateHasChanged();
+            });
+        }
+        catch (ObjectDisposedException)
+        {
+            // Navigation can finish while the interactive layout is being
+            // torn down; there is no UI left to update in that case.
+        }
+    }
+
+    private async Task LoadCurrentProjectAsync()
+    {
+        var generation = ++_loadGeneration;
+        _loading = true;
+        _project = null;
+        _status = null;
+        _error = null;
+        _message = null;
+
+        if (!TryGetProjectSlug(out var slug))
+        {
+            _loading = false;
+            return;
+        }
+
+        try
+        {
+            var project = await Projects.GetBySlugAsync(slug, _lifetimeCancellation.Token);
+            if (!IsCurrent(generation))
+                return;
+
+            _project = project;
+            if (project is not null)
+            {
+                await VersionHistory.EnsureRepositoryAsync(
+                    project.Id,
+                    _lifetimeCancellation.Token);
+                _status = await VersionHistory.GetStatusAsync(
+                    project.Id,
+                    includeCurrentSnapshotHash: true,
+                    _lifetimeCancellation.Token);
+            }
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (IsCurrent(generation))
+                _error = $"History status unavailable: {exception.Message}";
+        }
+        finally
+        {
+            if (IsCurrent(generation))
+                _loading = false;
+        }
+    }
+
+    private async Task RefreshStatusAsync()
+    {
+        if (_disposed || _loading || _busy || _refreshing || _project is not { } project)
+            return;
+
+        var generation = _loadGeneration;
+        _refreshing = true;
+        _error = null;
+        try
+        {
+            var status = await VersionHistory.GetStatusAsync(
+                project.Id,
+                includeCurrentSnapshotHash: true,
+                _lifetimeCancellation.Token);
+            if (IsCurrent(generation))
+                _status = status;
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (IsCurrent(generation))
+                _error = $"History status unavailable: {exception.Message}";
+        }
+        finally
+        {
+            _refreshing = false;
+        }
+    }
+
+    private async Task CreateCheckpointAsync()
+    {
+        if (!CanCheckpoint || _project is not { } project)
+            return;
+
+        var generation = _loadGeneration;
+        _busy = true;
+        _error = null;
+        _message = null;
+        try
+        {
+            await VersionHistory.CreateCheckpointAsync(
+                project.Id,
+                ProjectVersionCheckpointKind.Manual,
+                SemanticMessage,
+                cancellationToken: _lifetimeCancellation.Token);
+            var status = await VersionHistory.GetStatusAsync(
+                project.Id,
+                includeCurrentSnapshotHash: true,
+                _lifetimeCancellation.Token);
+            if (IsCurrent(generation))
+            {
+                _status = status;
+                _message = "Checkpoint saved locally.";
+            }
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (IsCurrent(generation))
+                _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private bool TryGetProjectSlug(out string slug)
+    {
+        var relativePath = Navigation.ToBaseRelativePath(Navigation.Uri)
+            .Split(['?', '#'], 2)[0]
+            .Trim('/');
+        var segments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 2 || !string.Equals(segments[0], "projects", StringComparison.OrdinalIgnoreCase))
+        {
+            slug = string.Empty;
+            return false;
+        }
+
+        slug = Uri.UnescapeDataString(segments[1]);
+        return !string.IsNullOrWhiteSpace(slug);
+    }
+
+    private bool IsCurrent(int generation) => !_disposed && generation == _loadGeneration;
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _disposed = true;
+        Navigation.LocationChanged -= OnLocationChanged;
+        _lifetimeCancellation.Cancel();
+        _lifetimeCancellation.Dispose();
+    }
+}

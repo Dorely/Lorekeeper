@@ -121,6 +121,14 @@ used by the history and restore services. Repeated content is deduplicated at
 the Git commit boundary, while the timeline can retain the semantic operation
 record.
 
+The History workspace provides the message-bearing checkpoint form. The shared
+layout also renders `ProjectCheckpointControl` beside the theme control: it
+resolves project routes, ensures the local repository exists, refreshes dirty
+state when approached, and creates a manual checkpoint with the fixed semantic
+message `Checkpoint current work`. It remains visible but disabled outside a
+project, while busy, for a clean initialized project, or when repository health
+is unavailable; an uninitialized project can create its first checkpoint.
+
 Restore validates manifest identity, every file hash and blob length, the full
 referential graph, required assets/styles/compositions/publication rows, and
 repository/project identity before acquiring mutation state. It creates a
@@ -209,7 +217,7 @@ the cutover.
 | `Lorekeeper/VersionHistory/Sync/` | GitHub remote attachment, fetch/fast-forward/push policy, remote checkout coordination, and clone transport. |
 | `Lorekeeper/VersionHistory/GitHub/` | Device authorization, GitHub API transport, connection validation, and non-secret remote views. |
 | `Lorekeeper/Models/ProjectVersion*.cs`, `ProjectGitRemote.cs`, `GitHubConnection.cs` | SQLite identity, checkpoint, operation, remote metadata, and provider credential rows. |
-| `Lorekeeper/Components/Pages/Projects/History/` and `Settings/VersionControl.razor` | Checkpoint/compare/restore UI, explicit sync controls, rights acknowledgement, and GitHub account setup. |
+| `Lorekeeper/Components/Pages/Projects/History/`, `Components/Layout/ProjectCheckpointControl.razor`, and `Settings/VersionControl.razor` | Checkpoint/compare/restore UI, global project checkpoint shortcut, explicit sync controls, rights acknowledgement, and GitHub account setup. |
 
 ## Related chapters
 
