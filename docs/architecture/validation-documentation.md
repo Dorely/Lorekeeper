@@ -103,11 +103,15 @@ could not be checked.
 Existing changes belong to the user unless proved otherwise. Inspect every diff;
 never discard, hide, overwrite, or mix unrelated unfinished work into a feature.
 Completed work includes current documentation, removal of obsolete runtime paths,
-the relevant verification, full-diff inspection, a focused commit, a clean
-post-commit working tree, a pushed work branch, and a pull request targeting
-`main`. The change becomes repository-integrated only after its required status
-check and independent approval pass, every conversation is resolved, and GitHub
-reports the pull request merged. Applied EF migrations remain immutable history.
+the relevant verification, full-diff inspection, a focused commit, and a clean
+post-commit working tree. Coherent verified commits accumulate on the work branch
+until the user decides it is ready to merge; completion of an individual change
+does not trigger a pull request. At that point, refresh the remote state, verify
+the complete proposed head, push the focused branch, and open or update one pull
+request targeting `main`. The change becomes repository-integrated only after its
+required status check and independent approval pass, every conversation is
+resolved, and GitHub reports the pull request merged. Applied EF migrations remain
+immutable history.
 
 Before completion, search again for obsolete names and paths, inspect all callers
 of changed contracts, run `git diff --check`, and compare documentation claims to
