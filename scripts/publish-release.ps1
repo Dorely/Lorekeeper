@@ -3,13 +3,19 @@ param(
     [Parameter(Mandatory)]
     [string]$Version,
 
+    [Parameter(Mandatory)]
+    [ValidateRange(1, [int]::MaxValue)]
+    [int]$MergedPullRequest,
+
     [string]$Notes,
 
     [string]$NotesFile,
 
     [switch]$Prerelease,
 
-    [switch]$WindowsOnly
+    [switch]$WindowsOnly,
+
+    [switch]$ConfirmOpenPullRequests
 )
 
 Set-StrictMode -Version Latest
@@ -298,9 +304,13 @@ try
     }
 
     $branch = (& git branch --show-current).Trim()
-    if ($LASTEXITCODE -ne 0 -or $branch -ne 'main')
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($branch))
     {
-        throw "Releases must be published from the main branch; current branch is '$branch'."
+        throw 'Releases must be published from a named release-orchestration branch.'
+    }
+    if ($branch -eq 'main')
+    {
+        throw 'Never publish while main is checked out. Create a fresh release-orchestration branch from origin/main.'
     }
 
     & git fetch origin main --quiet
@@ -314,6 +324,44 @@ try
     if ($sourceCommit -ne $remoteCommit)
     {
         throw "Local HEAD ($sourceCommit) must exactly match origin/main ($remoteCommit)."
+    }
+
+    $pullRequestJson = & gh pr view $MergedPullRequest --repo $sourceRepository `
+        --json number,state,baseRefName,mergeCommit,title,url
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "Could not inspect release-preparation pull request #$MergedPullRequest."
+    }
+    $pullRequest = ($pullRequestJson -join [Environment]::NewLine) | ConvertFrom-Json
+    if ($pullRequest.state -ne 'MERGED' -or $pullRequest.baseRefName -ne 'main')
+    {
+        throw "Release-preparation pull request #$MergedPullRequest must be merged into main before a release is possible."
+    }
+    $pullRequestMergeCommit = [string]$pullRequest.mergeCommit.oid
+    if ([string]::IsNullOrWhiteSpace($pullRequestMergeCommit) -or
+        $pullRequestMergeCommit -ne $sourceCommit)
+    {
+        throw "Release-preparation pull request #$MergedPullRequest produced $pullRequestMergeCommit, but the release source is $sourceCommit. The merged release-preparation pull request must be the current origin/main commit."
+    }
+
+    $openPullRequestsJson = & gh pr list --repo $sourceRepository --state open `
+        --base main --limit 1000 --json number,title,headRefName,url
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw 'Could not inspect open pull requests targeting main.'
+    }
+    $openPullRequests = @(($openPullRequestsJson -join [Environment]::NewLine) | ConvertFrom-Json)
+    if ($openPullRequests.Count -gt 0)
+    {
+        $openPullRequestSummary = @(
+            $openPullRequests |
+                ForEach-Object { "#$($_.number) $($_.title) [$($_.headRefName)] $($_.url)" }
+        ) -join [Environment]::NewLine
+        if (-not $ConfirmOpenPullRequests)
+        {
+            throw "Open pull requests target main. Stop and obtain explicit confirmation before releasing, then rerun with -ConfirmOpenPullRequests if publication should proceed:$([Environment]::NewLine)$openPullRequestSummary"
+        }
+        Write-Warning "Proceeding after explicit confirmation with open pull requests targeting main:$([Environment]::NewLine)$openPullRequestSummary"
     }
 
     $tag = "v$Version"

@@ -21,6 +21,11 @@
 
 - Before beginning new work, inspect the current branch, working tree, index,
   configured remotes, and upstream status.
+- Never edit, commit, or push directly on `main`. If a session starts on `main`
+  and work is required, first fetch `origin`, require a clean synchronized
+  checkout, and create a focused work branch from `origin/main`. Use the
+  `codex/` prefix for Codex-created branches unless the user requests another
+  name.
 - Start feature work only from a clean working tree whose index matches `HEAD`.
 - If existing changes form coherent prior work, finish their verification and
   documentation, then commit them before beginning a new feature. Never mix
@@ -28,12 +33,37 @@
 - Inspect every existing diff before committing it. If changes are unfamiliar,
   incomplete, unsafe to commit, or owned by another active effort, stop and ask
   for direction instead of discarding, hiding, or overwriting them.
-- When an upstream exists, fetch its current state and ensure the working branch
-  has no unintegrated upstream commits before starting. Fast-forward when safe;
-  stop for direction if histories have diverged. Never rewrite published history
-  without explicit instruction.
+- When an upstream exists, fetch it with pruning before work, before final
+  verification, and immediately before pushing. Ensure the work branch includes
+  the current `origin/main` and has no unintegrated commits from its own remote
+  tracking branch. Integrate remote changes without rewriting published history;
+  stop for direction if histories have diverged or ownership is unclear.
 - When no remote or upstream exists, require a clean local `HEAD` and report that
   remote synchronization could not be checked.
+
+## Branch and Pull Request Workflow
+
+- Every repository change, including release preparation, documentation, and
+  workflow configuration, must enter `main` through a pull request from a
+  non-`main` branch. Direct pushes to `main` are prohibited even for
+  administrators and urgent fixes.
+- Before opening or updating a pull request, fetch `origin`, incorporate the
+  latest `origin/main`, inspect the complete branch diff, and rerun all required
+  verification on the exact proposed head.
+- Push only the focused work branch. Open or update one pull request targeting
+  `main`, keep its scope coherent, and wait for the required status check and at
+  least one approving review from someone other than the last pusher. Resolve
+  every review conversation before merge.
+- Never approve or merge your own pull request. Agents may prepare, push, and
+  open a pull request, but merging requires an authorized human or a separately
+  authorized reviewer after repository protections pass.
+- Treat a local commit as implementation-complete, a pushed pull request as
+  review-ready, and the change as repository-integrated only after GitHub reports
+  the pull request merged into `main`. A closed or still-open pull request is not
+  merged work.
+- Use the repository's pull-request template and `CONTRIBUTING.md`. Keep GitHub
+  Actions permissions read-only by default; do not make a workflow token capable
+  of approving pull requests.
 
 ## Research and Impact Analysis
 
@@ -225,6 +255,15 @@
   invoking a release publisher, run the full repository commit gate. Release
   packaging checks are additional evidence; they never replace the repository
   gate. The exact commit being released must be the verified commit.
+- Prepare release/version changes on a dedicated branch and merge them through a
+  reviewed pull request. Before publishing, verify that release-preparation pull
+  request is `MERGED`, targets `main`, and produced the current `origin/main`
+  commit. If it is not fully merged, a release is impossible.
+- Invoke the publisher only from a fresh, clean, non-`main` release-orchestration
+  branch created at the fetched `origin/main`. If any pull request targeting
+  `main` remains open, stop and obtain explicit user confirmation before using
+  the publisher's `-ConfirmOpenPullRequests` override. That override never makes
+  an unmerged release-preparation pull request releasable.
 
 ## Completion and Commits
 
@@ -236,8 +275,11 @@
   stage only that feature's files, and create a focused commit with a descriptive
   message.
 - Commit every completed feature before beginning another one. Do not combine
-  unrelated work in a single commit.
-- After committing, verify that the working tree is clean. Do not amend, squash,
-  force-push, or otherwise rewrite history unless explicitly requested.
+  unrelated work in a single commit. Fetch again, confirm the branch remains
+  current, push the feature branch, and open or update its pull request.
+- After committing and after pushing, verify that the working tree is clean. Do
+  not amend, squash, force-push, or otherwise rewrite history unless explicitly
+  requested. Repository integration is complete only after the pull request is
+  reviewed, all required checks pass, and GitHub reports it merged.
 - If a required commit cannot be created, report the blocker and do not describe
   the feature as completed.

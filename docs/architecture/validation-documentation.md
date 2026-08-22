@@ -91,17 +91,23 @@ checks, command help/dry inspection where safe, and diff review.
 ### Repository readiness and completion
 
 Before new work, inspect the branch, working tree, index, remotes, and upstream.
-Feature work starts only from a clean tree whose index matches `HEAD`. When an
-upstream exists, fetch it and ensure there are no unintegrated upstream commits;
-fast-forward when safe and stop for direction if histories diverge. Without a
-remote/upstream, require a clean local `HEAD` and report that synchronization could
-not be checked.
+Never edit, commit, or push directly on `main`. Feature work starts on a focused
+non-`main` branch created from freshly fetched `origin/main`, with a clean tree
+whose index matches `HEAD`. When an upstream exists, fetch it with pruning and
+ensure there are no unintegrated commits from `origin/main` or the branch's own
+remote tracking branch. Integrate shared-branch changes without rewriting
+published history and stop for direction if histories diverge. Without a
+remote/upstream, require a clean local `HEAD` and report that synchronization
+could not be checked.
 
 Existing changes belong to the user unless proved otherwise. Inspect every diff;
 never discard, hide, overwrite, or mix unrelated unfinished work into a feature.
 Completed work includes current documentation, removal of obsolete runtime paths,
-the relevant verification, full-diff inspection, a focused commit, and a clean
-post-commit working tree. Applied EF migrations remain immutable history.
+the relevant verification, full-diff inspection, a focused commit, a clean
+post-commit working tree, a pushed work branch, and a pull request targeting
+`main`. The change becomes repository-integrated only after its required status
+check and independent approval pass, every conversation is resolved, and GitHub
+reports the pull request merged. Applied EF migrations remain immutable history.
 
 Before completion, search again for obsolete names and paths, inspect all callers
 of changed contracts, run `git diff --check`, and compare documentation claims to
@@ -233,22 +239,28 @@ checks, creates an ad-hoc-signed DMG, verifies architectures/signatures, mounts 
 smoke-tests the application, and writes a checksum. Do not substitute a
 cross-compiled artifact for that native evidence.
 
-Publish Windows-only or coordinated Windows plus Apple Silicon releases from a
-clean Windows `main` matching `origin/main`:
+Prepare every version change through a reviewed pull request. Publish Windows-only
+or coordinated Windows plus Apple Silicon releases from a fresh clean Windows
+orchestration branch whose `HEAD` exactly matches `origin/main`, supplying the
+merged release-preparation pull request that produced that commit:
 
 ```powershell
-.\scripts\publish-release.ps1 -Version <version> -WindowsOnly
-.\scripts\publish-release.ps1 -Version <version>
+.\scripts\publish-release.ps1 -Version <version> -MergedPullRequest <number> -WindowsOnly
+.\scripts\publish-release.ps1 -Version <version> -MergedPullRequest <number>
 ```
 
-The cross-platform path dispatches one correlated macOS arm64 workflow, builds
-Windows locally, verifies one requested artifact set, creates matching draft
-releases in the private source and public release repositories, verifies both
-asset sets, and only then publishes both. On a failed dual publication it removes
-the exact releases/tags created by that run when GitHub permits, and reports any
-resource requiring manual inspection. Temporary Actions artifacts are deleted
-only after successful publication. The public release repository is the automatic
-and manual update authority.
+The publisher rejects `main`, an unmerged or non-current release-preparation pull
+request, and any source commit other than fetched `origin/main`. It lists and
+stops for open pull requests targeting `main`; `-ConfirmOpenPullRequests` is an
+explicit human-approved override for unrelated open work, never for unmerged
+release preparation. The cross-platform path dispatches one correlated macOS
+arm64 workflow, builds Windows locally, verifies one requested artifact set,
+creates matching draft releases in the private source and public release
+repositories, verifies both asset sets, and only then publishes both. On a failed
+dual publication it removes the exact releases/tags created by that run when
+GitHub permits, and reports any resource requiring manual inspection. Temporary
+Actions artifacts are deleted only after successful publication. The public
+release repository is the automatic and manual update authority.
 
 Packaging and updater claims require execution on the relevant operating system.
 Never claim OAuth, provider calls, embeddings, web search, image generation,
@@ -259,7 +271,8 @@ behavior solely from compilation or static inspection.
 
 | File or family | Architectural role |
 |---|---|
-| [`AGENTS.md`](../../AGENTS.md), [`CLAUDE.md`](../../CLAUDE.md), and [Copilot instructions](../../.github/copilot-instructions.md) | Authoritative workflow rules and compatibility entry points for required routed reading, repository safety, verification, documentation, and commits. |
+| [`AGENTS.md`](../../AGENTS.md), [`CLAUDE.md`](../../CLAUDE.md), and [Copilot instructions](../../.github/copilot-instructions.md) | Authoritative workflow rules and compatibility entry points for required routed reading, repository safety, verification, branches, pull requests, documentation, and commits. |
+| [`CONTRIBUTING.md`](../../CONTRIBUTING.md), [pull-request template](../../.github/pull_request_template.md), [pull-request validation](../../.github/workflows/pull-request-validation.yml), and [GitHub settings checklist](../github-repository-settings.md) | Human contribution workflow, review evidence, exact repository commit gate, and maintainer-owned server protection settings. |
 | [`VISION.md`](../../VISION.md), [architecture index](../architecture.md), and [`README.md`](../../README.md) | Product direction, current technical routing/contracts, and user-facing behavior/setup respectively. |
 | [`docs/publishing-roadmap.md`](../publishing-roadmap.md), [`docs/research/`](../research/), [`docs/decisions/`](../decisions/), and [`docs/plans/`](../plans/) | Delivery gates, sourced evidence, historical architectural decisions, and deferred plans; none supersedes current code. |
 | [`Lorekeeper.sln`](../../Lorekeeper.sln), [`global.json`](../../global.json), and [`.editorconfig`](../../.editorconfig) | Solution boundary, pinned .NET SDK, and source formatting/naming authority. |
@@ -293,6 +306,12 @@ for stale source names and conflicting current-state claims, inspect the complet
 diff, and run `git diff --check`. Run the solution build, authorized test project,
 and HTTP startup smoke check when the documentation asserts those commands and
 current contracts, terminating the host afterward.
+
+For contributor-workflow changes, parse PowerShell scripts, inspect workflow YAML
+and permissions, compare the workflow steps to the exact repository commit gate,
+and confirm every documented command and link. After the workflow reaches
+`main`, validate the protected-branch settings and exercise them with a disposable
+pull request as described in the GitHub settings checklist.
 
 For source work, combine the baseline build/startup check with the owning
 chapter's focused checks. Add the semantic-editor, migration/import, Press,

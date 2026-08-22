@@ -269,6 +269,14 @@ Codex OAuth uses `Auth:Codex:RedirectUri`, which defaults to
 `http://localhost:1455/auth/callback`. Changing the desktop port can break Codex
 OAuth unless that redirect URI is also accepted by the OAuth provider.
 
+## Contributing
+
+All changes use non-`main` branches and reviewed pull requests. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for branch synchronization, the mandatory
+repository gate, review requirements, and the maintainer release workflow.
+Repository owners can apply and verify the matching GitHub controls with
+[`docs/github-repository-settings.md`](docs/github-repository-settings.md).
+
 ## Desktop Packaging
 
 Build the current Windows packages without publishing them:
@@ -303,7 +311,9 @@ install and authenticate [GitHub CLI](https://cli.github.com/), then run:
 
 ```powershell
 gh auth login
-.\scripts\publish-release.ps1 -Version 0.3.9 -WindowsOnly
+git fetch --prune origin
+git switch -c release/publish-0.3.9 origin/main
+.\scripts\publish-release.ps1 -Version 0.3.9 -MergedPullRequest 123 -WindowsOnly
 ```
 
 The Windows-only path builds locally, does not dispatch the macOS workflow, and
@@ -318,11 +328,18 @@ run the same command without `-WindowsOnly`:
 
 ```powershell
 gh auth login
-.\scripts\publish-release.ps1 -Version 0.3.9
+git fetch --prune origin
+git switch -c release/publish-0.3.9 origin/main
+.\scripts\publish-release.ps1 -Version 0.3.9 -MergedPullRequest 123
 ```
 
-The publisher requires a clean local `main` that exactly matches `origin/main`.
-Unless `-WindowsOnly` is used, it dispatches
+The publisher requires a clean, named, non-`main` orchestration branch whose
+`HEAD` exactly matches freshly fetched `origin/main`. `-MergedPullRequest` must
+identify the merged release-preparation pull request that produced that exact
+commit. If any other pull request targeting `main` remains open, the publisher
+stops and lists it. A maintainer may rerun with `-ConfirmOpenPullRequests` only
+after explicitly reviewing the open work and confirming publication should
+continue. Unless `-WindowsOnly` is used, the publisher dispatches
 `.github/workflows/build-macos-release.yml` for the Apple Silicon package,
 builds Windows locally at the same time, waits for the correlated Actions run,
 downloads the verified DMG, and publishes every artifact together only if all
