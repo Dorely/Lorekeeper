@@ -48,18 +48,19 @@ kubectl apply -f pvc.yaml -f secret.yaml -f deployment.yaml -f service.yaml
 kubectl -n lorekeeper rollout status deployment/lorekeeper
 ```
 
+Apply the files individually as shown. Applying the whole directory would also
+apply `secret.example.yaml`, which shares the Secret's name and would overwrite
+your real credentials with placeholders.
+
 First startup runs database migrations before the pod reports ready; the
 startup probe allows several minutes for that.
 
 ## 4. Open it
 
-```bash
-kubectl -n lorekeeper port-forward service/lorekeeper 8080:80
-```
-
-Browse to `http://localhost:8080` and sign in with your username, password, and
-current authenticator code. For standing LAN access, switch the Service to
-NodePort instead of port-forwarding.
+The Service is a NodePort pinned to `30455`, so the app answers on every node's
+LAN address. Browse to `http://<any-node-ip>:30455` and sign in with your
+username, password, and current authenticator code. Switch the Service type to
+ClusterIP if you prefer access through `kubectl port-forward` only.
 
 ## Upgrades
 

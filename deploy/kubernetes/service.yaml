@@ -6,12 +6,13 @@ metadata:
   labels:
     app: lorekeeper
 spec:
-  # ClusterIP for kubectl port-forward access. For direct LAN access instead,
-  # change the type to NodePort (optionally pinning a nodePort in 30000-32767).
-  type: ClusterIP
+  # NodePort for direct LAN access on every node's IP. Switch to ClusterIP if
+  # you prefer kubectl port-forward access only.
+  type: NodePort
   selector:
     app: lorekeeper
   ports:
     - name: http
       port: 80
       targetPort: http
+      nodePort: 30455
