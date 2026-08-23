@@ -112,6 +112,12 @@ Codex uses a PKCE OAuth flow with application endpoints at
 `http://localhost:1455/auth/callback`, so changing the desktop/HTTP port requires
 an accepted OAuth redirect update. OAuth success may best-effort configure a
 default Codex embedding model when embedding configuration is still unset.
+Because the accepted redirect is localhost-only, a browser on a different machine
+than the host (the container deployment) cannot complete the callback directly;
+the Providers surface offers a manual completion path that opens the sign-in in a
+new tab and accepts the failed `localhost:1455` callback address, extracting the
+code and state and finishing the same `HandleCallbackAsync` exchange server-side.
+Pasted callback material is used once and never logged.
 
 LLM and search API keys are persisted on their provider rows. Codex access and
 refresh tokens are stored in dedicated SQLite rows. This local persistence is not
