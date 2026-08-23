@@ -206,9 +206,10 @@ entities.
 discovery; `Startup:MinimumSplashMilliseconds` controls the minimum startup
 surface duration; and `Blazor:MaximumReceiveMessageSizeBytes` bounds interactive
 payloads. `VersionHistory:HistoryRoot` optionally overrides the local Git
-history root, while `VersionHistory:GitHub:ClientId` configures the
-version-control device-flow application (with standard environment-variable
-overrides). The version-history chapter owns those feature contracts;
+history root. The distributable supplies Lorekeeper's public GitHub OAuth client
+ID; forks and custom deployments can replace it through
+`VersionHistory:GitHub:ClientId` or the standard environment-variable override.
+The version-history chapter owns those feature contracts;
 provider-owned keys are described in the providers chapter.
 
 ## Key files and file families

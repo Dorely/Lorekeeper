@@ -173,14 +173,15 @@ are not merged, rebased, force-pushed, overwritten, or silently discarded.
 Removing a local remote attachment preserves local history and tracking refs;
 it removes only the project attachment and Git remote configuration.
 
-GitHub account setup uses device authorization. The OAuth app client ID is
-configured as `VersionHistory:GitHub:ClientId` (or the standard environment
-override `VersionHistory__GitHub__ClientId`). Access tokens remain in the
-provider-owned `GitHubConnection` row and are never written into manifests,
-snapshots, remote metadata, logs, or UI payloads. Repository listing, creation,
-fetch, push, and device authorization happen only after the user explicitly
-starts the corresponding action; selecting a remote also requires an explicit
-acknowledgement that creative material may be uploaded.
+GitHub account setup uses device authorization. The distributable ships the
+public client ID for Lorekeeper's maintainer-owned OAuth app. Forks and custom
+deployments can replace it through `VersionHistory:GitHub:ClientId` (or the
+standard environment override `VersionHistory__GitHub__ClientId`). Access
+tokens remain in the provider-owned `GitHubConnection` row and are never written
+into manifests, snapshots, remote metadata, logs, or UI payloads. Repository
+listing, creation, fetch, push, and device authorization happen only after the
+user explicitly starts the corresponding action; selecting a remote also
+requires an explicit acknowledgement that creative material may be uploaded.
 Credentialed Git transport accepts only absolute `https://github.com/...` clone
 URLs matching the selected owner and repository; alternate hosts fail closed.
 

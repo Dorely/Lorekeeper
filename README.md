@@ -268,12 +268,14 @@ decision. Creating a GitHub remote also requires acknowledging that manuscript
 text, sources, images, and fonts may be uploaded; review repository privacy and
 asset licensing first.
 
-Configure the GitHub OAuth application client ID as
-`VersionHistory:GitHub:ClientId` in configuration or
-`VersionHistory__GitHub__ClientId` as an environment variable. Lorekeeper stores
-the resulting access token only in its provider-owned local credential row. GitHub
-device authorization, repository listing/creation, fetch, push, and remote
-checkout contact the network only after the corresponding action is selected.
+Lorekeeper ships its public, maintainer-owned GitHub OAuth application client ID,
+so **Connect GitHub** can start device authorization without per-user setup. Forks
+and custom deployments can replace it with `VersionHistory:GitHub:ClientId` in
+configuration or `VersionHistory__GitHub__ClientId` as an environment variable.
+Lorekeeper stores the resulting access token only in its provider-owned local
+credential row. GitHub device authorization, repository listing/creation,
+fetch, push, and remote checkout contact the network only after the
+corresponding action is selected.
 
 A validated clone/import path can read a Lorekeeper repository head, reject
 project/repository/slug collisions, create a new local project and repository
