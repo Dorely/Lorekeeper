@@ -121,13 +121,23 @@ used by the history and restore services. Repeated content is deduplicated at
 the Git commit boundary, while the timeline can retain the semantic operation
 record.
 
-The History workspace provides the message-bearing checkpoint form. The shared
+The History workspace provides the message-bearing checkpoint form. Its timeline
+can compare two checkpoints in chronological order with bounded, readable before/after panes derived
+from semantic manuscript content; raw semantic JSON and binary assets are never
+rendered. Failed operation notices remain durable journal rows for reconciliation,
+but the user can acknowledge and clear them from the sidebar without deleting
+their error or recovery data. Opening Restore focuses the controlled-restore card,
+where whole-project, major-area, and selected-chapter scopes are explicit. The shared
 layout also renders `ProjectCheckpointControl` beside the theme control: it
 resolves project routes, ensures the local repository exists, refreshes dirty
 state when approached, and creates a manual checkpoint with the fixed semantic
 message `Checkpoint current work`. It remains visible but disabled outside a
-project, while busy, for a clean initialized project, or when repository health
-is unavailable; an uninitialized project can create its first checkpoint.
+project, while any project-history operation is active, for a clean initialized
+project, or when repository health is unavailable; an uninitialized project can
+create its first checkpoint. Process-local, project-scoped operation leases keep
+the independently rendered workspace and layout control synchronized. Checkpoint
+refreshes that arrive during restore or synchronization run after the owning
+operation becomes idle.
 
 Restore validates manifest identity, every file hash and blob length, the full
 referential graph, required assets/styles/compositions/publication rows, and
@@ -180,8 +190,10 @@ standard environment override `VersionHistory__GitHub__ClientId`). Access
 tokens remain in the provider-owned `GitHubConnection` row and are never written
 into manifests, snapshots, remote metadata, logs, or UI payloads. Repository
 listing, creation, fetch, push, and device authorization happen only after the
-user explicitly starts the corresponding action; selecting a remote also
-requires an explicit acknowledgement that creative material may be uploaded.
+user explicitly starts the corresponding action. Attaching a remote requires an
+explicit acknowledgement that creative material may be uploaded. After attachment,
+the consent and repository-selection controls collapse into the attached remote
+status and actions; removing the remote makes setup available again.
 Credentialed Git transport accepts only absolute `https://github.com/...` clone
 URLs matching the selected owner and repository; alternate hosts fail closed.
 
@@ -213,7 +225,7 @@ the cutover.
 | `Lorekeeper/VersionHistory/Snapshots/` | Schema-v1 payloads, canonical JSON, deterministic writer, strict reader, and manifest/blob validation. |
 | `Lorekeeper/VersionHistory/Git/` | Bare-repository paths, Git object/ref operations, history relation, and safe deletion staging. |
 | `Lorekeeper/VersionHistory/Services/` | Checkpoint timeline, dirty-state reconciliation, operation journal, and assistant checkpoint adapter. |
-| `Lorekeeper/VersionHistory/Compare/` | Pure semantic area summaries, detailed entries, and restore-selection contract. |
+| `Lorekeeper/VersionHistory/Compare/` | Pure semantic area summaries, bounded readable before/after text, detailed entries, and restore-selection contract. |
 | `Lorekeeper/VersionHistory/Restore/` | Whole/selective restore, clone import application, exact-head checkout, dependency validation, and projection repair. |
 | `Lorekeeper/VersionHistory/Sync/` | GitHub remote attachment, fetch/fast-forward/push policy, remote checkout coordination, and clone transport. |
 | `Lorekeeper/VersionHistory/GitHub/` | Device authorization, GitHub API transport, connection validation, and non-secret remote views. |

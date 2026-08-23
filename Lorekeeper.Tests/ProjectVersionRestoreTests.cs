@@ -657,6 +657,8 @@ public sealed class ProjectVersionRestoreTests
 
         public Task<ProjectVersionTimelineView?> GetTimelineAsync(Guid projectId, int maxCheckpoints = 100, int maxOperations = 100, CancellationToken cancellationToken = default) => Task.FromResult<ProjectVersionTimelineView?>(null);
 
+        public Task<int> ClearFailedOperationNoticesAsync(Guid projectId, CancellationToken cancellationToken = default) => Task.FromResult(0);
+
         public Task<ProjectVersionStatusView?> GetStatusAsync(Guid projectId, bool includeCurrentSnapshotHash = true, CancellationToken cancellationToken = default) => Task.FromResult(Status);
 
         public Task<ProjectVersionLoadedCheckpoint> LoadCheckpointAsync(Guid projectId, string commitSha, CancellationToken cancellationToken = default) => Task.FromResult(checkpoint);

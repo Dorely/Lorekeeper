@@ -16,7 +16,8 @@ public sealed class ProjectVersionHistoryService(
     IAppDatabaseOperationFactory database,
     IVersionHistorySnapshotWriter snapshotWriter,
     IVersionHistorySnapshotReader snapshotReader,
-    IGitRepositoryStore git) : IProjectVersionHistoryService
+    IGitRepositoryStore git,
+    ProjectVersionHistoryUiEvents historyEvents) : IProjectVersionHistoryService
 {
     private const string TemporaryDirectoryPrefix = "lorekeeper-version-history-";
 
@@ -105,6 +106,7 @@ public sealed class ProjectVersionHistoryService(
                         authoredAt ?? DateTimeOffset.UtcNow,
                         createdCommit: false,
                         cancellationToken);
+                    historyEvents.PublishCheckpointCreated(projectId);
                     return duplicate;
                 }
             }
@@ -124,6 +126,7 @@ public sealed class ProjectVersionHistoryService(
                 authoredAt ?? DateTimeOffset.UtcNow,
                 write.Created,
                 cancellationToken);
+            historyEvents.PublishCheckpointCreated(projectId);
             return checkpoint;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -180,6 +183,37 @@ public sealed class ProjectVersionHistoryService(
             ToRepositoryView(repository, ProjectVersionRepositoryHealthFromCache(repository)),
             checkpoints.Select(ToCheckpointView).ToList(),
             operations.Select(ToOperationView).ToList());
+    }
+
+    public async Task<int> ClearFailedOperationNoticesAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateProjectId(projectId);
+        await using var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var repository = await operation.Db.ProjectVersionRepositories
+            .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
+        if (repository is null)
+            return 0;
+
+        var failedOperations = await operation.Db.ProjectVersionOperations
+            .Where(item => item.ProjectVersionRepositoryId == repository.Id)
+            .Where(item => item.Status == ProjectVersionOperationStatus.Failed)
+            .Where(item => item.AcknowledgedAt == null)
+            .ToListAsync(cancellationToken);
+        if (failedOperations.Count == 0)
+            return 0;
+
+        var acknowledgedAt = DateTime.UtcNow;
+        foreach (var failedOperation in failedOperations)
+        {
+            failedOperation.AcknowledgedAt = acknowledgedAt;
+            failedOperation.UpdatedAt = acknowledgedAt;
+        }
+
+        await operation.SaveChangesAsync(cancellationToken);
+        return failedOperations.Count;
     }
 
     public async Task<ProjectVersionStatusView?> GetStatusAsync(
@@ -708,6 +742,7 @@ public sealed class ProjectVersionHistoryService(
         operation.StartedAt,
         operation.HeartbeatAt,
         operation.CompletedAt,
+        operation.AcknowledgedAt,
         operation.CreatedAt,
         operation.UpdatedAt);
 

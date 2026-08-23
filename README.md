@@ -249,13 +249,16 @@ OAuth tokens, AI/review/job/staging rows, FTS/vector/context projections,
 visual candidates, render artifacts and page maps, audits, migration journals,
 and process-lifetime Undo/Redo. Derived indexes are rebuilt after restore.
 
-The History page can create a semantic checkpoint, compare two checkpoints, and
-restore a whole project, selected major areas, or selected chapter IDs. A
+The History page can create a semantic checkpoint, compare two checkpoints with
+side-by-side readable text, and restore a whole project, selected major areas, or
+selected chapter IDs. Text previews are bounded and binary assets remain metadata-
+only. Failed operation notices can be cleared from the page while Lorekeeper keeps
+their durable journal and recovery records. A
 message-free **Checkpoint** shortcut beside the theme control captures current
 work from any project page and disables itself when the project is already
 checkpointed or history is unavailable. Chapter
 restore replaces/adds/removes by stable ID and makes annotation inclusion
-explicit. Restore validates identities and dependencies, creates a safety
+explicit, and opening Restore brings that workflow into view. Restore validates identities and dependencies, creates a safety
 checkpoint first, applies canonical rows atomically, and records a restored
 checkpoint afterward; unresolved project references remain unresolved rather
 than being guessed from a name or slug.
@@ -264,9 +267,10 @@ GitHub synchronization is optional and explicit. Fetch updates only local
 remote-tracking state. Apply-remote and push require a clean project and use
 fast-forward-only rules; no merge, rebase, force-push, or silent overwrite is
 performed. Diverged or unrelated histories remain visible for a deliberate
-decision. Creating a GitHub remote also requires acknowledging that manuscript
+decision. Attaching a GitHub remote also requires acknowledging that manuscript
 text, sources, images, and fonts may be uploaded; review repository privacy and
-asset licensing first.
+asset licensing first. Once attached, the setup warning and repository pickers are
+replaced by the remote status and synchronization actions.
 
 Lorekeeper ships its public, maintainer-owned GitHub OAuth application client ID,
 so **Connect GitHub** can start device authorization without per-user setup. Forks
@@ -284,10 +288,11 @@ remote. Deleting a project removes its app-managed local history after the
 database deletion succeeds; it never deletes the remote GitHub repository.
 Removing a remote attachment likewise leaves local history and tracking refs.
 
-The current repository has not yet been validated against a real GitHub account,
-OAuth flow, network fetch/push/clone, or manual History/Version control UI
-exercise. Those integration and manual checks remain pending; local builds and
-automated versioned-transformation checks do not establish them.
+GitHub device authorization and repository attachment have been exercised with a
+real account on Windows, and the History workspace has been exercised against an
+isolated local project. Live network fetch, push, remote checkout, and clone remain
+unvalidated; local builds and versioned-transformation checks do not establish
+those provider operations.
 
 ## Requirements
 

@@ -117,6 +117,7 @@ builder.Services.AddSingleton<IVersionHistorySnapshotReader, VersionHistorySnaps
 builder.Services.AddSingleton<IVersionHistorySnapshotComparer, VersionHistorySnapshotComparer>();
 builder.Services.AddScoped<IVersionHistorySnapshotWriter, VersionHistorySnapshotWriter>();
 builder.Services.AddScoped<IProjectVersionHistoryService, ProjectVersionHistoryService>();
+builder.Services.AddSingleton<ProjectVersionHistoryUiEvents>();
 builder.Services.AddScoped<IProjectVersionHistoryReconciliationService, ProjectVersionHistoryReconciliationService>();
 builder.Services.AddScoped<IAssistantVersionCheckpointService, AssistantVersionCheckpointService>();
 builder.Services.AddScoped<ProjectVersionRestoreService>();

@@ -22,8 +22,7 @@ public sealed class ProjectVersionSyncService(
     IGitHubConnectionService github,
     IAppDatabaseOperationFactory database,
     IVersionHistorySnapshotReader snapshotReader,
-    IProjectVersionHistoryService history,
-    IProjectMutationCoordinator projectMutations) : IProjectVersionSyncService
+    IProjectVersionHistoryService history) : IProjectVersionSyncService
 {
     private const string MainReferenceName = "refs/heads/main";
     private const string DefaultRemoteName = "origin";
@@ -303,16 +302,6 @@ public sealed class ProjectVersionSyncService(
                     "The remote branch was fetched without changing local main.");
             },
             cancellationToken);
-    }
-
-    public async Task<ProjectVersionSyncStatus> FastForwardLocalAsync(
-        Guid remoteId,
-        CancellationToken cancellationToken = default)
-    {
-        var remote = await LoadRemoteAsync(remoteId, cancellationToken);
-        var projectId = await LoadProjectIdAsync(remote.ProjectVersionRepositoryId, cancellationToken);
-        await using var mutationLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
-        return await FastForwardLocalUnderLeaseAsync(remote, cancellationToken);
     }
 
     internal async Task<ProjectVersionSyncStatus> FastForwardLocalUnderLeaseAsync(

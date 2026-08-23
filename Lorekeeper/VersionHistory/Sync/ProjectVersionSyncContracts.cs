@@ -58,8 +58,8 @@ public enum ProjectVersionSyncDisposition
 
 /// <summary>
 /// UI-ready local/remote relationship. A fetched remote tip remains in
-/// TrackingRef while local main is unchanged unless FastForwardLocalAsync is
-/// explicitly requested.
+/// TrackingRef while local main is unchanged unless the coordinated remote
+/// update workflow explicitly applies it.
 /// </summary>
 public sealed record ProjectVersionSyncStatus(
     Guid ProjectVersionRepositoryId,
@@ -142,10 +142,6 @@ public interface IProjectVersionSyncService
         CancellationToken cancellationToken = default);
 
     Task<ProjectVersionSyncStatus> FetchAsync(
-        Guid remoteId,
-        CancellationToken cancellationToken = default);
-
-    Task<ProjectVersionSyncStatus> FastForwardLocalAsync(
         Guid remoteId,
         CancellationToken cancellationToken = default);
 

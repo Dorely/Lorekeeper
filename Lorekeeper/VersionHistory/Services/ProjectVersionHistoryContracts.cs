@@ -54,6 +54,7 @@ public sealed record ProjectVersionOperationView(
     DateTime? StartedAt,
     DateTime? HeartbeatAt,
     DateTime? CompletedAt,
+    DateTime? AcknowledgedAt,
     DateTime CreatedAt,
     DateTime UpdatedAt);
 
@@ -94,6 +95,10 @@ public interface IProjectVersionHistoryService
         Guid projectId,
         int maxCheckpoints = 100,
         int maxOperations = 100,
+        CancellationToken cancellationToken = default);
+
+    Task<int> ClearFailedOperationNoticesAsync(
+        Guid projectId,
         CancellationToken cancellationToken = default);
 
     Task<ProjectVersionStatusView?> GetStatusAsync(

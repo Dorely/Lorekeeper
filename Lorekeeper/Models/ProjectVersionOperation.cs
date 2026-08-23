@@ -43,6 +43,7 @@ public sealed class ProjectVersionOperation
     public DateTime? StartedAt { get; set; }
     public DateTime? HeartbeatAt { get; set; }
     public DateTime? CompletedAt { get; set; }
+    public DateTime? AcknowledgedAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

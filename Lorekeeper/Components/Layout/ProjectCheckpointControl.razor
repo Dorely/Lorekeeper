@@ -5,6 +5,7 @@
 @inject NavigationManager Navigation
 @inject IProjectService Projects
 @inject IProjectVersionHistoryService VersionHistory
+@inject ProjectVersionHistoryUiEvents HistoryEvents
 
 <div class="project-checkpoint-control" @onmouseenter="RefreshStatusAsync" @onfocusin="RefreshStatusAsync">
     <button type="button"
@@ -58,6 +59,7 @@
     private bool CanCheckpoint => !_loading
         && !_busy
         && _project is not null
+        && !HistoryEvents.IsProjectOperationActive(_project.Id)
         && HistoryAvailable
         && (_status?.Repository.HeadCommitSha is null || _status.Repository.IsDirty);
 
@@ -76,6 +78,8 @@
     protected override void OnInitialized()
     {
         Navigation.LocationChanged += OnLocationChanged;
+        HistoryEvents.CheckpointCreated += HandleCheckpointCreated;
+        HistoryEvents.OperationStateChanged += HandleOperationStateChanged;
     }
 
     protected override async Task OnInitializedAsync()
@@ -189,6 +193,7 @@
             return;
 
         var generation = _loadGeneration;
+        using var operation = HistoryEvents.BeginProjectOperation(project.Id);
         _busy = true;
         _error = null;
         _message = null;
@@ -241,6 +246,51 @@
 
     private bool IsCurrent(int generation) => !_disposed && generation == _loadGeneration;
 
+    private async void HandleCheckpointCreated(Guid projectId)
+    {
+        if (_disposed || _project?.Id != projectId || _busy || HistoryEvents.IsProjectOperationActive(projectId))
+            return;
+
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                await RefreshStatusAsync();
+                if (!_disposed)
+                    StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private async void HandleOperationStateChanged(Guid projectId)
+    {
+        if (_disposed || _project?.Id != projectId)
+            return;
+
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                if (!HistoryEvents.IsProjectOperationActive(projectId) && !_busy)
+                    await RefreshStatusAsync();
+                if (!_disposed)
+                    StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -248,6 +298,8 @@
 
         _disposed = true;
         Navigation.LocationChanged -= OnLocationChanged;
+        HistoryEvents.CheckpointCreated -= HandleCheckpointCreated;
+        HistoryEvents.OperationStateChanged -= HandleOperationStateChanged;
         _lifetimeCancellation.Cancel();
         _lifetimeCancellation.Dispose();
     }
