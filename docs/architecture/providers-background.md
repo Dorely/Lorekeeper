@@ -130,14 +130,20 @@ those at the card boundary so one unavailable OAuth endpoint cannot break the
 settings page.
 
 Version-control GitHub access is a separate provider-owned boundary. Its device
-authorization and REST client bind `VersionHistory:GitHub:ClientId` (or the
-standard `VersionHistory__GitHub__ClientId` environment override), store the
-resulting access token only in `GitHubConnection`, and expose non-secret account
-and repository metadata to the History surface. Device authorization, repository
-listing/creation, fetch, push, and remote checkout are explicit user-started
-network actions; loading cached connection or remote status does not contact
-GitHub. Snapshot manifests, Git metadata, logs, and assistant payloads never
-carry the token or device code.
+authorization and REST client use the shipped public client ID for Lorekeeper's
+maintainer-owned OAuth app. Forks and custom deployments can replace it through
+`VersionHistory:GitHub:ClientId` or the standard
+`VersionHistory__GitHub__ClientId` environment override. The resulting access
+token is stored only in `GitHubConnection`, and the service exposes non-secret
+account and repository metadata to the History surface. Device authorization,
+repository listing/creation, fetch, manual push, and remote checkout are explicit
+user-started network actions; loading cached connection or remote status does
+not contact GitHub. After explicit remote attachment, successful local
+checkpoints enqueue durable automatic push intents for all attached remotes.
+The queue is only a process-local wake-up; the startup-gated worker scans the
+operation journal, creates fresh scopes, and holds the project mutation lease
+through each non-force push attempt. Snapshot manifests, Git metadata, logs,
+and assistant payloads never carry the token or device code.
 
 ### Embedding configuration and rebuilds
 
@@ -260,7 +266,8 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 - [Persistence, migrations, and import](persistence-migrations-import.md) — credential/job persistence, database-operation lifetimes, import atomicity, and recovery.
 - [Press production](press-production.md) — publication preparation/render queues and native process containment.
 - [Version history and synchronization](version-history-sync.md) — GitHub
-  device-flow use, explicit remote transport, and snapshot credential boundary.
+  device-flow use, explicit remote attachment, durable automatic push transport,
+  and snapshot credential boundary.
 
 ## Relevant verification
 

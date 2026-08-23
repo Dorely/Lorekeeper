@@ -32,7 +32,32 @@ public sealed record VersionHistorySnapshotChangeEntry(
     string? AfterHash,
     bool ManuscriptChanged,
     bool MetadataChanged,
-    bool BinaryChanged);
+    bool BinaryChanged)
+{
+    /// <summary>
+    /// Bounded readable text from the baseline item when the compared item has
+    /// text content. This is never raw semantic JSON or binary data.
+    /// </summary>
+    public string? BeforeText { get; init; }
+
+    /// <summary>
+    /// Bounded readable text from the candidate item when the compared item has
+    /// text content. This is never raw semantic JSON or binary data.
+    /// </summary>
+    public string? AfterText { get; init; }
+
+    /// <summary>
+    /// Indicates that <see cref="BeforeText"/> was bounded to the comparer
+    /// limit and is therefore only a prefix of the baseline text.
+    /// </summary>
+    public bool BeforeTextTruncated { get; init; }
+
+    /// <summary>
+    /// Indicates that <see cref="AfterText"/> was bounded to the comparer
+    /// limit and is therefore only a prefix of the candidate text.
+    /// </summary>
+    public bool AfterTextTruncated { get; init; }
+}
 
 public sealed record VersionHistorySnapshotAreaComparison(
     string Area,

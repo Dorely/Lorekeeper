@@ -153,7 +153,10 @@ to the persistence chapter. Version history follows the same split through
 `GitRepositoryStoreOptions`: development repositories live under the ignored
 `History/` directory beside the app data base, while packaged repositories live
 under `%LocalAppData%/Lorekeeper/History/<repository-id>.git`. Release
-orchestration and platform evidence belong to the validation chapter.
+orchestration and platform evidence belong to the validation chapter. The
+automatic checkpoint-push worker is startup-gated on database readiness and
+uses fresh scopes plus durable operation rows; its process-local queue is only a
+wake-up signal.
 
 ### Application-owned interaction surfaces
 
@@ -206,9 +209,10 @@ entities.
 discovery; `Startup:MinimumSplashMilliseconds` controls the minimum startup
 surface duration; and `Blazor:MaximumReceiveMessageSizeBytes` bounds interactive
 payloads. `VersionHistory:HistoryRoot` optionally overrides the local Git
-history root, while `VersionHistory:GitHub:ClientId` configures the
-version-control device-flow application (with standard environment-variable
-overrides). The version-history chapter owns those feature contracts;
+history root. The distributable supplies Lorekeeper's public GitHub OAuth client
+ID; forks and custom deployments can replace it through
+`VersionHistory:GitHub:ClientId` or the standard environment-variable override.
+The version-history chapter owns those feature contracts;
 provider-owned keys are described in the providers chapter.
 
 ## Key files and file families
@@ -235,7 +239,8 @@ provider-owned keys are described in the providers chapter.
 - [Assistants and chat](assistants-chat.md) — Blazor-independent conversation runtimes and shared chat surfaces.
 - [Composition and media](composition-media.md) — shared image UI and visual-workspace browser bridges.
 - [Version history and synchronization](version-history-sync.md) — local Git
-  paths, checkpoint/restore boundaries, and explicit remote actions.
+  paths, checkpoint/restore boundaries, explicit remote attachment, and durable
+  automatic push actions.
 - [Press production](press-production.md) — packaged native renderer and publication job processing.
 - [Validation and documentation](validation-documentation.md) — required build/startup checks and desktop/release validation.
 

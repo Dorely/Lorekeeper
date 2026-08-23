@@ -490,6 +490,7 @@ $RECYCLE.BIN/
 *.db-shm
 *.db-wal
 .playwright-mcp/
+.artifacts/
 **/.migration-backups/
 **/.mutation-locks/
 /History/

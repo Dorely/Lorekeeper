@@ -239,7 +239,10 @@ app data base; the repository-root `History/` directory is ignored by Git.
 Packaged builds use `%LocalAppData%/Lorekeeper/History/<repository-id>.git`.
 The repository contains deterministic UTF-8 snapshot files and ordinary Git
 blobs for project images and imported fonts; it is not a SQLite backup or a
-working checkout.
+working checkout. Every chapter has a stable directory under
+`narrative/chapters/<chapter-id>/`: `chapter.json` contains its metadata and
+`manuscript.json` contains the actual structured manuscript as readable,
+unescaped JSON, so chapter edits remain visible in GitHub and ordinary Git diffs.
 
 Snapshots preserve the authored creative areas—project settings and references,
 narrative and chapters, canonical graph data, ingest sources, images/fonts and
@@ -249,31 +252,46 @@ OAuth tokens, AI/review/job/staging rows, FTS/vector/context projections,
 visual candidates, render artifacts and page maps, audits, migration journals,
 and process-lifetime Undo/Redo. Derived indexes are rebuilt after restore.
 
-The History page can create a semantic checkpoint, compare two checkpoints, and
-restore a whole project, selected major areas, or selected chapter IDs. A
+The History page can create a semantic checkpoint, compare two checkpoints with
+side-by-side readable text, and restore a whole project, selected major areas, or
+selected chapter IDs. Text previews are bounded and binary assets remain metadata-
+only. Failed operation notices can be cleared from the page while Lorekeeper keeps
+their durable journal and recovery records. A
 message-free **Checkpoint** shortcut beside the theme control captures current
 work from any project page and disables itself when the project is already
 checkpointed or history is unavailable. Chapter
 restore replaces/adds/removes by stable ID and makes annotation inclusion
-explicit. Restore validates identities and dependencies, creates a safety
+explicit, and opening Restore brings that workflow into view. Restore validates identities and dependencies, creates a safety
 checkpoint first, applies canonical rows atomically, and records a restored
 checkpoint afterward; unresolved project references remain unresolved rather
 than being guessed from a name or slug.
 
-GitHub synchronization is optional and explicit. Fetch updates only local
-remote-tracking state. Apply-remote and push require a clean project and use
-fast-forward-only rules; no merge, rebase, force-push, or silent overwrite is
-performed. Diverged or unrelated histories remain visible for a deliberate
-decision. Creating a GitHub remote also requires acknowledging that manuscript
+GitHub synchronization is optional and begins with an explicit remote
+attachment. After attachment, every successful local checkpoint creates a
+durable automatic push intent for every attached remote; the local checkpoint
+never waits for or depends on network work. Fetch, apply-remote, and manual push
+remain user-started actions. Applying remote changes and every push require a
+clean workspace and use fast-forward-only rules; no merge, rebase, force-push,
+or silent overwrite is performed. Diverged or unrelated histories remain visible
+for a deliberate decision. A push is reported successful only after GitHub is
+fetched again and GitHub's API independently reports the exact checkpoint commit
+on the remote branch. Git transport remains embedded in Lorekeeper; no system Git
+executable is invoked or required. Lorekeeper will not silently recreate a
+missing branch in a non-empty remote repository.
+Attaching a GitHub remote also requires acknowledging that manuscript
 text, sources, images, and fonts may be uploaded; review repository privacy and
-asset licensing first.
+asset licensing first. Once attached, the setup warning and repository pickers are
+replaced by the remote status and synchronization actions.
 
-Configure the GitHub OAuth application client ID as
-`VersionHistory:GitHub:ClientId` in configuration or
-`VersionHistory__GitHub__ClientId` as an environment variable. Lorekeeper stores
-the resulting access token only in its provider-owned local credential row. GitHub
-device authorization, repository listing/creation, fetch, push, and remote
-checkout contact the network only after the corresponding action is selected.
+Lorekeeper ships its public, maintainer-owned GitHub OAuth application client ID,
+so **Connect GitHub** can start device authorization without per-user setup. Forks
+and custom deployments can replace it with `VersionHistory:GitHub:ClientId` in
+configuration or `VersionHistory__GitHub__ClientId` as an environment variable.
+Lorekeeper stores the resulting access token only in its provider-owned local
+credential row. GitHub device authorization, repository listing/creation, fetch,
+manual push, and remote checkout contact the network only after the corresponding
+action is selected. Automatic pushes are limited to explicitly attached remotes
+and are driven by durable local checkpoint intents.
 
 A validated clone/import path can read a Lorekeeper repository head, reject
 project/repository/slug collisions, create a new local project and repository
@@ -282,10 +300,12 @@ remote. Deleting a project removes its app-managed local history after the
 database deletion succeeds; it never deletes the remote GitHub repository.
 Removing a remote attachment likewise leaves local history and tracking refs.
 
-The current repository has not yet been validated against a real GitHub account,
-OAuth flow, network fetch/push/clone, or manual History/Version control UI
-exercise. Those integration and manual checks remain pending; local builds and
-automated versioned-transformation checks do not establish them.
+GitHub device authorization, repository attachment, manual push, and automatic
+checkpoint delivery have been exercised with a real account on Windows. Those
+checks verified the exact remote branch head and the readable chapter and
+manuscript files in GitHub. Remote checkout and clone remain unvalidated; local
+builds and versioned-transformation checks do not establish those provider
+operations.
 
 ## Requirements
 

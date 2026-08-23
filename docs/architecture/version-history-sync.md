@@ -23,9 +23,12 @@ returns UI-ready semantic differences; it never reads Git or SQLite.
 
 SQLite and the current domain models remain the live project authority. Git is a
 durable, reviewable history of selected canonical creative state, not a second
-live database and not a working checkout. Remote synchronization is an explicit
-transport action; it does not silently merge, rebase, force-push, or resolve
-conflicts by discarding either history.
+live database and not a working checkout. Remote attachment is explicit opt-in.
+Once attached, each successful local checkpoint durably records one automatic
+push intent per attachment; a startup-gated worker later processes those intents
+without delaying or failing the local checkpoint. User-started fetch, checkout,
+and manual push remain explicit transport actions. No path silently merges,
+rebases, force-pushes, or resolves conflicts by discarding either history.
 
 ## Current architecture and invariants
 
@@ -58,19 +61,26 @@ tree has this stable layout:
 manifest.json
 project/project.json
 narrative/narrative.json
+narrative/chapters/<chapter-id>/chapter.json
+narrative/chapters/<chapter-id>/manuscript.json
 graph/graph.json
 sources/sources.json
 assets/assets.json
 assets/images/<image-id>/content.<extension>
 assets/fonts/<family-id>/faces/<face-id>/content.<extension>
-manuscript/manuscript.json
+manuscript/styles.json
 composition/composition.json
 publication/publication.json
 ```
 
 JSON is UTF-8 without a BOM, indented by the canonical serializer, and
 recursively ordinal-sorted by property name. Arrays
-are ordered by stable identity or the area's semantic key. Embedded properties
+are ordered by stable identity or the area's semantic key. Each chapter has one
+stable lowercase `N`-format GUID directory: `chapter.json` contains its metadata
+and manuscript revision, while `manuscript.json` contains the structured
+manuscript as direct canonical JSON rather than an escaped JSON string. The
+reader requires exactly both files for every chapter and rejects orphaned,
+duplicated, or path/identity-mismatched chapter files. Other embedded properties
 whose names end in `Json` are parsed, recursively canonicalized, and emitted as
 canonical JSON strings; malformed non-empty values and embedded credential,
 token, secret, password, API-key, or authorization-code properties fail closed.
@@ -91,14 +101,14 @@ The captured canonical areas are:
 - `project`: project settings, page setup, contest-mode setting, and outgoing
   references;
 - `narrative`: Book Brief and canonical-source selections, entity types, acts,
-  chapters, writing samples, editor context preferences, and manuscript
-  annotations;
+  per-chapter metadata and directly reviewable structured manuscript files,
+  writing samples, editor context preferences, and manuscript annotations;
 - `graph`: canonical graph nodes and edges, excluding structural and derived
   projection edges;
 - `sources`: ingest sources and their source chunks, pages, and blocks, with
   fetch/job timestamps and provider diagnostics removed;
 - `assets`: project images, entity visual examples, and imported font families;
-- `manuscript`: project Book Text Styles;
+- `manuscript`: project Book Text Styles in `manuscript/styles.json`;
 - `composition`: page compositions, variants, and scene data; and
 - `publication`: Core Book, editions, and publication sections.
 
@@ -121,13 +131,23 @@ used by the history and restore services. Repeated content is deduplicated at
 the Git commit boundary, while the timeline can retain the semantic operation
 record.
 
-The History workspace provides the message-bearing checkpoint form. The shared
+The History workspace provides the message-bearing checkpoint form. Its timeline
+can compare two checkpoints in chronological order with bounded, readable before/after panes derived
+from semantic manuscript content; raw semantic JSON and binary assets are never
+rendered. Failed operation notices remain durable journal rows for reconciliation,
+but the user can acknowledge and clear them from the sidebar without deleting
+their error or recovery data. Opening Restore focuses the controlled-restore card,
+where whole-project, major-area, and selected-chapter scopes are explicit. The shared
 layout also renders `ProjectCheckpointControl` beside the theme control: it
 resolves project routes, ensures the local repository exists, refreshes dirty
 state when approached, and creates a manual checkpoint with the fixed semantic
 message `Checkpoint current work`. It remains visible but disabled outside a
-project, while busy, for a clean initialized project, or when repository health
-is unavailable; an uninitialized project can create its first checkpoint.
+project, while any project-history operation is active, for a clean initialized
+project, or when repository health is unavailable; an uninitialized project can
+create its first checkpoint. Process-local, project-scoped operation leases keep
+the independently rendered workspace and layout control synchronized. Checkpoint
+refreshes that arrive during restore or synchronization run after the owning
+operation becomes idle.
 
 Restore validates manifest identity, every file hash and blob length, the full
 referential graph, required assets/styles/compositions/publication rows, and
@@ -158,8 +178,11 @@ projections. It fails closed on a head mismatch.
 
 ### Remote synchronization
 
-Fetching a remote is a network action and updates only the remote-tracking ref;
-cached status and local reads do not contact GitHub. Applying a fetched remote
+Fetching a remote is a network action and updates only the attachment-specific
+remote-tracking ref; cached status and local reads do not contact GitHub. A
+missing/deleted branch or empty repository clears that active ref, so status
+returns to attached/unknown rather than retaining an old synchronized tip.
+Applying a fetched remote
 requires a clean project, creates a deduplicated safety checkpoint, and uses
 fast-forward-only compare-and-swap before exact-head checkout. Local `main` is
 advanced only when the remote tip is a descendant. The final clean-state check,
@@ -167,20 +190,48 @@ ref update, cache advancement, and SQLite checkout share one project mutation
 lease so an editor/checkpoint cannot interleave them. Pushing likewise requires a
 clean project and an existing local checkpoint; it permits only a non-force
 fast-forward refspec when the remote is empty or an ancestor of local `main`.
+Empty GitHub repositories use `main` for their first push. Manual and automatic
+pushes share this transport policy, while automatic attempts use their existing
+durable operation row and remain retryable after network or history failures.
+Lorekeeper does not treat libgit2 transport completion as remote success: ref-level
+push errors fail the operation, a second authenticated fetch must observe the
+exact requested commit, and GitHub's API must independently report that same
+branch head before the operation can become synchronized or succeeded.
+The OAuth token remains inside the GitHub provider boundary and reaches the
+embedded libgit2 HTTPS transport through both its credential callback and a
+repository-bound preemptive in-memory authorization header; no system Git
+executable is invoked. A missing configured branch in a non-empty repository
+fails closed rather than being recreated automatically. A queued automatic push
+superseded by a newer local checkpoint is canceled as non-resumable; only the
+intent whose target was actually observed on GitHub can succeed.
 
 Diverged and unrelated histories remain visible with their tracking refs and
 are not merged, rebased, force-pushed, overwritten, or silently discarded.
 Removing a local remote attachment preserves local history and tracking refs;
 it removes only the project attachment and Git remote configuration.
 
-GitHub account setup uses device authorization. The OAuth app client ID is
-configured as `VersionHistory:GitHub:ClientId` (or the standard environment
-override `VersionHistory__GitHub__ClientId`). Access tokens remain in the
-provider-owned `GitHubConnection` row and are never written into manifests,
-snapshots, remote metadata, logs, or UI payloads. Repository listing, creation,
-fetch, push, and device authorization happen only after the user explicitly
-starts the corresponding action; selecting a remote also requires an explicit
-acknowledgement that creative material may be uploaded.
+`ProjectVersionOperation` is also the automatic-push durable boundary. Its
+nullable remote-attachment and exact target-commit fields deduplicate intents;
+the process-local queue only wakes a startup-gated hosted worker. The worker
+creates fresh scopes, scans pending/interrupted rows, and holds the project
+mutation lease across dirty-state checks, fetch, compare, push, and
+tracking-ref updates. It never retains scoped database contexts across network
+calls. Startup reconciliation also creates a missing intent for the current head
+of each existing attachment, so upgrading an already attached project does not
+require an extra checkpoint before its first automatic delivery.
+
+GitHub account setup uses device authorization. The distributable ships the
+public client ID for Lorekeeper's maintainer-owned OAuth app. Forks and custom
+deployments can replace it through `VersionHistory:GitHub:ClientId` (or the
+standard environment override `VersionHistory__GitHub__ClientId`). Access
+tokens remain in the provider-owned `GitHubConnection` row and are never written
+into manifests, snapshots, remote metadata, logs, or UI payloads. Repository
+listing, creation, fetch, manual push, and device authorization happen only after
+the user explicitly starts the corresponding action. Automatic push begins only
+after explicit attachment and a successful local checkpoint. Attaching a remote requires an
+explicit acknowledgement that creative material may be uploaded. After attachment,
+the consent and repository-selection controls collapse into the attached remote
+status and actions; removing the remote makes setup available again.
 Credentialed Git transport accepts only absolute `https://github.com/...` clone
 URLs matching the selected owner and repository; alternate hosts fail closed.
 
@@ -212,7 +263,7 @@ the cutover.
 | `Lorekeeper/VersionHistory/Snapshots/` | Schema-v1 payloads, canonical JSON, deterministic writer, strict reader, and manifest/blob validation. |
 | `Lorekeeper/VersionHistory/Git/` | Bare-repository paths, Git object/ref operations, history relation, and safe deletion staging. |
 | `Lorekeeper/VersionHistory/Services/` | Checkpoint timeline, dirty-state reconciliation, operation journal, and assistant checkpoint adapter. |
-| `Lorekeeper/VersionHistory/Compare/` | Pure semantic area summaries, detailed entries, and restore-selection contract. |
+| `Lorekeeper/VersionHistory/Compare/` | Pure semantic area summaries, bounded readable before/after text, detailed entries, and restore-selection contract. |
 | `Lorekeeper/VersionHistory/Restore/` | Whole/selective restore, clone import application, exact-head checkout, dependency validation, and projection repair. |
 | `Lorekeeper/VersionHistory/Sync/` | GitHub remote attachment, fetch/fast-forward/push policy, remote checkout coordination, and clone transport. |
 | `Lorekeeper/VersionHistory/GitHub/` | Device authorization, GitHub API transport, connection validation, and non-secret remote views. |

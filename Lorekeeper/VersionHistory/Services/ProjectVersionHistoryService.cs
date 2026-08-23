@@ -2,6 +2,7 @@ using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.VersionHistory.Git;
 using Lorekeeper.VersionHistory.Snapshots;
+using Lorekeeper.VersionHistory.Sync;
 using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.VersionHistory.Services;
@@ -16,7 +17,9 @@ public sealed class ProjectVersionHistoryService(
     IAppDatabaseOperationFactory database,
     IVersionHistorySnapshotWriter snapshotWriter,
     IVersionHistorySnapshotReader snapshotReader,
-    IGitRepositoryStore git) : IProjectVersionHistoryService
+    IGitRepositoryStore git,
+    ProjectVersionHistoryUiEvents historyEvents,
+    IProjectVersionAutoPushQueue autoPushQueue) : IProjectVersionHistoryService
 {
     private const string TemporaryDirectoryPrefix = "lorekeeper-version-history-";
 
@@ -105,6 +108,7 @@ public sealed class ProjectVersionHistoryService(
                         authoredAt ?? DateTimeOffset.UtcNow,
                         createdCommit: false,
                         cancellationToken);
+                    historyEvents.PublishCheckpointCreated(projectId);
                     return duplicate;
                 }
             }
@@ -124,6 +128,7 @@ public sealed class ProjectVersionHistoryService(
                 authoredAt ?? DateTimeOffset.UtcNow,
                 write.Created,
                 cancellationToken);
+            historyEvents.PublishCheckpointCreated(projectId);
             return checkpoint;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -182,6 +187,37 @@ public sealed class ProjectVersionHistoryService(
             operations.Select(ToOperationView).ToList());
     }
 
+    public async Task<int> ClearFailedOperationNoticesAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateProjectId(projectId);
+        await using var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var repository = await operation.Db.ProjectVersionRepositories
+            .SingleOrDefaultAsync(item => item.ProjectId == projectId, cancellationToken);
+        if (repository is null)
+            return 0;
+
+        var failedOperations = await operation.Db.ProjectVersionOperations
+            .Where(item => item.ProjectVersionRepositoryId == repository.Id)
+            .Where(item => item.Status == ProjectVersionOperationStatus.Failed)
+            .Where(item => item.AcknowledgedAt == null)
+            .ToListAsync(cancellationToken);
+        if (failedOperations.Count == 0)
+            return 0;
+
+        var acknowledgedAt = DateTime.UtcNow;
+        foreach (var failedOperation in failedOperations)
+        {
+            failedOperation.AcknowledgedAt = acknowledgedAt;
+            failedOperation.UpdatedAt = acknowledgedAt;
+        }
+
+        await operation.SaveChangesAsync(cancellationToken);
+        return failedOperations.Count;
+    }
+
     public async Task<ProjectVersionStatusView?> GetStatusAsync(
         Guid projectId,
         bool includeCurrentSnapshotHash = true,
@@ -189,6 +225,20 @@ public sealed class ProjectVersionHistoryService(
     {
         ValidateProjectId(projectId);
         await using var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        return await GetStatusUnderLeaseAsync(projectId, includeCurrentSnapshotHash, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads and validates status while the caller owns the project mutation
+    /// lease. Sync uses this path so its cleanliness check and push remain one
+    /// serialized operation without attempting to reacquire the same lease.
+    /// </summary>
+    internal async Task<ProjectVersionStatusView?> GetStatusUnderLeaseAsync(
+        Guid projectId,
+        bool includeCurrentSnapshotHash,
+        CancellationToken cancellationToken)
+    {
+        ValidateProjectId(projectId);
         ProjectVersionRepository? repository;
         await using (var read = await database.OpenReadAsync(cancellationToken))
         {
@@ -406,8 +456,84 @@ public sealed class ProjectVersionHistoryService(
         journal.ErrorCode = null;
         journal.ErrorMessage = null;
 
+        await AddPendingAutoPushIntentsAsync(
+            db,
+            repositoryId,
+            commit.Sha,
+            DateTime.UtcNow,
+            cancellationToken);
+
         await operation.SaveChangesAsync(cancellationToken);
+        autoPushQueue.Signal();
         return ToCheckpointView(checkpoint);
+    }
+
+    private static async Task AddPendingAutoPushIntentsAsync(
+        AppDbContext db,
+        Guid repositoryId,
+        string targetCommitSha,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        var remotes = await db.ProjectGitRemotes
+            .Where(remote => remote.ProjectVersionRepositoryId == repositoryId)
+            .ToListAsync(cancellationToken);
+        foreach (var remote in remotes)
+            await AddPendingAutoPushIntentAsync(
+                db,
+                repositoryId,
+                remote,
+                targetCommitSha,
+                now,
+                cancellationToken);
+    }
+
+    internal static async Task AddPendingAutoPushIntentAsync(
+        AppDbContext db,
+        Guid repositoryId,
+        ProjectGitRemote remote,
+        string? targetCommitSha,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(targetCommitSha))
+            return;
+
+        var existing = await db.ProjectVersionOperations
+            .SingleOrDefaultAsync(
+            operation => operation.ProjectVersionRepositoryId == repositoryId
+                && operation.ProjectGitRemoteId == remote.Id
+                && operation.TargetCommitSha == targetCommitSha,
+            cancellationToken);
+        if (existing is not null)
+        {
+            if (existing.Status is ProjectVersionOperationStatus.Failed or ProjectVersionOperationStatus.Canceled)
+            {
+                existing.Status = ProjectVersionOperationStatus.Pending;
+                existing.IsResumable = true;
+                existing.ErrorCode = null;
+                existing.ErrorMessage = null;
+                existing.StartedAt = null;
+                existing.HeartbeatAt = null;
+                existing.CompletedAt = null;
+                existing.UpdatedAt = now;
+            }
+            return;
+        }
+
+        db.ProjectVersionOperations.Add(new ProjectVersionOperation
+        {
+            ProjectVersionRepositoryId = repositoryId,
+            ProjectGitRemoteId = remote.Id,
+            Kind = ProjectVersionOperationKind.AutoPush,
+            Status = ProjectVersionOperationStatus.Pending,
+            RequestKey = $"auto-push:{remote.Id:N}:{targetCommitSha}",
+            TargetCommitSha = targetCommitSha,
+            IsResumable = true,
+            AttemptCount = 0,
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
     }
 
     private async Task TryFailOperationAsync(
@@ -708,6 +834,7 @@ public sealed class ProjectVersionHistoryService(
         operation.StartedAt,
         operation.HeartbeatAt,
         operation.CompletedAt,
+        operation.AcknowledgedAt,
         operation.CreatedAt,
         operation.UpdatedAt);
 

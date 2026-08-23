@@ -258,6 +258,7 @@ public class AppDbContext(
             entity.HasIndex(e => new { e.ProjectVersionRepositoryId, e.CreatedAt });
             entity.HasIndex(e => new { e.ProjectVersionRepositoryId, e.Status, e.UpdatedAt });
             entity.HasIndex(e => new { e.ProjectVersionRepositoryId, e.RequestKey }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectGitRemoteId, e.TargetCommitSha }).IsUnique();
             entity.Property(e => e.Kind).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
             entity.HasOne(e => e.Repository)

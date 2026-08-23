@@ -3,6 +3,7 @@ using System;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Lorekeeper.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260823043015_AcknowledgeVersionHistoryOperations")]
+    partial class AcknowledgeVersionHistoryOperations
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.5");
@@ -3324,9 +3327,6 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<DateTime?>("AcknowledgedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<Guid?>("ProjectGitRemoteId")
-                        .HasColumnType("TEXT");
-
                     b.Property<int>("AttemptCount")
                         .HasColumnType("INTEGER");
 
@@ -3365,9 +3365,6 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("TargetCommitSha")
-                        .HasColumnType("TEXT");
-
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
@@ -3379,9 +3376,6 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsUnique();
 
                     b.HasIndex("ProjectVersionRepositoryId", "Status", "UpdatedAt");
-
-                    b.HasIndex("ProjectGitRemoteId", "TargetCommitSha")
-                        .IsUnique();
 
                     b.ToTable("ProjectVersionOperations");
                 });

@@ -60,5 +60,14 @@
 }
 
 @media (max-width: 52rem) {
-    .project-checkpoint-feedback { display: none; }
+    .project-checkpoint-feedback:not(.project-checkpoint-error) { display: none; }
+
+    .project-checkpoint-error {
+        background: var(--lk-surface);
+        border: 1px solid var(--lk-danger);
+        border-radius: 0.45rem;
+        max-width: min(22rem, calc(100vw - 2rem));
+        padding: 0.35rem 0.5rem;
+        white-space: normal;
+    }
 }

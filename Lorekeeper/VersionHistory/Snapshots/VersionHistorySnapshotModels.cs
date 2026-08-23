@@ -58,6 +58,91 @@ public sealed record VersionHistorySnapshotNarrativeArea(
     IReadOnlyList<VersionHistoryContextPreference> ContextPreferences,
     IReadOnlyList<ProjectExportManuscriptAnnotation> Annotations);
 
+/// <summary>
+/// The non-chapter portion of <c>narrative/narrative.json</c>. Chapters are
+/// intentionally stored in stable ID folders so a chapter edit does not move
+/// any other chapter's path.
+/// </summary>
+public sealed record VersionHistorySnapshotNarrativeFile(
+    ProjectExportBookBrief? BookBrief,
+    IReadOnlyList<Guid> BookBriefCanonSourceIds,
+    IReadOnlyList<ProjectExportEntityType> EntityTypes,
+    IReadOnlyList<ProjectExportAct> Acts,
+    IReadOnlyList<VersionHistoryWritingSample> WritingSamples,
+    IReadOnlyList<VersionHistoryContextPreference> ContextPreferences,
+    IReadOnlyList<ProjectExportManuscriptAnnotation> Annotations)
+{
+    public static VersionHistorySnapshotNarrativeFile FromArea(VersionHistorySnapshotNarrativeArea area) => new(
+        area.BookBrief,
+        area.BookBriefCanonSourceIds,
+        area.EntityTypes,
+        area.Acts,
+        area.WritingSamples,
+        area.ContextPreferences,
+        area.Annotations);
+
+    public VersionHistorySnapshotNarrativeArea ToArea(IReadOnlyList<ProjectExportChapter> chapters) => new(
+        BookBrief,
+        BookBriefCanonSourceIds,
+        EntityTypes,
+        Acts,
+        chapters,
+        WritingSamples,
+        ContextPreferences,
+        Annotations);
+}
+
+/// <summary>
+/// All chapter metadata except the manuscript body. The body is a direct JSON
+/// file beside this metadata and is reconstructed into the in-memory export
+/// DTO when the snapshot is read.
+/// </summary>
+public sealed record VersionHistorySnapshotChapter(
+    Guid Id,
+    Guid? ActId,
+    string Title,
+    long ManuscriptRevision,
+    string? Body,
+    string Synopsis,
+    int Order,
+    ChapterVisualMode VisualMode,
+    ChapterPageLayoutKind PageLayoutKind,
+    string PageLayoutJson,
+    string IllustrationLayoutJson,
+    IReadOnlyList<Guid> ExplicitImageContextImageIds)
+{
+    public static VersionHistorySnapshotChapter FromProjectExportChapter(ProjectExportChapter chapter) => new(
+        chapter.Id,
+        chapter.ActId,
+        chapter.Title,
+        chapter.ManuscriptRevision,
+        chapter.Body,
+        chapter.Synopsis,
+        chapter.Order,
+        chapter.VisualMode,
+        chapter.PageLayoutKind,
+        chapter.PageLayoutJson,
+        chapter.IllustrationLayoutJson,
+        chapter.ExplicitImageContextImageIds);
+
+    public ProjectExportChapter ToProjectExportChapter(string manuscriptJson) => new()
+    {
+        Id = Id,
+        ActId = ActId,
+        Title = Title,
+        ManuscriptJson = manuscriptJson,
+        ManuscriptRevision = ManuscriptRevision,
+        Body = Body,
+        Synopsis = Synopsis,
+        Order = Order,
+        VisualMode = VisualMode,
+        PageLayoutKind = PageLayoutKind,
+        PageLayoutJson = PageLayoutJson,
+        IllustrationLayoutJson = IllustrationLayoutJson,
+        ExplicitImageContextImageIds = ExplicitImageContextImageIds.ToList(),
+    };
+}
+
 public sealed record VersionHistorySnapshotGraphArea(
     IReadOnlyList<ProjectExportNode> Nodes,
     IReadOnlyList<ProjectExportEdge> Edges);
