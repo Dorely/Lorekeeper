@@ -216,11 +216,16 @@
   checks. A user request to add tests does not broaden this repository boundary
   unless the user explicitly changes the two approved test purposes.
 - Every commit, regardless of its apparent scope, must pass the full repository
-  commit gate on the exact final worktree that will be committed:
+  commit gate on the exact final worktree that will be committed. Route .NET
+  outputs through the ignored commit-gate artifacts directory so verification
+  never requires stopping a developer-owned debug instance that has the default
+  `bin/` output locked:
 
   ```powershell
+  $env:ArtifactsPath = Join-Path (Get-Location) ".artifacts\commit-gate"
   dotnet build Lorekeeper.sln
   dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj
+  Remove-Item Env:ArtifactsPath
   Push-Location Lorekeeper.Press
   cargo fmt --check
   cargo clippy --all-targets -- -D warnings
@@ -234,10 +239,13 @@
   Diagnose the failure; then either correct it and rerun the entire gate, or stop
   and report the blocker. Never commit, push, tag, or publish while any command
   in this gate is failing.
-- Verify normal source changes with `dotnet build Lorekeeper.sln`. After a
+- Verify normal source changes with `dotnet build Lorekeeper.sln`, using the
+  isolated `ArtifactsPath` above when a debug instance is running. After a
   successful build, start the browser-hosted app with
   `dotnet run --project Lorekeeper --launch-profile http`, confirm the local host
-  starts without startup exceptions, and terminate it.
+  starts without startup exceptions, and terminate it. When a user-owned debug
+  instance already provides the requested validation surface, use that instance
+  without terminating it and do not start a competing host on the same port.
 - Electron is the primary/default debug target. For browser-driven validation,
   use the explicit `http` launch profile at `http://localhost:1455`; do not
   reorder the launch profiles to make browser hosting the default.
