@@ -35,6 +35,51 @@ internal static class VersionHistoryCanonicalJson
         }
     }
 
+    /// <summary>
+    /// Canonicalizes a manuscript document for its direct snapshot file. This
+    /// uses the same recursive embedded-JSON and sensitive-property checks as
+    /// JSON values embedded in the other snapshot DTOs, but returns an object
+    /// document rather than a JSON-escaped string.
+    /// </summary>
+    public static byte[] SerializeDirectManuscript(string manuscriptJson)
+    {
+        if (string.IsNullOrWhiteSpace(manuscriptJson))
+            throw new InvalidDataException("Snapshot chapter manuscript JSON is empty.");
+
+        JsonNode node;
+        try
+        {
+            node = JsonNode.Parse(manuscriptJson)
+                ?? throw new InvalidDataException("Snapshot chapter manuscript JSON is null.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("Snapshot chapter manuscript JSON is malformed.", exception);
+        }
+
+        return SerializeDirectManuscript(node);
+    }
+
+    public static string DeserializeDirectManuscript(ReadOnlySpan<byte> bytes)
+    {
+        JsonNode node;
+        try
+        {
+            node = JsonNode.Parse(bytes)
+                ?? throw new InvalidDataException("Snapshot chapter manuscript JSON is null.");
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("Snapshot chapter manuscript JSON is malformed.", exception);
+        }
+
+        var canonicalBytes = SerializeDirectManuscript(node);
+        if (!bytes.SequenceEqual(canonicalBytes))
+            throw new InvalidDataException("Snapshot chapter manuscript JSON is not in canonical schema-v1 form.");
+
+        return Encoding.UTF8.GetString(canonicalBytes);
+    }
+
     public static JsonNode Canonicalize(JsonNode node)
     {
         return CanonicalizeNode(node, scanEmbeddedProperties: false);
@@ -93,6 +138,15 @@ internal static class VersionHistoryCanonicalJson
         || propertyName.Equals("progressMessage", StringComparison.OrdinalIgnoreCase)
         || propertyName.Equals("currentMessage", StringComparison.OrdinalIgnoreCase)
         || propertyName.Equals("error", StringComparison.OrdinalIgnoreCase);
+
+    private static byte[] SerializeDirectManuscript(JsonNode node)
+    {
+        if (node is not JsonObject)
+            throw new InvalidDataException("Snapshot chapter manuscript JSON must be an object.");
+
+        var canonical = CanonicalizeNode(node, scanEmbeddedProperties: true);
+        return Encoding.UTF8.GetBytes(canonical.ToJsonString(SerializerOptions));
+    }
 
     private static bool IsSensitiveEmbeddedProperty(string propertyName)
     {

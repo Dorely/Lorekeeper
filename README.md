@@ -239,7 +239,10 @@ app data base; the repository-root `History/` directory is ignored by Git.
 Packaged builds use `%LocalAppData%/Lorekeeper/History/<repository-id>.git`.
 The repository contains deterministic UTF-8 snapshot files and ordinary Git
 blobs for project images and imported fonts; it is not a SQLite backup or a
-working checkout.
+working checkout. Every chapter has a stable directory under
+`narrative/chapters/<chapter-id>/`: `chapter.json` contains its metadata and
+`manuscript.json` contains the actual structured manuscript as readable,
+unescaped JSON, so chapter edits remain visible in GitHub and ordinary Git diffs.
 
 Snapshots preserve the authored creative areas—project settings and references,
 narrative and chapters, canonical graph data, ingest sources, images/fonts and

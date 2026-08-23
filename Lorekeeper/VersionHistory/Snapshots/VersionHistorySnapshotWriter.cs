@@ -1,4 +1,3 @@
-using System.Text;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -52,7 +51,7 @@ public sealed class VersionHistorySnapshotWriter(
             supplemental.Project.ContestModeEnabled,
             supplemental.References));
 
-        AddJson(files, "narrative/narrative.json", new VersionHistorySnapshotNarrativeArea(
+        var narrative = new VersionHistorySnapshotNarrativeArea(
             document.BookBrief,
             document.BookBriefCanonSourceIds.OrderBy(id => id).ToList(),
             document.EntityTypes.OrderBy(item => item.Type, StringComparer.Ordinal).ToList(),
@@ -60,7 +59,18 @@ public sealed class VersionHistorySnapshotWriter(
             document.Chapters.OrderBy(item => item.Id).ToList(),
             supplemental.WritingSamples,
             supplemental.ContextPreferences,
-            document.ManuscriptAnnotations.OrderBy(item => item.Id).ToList()));
+            document.ManuscriptAnnotations.OrderBy(item => item.Id).ToList());
+        AddJson(files, "narrative/narrative.json", VersionHistorySnapshotNarrativeFile.FromArea(narrative));
+        foreach (var chapter in narrative.Chapters)
+        {
+            var chapterDirectory = $"narrative/chapters/{chapter.Id:N}";
+            AddJson(
+                files,
+                $"{chapterDirectory}/chapter.json",
+                VersionHistorySnapshotChapter.FromProjectExportChapter(chapter));
+            files[$"{chapterDirectory}/manuscript.json"] =
+                VersionHistoryCanonicalJson.SerializeDirectManuscript(chapter.ManuscriptJson);
+        }
 
         AddJson(files, "graph/graph.json", new VersionHistorySnapshotGraphArea(
             document.Nodes
@@ -143,7 +153,7 @@ public sealed class VersionHistorySnapshotWriter(
                 .ToList(),
             fontFamilies));
 
-        AddJson(files, "manuscript/manuscript.json", new VersionHistorySnapshotManuscriptArea(
+        AddJson(files, "manuscript/styles.json", new VersionHistorySnapshotManuscriptArea(
             document.ManuscriptStyles.OrderBy(item => item.Id).ToList()));
 
         AddJson(files, "composition/composition.json", new VersionHistorySnapshotCompositionArea(
@@ -183,27 +193,10 @@ public sealed class VersionHistorySnapshotWriter(
             await File.WriteAllBytesAsync(path, item.Value, cancellationToken);
         }
 
-        var payload = new VersionHistorySnapshotPayload(
-            repositoryId,
-            projectId,
-            VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotProjectArea>(files["project/project.json"]),
-            VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotNarrativeArea>(files["narrative/narrative.json"]),
-            VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotGraphArea>(files["graph/graph.json"]),
-            VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotSourcesArea>(files["sources/sources.json"]),
-            VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotAssetsArea>(files["assets/assets.json"]),
-            VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotManuscriptArea>(files["manuscript/manuscript.json"]),
-            VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotCompositionArea>(files["composition/composition.json"]),
-            VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotPublicationArea>(files["publication/publication.json"]))
-        {
-            ImageData = assetRecords.ToDictionary(
-                image => image.Id,
-                image => files[image.BlobPath]),
-            FontFaceData = fontFamilies
-                .SelectMany(family => family.Faces)
-                .ToDictionary(face => face.Id, face => files[face.BlobPath]),
-        };
-
-        return new VersionHistorySnapshotArtifact(fullRoot, manifest, payload);
+        // Read the emitted tree back through the strict schema boundary. This
+        // makes the writer's returned payload exactly match what a later
+        // compare/restore operation will receive from Git.
+        return new VersionHistorySnapshotReader().Read(fullRoot, repositoryId, projectId);
     }
 
     private async Task<SupplementalState> ReadSupplementalStateAsync(

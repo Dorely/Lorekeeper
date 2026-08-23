@@ -61,19 +61,26 @@ tree has this stable layout:
 manifest.json
 project/project.json
 narrative/narrative.json
+narrative/chapters/<chapter-id>/chapter.json
+narrative/chapters/<chapter-id>/manuscript.json
 graph/graph.json
 sources/sources.json
 assets/assets.json
 assets/images/<image-id>/content.<extension>
 assets/fonts/<family-id>/faces/<face-id>/content.<extension>
-manuscript/manuscript.json
+manuscript/styles.json
 composition/composition.json
 publication/publication.json
 ```
 
 JSON is UTF-8 without a BOM, indented by the canonical serializer, and
 recursively ordinal-sorted by property name. Arrays
-are ordered by stable identity or the area's semantic key. Embedded properties
+are ordered by stable identity or the area's semantic key. Each chapter has one
+stable lowercase `N`-format GUID directory: `chapter.json` contains its metadata
+and manuscript revision, while `manuscript.json` contains the structured
+manuscript as direct canonical JSON rather than an escaped JSON string. The
+reader requires exactly both files for every chapter and rejects orphaned,
+duplicated, or path/identity-mismatched chapter files. Other embedded properties
 whose names end in `Json` are parsed, recursively canonicalized, and emitted as
 canonical JSON strings; malformed non-empty values and embedded credential,
 token, secret, password, API-key, or authorization-code properties fail closed.
@@ -94,14 +101,14 @@ The captured canonical areas are:
 - `project`: project settings, page setup, contest-mode setting, and outgoing
   references;
 - `narrative`: Book Brief and canonical-source selections, entity types, acts,
-  chapters, writing samples, editor context preferences, and manuscript
-  annotations;
+  per-chapter metadata and directly reviewable structured manuscript files,
+  writing samples, editor context preferences, and manuscript annotations;
 - `graph`: canonical graph nodes and edges, excluding structural and derived
   projection edges;
 - `sources`: ingest sources and their source chunks, pages, and blocks, with
   fetch/job timestamps and provider diagnostics removed;
 - `assets`: project images, entity visual examples, and imported font families;
-- `manuscript`: project Book Text Styles;
+- `manuscript`: project Book Text Styles in `manuscript/styles.json`;
 - `composition`: page compositions, variants, and scene data; and
 - `publication`: Core Book, editions, and publication sections.
 

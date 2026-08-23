@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Lorekeeper.ImportExport;
+using Lorekeeper.Manuscripts;
 
 namespace Lorekeeper.VersionHistory.Snapshots;
 
@@ -63,14 +65,17 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
 
         ValidateFileSet(fullRoot, files.Keys);
         var project = ReadRequired<VersionHistorySnapshotProjectArea>(files, "project/project.json");
-        var narrative = ReadRequired<VersionHistorySnapshotNarrativeArea>(files, "narrative/narrative.json");
+        var narrativeFile = ReadRequired<VersionHistorySnapshotNarrativeFile>(files, "narrative/narrative.json");
+        var chapterPaths = ValidateChapterFileSet(files.Keys);
+        var chapters = ReadChapters(files, chapterPaths);
+        var narrative = narrativeFile.ToArea(chapters);
         var graph = ReadRequired<VersionHistorySnapshotGraphArea>(files, "graph/graph.json");
         var sources = ReadRequired<VersionHistorySnapshotSourcesArea>(files, "sources/sources.json");
         var assets = ReadRequired<VersionHistorySnapshotAssetsArea>(files, "assets/assets.json");
-        var manuscript = ReadRequired<VersionHistorySnapshotManuscriptArea>(files, "manuscript/manuscript.json");
+        var manuscript = ReadRequired<VersionHistorySnapshotManuscriptArea>(files, "manuscript/styles.json");
         var composition = ReadRequired<VersionHistorySnapshotCompositionArea>(files, "composition/composition.json");
         var publication = ReadRequired<VersionHistorySnapshotPublicationArea>(files, "publication/publication.json");
-        ValidateSchemaFileSet(files.Keys, assets);
+        ValidateSchemaFileSet(files.Keys, assets, chapterPaths);
         var payload = new VersionHistorySnapshotPayload(
             manifest.RepositoryId,
             manifest.ProjectId,
@@ -172,9 +177,100 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         return result;
     }
 
+    private static IReadOnlyDictionary<Guid, ChapterFilePaths> ValidateChapterFileSet(
+        IEnumerable<string> actualFiles)
+    {
+        var entries = new Dictionary<Guid, (string? MetadataPath, string? ManuscriptPath)>();
+        foreach (var path in actualFiles.Where(path =>
+                     path.StartsWith("narrative/chapters", StringComparison.OrdinalIgnoreCase)))
+        {
+            var segments = path.Split('/');
+            if (segments.Length != 4
+                || !string.Equals(segments[0], "narrative", StringComparison.Ordinal)
+                || !string.Equals(segments[1], "chapters", StringComparison.Ordinal)
+                || !Guid.TryParseExact(segments[2], "N", out var chapterId)
+                || chapterId == Guid.Empty
+                || !string.Equals(segments[2], chapterId.ToString("N"), StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    $"Snapshot chapter path '{path}' is not in the canonical schema-v1 chapter layout.");
+            }
+
+            var current = entries.GetValueOrDefault(chapterId);
+            if (string.Equals(segments[3], "chapter.json", StringComparison.Ordinal))
+            {
+                if (current.MetadataPath is not null)
+                    throw new InvalidDataException($"Snapshot contains duplicate chapter metadata for {chapterId:N}.");
+                current.MetadataPath = path;
+            }
+            else if (string.Equals(segments[3], "manuscript.json", StringComparison.Ordinal))
+            {
+                if (current.ManuscriptPath is not null)
+                    throw new InvalidDataException($"Snapshot contains duplicate chapter manuscript for {chapterId:N}.");
+                current.ManuscriptPath = path;
+            }
+            else
+            {
+                throw new InvalidDataException($"Snapshot chapter path '{path}' is not a declared chapter file.");
+            }
+
+            entries[chapterId] = current;
+        }
+
+        var result = new Dictionary<Guid, ChapterFilePaths>();
+        foreach (var (chapterId, paths) in entries)
+        {
+            if (paths.MetadataPath is null || paths.ManuscriptPath is null)
+            {
+                throw new InvalidDataException(
+                    $"Snapshot chapter {chapterId:N} must contain exactly chapter.json and manuscript.json.");
+            }
+
+            result.Add(chapterId, new ChapterFilePaths(chapterId, paths.MetadataPath, paths.ManuscriptPath));
+        }
+
+        return result;
+    }
+
+    private static IReadOnlyList<ProjectExportChapter> ReadChapters(
+        IReadOnlyDictionary<string, byte[]> files,
+        IReadOnlyDictionary<Guid, ChapterFilePaths> chapterPaths)
+    {
+        var chapters = new List<ProjectExportChapter>(chapterPaths.Count);
+        foreach (var (chapterId, paths) in chapterPaths.OrderBy(item => item.Key))
+        {
+            var metadata = ReadRequired<VersionHistorySnapshotChapter>(files, paths.MetadataPath);
+            if (metadata.Id != chapterId)
+            {
+                throw new InvalidDataException(
+                    $"Snapshot chapter path ID {chapterId:N} does not match chapter metadata ID {metadata.Id:N}.");
+            }
+
+            var manuscriptJson = VersionHistoryCanonicalJson.DeserializeDirectManuscript(
+                files[paths.ManuscriptPath]);
+            try
+            {
+                _ = ManuscriptCodec.Deserialize(
+                    manuscriptJson,
+                    metadata.Id,
+                    metadata.ManuscriptRevision);
+            }
+            catch (InvalidDataException exception)
+            {
+                throw new InvalidDataException(
+                    $"Snapshot chapter {chapterId:N} manuscript does not match its chapter metadata.",
+                    exception);
+            }
+            chapters.Add(metadata.ToProjectExportChapter(manuscriptJson));
+        }
+
+        return chapters;
+    }
+
     private static void ValidateSchemaFileSet(
         IEnumerable<string> actualFiles,
-        VersionHistorySnapshotAssetsArea assets)
+        VersionHistorySnapshotAssetsArea assets,
+        IReadOnlyDictionary<Guid, ChapterFilePaths> chapterPaths)
     {
         var expected = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -183,10 +279,16 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             "graph/graph.json",
             "sources/sources.json",
             "assets/assets.json",
-            "manuscript/manuscript.json",
+            "manuscript/styles.json",
             "composition/composition.json",
             "publication/publication.json",
         };
+
+        foreach (var paths in chapterPaths.Values)
+        {
+            if (!expected.Add(paths.MetadataPath) || !expected.Add(paths.ManuscriptPath))
+                throw new InvalidDataException($"Snapshot chapter {paths.ChapterId:N} contains duplicate paths.");
+        }
 
         foreach (var image in assets.Images)
         {
@@ -221,7 +323,8 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         }
 
         if (!expected.SetEquals(actualFiles))
-            throw new InvalidDataException("Snapshot payload files do not exactly match the schema-v1 area and asset paths.");
+            throw new InvalidDataException(
+                "Snapshot payload files do not exactly match the schema-v1 area, chapter, style, and asset paths.");
     }
 
     private static byte[] ReadBlob(string root, string relativePath, string expectedHash, long expectedLength)
@@ -243,7 +346,10 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             throw new InvalidDataException("Snapshot project payload ID does not match its manifest.");
         if (payload.Project.Project.Id == Guid.Empty)
             throw new InvalidDataException("Snapshot project ID is empty.");
-        var chapterIds = payload.Narrative.Chapters.Select(chapter => chapter.Id).ToHashSet();
+        var chapterIdList = payload.Narrative.Chapters.Select(chapter => chapter.Id).ToList();
+        if (chapterIdList.Distinct().Count() != chapterIdList.Count)
+            throw new InvalidDataException("Snapshot contains duplicate chapter IDs.");
+        var chapterIds = chapterIdList.ToHashSet();
         var actIds = payload.Narrative.Acts.Select(act => act.Id).ToHashSet();
         foreach (var chapter in payload.Narrative.Chapters)
         {
@@ -319,4 +425,9 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
 
     private static string NormalizeRelativePath(string path) =>
         path.Replace('\\', '/');
+
+    private sealed record ChapterFilePaths(
+        Guid ChapterId,
+        string MetadataPath,
+        string ManuscriptPath);
 }

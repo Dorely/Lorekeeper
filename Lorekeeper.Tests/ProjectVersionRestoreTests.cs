@@ -62,6 +62,136 @@ public sealed class ProjectVersionRestoreTests
     }
 
     [Fact]
+    public void SnapshotReaderPreservesChapterMetadataAndUsesDirectManuscriptJson()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var chapterId = Guid.NewGuid();
+            var chapter = CreateChapter(chapterId, "Complete chapter") with
+            {
+                ActId = Guid.NewGuid(),
+                Body = "Legacy body is retained as chapter metadata.",
+                ManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(chapterId, revision: 17)),
+                ManuscriptRevision = 17,
+                Order = 4,
+                VisualMode = ChapterVisualMode.IllustratedProse,
+                PageLayoutKind = ChapterPageLayoutKind.DoubleLandscape,
+                PageLayoutJson = "{\"pageWidth\":11}",
+                IllustrationLayoutJson = "{\"columns\":2}",
+                ExplicitImageContextImageIds = [Guid.NewGuid(), Guid.NewGuid()],
+            };
+            var payload = CreatePayload(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                chapter: chapter,
+                acts: [new ProjectExportAct(chapter.ActId!.Value, "Act", "Act synopsis", 0)]);
+            var snapshotRoot = Path.Combine(root, "snapshot");
+            WriteSnapshotTree(snapshotRoot, payload);
+
+            var manuscriptPath = Path.Combine(
+                snapshotRoot,
+                "narrative",
+                "chapters",
+                chapter.Id.ToString("N"),
+                "manuscript.json");
+            var manuscriptBytes = File.ReadAllBytes(manuscriptPath);
+            Assert.StartsWith("{", Encoding.UTF8.GetString(manuscriptBytes));
+            Assert.DoesNotContain("\\\"", Encoding.UTF8.GetString(manuscriptBytes));
+
+            var actual = new VersionHistorySnapshotReader()
+                .Read(snapshotRoot, payload.RepositoryId, payload.ProjectId)
+                .Payload
+                .Narrative
+                .Chapters
+                .Single();
+            var expectedManuscript = Encoding.UTF8.GetString(
+                VersionHistoryCanonicalJson.SerializeDirectManuscript(chapter.ManuscriptJson));
+            var expectedMetadata = VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotChapter>(
+                VersionHistoryCanonicalJson.Serialize(
+                    VersionHistorySnapshotChapter.FromProjectExportChapter(chapter)));
+
+            Assert.Equal(expectedMetadata.Id, actual.Id);
+            Assert.Equal(expectedMetadata.ActId, actual.ActId);
+            Assert.Equal(expectedMetadata.Title, actual.Title);
+            Assert.Equal(expectedManuscript, actual.ManuscriptJson);
+            Assert.Equal(expectedMetadata.ManuscriptRevision, actual.ManuscriptRevision);
+            Assert.Equal(expectedMetadata.Body, actual.Body);
+            Assert.Equal(expectedMetadata.Synopsis, actual.Synopsis);
+            Assert.Equal(expectedMetadata.Order, actual.Order);
+            Assert.Equal(expectedMetadata.VisualMode, actual.VisualMode);
+            Assert.Equal(expectedMetadata.PageLayoutKind, actual.PageLayoutKind);
+            Assert.Equal(expectedMetadata.PageLayoutJson, actual.PageLayoutJson);
+            Assert.Equal(expectedMetadata.IllustrationLayoutJson, actual.IllustrationLayoutJson);
+            Assert.Equal(expectedMetadata.ExplicitImageContextImageIds, actual.ExplicitImageContextImageIds);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("{")]
+    [InlineData("{\"accessToken\":\"secret\"}")]
+    public void SnapshotReaderRejectsMalformedOrSensitiveDirectManuscriptJson(string manuscriptJson)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var payload = CreatePayload(Guid.NewGuid(), Guid.NewGuid(), chapter: CreateChapter(Guid.NewGuid(), "Chapter"));
+            var snapshotRoot = Path.Combine(root, "snapshot");
+            WriteSnapshotTree(
+                snapshotRoot,
+                payload,
+                (path, bytes) => path.EndsWith("/manuscript.json", StringComparison.Ordinal)
+                    ? Encoding.UTF8.GetBytes(manuscriptJson)
+                    : bytes);
+
+            var exception = Assert.Throws<InvalidDataException>(
+                () => new VersionHistorySnapshotReader().Read(snapshotRoot, payload.RepositoryId, payload.ProjectId));
+            Assert.Contains("json", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SnapshotReaderRejectsManuscriptOwnedByAnotherChapter()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var chapter = CreateChapter(Guid.NewGuid(), "Chapter");
+            var otherChapter = CreateChapter(Guid.NewGuid(), "Other chapter");
+            var payload = CreatePayload(Guid.NewGuid(), Guid.NewGuid(), chapter: chapter);
+            var snapshotRoot = Path.Combine(root, "snapshot");
+            WriteSnapshotTree(
+                snapshotRoot,
+                payload,
+                (path, bytes) => path.EndsWith("/manuscript.json", StringComparison.Ordinal)
+                    ? VersionHistoryCanonicalJson.SerializeDirectManuscript(otherChapter.ManuscriptJson)
+                    : bytes);
+
+            var exception = Assert.Throws<InvalidDataException>(
+                () => new VersionHistorySnapshotReader().Read(snapshotRoot, payload.RepositoryId, payload.ProjectId));
+            Assert.Contains("metadata", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void MajorAreaMergeChangesOnlyTheSelectedArea()
     {
         var repositoryId = Guid.NewGuid();
@@ -531,14 +661,23 @@ public sealed class ProjectVersionRestoreTests
         var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal)
         {
             ["project/project.json"] = VersionHistoryCanonicalJson.Serialize(payload.Project),
-            ["narrative/narrative.json"] = VersionHistoryCanonicalJson.Serialize(payload.Narrative),
+            ["narrative/narrative.json"] = VersionHistoryCanonicalJson.Serialize(
+                VersionHistorySnapshotNarrativeFile.FromArea(payload.Narrative)),
             ["graph/graph.json"] = VersionHistoryCanonicalJson.Serialize(payload.Graph),
             ["sources/sources.json"] = VersionHistoryCanonicalJson.Serialize(payload.Sources),
             ["assets/assets.json"] = VersionHistoryCanonicalJson.Serialize(payload.Assets),
-            ["manuscript/manuscript.json"] = VersionHistoryCanonicalJson.Serialize(payload.Manuscript),
+            ["manuscript/styles.json"] = VersionHistoryCanonicalJson.Serialize(payload.Manuscript),
             ["composition/composition.json"] = VersionHistoryCanonicalJson.Serialize(payload.Composition),
             ["publication/publication.json"] = VersionHistoryCanonicalJson.Serialize(payload.Publication),
         };
+        foreach (var chapter in payload.Narrative.Chapters)
+        {
+            var chapterDirectory = $"narrative/chapters/{chapter.Id:N}";
+            files[$"{chapterDirectory}/chapter.json"] = VersionHistoryCanonicalJson.Serialize(
+                VersionHistorySnapshotChapter.FromProjectExportChapter(chapter));
+            files[$"{chapterDirectory}/manuscript.json"] = VersionHistoryCanonicalJson.SerializeDirectManuscript(
+                chapter.ManuscriptJson);
+        }
         if (transform is not null)
         {
             foreach (var path in files.Keys.ToList())
@@ -579,6 +718,7 @@ public sealed class ProjectVersionRestoreTests
         ProjectExportChapter? chapter = null,
         IReadOnlyList<ProjectExportChapter>? chapters = null,
         IReadOnlyList<ProjectExportManuscriptAnnotation>? annotations = null,
+        IReadOnlyList<ProjectExportAct>? acts = null,
         VersionHistorySnapshotGraphArea? graph = null)
     {
         var selectedChapters = chapters ?? (chapter is null ? [] : [chapter]);
@@ -594,7 +734,7 @@ public sealed class ProjectVersionRestoreTests
                 null,
                 [],
                 [],
-                [],
+                acts ?? [],
                 selectedChapters,
                 [],
                 [],
