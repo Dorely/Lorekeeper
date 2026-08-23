@@ -300,11 +300,12 @@ remote. Deleting a project removes its app-managed local history after the
 database deletion succeeds; it never deletes the remote GitHub repository.
 Removing a remote attachment likewise leaves local history and tracking refs.
 
-GitHub device authorization and repository attachment have been exercised with a
-real account on Windows, and the History workspace has been exercised against an
-isolated local project. Live network fetch, push, automatic checkpoint delivery,
-remote checkout, and clone remain unvalidated; local builds and
-versioned-transformation checks do not establish those provider operations.
+GitHub device authorization, repository attachment, manual push, and automatic
+checkpoint delivery have been exercised with a real account on Windows. Those
+checks verified the exact remote branch head and the readable chapter and
+manuscript files in GitHub. Remote checkout and clone remain unvalidated; local
+builds and versioned-transformation checks do not establish those provider
+operations.
 
 ## Requirements
 
