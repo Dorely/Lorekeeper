@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using LibGit2Sharp;
@@ -14,9 +15,9 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.VersionHistory.GitHub;
 
 /// <summary>
-/// Owns GitHub's device flow, account repository discovery, and the app-level
-/// credential rows used by version-control remotes. Git transport is kept out
-/// of this service; callers receive a LibGit2Sharp credential callback only.
+/// Owns GitHub's device flow, account repository discovery, app-level
+/// credential rows, and repository-bound authenticated push operations.
+/// Generic local Git history and comparison remain outside this service.
 /// </summary>
 public sealed class GitHubConnectionService(
     HttpClient httpClient,
@@ -344,16 +345,129 @@ public sealed class GitHubConnectionService(
         return ToRepositoryInfo(repository);
     }
 
+    public async Task<string?> GetBranchHeadAsync(
+        Guid connectionId,
+        long expectedRepositoryId,
+        string owner,
+        string repositoryName,
+        string branchName,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateOptions();
+        if (expectedRepositoryId <= 0)
+            throw InvalidRequest("The expected GitHub repository identity must be positive.");
+
+        var validatedOwner = ValidateRepositoryPathPart(owner, nameof(owner));
+        var validatedRepositoryName = ValidateRepositoryPathPart(repositoryName, nameof(repositoryName));
+        var validatedBranchName = ValidateBranchPath(branchName);
+        var credential = await LoadCredentialAsync(connectionId, cancellationToken);
+        var repositoryPath = $"repos/{EscapeApiPathSegment(validatedOwner)}/{EscapeApiPathSegment(validatedRepositoryName)}";
+
+        using (var repositoryResponse = await SendApiAsync(
+                   HttpMethod.Get,
+                   CreateApiUri(repositoryPath),
+                   credential.AccessToken,
+                   null,
+                   "validate the GitHub repository identity",
+                   cancellationToken))
+        {
+            if (!repositoryResponse.IsSuccessStatusCode)
+                throw CreateApiHttpException(repositoryResponse, "validate the GitHub repository identity");
+
+            var repository = await DeserializeAsync<GitHubRepositoryResponse>(
+                repositoryResponse,
+                "validate the GitHub repository identity",
+                cancellationToken);
+            ValidateRepositoryIdentity(
+                repository,
+                expectedRepositoryId,
+                validatedOwner,
+                validatedRepositoryName);
+        }
+
+        using var branchResponse = await SendApiAsync(
+            HttpMethod.Get,
+            CreateApiUri($"{repositoryPath}/branches/{EscapeApiBranchPath(validatedBranchName)}"),
+            credential.AccessToken,
+            null,
+            "observe the GitHub branch head",
+            cancellationToken);
+        if (branchResponse.StatusCode == HttpStatusCode.NotFound)
+        {
+            using var commitsResponse = await SendApiAsync(
+                HttpMethod.Get,
+                CreateApiUri(
+                    $"{repositoryPath}/commits",
+                    new Dictionary<string, string?> { ["per_page"] = "1" }),
+                credential.AccessToken,
+                null,
+                "distinguish an empty GitHub repository from a missing branch",
+                cancellationToken);
+            if (commitsResponse.StatusCode == HttpStatusCode.Conflict)
+                return null;
+            if (commitsResponse.IsSuccessStatusCode)
+                throw new GitHubConnectionException(
+                    GitHubConnectionErrorCode.Conflict,
+                    "The configured GitHub branch is missing from a non-empty repository. Reattach or choose the remote branch deliberately before pushing.",
+                    HttpStatusCode.Conflict);
+            throw CreateApiHttpException(
+                commitsResponse,
+                "distinguish an empty GitHub repository from a missing branch");
+        }
+        if (!branchResponse.IsSuccessStatusCode)
+            throw CreateApiHttpException(branchResponse, "observe the GitHub branch head");
+
+        var branch = await DeserializeAsync<GitHubBranchResponse>(
+            branchResponse,
+            "observe the GitHub branch head",
+            cancellationToken);
+        if (branch is null || string.IsNullOrWhiteSpace(branch.Name) || branch.Commit is null)
+            throw InvalidResponse("GitHub returned an incomplete branch-head response.");
+        if (!string.Equals(branch.Name, validatedBranchName, StringComparison.Ordinal))
+            throw InvalidResponse("GitHub returned a branch different from the requested branch.");
+
+        return NormalizeCommitSha(branch.Commit.Sha);
+    }
+
     public async Task<CredentialsHandler> CreateCredentialsHandlerAsync(
         Guid connectionId,
         CancellationToken cancellationToken = default)
     {
         ValidateOptions();
         var credential = await LoadCredentialAsync(connectionId, cancellationToken);
+        return CreateCredentialsHandler(credential);
+    }
 
-        // The token is supplied only through libgit2's credential callback. It
-        // is never embedded in a clone URL, remote URL, exception, or log.
-        return (_, _, types) =>
+    public async Task<IGitHubPushOperation> CreatePushOperationAsync(
+        Guid connectionId,
+        long expectedRepositoryId,
+        string owner,
+        string repositoryName,
+        string sourceCommitSha,
+        string branchName,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateOptions();
+        if (expectedRepositoryId <= 0)
+            throw InvalidRequest("The expected GitHub repository identity must be positive.");
+
+        var validatedOwner = ValidateRepositoryPathPart(owner, nameof(owner));
+        var validatedRepositoryName = ValidateRepositoryPathPart(repositoryName, nameof(repositoryName));
+        var validatedSourceCommitSha = NormalizeCommitSha(sourceCommitSha);
+        var validatedBranchName = ValidateBranchPath(branchName);
+        var credential = await LoadCredentialAsync(connectionId, cancellationToken);
+        return new GitHubPushOperation(
+            validatedOwner,
+            validatedRepositoryName,
+            validatedSourceCommitSha,
+            validatedBranchName,
+            credential);
+    }
+
+    private static CredentialsHandler CreateCredentialsHandler(GitHubCredential credential) =>
+        // The token is supplied only to libgit2's in-memory HTTPS transport.
+        // It is never embedded in a clone URL, remote URL, exception, or log.
+        (_, _, types) =>
         {
             if ((types & SupportedCredentialTypes.UsernamePassword) == 0)
                 throw new GitHubConnectionException(
@@ -366,7 +480,6 @@ public sealed class GitHubConnectionService(
                 Password = credential.AccessToken,
             };
         };
-    }
 
     private async Task<GitHubUser> GetAuthenticatedUserAsync(
         string accessToken,
@@ -748,6 +861,77 @@ public sealed class GitHubConnectionService(
             throw InvalidRequest("GitHub repository names must be 1–100 characters and may not contain path separators.");
     }
 
+    private static string ValidateRepositoryPathPart(string value, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw InvalidRequest($"GitHub {parameterName} must not be empty.");
+
+        var normalized = value.Trim();
+        if (!string.Equals(value, normalized, StringComparison.Ordinal) ||
+            normalized is "." or ".." ||
+            normalized.Length > 255 ||
+            normalized.Any(char.IsControl) ||
+            normalized.Contains('/', StringComparison.Ordinal) ||
+            normalized.Contains('\\', StringComparison.Ordinal) ||
+            normalized.Contains('?', StringComparison.Ordinal) ||
+            normalized.Contains('#', StringComparison.Ordinal))
+            throw InvalidRequest($"GitHub {parameterName} is not a valid repository path component.");
+
+        return normalized;
+    }
+
+    private static string ValidateBranchPath(string branchName)
+    {
+        if (string.IsNullOrWhiteSpace(branchName))
+            throw InvalidRequest("GitHub branchName must not be empty.");
+
+        var normalized = branchName.Trim();
+        var segments = normalized.Split('/');
+        if (!string.Equals(branchName, normalized, StringComparison.Ordinal) ||
+            normalized.Length > 255 ||
+            normalized.Any(char.IsControl) ||
+            normalized.Contains('\\', StringComparison.Ordinal) ||
+            normalized.Contains('?', StringComparison.Ordinal) ||
+            normalized.Contains('#', StringComparison.Ordinal) ||
+            segments.Any(segment => segment.Length == 0 || segment is "." or ".."))
+            throw InvalidRequest("GitHub branchName is not a valid repository path.");
+
+        return normalized;
+    }
+
+    private static string EscapeApiPathSegment(string value) => Uri.EscapeDataString(value);
+
+    private static string EscapeApiBranchPath(string branchName) =>
+        string.Join(
+            "/",
+            branchName.Split('/').Select(EscapeApiPathSegment));
+
+    private static void ValidateRepositoryIdentity(
+        GitHubRepositoryResponse? repository,
+        long expectedRepositoryId,
+        string expectedOwner,
+        string expectedRepositoryName)
+    {
+        if (repository is null || repository.Id <= 0 || string.IsNullOrWhiteSpace(repository.Name) ||
+            string.IsNullOrWhiteSpace(repository.Owner?.Login))
+            throw InvalidResponse("GitHub returned an incomplete repository identity response.");
+
+        if (repository.Id != expectedRepositoryId ||
+            !string.Equals(repository.Owner!.Login.Trim(), expectedOwner, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(repository.Name.Trim(), expectedRepositoryName, StringComparison.OrdinalIgnoreCase))
+            throw InvalidResponse("GitHub returned a different repository identity than the attached remote.");
+    }
+
+    private static string NormalizeCommitSha(string? sha)
+    {
+        var normalized = sha?.Trim();
+        if (normalized is null || normalized.Length != 40 ||
+            normalized.Any(character => !Uri.IsHexDigit(character)))
+            throw InvalidResponse("GitHub returned an invalid branch commit SHA.");
+
+        return normalized.ToLowerInvariant();
+    }
+
     private static GitHubConnectionException CreateOAuthHttpException(
         HttpResponseMessage response,
         string operation,
@@ -840,6 +1024,89 @@ public sealed class GitHubConnectionService(
         DateTime? AccessTokenExpiresAt,
         string? Scope);
 
+    private sealed class GitHubPushOperation(
+        string owner,
+        string repositoryName,
+        string sourceCommitSha,
+        string branchName,
+        GitHubCredential credential) : IGitHubPushOperation
+    {
+        public void Execute(Repository repository, Remote remote)
+        {
+            ArgumentNullException.ThrowIfNull(repository);
+            ArgumentNullException.ThrowIfNull(remote);
+            var pushUrl = string.IsNullOrWhiteSpace(remote.PushUrl) ? remote.Url : remote.PushUrl;
+            if (!MatchesTrustedGitHubRemote(pushUrl, owner, repositoryName))
+                throw new GitHubConnectionException(
+                    GitHubConnectionErrorCode.InvalidRequest,
+                    "The configured Git remote does not match the authorized GitHub repository.");
+
+            var authorization = Convert.ToBase64String(
+                Encoding.UTF8.GetBytes($"x-access-token:{credential.AccessToken}"));
+            var pushStatusErrors = new List<PushStatusError>();
+            var options = new PushOptions
+            {
+                CredentialsProvider = CreateCredentialsHandler(credential),
+                // libgit2's Windows HTTPS transport can finish an
+                // empty-repository push without invoking its credential
+                // callback. This in-memory header authenticates that first
+                // ref update while remaining bound to the validated remote.
+                CustomHeaders = [$"Authorization: Basic {authorization}"],
+                OnPushStatusError = pushStatusErrors.Add,
+            };
+            repository.Network.Push(
+                remote,
+                sourceCommitSha,
+                $"refs/heads/{branchName}",
+                options);
+            if (pushStatusErrors.Count > 0)
+                throw new GitHubConnectionException(
+                    GitHubConnectionErrorCode.TransportFailure,
+                    $"GitHub rejected the requested push: {FormatPushStatusErrors(pushStatusErrors)}");
+        }
+
+        private static bool MatchesTrustedGitHubRemote(
+            string? remoteUrl,
+            string expectedOwner,
+            string expectedRepositoryName)
+        {
+            if (string.IsNullOrWhiteSpace(remoteUrl) ||
+                !Uri.TryCreate(remoteUrl, UriKind.Absolute, out var uri) ||
+                !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) ||
+                !uri.IsDefaultPort ||
+                !string.IsNullOrWhiteSpace(uri.UserInfo) ||
+                !string.IsNullOrEmpty(uri.Query) ||
+                !string.IsNullOrEmpty(uri.Fragment))
+                return false;
+
+            var path = Uri.UnescapeDataString(uri.AbsolutePath).Trim('/');
+            if (path.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+                path = path[..^4];
+            var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            return segments.Length == 2 &&
+                string.Equals(segments[0], expectedOwner, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(segments[1], expectedRepositoryName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string FormatPushStatusErrors(IEnumerable<PushStatusError> errors)
+        {
+            var details = errors
+                .Take(4)
+                .Select(error =>
+                {
+                    var reference = string.IsNullOrWhiteSpace(error.Reference)
+                        ? "the requested ref"
+                        : error.Reference.Trim();
+                    var message = string.IsNullOrWhiteSpace(error.Message)
+                        ? "the remote rejected the update"
+                        : error.Message.Trim().Replace('\r', ' ').Replace('\n', ' ');
+                    return $"{reference}: {message}";
+                });
+            return string.Join("; ", details);
+        }
+    }
+
     private sealed record DeviceCodeResponse(
         [property: JsonPropertyName("device_code")] string? DeviceCode,
         [property: JsonPropertyName("user_code")] string? UserCode,
@@ -876,4 +1143,11 @@ public sealed class GitHubConnectionService(
 
     private sealed record GitHubRepositoryOwnerResponse(
         [property: JsonPropertyName("login")] string? Login);
+
+    private sealed record GitHubBranchResponse(
+        [property: JsonPropertyName("name")] string? Name,
+        [property: JsonPropertyName("commit")] GitHubBranchCommitResponse? Commit);
+
+    private sealed record GitHubBranchCommitResponse(
+        [property: JsonPropertyName("sha")] string? Sha);
 }

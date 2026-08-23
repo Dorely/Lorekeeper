@@ -349,7 +349,10 @@ public sealed class ProjectVersionSyncService(
                 ConfigureGitRemote(remote.ProjectVersionRepositoryId, target);
                 var credentials = await CreateCredentialsAsync(remote, cancellationToken);
                 FetchRemote(remote.ProjectVersionRepositoryId, target, credentials, cancellationToken);
-                var comparison = ReadComparison(remote.ProjectVersionRepositoryId, target);
+                var comparison = await ReadVerifiedComparisonAsync(
+                    remote.ProjectVersionRepositoryId,
+                    target,
+                    cancellationToken);
                 return CreateComparisonStatus(
                     remote.ProjectVersionRepositoryId,
                     remoteId,
@@ -385,7 +388,10 @@ public sealed class ProjectVersionSyncService(
                 ConfigureGitRemote(remote.ProjectVersionRepositoryId, target);
                 var credentials = await CreateCredentialsAsync(remote, cancellationToken);
                 FetchRemote(remote.ProjectVersionRepositoryId, target, credentials, cancellationToken);
-                var comparison = ReadComparison(remote.ProjectVersionRepositoryId, target);
+                var comparison = await ReadVerifiedComparisonAsync(
+                    remote.ProjectVersionRepositoryId,
+                    target,
+                    cancellationToken);
 
                 if (comparison.Relation is not GitHistoryRelation.CandidateFastForward)
                 {
@@ -441,7 +447,9 @@ public sealed class ProjectVersionSyncService(
                 ProjectVersionOperationKind.Push,
                 () => PushUnderLeaseAsync(remote, targetCommitSha: null, cancellationToken),
                 cancellationToken);
-            if (result.LocalCommitSha is not null)
+            if (result.LocalCommitSha is not null
+                && result.Disposition is (ProjectVersionSyncDisposition.Pushed
+                    or ProjectVersionSyncDisposition.AlreadySynchronized))
                 await ResolveMatchingAutoPushIntentAsync(
                     remote.Id,
                     result.LocalCommitSha,
@@ -481,7 +489,10 @@ public sealed class ProjectVersionSyncService(
         ConfigureGitRemote(remote.ProjectVersionRepositoryId, target);
         var credentials = await CreateCredentialsAsync(remote, cancellationToken);
         FetchRemote(remote.ProjectVersionRepositoryId, target, credentials, cancellationToken);
-        var comparison = ReadComparison(remote.ProjectVersionRepositoryId, target);
+        var comparison = await ReadVerifiedComparisonAsync(
+            remote.ProjectVersionRepositoryId,
+            target,
+            cancellationToken);
 
         if (targetCommitSha is not null &&
             !string.Equals(comparison.CurrentCommitSha, targetCommitSha, StringComparison.Ordinal))
@@ -495,22 +506,20 @@ public sealed class ProjectVersionSyncService(
                 remote.ProjectVersionRepositoryId,
                 targetCommitSha,
                 comparison.CurrentCommitSha);
-            if (targetRelation.Relation is GitHistoryRelation.CandidateFastForward or GitHistoryRelation.Identical)
-            {
-                return CreateComparisonStatus(
-                    remote.ProjectVersionRepositoryId,
-                    remote.Id,
-                    target,
-                    comparison,
-                    ProjectVersionSyncDisposition.AlreadySynchronized,
-                    localUpdated: false,
-                    remoteUpdated: false,
-                    "The automatic push target was superseded by a newer local checkpoint.");
-            }
+            if (targetRelation.Relation is not (GitHistoryRelation.CandidateFastForward or GitHistoryRelation.Identical))
+                throw new ProjectVersionSyncException(
+                    ProjectVersionSyncErrorCode.HistoryConflict,
+                    "The automatic push target is no longer an ancestor of local main.");
 
-            throw new ProjectVersionSyncException(
-                ProjectVersionSyncErrorCode.HistoryConflict,
-                "The automatic push target is no longer an ancestor of local main.");
+            return CreateComparisonStatus(
+                remote.ProjectVersionRepositoryId,
+                remote.Id,
+                target,
+                comparison,
+                ProjectVersionSyncDisposition.PushSkipped,
+                localUpdated: false,
+                remoteUpdated: false,
+                "The automatic push target was superseded by a newer local checkpoint.");
         }
 
         var pushAllowed = comparison.CurrentCommitSha is not null &&
@@ -538,18 +547,33 @@ public sealed class ProjectVersionSyncService(
                 "Push was not performed because the remote tip is not empty or an ancestor of local main.");
         }
 
-        PushRemote(remote.ProjectVersionRepositoryId, target, credentials, comparison.CurrentCommitSha!, cancellationToken);
-        UpdateTrackingReference(remote.ProjectVersionRepositoryId, target.TrackingRef, comparison.CurrentCommitSha!);
-        var pushedComparison = ReadComparison(remote.ProjectVersionRepositoryId, target);
+        var pushedCommitSha = comparison.CurrentCommitSha!;
+        var pushOperation = await CreatePushOperationAsync(target, pushedCommitSha, cancellationToken);
+        PushRemote(remote.ProjectVersionRepositoryId, target, pushOperation, cancellationToken);
+
+        // A successful libgit2 transport does not by itself prove that the
+        // server updated the requested ref: GitHub can report a ref-level
+        // rejection through PushStatusError. Fetch again over the network and
+        // only report success when the exact target SHA is observed there.
+        FetchRemote(remote.ProjectVersionRepositoryId, target, credentials, cancellationToken);
+        var pushedComparison = await ReadVerifiedComparisonAsync(
+            remote.ProjectVersionRepositoryId,
+            target,
+            cancellationToken);
+        if (!string.Equals(pushedComparison.CandidateCommitSha, pushedCommitSha, StringComparison.Ordinal))
+            throw new ProjectVersionSyncException(
+                ProjectVersionSyncErrorCode.TransportFailure,
+                "GitHub did not report the requested commit on the configured branch. The remote was not marked synchronized; retry after checking repository access and history.");
+
         return CreateComparisonStatus(
             remote.ProjectVersionRepositoryId,
             remote.Id,
             target,
-            pushedComparison with { CandidateCommitSha = comparison.CurrentCommitSha },
+            pushedComparison,
             ProjectVersionSyncDisposition.Pushed,
             localUpdated: false,
             remoteUpdated: true,
-            "Local main was pushed with a non-force fast-forward refspec.");
+            "Local main was pushed with a non-force fast-forward update.");
     }
 
     private async Task EnsureCleanForPushAsync(
@@ -1008,6 +1032,31 @@ public sealed class ProjectVersionSyncService(
         }
     }
 
+    private async Task<IGitHubPushOperation> CreatePushOperationAsync(
+        RemoteTarget target,
+        string sourceCommitSha,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await github.CreatePushOperationAsync(
+                target.ConnectionId,
+                target.GitHubRepositoryId,
+                target.Owner,
+                target.RepositoryName,
+                sourceCommitSha,
+                target.DefaultBranch,
+                cancellationToken);
+        }
+        catch (GitHubConnectionException exception)
+        {
+            throw new ProjectVersionSyncException(
+                ProjectVersionSyncErrorCode.CredentialUnavailable,
+                "The selected GitHub connection is unavailable. Reauthorize GitHub before syncing.",
+                exception);
+        }
+    }
+
     private void FetchRemote(
         Guid repositoryId,
         RemoteTarget target,
@@ -1051,8 +1100,7 @@ public sealed class ProjectVersionSyncService(
     private void PushRemote(
         Guid repositoryId,
         RemoteTarget target,
-        CredentialsHandler credentials,
-        string localCommitSha,
+        IGitHubPushOperation pushOperation,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -1062,19 +1110,24 @@ public sealed class ProjectVersionSyncService(
             using var repository = OpenRepository(path);
             var remote = repository.Network.Remotes[target.RemoteName]
                 ?? throw InvalidRemote($"The configured Git remote '{target.RemoteName}' is missing.");
-            var options = new PushOptions { CredentialsProvider = credentials };
-            var refSpec = $"{MainReferenceName}:refs/heads/{target.DefaultBranch}";
             try
             {
                 // There is intentionally no '+' force marker here. GitHub
                 // rejects the push if the remote advanced after our fetch.
-                repository.Network.Push(remote, [refSpec], options);
+                pushOperation.Execute(repository, remote);
             }
             catch (Exception exception) when (exception is LibGit2SharpException or IOException)
             {
                 throw new ProjectVersionSyncException(
                     ProjectVersionSyncErrorCode.TransportFailure,
                     "GitHub push failed or the remote advanced concurrently. Fetch again and review the history relationship.",
+                    exception);
+            }
+            catch (GitHubConnectionException exception)
+            {
+                throw new ProjectVersionSyncException(
+                    ProjectVersionSyncErrorCode.TransportFailure,
+                    exception.Message,
                     exception);
             }
         }
@@ -1086,6 +1139,67 @@ public sealed class ProjectVersionSyncService(
         var localHead = git.GetHead(repositoryId).CommitSha;
         var remoteHead = ReadTrackingCommitSha(repositoryId, target.TrackingRef);
         return git.CompareHistory(repositoryId, localHead, remoteHead);
+    }
+
+    private async Task<GitHistoryComparison> ReadVerifiedComparisonAsync(
+        Guid repositoryId,
+        RemoteTarget target,
+        CancellationToken cancellationToken)
+    {
+        var localHead = git.GetHead(repositoryId).CommitSha;
+        var trackingHead = ReadTrackingCommitSha(repositoryId, target.TrackingRef);
+        var githubHead = await ObserveGitHubBranchHeadAsync(
+            target.ConnectionId,
+            target.GitHubRepositoryId,
+            target.Owner,
+            target.RepositoryName,
+            target.DefaultBranch,
+            cancellationToken);
+
+        if (githubHead is null)
+            return git.CompareHistory(repositoryId, localHead, null);
+        if (!string.Equals(trackingHead, githubHead, StringComparison.Ordinal))
+            throw new ProjectVersionSyncException(
+                ProjectVersionSyncErrorCode.TransportFailure,
+                "The authenticated GitHub branch head did not match the fetched tracking ref. The remote state was not trusted; fetch again and retry.");
+
+        return git.CompareHistory(repositoryId, localHead, githubHead);
+    }
+
+    private async Task<string?> ObserveGitHubBranchHeadAsync(
+        Guid connectionId,
+        long repositoryId,
+        string owner,
+        string repositoryName,
+        string branchName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await github.GetBranchHeadAsync(
+                connectionId,
+                repositoryId,
+                owner,
+                repositoryName,
+                branchName,
+                cancellationToken);
+        }
+        catch (GitHubConnectionException exception)
+        {
+            var code = exception.Code switch
+            {
+                GitHubConnectionErrorCode.Conflict => ProjectVersionSyncErrorCode.HistoryConflict,
+                GitHubConnectionErrorCode.Unauthorized or
+                GitHubConnectionErrorCode.Forbidden or
+                GitHubConnectionErrorCode.ExpiredToken or
+                GitHubConnectionErrorCode.ConnectionNotFound => ProjectVersionSyncErrorCode.CredentialUnavailable,
+                _ => ProjectVersionSyncErrorCode.TransportFailure,
+            };
+            var message = exception.Code == GitHubConnectionErrorCode.Conflict
+                ? exception.Message
+                : "GitHub branch verification failed. Check the connection and repository access, then retry.";
+            throw new ProjectVersionSyncException(code, message, exception);
+        }
     }
 
     private string? ReadTrackingCommitSha(Guid repositoryId, string trackingRef)
@@ -1101,20 +1215,6 @@ public sealed class ProjectVersionSyncService(
             if (commit is null)
                 throw InvalidRemote("The remote-tracking ref does not point to a commit.");
             return commit.Sha;
-        }
-    }
-
-    private void UpdateTrackingReference(Guid repositoryId, string trackingRef, string commitSha)
-    {
-        var path = git.GetRepositoryPath(repositoryId);
-        lock (GetRepositoryLock(path))
-        {
-            using var repository = OpenRepository(path);
-            var reference = repository.Refs[trackingRef];
-            if (reference is null)
-                repository.Refs.Add(trackingRef, new ObjectId(commitSha));
-            else
-                repository.Refs.UpdateTarget(reference, new ObjectId(commitSha));
         }
     }
 

@@ -186,6 +186,17 @@ fast-forward refspec when the remote is empty or an ancestor of local `main`.
 Empty GitHub repositories use `main` for their first push. Manual and automatic
 pushes share this transport policy, while automatic attempts use their existing
 durable operation row and remain retryable after network or history failures.
+Lorekeeper does not treat libgit2 transport completion as remote success: ref-level
+push errors fail the operation, a second authenticated fetch must observe the
+exact requested commit, and GitHub's API must independently report that same
+branch head before the operation can become synchronized or succeeded.
+The OAuth token remains inside the GitHub provider boundary and reaches the
+embedded libgit2 HTTPS transport through both its credential callback and a
+repository-bound preemptive in-memory authorization header; no system Git
+executable is invoked. A missing configured branch in a non-empty repository
+fails closed rather than being recreated automatically. A queued automatic push
+superseded by a newer local checkpoint is canceled as non-resumable; only the
+intent whose target was actually observed on GitHub can succeed.
 
 Diverged and unrelated histories remain visible with their tracking refs and
 are not merged, rebased, force-pushed, overwritten, or silently discarded.

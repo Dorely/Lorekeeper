@@ -130,6 +130,11 @@ public sealed record GitHubRepositoryCreateRequest(
     bool HasWiki = true,
     bool AutoInit = false);
 
+public interface IGitHubPushOperation
+{
+    void Execute(Repository repository, Remote remote);
+}
+
 public interface IGitHubConnectionService
 {
     Task<GitHubDeviceAuthorization> StartDeviceAuthorizationAsync(
@@ -159,6 +164,23 @@ public interface IGitHubConnectionService
     Task<GitHubRepositoryInfo> CreateRepositoryAsync(
         Guid connectionId,
         GitHubRepositoryCreateRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<string?> GetBranchHeadAsync(
+        Guid connectionId,
+        long expectedRepositoryId,
+        string owner,
+        string repositoryName,
+        string branchName,
+        CancellationToken cancellationToken = default);
+
+    Task<IGitHubPushOperation> CreatePushOperationAsync(
+        Guid connectionId,
+        long expectedRepositoryId,
+        string owner,
+        string repositoryName,
+        string sourceCommitSha,
+        string branchName,
         CancellationToken cancellationToken = default);
 
     Task<CredentialsHandler> CreateCredentialsHandlerAsync(

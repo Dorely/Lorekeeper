@@ -270,7 +270,12 @@ never waits for or depends on network work. Fetch, apply-remote, and manual push
 remain user-started actions. Applying remote changes and every push require a
 clean workspace and use fast-forward-only rules; no merge, rebase, force-push,
 or silent overwrite is performed. Diverged or unrelated histories remain visible
-for a deliberate decision. Attaching a GitHub remote also requires acknowledging that manuscript
+for a deliberate decision. A push is reported successful only after GitHub is
+fetched again and GitHub's API independently reports the exact checkpoint commit
+on the remote branch. Git transport remains embedded in Lorekeeper; no system Git
+executable is invoked or required. Lorekeeper will not silently recreate a
+missing branch in a non-empty remote repository.
+Attaching a GitHub remote also requires acknowledging that manuscript
 text, sources, images, and fonts may be uploaded; review repository privacy and
 asset licensing first. Once attached, the setup warning and repository pickers are
 replaced by the remote status and synchronization actions.

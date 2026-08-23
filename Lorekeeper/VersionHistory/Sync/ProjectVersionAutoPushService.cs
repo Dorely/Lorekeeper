@@ -51,13 +51,28 @@ public sealed class ProjectVersionAutoPushService(
             if (status.Disposition is ProjectVersionSyncDisposition.Pushed
                 or ProjectVersionSyncDisposition.AlreadySynchronized)
             {
-                await CompleteAsync(candidate.OperationId, success: true, null, null);
+                await CompleteAsync(
+                    candidate.OperationId,
+                    ProjectVersionOperationStatus.Succeeded,
+                    isResumable: false,
+                    null,
+                    null);
+            }
+            else if (status.Disposition == ProjectVersionSyncDisposition.PushSkipped)
+            {
+                await CompleteAsync(
+                    candidate.OperationId,
+                    ProjectVersionOperationStatus.Canceled,
+                    isResumable: false,
+                    null,
+                    status.Message);
             }
             else
             {
                 await CompleteAsync(
                     candidate.OperationId,
-                    success: false,
+                    ProjectVersionOperationStatus.Failed,
+                    isResumable: true,
                     ProjectVersionSyncErrorCode.HistoryConflict.ToString(),
                     status.Message);
             }
@@ -71,7 +86,8 @@ public sealed class ProjectVersionAutoPushService(
         {
             await CompleteAsync(
                 candidate.OperationId,
-                success: false,
+                ProjectVersionOperationStatus.Failed,
+                isResumable: true,
                 ErrorCodeFor(exception),
                 SafeErrorMessage(exception));
         }
@@ -149,7 +165,8 @@ public sealed class ProjectVersionAutoPushService(
 
     private async Task CompleteAsync(
         Guid operationId,
-        bool success,
+        ProjectVersionOperationStatus status,
+        bool isResumable,
         string? errorCode,
         string? errorMessage)
     {
@@ -160,10 +177,8 @@ public sealed class ProjectVersionAutoPushService(
             return;
 
         var now = DateTime.UtcNow;
-        row.Status = success
-            ? ProjectVersionOperationStatus.Succeeded
-            : ProjectVersionOperationStatus.Failed;
-        row.IsResumable = !success;
+        row.Status = status;
+        row.IsResumable = isResumable;
         row.ErrorCode = errorCode;
         row.ErrorMessage = errorMessage;
         row.CompletedAt = now;
