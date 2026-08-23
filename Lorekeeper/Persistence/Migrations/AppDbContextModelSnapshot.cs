@@ -3324,6 +3324,9 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<DateTime?>("AcknowledgedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ProjectGitRemoteId")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("AttemptCount")
                         .HasColumnType("INTEGER");
 
@@ -3362,6 +3365,9 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TargetCommitSha")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
@@ -3373,6 +3379,9 @@ namespace Lorekeeper.Persistence.Migrations
                         .IsUnique();
 
                     b.HasIndex("ProjectVersionRepositoryId", "Status", "UpdatedAt");
+
+                    b.HasIndex("ProjectGitRemoteId", "TargetCommitSha")
+                        .IsUnique();
 
                     b.ToTable("ProjectVersionOperations");
                 });

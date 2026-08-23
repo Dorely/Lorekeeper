@@ -2,6 +2,7 @@ using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.VersionHistory.Git;
 using Lorekeeper.VersionHistory.Snapshots;
+using Lorekeeper.VersionHistory.Sync;
 using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.VersionHistory.Services;
@@ -14,7 +15,8 @@ public sealed class ProjectVersionHistoryReconciliationService(
     IProjectMutationCoordinator projectMutations,
     IAppDatabaseOperationFactory database,
     IVersionHistorySnapshotReader snapshotReader,
-    IGitRepositoryStore git) : IProjectVersionHistoryReconciliationService
+    IGitRepositoryStore git,
+    IProjectVersionAutoPushQueue autoPushQueue) : IProjectVersionHistoryReconciliationService
 {
     private const string TemporaryDirectoryPrefix = "lorekeeper-version-history-reconcile-";
 
@@ -37,6 +39,7 @@ public sealed class ProjectVersionHistoryReconciliationService(
             cancellationToken.ThrowIfCancellationRequested();
             results.Add(await ReconcileProjectAsync(projectId, cancellationToken));
         }
+        autoPushQueue.Signal();
 
         return new ProjectVersionReconciliationReport(DateTime.UtcNow, results)
         {
@@ -272,6 +275,7 @@ public sealed class ProjectVersionHistoryReconciliationService(
                 headCommit,
                 commits,
                 cancellationToken);
+            await EnsureAutoPushIntentsAsync(repository.Id, head.Commit.Sha, cancellationToken);
             return Result(
                 projectId,
                 repository.Id,
@@ -294,6 +298,30 @@ public sealed class ProjectVersionHistoryReconciliationService(
                 0,
                 exception.Message);
         }
+    }
+
+    private async Task EnsureAutoPushIntentsAsync(
+        Guid repositoryId,
+        string targetCommitSha,
+        CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var remotes = await operation.Db.ProjectGitRemotes
+            .Where(remote => remote.ProjectVersionRepositoryId == repositoryId)
+            .ToListAsync(cancellationToken);
+        var now = DateTime.UtcNow;
+        foreach (var remote in remotes)
+        {
+            await ProjectVersionHistoryService.AddPendingAutoPushIntentAsync(
+                operation.Db,
+                repositoryId,
+                remote,
+                targetCommitSha,
+                now,
+                cancellationToken);
+        }
+
+        await operation.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<HashSet<string>> ListKnownCheckpointCommitShasAsync(
@@ -343,11 +371,25 @@ public sealed class ProjectVersionHistoryReconciliationService(
             .ToListAsync(cancellationToken);
         foreach (var journal in running)
         {
-            journal.Status = ProjectVersionOperationStatus.Failed;
-            journal.IsResumable = true;
-            journal.ErrorCode = "StartupInterrupted";
-            journal.ErrorMessage = "The operation was interrupted before the previous application exited.";
-            journal.CompletedAt = now;
+            if (journal.Kind == ProjectVersionOperationKind.AutoPush)
+            {
+                // Automatic push has a durable target and is safe to reclaim
+                // from its Running state. The startup-gated worker will claim
+                // it again under the project mutation lease.
+                journal.Status = ProjectVersionOperationStatus.Pending;
+                journal.IsResumable = true;
+                journal.ErrorCode = null;
+                journal.ErrorMessage = null;
+                journal.CompletedAt = null;
+            }
+            else
+            {
+                journal.Status = ProjectVersionOperationStatus.Failed;
+                journal.IsResumable = true;
+                journal.ErrorCode = "StartupInterrupted";
+                journal.ErrorMessage = "The operation was interrupted before the previous application exited.";
+                journal.CompletedAt = now;
+            }
             journal.HeartbeatAt = now;
             journal.UpdatedAt = now;
         }

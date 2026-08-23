@@ -34,8 +34,12 @@ the current runtime. Source inspection remains the proof of what is implemented.
   canonical creative state, not a SQLite mirror. Secrets, chats, jobs,
   projections, render artifacts, and other operational state stay outside the
   snapshot; restore rebuilds derived projections through their owning services.
-  Remote actions are explicit, clean-workspace, fast-forward-only operations;
-  divergence is preserved rather than silently merged or overwritten.
+  Remote attachment is explicit opt-in. After attachment, successful local
+  checkpoints create durable automatic push intents for every attached remote;
+  fetch, checkout, and manual push remain explicit operations, while checkout
+  and every push require a clean workspace and fast-forward-only history.
+  Divergence is preserved rather than silently
+  merged or overwritten, and local checkpoint success never waits for network.
 - Manuscripts persist as semantic manuscript v4 documents. Older v1-v3 forms
   survive only at immutable migration history and versioned import boundaries.
 - The graph, FTS5, and sqlite-vec projections are maintained through owning

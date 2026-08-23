@@ -23,9 +23,12 @@ returns UI-ready semantic differences; it never reads Git or SQLite.
 
 SQLite and the current domain models remain the live project authority. Git is a
 durable, reviewable history of selected canonical creative state, not a second
-live database and not a working checkout. Remote synchronization is an explicit
-transport action; it does not silently merge, rebase, force-push, or resolve
-conflicts by discarding either history.
+live database and not a working checkout. Remote attachment is explicit opt-in.
+Once attached, each successful local checkpoint durably records one automatic
+push intent per attachment; a startup-gated worker later processes those intents
+without delaying or failing the local checkpoint. User-started fetch, checkout,
+and manual push remain explicit transport actions. No path silently merges,
+rebases, force-pushes, or resolves conflicts by discarding either history.
 
 ## Current architecture and invariants
 
@@ -168,8 +171,11 @@ projections. It fails closed on a head mismatch.
 
 ### Remote synchronization
 
-Fetching a remote is a network action and updates only the remote-tracking ref;
-cached status and local reads do not contact GitHub. Applying a fetched remote
+Fetching a remote is a network action and updates only the attachment-specific
+remote-tracking ref; cached status and local reads do not contact GitHub. A
+missing/deleted branch or empty repository clears that active ref, so status
+returns to attached/unknown rather than retaining an old synchronized tip.
+Applying a fetched remote
 requires a clean project, creates a deduplicated safety checkpoint, and uses
 fast-forward-only compare-and-swap before exact-head checkout. Local `main` is
 advanced only when the remote tip is a descendant. The final clean-state check,
@@ -177,11 +183,24 @@ ref update, cache advancement, and SQLite checkout share one project mutation
 lease so an editor/checkpoint cannot interleave them. Pushing likewise requires a
 clean project and an existing local checkpoint; it permits only a non-force
 fast-forward refspec when the remote is empty or an ancestor of local `main`.
+Empty GitHub repositories use `main` for their first push. Manual and automatic
+pushes share this transport policy, while automatic attempts use their existing
+durable operation row and remain retryable after network or history failures.
 
 Diverged and unrelated histories remain visible with their tracking refs and
 are not merged, rebased, force-pushed, overwritten, or silently discarded.
 Removing a local remote attachment preserves local history and tracking refs;
 it removes only the project attachment and Git remote configuration.
+
+`ProjectVersionOperation` is also the automatic-push durable boundary. Its
+nullable remote-attachment and exact target-commit fields deduplicate intents;
+the process-local queue only wakes a startup-gated hosted worker. The worker
+creates fresh scopes, scans pending/interrupted rows, and holds the project
+mutation lease across dirty-state checks, fetch, compare, push, and
+tracking-ref updates. It never retains scoped database contexts across network
+calls. Startup reconciliation also creates a missing intent for the current head
+of each existing attachment, so upgrading an already attached project does not
+require an extra checkpoint before its first automatic delivery.
 
 GitHub account setup uses device authorization. The distributable ships the
 public client ID for Lorekeeper's maintainer-owned OAuth app. Forks and custom
@@ -189,8 +208,9 @@ deployments can replace it through `VersionHistory:GitHub:ClientId` (or the
 standard environment override `VersionHistory__GitHub__ClientId`). Access
 tokens remain in the provider-owned `GitHubConnection` row and are never written
 into manifests, snapshots, remote metadata, logs, or UI payloads. Repository
-listing, creation, fetch, push, and device authorization happen only after the
-user explicitly starts the corresponding action. Attaching a remote requires an
+listing, creation, fetch, manual push, and device authorization happen only after
+the user explicitly starts the corresponding action. Automatic push begins only
+after explicit attachment and a successful local checkpoint. Attaching a remote requires an
 explicit acknowledgement that creative material may be uploaded. After attachment,
 the consent and repository-selection controls collapse into the attached remote
 status and actions; removing the remote makes setup available again.

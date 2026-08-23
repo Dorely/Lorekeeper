@@ -67,6 +67,13 @@ publication artifacts. Restore/import uses the same project mutation lease,
 database write lease, and transaction ordering as other guarded transformations
 and repairs projections only after canonical rows commit.
 
+The `ProjectVersionOperation` journal is also the durable boundary for automatic
+checkpoint pushes. A successful checkpoint inserts deduplicated remote/target
+intent rows in the same database write transaction. A startup-gated hosted
+worker reclaims pending or interrupted intents through fresh scopes; its
+process-local queue is only a wake-up and never replaces the journal or a
+database migration.
+
 Credential/API-key rows, OAuth token rows, and provider configuration remain
 within the provider persistence boundary. The local database is not an
 operating-system credential vault or an encryption-at-rest claim. Secrets,
@@ -234,7 +241,7 @@ SQLite backup or a portable v24 export.
 | `Lorekeeper/ImportExport/ProjectImportExportService.cs` | UI-facing Full/Non-structural export, warnings, queueing, and import job lifecycle. |
 | `Lorekeeper/ImportExport/ProjectImportJobProcessor.cs` | Transactional v24 import, ID remapping, rollback/report behavior, legacy conversion, and post-commit indexing. |
 | `Lorekeeper/ImportExport/ProjectImportJobQueue.cs` / `ProjectImportJobNotifier.cs` | Import job dispatch and ephemeral live UI updates; the provider/background chapter owns hosted worker execution. |
-| `Lorekeeper/VersionHistory/Snapshots/`, `Git/`, `Services/`, `Restore/`, and `Sync/` | Deterministic creative snapshot trees, bare Git/checkpoint metadata, guarded restore/import, and explicit remote transport; detailed ownership is in `version-history-sync.md`. |
+| `Lorekeeper/VersionHistory/Snapshots/`, `Git/`, `Services/`, `Restore/`, and `Sync/` | Deterministic creative snapshot trees, bare Git/checkpoint metadata, guarded restore/import, explicit remote attachment, and durable automatic transport; detailed ownership is in `version-history-sync.md`. |
 | `Lorekeeper.Tests/DatabaseMigrationRecoveryTests.cs` | Recovery markers, protected backup retention, and fail-closed startup behavior. |
 | `Lorekeeper.Tests/ManuscriptMigrationIntegrationTests.cs` | Real legacy WAL migration, backup/journal/hash validation, restore, and audit compatibility. |
 | `Lorekeeper.Tests/ProjectExportCompatibilityTests.cs` / `ProjectImportJobIntegrationTests.cs` | v24 export/import preservation, warnings, remapping, rollback, and legacy adapters. |

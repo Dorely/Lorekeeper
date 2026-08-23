@@ -11,6 +11,7 @@ public sealed class ProjectVersionHistoryUiEvents
 
     public event Action<Guid>? CheckpointCreated;
     public event Action<Guid>? OperationStateChanged;
+    public event Action<Guid>? RemoteSyncChanged;
 
     public bool IsProjectOperationActive(Guid projectId)
     {
@@ -45,6 +46,12 @@ public sealed class ProjectVersionHistoryUiEvents
     {
         ValidateProjectId(projectId);
         Publish(CheckpointCreated, projectId);
+    }
+
+    public void PublishRemoteSyncChanged(Guid projectId)
+    {
+        ValidateProjectId(projectId);
+        Publish(RemoteSyncChanged, projectId);
     }
 
     private static void Publish(Action<Guid>? handlers, Guid projectId)

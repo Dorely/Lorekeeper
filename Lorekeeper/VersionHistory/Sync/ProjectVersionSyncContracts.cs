@@ -54,6 +54,8 @@ public enum ProjectVersionSyncDisposition
     Attached,
     Updated,
     Removed,
+    Syncing,
+    Failed,
 }
 
 /// <summary>

@@ -22,7 +22,10 @@ public sealed class ProjectVersionSyncService(
     IGitHubConnectionService github,
     IAppDatabaseOperationFactory database,
     IVersionHistorySnapshotReader snapshotReader,
-    IProjectVersionHistoryService history) : IProjectVersionSyncService
+    ProjectVersionHistoryService history,
+    IProjectMutationCoordinator projectMutations,
+    IProjectVersionAutoPushQueue autoPushQueue,
+    ProjectVersionHistoryUiEvents historyEvents) : IProjectVersionSyncService
 {
     private const string MainReferenceName = "refs/heads/main";
     private const string DefaultRemoteName = "origin";
@@ -76,6 +79,18 @@ public sealed class ProjectVersionSyncService(
         var remote = await LoadRemoteAsync(remoteId, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         var target = remote.ToTarget();
+        AutoPushState? autoPushState;
+        await using (var operation = await database.OpenReadAsync(cancellationToken))
+        {
+            autoPushState = await operation.Db.ProjectVersionOperations
+                .AsNoTracking()
+                .Where(item => item.ProjectGitRemoteId == remoteId
+                    && item.Kind == ProjectVersionOperationKind.AutoPush
+                    && item.TargetCommitSha != null)
+                .OrderByDescending(item => item.CreatedAt)
+                .Select(item => new AutoPushState(item.Status, item.ErrorMessage))
+                .FirstOrDefaultAsync(cancellationToken);
+        }
         EnsureLocalGitRepository(remote.ProjectVersionRepositoryId, initializeIfMissing: false);
         var comparison = ReadComparison(remote.ProjectVersionRepositoryId, target);
         cancellationToken.ThrowIfCancellationRequested();
@@ -94,10 +109,10 @@ public sealed class ProjectVersionSyncService(
                 null,
                 null,
                 GitHistoryRelation.Empty,
-                ProjectVersionSyncDisposition.Attached,
+                AutomaticDisposition(autoPushState, ProjectVersionSyncDisposition.Attached),
                 localUpdated: false,
                 remoteUpdated: false,
-                "The remote is attached but has not been fetched into this local repository.");
+                AutomaticMessage(autoPushState, "The remote is attached but has not been fetched into this local repository."));
         }
 
         return CreateComparisonStatus(
@@ -105,10 +120,10 @@ public sealed class ProjectVersionSyncService(
             remoteId,
             target,
             comparison,
-            ProjectVersionSyncDispositionFor(comparison.Relation),
+            AutomaticDisposition(autoPushState, ProjectVersionSyncDispositionFor(comparison.Relation)),
             localUpdated: false,
             remoteUpdated: false,
-            "The status reflects the existing local main and remote-tracking refs; no network request was made.");
+            AutomaticMessage(autoPushState, "The status reflects the existing local main and remote-tracking refs; no network request was made."));
     }
 
     public async Task<ProjectVersionSyncStatus> AttachRemoteAsync(
@@ -117,13 +132,17 @@ public sealed class ProjectVersionSyncService(
         CancellationToken cancellationToken = default)
     {
         await EnsureRepositoryExistsAsync(projectVersionRepositoryId, cancellationToken);
+        var projectId = await LoadProjectIdAsync(projectVersionRepositoryId, cancellationToken);
+        await using var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
         return await RunJournaledAsync(
             projectVersionRepositoryId,
             ProjectVersionOperationKind.Relink,
             async () =>
             {
-                var target = ValidateSelection(selection);
+                var remoteId = Guid.NewGuid();
+                var target = ValidateSelection(selection, remoteId);
                 EnsureLocalGitRepository(projectVersionRepositoryId, initializeIfMissing: true);
+                var localHead = git.GetHead(projectVersionRepositoryId).CommitSha;
 
                 await using var operation = await database.OpenWriteAsync(cancellationToken);
                 var existing = await operation.Db.ProjectGitRemotes
@@ -146,8 +165,9 @@ public sealed class ProjectVersionSyncService(
 
                 ConfigureGitRemote(projectVersionRepositoryId, target);
                 var now = DateTime.UtcNow;
-                operation.Db.ProjectGitRemotes.Add(new ProjectGitRemote
+                var entity = new ProjectGitRemote
                 {
+                    Id = remoteId,
                     ProjectVersionRepositoryId = projectVersionRepositoryId,
                     GitHubConnectionId = target.ConnectionId,
                     RemoteName = target.RemoteName,
@@ -159,13 +179,21 @@ public sealed class ProjectVersionSyncService(
                     DefaultBranch = target.DefaultBranch,
                     CreatedAt = now,
                     UpdatedAt = now,
-                });
+                };
+                operation.Db.ProjectGitRemotes.Add(entity);
+                await ProjectVersionHistoryService.AddPendingAutoPushIntentAsync(
+                    operation.Db,
+                    projectVersionRepositoryId,
+                    entity,
+                    localHead,
+                    now,
+                    cancellationToken);
                 await operation.SaveChangesAsync(cancellationToken);
 
-                var localHead = git.GetHead(projectVersionRepositoryId).CommitSha;
+                autoPushQueue.Signal();
                 return CreateStatus(
                     projectVersionRepositoryId,
-                    null,
+                    remoteId,
                     target,
                     localHead,
                     null,
@@ -185,12 +213,15 @@ public sealed class ProjectVersionSyncService(
         CancellationToken cancellationToken = default)
     {
         var remote = await LoadRemoteAsync(remoteId, cancellationToken);
+        var projectId = await LoadProjectIdAsync(remote.ProjectVersionRepositoryId, cancellationToken);
+        await using var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        remote = await LoadRemoteAsync(remoteId, cancellationToken);
         return await RunJournaledAsync(
             remote.ProjectVersionRepositoryId,
             ProjectVersionOperationKind.Relink,
             async () =>
             {
-                var target = ValidateSelection(selection);
+                var target = ValidateSelection(selection, remote.Id);
                 if (!string.Equals(target.RemoteName, remote.RemoteName, StringComparison.Ordinal))
                     throw InvalidRequest("A remote name cannot be changed in place because its tracking refs must be preserved. Remove and attach the remote with the new name.");
 
@@ -219,9 +250,17 @@ public sealed class ProjectVersionSyncService(
                 entity.WebUrl = selection.Repository.HtmlUrl;
                 entity.DefaultBranch = target.DefaultBranch;
                 entity.UpdatedAt = DateTime.UtcNow;
+                var localHead = git.GetHead(remote.ProjectVersionRepositoryId).CommitSha;
+                await ProjectVersionHistoryService.AddPendingAutoPushIntentAsync(
+                    operation.Db,
+                    remote.ProjectVersionRepositoryId,
+                    entity,
+                    localHead,
+                    entity.UpdatedAt,
+                    cancellationToken);
                 await operation.SaveChangesAsync(cancellationToken);
 
-                var localHead = git.GetHead(remote.ProjectVersionRepositoryId).CommitSha;
+                autoPushQueue.Signal();
                 return CreateStatus(
                     remote.ProjectVersionRepositoryId,
                     remoteId,
@@ -243,6 +282,9 @@ public sealed class ProjectVersionSyncService(
         CancellationToken cancellationToken = default)
     {
         var remote = await LoadRemoteAsync(remoteId, cancellationToken);
+        var projectId = await LoadProjectIdAsync(remote.ProjectVersionRepositoryId, cancellationToken);
+        await using var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        remote = await LoadRemoteAsync(remoteId, cancellationToken);
         return await RunJournaledAsync(
             remote.ProjectVersionRepositoryId,
             ProjectVersionOperationKind.Relink,
@@ -254,6 +296,23 @@ public sealed class ProjectVersionSyncService(
                 var entity = await operation.Db.ProjectGitRemotes
                     .SingleOrDefaultAsync(item => item.Id == remoteId, cancellationToken)
                     ?? throw RemoteNotFound(remoteId);
+                var interruptedPushes = await operation.Db.ProjectVersionOperations
+                    .Where(item => item.ProjectGitRemoteId == remoteId
+                        && item.Kind == ProjectVersionOperationKind.AutoPush
+                        && (item.Status == ProjectVersionOperationStatus.Pending
+                            || item.Status == ProjectVersionOperationStatus.Running))
+                    .ToListAsync(cancellationToken);
+                var removedAt = DateTime.UtcNow;
+                foreach (var interruptedPush in interruptedPushes)
+                {
+                    interruptedPush.Status = ProjectVersionOperationStatus.Canceled;
+                    interruptedPush.IsResumable = false;
+                    interruptedPush.ErrorCode = ProjectVersionSyncErrorCode.RemoteNotFound.ToString();
+                    interruptedPush.ErrorMessage = "The attached remote was removed before its automatic push completed.";
+                    interruptedPush.CompletedAt = removedAt;
+                    interruptedPush.HeartbeatAt = removedAt;
+                    interruptedPush.UpdatedAt = removedAt;
+                }
                 operation.Db.ProjectGitRemotes.Remove(entity);
                 await operation.SaveChangesAsync(cancellationToken);
 
@@ -372,58 +431,125 @@ public sealed class ProjectVersionSyncService(
         CancellationToken cancellationToken = default)
     {
         var remote = await LoadRemoteAsync(remoteId, cancellationToken);
-        return await RunJournaledAsync(
-            remote.ProjectVersionRepositoryId,
-            ProjectVersionOperationKind.Push,
-            async () =>
+        var projectId = await LoadProjectIdAsync(remote.ProjectVersionRepositoryId, cancellationToken);
+        await using var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        remote = await LoadRemoteAsync(remoteId, cancellationToken);
+        try
+        {
+            var result = await RunJournaledAsync(
+                remote.ProjectVersionRepositoryId,
+                ProjectVersionOperationKind.Push,
+                () => PushUnderLeaseAsync(remote, targetCommitSha: null, cancellationToken),
+                cancellationToken);
+            if (result.LocalCommitSha is not null)
+                await ResolveMatchingAutoPushIntentAsync(
+                    remote.Id,
+                    result.LocalCommitSha,
+                    CancellationToken.None);
+            historyEvents.PublishRemoteSyncChanged(projectId);
+            return result;
+        }
+        catch
+        {
+            historyEvents.PublishRemoteSyncChanged(projectId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Executes the same fetch/compare/non-force push transport used by the
+    /// public manual operation. The caller owns the project mutation lease and
+    /// the durable AutoPush journal row.
+    /// </summary>
+    internal async Task<ProjectVersionSyncStatus> PushAutomaticUnderLeaseAsync(
+        Guid remoteId,
+        string targetCommitSha,
+        CancellationToken cancellationToken)
+    {
+        var remote = await LoadRemoteAsync(remoteId, cancellationToken);
+        return await PushUnderLeaseAsync(remote, targetCommitSha, cancellationToken);
+    }
+
+    private async Task<ProjectVersionSyncStatus> PushUnderLeaseAsync(
+        RemoteContext remote,
+        string? targetCommitSha,
+        CancellationToken cancellationToken)
+    {
+        await EnsureCleanForPushAsync(remote.ProjectVersionRepositoryId, cancellationToken);
+        var target = remote.ToTarget();
+        EnsureLocalGitRepository(remote.ProjectVersionRepositoryId, initializeIfMissing: false);
+        ConfigureGitRemote(remote.ProjectVersionRepositoryId, target);
+        var credentials = await CreateCredentialsAsync(remote, cancellationToken);
+        FetchRemote(remote.ProjectVersionRepositoryId, target, credentials, cancellationToken);
+        var comparison = ReadComparison(remote.ProjectVersionRepositoryId, target);
+
+        if (targetCommitSha is not null &&
+            !string.Equals(comparison.CurrentCommitSha, targetCommitSha, StringComparison.Ordinal))
+        {
+            if (comparison.CurrentCommitSha is null)
+                throw new ProjectVersionSyncException(
+                    ProjectVersionSyncErrorCode.HistoryConflict,
+                    "The automatic push target is no longer the local main head.");
+
+            var targetRelation = git.CompareHistory(
+                remote.ProjectVersionRepositoryId,
+                targetCommitSha,
+                comparison.CurrentCommitSha);
+            if (targetRelation.Relation is GitHistoryRelation.CandidateFastForward or GitHistoryRelation.Identical)
             {
-                await EnsureCleanForPushAsync(remote.ProjectVersionRepositoryId, cancellationToken);
-                var target = remote.ToTarget();
-                EnsureLocalGitRepository(remote.ProjectVersionRepositoryId, initializeIfMissing: false);
-                ConfigureGitRemote(remote.ProjectVersionRepositoryId, target);
-                var credentials = await CreateCredentialsAsync(remote, cancellationToken);
-                FetchRemote(remote.ProjectVersionRepositoryId, target, credentials, cancellationToken);
-                var comparison = ReadComparison(remote.ProjectVersionRepositoryId, target);
-
-                var pushAllowed = comparison.CurrentCommitSha is not null &&
-                    (comparison.CandidateCommitSha is null ||
-                     comparison.Relation is GitHistoryRelation.CurrentFastForward);
-                if (!pushAllowed)
-                {
-                    var disposition = comparison.Relation switch
-                    {
-                        GitHistoryRelation.Empty => ProjectVersionSyncDisposition.PushSkipped,
-                        GitHistoryRelation.Identical => ProjectVersionSyncDisposition.AlreadySynchronized,
-                        GitHistoryRelation.CandidateFastForward => ProjectVersionSyncDisposition.RemoteAhead,
-                        GitHistoryRelation.Diverged => ProjectVersionSyncDisposition.Diverged,
-                        GitHistoryRelation.Unrelated => ProjectVersionSyncDisposition.Unrelated,
-                        _ => ProjectVersionSyncDisposition.PushSkipped,
-                    };
-                    return CreateComparisonStatus(
-                        remote.ProjectVersionRepositoryId,
-                        remoteId,
-                        target,
-                        comparison,
-                        disposition,
-                        localUpdated: false,
-                        remoteUpdated: false,
-                        "Push was not performed because the remote tip is not empty or an ancestor of local main.");
-                }
-
-                PushRemote(remote.ProjectVersionRepositoryId, target, credentials, comparison.CurrentCommitSha!, cancellationToken);
-                UpdateTrackingReference(remote.ProjectVersionRepositoryId, target.TrackingRef, comparison.CurrentCommitSha!);
-                var pushedComparison = ReadComparison(remote.ProjectVersionRepositoryId, target);
                 return CreateComparisonStatus(
                     remote.ProjectVersionRepositoryId,
-                    remoteId,
+                    remote.Id,
                     target,
-                    pushedComparison with { CandidateCommitSha = comparison.CurrentCommitSha },
-                    ProjectVersionSyncDisposition.Pushed,
+                    comparison,
+                    ProjectVersionSyncDisposition.AlreadySynchronized,
                     localUpdated: false,
-                    remoteUpdated: true,
-                    "Local main was pushed with a non-force fast-forward refspec.");
-            },
-            cancellationToken);
+                    remoteUpdated: false,
+                    "The automatic push target was superseded by a newer local checkpoint.");
+            }
+
+            throw new ProjectVersionSyncException(
+                ProjectVersionSyncErrorCode.HistoryConflict,
+                "The automatic push target is no longer an ancestor of local main.");
+        }
+
+        var pushAllowed = comparison.CurrentCommitSha is not null &&
+            (comparison.CandidateCommitSha is null ||
+             comparison.Relation is GitHistoryRelation.CurrentFastForward);
+        if (!pushAllowed)
+        {
+            var disposition = comparison.Relation switch
+            {
+                GitHistoryRelation.Empty => ProjectVersionSyncDisposition.PushSkipped,
+                GitHistoryRelation.Identical => ProjectVersionSyncDisposition.AlreadySynchronized,
+                GitHistoryRelation.CandidateFastForward => ProjectVersionSyncDisposition.RemoteAhead,
+                GitHistoryRelation.Diverged => ProjectVersionSyncDisposition.Diverged,
+                GitHistoryRelation.Unrelated => ProjectVersionSyncDisposition.Unrelated,
+                _ => ProjectVersionSyncDisposition.PushSkipped,
+            };
+            return CreateComparisonStatus(
+                remote.ProjectVersionRepositoryId,
+                remote.Id,
+                target,
+                comparison,
+                disposition,
+                localUpdated: false,
+                remoteUpdated: false,
+                "Push was not performed because the remote tip is not empty or an ancestor of local main.");
+        }
+
+        PushRemote(remote.ProjectVersionRepositoryId, target, credentials, comparison.CurrentCommitSha!, cancellationToken);
+        UpdateTrackingReference(remote.ProjectVersionRepositoryId, target.TrackingRef, comparison.CurrentCommitSha!);
+        var pushedComparison = ReadComparison(remote.ProjectVersionRepositoryId, target);
+        return CreateComparisonStatus(
+            remote.ProjectVersionRepositoryId,
+            remote.Id,
+            target,
+            pushedComparison with { CandidateCommitSha = comparison.CurrentCommitSha },
+            ProjectVersionSyncDisposition.Pushed,
+            localUpdated: false,
+            remoteUpdated: true,
+            "Local main was pushed with a non-force fast-forward refspec.");
     }
 
     private async Task EnsureCleanForPushAsync(
@@ -432,10 +558,10 @@ public sealed class ProjectVersionSyncService(
     {
         var projectId = await LoadProjectIdAsync(projectVersionRepositoryId, cancellationToken);
 
-        var status = await history.GetStatusAsync(
+        var status = await history.GetStatusUnderLeaseAsync(
             projectId,
             includeCurrentSnapshotHash: true,
-            cancellationToken: cancellationToken);
+            cancellationToken);
         if (status?.Repository.IsDirty == true)
             throw new ProjectVersionSyncException(
                 ProjectVersionSyncErrorCode.HistoryConflict,
@@ -455,6 +581,34 @@ public sealed class ProjectVersionSyncService(
         return projectId == Guid.Empty
             ? throw RepositoryNotFound(projectVersionRepositoryId)
             : projectId;
+    }
+
+    private async Task ResolveMatchingAutoPushIntentAsync(
+        Guid remoteId,
+        string commitSha,
+        CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var now = DateTime.UtcNow;
+        var rows = await operation.Db.ProjectVersionOperations
+            .Where(item => item.ProjectGitRemoteId == remoteId
+                && item.Kind == ProjectVersionOperationKind.AutoPush
+                && item.TargetCommitSha == commitSha
+                && item.Status != ProjectVersionOperationStatus.Succeeded)
+            .ToListAsync(cancellationToken);
+        foreach (var row in rows)
+        {
+            row.Status = ProjectVersionOperationStatus.Succeeded;
+            row.IsResumable = false;
+            row.ErrorCode = null;
+            row.ErrorMessage = null;
+            row.CompletedAt = now;
+            row.HeartbeatAt = now;
+            row.UpdatedAt = now;
+        }
+
+        if (rows.Count > 0)
+            await operation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<VersionHistoryImportCloneResult> CloneForImportAsync(
@@ -870,9 +1024,15 @@ public sealed class ProjectVersionSyncService(
             var options = new FetchOptions
             {
                 CredentialsProvider = credentials,
-                Prune = false,
+                Prune = true,
             };
-            var refSpec = $"+refs/heads/{target.DefaultBranch}:" + target.TrackingRef;
+            // Remove this attachment's last observed tip before the network
+            // request. A deleted branch, empty repository, or failed fetch
+            // must become Attached/unknown rather than stale Synchronized.
+            var existingTracking = repository.Refs[target.TrackingRef];
+            if (existingTracking is not null)
+                repository.Refs.Remove(existingTracking);
+            var refSpec = BuildFetchRefSpec(target.RemoteId);
             try
             {
                 Commands.Fetch(repository, remote.Name, [refSpec], options, "Lorekeeper version-history fetch");
@@ -964,7 +1124,7 @@ public sealed class ProjectVersionSyncService(
         lock (GetRepositoryLock(path))
         {
             using var repository = OpenRepository(path);
-            var fetchRefSpec = $"+refs/heads/{target.DefaultBranch}:" + target.TrackingRef;
+            var fetchRefSpec = BuildFetchRefSpec(target.RemoteId);
             var remote = repository.Network.Remotes[target.RemoteName];
             if (remote is null)
             {
@@ -1342,7 +1502,9 @@ public sealed class ProjectVersionSyncService(
         }
     }
 
-    private static RemoteTarget ValidateSelection(GitHubRepositorySelection selection)
+    private static RemoteTarget ValidateSelection(
+        GitHubRepositorySelection selection,
+        Guid? remoteId = null)
     {
         if (selection is null)
             throw InvalidRequest("A GitHub repository selection is required.");
@@ -1358,9 +1520,11 @@ public sealed class ProjectVersionSyncService(
             throw InvalidRequest("The selected GitHub repository has no valid numeric identity.");
         if (!string.Equals(repository.FullName, $"{repository.Owner}/{repository.Name}", StringComparison.OrdinalIgnoreCase))
             throw InvalidRequest("The selected GitHub repository metadata is internally inconsistent.");
-        ValidateBranchName(repository.DefaultBranch);
         var cloneUrl = ValidateCloneUrl(repository.CloneUrl, repository.Owner, repository.Name);
-        var defaultBranch = repository.DefaultBranch!.Trim();
+        var defaultBranch = string.IsNullOrWhiteSpace(repository.DefaultBranch)
+            ? "main"
+            : repository.DefaultBranch.Trim();
+        ValidateBranchName(defaultBranch);
 
         return new RemoteTarget(
             selection.ConnectionId,
@@ -1371,7 +1535,7 @@ public sealed class ProjectVersionSyncService(
             repository.Id,
             cloneUrl,
             defaultBranch,
-            BuildTrackingRef(remoteName, defaultBranch));
+            BuildTrackingRef(remoteId, defaultBranch));
     }
 
     private static RemoteTarget ValidateStoredRemote(RemoteContext remote)
@@ -1383,8 +1547,11 @@ public sealed class ProjectVersionSyncService(
         ValidateRemoteName(remote.RemoteName);
         ValidateRepositoryPart(remote.Owner, "owner");
         ValidateRepositoryPart(remote.RepositoryName, "repository name");
-        ValidateBranchName(remote.DefaultBranch);
         var cloneUrl = ValidateCloneUrl(remote.CloneUrl, remote.Owner, remote.RepositoryName);
+        var defaultBranch = string.IsNullOrWhiteSpace(remote.DefaultBranch)
+            ? "main"
+            : remote.DefaultBranch.Trim();
+        ValidateBranchName(defaultBranch);
         return new RemoteTarget(
             connectionId,
             remote.Id,
@@ -1393,8 +1560,8 @@ public sealed class ProjectVersionSyncService(
             remote.RepositoryName,
             remote.GitHubRepositoryId ?? 0,
             cloneUrl,
-            remote.DefaultBranch!.Trim(),
-            BuildTrackingRef(remote.RemoteName, remote.DefaultBranch.Trim()));
+            defaultBranch,
+            BuildTrackingRef(remote.Id, defaultBranch));
     }
 
     private static Uri ValidateCloneUrl(string? cloneUrl, string owner, string repositoryName)
@@ -1448,8 +1615,15 @@ public sealed class ProjectVersionSyncService(
             throw InvalidRemote("The configured GitHub default branch is not a safe Git ref path.");
     }
 
-    private static string BuildTrackingRef(string remoteName, string defaultBranch) =>
-        $"refs/remotes/{remoteName}/{defaultBranch}";
+    private static string BuildTrackingRef(Guid? remoteId, string defaultBranch) =>
+        remoteId is Guid id
+            ? $"refs/remotes/lorekeeper/{id:N}/{defaultBranch}"
+            : string.Empty;
+
+    private static string BuildFetchRefSpec(Guid? remoteId) =>
+        remoteId is Guid id
+            ? $"+refs/heads/*:refs/remotes/lorekeeper/{id:N}/*"
+            : throw InvalidRemote("The attached remote has no stable local identity.");
 
     private static void ValidateTreeSegment(string segment)
     {
@@ -1620,6 +1794,30 @@ public sealed class ProjectVersionSyncService(
         Uri CloneUrl,
         string DefaultBranch,
         string TrackingRef);
+
+    private sealed record AutoPushState(
+        ProjectVersionOperationStatus Status,
+        string? ErrorMessage);
+
+    private static ProjectVersionSyncDisposition AutomaticDisposition(
+        AutoPushState? state,
+        ProjectVersionSyncDisposition fallback) => state?.Status switch
+        {
+            ProjectVersionOperationStatus.Pending or ProjectVersionOperationStatus.Running => ProjectVersionSyncDisposition.Syncing,
+            ProjectVersionOperationStatus.Failed or ProjectVersionOperationStatus.Canceled => ProjectVersionSyncDisposition.Failed,
+            _ => fallback,
+        };
+
+    private static string AutomaticMessage(
+        AutoPushState? state,
+        string fallback) => state?.Status switch
+        {
+            ProjectVersionOperationStatus.Pending => "A checkpoint is queued for automatic push to this attached remote.",
+            ProjectVersionOperationStatus.Running => "Automatic push is synchronizing this attached remote.",
+            ProjectVersionOperationStatus.Failed or ProjectVersionOperationStatus.Canceled =>
+                $"Automatic push failed: {state.ErrorMessage ?? "retry the operation after reviewing the remote history."}",
+            _ => fallback,
+        };
 
     private sealed record RemoteContext(
         Guid Id,

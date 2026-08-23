@@ -116,8 +116,13 @@ builder.Services.AddSingleton<IGitRepositoryStore, GitRepositoryStore>();
 builder.Services.AddSingleton<IVersionHistorySnapshotReader, VersionHistorySnapshotReader>();
 builder.Services.AddSingleton<IVersionHistorySnapshotComparer, VersionHistorySnapshotComparer>();
 builder.Services.AddScoped<IVersionHistorySnapshotWriter, VersionHistorySnapshotWriter>();
-builder.Services.AddScoped<IProjectVersionHistoryService, ProjectVersionHistoryService>();
+builder.Services.AddScoped<ProjectVersionHistoryService>();
+builder.Services.AddScoped<IProjectVersionHistoryService>(services =>
+    services.GetRequiredService<ProjectVersionHistoryService>());
 builder.Services.AddSingleton<ProjectVersionHistoryUiEvents>();
+builder.Services.AddSingleton<IProjectVersionAutoPushQueue, ProjectVersionAutoPushQueue>();
+builder.Services.AddScoped<ProjectVersionAutoPushService>();
+builder.Services.AddHostedService<ProjectVersionAutoPushWorker>();
 builder.Services.AddScoped<IProjectVersionHistoryReconciliationService, ProjectVersionHistoryReconciliationService>();
 builder.Services.AddScoped<IAssistantVersionCheckpointService, AssistantVersionCheckpointService>();
 builder.Services.AddScoped<ProjectVersionRestoreService>();

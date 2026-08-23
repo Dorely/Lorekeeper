@@ -795,6 +795,7 @@
     {
         HistoryEvents.CheckpointCreated += HandleCheckpointCreated;
         HistoryEvents.OperationStateChanged += HandleOperationStateChanged;
+        HistoryEvents.RemoteSyncChanged += HandleRemoteSyncChanged;
     }
 
     protected override async Task OnParametersSetAsync()
@@ -960,6 +961,34 @@
             catch (ObjectDisposedException)
             {
             }
+        }
+    }
+
+    private async void HandleRemoteSyncChanged(Guid projectId)
+    {
+        if (_disposed || Project?.Id != projectId)
+            return;
+
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                if (!HasActiveHistoryOperation && !_remoteBusy)
+                {
+                    await RefreshHistoryAsync(projectId);
+                    if (Repository is not null)
+                        await LoadRemoteDataAsync(projectId);
+                }
+
+                if (!_disposed)
+                    StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
         }
     }
 
@@ -1190,10 +1219,12 @@
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
+            _remoteStatuses.Remove(remote.Id);
             return false;
         }
         catch (Exception exception)
         {
+            _remoteStatuses.Remove(remote.Id);
             _remoteError = RemoteErrorMessage(exception);
             return false;
         }
@@ -1690,8 +1721,12 @@
         connection.RevokedAt is not null ? "Needs attention" : "Connected";
 
     private static string SyncStatusLabel(ProjectVersionSyncStatus? status) =>
-        status is null ? "Status unavailable" : status.Relation switch
+        status is null ? "Status unavailable" : status.Disposition switch
         {
+            ProjectVersionSyncDisposition.Syncing => "Syncing",
+            ProjectVersionSyncDisposition.Failed => "Push failed",
+            _ => status.Relation switch
+            {
             GitHistoryRelation.Empty => "Attached",
             GitHistoryRelation.Identical => "Synchronized",
             GitHistoryRelation.CandidateFastForward => "Remote ahead",
@@ -1699,16 +1734,22 @@
             GitHistoryRelation.Diverged => "Diverged",
             GitHistoryRelation.Unrelated => "Unrelated histories",
             _ => status.Disposition.ToString(),
+            },
         };
 
     private static string SyncStatusClass(ProjectVersionSyncStatus? status) =>
-        status?.Relation switch
+        status?.Disposition switch
         {
+            ProjectVersionSyncDisposition.Syncing => "is-dirty",
+            ProjectVersionSyncDisposition.Failed => "is-error",
+            _ => status?.Relation switch
+            {
             GitHistoryRelation.Identical => "is-healthy",
             GitHistoryRelation.CurrentFastForward => "is-dirty",
             GitHistoryRelation.CandidateFastForward => "is-dirty",
             GitHistoryRelation.Diverged or GitHistoryRelation.Unrelated => "is-error",
             _ => "is-neutral",
+            },
         };
 
     private static string RelationLabel(GitHistoryRelation relation) =>
@@ -1745,6 +1786,7 @@
         _disposed = true;
         HistoryEvents.CheckpointCreated -= HandleCheckpointCreated;
         HistoryEvents.OperationStateChanged -= HandleOperationStateChanged;
+        HistoryEvents.RemoteSyncChanged -= HandleRemoteSyncChanged;
         _lifetimeCancellation.Cancel();
         _lifetimeCancellation.Dispose();
     }
