@@ -19,7 +19,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   active project's canon and user direction win conflicts, while referenced projects
   remain intact and independently editable.
 - Six persistent assistant surfaces for outline collaboration, chapter editing,
-  writing coaching, research, project images, and publishing, including streaming tools,
+  writing coaching, research, project images, and publishing, including streaming tools and expandable model-reasoning transcripts,
   reviewable changes, visual context, background revision agents, and project/surface-
   scoped composer drafts that survive navigation and reloads until sent.
 - Each of the six assistant chats has a compact per-conversation model picker.

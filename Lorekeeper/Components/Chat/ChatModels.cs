@@ -35,6 +35,20 @@ public sealed class ChatTextPart : ChatMessagePart
     public void Append(string text) => Text.Append(text);
 }
 
+/// <summary>Model reasoning streamed alongside an assistant answer; rendered collapsed by default.</summary>
+public sealed class ChatReasoningPart : ChatMessagePart
+{
+    public StringBuilder Text { get; } = new();
+
+    public bool IsStreaming { get; set; }
+
+    public void Append(string text)
+    {
+        if (!string.IsNullOrEmpty(text))
+            Text.Append(text);
+    }
+}
+
 public sealed class ChatToolPart(ChatToolChip chip) : ChatMessagePart
 {
     public ChatToolChip Chip { get; } = chip;
@@ -200,12 +214,28 @@ public sealed class ChatLiveTurn
     {
         if (string.IsNullOrEmpty(text)) return;
         IsThinking = false;
+        CloseStreamingReasoning();
         CurrentMessage().AppendText(text);
+    }
+
+    public void AppendReasoning(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        IsThinking = false;
+        var parts = CurrentMessage().Parts;
+        if (parts.LastOrDefault() is not ChatReasoningPart reasoningPart)
+        {
+            reasoningPart = new ChatReasoningPart { IsStreaming = true };
+            parts.Add(reasoningPart);
+        }
+
+        reasoningPart.Append(text);
     }
 
     public void StartToolCall(string callId, string name, string argumentsJson, bool argumentsComplete)
     {
         IsThinking = false;
+        CloseStreamingReasoning();
         var chip = FindToolChip(callId);
         if (chip is null)
         {
@@ -288,6 +318,16 @@ public sealed class ChatLiveTurn
             .Select(part => part.Chip))
         {
             chip.MarkDroppedFromActiveContext();
+        }
+    }
+
+    private void CloseStreamingReasoning()
+    {
+        foreach (var part in Messages
+            .SelectMany(message => message.Parts)
+            .OfType<ChatReasoningPart>())
+        {
+            part.IsStreaming = false;
         }
     }
 

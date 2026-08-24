@@ -472,6 +472,9 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                         case ChatRoundTextDelta text:
                             yield return new PublishTextDelta(text.Text);
                             break;
+                        case ChatRoundReasoningDelta reasoning:
+                            yield return new PublishReasoningDelta(reasoning.Text);
+                            break;
                         case ChatRoundToolCallStarted started:
                             yield return new PublishToolCallStarted(
                                 started.CallId,
@@ -490,6 +493,8 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                             break;
                         case ChatRoundFailed failed:
                             activeAssistant.Content = failed.Text;
+                            if (!string.IsNullOrEmpty(failed.Reasoning))
+                                activeAssistant.Reasoning = failed.Reasoning;
                             activeAssistant.Status = failed.Cancelled
                                 ? PublishMessageStatus.Cancelled
                                 : PublishMessageStatus.Failed;
@@ -509,6 +514,8 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     yield break;
                 }
 
+                activeAssistant.Reasoning = completedRound.Reasoning;
+
                 if (completedRound.ToolCalls.Count == 0)
                 {
                     activeAssistant.Content = completedRound.Text;
@@ -527,7 +534,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 await SafePersistAsync(activeAssistant);
                 messages.Add(new ChatMessage(
                     ChatRole.Assistant,
-                    ChatTurnEngine.BuildAssistantContents(completedRound.Text, completedRound.ToolCalls)));
+                    ChatTurnEngine.BuildAssistantContents(completedRound.Text, completedRound.ToolCalls, completedRound.Reasoning)));
 
                 var resultContents = new List<AIContent>();
                 var roundTransientVisuals = new List<PublishAssistantTransientVisual>();

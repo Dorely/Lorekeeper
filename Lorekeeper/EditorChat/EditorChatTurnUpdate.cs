@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 namespace Lorekeeper.EditorChat;
 
 [JsonDerivedType(typeof(EditorChatTextDelta), typeDiscriminator: "text")]
+[JsonDerivedType(typeof(EditorChatReasoningDelta), typeDiscriminator: "reasoning")]
 [JsonDerivedType(typeof(EditorChatToolCallStarted), typeDiscriminator: "tool-start")]
 [JsonDerivedType(typeof(EditorChatToolCallArgumentsDelta), typeDiscriminator: "tool-args")]
 [JsonDerivedType(typeof(EditorChatToolCallCompleted), typeDiscriminator: "tool-end")]
@@ -20,6 +21,8 @@ namespace Lorekeeper.EditorChat;
 public abstract record EditorChatTurnUpdate;
 
 public sealed record EditorChatTextDelta(string Text) : EditorChatTurnUpdate;
+
+public sealed record EditorChatReasoningDelta(string Text) : EditorChatTurnUpdate;
 
 public sealed record EditorChatToolCallStarted(string CallId, string ToolName, string ArgumentsJson, bool ArgumentsComplete = true) : EditorChatTurnUpdate;
 

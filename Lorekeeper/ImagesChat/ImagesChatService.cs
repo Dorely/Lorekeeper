@@ -396,6 +396,9 @@ public sealed class ImagesChatService(
                     case ChatRoundTextDelta text:
                         yield return new ImagesChatTextDelta(text.Text);
                         break;
+                    case ChatRoundReasoningDelta reasoning:
+                        yield return new ImagesChatReasoningDelta(reasoning.Text);
+                        break;
                     case ChatRoundToolCallStarted started:
                         yield return new ImagesChatToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                         break;
@@ -407,6 +410,8 @@ public sealed class ImagesChatService(
                         break;
                     case ChatRoundFailed failed:
                         activeAssistant.Content = failed.Text;
+                        if (!string.IsNullOrEmpty(failed.Reasoning))
+                            activeAssistant.Reasoning = failed.Reasoning;
                         activeAssistant.Status = failed.Cancelled
                             ? ProjectImageMessageStatus.Cancelled
                             : ProjectImageMessageStatus.Failed;
@@ -429,6 +434,7 @@ public sealed class ImagesChatService(
 
             var textBuilder = new StringBuilder(completedRound.Text);
             var pendingCalls = completedRound.ToolCalls;
+            activeAssistant.Reasoning = completedRound.Reasoning;
 
             if (pendingCalls.Count == 0)
             {
@@ -449,7 +455,7 @@ public sealed class ImagesChatService(
 
             messages.Add(new ChatMessage(
                 ChatRole.Assistant,
-                ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls)));
+                ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning)));
 
             var resultContents = new List<AIContent>();
             var modelOnlyImagesForNextRound = new List<ProjectImageView>();

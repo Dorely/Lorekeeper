@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 namespace Lorekeeper.Research;
 
 [JsonDerivedType(typeof(ResearchTextDelta), typeDiscriminator: "text")]
+[JsonDerivedType(typeof(ResearchReasoningDelta), typeDiscriminator: "reasoning")]
 [JsonDerivedType(typeof(ResearchToolCallStarted), typeDiscriminator: "tool-start")]
 [JsonDerivedType(typeof(ResearchToolCallArgumentsDelta), typeDiscriminator: "tool-args")]
 [JsonDerivedType(typeof(ResearchToolCallCompleted), typeDiscriminator: "tool-end")]
@@ -13,6 +14,8 @@ namespace Lorekeeper.Research;
 public abstract record ResearchTurnUpdate;
 
 public sealed record ResearchTextDelta(string Text) : ResearchTurnUpdate;
+
+public sealed record ResearchReasoningDelta(string Text) : ResearchTurnUpdate;
 
 public sealed record ResearchToolCallStarted(
     string CallId,

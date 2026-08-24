@@ -285,6 +285,12 @@
                 RequestScroll();
                 StateHasChanged();
                 break;
+            case WritingCoachReasoningDelta reasoning:
+                _live!.AppendReasoning(reasoning.Text);
+                RequestScroll();
+                StateHasChanged();
+                break;
+
 
             case WritingCoachToolCallStarted started:
                 _live!.StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
@@ -424,6 +430,12 @@
     private List<ChatMessagePart> BuildPartsWithImages(WritingCoachMessage message, IReadOnlyDictionary<string, WritingCoachMessage> byCallId)
     {
         var parts = BuildMessageParts(message, byCallId);
+        if (message.Role == WritingCoachMessageRole.Assistant && !string.IsNullOrWhiteSpace(message.Reasoning))
+        {
+            var reasoningPart = new ChatReasoningPart();
+            reasoningPart.Append(message.Reasoning);
+            parts.Insert(0, reasoningPart);
+        }
         if (message.Role == WritingCoachMessageRole.User && _messageImages.TryGetValue(message.Id, out var images))
             ChatImageParts.Append(parts, images);
         return parts;

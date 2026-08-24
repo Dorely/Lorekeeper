@@ -25,6 +25,9 @@ public class OutlineMessage
     /// <summary>JSON array of <c>{ callId, name, argumentsJson }</c> for assistant rows that emitted tool calls. Empty array otherwise.</summary>
     public string ToolCallsJson { get; set; } = "[]";
 
+    /// <summary>Model reasoning streamed alongside this assistant row. Echoed back within the turn; dropped from cross-turn replay.</summary>
+    public string Reasoning { get; set; } = string.Empty;
+
     /// <summary>Set on <see cref="OutlineMessageRole.Tool"/> rows; matches the assistant's emitted call id.</summary>
     public string? ToolCallId { get; set; }
 

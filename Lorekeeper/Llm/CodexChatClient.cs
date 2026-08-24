@@ -228,7 +228,7 @@ public sealed class CodexChatClient : IChatClient
                             yield return new ChatResponseUpdate
                             {
                                 Role = ChatRole.Assistant,
-                                Contents = [new ReasoningContent(reasoningText)]
+                                Contents = [new TextReasoningContent(reasoningText)]
                             };
                         }
                     }

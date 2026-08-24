@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 namespace Lorekeeper.ImagesChat;
 
 [JsonDerivedType(typeof(ImagesChatTextDelta), typeDiscriminator: "text")]
+[JsonDerivedType(typeof(ImagesChatReasoningDelta), typeDiscriminator: "reasoning")]
 [JsonDerivedType(typeof(ImagesChatToolCallStarted), typeDiscriminator: "tool-start")]
 [JsonDerivedType(typeof(ImagesChatToolCallArgumentsDelta), typeDiscriminator: "tool-args")]
 [JsonDerivedType(typeof(ImagesChatToolCallCompleted), typeDiscriminator: "tool-end")]
@@ -12,6 +13,8 @@ namespace Lorekeeper.ImagesChat;
 public abstract record ImagesChatTurnUpdate;
 
 public sealed record ImagesChatTextDelta(string Text) : ImagesChatTurnUpdate;
+
+public sealed record ImagesChatReasoningDelta(string Text) : ImagesChatTurnUpdate;
 
 public sealed record ImagesChatToolCallStarted(
     string CallId,

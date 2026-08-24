@@ -11,6 +11,7 @@ public class PublishMessage
     public PublishMessageRole Role { get; set; }
     public string Content { get; set; } = string.Empty;
     public string ToolCallsJson { get; set; } = "[]";
+    public string Reasoning { get; set; } = string.Empty;
     public string? ToolCallId { get; set; }
     public string? ToolName { get; set; }
     public PublishMessageStatus Status { get; set; } = PublishMessageStatus.Completed;

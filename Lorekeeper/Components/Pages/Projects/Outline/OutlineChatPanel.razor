@@ -294,6 +294,12 @@
                 RequestScroll();
                 StateHasChanged();
                 break;
+            case ReasoningDelta reasoning:
+                _live!.AppendReasoning(reasoning.Text);
+                RequestScroll();
+                StateHasChanged();
+                break;
+
 
             case ToolCallStarted ts:
                 _live!.StartToolCall(ts.CallId, ts.ToolName, ts.ArgumentsJson, ts.ArgumentsComplete);
@@ -500,6 +506,12 @@
     private List<ChatMessagePart> BuildPartsWithImages(OutlineMessage message, IReadOnlyDictionary<string, OutlineMessage> byCallId)
     {
         var parts = BuildMessageParts(message, byCallId);
+        if (message.Role == OutlineMessageRole.Assistant && !string.IsNullOrWhiteSpace(message.Reasoning))
+        {
+            var reasoningPart = new ChatReasoningPart();
+            reasoningPart.Append(message.Reasoning);
+            parts.Insert(0, reasoningPart);
+        }
         if (message.Role == OutlineMessageRole.User && _messageImages.TryGetValue(message.Id, out var images))
             ChatImageParts.Append(parts, images);
         return parts;

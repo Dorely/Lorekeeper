@@ -44,14 +44,24 @@ context, tools, and typed streaming updates to the common `ChatTurnEngine`.
 attachments, tool chips, scrolling, and textarea behavior.
 
 The shared engine owns the provider-facing loop: persist the outgoing user
-message, stream assistant text and function-call argument deltas, invoke the
-registered application tools, return correlated results, persist the completed
-visible transcript, and emit typed updates. Tool rounds retain the provider's
-`FunctionCallContent` only until its correlated tool result has been submitted.
-OpenAI-compatible clients must also preserve unknown immediate-round tool-call
-metadata such as Gemini thought signatures. Cross-turn replay is intentionally
-text-only: non-empty system, user, and assistant prose is retained; tool calls,
-tool results, and model-only visual attachments are not replayed.
+message, stream assistant text, reasoning, and function-call argument deltas,
+invoke the registered application tools, return correlated results, persist the
+completed visible transcript, and emit typed updates. Tool rounds retain the
+provider's `FunctionCallContent` only until its correlated tool result has been
+submitted. OpenAI-compatible clients must also preserve unknown immediate-round
+tool-call metadata such as Gemini thought signatures. Cross-turn replay is
+intentionally text-only: non-empty system, user, and assistant prose is retained;
+tool calls, tool results, reasoning, and model-only visual attachments are not
+replayed.
+
+Reasoning deltas (`TextReasoningContent`) stream into a collapsed-by-default,
+expandable transcript section per assistant message and are persisted on the
+message row. Within a turn, completed-round reasoning is echoed back to the
+provider in the next round's assistant message; transports without a reasoning
+field drop it harmlessly. A round that ends with no visible text and no tool
+calls fails visibly ("empty response" or "reasoning without an answer") instead
+of persisting a silently empty completed message; failed rounds keep any
+reasoning they received.
 
 Because protocol metadata disappears on later turns, assistant prose is the
 durable work log. A tool-using assistant narrates meaningful phases and closes

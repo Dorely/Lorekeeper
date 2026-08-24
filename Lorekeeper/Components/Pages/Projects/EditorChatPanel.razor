@@ -625,6 +625,11 @@
                 RequestScroll();
                 StateHasChanged();
                 break;
+            case EditorChatReasoningDelta reasoning:
+                LiveTurn().AppendReasoning(reasoning.Text);
+                RequestScroll();
+                StateHasChanged();
+                break;
 
             case EditorChatToolCallStarted started:
                 LiveTurn().StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
@@ -994,6 +999,12 @@
     private List<ChatMessagePart> BuildPartsWithImages(EditorMessage message, IReadOnlyDictionary<string, EditorMessage> byCallId)
     {
         var parts = BuildMessageParts(message, byCallId, ProjectId);
+        if (message.Role == EditorMessageRole.Assistant && !string.IsNullOrWhiteSpace(message.Reasoning))
+        {
+            var reasoningPart = new ChatReasoningPart();
+            reasoningPart.Append(message.Reasoning);
+            parts.Insert(0, reasoningPart);
+        }
         if (message.Role == EditorMessageRole.User && _messageImages.TryGetValue(message.Id, out var images))
             ChatImageParts.Append(parts, images);
         return parts;

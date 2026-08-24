@@ -333,6 +333,11 @@
                 RequestScroll();
                 StateHasChanged();
                 break;
+            case ImagesChatReasoningDelta reasoning:
+                _live!.AppendReasoning(reasoning.Text);
+                RequestScroll();
+                StateHasChanged();
+                break;
             case ImagesChatToolCallStarted started:
                 _live!.StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                 UpdateConversationTokenCount();
@@ -462,6 +467,12 @@
     private List<ChatMessagePart> BuildPartsWithImages(ProjectImageMessage message, IReadOnlyDictionary<string, ProjectImageMessage> byCallId)
     {
         var parts = BuildMessageParts(message, byCallId);
+        if (message.Role == ProjectImageMessageRole.Assistant && !string.IsNullOrWhiteSpace(message.Reasoning))
+        {
+            var reasoningPart = new ChatReasoningPart();
+            reasoningPart.Append(message.Reasoning);
+            parts.Insert(0, reasoningPart);
+        }
         if (message.Role == ProjectImageMessageRole.User && _messageImages.TryGetValue(message.Id, out var images))
             ChatImageParts.Append(parts, images);
         return parts;

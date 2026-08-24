@@ -24,11 +24,18 @@ public sealed record ChatRoundToolCallArgumentsDelta(
     string ArgumentsDelta,
     bool ArgumentsComplete) : ChatRoundUpdate;
 
+public sealed record ChatRoundReasoningDelta(string Text) : ChatRoundUpdate;
+
 public sealed record ChatRoundCompleted(
     string Text,
+    string Reasoning,
     IReadOnlyList<ChatPendingToolCall> ToolCalls) : ChatRoundUpdate;
 
-public sealed record ChatRoundFailed(string Message, bool Cancelled, string Text) : ChatRoundUpdate;
+public sealed record ChatRoundFailed(
+    string Message,
+    bool Cancelled,
+    string Text,
+    string? Reasoning = null) : ChatRoundUpdate;
 
 public sealed record ChatPendingToolCall(
     FunctionCallContent Content,
@@ -167,6 +174,7 @@ public sealed class ChatTurnEngine(
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var textBuilder = new StringBuilder();
+        var reasoningBuilder = new StringBuilder();
         var pendingCalls = new List<ChatPendingToolCall>();
         var tracker = new StreamingToolCallTracker();
         string? failure = null;
@@ -211,6 +219,14 @@ public sealed class ChatTurnEngine(
                         {
                             textBuilder.Append(text.Text);
                             updates.Add(new ChatRoundTextDelta(text.Text));
+                            continue;
+                        }
+
+                        if (content is TextReasoningContent reasoningContent
+                            && !string.IsNullOrEmpty(reasoningContent.Text))
+                        {
+                            reasoningBuilder.Append(reasoningContent.Text);
+                            updates.Add(new ChatRoundReasoningDelta(reasoningContent.Text));
                             continue;
                         }
 
@@ -273,17 +289,42 @@ public sealed class ChatTurnEngine(
 
         if (cancelled)
         {
-            yield return new ChatRoundFailed("Cancelled.", Cancelled: true, textBuilder.ToString());
+            yield return new ChatRoundFailed(
+                "Cancelled.",
+                Cancelled: true,
+                textBuilder.ToString(),
+                ReasoningOrNull(reasoningBuilder));
             yield break;
         }
         if (failure is not null)
         {
-            yield return new ChatRoundFailed(failure, Cancelled: false, textBuilder.ToString());
+            yield return new ChatRoundFailed(
+                failure,
+                Cancelled: false,
+                textBuilder.ToString(),
+                ReasoningOrNull(reasoningBuilder));
+            yield break;
+        }
+        if (textBuilder.Length == 0 && pendingCalls.Count == 0)
+        {
+            // A round without visible output would otherwise persist as a silently
+            // empty completed message. Reasoning-only rounds fail visibly too, but
+            // keep their reasoning so the user can inspect what the model did.
+            yield return new ChatRoundFailed(
+                reasoningBuilder.Length > 0
+                    ? "The model returned reasoning without an answer."
+                    : "The model returned an empty response.",
+                Cancelled: false,
+                string.Empty,
+                ReasoningOrNull(reasoningBuilder));
             yield break;
         }
 
-        yield return new ChatRoundCompleted(textBuilder.ToString(), pendingCalls);
+        yield return new ChatRoundCompleted(textBuilder.ToString(), reasoningBuilder.ToString(), pendingCalls);
     }
+
+    private static string? ReasoningOrNull(StringBuilder reasoningBuilder) =>
+        reasoningBuilder.Length > 0 ? reasoningBuilder.ToString() : null;
 
     public async Task<ChatToolInvocationOutcome> InvokeToolAsync(
         IList<AITool> tools,
@@ -324,12 +365,26 @@ public sealed class ChatTurnEngine(
 
     public static List<AIContent> BuildAssistantContents(
         string text,
-        IReadOnlyList<ChatPendingToolCall> calls)
+        IReadOnlyList<ChatPendingToolCall> calls) =>
+        BuildAssistantContents(text, calls, reasoning: null);
+
+    public static List<AIContent> BuildAssistantContents(
+        string text,
+        IReadOnlyList<ChatPendingToolCall> calls,
+        string? reasoning)
     {
+        // Reasoning is echoed back to the provider within the same turn so
+        // reasoning-capable models can condition on it; cross-turn replay stays
+        // text-only. Providers without a reasoning field drop it harmlessly.
+        if (calls.Count == 0 && !string.IsNullOrEmpty(reasoning))
+            return [new TextReasoningContent(reasoning), new TextContent(text)];
+
         if (calls.Count == 0)
             return string.IsNullOrEmpty(text) ? [new TextContent(string.Empty)] : [new TextContent(text)];
 
         var contents = new List<AIContent>();
+        if (!string.IsNullOrEmpty(reasoning))
+            contents.Add(new TextReasoningContent(reasoning));
         var cursor = 0;
         foreach (var item in calls
             .Select((call, index) => new { Call = call, Index = index })

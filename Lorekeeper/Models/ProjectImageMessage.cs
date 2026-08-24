@@ -15,6 +15,10 @@ public class ProjectImageMessage
 
     public string ToolCallsJson { get; set; } = "[]";
 
+    /// <summary>Model reasoning streamed alongside this assistant row. Echoed back within the turn; dropped from cross-turn replay.</summary>
+    public string Reasoning { get; set; } = string.Empty;
+
+
     public string? ToolCallId { get; set; }
 
     public string? ToolName { get; set; }

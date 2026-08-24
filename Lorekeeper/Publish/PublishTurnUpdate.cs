@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 namespace Lorekeeper.Publish;
 
 [JsonDerivedType(typeof(PublishTextDelta), typeDiscriminator: "text")]
+[JsonDerivedType(typeof(PublishReasoningDelta), typeDiscriminator: "reasoning")]
 [JsonDerivedType(typeof(PublishToolCallStarted), typeDiscriminator: "tool-start")]
 [JsonDerivedType(typeof(PublishToolCallArgumentsDelta), typeDiscriminator: "tool-args")]
 [JsonDerivedType(typeof(PublishToolCallCompleted), typeDiscriminator: "tool-end")]
@@ -12,6 +13,8 @@ namespace Lorekeeper.Publish;
 public abstract record PublishTurnUpdate;
 
 public sealed record PublishTextDelta(string Text) : PublishTurnUpdate;
+
+public sealed record PublishReasoningDelta(string Text) : PublishTurnUpdate;
 
 public sealed record PublishToolCallStarted(
     string CallId,

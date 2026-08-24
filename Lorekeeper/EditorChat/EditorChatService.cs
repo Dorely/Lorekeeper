@@ -398,6 +398,9 @@ public sealed class EditorChatService(
                     case ChatRoundTextDelta text:
                         yield return new EditorChatTextDelta(text.Text);
                         break;
+                    case ChatRoundReasoningDelta reasoning:
+                        yield return new EditorChatReasoningDelta(reasoning.Text);
+                        break;
                     case ChatRoundToolCallStarted started:
                         yield return new EditorChatToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                         break;
@@ -409,6 +412,8 @@ public sealed class EditorChatService(
                         break;
                     case ChatRoundFailed failed:
                         activeAssistant.Content = failed.Text;
+                        if (!string.IsNullOrEmpty(failed.Reasoning))
+                            activeAssistant.Reasoning = failed.Reasoning;
                         activeAssistant.Status = failed.Cancelled
                             ? EditorMessageStatus.Cancelled
                             : EditorMessageStatus.Failed;
@@ -431,6 +436,7 @@ public sealed class EditorChatService(
 
             var textBuilder = new StringBuilder(completedRound.Text);
             var pendingCalls = completedRound.ToolCalls.ToList();
+            activeAssistant.Reasoning = completedRound.Reasoning;
 
             if (pendingCalls.Count == 0)
             {
@@ -470,7 +476,7 @@ public sealed class EditorChatService(
 
             messages.Add(new ChatMessage(
                 ChatRole.Assistant,
-                ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls)));
+                ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning)));
 
             var resultContents = new List<AIContent>();
             var modelOnlyImagesForNextRound = new List<EditorChatModelImageAttachment>();

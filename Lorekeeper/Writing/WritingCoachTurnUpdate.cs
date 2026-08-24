@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 namespace Lorekeeper.Writing;
 
 [JsonDerivedType(typeof(WritingCoachTextDelta), typeDiscriminator: "text")]
+[JsonDerivedType(typeof(WritingCoachReasoningDelta), typeDiscriminator: "reasoning")]
 [JsonDerivedType(typeof(WritingCoachToolCallStarted), typeDiscriminator: "tool-start")]
 [JsonDerivedType(typeof(WritingCoachToolCallArgumentsDelta), typeDiscriminator: "tool-args")]
 [JsonDerivedType(typeof(WritingCoachToolCallCompleted), typeDiscriminator: "tool-end")]
@@ -11,6 +12,8 @@ namespace Lorekeeper.Writing;
 public abstract record WritingCoachTurnUpdate;
 
 public sealed record WritingCoachTextDelta(string Text) : WritingCoachTurnUpdate;
+
+public sealed record WritingCoachReasoningDelta(string Text) : WritingCoachTurnUpdate;
 
 public sealed record WritingCoachToolCallStarted(
     string CallId,

@@ -451,6 +451,9 @@ they commit to a direction, act on it without a second confirmation.
                     case ChatRoundTextDelta text:
                         yield return new TextDelta(text.Text);
                         break;
+                    case ChatRoundReasoningDelta reasoning:
+                        yield return new ReasoningDelta(reasoning.Text);
+                        break;
                     case ChatRoundToolCallStarted started:
                         yield return new ToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                         break;
@@ -462,6 +465,8 @@ they commit to a direction, act on it without a second confirmation.
                         break;
                     case ChatRoundFailed failed:
                         activeAssistant.Content = failed.Text;
+                        if (!string.IsNullOrEmpty(failed.Reasoning))
+                            activeAssistant.Reasoning = failed.Reasoning;
                         activeAssistant.Status = failed.Cancelled
                             ? OutlineMessageStatus.Cancelled
                             : OutlineMessageStatus.Failed;
@@ -484,6 +489,7 @@ they commit to a direction, act on it without a second confirmation.
 
             var textBuilder = new StringBuilder(completedRound.Text);
             var pendingCalls = completedRound.ToolCalls;
+            activeAssistant.Reasoning = completedRound.Reasoning;
 
             // No tool calls -> final turn.
             if (pendingCalls.Count == 0)
@@ -506,7 +512,7 @@ they commit to a direction, act on it without a second confirmation.
 
             // Append to in-memory message list as a single assistant message with tool calls,
             // matching what the model emitted (text + FunctionCallContent[]).
-            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls)));
+            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning)));
 
             var resultContents = new List<AIContent>();
             foreach (var pendingCall in pendingCalls)

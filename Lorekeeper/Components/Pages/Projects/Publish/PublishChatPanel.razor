@@ -331,6 +331,11 @@
                 RequestScroll();
                 StateHasChanged();
                 break;
+            case PublishReasoningDelta reasoning:
+                _live!.AppendReasoning(reasoning.Text);
+                RequestScroll();
+                StateHasChanged();
+                break;
             case PublishToolCallStarted started:
                 _live!.StartToolCall(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                 UpdateConversationTokenCount();
@@ -416,6 +421,12 @@
             if (message.Role is PublishMessageRole.Tool or PublishMessageRole.System)
                 continue;
             var parts = BuildMessageParts(message, byCallId);
+            if (message.Role == PublishMessageRole.Assistant && !string.IsNullOrWhiteSpace(message.Reasoning))
+            {
+                var reasoningPart = new ChatReasoningPart();
+                reasoningPart.Append(message.Reasoning);
+                parts.Insert(0, reasoningPart);
+            }
             if (message.Role == PublishMessageRole.User
                 && _messageImages.TryGetValue(message.Id, out var images))
             {

@@ -7,6 +7,7 @@ namespace Lorekeeper.Outline;
 /// during a collaborative chat turn. The UI consumes the stream and updates state per kind.
 /// </summary>
 [JsonDerivedType(typeof(TextDelta), typeDiscriminator: "text")]
+[JsonDerivedType(typeof(ReasoningDelta), typeDiscriminator: "reasoning")]
 [JsonDerivedType(typeof(ToolCallStarted), typeDiscriminator: "tool-start")]
 [JsonDerivedType(typeof(ToolCallArgumentsDelta), typeDiscriminator: "tool-args")]
 [JsonDerivedType(typeof(ToolCallCompleted), typeDiscriminator: "tool-end")]
@@ -18,6 +19,9 @@ public abstract record OutlineTurnUpdate;
 
 /// <summary>Streaming text chunk from the assistant.</summary>
 public sealed record TextDelta(string Text) : OutlineTurnUpdate;
+
+/// <summary>Streaming model-reasoning chunk from the assistant.</summary>
+public sealed record ReasoningDelta(string Text) : OutlineTurnUpdate;
 
 /// <summary>A function call has been parsed; tool invocation is about to begin.</summary>
 public sealed record ToolCallStarted(string CallId, string ToolName, string ArgumentsJson, bool ArgumentsComplete = true) : OutlineTurnUpdate;

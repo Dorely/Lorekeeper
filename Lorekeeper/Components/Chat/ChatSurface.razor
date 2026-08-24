@@ -382,12 +382,30 @@
         }
     };
 
-    private RenderFragment RenderThinkingIndicator() => __builder =>
+    private static RenderFragment RenderThinkingIndicator() => __builder =>
     {
         <div class="chat-msg chat-msg-asst chat-msg-streaming chat-thinking">
             <span class="chat-typing" aria-hidden="true"><span></span><span></span><span></span></span>
             <span class="chat-thinking-label">Thinking...</span>
         </div>
+    };
+
+    private static RenderFragment RenderReasoning(ChatReasoningPart reasoning, bool showCursor = false) => __builder =>
+    {
+        var text = reasoning.Text.ToString();
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        <details class="chat-reasoning @(reasoning.IsStreaming ? "chat-reasoning-live" : "")" open="@reasoning.IsStreaming">
+            <summary>
+                <span class="chat-reasoning-label">@(reasoning.IsStreaming ? "Reasoning..." : "Reasoning")</span>
+                @if (reasoning.IsStreaming && showCursor)
+                {
+                    <span class="chat-cursor">|</span>
+                }
+            </summary>
+            <div class="chat-reasoning-body">@text</div>
+        </details>
     };
 
     private RenderFragment RenderParts(IReadOnlyList<ChatMessagePart> parts, ChatTextPart? trailingText = null) => __builder =>
@@ -442,6 +460,10 @@
             {
                 @RenderVisualStrip(toolPart.Chip.Visuals)
             }
+        }
+        else if (part is ChatReasoningPart reasoningPart)
+        {
+            @RenderReasoning(reasoningPart, showCursor)
         }
         else if (part is ChatImagePart imagePart)
         {

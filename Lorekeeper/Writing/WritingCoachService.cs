@@ -275,6 +275,9 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     case ChatRoundTextDelta text:
                         yield return new WritingCoachTextDelta(text.Text);
                         break;
+                    case ChatRoundReasoningDelta reasoning:
+                        yield return new WritingCoachReasoningDelta(reasoning.Text);
+                        break;
                     case ChatRoundToolCallStarted started:
                         yield return new WritingCoachToolCallStarted(started.CallId, started.ToolName, started.ArgumentsJson, started.ArgumentsComplete);
                         break;
@@ -286,6 +289,8 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                         break;
                     case ChatRoundFailed failed:
                         activeAssistant.Content = failed.Text;
+                        if (!string.IsNullOrEmpty(failed.Reasoning))
+                            activeAssistant.Reasoning = failed.Reasoning;
                         activeAssistant.Status = failed.Cancelled
                             ? WritingCoachMessageStatus.Cancelled
                             : WritingCoachMessageStatus.Failed;
@@ -307,6 +312,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
 
             var textBuilder = new StringBuilder(completedRound.Text);
             var pendingCalls = completedRound.ToolCalls;
+            activeAssistant.Reasoning = completedRound.Reasoning;
 
             if (pendingCalls.Count == 0)
             {
@@ -325,7 +331,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
             activeAssistant.Status = WritingCoachMessageStatus.Completed;
             await SafePersistAsync(activeAssistant);
 
-            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls)));
+            messages.Add(new ChatMessage(ChatRole.Assistant, ChatTurnEngine.BuildAssistantContents(textBuilder.ToString(), pendingCalls, completedRound.Reasoning)));
 
             var resultContents = new List<AIContent>();
             foreach (var pendingCall in pendingCalls)
