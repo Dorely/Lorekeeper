@@ -16,6 +16,11 @@ Constraints to respect:
 - **The volume is the backup boundary.** `/data` holds the database, its
   protected migration backups, and Data Protection keys. Snapshot the
   PersistentVolume to back up the whole workspace.
+- **Keep the data on node-local redundant storage.** Copy `pv.example.yaml` to
+  `pv.yaml` (not committed) and pin the volume to a directory on redundant
+  local storage instead of the cluster's default dynamic provisioner, which
+  would silently place it on the node's OS disk. SQLite needs local file
+  semantics, so never point this volume at NFS; put backups there instead.
 
 ## 1. Build and publish the image
 
@@ -44,9 +49,20 @@ password is never stored anywhere.
 
 ## 3. Deploy
 
+Copy `pv.example.yaml` to `pv.yaml` (it is not committed), set the node
+hostname and storage path for your cluster, and create that directory on the
+node:
+
+```bash
+sudo mkdir -p <path from pv.yaml>
+sudo chown 10001:10001 <path from pv.yaml>
+```
+
+Then apply the manifests:
+
 ```bash
 kubectl apply -f namespace.yaml
-kubectl apply -f pvc.yaml -f secret.yaml -f deployment.yaml -f service.yaml
+kubectl apply -f pv.yaml -f pvc.yaml -f secret.yaml -f deployment.yaml -f service.yaml
 kubectl -n lorekeeper rollout status deployment/lorekeeper
 ```
 

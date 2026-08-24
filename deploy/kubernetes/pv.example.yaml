@@ -1,0 +1,36 @@
+# Template for the node-local PersistentVolume backing the Lorekeeper data
+# directory. Copy this file to pv.yaml (it is not committed), then set the node
+# hostname and the directory on that node's redundant storage. Pinning the
+# volume explicitly keeps the SQLite database, its protected migration backups,
+# and the Data Protection keys off the cluster's default dynamic provisioner,
+# which would silently place them on the node's OS disk with a Delete reclaim
+# policy. Create the directory on the node before applying:
+#   mkdir -p <path> && chown 10001:10001 <path>
+# SQLite requires local file semantics; never place this volume on NFS.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: lorekeeper-data-pv
+spec:
+  storageClassName: local-storage
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  volumeMode: Filesystem
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: lorekeeper-data
+    namespace: lorekeeper
+  local:
+    path: /mnt/REPLACE_ME/lorekeeper
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - REPLACE_ME

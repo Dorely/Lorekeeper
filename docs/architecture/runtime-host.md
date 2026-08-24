@@ -206,10 +206,11 @@ secure-context APIs without the same consideration. The image also sets a
 writable `XDG_CACHE_HOME` so Fontconfig can cache font scans.
 
 The manifests under [`deploy/kubernetes/`](../../deploy/kubernetes/) deploy that
-image as a single-replica `Recreate` Deployment with a PersistentVolumeClaim,
-Secret-provided credentials, and probes wired to `/healthz` (liveness) and
-`/healthz/ready` (startup readiness gate), so traffic is withheld until guarded
-migrations finish. SQLite and the process-wide write lease make one replica a
+image as a single-replica `Recreate` Deployment with a deployment-provided
+node-local PersistentVolume on redundant local storage (never NFS — SQLite
+requires local file semantics), Secret-provided credentials, and probes wired to
+`/healthz` (liveness) and `/healthz/ready` (startup readiness gate), so traffic
+is withheld until guarded migrations finish. SQLite and the process-wide write lease make one replica a
 hard correctness bound, not a tuning default. Electron packaging, automatic
 updates, and per-user data placement do not apply to this hosting shape.
 

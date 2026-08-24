@@ -505,3 +505,7 @@ $RECYCLE.BIN/
 
 # Kubernetes deployment secrets stay local; only the example template is committed.
 deploy/kubernetes/secret.yaml
+
+# The node-local PersistentVolume names private infrastructure (node hostname,
+# storage paths); only the example template is committed.
+deploy/kubernetes/pv.yaml
