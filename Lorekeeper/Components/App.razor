@@ -1,5 +1,7 @@
 ﻿<!DOCTYPE html>
+@using Lorekeeper.Appearance
 @using Lorekeeper.Startup
+@inject IAppearanceService Appearance
 @inject IApplicationStartupState Startup
 
 <html lang="en">
@@ -10,6 +12,24 @@
     <base href="/" />
     <script>
         (function () {
+            // crypto.randomUUID exists only in secure contexts (HTTPS or
+            // localhost). Deliberate plain-HTTP LAN hosting still needs it for
+            // the semantic editor's block IDs and the graph library, so provide
+            // the standard v4 construction from crypto.getRandomValues, which
+            // is available in every context.
+            if (window.crypto && !("randomUUID" in window.crypto)) {
+                window.crypto.randomUUID = function () {
+                    var bytes = new Uint8Array(16);
+                    window.crypto.getRandomValues(bytes);
+                    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+                    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+                    var hex = "";
+                    for (var i = 0; i < 16; i++) hex += bytes[i].toString(16).padStart(2, "0");
+                    return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16)
+                        + "-" + hex.slice(16, 20) + "-" + hex.slice(20);
+                };
+            }
+
             var THEME_KEY = "Lorekeeper.ui.theme";
             var theme = null;
             try {
@@ -47,6 +67,10 @@
     <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["Lorekeeper.styles.css"]" />
+    @if (_customThemeCss is not null)
+    {
+        <style id="lk-custom-theme">@((MarkupString)_customThemeCss)</style>
+    }
     <ImportMap />
     <meta name="theme-color" content="#425fce" />
     <link rel="icon" type="image/svg+xml" href="@Assets["branding/icon.svg"]" />
@@ -71,3 +95,10 @@
 </body>
 
 </html>
+
+@code {
+    private string? _customThemeCss;
+
+    protected override async Task OnInitializedAsync() =>
+        _customThemeCss = await Appearance.GetCustomCssAsync();
+}

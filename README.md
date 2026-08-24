@@ -332,6 +332,54 @@ The HTTP launch profile is pinned to `http://localhost:1455` for the Codex OAuth
 callback. Use this explicit profile for browser-driven UI validation; the Electron
 profile intentionally remains the default development target.
 
+### Secured browser hosting
+
+Browser hosting can require a single-user sign-in with a username, password, and
+authenticator code. Generate the credentials once:
+
+```bash
+dotnet run --project Lorekeeper -- auth-setup --username <name>
+```
+
+Set the printed `Auth__SingleUser__*` environment variables before starting the
+host and scan the printed QR code with an authenticator app (the `otpauth://`
+URI is also printed for manual entry). Every page and
+endpoint then requires the sign-in; without those variables the host remains a
+local, unauthenticated development server. `Server__EnableHttpsRedirection=false`
+permits deliberate plain-HTTP hosting on a trusted network or behind a reverse
+proxy, and `Server__DataProtectionKeysDirectory` keeps sign-in cookies valid
+across restarts.
+
+### Custom theme colors
+
+Settings → Appearance customizes the core colors of the light and night themes —
+accent, page background, surface, text, muted text, and borders — with an
+immediate live preview and per-color or full reset to the built-in palettes.
+Dependent shades (hovers, tints, focus rings) derive automatically so the whole
+interface stays cohesive. Choices are stored in the database, so they follow the
+workspace across browsers, backups, and database imports.
+
+### Moving a whole workspace
+
+Settings → Data import replaces this installation's entire database with a
+`lorekeeper.db` file uploaded from another installation (close Lorekeeper on the
+source machine before copying its database). The upload is validated before
+anything changes, the current database is preserved automatically as a protected
+backup restorable from Data recovery, and the imported database is migrated to
+the current version on the next start. This is the easiest way to move a desktop
+workspace into a self-hosted server.
+
+### Container and Kubernetes hosting
+
+The repository `Dockerfile` builds a self-hosted server image, including the
+contained Press PDF runtime, that stores the database and session keys on a
+`/data` volume and requires the single-user sign-in. The manifests and
+step-by-step instructions in
+[`deploy/kubernetes/`](deploy/kubernetes/README.md) deploy it as a
+single-replica Kubernetes workload with persistent storage, secret-provided
+credentials, and health probes. The database stays SQLite on the mounted
+volume — exactly one replica, and the volume is the backup boundary.
+
 ## Desktop Development
 
 Run the Electron.NET desktop shell:

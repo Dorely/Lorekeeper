@@ -34,6 +34,10 @@ using Lorekeeper.VersionHistory.Services;
 using Lorekeeper.VersionHistory.Snapshots;
 using Lorekeeper.VersionHistory.Sync;
 using Lorekeeper.Writing;
+using Microsoft.AspNetCore.DataProtection;
+
+if (args.FirstOrDefault() == SingleUserCredentialTool.CommandName)
+    return SingleUserCredentialTool.Run(args[1..]);
 
 var builder = WebApplication.CreateBuilder(args);
 var desktopUpdates = new DesktopUpdateService();
@@ -59,6 +63,16 @@ var maxInteractiveServerMessageSize = builder.Configuration.GetValue<long?>("Bla
 var minimumStartupSplashMilliseconds = builder.Configuration.GetValue("Startup:MinimumSplashMilliseconds", 1200);
 if (minimumStartupSplashMilliseconds is < 0 or > 10_000)
     throw new InvalidOperationException("Startup:MinimumSplashMilliseconds must be between zero and 10000.");
+var enableHttpsRedirection = builder.Configuration.GetValue("Server:EnableHttpsRedirection", true);
+var dataProtectionKeysDirectory = builder.Configuration["Server:DataProtectionKeysDirectory"];
+if (!string.IsNullOrWhiteSpace(dataProtectionKeysDirectory))
+{
+    Directory.CreateDirectory(dataProtectionKeysDirectory);
+    builder.Services.AddDataProtection()
+        .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysDirectory))
+        .SetApplicationName("Lorekeeper");
+}
+var singleUserAuthEnabled = builder.AddSingleUserAuth();
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
@@ -70,6 +84,8 @@ builder.Services.AddSingleton<IApplicationStartupState>(services =>
 builder.Services.AddSingleton(new ApplicationStartupOptions(
     TimeSpan.FromMilliseconds(minimumStartupSplashMilliseconds)));
 builder.Services.AddHostedService<ApplicationStartupWorker>();
+
+builder.Services.AddSingleton<Lorekeeper.Appearance.IAppearanceService, Lorekeeper.Appearance.AppearanceService>();
 
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IDesktopReleaseUpdateChecker, GitHubDesktopReleaseUpdateChecker>(client =>
@@ -212,6 +228,7 @@ builder.Services.AddSingleton<Lorekeeper.Authoring.IAuthoringHistoryRuntime, Lor
 builder.Services.AddScoped<Lorekeeper.Authoring.IAssistantReviewBaselineService, Lorekeeper.Authoring.AssistantReviewBaselineService>();
 builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringMutationContextAccessor, Lorekeeper.Authoring.AuthoringMutationContextAccessor>();
 builder.Services.AddSingleton<IDatabaseMigrationRecoveryService, DatabaseMigrationRecoveryService>();
+builder.Services.AddScoped<IDatabaseImportService, DatabaseImportService>();
 builder.Services.AddSingleton<IManuscriptMigrationService, ManuscriptMigrationService>();
 builder.Services.AddScoped<IDatabaseStartupMigrationService, DatabaseStartupMigrationService>();
 builder.Services.AddScoped<IVisualCompositionMigrationService, VisualCompositionMigrationService>();
@@ -363,28 +380,42 @@ app.Lifetime.ApplicationStopping.Register(desktopUpdateMonitorCancellation.Cance
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    if (!isElectronMode)
+    if (!isElectronMode && enableHttpsRedirection)
     {
         // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
         app.UseHsts();
     }
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
-if (!isElectronMode)
+if (!isElectronMode && enableHttpsRedirection)
     app.UseHttpsRedirection();
+
+if (singleUserAuthEnabled)
+{
+    app.UseAuthentication();
+    app.UseAuthorization();
+}
 
 app.UseAntiforgery();
 
-app.MapStaticAssets();
+app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<Lorekeeper.Components.App>()
     .AddInteractiveServerRenderMode();
 
+app.MapGet("/healthz", () => Results.Text("ok")).AllowAnonymous();
+app.MapGet("/healthz/ready", (IApplicationStartupState startupState) => startupState.Current.CanUseDatabase
+    ? Results.Text("ready")
+    : Results.StatusCode(StatusCodes.Status503ServiceUnavailable)).AllowAnonymous();
+
+if (singleUserAuthEnabled)
+    app.MapSingleUserAuth();
 app.MapCodexOAuth();
 app.MapProjectImages();
 app.MapProjectFonts();
 app.MapPublishEndpoints();
 
 app.Run();
+return 0;
 
 static async Task ElectronAppReady(
     string desktopUrl,

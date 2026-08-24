@@ -73,6 +73,15 @@
     background: #fff;
 }
 
+/* Display-only page color modes; the rendered artifact stays print-true. */
+.publication-pdf-preview-scroll.display-dim .publication-pdf-preview-page img {
+    filter: brightness(0.8);
+}
+
+.publication-pdf-preview-scroll.display-night .publication-pdf-preview-page img {
+    filter: invert(0.92) hue-rotate(180deg);
+}
+
 .publication-pdf-preview-scroll.facing .publication-pdf-preview-page:first-child {
     justify-content: flex-end;
 }

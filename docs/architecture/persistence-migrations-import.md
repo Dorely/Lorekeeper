@@ -119,6 +119,18 @@ tracking context across explicit backup/schema/validation phases, and guarded
 imports may share one transaction, but neither leaks tracker state after
 rollback.
 
+Whole-database import reuses the scheduled-restore contract rather than adding a
+second replacement path. `IDatabaseImportService` streams an uploaded
+`lorekeeper.db` into the protected backup root's staging location, validates it
+fail-closed (SQLite header and integrity, Lorekeeper schema presence, and an
+`__EFMigrationsHistory` set that must be a subset of this build's known
+migrations so a newer installation's database is rejected), and then schedules
+it through the recovery service's token-confirmed restore. The next startup
+creates a diagnostic backup of the replaced database, restores the staged file
+before any worker runs, and upgrades imported legacy content through the same
+ordered startup migration chain as a database opened in place. The Settings
+"Data import" page owns the upload, review, confirmation, and shutdown flow.
+
 Every guarded migration creates a protected SQLite Online Backup, performs
 integrity checks, transforms data transactionally, validates row counts,
 foreign keys, hashes, ownership, artifacts, packages, and unaffected data, then
@@ -213,7 +225,11 @@ path as the application rather than a parallel test-only migration sequence.
 
 Desktop development stores SQLite in the repository by default. Packaged builds
 resolve per-user application-data storage so installed, portable, and mounted
-DMG locations remain disposable. Database files, verification databases,
+DMG locations remain disposable. The server container overrides
+`ConnectionStrings:DefaultConnection` to an absolute path on a mounted volume
+that also holds the protected migration backups and Data Protection keys, so a
+volume snapshot is the complete backup boundary; the SQLite engine, WAL mode,
+and every migration and recovery contract in this chapter are unchanged there. Database files, verification databases,
 temporary migration backups, and publish output are local ignored state. Port
 and OAuth redirect configuration remain local-host-only unless an explicit
 security architecture change expands exposure. Version-history repositories use
@@ -233,6 +249,7 @@ SQLite backup or a portable v24 export.
 | `Lorekeeper/Persistence/SqliteConnectionSettings.cs` | Local SQLite paths, PRAGMAs, WAL, busy timeout, and packaged per-user placement. |
 | `Lorekeeper/Persistence/DatabaseMigrationRecoveryService.cs` | Protected backup/restore, markers, recovery shell, confirmation, discovery, and pruning. |
 | `Lorekeeper/Persistence/DatabaseStartupMigrationService.cs` | Ordered startup migration/recovery orchestration and readiness-boundary integration. |
+| `Lorekeeper/Persistence/DatabaseImportService.cs` and `Lorekeeper/Components/Pages/Settings/DataImport.razor` | Whole-database import: staged upload, fail-closed validation, scheduling through the restore contract, and the owning Settings surface. |
 | `Lorekeeper/Persistence/Migrations/` | Immutable EF schema history and current model snapshot; never edit applied files. |
 | `Lorekeeper/Manuscripts/ManuscriptMigrationService.cs` | WAL-safe structured-manuscript migration, recovery, validation, journaling, and current v4 upgrade. |
 | `Lorekeeper/Manuscripts/VisualCompositionMigrationService.cs` / `AuthoringPageMigrationService.cs` | Guarded visual/composition and authoring-page cutovers with protected invariants. |
@@ -243,6 +260,7 @@ SQLite backup or a portable v24 export.
 | `Lorekeeper/ImportExport/ProjectImportJobQueue.cs` / `ProjectImportJobNotifier.cs` | Import job dispatch and ephemeral live UI updates; the provider/background chapter owns hosted worker execution. |
 | `Lorekeeper/VersionHistory/Snapshots/`, `Git/`, `Services/`, `Restore/`, and `Sync/` | Deterministic creative snapshot trees, bare Git/checkpoint metadata, guarded restore/import, explicit remote attachment, and durable automatic transport; detailed ownership is in `version-history-sync.md`. |
 | `Lorekeeper.Tests/DatabaseMigrationRecoveryTests.cs` | Recovery markers, protected backup retention, and fail-closed startup behavior. |
+| `Lorekeeper.Tests/DatabaseImportTests.cs` | Staged whole-database import applied at startup with the replaced database preserved, and fail-closed rejection of foreign, corrupt, oversized, and newer databases. |
 | `Lorekeeper.Tests/ManuscriptMigrationIntegrationTests.cs` | Real legacy WAL migration, backup/journal/hash validation, restore, and audit compatibility. |
 | `Lorekeeper.Tests/ProjectExportCompatibilityTests.cs` / `ProjectImportJobIntegrationTests.cs` | v24 export/import preservation, warnings, remapping, rollback, and legacy adapters. |
 | `Lorekeeper.Tests/LorekeeperPressMigrationTests.cs` | Installed-schema Press/Core projection, migration preservation, recovery, and byte/hash invariants. |

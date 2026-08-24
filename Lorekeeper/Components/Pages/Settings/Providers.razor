@@ -9,6 +9,7 @@
 @inject IChatClientFactory ChatClientFactory
 @inject IVisionModelClientFactory VisionModelClientFactory
 @inject IModelCatalogService ModelCatalog
+@inject IEmbeddingConfigurationService EmbeddingConfiguration
 @inject NavigationManager Nav
 @inject ILogger<Providers> Logger
 @implements IDisposable
@@ -146,8 +147,37 @@
                         <span class="lk-status-pill is-warning">Not connected</span>
                         <button type="button" class="btn btn-sm btn-primary" @onclick="ConnectCodexAsync">Connect OpenAI</button>
                     }
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ToggleManualCodexAsync">
+                        @(_manualCodexOpen ? "Close remote sign-in" : "Remote sign-in…")
+                    </button>
                 </div>
             </header>
+            @if (_manualCodexOpen && _codexProvider is not null)
+            {
+                <div class="alert alert-info">
+                    <p>
+                        <strong>Connecting from a browser on a different machine than the app host?</strong>
+                        The OpenAI sign-in always returns to <code>localhost:1455</code>, which only
+                        resolves when Lorekeeper runs on this machine. Complete it manually instead:
+                    </p>
+                    <ol class="mb-2">
+                        <li><a href="/auth/start/@_codexProvider.Id" target="_blank" rel="noopener">Open the OpenAI sign-in in a new tab</a> and finish signing in.</li>
+                        <li>The final page fails to load at <code>localhost:1455</code> — copy that tab's full address.</li>
+                        <li>Paste it below and complete the connection.</li>
+                    </ol>
+                    <div class="d-flex gap-2">
+                        <input class="form-control form-control-sm"
+                               placeholder="http://localhost:1455/auth/callback?code=…&state=…"
+                               @bind="_manualCallbackUrl" @bind:event="oninput" />
+                        <button type="button"
+                                class="btn btn-sm btn-primary"
+                                disabled="@(_manualCodexBusy || string.IsNullOrWhiteSpace(_manualCallbackUrl))"
+                                @onclick="CompleteManualCodexAsync">
+                            Complete connection
+                        </button>
+                    </div>
+                </div>
+            }
             @if (_codexProvider is not null)
             {
                 <div class="model-list">
@@ -298,6 +328,9 @@
     private List<LlmProvider> _parents = [];
     private Dictionary<int, List<LlmProvider>> _children = [];
     private Dictionary<int, bool> _oauthStatus = [];
+    private bool _manualCodexOpen;
+    private bool _manualCodexBusy;
+    private string _manualCallbackUrl = string.Empty;
     private Dictionary<int, bool> _chatReadyStatus = [];
     private Dictionary<int, bool> _visionReadyStatus = [];
     private LlmProvider? _codexProvider;
@@ -755,22 +788,82 @@
 
     private async Task ConnectCodexAsync()
     {
-        var codex = _codexProvider;
-        if (codex is null)
-        {
-            codex = new LlmProvider
-            {
-                Name = CodexProvider.Name,
-                DisplayName = "OpenAI (Codex)",
-                EndpointUrl = CodexProvider.ResponsesEndpoint,
-                ModelId = "gpt-5.4-mini",
-                AuthType = AuthType.OAuth,
-                IsDefault = false
-            };
-            await ProviderService.CreateAsync(codex);
-        }
-
+        var codex = await EnsureCodexProviderAsync();
         Nav.NavigateTo($"/auth/start/{codex.Id}", forceLoad: true);
+    }
+
+    private async Task<LlmProvider> EnsureCodexProviderAsync()
+    {
+        if (_codexProvider is not null)
+            return _codexProvider;
+
+        var codex = new LlmProvider
+        {
+            Name = CodexProvider.Name,
+            DisplayName = "OpenAI (Codex)",
+            EndpointUrl = CodexProvider.ResponsesEndpoint,
+            ModelId = "gpt-5.4-mini",
+            AuthType = AuthType.OAuth,
+            IsDefault = false
+        };
+        await ProviderService.CreateAsync(codex);
+        await ReloadAsync();
+        return _codexProvider ?? codex;
+    }
+
+    private async Task ToggleManualCodexAsync()
+    {
+        if (!_manualCodexOpen)
+            await EnsureCodexProviderAsync();
+        _manualCodexOpen = !_manualCodexOpen;
+    }
+
+    private async Task CompleteManualCodexAsync()
+    {
+        _manualCodexBusy = true;
+        try
+        {
+            var pasted = _manualCallbackUrl.Trim();
+            var queryStart = pasted.IndexOf('?');
+            var query = queryStart >= 0 ? pasted[(queryStart + 1)..] : pasted;
+            var values = QueryHelpers.ParseQuery(query);
+            var code = values.TryGetValue("code", out var codeValue) ? codeValue.ToString() : null;
+            var state = values.TryGetValue("state", out var stateValue) ? stateValue.ToString() : null;
+            if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(state))
+            {
+                SetStatus(
+                    "That address contains no sign-in code. Copy the complete localhost:1455 address from the tab that failed to load.",
+                    "warning");
+                return;
+            }
+
+            var providerId = await CodexAuth.HandleCallbackAsync(code, state);
+            try
+            {
+                var configured = await EmbeddingConfiguration.ConfigureCodexDefaultIfUnsetAsync(providerId);
+                SetStatus(
+                    configured
+                        ? $"OpenAI account connected. Codex embeddings configured with {CodexProvider.DefaultEmbeddingModel}."
+                        : "OpenAI account connected.",
+                    "success");
+            }
+            catch (Exception exception)
+            {
+                SetStatus($"OpenAI account connected, but Codex embeddings were not configured: {exception.Message}", "warning");
+            }
+
+            _manualCallbackUrl = string.Empty;
+            _manualCodexOpen = false;
+            await ReloadAsync();
+        }
+        catch (Exception exception)
+        {
+            SetStatus("OAuth failed: " + exception.Message, "danger");
+        }
+        finally
+        {
+            _manualCodexBusy = false;
+        }
     }
 
     private async Task DisconnectCodexAsync()

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: lorekeeper
+  namespace: lorekeeper
+  labels:
+    app: lorekeeper
+spec:
+  # NodePort for direct LAN access on every node's IP. Switch to ClusterIP if
+  # you prefer kubectl port-forward access only.
+  type: NodePort
+  selector:
+    app: lorekeeper
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      nodePort: 30455

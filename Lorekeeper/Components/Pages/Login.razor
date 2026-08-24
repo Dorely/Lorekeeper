@@ -1,0 +1,82 @@
+@page "/login"
+@using Microsoft.AspNetCore.Authorization
+@using Lorekeeper.Auth
+@attribute [AllowAnonymous]
+@layout Layout.BlankLayout
+@inject SingleUserAuthState AuthState
+@inject NavigationManager Navigation
+
+<PageTitle>Sign in · Lorekeeper</PageTitle>
+
+<main class="login-screen">
+    <section class="login-card" aria-labelledby="login-title">
+        <div class="login-brand" aria-hidden="true">
+            <span class="login-brand-glow"></span>
+            <img src="/branding/icon.svg" alt="" />
+        </div>
+
+        <header class="login-copy">
+            <span class="login-kicker">Lorekeeper</span>
+            <h1 id="login-title">Welcome back</h1>
+            <p>Sign in to open your studio.</p>
+        </header>
+
+        @if (StatusMessage() is { } statusMessage)
+        {
+            <div class="login-error" role="alert">@statusMessage</div>
+        }
+
+        <form class="login-form" method="post" action="/login">
+            <AntiforgeryToken />
+            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+
+            <label class="login-field">
+                <span>Name</span>
+                <input name="username" type="text" autocomplete="username" required autofocus />
+            </label>
+
+            <label class="login-field">
+                <span>Password</span>
+                <input name="password" type="password" autocomplete="current-password" required />
+            </label>
+
+            <label class="login-field">
+                <span>Authenticator code</span>
+                <input class="login-otp"
+                       name="code"
+                       type="text"
+                       inputmode="numeric"
+                       pattern="[0-9]{6}"
+                       maxlength="6"
+                       autocomplete="one-time-code"
+                       placeholder="000000"
+                       required />
+            </label>
+
+            <button class="login-submit" type="submit">Unlock the studio</button>
+        </form>
+
+        <p class="login-footnote">This workspace is private. Every page requires your sign-in.</p>
+    </section>
+</main>
+
+@code {
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? Status { get; set; }
+
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    protected override void OnInitialized()
+    {
+        if (!AuthState.Enabled)
+            Navigation.NavigateTo("/", replace: true);
+    }
+
+    private string? StatusMessage() => Status switch
+    {
+        "failed" => "That sign-in didn't match. Check your name, password, and current authenticator code.",
+        "locked" => "Sign-in is temporarily locked after too many attempts. Wait a few minutes and try again.",
+        _ => null,
+    };
+}

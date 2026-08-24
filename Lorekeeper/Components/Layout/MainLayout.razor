@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @inject NavigationManager Navigation
+@inject Lorekeeper.Auth.SingleUserAuthState AuthState
 
 <div class="app-shell">
     <header class="app-topbar">
@@ -26,6 +27,13 @@
             <ThemeToggle @rendermode="InteractiveServer" />
             <ProjectCheckpointControl @rendermode="InteractiveServer" />
             <DesktopUpdateControl @rendermode="InteractiveServer" />
+            @if (AuthState.Enabled)
+            {
+                <form class="app-signout" method="post" action="/logout">
+                    <AntiforgeryToken />
+                    <button type="submit" class="app-signout-button">Sign out</button>
+                </form>
+            }
         </div>
     </header>
 

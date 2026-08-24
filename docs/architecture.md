@@ -7,7 +7,9 @@ implemented foundation spans narrative planning and retrieval, semantic
 manuscript authoring, assistant collaboration, images and page composition, and
 publication production through the owned Lorekeeper Press renderer. Normal use
 is through an Electron.NET shell backed by a local ASP.NET Core host; an explicit
-browser profile exists for development and validation.
+browser profile exists for development and validation, and an optional
+container/Kubernetes deployment serves the same browser application behind the
+single-user login described in the runtime chapter.
 
 This file is the required architecture entry point. It records only the global
 contracts needed to route work safely. Detailed current architecture and key

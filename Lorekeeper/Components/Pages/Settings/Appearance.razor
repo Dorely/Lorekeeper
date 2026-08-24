@@ -1,0 +1,136 @@
+@page "/settings/appearance"
+@using Lorekeeper.Appearance
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@inject IAppearanceService AppearanceService
+@inject IJSRuntime JS
+
+<PageTitle>Appearance - Lorekeeper</PageTitle>
+
+<ConfigurationShell Title="Appearance"
+                    Description="Customize the core colors of the light and night themes. Related shades derive automatically so the whole interface stays cohesive.">
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger" role="alert">@_error</div>
+    }
+    @if (_message is not null)
+    {
+        <div class="alert alert-success" role="status">@_message</div>
+    }
+
+    @if (_light is null || _dark is null)
+    {
+        <p>Loading appearance settings…</p>
+    }
+    else
+    {
+        <p class="text-muted">
+            Changes preview immediately in the theme you are currently viewing; use the
+            theme toggle in the top bar to see the other one. Nothing is permanent until
+            you save.
+        </p>
+
+        <section class="lk-card mb-4">
+            <h2>Light theme</h2>
+            <AppearanceThemeEditor Palette="_light"
+                                   Defaults="AppearanceCss.LightDefaults"
+                                   Disabled="_busy"
+                                   PaletteChanged="async palette => { _light = palette; await ApplyPreviewAsync(); }" />
+        </section>
+
+        <section class="lk-card mb-4">
+            <h2>Night theme</h2>
+            <AppearanceThemeEditor Palette="_dark"
+                                   Defaults="AppearanceCss.DarkDefaults"
+                                   Disabled="_busy"
+                                   PaletteChanged="async palette => { _dark = palette; await ApplyPreviewAsync(); }" />
+        </section>
+
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_busy">Save colors</button>
+            <button class="btn btn-outline-secondary" @onclick="ResetAllAsync" disabled="@_busy">
+                Reset both themes to defaults
+            </button>
+        </div>
+    }
+</ConfigurationShell>
+
+@code {
+    private AppearancePalette? _light;
+    private AppearancePalette? _dark;
+    private IJSObjectReference? _module;
+    private string? _error;
+    private string? _message;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AppearanceService.GetAsync();
+        _light = state.Light;
+        _dark = state.Dark;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            _module = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./Components/Pages/Settings/Appearance.razor.js");
+    }
+
+    private async Task ApplyPreviewAsync()
+    {
+        _message = null;
+        if (_module is null || _light is null || _dark is null)
+            return;
+        var css = AppearanceCss.Build(new AppearanceThemeState(_light, _dark));
+        await _module.InvokeVoidAsync("setPreview", css ?? "");
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_light is null || _dark is null)
+            return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            var state = new AppearanceThemeState(_light, _dark);
+            await AppearanceService.SaveAsync(state);
+            if (_module is not null)
+                await _module.InvokeVoidAsync("applySaved", AppearanceCss.Build(state) ?? "");
+            _message = "Colors saved. They now apply everywhere this database is used.";
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ResetAllAsync()
+    {
+        _light = AppearancePalette.Empty;
+        _dark = AppearancePalette.Empty;
+        await ApplyPreviewAsync();
+        _message = "Defaults restored in the preview. Save to make it permanent.";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is null)
+            return;
+        try
+        {
+            await _module.InvokeVoidAsync("clearPreview");
+            await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The browser is gone; nothing to clean up.
+        }
+    }
+}

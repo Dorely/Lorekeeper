@@ -14,6 +14,20 @@
                 @(_showFacingSeam ? "Hide page seam" : "Show page seam")
             </button>
         }
+        <div class="btn-group btn-group-sm" role="group" aria-label="Page color display">
+            <button type="button"
+                    class="btn @ButtonClass(_displayMode == "paper")"
+                    title="Display pages exactly as printed, on white paper"
+                    @onclick="@(() => SetDisplayModeAsync("paper"))">Paper</button>
+            <button type="button"
+                    class="btn @ButtonClass(_displayMode == "dim")"
+                    title="Soften the white pages for night viewing; display only"
+                    @onclick="@(() => SetDisplayModeAsync("dim"))">Dim</button>
+            <button type="button"
+                    class="btn @ButtonClass(_displayMode == "night")"
+                    title="Invert page colors for night reading; the PDF itself is unchanged"
+                    @onclick="@(() => SetDisplayModeAsync("night"))">Night</button>
+        </div>
         <span>@PageCount.ToString("N0") @(PageCount == 1 ? "page" : "pages")</span>
     </header>
 
@@ -25,7 +39,7 @@
     }
     else
     {
-        <div class="publication-pdf-preview-scroll @(_facingPages ? "facing" : "single") @(_facingPages && _showFacingSeam ? "show-seam" : null)">
+        <div class="publication-pdf-preview-scroll @(_facingPages ? "facing" : "single") @(_facingPages && _showFacingSeam ? "show-seam" : null) @DisplayModeClass()">
             @if (_facingPages)
             {
                 @foreach (var spread in BuildFacingSpreads(PageCount))
@@ -63,9 +77,13 @@
     [Parameter, EditorRequired] public Guid ArtifactId { get; set; }
     [Parameter, EditorRequired] public int PageCount { get; set; }
 
+    [Inject] private IJSRuntime JS { get; set; } = null!;
+
     private bool _facingPages;
     private bool _showFacingSeam;
     private bool _initialized;
+    private string _displayMode = "paper";
+    private IJSObjectReference? _module;
 
     protected override void OnParametersSet()
     {
@@ -74,6 +92,33 @@
         _facingPages = PageCount > 1;
         _initialized = true;
     }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+        _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/page-display-mode.js");
+        var stored = await _module.InvokeAsync<string>("getDisplayMode");
+        if (stored != _displayMode)
+        {
+            _displayMode = stored;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SetDisplayModeAsync(string mode)
+    {
+        _displayMode = mode;
+        if (_module is not null)
+            await _module.InvokeVoidAsync("setDisplayMode", mode);
+    }
+
+    private string? DisplayModeClass() => _displayMode switch
+    {
+        "dim" => "display-dim",
+        "night" => "display-night",
+        _ => null,
+    };
 
     private static IEnumerable<int?[]> BuildFacingSpreads(int pageCount)
     {

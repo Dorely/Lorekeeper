@@ -502,3 +502,6 @@ $RECYCLE.BIN/
 .commandcode/taste/architecture/taste.md
 .commandcode/taste/ui/taste.md
 .commandcode/taste/workflow/taste.md
+
+# Kubernetes deployment secrets stay local; only the example template is committed.
+deploy/kubernetes/secret.yaml

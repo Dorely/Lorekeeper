@@ -118,3 +118,36 @@ main ::deep article.content--workspace {
 
 #blazor-error-ui .reload { font-weight: 750; margin-left: auto; }
 #blazor-error-ui .dismiss { background: transparent; border: 0; color: inherit; font-size: 1.25rem; line-height: 1; }
+
+.app-signout {
+    display: inline-flex;
+    margin: 0;
+}
+
+.app-signout-button {
+    align-items: center;
+    background: transparent;
+    border: 1px solid var(--lk-line-strong);
+    border-radius: var(--lk-radius-sm);
+    color: var(--lk-muted);
+    cursor: pointer;
+    display: inline-flex;
+    flex: 0 0 auto;
+    font-size: 0.8rem;
+    font-weight: 650;
+    height: 2rem;
+    padding: 0 0.7rem;
+    transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.app-signout-button:hover {
+    background: var(--lk-soft);
+    border-color: var(--lk-border-strong);
+    color: var(--lk-ink);
+}
+
+.app-signout-button:focus-visible {
+    border-color: var(--lk-accent);
+    box-shadow: var(--lk-focus);
+    outline: none;
+}

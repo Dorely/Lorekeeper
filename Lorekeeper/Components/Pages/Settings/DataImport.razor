@@ -1,0 +1,163 @@
+@page "/settings/data-import"
+@using Lorekeeper.Persistence
+@rendermode InteractiveServer
+@inject IDatabaseImportService Import
+@inject IHostApplicationLifetime ApplicationLifetime
+
+<PageTitle>Data import - Lorekeeper</PageTitle>
+
+<ConfigurationShell Title="Database import"
+                    Description="Replace this installation's entire database with a lorekeeper.db file from another installation.">
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger" role="alert">@_error</div>
+    }
+
+    @if (_scheduled)
+    {
+        <div class="alert alert-success" role="status">
+            The import is scheduled. Lorekeeper is shutting down; when it starts again it
+            backs up the current database, applies the imported one, and migrates it to the
+            current version before anything else runs.
+        </div>
+    }
+    else
+    {
+        <section class="lk-card mb-4">
+            <h2>Choose a database file</h2>
+            <p>
+                On the source machine, close Lorekeeper first, then copy its
+                <code>lorekeeper.db</code> file. Installed desktop builds keep it in the
+                per-user Lorekeeper data directory; development checkouts keep it in the
+                repository root. Everything transfers: projects, manuscripts, images,
+                fonts, publication state, chat transcripts, and provider credentials.
+            </p>
+            <InputFile OnChange="OnFileSelectedAsync" accept=".db" disabled="@_busy" />
+            @if (_busy && _candidate is null)
+            {
+                <p class="mt-3" role="status">Uploading and validating the database…</p>
+            }
+        </section>
+
+        @if (_candidate is { } candidate)
+        {
+            <section class="lk-card">
+                <h2>Review and import</h2>
+                <article class="border rounded p-3 mb-3">
+                    <div><strong>Size:</strong> @FormatBytes(candidate.SizeBytes)</div>
+                    <div><strong>Projects:</strong> @candidate.ProjectCount</div>
+                    @if (candidate.ProjectNames.Count > 0)
+                    {
+                        <div>
+                            <strong>Includes:</strong>
+                            @string.Join(", ", candidate.ProjectNames)@(candidate.ProjectCount > candidate.ProjectNames.Count ? ", …" : "")
+                        </div>
+                    }
+                    <div>
+                        <strong>Schema:</strong> @candidate.AppliedMigrationCount applied migrations,
+                        @candidate.PendingMigrationCount will be applied during import.
+                    </div>
+                </article>
+
+                @if (_restoreRequest is null)
+                {
+                    <button class="btn btn-outline-danger" @onclick="PrepareAsync" disabled="@_busy">
+                        Replace current database…
+                    </button>
+                }
+                else
+                {
+                    <div class="alert alert-warning">
+                        This replaces <strong>everything</strong> in this installation with the
+                        uploaded database, including provider credentials. The current database is
+                        preserved automatically as a protected backup and can be restored from the
+                        Data recovery page. Lorekeeper shuts down and applies the import when it
+                        starts again.
+                    </div>
+                    <button class="btn btn-danger" @onclick="ConfirmImportAsync" disabled="@_busy">
+                        Import and restart
+                    </button>
+                    <button class="btn btn-secondary ms-2" @onclick="CancelConfirmation" disabled="@_busy">
+                        Cancel
+                    </button>
+                }
+            </section>
+        }
+    }
+</ConfigurationShell>
+
+@code {
+    private DatabaseImportCandidate? _candidate;
+    private Lorekeeper.Manuscripts.ManuscriptRestoreRequest? _restoreRequest;
+    private string? _error;
+    private bool _busy;
+    private bool _scheduled;
+
+    private async Task OnFileSelectedAsync(InputFileChangeEventArgs eventArgs)
+    {
+        _busy = true;
+        _error = null;
+        _candidate = null;
+        _restoreRequest = null;
+        try
+        {
+            await using var content = eventArgs.File.OpenReadStream(DatabaseImportService.DefaultMaxImportBytes);
+            _candidate = await Import.StageAsync(content, DatabaseImportService.DefaultMaxImportBytes);
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task PrepareAsync()
+    {
+        if (_candidate is null)
+            return;
+        _error = null;
+        try
+        {
+            _restoreRequest = await Import.PrepareImportAsync(_candidate.StagedPath);
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+    }
+
+    private async Task ConfirmImportAsync()
+    {
+        if (_candidate is null || _restoreRequest is null)
+            return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Import.ScheduleImportAsync(_candidate.StagedPath, _restoreRequest.ConfirmationToken);
+            _scheduled = true;
+            _restoreRequest = null;
+            await InvokeAsync(StateHasChanged);
+            ApplicationLifetime.StopApplication();
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void CancelConfirmation() => _restoreRequest = null;
+
+    private static string FormatBytes(long bytes) =>
+        bytes >= 1024 * 1024
+            ? $"{bytes / 1024d / 1024d:0.0} MB"
+            : $"{bytes / 1024d:0.0} KB";
+}
