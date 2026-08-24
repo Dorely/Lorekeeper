@@ -56,6 +56,15 @@
     color: var(--bs-info-text-emphasis, #055160);
 }
 
+.chat-chip-tombstoned {
+    border-color: var(--bs-secondary-border-subtle, #c4c8cb);
+    background: rgba(108, 117, 125, 0.06);
+}
+
+.chat-chip-tombstoned .chat-chip-icon {
+    color: var(--bs-secondary-color, #6c757d);
+}
+
 .chat-chip-running .chat-chip-icon,
 .chat-chip-pending .chat-chip-icon {
     color: var(--bs-secondary-color, #6c757d);

@@ -602,34 +602,15 @@ they commit to a direction, act on it without a second confirmation.
 
             if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId) is { } compaction)
             {
-                manifest.Add(new ChatToolCallManifest(
-                    compaction.CallId,
-                    ChatTurnEngine.CompactionToolName,
-                    ChatContextCompaction.EmptyArgumentsJson));
-                activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
-                await SafePersistAsync(activeAssistant);
-
-                await turnEngine.AddMessageAsync(repositories => repositories.OutlineConversations, new OutlineMessage
+                yield return new ContextTrimmed(compaction);
+                if (compaction.LimitExceeded)
                 {
-                    ConversationId = conversation.Id,
-                    Order = nextOrder++,
-                    Role = OutlineMessageRole.Tool,
-                    Content = ChatTurnEngine.CompactionNotice,
-                    ToolCallId = compaction.CallId,
-                    ToolName = ChatTurnEngine.CompactionToolName,
-                    Status = OutlineMessageStatus.Completed,
-                }, CancellationToken.None);
-                yield return new ToolCallStarted(
-                    compaction.CallId,
-                    ChatTurnEngine.CompactionToolName,
-                    ChatContextCompaction.EmptyArgumentsJson,
-                    ArgumentsComplete: true);
-                yield return new ToolCallCompleted(
-                    compaction.CallId,
-                    ChatTurnEngine.CompactionToolName,
-                    ChatTurnEngine.CompactionNotice,
-                    Error: null,
-                    DurationMs: 0);
+                    activeAssistant.Status = OutlineMessageStatus.Failed;
+                    activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
+                    await SafePersistAsync(activeAssistant);
+                    yield return new TurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                    yield break;
+                }
             }
 
             if (iteration == maxIterations - 1)

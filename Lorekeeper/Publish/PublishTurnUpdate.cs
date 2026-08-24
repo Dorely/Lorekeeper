@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Lorekeeper.ChatTurns;
 
 namespace Lorekeeper.Publish;
 
@@ -7,6 +8,7 @@ namespace Lorekeeper.Publish;
 [JsonDerivedType(typeof(PublishToolCallStarted), typeDiscriminator: "tool-start")]
 [JsonDerivedType(typeof(PublishToolCallArgumentsDelta), typeDiscriminator: "tool-args")]
 [JsonDerivedType(typeof(PublishToolCallCompleted), typeDiscriminator: "tool-end")]
+[JsonDerivedType(typeof(PublishContextTrimmed), typeDiscriminator: "context-trimmed")]
 [JsonDerivedType(typeof(PublishWorkspaceMutated), typeDiscriminator: "workspace-mutated")]
 [JsonDerivedType(typeof(PublishAssistantMessageCompleted), typeDiscriminator: "assistant-end")]
 [JsonDerivedType(typeof(PublishTurnError), typeDiscriminator: "error")]
@@ -34,6 +36,8 @@ public sealed record PublishToolCallCompleted(
     string? Error,
     double DurationMs,
     IReadOnlyList<PublishChatVisualAttachment> Visuals) : PublishTurnUpdate;
+
+public sealed record PublishContextTrimmed(ChatCompactionResult Result) : PublishTurnUpdate;
 
 public sealed record PublishChatVisualAttachment(
     Guid Id,

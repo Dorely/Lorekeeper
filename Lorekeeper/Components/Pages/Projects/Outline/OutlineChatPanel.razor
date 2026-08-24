@@ -322,6 +322,14 @@
                 StateHasChanged();
                 break;
 
+            case ContextTrimmed trimmed:
+                _live!.ApplyContextTrim(
+                    trimmed.Result.NewlyTombstonedCallIds,
+                    trimmed.Result.CompletedRoundCallIds);
+                UpdateConversationTokenCount();
+                StateHasChanged();
+                break;
+
             case OutlineMutated:
                 if (OnOutlineChanged.HasDelegate)
                     await OnOutlineChanged.InvokeAsync();

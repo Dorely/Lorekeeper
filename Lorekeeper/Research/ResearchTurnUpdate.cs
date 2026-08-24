@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Lorekeeper.ChatTurns;
 
 namespace Lorekeeper.Research;
 
@@ -7,6 +8,7 @@ namespace Lorekeeper.Research;
 [JsonDerivedType(typeof(ResearchToolCallStarted), typeDiscriminator: "tool-start")]
 [JsonDerivedType(typeof(ResearchToolCallArgumentsDelta), typeDiscriminator: "tool-args")]
 [JsonDerivedType(typeof(ResearchToolCallCompleted), typeDiscriminator: "tool-end")]
+[JsonDerivedType(typeof(ResearchContextTrimmed), typeDiscriminator: "context-trimmed")]
 [JsonDerivedType(typeof(ResearchPendingAiChangeCreated), typeDiscriminator: "pending-change")]
 [JsonDerivedType(typeof(ResearchGraphMutated), typeDiscriminator: "graph-mutated")]
 [JsonDerivedType(typeof(ResearchAssistantMessageCompleted), typeDiscriminator: "assistant-end")]
@@ -34,6 +36,8 @@ public sealed record ResearchToolCallCompleted(
     string? Result,
     string? Error,
     double DurationMs) : ResearchTurnUpdate;
+
+public sealed record ResearchContextTrimmed(ChatCompactionResult Result) : ResearchTurnUpdate;
 
 public sealed record ResearchAssistantMessageCompleted(Guid MessageId) : ResearchTurnUpdate;
 

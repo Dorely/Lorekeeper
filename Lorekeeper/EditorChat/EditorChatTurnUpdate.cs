@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Lorekeeper.ChatTurns;
 
 namespace Lorekeeper.EditorChat;
 
@@ -7,6 +8,7 @@ namespace Lorekeeper.EditorChat;
 [JsonDerivedType(typeof(EditorChatToolCallStarted), typeDiscriminator: "tool-start")]
 [JsonDerivedType(typeof(EditorChatToolCallArgumentsDelta), typeDiscriminator: "tool-args")]
 [JsonDerivedType(typeof(EditorChatToolCallCompleted), typeDiscriminator: "tool-end")]
+[JsonDerivedType(typeof(EditorChatContextTrimmed), typeDiscriminator: "context-trimmed")]
 [JsonDerivedType(typeof(EditorChatPendingAiChangeCreated), typeDiscriminator: "pending-change")]
 [JsonDerivedType(typeof(EditorChatContestStarted), typeDiscriminator: "contest-start")]
 [JsonDerivedType(typeof(EditorChatContestCandidateUpdated), typeDiscriminator: "contest-candidate")]
@@ -35,6 +37,8 @@ public sealed record EditorChatToolCallCompleted(
     string? Error,
     double DurationMs,
     IReadOnlyList<EditorChatVisualAttachment> Visuals) : EditorChatTurnUpdate;
+
+public sealed record EditorChatContextTrimmed(ChatCompactionResult Result) : EditorChatTurnUpdate;
 
 public sealed record EditorChatVisualAttachment(
     Guid Id,

@@ -54,6 +54,9 @@ public static class ChatModelHistory
                     case TextContent text when !string.IsNullOrEmpty(text.Text):
                         builder.AppendLine(text.Text);
                         break;
+                    case TextReasoningContent reasoning when !string.IsNullOrEmpty(reasoning.Text):
+                        builder.Append("Reasoning: ").AppendLine(reasoning.Text);
+                        break;
                     case FunctionCallContent call:
                         builder.Append("Tool call: ").Append(call.Name).Append(' ').AppendLine(call.CallId);
                         builder.AppendLine(call.Arguments is null ? "{}" : JsonSerializer.Serialize(call.Arguments));

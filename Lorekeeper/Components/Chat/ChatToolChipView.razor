@@ -220,10 +220,12 @@
         await RefreshRevisionJobAsync(jobId, showLoading: false);
     }
 
-    private bool IsCompaction => string.Equals(Chip.Name, ChatTurnEngine.CompactionToolName, StringComparison.Ordinal);
+    private bool IsCompaction => string.Equals(Chip.Name, ChatContextCompaction.HistoricalToolName, StringComparison.Ordinal);
 
     private string StateClass => IsCompaction
         ? "chat-chip-compaction"
+        : Chip.ContextState == ChatToolChipContextState.ResultTombstoned
+        ? "chat-chip-tombstoned"
         : Chip.Error is not null
         ? "chat-chip-error"
         : Chip.Completed

@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Lorekeeper.ChatTurns;
 
 namespace Lorekeeper.Outline;
 
@@ -11,6 +12,7 @@ namespace Lorekeeper.Outline;
 [JsonDerivedType(typeof(ToolCallStarted), typeDiscriminator: "tool-start")]
 [JsonDerivedType(typeof(ToolCallArgumentsDelta), typeDiscriminator: "tool-args")]
 [JsonDerivedType(typeof(ToolCallCompleted), typeDiscriminator: "tool-end")]
+[JsonDerivedType(typeof(ContextTrimmed), typeDiscriminator: "context-trimmed")]
 [JsonDerivedType(typeof(PendingAiChangeCreated), typeDiscriminator: "pending-change")]
 [JsonDerivedType(typeof(AssistantMessageCompleted), typeDiscriminator: "assistant-end")]
 [JsonDerivedType(typeof(OutlineMutated), typeDiscriminator: "outline-mutated")]
@@ -31,6 +33,8 @@ public sealed record ToolCallArgumentsDelta(string CallId, string ArgumentsDelta
 
 /// <summary>A function call has finished. <paramref name="Error"/> is null on success.</summary>
 public sealed record ToolCallCompleted(string CallId, string ToolName, string? Result, string? Error, double DurationMs) : OutlineTurnUpdate;
+
+public sealed record ContextTrimmed(ChatCompactionResult Result) : OutlineTurnUpdate;
 
 /// <summary>A mutating tool call was queued for approval instead of being applied immediately.</summary>
 public sealed record PendingAiChangeCreated(Guid BatchId, Guid ChangeId, string ToolCallId, string ToolName, string Summary) : OutlineTurnUpdate;

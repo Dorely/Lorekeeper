@@ -106,9 +106,6 @@ public sealed class ChatTurnEngine(
     ILogger<ChatTurnEngine> logger,
     IChatContextCompactionService contextCompaction)
 {
-    public const string CompactionToolName = ChatContextCompaction.ToolName;
-    public const string CompactionNotice = ChatContextCompaction.Notice;
-
     public static string ToolLoopLimitError(int maxIterations) =>
         $"Tool-call loop hit cap of {maxIterations} iterations without producing a final response.";
 

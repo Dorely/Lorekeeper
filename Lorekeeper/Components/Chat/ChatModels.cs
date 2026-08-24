@@ -42,11 +42,15 @@ public sealed class ChatReasoningPart : ChatMessagePart
 
     public bool IsStreaming { get; set; }
 
+    public bool IsInActiveContext { get; private set; } = true;
+
     public void Append(string text)
     {
         if (!string.IsNullOrEmpty(text))
             Text.Append(text);
     }
+
+    public void MarkRemovedFromActiveContext() => IsInActiveContext = false;
 }
 
 public sealed class ChatToolPart(ChatToolChip chip) : ChatMessagePart
@@ -72,6 +76,12 @@ public sealed record ChatImageVisual(
 public sealed record ChatComposerSubmission(
     string Text,
     IReadOnlyList<ChatTurnImageAttachment> Images);
+
+public enum ChatToolChipContextState
+{
+    Active,
+    ResultTombstoned,
+}
 
 public static class ChatImageParts
 {
@@ -127,7 +137,7 @@ public sealed class ChatToolChip
 
     public bool ArgumentsComplete { get; private set; }
 
-    public bool IsDroppedFromActiveContext { get; private set; }
+    public ChatToolChipContextState ContextState { get; private set; } = ChatToolChipContextState.Active;
 
     public bool HasArguments => !string.IsNullOrWhiteSpace(ArgumentsJson) && ArgumentsJson != "{}";
 
@@ -154,7 +164,7 @@ public sealed class ChatToolChip
         ArgumentsComplete = true;
     }
 
-    public void MarkDroppedFromActiveContext() => IsDroppedFromActiveContext = true;
+    public void MarkResultTombstoned() => ContextState = ChatToolChipContextState.ResultTombstoned;
 }
 
 public sealed class ChatToolProgress
@@ -282,8 +292,6 @@ public sealed class ChatLiveTurn
             if (visuals is { Count: > 0 })
                 chip.Visuals.AddRange(visuals);
 
-            if (string.Equals(chip.Name, ChatContextCompaction.ToolName, StringComparison.Ordinal))
-                MarkToolContextDropped();
         }
 
         IsThinking = true;
@@ -310,14 +318,27 @@ public sealed class ChatLiveTurn
 
     public string? ToolNameFor(string callId) => FindToolChip(callId)?.Name;
 
-    private void MarkToolContextDropped()
+    public void ApplyContextTrim(
+        IReadOnlyCollection<string> tombstonedCallIds,
+        IReadOnlyCollection<string> completedRoundCallIds)
     {
-        foreach (var chip in Messages
-            .SelectMany(message => message.Parts)
-            .OfType<ChatToolPart>()
-            .Select(part => part.Chip))
+        foreach (var message in Messages)
         {
-            chip.MarkDroppedFromActiveContext();
+            var chips = message.Parts
+                .OfType<ChatToolPart>()
+                .Select(part => part.Chip)
+                .ToList();
+            foreach (var chip in chips)
+            {
+                if (tombstonedCallIds.Contains(chip.CallId, StringComparer.Ordinal))
+                    chip.MarkResultTombstoned();
+            }
+
+            if (chips.Any(chip => completedRoundCallIds.Contains(chip.CallId, StringComparer.Ordinal)))
+            {
+                foreach (var reasoning in message.Parts.OfType<ChatReasoningPart>())
+                    reasoning.MarkRemovedFromActiveContext();
+            }
         }
     }
 
@@ -411,17 +432,12 @@ public static class ChatTranscriptHelpers
                         if (!string.IsNullOrEmpty(text))
                             sb.AppendLine(text);
                         break;
+                    case ChatReasoningPart reasoningPart:
+                        if (reasoningPart.IsInActiveContext && reasoningPart.Text.Length > 0)
+                            sb.Append("Reasoning: ").AppendLine(reasoningPart.Text.ToString());
+                        break;
                     case ChatToolPart toolPart:
-                        if (string.Equals(toolPart.Chip.Name, ChatContextCompaction.ToolName, StringComparison.Ordinal))
-                        {
-                            // The chip is transcript-only. The provider receives this runtime notice instead.
-                            sb.Append("User:").AppendLine();
-                            sb.AppendLine(ChatContextCompaction.Notice);
-                        }
-                        else if (!toolPart.Chip.IsDroppedFromActiveContext)
-                        {
-                            AppendToolChipForTokenCount(sb, toolPart.Chip);
-                        }
+                        AppendToolChipForTokenCount(sb, toolPart.Chip);
                         break;
                     case ChatImagePart imagePart:
                         sb.Append("Image: ").Append(imagePart.Visual.Title).Append(' ').AppendLine(imagePart.Visual.Caption);
@@ -434,9 +450,10 @@ public static class ChatTranscriptHelpers
     public static void AppendToolChipForTokenCount(StringBuilder sb, ChatToolChip chip)
     {
         sb.Append("Tool: ").Append(chip.Name).Append(' ').AppendLine(chip.CallId);
-        if (chip.HasArguments)
-            sb.Append("Args: ").AppendLine(chip.ArgumentsJson);
-        if (!string.IsNullOrWhiteSpace(chip.Result))
+        sb.Append("Args: ").AppendLine(string.IsNullOrEmpty(chip.ArgumentsJson) ? "{}" : chip.ArgumentsJson);
+        if (chip.ContextState == ChatToolChipContextState.ResultTombstoned)
+            sb.Append("Result: ").AppendLine(ChatContextCompaction.ResultTombstone);
+        else if (!string.IsNullOrWhiteSpace(chip.Result))
             sb.Append("Result: ").AppendLine(chip.Result);
         if (!string.IsNullOrWhiteSpace(chip.Error))
             sb.Append("Error: ").AppendLine(chip.Error);

@@ -111,17 +111,27 @@ image generation, and Press rendering keep their separate selection contracts.
 
 All six surfaces use the active model's configured input-token limit and shared
 token counter. After a complete tool-call batch, reaching 90% of that limit
-removes completed tool-result messages, their function-call protocol entries,
-and tool-derived visual context from the active in-memory request. System and
-user content, assistant prose, and initial visual context remain. Compaction
-never interrupts streaming output or an executing tool.
+tombstones completed function results oldest-first, one result at a time, using
+the exact structural tombstone marker and payload. The original
+`FunctionCallContent`, call ID, name, arguments, result row, and audit rendering
+remain intact; only the active in-memory result payload is replaced. Each
+replacement is recounted, so newer results are preserved when an older result is
+sufficient. Reasoning and marked tool-derived visual messages are removed only
+after every result in that tool round is tombstoned. Reasoning is included in
+server token accounting, and repeated compaction is idempotent.
 
-A runtime-only notice tells the assistant that IDs and state from removed tool
-results must be looked up again. The transcript records a synthetic
-`Chat Compacted` tool row and manifest entry while retaining original tool rows
-for audit. The live token estimate excludes dropped chips and includes the
-notice until the turn ends. Background ingest, contests, revision workers, image
-jobs, and publication workers do not use interactive chat compaction.
+Each turn emits the shared trim state (original/final token counts, token limit,
+newly tombstoned call IDs, completed-round call IDs whose transient context was
+removed, and limit-exceeded state) through its typed service, runner, and panel
+update path. Live chips remain visible with their original audit result and use
+`Active` or `ResultTombstoned` state for token projection.
+When every eligible result is tombstoned and usage remains at or above 90%, the
+current assistant row is persisted as failed, an actionable reset or
+larger-context-model error is emitted, and no further provider request is made.
+There is no summarization call, full-prune fallback, runtime warning, or new
+synthetic `Chat Compacted` row/chip. Historical compaction rows remain inert and
+renderable. Background ingest, contests, revision workers, image jobs, and
+publication workers do not use interactive chat compaction.
 
 ### Prompts, context, and tool boundaries
 
@@ -310,9 +320,10 @@ must leave durable terminal state and no concurrent-disposal error.
   provider stream or background wait.
 - Verify provider/model snapshots remain stable for the entire turn and that an
   unavailable explicit selection fails closed without erasing the transcript.
-- Exercise token accounting and compaction at complete tool-batch boundaries;
-  confirm replay stays text-only and the assistant receives the re-lookup
-  notice.
+- Exercise token accounting and result tombstoning at complete tool-batch
+  boundaries; confirm reasoning is counted, oldest results trim first, pairing
+  and audit rows remain intact, replay stays text-only, and exhausted eligible
+  results fail closed before another provider request.
 - For tool changes, inspect schemas, prompt guidance, result shapes, mutation
   notices, staging/revision checks, persistence, UI refresh consumers, and the
   owning manual service path together.

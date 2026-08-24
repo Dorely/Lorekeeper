@@ -649,35 +649,15 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
 
                 if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId) is { } compaction)
                 {
-                    manifest.Add(new ChatToolCallManifest(
-                        compaction.CallId,
-                        ChatTurnEngine.CompactionToolName,
-                        ChatContextCompaction.EmptyArgumentsJson));
-                    activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
-                    await SafePersistAsync(activeAssistant);
-
-                    await turnEngine.AddMessageAsync(repositories => repositories.PublishConversations, new PublishMessage
+                    yield return new PublishContextTrimmed(compaction);
+                    if (compaction.LimitExceeded)
                     {
-                        ConversationId = conversation.Id,
-                        Order = nextOrder++,
-                        Role = PublishMessageRole.Tool,
-                        Content = ChatTurnEngine.CompactionNotice,
-                        ToolCallId = compaction.CallId,
-                        ToolName = ChatTurnEngine.CompactionToolName,
-                        Status = PublishMessageStatus.Completed,
-                    }, CancellationToken.None);
-                    yield return new PublishToolCallStarted(
-                        compaction.CallId,
-                        ChatTurnEngine.CompactionToolName,
-                        ChatContextCompaction.EmptyArgumentsJson,
-                        ArgumentsComplete: true);
-                    yield return new PublishToolCallCompleted(
-                        compaction.CallId,
-                        ChatTurnEngine.CompactionToolName,
-                        ChatTurnEngine.CompactionNotice,
-                        Error: null,
-                        DurationMs: 0,
-                        Visuals: []);
+                        activeAssistant.Status = PublishMessageStatus.Failed;
+                        activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
+                        await SafePersistAsync(activeAssistant);
+                        yield return new PublishTurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                        yield break;
+                    }
                 }
 
                 if (iteration == maxIterations - 1)

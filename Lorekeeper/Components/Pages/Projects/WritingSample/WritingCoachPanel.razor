@@ -313,6 +313,14 @@
                 StateHasChanged();
                 break;
 
+            case WritingCoachContextTrimmed trimmed:
+                _live!.ApplyContextTrim(
+                    trimmed.Result.NewlyTombstonedCallIds,
+                    trimmed.Result.CompletedRoundCallIds);
+                UpdateConversationTokenCount();
+                StateHasChanged();
+                break;
+
             case WritingCoachAssistantMessageCompleted:
                 ReleaseRunningUi();
                 await ReloadFromDbAsync();

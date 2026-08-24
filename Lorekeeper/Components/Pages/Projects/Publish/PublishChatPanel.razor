@@ -359,6 +359,13 @@
                 RequestScroll();
                 StateHasChanged();
                 break;
+            case PublishContextTrimmed trimmed:
+                _live!.ApplyContextTrim(
+                    trimmed.Result.NewlyTombstonedCallIds,
+                    trimmed.Result.CompletedRoundCallIds);
+                UpdateConversationTokenCount();
+                StateHasChanged();
+                break;
             case PublishWorkspaceMutated mutation:
                 await OnWorkspaceMutated.InvokeAsync(mutation);
                 break;

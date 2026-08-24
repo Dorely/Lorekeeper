@@ -335,6 +335,13 @@
                 RequestScroll();
                 StateHasChanged();
                 break;
+            case ResearchContextTrimmed trimmed:
+                _live!.ApplyContextTrim(
+                    trimmed.Result.NewlyTombstonedCallIds,
+                    trimmed.Result.CompletedRoundCallIds);
+                UpdateConversationTokenCount();
+                StateHasChanged();
+                break;
             case ResearchPendingAiChangeCreated:
                 await LoadPendingChangesAsync(openIfPending: true);
                 await OnActivityChanged.InvokeAsync();

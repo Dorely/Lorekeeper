@@ -398,34 +398,15 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
 
             if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId) is { } compaction)
             {
-                manifest.Add(new ChatToolCallManifest(
-                    compaction.CallId,
-                    ChatTurnEngine.CompactionToolName,
-                    ChatContextCompaction.EmptyArgumentsJson));
-                activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
-                await SafePersistAsync(activeAssistant);
-
-                await turnEngine.AddMessageAsync(repositories => repositories.WritingCoachConversations, new WritingCoachMessage
+                yield return new WritingCoachContextTrimmed(compaction);
+                if (compaction.LimitExceeded)
                 {
-                    ConversationId = conversation.Id,
-                    Order = nextOrder++,
-                    Role = WritingCoachMessageRole.Tool,
-                    Content = ChatTurnEngine.CompactionNotice,
-                    ToolCallId = compaction.CallId,
-                    ToolName = ChatTurnEngine.CompactionToolName,
-                    Status = WritingCoachMessageStatus.Completed,
-                }, CancellationToken.None);
-                yield return new WritingCoachToolCallStarted(
-                    compaction.CallId,
-                    ChatTurnEngine.CompactionToolName,
-                    ChatContextCompaction.EmptyArgumentsJson,
-                    ArgumentsComplete: true);
-                yield return new WritingCoachToolCallCompleted(
-                    compaction.CallId,
-                    ChatTurnEngine.CompactionToolName,
-                    ChatTurnEngine.CompactionNotice,
-                    Error: null,
-                    DurationMs: 0);
+                    activeAssistant.Status = WritingCoachMessageStatus.Failed;
+                    activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
+                    await SafePersistAsync(activeAssistant);
+                    yield return new WritingCoachTurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                    yield break;
+                }
             }
 
             if (iteration == maxIterations - 1)

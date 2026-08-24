@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Lorekeeper.ChatTurns;
 
 namespace Lorekeeper.ImagesChat;
 
@@ -7,6 +8,7 @@ namespace Lorekeeper.ImagesChat;
 [JsonDerivedType(typeof(ImagesChatToolCallStarted), typeDiscriminator: "tool-start")]
 [JsonDerivedType(typeof(ImagesChatToolCallArgumentsDelta), typeDiscriminator: "tool-args")]
 [JsonDerivedType(typeof(ImagesChatToolCallCompleted), typeDiscriminator: "tool-end")]
+[JsonDerivedType(typeof(ImagesChatContextTrimmed), typeDiscriminator: "context-trimmed")]
 [JsonDerivedType(typeof(ImagesChatAssistantMessageCompleted), typeDiscriminator: "assistant-end")]
 [JsonDerivedType(typeof(ImagesChatMutated), typeDiscriminator: "images-mutated")]
 [JsonDerivedType(typeof(ImagesChatTurnError), typeDiscriminator: "error")]
@@ -34,6 +36,8 @@ public sealed record ImagesChatToolCallCompleted(
     string? Error,
     double DurationMs,
     IReadOnlyList<ImagesChatVisualAttachment> Visuals) : ImagesChatTurnUpdate;
+
+public sealed record ImagesChatContextTrimmed(ChatCompactionResult Result) : ImagesChatTurnUpdate;
 
 public sealed record ImagesChatAssistantMessageCompleted(Guid MessageId) : ImagesChatTurnUpdate;
 

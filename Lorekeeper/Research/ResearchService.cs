@@ -581,34 +581,15 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
 
             if (turnEngine.TryCompactContext(messages, chatProvider.ModelId) is { } compaction)
             {
-                manifest.Add(new ChatToolCallManifest(
-                    compaction.CallId,
-                    ChatTurnEngine.CompactionToolName,
-                    ChatContextCompaction.EmptyArgumentsJson));
-                activeAssistant.ToolCallsJson = JsonSerializer.Serialize(manifest);
-                await SafePersistAsync(activeAssistant);
-
-                await turnEngine.AddMessageAsync(repositories => repositories.ResearchConversations, new ResearchMessage
+                yield return new ResearchContextTrimmed(compaction);
+                if (compaction.LimitExceeded)
                 {
-                    ConversationId = conversation.Id,
-                    Order = nextOrder++,
-                    Role = ResearchMessageRole.Tool,
-                    Content = ChatTurnEngine.CompactionNotice,
-                    ToolCallId = compaction.CallId,
-                    ToolName = ChatTurnEngine.CompactionToolName,
-                    Status = ResearchMessageStatus.Completed,
-                }, CancellationToken.None);
-                yield return new ResearchToolCallStarted(
-                    compaction.CallId,
-                    ChatTurnEngine.CompactionToolName,
-                    ChatContextCompaction.EmptyArgumentsJson,
-                    ArgumentsComplete: true);
-                yield return new ResearchToolCallCompleted(
-                    compaction.CallId,
-                    ChatTurnEngine.CompactionToolName,
-                    ChatTurnEngine.CompactionNotice,
-                    Error: null,
-                    DurationMs: 0);
+                    activeAssistant.Status = ResearchMessageStatus.Failed;
+                    activeAssistant.ErrorMessage = ChatContextCompaction.LimitExceededMessage;
+                    await SafePersistAsync(activeAssistant);
+                    yield return new ResearchTurnError(activeAssistant.ErrorMessage, Cancelled: false);
+                    yield break;
+                }
             }
 
             if (iteration == maxIterations - 1)
