@@ -104,6 +104,11 @@
                     <small class="field-note">Caps the response budget. Leave blank to auto-apply a per-endpoint default: standard field with 16,384 for generic/unknown gateways, none for OpenAI and local servers.</small>
                 </label>
                 <label>
+                    <span>Max input tokens</span>
+                    <input type="number" min="1" step="1" class="form-control" placeholder="Auto (200,000)" @bind="_newProvider.MaxInputTokens" />
+                    <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted. Selecting a discovered model prefills this when its catalog advertises a context length; raise it for larger-context models.</small>
+                </label>
+                <label>
                     <span>Max tokens field</span>
                     <select class="form-select" @bind="_newProvider.MaxTokensField">
                         @foreach (var choice in MaxTokensFieldChoices)
@@ -316,11 +321,14 @@
     private int? _testingProviderId;
     private string _newProviderPresetSlug = "";
     private IReadOnlyList<string> _newProviderModels = [];
+    private readonly Dictionary<string, int> _newProviderContextLengths = [];
     private bool _listingNewProviderModels;
     private bool _newProviderVisionSucceeded;
     private string? _newProviderVisionError;
     private readonly Dictionary<int, IReadOnlyList<string>> _rowModels = [];
+    private readonly Dictionary<int, Dictionary<string, int>> _rowContextLengths = [];
     private readonly Dictionary<int, IReadOnlyList<string>> _childModels = [];
+    private readonly Dictionary<int, Dictionary<string, int>> _childContextLengths = [];
     private int? _listingRowModelId;
     private int? _listingChildModelParentId;
 
@@ -631,6 +639,7 @@
             _testedNewProviderSnapshot = null;
             _newProviderPresetSlug = "";
             _newProviderModels = [];
+            _newProviderContextLengths.Clear();
             _newProviderVisionSucceeded = false;
             _newProviderVisionError = null;
         }
@@ -719,6 +728,7 @@
             ModelId = modelId,
             ReasoningEffort = draft.ReasoningEffort,
             MaxOutputTokens = draft.MaxOutputTokens,
+            MaxInputTokens = draft.MaxInputTokens,
             MaxTokensField = draft.MaxTokensField,
             AuthType = parent.AuthType,
             CredentialSourceId = parent.Id
@@ -861,6 +871,11 @@
             <small class="field-note">Blank uses the per-endpoint auto default (see add/edit connection notes).</small>
         </label>
         <label>
+            <span>Max input tokens</span>
+            <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto (200,000)" @bind="model.MaxInputTokens" />
+            <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted. Selecting a discovered model prefills this when its catalog advertises a context length.</small>
+        </label>
+        <label>
             <span>Max tokens field</span>
             <select class="form-select form-select-sm" @bind="model.MaxTokensField">
                 @foreach (var choice in MaxTokensFieldChoices)
@@ -912,6 +927,11 @@
                 <span>Max output tokens</span>
                 <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto" @bind="draft.MaxOutputTokens" />
                 <small class="field-note">Blank uses the per-endpoint auto default.</small>
+            </label>
+            <label>
+                <span>Max input tokens</span>
+                <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto (200,000)" @bind="draft.MaxInputTokens" />
+                <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted.</small>
             </label>
             <label>
                 <span>Max tokens field</span>
@@ -975,15 +995,24 @@
     private void OnNewProviderModelSelected(ChangeEventArgs args)
     {
         var value = args.Value?.ToString()?.Trim();
-        if (!string.IsNullOrWhiteSpace(value))
-            _newProvider.ModelId = value;
+        if (string.IsNullOrWhiteSpace(value))
+            return;
+        _newProvider.ModelId = value;
+        if (_newProvider.MaxInputTokens is null
+            && _newProviderContextLengths.TryGetValue(value, out var contextLength))
+            _newProvider.MaxInputTokens = contextLength;
     }
 
     private void OnRowModelSelected(LlmProvider model, ChangeEventArgs args)
     {
         var value = args.Value?.ToString()?.Trim();
-        if (!string.IsNullOrWhiteSpace(value))
-            model.ModelId = value;
+        if (string.IsNullOrWhiteSpace(value))
+            return;
+        model.ModelId = value;
+        if (model.MaxInputTokens is null
+            && _rowContextLengths.TryGetValue(model.Id, out var lengths)
+            && lengths.TryGetValue(value, out var contextLength))
+            model.MaxInputTokens = contextLength;
     }
 
     private void OnChildModelSelected(int parentId, ChangeEventArgs args)
@@ -991,9 +1020,22 @@
         if (!_childForms.TryGetValue(parentId, out var draft))
             return;
         var value = args.Value?.ToString()?.Trim();
-        if (!string.IsNullOrWhiteSpace(value))
-            draft.ModelId = value;
+        if (string.IsNullOrWhiteSpace(value))
+            return;
+        draft.ModelId = value;
+        if (draft.MaxInputTokens is null
+            && _childContextLengths.TryGetValue(parentId, out var lengths)
+            && lengths.TryGetValue(value, out var contextLength))
+            draft.MaxInputTokens = contextLength;
     }
+
+    private static Dictionary<string, int> BuildContextLengthMap(IReadOnlyList<LlmDiscoveredModel> models) =>
+        models
+            .Where(model => model.ContextLengthTokens is > 0)
+            .ToDictionary(
+                model => model.Id,
+                model => (int)Math.Min(model.ContextLengthTokens!.Value, int.MaxValue),
+                StringComparer.Ordinal);
 
     private async Task ListNewProviderModelsAsync()
     {
@@ -1007,13 +1049,18 @@
         _listingNewProviderModels = true;
         try
         {
-            _newProviderModels = await ModelCatalog.ListChatModelsAsync(provider);
+            var discovered = await ModelCatalog.ListChatModelsAsync(provider);
+            _newProviderModels = [.. discovered.Select(model => model.Id)];
+            _newProviderContextLengths.Clear();
+            foreach (var (id, tokens) in BuildContextLengthMap(discovered))
+                _newProviderContextLengths[id] = tokens;
             if (_newProviderModels.Count == 0)
                 SetStatus("The provider returned an empty model list; enter the model ID manually.", "info");
         }
         catch (Exception ex)
         {
             _newProviderModels = [];
+            _newProviderContextLengths.Clear();
             SetStatus($"Model discovery failed: {ex.Message} Enter the model ID manually.", "info");
         }
         finally
@@ -1027,14 +1074,16 @@
         _listingRowModelId = model.Id;
         try
         {
-            var models = await ModelCatalog.ListChatModelsAsync(model);
-            _rowModels[model.Id] = models;
-            if (models.Count == 0)
+            var discovered = await ModelCatalog.ListChatModelsAsync(model);
+            _rowModels[model.Id] = [.. discovered.Select(item => item.Id)];
+            _rowContextLengths[model.Id] = BuildContextLengthMap(discovered);
+            if (_rowModels[model.Id].Count == 0)
                 SetStatus("The provider returned an empty model list; enter the model ID manually.", "info");
         }
         catch (Exception ex)
         {
             _rowModels.Remove(model.Id);
+            _rowContextLengths.Remove(model.Id);
             SetStatus($"Model discovery failed: {ex.Message} Enter the model ID manually.", "info");
         }
         finally
@@ -1048,14 +1097,16 @@
         _listingChildModelParentId = parent.Id;
         try
         {
-            var models = await ModelCatalog.ListChatModelsAsync(parent);
-            _childModels[parent.Id] = models;
-            if (models.Count == 0)
+            var discovered = await ModelCatalog.ListChatModelsAsync(parent);
+            _childModels[parent.Id] = [.. discovered.Select(item => item.Id)];
+            _childContextLengths[parent.Id] = BuildContextLengthMap(discovered);
+            if (_childModels[parent.Id].Count == 0)
                 SetStatus("The provider returned an empty model list; enter the model ID manually.", "info");
         }
         catch (Exception ex)
         {
             _childModels.Remove(parent.Id);
+            _childContextLengths.Remove(parent.Id);
             SetStatus($"Model discovery failed: {ex.Message} Enter the model ID manually.", "info");
         }
         finally
@@ -1092,6 +1143,7 @@
             ModelId = model,
             ReasoningEffort = _newProvider.ReasoningEffort,
             MaxOutputTokens = _newProvider.MaxOutputTokens,
+            MaxInputTokens = _newProvider.MaxInputTokens,
             MaxTokensField = _newProvider.MaxTokensField,
             AuthType = _newProvider.AuthType,
             ApiKey = _newProvider.AuthType == AuthType.ApiKey ? apiKey : null,
@@ -1123,6 +1175,7 @@
         public string? ModelId { get; set; }
         public LlmReasoningEffort? ReasoningEffort { get; set; }
         public int? MaxOutputTokens { get; set; }
+        public int? MaxInputTokens { get; set; }
         public LlmMaxTokensField MaxTokensField { get; set; } = LlmMaxTokensField.Default;
         public AuthType AuthType { get; set; } = AuthType.None;
         public string? ApiKey { get; set; }
@@ -1144,6 +1197,7 @@
         public string? ModelId { get; set; }
         public LlmReasoningEffort? ReasoningEffort { get; set; }
         public int? MaxOutputTokens { get; set; }
+        public int? MaxInputTokens { get; set; }
         public LlmMaxTokensField MaxTokensField { get; set; } = LlmMaxTokensField.Default;
     }
 

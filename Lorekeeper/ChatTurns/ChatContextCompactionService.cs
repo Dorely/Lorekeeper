@@ -14,7 +14,7 @@ public sealed record ChatCompactionResult(
 
 public interface IChatContextCompactionService
 {
-    ChatCompactionResult? TryCompact(IList<ChatMessage> messages, string? modelId);
+    ChatCompactionResult? TryCompact(IList<ChatMessage> messages, string? modelId, int? providerMaxInputTokens);
 }
 
 public static class ChatContextCompaction
@@ -67,11 +67,11 @@ internal sealed class ChatContextCompactionService(
         IReadOnlyList<FunctionResultContent> Results,
         IReadOnlyList<ChatMessage> FollowingToolContextMessages);
 
-    public ChatCompactionResult? TryCompact(IList<ChatMessage> messages, string? modelId)
+    public ChatCompactionResult? TryCompact(IList<ChatMessage> messages, string? modelId, int? providerMaxInputTokens)
     {
         ArgumentNullException.ThrowIfNull(messages);
 
-        var originalCount = Count(messages, modelId, out var maximumInputTokens, out var method);
+        var originalCount = Count(messages, modelId, providerMaxInputTokens, out var maximumInputTokens, out var method);
         if ((long)originalCount * 100 < (long)maximumInputTokens * 90)
             return null;
 
@@ -89,7 +89,7 @@ internal sealed class ChatContextCompactionService(
         {
             ChatContextCompaction.MarkResultTombstoned(result);
             tombstonedCallIds.Add(result.CallId);
-            finalCount = Count(messages, modelId, out _, out _);
+            finalCount = Count(messages, modelId, providerMaxInputTokens, out _, out _);
             foreach (var round in rounds)
             {
                 if (round.Results.Count > 0
@@ -106,7 +106,7 @@ internal sealed class ChatContextCompactionService(
 
             // Cleanup can remove reasoning and visual payloads, so recount the
             // post-cleanup request before deciding whether to continue.
-            finalCount = Count(messages, modelId, out _, out _);
+            finalCount = Count(messages, modelId, providerMaxInputTokens, out _, out _);
             if ((long)finalCount * 100 < (long)maximumInputTokens * 90)
                 break;
         }
@@ -125,13 +125,14 @@ internal sealed class ChatContextCompactionService(
     private int Count(
         IEnumerable<ChatMessage> messages,
         string? modelId,
+        int? providerMaxInputTokens,
         out int maximumInputTokens,
         out string method)
     {
         var result = tokenCounter.Count(
             ChatModelHistory.FormatForTokenCount(messages),
             new TokenCountRequest(modelId));
-        maximumInputTokens = Math.Max(1, tokenLimitResolver.Resolve(modelId));
+        maximumInputTokens = Math.Max(1, tokenLimitResolver.Resolve(providerMaxInputTokens, modelId));
         method = result.Method;
         return result.TokenCount;
     }

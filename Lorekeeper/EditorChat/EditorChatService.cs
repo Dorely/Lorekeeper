@@ -738,7 +738,7 @@ public sealed class EditorChatService(
                 messages.Add(ChatTurnEngine.MarkToolContextMessage(
                     await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound)));
 
-            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId) is { } compaction)
+            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.MaxInputTokens) is { } compaction)
             {
                 yield return new EditorChatContextTrimmed(compaction);
                 if (compaction.LimitExceeded)

@@ -109,9 +109,11 @@ turn cannot switch the provider halfway through client creation, compaction, or
 tool execution. Contest candidates, revision workers, ingest jobs, embeddings,
 image generation, and Press rendering keep their separate selection contracts.
 
-All six surfaces use the active model's configured input-token limit and shared
-token counter. After a complete tool-call batch, reaching 90% of that limit
-tombstones completed function results oldest-first, one result at a time, using
+All six surfaces use the active model's resolved input-token limit (explicit
+provider-row value, then `ChatTokens` configuration mapping, then configured
+default) and shared token counter. After a complete tool-call batch, reaching
+90% of that limit tombstones completed function results oldest-first, one result
+at a time, using
 the exact structural tombstone marker and payload. The original
 `FunctionCallContent`, call ID, name, arguments, result row, and audit rendering
 remain intact; only the active in-memory result payload is replaced. Each

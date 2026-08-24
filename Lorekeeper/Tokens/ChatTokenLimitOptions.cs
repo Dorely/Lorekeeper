@@ -12,8 +12,16 @@ internal sealed class ChatTokenLimitOptions
 
 internal sealed class ChatTokenLimitResolver(IOptions<ChatTokenLimitOptions> options)
 {
-    public int Resolve(string? modelId)
+    /// <summary>
+    /// Resolves the advisory maximum input-token budget: an explicit
+    /// provider-model value wins, then the configured per-model mapping, then
+    /// the configured default.
+    /// </summary>
+    public int Resolve(int? providerMaxInputTokens, string? modelId)
     {
+        if (providerMaxInputTokens is > 0)
+            return providerMaxInputTokens.Value;
+
         var configured = options.Value;
         if (!string.IsNullOrWhiteSpace(modelId))
         {

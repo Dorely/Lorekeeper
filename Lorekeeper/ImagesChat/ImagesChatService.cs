@@ -521,7 +521,7 @@ public sealed class ImagesChatService(
                 messages.Add(ChatTurnEngine.MarkToolContextMessage(
                     await BuildModelOnlyImageMessageAsync(projectId, modelOnlyImagesForNextRound, modelOnlyImagePayloadsForNextRound)));
 
-            if (turnEngine.TryCompactContext(messages, chatProvider.ModelId) is { } compaction)
+            if (turnEngine.TryCompactContext(messages, chatProvider.ModelId, chatProvider.MaxInputTokens) is { } compaction)
             {
                 yield return new ImagesChatContextTrimmed(compaction);
                 if (compaction.LimitExceeded)

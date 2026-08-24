@@ -109,8 +109,8 @@ public sealed class ChatTurnEngine(
     public static string ToolLoopLimitError(int maxIterations) =>
         $"Tool-call loop hit cap of {maxIterations} iterations without producing a final response.";
 
-    public ChatCompactionResult? TryCompactContext(IList<ChatMessage> messages, string? modelId) =>
-        contextCompaction.TryCompact(messages, modelId);
+    public ChatCompactionResult? TryCompactContext(IList<ChatMessage> messages, string? modelId, int? providerMaxInputTokens) =>
+        contextCompaction.TryCompact(messages, modelId, providerMaxInputTokens);
 
     public static ChatMessage MarkToolContextMessage(ChatMessage message) =>
         ChatContextCompaction.MarkToolContext(message);

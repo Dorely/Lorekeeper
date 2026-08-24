@@ -17,6 +17,14 @@ public class LlmProvider
     public int? MaxOutputTokens { get; set; }
 
     /// <summary>
+    /// Explicit input-context budget used for chat compaction decisions. When
+    /// null, resolution falls back to the <c>ChatTokens</c> configuration
+    /// mapping and then its default. Discovery may prefill this from
+    /// provider-advertised context metadata; a manual value always wins.
+    /// </summary>
+    public int? MaxInputTokens { get; set; }
+
+    /// <summary>
     /// Overrides the max-tokens request field name chosen by the endpoint-based
     /// wire-compat classification. Use <see cref="LlmMaxTokensField.Legacy"/> for
     /// providers that reject <c>max_completion_tokens</c>.

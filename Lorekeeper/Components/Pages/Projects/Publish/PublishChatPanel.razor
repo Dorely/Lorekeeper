@@ -101,7 +101,8 @@
     private int _resetComposerKey;
 
     private string? ActiveModelId => _activeTurnModel?.ModelId ?? _chatAvailability?.Provider?.ModelId;
-    private int ConversationTokenLimit => TokenLimits.Resolve(ActiveModelId);
+    private int? ActiveMaxInputTokens => _activeTurnModel?.MaxInputTokens ?? _chatAvailability?.Provider?.MaxInputTokens;
+    private int ConversationTokenLimit => TokenLimits.Resolve(ActiveMaxInputTokens, ActiveModelId);
     private bool ChatDisabled => _chatAvailability?.IsAvailable != true;
     private bool TurnActive => _running || ChatTurns.GetActiveTurn(ProjectId) is not null;
     private string ChatDisabledMessage => _chatAvailability?.Message
@@ -575,7 +576,7 @@
     }
 
     private ChatTurnModelSnapshot Snapshot(LlmProvider provider) =>
-        new(provider.Id, provider.ModelId, _chatSelection?.Label ?? $"{provider.DisplayName ?? provider.Name} · {provider.ModelId}");
+        new(provider.Id, provider.ModelId, _chatSelection?.Label ?? $"{provider.DisplayName ?? provider.Name} · {provider.ModelId}", provider.MaxInputTokens);
 
     private void UpdateConversationTokenCount()
     {

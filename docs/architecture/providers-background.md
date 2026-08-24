@@ -69,6 +69,19 @@ gated on chat success only. A failed vision probe persists or presents a warning
 without converting a working chat connection into a failure. Shared error helpers
 extract concise provider detail rather than exposing raw response bodies.
 
+### Input-context budgets
+
+Each chat model row carries an optional `MaxInputTokens` advisory input-context
+budget used only for assistant context compaction decisions and panel token
+projection; it never changes the wire request. Resolution prefers an explicit
+row value, then a matching `ChatTokens:ModelMaxInputTokens` configuration entry,
+then `ChatTokens:DefaultMaxInputTokens`. Chat-model discovery also reads
+provider-advertised context metadata (`context_length` / `context_window`) from
+catalog responses; selecting a discovered model prefills the row value when it
+is not already set, and a manually entered value always wins over harvested
+metadata. The budget is captured in each turn's model snapshot so an active turn
+keeps one stable limit even if settings change mid-turn.
+
 ### Chat and vision wire compatibility
 
 `IChatClientFactory` creates either the Codex Responses client or an

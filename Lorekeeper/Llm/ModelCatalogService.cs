@@ -9,19 +9,19 @@ public sealed class ModelCatalogService(
     IHttpClientFactory httpClientFactory,
     ILogger<ModelCatalogService> logger) : IModelCatalogService
 {
-    public async Task<IReadOnlyList<string>> ListChatModelsAsync(LlmProvider provider, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<LlmDiscoveredModel>> ListChatModelsAsync(LlmProvider provider, CancellationToken cancellationToken = default)
     {
         var endpoint = CodexProvider.IsCodex(provider)
             ? CodexProvider.PlatformModelsEndpoint
             : BuildModelsEndpointUrl(provider.EndpointUrl);
-        return await QueryModelIdsAsync(provider, endpoint, ParseOpenAiModelIds, cancellationToken);
+        return await QueryModelsAsync(provider, endpoint, ParseOpenAiChatModels, cancellationToken);
     }
 
     public async Task<IReadOnlyList<string>> ListEmbeddingModelsAsync(LlmProvider provider, EmbeddingApiKind apiKind, CancellationToken cancellationToken = default)
     {
         if (apiKind == EmbeddingApiKind.OllamaNative)
         {
-            return await QueryModelIdsAsync(
+            return await QueryModelsAsync(
                 provider,
                 $"{OllamaRootUrl(provider.EndpointUrl)}/api/tags",
                 ParseOllamaModelIds,
@@ -31,13 +31,13 @@ public sealed class ModelCatalogService(
         var endpoint = CodexProvider.IsCodex(provider)
             ? CodexProvider.PlatformModelsEndpoint
             : BuildModelsEndpointUrl(provider.EndpointUrl);
-        return await QueryModelIdsAsync(provider, endpoint, ParseOpenAiModelIds, cancellationToken);
+        return await QueryModelsAsync(provider, endpoint, ParseOpenAiModelIds, cancellationToken);
     }
 
-    private async Task<IReadOnlyList<string>> QueryModelIdsAsync(
+    private async Task<IReadOnlyList<T>> QueryModelsAsync<T>(
         LlmProvider provider,
         string endpoint,
-        Func<JsonElement, IReadOnlyList<string>> parse,
+        Func<JsonElement, IReadOnlyList<T>> parse,
         CancellationToken cancellationToken)
     {
         var (apiKey, effectiveAuthType) = await LlmConnectionResolver.ResolveAsync(providerService, provider, cancellationToken);
@@ -83,6 +83,40 @@ public sealed class ModelCatalogService(
                 "The provider returned a model list that could not be parsed; enter the model ID manually.", ex);
         }
     }
+
+    private static IReadOnlyList<LlmDiscoveredModel> ParseOpenAiChatModels(JsonElement root)
+    {
+        if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+            return [];
+
+        return data.EnumerateArray()
+            .Where(item => item.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+            .Select(item => new LlmDiscoveredModel(
+                Id: item.GetProperty("id").GetString() ?? string.Empty,
+                ContextLengthTokens: ReadContextLengthTokens(item)))
+            .Where(model => !string.IsNullOrWhiteSpace(model.Id))
+            .DistinctBy(model => model.Id, StringComparer.Ordinal)
+            .OrderBy(model => model.Id, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static long? ReadContextLengthTokens(JsonElement item)
+    {
+        foreach (var propertyName in ContextLengthPropertyNames)
+        {
+            if (item.TryGetProperty(propertyName, out var value)
+                && value.ValueKind == JsonValueKind.Number
+                && value.TryGetInt64(out var tokens)
+                && tokens > 0)
+            {
+                return tokens;
+            }
+        }
+
+        return null;
+    }
+
+    private static readonly string[] ContextLengthPropertyNames = ["context_length", "context_window"];
 
     private static IReadOnlyList<string> ParseOpenAiModelIds(JsonElement root)
     {

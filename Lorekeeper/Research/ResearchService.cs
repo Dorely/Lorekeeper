@@ -579,7 +579,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 }
             }
 
-            if (turnEngine.TryCompactContext(messages, chatProvider.ModelId) is { } compaction)
+            if (turnEngine.TryCompactContext(messages, chatProvider.ModelId, chatProvider.MaxInputTokens) is { } compaction)
             {
                 yield return new ResearchContextTrimmed(compaction);
                 if (compaction.LimitExceeded)

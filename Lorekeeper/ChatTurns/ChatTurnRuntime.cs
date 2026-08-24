@@ -17,7 +17,8 @@ public readonly record struct ChatTurnKey(Guid ProjectId, ChatTurnSurface Surfac
 public sealed record ChatTurnModelSnapshot(
     int ProviderId,
     string ModelId,
-    string Label);
+    string Label,
+    int? MaxInputTokens);
 
 public sealed record ChatTurnSnapshot(
     Guid TurnId,

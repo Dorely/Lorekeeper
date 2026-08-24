@@ -600,7 +600,7 @@ they commit to a direction, act on it without a second confirmation.
                 }
             }
 
-            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId) is { } compaction)
+            if (turnEngine.TryCompactContext(messages, persistedProvider.ModelId, persistedProvider.MaxInputTokens) is { } compaction)
             {
                 yield return new ContextTrimmed(compaction);
                 if (compaction.LimitExceeded)
