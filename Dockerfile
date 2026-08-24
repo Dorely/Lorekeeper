@@ -33,13 +33,17 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=build /src/publish .
 USER lorekeeper
-# /data holds the SQLite database, its protected migration backups, and the Data
-# Protection keys; mount a persistent volume there. Auth__SingleUser__* secrets
-# are supplied by the deployment, not baked into the image.
+# /data holds the SQLite database, its protected migration backups, the Data
+# Protection keys, and the local version-history Git repositories; mount a
+# persistent volume there. Without the explicit history root the store would
+# fall back to its development default — the content root's parent, which is
+# the unwritable filesystem root inside the container. Auth__SingleUser__*
+# secrets are supplied by the deployment, not baked into the image.
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080 \
     ConnectionStrings__DefaultConnection="Data Source=/data/lorekeeper.db" \
     Server__EnableHttpsRedirection=false \
     Server__DataProtectionKeysDirectory=/data/keys \
+    VersionHistory__HistoryRoot=/data/history \
     XDG_CACHE_HOME=/tmp/cache
 EXPOSE 8080
 VOLUME ["/data"]

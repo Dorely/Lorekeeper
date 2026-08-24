@@ -1,7 +1,7 @@
-# Durable storage for the SQLite database, its protected migration backups, and
-# the Data Protection keys. Bound to the node-local PersistentVolume defined by
-# your pv.yaml (copied from pv.example.yaml); snapshot or back up that storage
-# to back up Lorekeeper.
+# Durable storage for the SQLite database, its protected migration backups, the
+# Data Protection keys, and the local version-history Git repositories. Bound to
+# the node-local PersistentVolume defined by your pv.yaml (copied from
+# pv.example.yaml); snapshot or back up that storage to back up Lorekeeper.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

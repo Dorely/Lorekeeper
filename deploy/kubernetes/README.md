@@ -14,8 +14,9 @@ Constraints to respect:
   network (`kubectl port-forward`, NodePort on a LAN) or terminate TLS in front
   of it.
 - **The volume is the backup boundary.** `/data` holds the database, its
-  protected migration backups, and Data Protection keys. Snapshot the
-  PersistentVolume to back up the whole workspace.
+  protected migration backups, Data Protection keys, and the local
+  version-history Git repositories. Snapshot the PersistentVolume to back up
+  the whole workspace.
 - **Keep the data on node-local redundant storage.** Copy `pv.example.yaml` to
   `pv.yaml` (not committed) and pin the volume to a directory on redundant
   local storage instead of the cluster's default dynamic provisioner, which

@@ -193,7 +193,8 @@ The repository `Dockerfile` packages the browser-hosted server: the build stage
 publishes the linux-x64 application with the contained Press runtime through the
 same `eng/BuildPressRuntime.ps1` integration as local builds, and the runtime
 stage runs as a non-root user with the SQLite database, protected migration
-backups, and Data Protection keys on a `/data` volume. The image disables the
+backups, Data Protection keys, and local version-history repositories on a
+`/data` volume. The image disables the
 HTTPS redirect for trusted-network hosting and relies on the single-user login
 for access control; deployments supply the `Auth__SingleUser__*` values as
 secrets rather than baking them into the image.

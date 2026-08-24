@@ -44,6 +44,7 @@ GUID:
 |---|---|
 | Development | `<process base directory>/History/<repository-id>.git` (the repository-local `History/` directory during normal development; it is ignored by the source repository) |
 | Packaged | `%LocalAppData%/Lorekeeper/History/<repository-id>.git` |
+| Container | `/data/history/<repository-id>.git` via the image's `VersionHistory__HistoryRoot` environment value, keeping history on the persistent volume; the development fallback would resolve to the unwritable filesystem root inside the container |
 
 `VersionHistory:HistoryRoot` can explicitly override the root. The Git store
 validates that repository paths stay inside that root and rejects reparse-point
