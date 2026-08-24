@@ -105,8 +105,8 @@
                 </label>
                 <label>
                     <span>Max input tokens</span>
-                    <input type="number" min="1" step="1" class="form-control" placeholder="Auto (200,000)" @bind="_newProvider.MaxInputTokens" />
-                    <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted. Selecting a discovered model prefills this when its catalog advertises a context length; raise it for larger-context models.</small>
+                    <input type="number" min="1" step="1" class="form-control" placeholder="Auto (model/default)" @bind="_newProvider.MaxInputTokens" />
+                    <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.</small>
                 </label>
                 <label>
                     <span>Max tokens field</span>
@@ -773,7 +773,7 @@
                 Name = CodexProvider.Name,
                 DisplayName = "OpenAI (Codex)",
                 EndpointUrl = CodexProvider.ResponsesEndpoint,
-                ModelId = "gpt-5.4-mini",
+                ModelId = LlmProviderCatalog.OpenAiDefaultMainlineModel,
                 AuthType = AuthType.OAuth,
                 IsDefault = false
             };
@@ -872,8 +872,8 @@
         </label>
         <label>
             <span>Max input tokens</span>
-            <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto (200,000)" @bind="model.MaxInputTokens" />
-            <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted. Selecting a discovered model prefills this when its catalog advertises a context length.</small>
+            <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto (model/default)" @bind="model.MaxInputTokens" />
+            <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.</small>
         </label>
         <label>
             <span>Max tokens field</span>
@@ -930,8 +930,8 @@
             </label>
             <label>
                 <span>Max input tokens</span>
-                <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto (200,000)" @bind="draft.MaxInputTokens" />
-                <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted.</small>
+                <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto (model/default)" @bind="draft.MaxInputTokens" />
+                <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.</small>
             </label>
             <label>
                 <span>Max tokens field</span>

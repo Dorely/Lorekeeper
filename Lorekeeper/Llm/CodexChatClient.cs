@@ -14,7 +14,6 @@ namespace Lorekeeper.Llm;
 /// </summary>
 public sealed class CodexChatClient : IChatClient
 {
-    private const string DefaultModel = "gpt-5.4-mini";
     private const int MaxBufferedResponseAttempts = 2;
 
     private readonly HttpClient _httpClient;
@@ -33,7 +32,7 @@ public sealed class CodexChatClient : IChatClient
     {
         _httpClient = httpClient;
         _accessToken = accessToken;
-        _model = string.IsNullOrWhiteSpace(model) ? DefaultModel : model;
+        _model = string.IsNullOrWhiteSpace(model) ? LlmProviderCatalog.OpenAiDefaultMainlineModel : model;
         _reasoningEffort = reasoningEffort?.ToWireValue();
         _accountId = CodexProvider.ExtractAccountId(accessToken);
         _logger = logger;

@@ -127,7 +127,7 @@ public sealed class VisionModelClientFactory(
 
         var body = new Dictionary<string, object?>
         {
-            ["model"] = string.IsNullOrWhiteSpace(model) ? "gpt-5.4-mini" : model,
+            ["model"] = string.IsNullOrWhiteSpace(model) ? LlmProviderCatalog.OpenAiDefaultMainlineModel : model,
             ["stream"] = true,
             ["store"] = false,
             ["instructions"] = "Read the supplied image accurately and answer the user's request.",

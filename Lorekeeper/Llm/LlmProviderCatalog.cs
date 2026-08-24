@@ -20,14 +20,17 @@ public sealed record LlmProviderPreset(
 public static class LlmProviderCatalog
 {
     public const string CustomPresetSlug = "custom";
+    public const string OpenAiDefaultMainlineModel = "gpt-5.6-sol";
 
     public static readonly IReadOnlyList<LlmProviderPreset> Presets =
     [
         new("openai", "OpenAI", "https://api.openai.com/v1", AuthType.ApiKey,
         [
+            OpenAiDefaultMainlineModel,
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
             "gpt-5.4",
-            "gpt-5.4-mini",
-            "gpt-5.1",
         ],
             KeyManagementUrl: "https://platform.openai.com/api-keys"),
         // OpenAI first-party is resolved as OpenAiFirstParty: no auto budget, standard field.

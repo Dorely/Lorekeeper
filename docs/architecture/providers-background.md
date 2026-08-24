@@ -68,6 +68,9 @@ output budget and, after chat succeeds, a non-blocking vision probe. Saving is
 gated on chat success only. A failed vision probe persists or presents a warning
 without converting a working chat connection into a failure. Shared error helpers
 extract concise provider detail rather than exposing raw response bodies.
+Direct OpenAI presets and OpenAI-account chat, vision, and image-mainline
+fallbacks use `gpt-5.6-sol` as the code-owned default; existing persisted model
+selections remain authoritative until the user changes them.
 
 ### Input-context budgets
 
@@ -81,6 +84,10 @@ catalog responses; selecting a discovered model prefills the row value when it
 is not already set, and a manually entered value always wins over harvested
 metadata. The budget is captured in each turn's model snapshot so an active turn
 keeps one stable limit even if settings change mid-turn.
+The shipped configuration assigns 1,050,000 tokens to `gpt-5.4`, `gpt-5.5`,
+`gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; unknown models retain the
+general 200,000-token fallback unless a row or deployment override supplies a
+different value.
 
 ### Chat and vision wire compatibility
 

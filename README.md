@@ -229,7 +229,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   semantic mixed-layout EPUB, artifact-backed Generate/Regenerate, separate
   paperback interior/cover saves, and one Digital PDF Book save. EPUB export is
   restricted to EPUB editions.
-- Configurable Codex/OpenAI-compatible chat and embedding providers — with provider presets, model discovery, combined chat+vision verification, per-model reasoning effort, output-token budget, and endpoint-aware wire compatibility — configurable web search, and local SQLite persistence.
+- Configurable Codex/OpenAI-compatible chat and embedding providers — with GPT-5.6 Sol as the OpenAI default, explicit context budgets for `gpt-5.4`, `gpt-5.5`, and the GPT-5.6 Sol/Terra/Luna tiers, provider presets, model discovery, combined chat+vision verification, per-model reasoning effort, output-token budget, and endpoint-aware wire compatibility — configurable web search, and local SQLite persistence.
 
 ## Version history and optional synchronization
 
