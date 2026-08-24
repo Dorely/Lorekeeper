@@ -208,6 +208,25 @@ Core/release presentation. It is a private selected-chapter trace, not a full
 publication render. Read annotation ranges map rendered text back to stable
 semantic blocks without changing the Press protocol.
 
+Read additionally hosts a speed-reading sub-mode (not a fifth editor mode).
+`SpeedReadingPlaylistBuilder` projects the same manuscript document the preview
+already loads into an ordered word/interstitial playlist whose word offsets are
+UTF-16 offsets into `ManuscriptCodec.Text` of the owning block, aligned with
+annotation anchors and Press line spans; Figures, Designed Pages, and scene
+breaks become placeholder items rather than expanded content. The overlay's
+browser module owns the timing loop, chunk/RSVP rendering, and keyboard
+handling; the circuit receives only discrete pause/edit/exit/completion events.
+A paused item converts to a `ManuscriptViewLocation` that the preview returns
+from its location capture, so switching to Edit lands the caret on the paused
+word through the existing restore pipeline; that resume position stays
+transient like every other view location. Style, per-style words-per-minute,
+and auto-advance are the database-backed reading settings owned by the runtime
+chapter's `ISpeedReadingService`; the in-overlay quick settings and the
+Settings page write through that same service. Auto-advance asks the owning
+editor page to select the next chapter while remaining in Read mode, and the
+playlist is rebuilt from each preview manuscript load so offsets always match
+the flushed revision.
+
 Edit, Read, and Review also share a transient `ManuscriptViewLocation` scoped to
 the current project, chapter, and Core/release target; it is never persisted as
 manuscript data or workspace preference. Edit records the semantic block ID,
@@ -354,6 +373,7 @@ every one of those consumers.
 | [`Lorekeeper/Manuscripts/ManuscriptAnnotationModels.cs`](../../Lorekeeper/Manuscripts/ManuscriptAnnotationModels.cs) and [`ManuscriptAnnotationService.cs`](../../Lorekeeper/Manuscripts/ManuscriptAnnotationService.cs) | Exact-target sidecar annotation contract, rebasing, paging, state, and completion. |
 | [`Lorekeeper/Authoring/`](../../Lorekeeper/Authoring/) and [`Lorekeeper/Models/AssistantReviewBaseline.cs`](../../Lorekeeper/Models/AssistantReviewBaseline.cs) | In-process manual history runtime, selection/dependency state, assistant mutation identity, and the separate durable latest-review baseline. |
 | [`Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor`](../../Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor), [`ManuscriptViewLocation.cs`](../../Lorekeeper/Components/Pages/Projects/ManuscriptViewLocation.cs), and related Editor components | Shared semantic editor host, revision-aware autosave, transient cross-view location, Figure/style controls, Read/Review modes, annotations, and authoring workspace state. |
+| [`Lorekeeper/SpeedReading/SpeedReadingPlaylistBuilder.cs`](../../Lorekeeper/SpeedReading/SpeedReadingPlaylistBuilder.cs) and [`Components/Pages/Projects/SpeedReadOverlay.razor`](../../Lorekeeper/Components/Pages/Projects/SpeedReadOverlay.razor) family | Manuscript-to-playlist projection with block-aligned UTF-16 word offsets, and the Read-mode speed-reading overlay whose collocated JS owns playback while pause-to-edit reuses the shared view-location pipeline. |
 | [`tools/semantic-editor/`](../../tools/semantic-editor/) and shipped bundle under `Lorekeeper/wwwroot/js/` | Exact-pinned ProseMirror schema/adapter source, deterministic build, shipped runtime, and notices. |
 | [`Lorekeeper/EditorChat/EditorManuscriptApplyService.cs`](../../Lorekeeper/EditorChat/EditorManuscriptApplyService.cs) | One-step assistant manuscript operation validation and apply/stage bridge over the canonical manuscript service. |
 | [`Lorekeeper/Manuscripts/ManuscriptSchemaUpgrade.cs`](../../Lorekeeper/Manuscripts/ManuscriptSchemaUpgrade.cs) | Strict lossless v1-v3 document and nested historical-payload upgrade logic used only by migration/import owners. |

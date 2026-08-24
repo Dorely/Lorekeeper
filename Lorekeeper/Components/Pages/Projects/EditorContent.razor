@@ -11,6 +11,7 @@
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
 @using Lorekeeper.Publish
+@using Lorekeeper.SpeedReading
 @using Lorekeeper.Tokens
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.JSInterop
@@ -26,6 +27,7 @@
 @inject IEditorChatService Chat
 @inject IAiChangeApprovalService ChangeApproval
 @inject ITokenCounter TokenCounter
+@inject ISpeedReadingService SpeedReading
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject ILogger<EditorContent> Logger
@@ -254,7 +256,12 @@ else
                                         FacingPagesChanged="SetReadFacingAsync"
                                         AnnotationsChanged="OnEditorAnnotationsChangedAsync"
                                         AnnotationSelected="SelectAnnotationCardAsync"
-                                        RefreshSignal="_previewRefreshSignal" />
+                                        RefreshSignal="_previewRefreshSignal"
+                                        SpeedReadingBlocked="ContestReviewActive"
+                                        AutoStartSpeedReading="_speedReadAutoStart"
+                                        AutoStartSpeedReadingConsumed="() => _speedReadAutoStart = false"
+                                        EditRequested="() => SetModeAsync(EditorMode.Edit)"
+                                        ChapterCompleted="HandleReadChapterCompletedAsync" />
                 }
 
                 @if ((_mode == EditorMode.Edit || _mode == EditorMode.Read) && _current is not null)
@@ -993,6 +1000,7 @@ else
     private bool _disposed;
     private ChapterBodyEditor? _bodyEditor;
     private ChapterReadPreview? _readPreview;
+    private bool _speedReadAutoStart;
     private EditorDocumentState? _editorDocument;
     private long _styleCatalogVersion;
     private long _stylePanelVersion;
@@ -1188,6 +1196,34 @@ else
         }
 
         await LoadChapterAsync(targetId, requestedTarget, applyRequestedRouteState: true);
+    }
+
+    private async Task HandleReadChapterCompletedAsync()
+    {
+        if (ContestReviewActive || _mode != EditorMode.Read)
+            return;
+        SpeedReadingState settings;
+        try
+        {
+            settings = await SpeedReading.GetAsync();
+        }
+        catch (Exception)
+        {
+            return;
+        }
+        if (!settings.AutoAdvance)
+            return;
+        var index = _chapters.FindIndex(chapter => chapter.Id == _activeChapterId);
+        if (index < 0 || index + 1 >= _chapters.Count)
+            return;
+        var next = _chapters[index + 1];
+        _rememberedChapterModes[next.Id] = EditorMode.Read;
+        _speedReadAutoStart = true;
+        await SelectChapterAsync(next.Id);
+        if (_mode == EditorMode.Read)
+            await RememberEditorModeAsync(EditorMode.Read);
+        else
+            _speedReadAutoStart = false;
     }
 
     private async Task SelectChapterAsync(Guid chapterId)
@@ -2073,6 +2109,7 @@ else
         if (_mode == mode) return;
         if (ContestReviewActive && mode != EditorMode.Review) return;
         if (mode == EditorMode.Pages && DesignedPageIds.Count == 0) return;
+        _speedReadAutoStart = false;
 
         var locationIdentity = CurrentManuscriptLocationIdentity();
         ManuscriptViewLocation? capturedLocation = null;

@@ -2,6 +2,7 @@
 @using Lorekeeper.Manuscripts
 @using Lorekeeper.Models
 @using Lorekeeper.Publish
+@using Lorekeeper.SpeedReading
 @using System.Globalization
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
@@ -15,8 +16,8 @@
     <style>@((MarkupString)PreviewFontCss())</style>
     <header class="chapter-preview-toolbar">
         <div class="btn-group btn-group-sm" role="group" aria-label="Page display">
-            <button type="button" class="btn @ButtonClass(!FacingPages)" @onclick="() => ChangeFacingAsync(false)">Single page</button>
-            <button type="button" class="btn @ButtonClass(FacingPages)" @onclick="() => ChangeFacingAsync(true)">Facing pages</button>
+            <button type="button" class="btn @ButtonClass(!FacingPages)" disabled="@_speedReadActive" @onclick="() => ChangeFacingAsync(false)">Single page</button>
+            <button type="button" class="btn @ButtonClass(FacingPages)" disabled="@_speedReadActive" @onclick="() => ChangeFacingAsync(true)">Facing pages</button>
         </div>
         @if (FacingPages)
         {
@@ -42,17 +43,26 @@
                     title="Invert page colors for night reading; the manuscript and print output are unchanged"
                     @onclick="@(() => SetDisplayModeAsync("night"))">Night</button>
         </div>
-        <select class="form-select form-select-sm" value="@_fit" @onchange="ChangeFit">
+        @if (_playlist?.HasWords == true && !SpeedReadingBlocked)
+        {
+            <button type="button"
+                    class="btn btn-sm @ButtonClass(_speedReadActive)"
+                    aria-pressed="@_speedReadActive"
+                    title="Flash the chapter text word by word at your reading speed"
+                    disabled="@(_speedReadActive || _loading)"
+                    @onclick="StartSpeedReadingAsync">Speed read</button>
+        }
+        <select class="form-select form-select-sm" value="@_fit" disabled="@_speedReadActive" @onchange="ChangeFit">
             <option value="page">Fit page</option>
             <option value="width">Fit width</option>
             <option value="zoom">Custom zoom</option>
         </select>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ChangeZoom(-.1)">−</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_speedReadActive" @onclick="() => ChangeZoom(-.1)">−</button>
         <span class="chapter-preview-zoom">@Math.Round(_zoom * 100)%</span>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ChangeZoom(.1)">+</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_speedReadActive" @onclick="() => ChangeZoom(.1)">+</button>
         @if (_setup is not null)
         {
-            <select class="form-select form-select-sm chapter-preview-preset" value="@PresetValue()" @onchange="ChangePresetAsync">
+            <select class="form-select form-select-sm chapter-preview-preset" value="@PresetValue()" disabled="@_speedReadActive" @onchange="ChangePresetAsync">
                 <option value="6x9">6 × 9 in</option>
                 <option value="5.5x8.5">5.5 × 8.5 in</option>
                 <option value="8.5x11">8.5 × 11 in</option>
@@ -66,14 +76,14 @@
                     <label>Margins (in)<input type="number" min=".25" max="3" step=".0625" @bind="_setupMargin" /></label>
                     <label>Body size (pt)<input type="number" min="6" max="36" step=".25" @bind="_setupFontSize" /></label>
                     <label>Line height<input type="number" min=".8" max="3" step=".05" @bind="_setupLineHeight" /></label>
-                    <button type="button" class="btn btn-sm btn-primary" @onclick="SaveSetupAsync">Apply</button>
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@_speedReadActive" @onclick="SaveSetupAsync">Apply</button>
                 </div>
             </details>
         }
-        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_loading" @onclick="LoadAsync">Refresh</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_loading || _speedReadActive)" @onclick="LoadAsync">Refresh</button>
         <div class="btn-group btn-group-sm" role="group" aria-label="Review selected preview text">
-            <button type="button" class="btn btn-outline-warning" @onmousedown:preventDefault @onclick="() => CreateReadAnnotationAsync(ManuscriptAnnotationKind.Highlight)">Highlight</button>
-            <button type="button" class="btn btn-outline-secondary" @onmousedown:preventDefault @onclick="OpenReadNoteAsync">Note</button>
+            <button type="button" class="btn btn-outline-warning" disabled="@_speedReadActive" @onmousedown:preventDefault @onclick="() => CreateReadAnnotationAsync(ManuscriptAnnotationKind.Highlight)">Highlight</button>
+            <button type="button" class="btn btn-outline-secondary" disabled="@_speedReadActive" @onmousedown:preventDefault @onclick="OpenReadNoteAsync">Note</button>
         </div>
     </header>
 
@@ -117,6 +127,7 @@
                 }
             </div>
         }
+        <div class="chapter-preview-body">
         <div class="chapter-preview-scroll @(FacingPages ? "facing" : "single") @(FacingPages && _showFacingSeam ? "show-seam" : null) @($"fit-{_fit}") @DisplayModeClass()">
             @if (FacingPages)
             {
@@ -145,6 +156,17 @@
                 }
             }
         </div>
+        @if (_speedReadActive && _playlist is not null)
+        {
+            <SpeedReadOverlay Playlist="_playlist"
+                              DisplayMode="_displayMode"
+                              StartItem="_speedReadStartItem"
+                              Paused="OnSpeedReadPaused"
+                              EditRequested="HandleSpeedReadEditAsync"
+                              Exited="HandleSpeedReadExitedAsync"
+                              ChapterCompleted="ChapterCompleted" />
+        }
+        </div>
     }
 </section>
 
@@ -157,6 +179,11 @@
     [Parameter] public EventCallback<bool> FacingPagesChanged { get; set; }
     [Parameter] public EventCallback AnnotationsChanged { get; set; }
     [Parameter] public EventCallback<Guid> AnnotationSelected { get; set; }
+    [Parameter] public bool SpeedReadingBlocked { get; set; }
+    [Parameter] public bool AutoStartSpeedReading { get; set; }
+    [Parameter] public EventCallback AutoStartSpeedReadingConsumed { get; set; }
+    [Parameter] public EventCallback EditRequested { get; set; }
+    [Parameter] public EventCallback ChapterCompleted { get; set; }
 
     private static IEnumerable<ChapterPreviewPage?[]> BuildFacingSpreads(IReadOnlyList<ChapterPreviewPage> pages)
     {
@@ -240,6 +267,10 @@
     private string? _selectionError;
     private ManuscriptViewLocation? _pendingLocation;
     private PreviewLocationIdentity? _pendingLocationIdentity;
+    private SpeedReadingPlaylist? _playlist;
+    private bool _speedReadActive;
+    private int _speedReadStartItem;
+    private ManuscriptViewLocation? _speedReadLocation;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -321,11 +352,24 @@
             _blockOrder.Clear();
             for (var index = 0; index < manuscript.Document.Content.Count; index++)
                 _blockOrder[manuscript.Document.Content[index].Id] = index;
+            _playlist = SpeedReadingPlaylistBuilder.Build(manuscript.Document);
+            if (!_playlist.HasWords)
+                _speedReadActive = false;
             var previewTask = Preview.LayoutAsync(ProjectId, ChapterId, ContentTarget, cancellation.Token);
             var annotationsTask = Annotations.ListChapterAsync(ProjectId, ContentTarget, ChapterId, cancellation.Token);
             await Task.WhenAll(previewTask, annotationsTask);
             _result = await previewTask;
             _annotations = await annotationsTask;
+            if (AutoStartSpeedReading && generation == _loadGeneration && !_disposed)
+            {
+                if (_playlist.HasWords && !SpeedReadingBlocked)
+                {
+                    _speedReadStartItem = 0;
+                    _speedReadLocation = null;
+                    _speedReadActive = true;
+                }
+                await AutoStartSpeedReadingConsumed.InvokeAsync();
+            }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -664,6 +708,8 @@
     {
         if (_disposed || _result is null)
             return null;
+        if (_speedReadLocation is not null)
+            return _speedReadLocation;
 
         try
         {
@@ -726,6 +772,77 @@
     {
         _annotations = annotations;
         StateHasChanged();
+    }
+
+    private async Task StartSpeedReadingAsync()
+    {
+        if (_speedReadActive || _loading || SpeedReadingBlocked || _playlist is not { HasWords: true } playlist)
+            return;
+        var location = await CaptureLocationAsync();
+        _speedReadStartItem = StartItemFor(playlist, location);
+        _speedReadLocation = null;
+        _speedReadActive = true;
+    }
+
+    private static int StartItemFor(SpeedReadingPlaylist playlist, ManuscriptViewLocation? location)
+    {
+        if (location?.BlockId is not { } blockId)
+            return 0;
+        var blockIndex = -1;
+        for (var index = 0; index < playlist.BlockIds.Count; index++)
+        {
+            if (string.Equals(playlist.BlockIds[index], blockId, StringComparison.Ordinal))
+            {
+                blockIndex = index;
+                break;
+            }
+        }
+        if (blockIndex < 0)
+            return 0;
+        for (var index = 0; index < playlist.Items.Count; index++)
+        {
+            var item = playlist.Items[index];
+            if (item.BlockIndex > blockIndex)
+                return index;
+            if (item.BlockIndex == blockIndex
+                && (item.Kind != SpeedReadingItemKind.Word
+                    || item.Offset + item.Text.Length > location.AnchorOffset))
+                return index;
+        }
+        return 0;
+    }
+
+    private ManuscriptViewLocation? LocationForItem(int itemIndex)
+    {
+        if (_playlist is not { } playlist || itemIndex < 0 || itemIndex >= playlist.Items.Count)
+            return null;
+        var item = playlist.Items[itemIndex];
+        var blockId = playlist.BlockIds[item.BlockIndex];
+        var progress = playlist.BlockIds.Count <= 1
+            ? 0
+            : (double)item.BlockIndex / (playlist.BlockIds.Count - 1);
+        var isNode = item.Kind != SpeedReadingItemKind.Word;
+        var offset = isNode ? 0 : item.Offset;
+        return new ManuscriptViewLocation(blockId, isNode, offset, offset, progress);
+    }
+
+    private void OnSpeedReadPaused(int itemIndex) =>
+        _speedReadLocation = LocationForItem(itemIndex) ?? _speedReadLocation;
+
+    private async Task HandleSpeedReadEditAsync(int itemIndex)
+    {
+        _speedReadLocation = LocationForItem(itemIndex) ?? _speedReadLocation;
+        _speedReadActive = false;
+        await EditRequested.InvokeAsync();
+    }
+
+    private async Task HandleSpeedReadExitedAsync(int itemIndex)
+    {
+        _speedReadActive = false;
+        var location = LocationForItem(itemIndex);
+        _speedReadLocation = null;
+        if (location is not null)
+            await RestoreLocationAsync(location);
     }
 
     private sealed record PreviewTextPiece(string Text, string Style, bool Highlighted, Guid? AnnotationId = null);

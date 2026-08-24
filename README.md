@@ -115,6 +115,13 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Switching between Edit, Read, and Review carries the current chapter position;
   Edit restores a semantic caret or node, while Read and Review restore the
   corresponding manuscript viewport without changing Review expansion state.
+- A speed-reading tool inside Read flashes the chapter as short phrase chunks or
+  single RSVP words at an adjustable words-per-minute pace with
+  punctuation-aware pauses and a gentle ramp-up after every start and resume.
+  Pausing can jump straight into Edit at that exact word, chapters can
+  auto-advance, and the style, per-style speed, and auto-advance settings live
+  in Settings → Reading with an in-overlay quick-settings panel (S) writing the
+  same values.
 - Review remains populated after an assistant manuscript pass is applied: it
   compares the live Current chapter with the saved Before snapshot from before
   that pass, so later manual edits remain visible. Pending and Contest review

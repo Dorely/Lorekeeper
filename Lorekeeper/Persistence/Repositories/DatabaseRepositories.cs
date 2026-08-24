@@ -4,6 +4,7 @@ public sealed class DatabaseRepositories(AppDatabaseReadOperation operation)
 {
     public IActRepository Acts { get; } = new ActRepository(operation);
     public IAppearanceSettingsRepository AppearanceSettings { get; } = new AppearanceSettingsRepository(operation);
+    public ISpeedReadingSettingsRepository SpeedReadingSettings { get; } = new SpeedReadingSettingsRepository(operation);
     public IAiChangeRepository AiChanges { get; } = new AiChangeRepository(operation);
     public IChapterRepository Chapters { get; } = new ChapterRepository(operation);
     public IContestRepository Contests { get; } = new ContestRepository(operation);

@@ -86,6 +86,7 @@ builder.Services.AddSingleton(new ApplicationStartupOptions(
 builder.Services.AddHostedService<ApplicationStartupWorker>();
 
 builder.Services.AddSingleton<Lorekeeper.Appearance.IAppearanceService, Lorekeeper.Appearance.AppearanceService>();
+builder.Services.AddSingleton<Lorekeeper.SpeedReading.ISpeedReadingService, Lorekeeper.SpeedReading.SpeedReadingService>();
 
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IDesktopReleaseUpdateChecker, GitHubDesktopReleaseUpdateChecker>(client =>

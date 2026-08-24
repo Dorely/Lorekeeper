@@ -1,0 +1,116 @@
+@page "/settings/reading"
+@using Lorekeeper.Models
+@using Lorekeeper.SpeedReading
+@rendermode InteractiveServer
+@inject ISpeedReadingService SpeedReadingService
+
+<PageTitle>Reading - Lorekeeper</PageTitle>
+
+<ConfigurationShell Title="Reading"
+                    Description="Tune the speed-reading tool used by the chapter Read view. The same settings are reachable while reading through the quick-settings overlay.">
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger" role="alert">@_error</div>
+    }
+    @if (_message is not null)
+    {
+        <div class="alert alert-success" role="status">@_message</div>
+    }
+
+    @if (_state is null)
+    {
+        <p>Loading reading settings…</p>
+    }
+    else
+    {
+        <section class="lk-card mb-4">
+            <h2>Speed reading</h2>
+            <div class="mb-3">
+                <label class="form-label" for="reading-style">Style</label>
+                <select id="reading-style" class="form-select" value="@_style" disabled="@_busy"
+                        @onchange="e => _style = (string?)e.Value ?? SpeedReadingSettings.ChunkStyle">
+                    <option value="@SpeedReadingSettings.ChunkStyle">Chunk pacing (short phrases)</option>
+                    <option value="@SpeedReadingSettings.RsvpStyle">RSVP (one word at a time)</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="reading-chunk-wpm">
+                    Chunk pacing speed (words per minute, @SpeedReadingSettings.MinimumWordsPerMinute–@SpeedReadingSettings.MaximumWordsPerMinute)
+                </label>
+                <input id="reading-chunk-wpm" type="number" class="form-control"
+                       min="@SpeedReadingSettings.MinimumWordsPerMinute"
+                       max="@SpeedReadingSettings.MaximumWordsPerMinute"
+                       step="25" @bind="_chunkWpm" disabled="@_busy" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="reading-rsvp-wpm">
+                    RSVP speed (words per minute, @SpeedReadingSettings.MinimumWordsPerMinute–@SpeedReadingSettings.MaximumWordsPerMinute)
+                </label>
+                <input id="reading-rsvp-wpm" type="number" class="form-control"
+                       min="@SpeedReadingSettings.MinimumWordsPerMinute"
+                       max="@SpeedReadingSettings.MaximumWordsPerMinute"
+                       step="25" @bind="_rsvpWpm" disabled="@_busy" />
+            </div>
+            <div class="form-check mb-2">
+                <input id="reading-auto-advance" type="checkbox" class="form-check-input"
+                       @bind="_autoAdvance" disabled="@_busy" />
+                <label class="form-check-label" for="reading-auto-advance">
+                    Continue into the next chapter automatically when a chapter ends
+                </label>
+            </div>
+            <p class="text-muted mb-0">
+                While speed reading: Space pauses and resumes, Esc exits, S opens quick
+                settings, Left rewinds a sentence, and Up/Down adjust the speed.
+            </p>
+        </section>
+
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_busy">Save reading settings</button>
+    }
+</ConfigurationShell>
+
+@code {
+    private SpeedReadingState? _state;
+    private string _style = SpeedReadingSettings.ChunkStyle;
+    private int _chunkWpm = SpeedReadingSettings.DefaultChunkWordsPerMinute;
+    private int _rsvpWpm = SpeedReadingSettings.DefaultRsvpWordsPerMinute;
+    private bool _autoAdvance;
+    private string? _error;
+    private string? _message;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _state = await SpeedReadingService.GetAsync();
+        _style = _state.Style;
+        _chunkWpm = _state.ChunkWordsPerMinute;
+        _rsvpWpm = _state.RsvpWordsPerMinute;
+        _autoAdvance = _state.AutoAdvance;
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        _error = null;
+        _message = null;
+        try
+        {
+            var saved = new SpeedReadingState(_style, _chunkWpm, _rsvpWpm, _autoAdvance).Normalized();
+            await SpeedReadingService.SaveAsync(saved);
+            _state = saved;
+            _style = saved.Style;
+            _chunkWpm = saved.ChunkWordsPerMinute;
+            _rsvpWpm = saved.RsvpWordsPerMinute;
+            _autoAdvance = saved.AutoAdvance;
+            _message = "Reading settings saved.";
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
