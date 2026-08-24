@@ -84,10 +84,10 @@ catalog responses; selecting a discovered model prefills the row value when it
 is not already set, and a manually entered value always wins over harvested
 metadata. The budget is captured in each turn's model snapshot so an active turn
 keeps one stable limit even if settings change mid-turn.
-The shipped configuration assigns 1,050,000 tokens to `gpt-5.4`, `gpt-5.5`,
-`gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; unknown models retain the
-general 200,000-token fallback unless a row or deployment override supplies a
-different value.
+The shipped configuration assigns the OpenAI account path's effective 272,000-
+token window to `gpt-5.4`, `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and
+`gpt-5.6-luna`; unknown models retain the general 200,000-token fallback unless
+a row or deployment override supplies a different value.
 
 ### Chat and vision wire compatibility
 
