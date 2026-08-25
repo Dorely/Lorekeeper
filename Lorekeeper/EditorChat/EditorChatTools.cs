@@ -75,7 +75,7 @@ IAppDatabaseOperationFactory database, IActService acts,
         CancellationToken cancellationToken = default)
     {
         var tools = new List<AITool>();
-        var impactDescription = "Read-only book-level impact map for continuity changes. Combines outline order, chapter synopses, server-side keyword/body checks, hybrid project search hits, affected entities/events, adjacency, and downstream chapters from an anchor chapter. Use this before spawning revision agents or before deciding which chapters need body edits.";
+        var impactDescription = "Read-only book-level impact map for continuity changes. Search expected source content, not edit instructions: use one 2–6-term facet per call and keep combined query plus keywords under ten high-signal terms. Keywords are optional exact aliases or terms expected to coexist with the query; put alternatives in separate calls. Resolve exact chapter, entity, and event IDs first and include only directly affected IDs. anchorChapterId is forward-only for a known originating chapter: omit it for backward, whole-book, bidirectional, or direction-neutral impact. Combine and deduplicate facet candidates yourself, then verify them with focused search_project and read_chapter calls before assigning revisions; reject anchor-only, generic-term-only, and opaque-score-only candidates. Put the complete requested change in revision instructions after retrieval. The map combines outline order, chapter synopses, server-side keyword/body checks, hybrid project-search hits, affected entities/events, adjacency, and downstream chapters.";
 
         tools.Add(AIFunctionFactory.Create(
             method: (int offset = 0, int limit = 50) => ListManuscriptAnnotationsAsync(context, offset, limit),

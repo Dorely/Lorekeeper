@@ -146,6 +146,34 @@ workflow instructions enforce active-canon precedence, read-only foreign
 references, compact paging and staging, durable work logs, and honest
 verification.
 
+`SystemPromptComposer` adds the shared
+`AssistantWorkflowInstructions.ProjectSearchQueryDiscipline` to every
+composed assistant role; Writing Coach's intentionally separate static prompt
+appends the same block. Its tool-scope sentence is role-specific: Editor
+also has `find_impacted_chapters`, revision workers do not, Contest Candidate
+has no project-search tools, and Research's external `web_search` remains a
+separate contract. Project-search facets are concise 2–6-term source-content
+queries with rare canonical names, aliases, exact events, objects, or other
+distinctive terms first. Conceptual facets use hybrid `search_project`; exact
+wording or known-source facets use filtered `lexicalOnly=true` search.
+Independent facets are split into separate calls, then unioned and deduped by
+stable IDs before paginated exact reads. Search continues until focused work
+stops adding relevant evidence or resolving ambiguity, rather than using a
+fixed call cap; one grounded reformulation is required before reporting no
+project evidence. This discipline explicitly excludes external `web_search`.
+
+Editor impact mapping narrows the same contract further. Each
+`find_impacted_chapters` call carries one 2–6-term facet, with query and optional
+coexisting exact keywords together staying below ten high-signal terms. Exact
+chapter, entity, and event IDs are resolved first and limited to directly
+affected anchors. `anchorChapterId` is used only for forward propagation from a
+known origin; backward, whole-book, bidirectional, and direction-neutral audits
+omit it. The Editor unions and deduplicates candidates across facets, verifies
+each with focused `search_project` and `read_chapter` evidence, and rejects
+proximity-only, generic-match-only, or unexplained-score-only candidates before
+assigning revision workers. The complete requested continuity change belongs in
+the later chapter-specific revision instructions, not in an impact query.
+
 `AssistantWorkflowInstructions.EditorContinuityMemory`, appended by
 `EditorChatFor` to both vector-enabled and vector-disabled Editor prompts,
 keeps Editor continuity memory narrower than ordinary drafting. Continuity-

@@ -82,6 +82,11 @@ public sealed class SystemPromptComposer(
                 "Operating and Tool Rules",
                 request.OperatingRules.Trim()),
             new(
+                "project-search-query-discipline",
+                SystemPromptSectionKind.OperatingRules,
+                "Project Search Query Discipline",
+                AssistantWorkflowInstructions.ProjectSearchQueryDisciplineFor(request.AgentRole)),
+            new(
                 "project-reference-continuity",
                 SystemPromptSectionKind.OperatingRules,
                 "Direct Project Reference Continuity",

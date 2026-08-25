@@ -92,6 +92,32 @@ lexical and vector projections current. A change to any retrievable model or
 stored text must be traced through both index paths; updating only vectors or
 only FTS leaves inconsistent assistant behavior.
 
+Assistant-facing project search is discovery, not a complete-source read. The
+shared prompt discipline asks each call to represent one source-content facet
+with 2–6 high-signal terms, putting rare canonical names, aliases, exact
+events, objects, and distinctive wording first. Conceptual searches use the
+default FTS5/BM25 plus sqlite-vec hybrid; exact wording, proper names, or a
+known source use filtered lexical-only search. Independent facets are separate
+queries whose candidates are unioned and deduplicated by stable source or
+chapter identity. Callers honor counts, completeness, and pagination, then
+use exact source/chapter/entity reads before relying on a detail. They continue
+until focused evidence stops changing the decision, with one reformulation
+grounded in current names or returned terms before reporting no match. External
+`web_search` is outside this internal project-search contract. The lexical
+index currently tokenizes only the first twelve query terms, so Editor impact
+facets deliberately keep their combined query and keywords below ten
+high-signal terms.
+
+`find_impacted_chapters` remains an evidence-map helper rather than an authority
+on revision scope. Its Editor-facing contract resolves exact directly affected
+IDs first, reserves `anchorChapterId` for forward propagation, and omits the
+anchor for backward, whole-book, bidirectional, or direction-neutral audits.
+Optional keywords must be exact terms expected to coexist in the same passage;
+alternatives and independent concepts become separate facet calls. Candidate
+chapters are unioned across facets and must survive focused project search plus
+exact chapter reads before revision assignment; anchor proximity, generic
+substring matches, and unexplained aggregate scores are insufficient evidence.
+
 `ContextBuilder` owns the Editor's bounded automatic working context. It starts
 from protected Project Guidance and Book Brief direction, then adds relevant
 prior chapter material, explicit per-chapter include/exclude preferences, graph

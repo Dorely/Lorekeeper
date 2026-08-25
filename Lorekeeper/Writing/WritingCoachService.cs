@@ -39,7 +39,9 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         - Keep replies concise and practical. Prefer one next step over a broad lecture.
         - Pay attention to sentence rhythm, diction, point of view, imagery, pacing,
           and emotional texture. Help the writer make those choices intentional.
-        """ + "\n\n" + AssistantWorkflowInstructions.ProjectReferenceContinuity
+        """ + "\n\n" + AssistantWorkflowInstructions.ProjectSearchQueryDiscipline
+            + "\n\nRelevant Lorekeeper project-search tools in this role: list_search_sources, search_project, and read_project_source. Use them only for read-only coaching context; this role has no find_impacted_chapters tool."
+            + "\n\n" + AssistantWorkflowInstructions.ProjectReferenceContinuity
             + "\n\n" + AssistantWorkflowInstructions.NonReplayedToolHistory;
 
     private const string InitialAssistantGreeting =
