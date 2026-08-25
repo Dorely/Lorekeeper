@@ -37,6 +37,25 @@ public sealed class EditorManuscriptApplyService(
         {
             var converted = ManuscriptOperationInput.ToOperations(operations);
             var (document, changedBlockIds) = ManuscriptOperations.Apply(source, converted);
+            var operationCounts = new
+            {
+                insertBlock = converted.Count(operation => operation is InsertManuscriptBlock),
+                replaceBlockText = converted.Count(operation => operation is ReplaceManuscriptBlockText),
+                deleteBlock = converted.Count(operation => operation is DeleteManuscriptBlock),
+                moveBlock = converted.Count(operation => operation is MoveManuscriptBlock),
+                splitBlock = converted.Count(operation => operation is SplitManuscriptBlock),
+                mergeBlocks = converted.Count(operation => operation is MergeManuscriptBlocks),
+                setBlockType = converted.Count(operation => operation is SetManuscriptBlockType),
+                setBlockStyle = converted.Count(operation => operation is SetManuscriptBlockStyle),
+                setInlineMark = converted.Count(operation => operation is SetManuscriptInlineMark),
+                setParagraphPresentation = converted.Count(operation => operation is SetParagraphPresentation),
+            };
+            var requiresReadback = converted.Any(IsTextOrStructureOperation);
+            var readbackRanges = requiresReadback
+                ? BuildReadbackRanges(chapterId, source, document, changedBlockIds)
+                : [];
+            var diagnostics = BuildDiagnostics(source, converted);
+            var sourceHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(document));
             var styleCatalog = context.ReviewEdits && context.EditorStaging is not null
                 ? await context.EditorStaging.ListManuscriptStyleDraftsAsync(
                     manuscriptStyles,
@@ -58,8 +77,15 @@ public sealed class EditorManuscriptApplyService(
                     targetId = chapterId,
                     expectedRevision,
                     revision = document.Revision,
+                    sourceHash,
                     changedIds = changedBlockIds,
                     changedBlockCount = changedBlockIds.Count,
+                    beforeBlockCount = source.Content.Count,
+                    afterBlockCount = document.Content.Count,
+                    operationCounts,
+                    diagnostics,
+                    requiresReadback,
+                    readbackRanges,
                     summary = $"Applied manuscript edit to {changedBlockIds.Count} block(s); it is ready for review.",
                 }, ManuscriptCodec.JsonOptions);
                 await context.EditorStaging.StageChapterManuscriptEditAsync(
@@ -88,6 +114,12 @@ public sealed class EditorManuscriptApplyService(
                 sourceHash = result.Snapshot.SourceHash,
                 changedIds = changedBlockIds,
                 changedBlockCount = changedBlockIds.Count,
+                beforeBlockCount = source.Content.Count,
+                afterBlockCount = document.Content.Count,
+                operationCounts,
+                diagnostics,
+                requiresReadback,
+                readbackRanges,
                 summary = $"Applied manuscript edit to {changedBlockIds.Count} block(s).",
                 mutation = new { kind = "manuscript", id = chapterId },
             }, ManuscriptCodec.JsonOptions);
@@ -97,4 +129,95 @@ public sealed class EditorManuscriptApplyService(
             return $"Error: {exception.Message}";
         }
     }
+
+    private static bool IsTextOrStructureOperation(ManuscriptOperation operation) =>
+        operation is InsertManuscriptBlock
+            or ReplaceManuscriptBlockText
+            or DeleteManuscriptBlock
+            or MoveManuscriptBlock
+            or SplitManuscriptBlock
+            or MergeManuscriptBlocks
+            or SetManuscriptBlockType;
+
+    private static IReadOnlyList<ManuscriptMutationDiagnostic> BuildDiagnostics(
+        ManuscriptDocument source,
+        IReadOnlyList<ManuscriptOperation> operations)
+    {
+        var hasNonEmptyTextInsertion = operations
+            .OfType<InsertManuscriptBlock>()
+            .Any(operation => operation.Type is not ManuscriptBlockType.Figure
+                && !string.IsNullOrWhiteSpace(operation.Text));
+        var hasReplacementOrDeletion = operations.Any(operation =>
+            operation is ReplaceManuscriptBlockText or DeleteManuscriptBlock);
+        if (source.Content.Count == 0 || !hasNonEmptyTextInsertion || hasReplacementOrDeletion)
+            return [];
+
+        return
+        [
+            new(
+                "warning",
+                "MANUSCRIPT_INSERT_WITHOUT_REPLACEMENT",
+                "This batch added text to a non-empty manuscript without replacing or deleting a source block. That is valid only for genuinely additive work. If the user asked to revise existing prose, read every returned range and remove the superseded source before replying."),
+        ];
+    }
+
+    private static IReadOnlyList<ManuscriptReadbackRange> BuildReadbackRanges(
+        Guid chapterId,
+        ManuscriptDocument source,
+        ManuscriptDocument document,
+        IReadOnlyList<string> changedBlockIds)
+    {
+        if (document.Content.Count == 0)
+            return [new(chapterId, 0, 1)];
+
+        var sourceIndexes = source.Content
+            .Select((block, index) => (block.Id, index))
+            .ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
+        var resultIndexes = document.Content
+            .Select((block, index) => (block.Id, index))
+            .ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
+        var anchors = new SortedSet<int>();
+        foreach (var blockId in changedBlockIds)
+        {
+            if (sourceIndexes.TryGetValue(blockId, out var sourceIndex))
+                anchors.Add(Math.Clamp(sourceIndex, 0, document.Content.Count - 1));
+            if (resultIndexes.TryGetValue(blockId, out var resultIndex))
+                anchors.Add(resultIndex);
+        }
+
+        if (anchors.Count == 0)
+            return [new(chapterId, 0, Math.Min(100, document.Content.Count))];
+
+        var merged = new List<(int Start, int EndExclusive)>();
+        foreach (var anchor in anchors)
+        {
+            var start = Math.Max(0, anchor - 1);
+            var endExclusive = Math.Min(document.Content.Count, anchor + 2);
+            if (merged.Count > 0 && start <= merged[^1].EndExclusive)
+            {
+                var previous = merged[^1];
+                merged[^1] = (previous.Start, Math.Max(previous.EndExclusive, endExclusive));
+                continue;
+            }
+
+            merged.Add((start, endExclusive));
+        }
+
+        var result = new List<ManuscriptReadbackRange>();
+        foreach (var range in merged)
+        {
+            var start = range.Start;
+            while (start < range.EndExclusive)
+            {
+                var count = Math.Min(100, range.EndExclusive - start);
+                result.Add(new(chapterId, start, count));
+                start += count;
+            }
+        }
+        return result;
+    }
+
+    private sealed record ManuscriptMutationDiagnostic(string Severity, string Code, string Message);
+
+    private sealed record ManuscriptReadbackRange(Guid ChapterId, int StartBlock, int BlockCount);
 }

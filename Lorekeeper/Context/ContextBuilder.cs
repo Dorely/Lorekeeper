@@ -235,7 +235,8 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 AssistantWorkflowInstructions.EditorChatFor(await embeddings.IsAvailableAsync(cancellationToken)),
             ContextBuildPurpose.EditorRevision =>
                 AssistantWorkflowInstructions.EditorRevisionWorker
-                + "\n\n" + AssistantWorkflowInstructions.AgentManuscriptProjection,
+                + "\n\n" + AssistantWorkflowInstructions.AgentManuscriptProjection
+                + "\n\n" + AssistantWorkflowInstructions.ManuscriptOperationDiscipline,
             ContextBuildPurpose.Images => AssistantWorkflowInstructions.VisualCreationWorkflow,
             ContextBuildPurpose.Research =>
                 "Use the supplied research tools to gather, attribute, compare, and synthesize evidence. Distinguish sourced facts from editorial inference and never fabricate a source.",

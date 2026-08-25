@@ -156,13 +156,26 @@ vocabulary. Known built-in role aliases and the visible `***` scene-break form
 are canonicalized. An inserted block may supply its stable ID so later
 operations in the same atomic batch can target it.
 
+Insertion is strictly additive and never carries replacement semantics. An
+assistant revising one existing text block uses `ReplaceBlockText` to preserve
+its stable identity. Before a multi-block rewrite it assigns every source block
+in the intended range to retain, replace, or delete, and only then inserts any
+additional replacement blocks. The runtime does not automatically deduplicate
+similar prose because repeated language may be intentional.
+
 Editor assistants never send a full projected document back to an apply call.
 `EditorManuscriptApplyService` converts and validates one complete operation
 batch, verifies the protected source revision, and writes the resulting document
 through `IManuscriptService` or the Review Edits overlay in that same call. The
-result reports compact changed IDs, counts, the committed hash when available,
-and the committed or staged revision; no turn-local preview ID or projected
-document is retained.
+result reports compact changed IDs, operation and before/after block counts, the
+full resulting hash, diagnostics, the committed or staged revision, and exact
+bounded readback ranges; no turn-local preview ID or projected document is
+retained. Text and structure changes require focused readback from the resulting
+persisted or staged source. Each range includes one adjacent block on either
+side where available, overlapping ranges merge, and long ranges split at the
+100-block read limit. An insertion-only text batch against a non-empty source
+returns `MANUSCRIPT_INSERT_WITHOUT_REPLACEMENT` as a warning rather than
+rejecting intentional additive work.
 
 `ManuscriptInspection` supplies shared validation, normalization diagnostics,
 and structural search to Editor and revision workers. Prompt/tool guidance and
@@ -385,6 +398,10 @@ every one of those consumers.
 - Confirm all runtime writes use `IManuscriptService`, carry the exact
   `EditorContentTarget`, validate expected revision and referenced ownership,
   and update derived graph/search/index state.
+- Confirm assistant revisions distinguish insert from replace, every superseded
+  source block is accounted for, direct text/structure applies require all
+  returned range reads with matching revision/hash, and Review Edits reads the
+  staged overlay rather than the persisted source.
 - For schema changes, advance the current schema and JSON Schema together, add a
   strict forward upgrader, preserve applied migrations, update versioned import
   handling, and prove live plus historical payload conversion under the guarded

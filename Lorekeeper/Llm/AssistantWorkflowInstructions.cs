@@ -52,6 +52,24 @@ public static class AssistantWorkflowInstructions
         - Typography precedence is direct paragraph formatting over the block's named style, then named style over built-in defaults.
         """;
 
+    public const string ManuscriptOperationDiscipline = """
+        Manuscript replacement and insertion safety:
+        - Classify the requested prose change before building operations: additive work creates genuinely new content; revision work supersedes existing content. InsertBlock is additive only. It never replaces, edits, or removes an existing block, even when its text is a rewritten version of that block.
+        - Use ReplaceBlockText as the default for revising one existing text block because it preserves the exact stable block ID. Do not append rewritten prose elsewhere in the manuscript as a shortcut.
+        - Before a multi-block rewrite, map every source block in the intended range to one explicit disposition: retain unchanged, replace in place, or delete. Include every replacement and deletion in the same atomic batch, then use InsertBlock only for additional replacement blocks that have no source block to preserve.
+        - Audit the proposed final sequence against the current agent-manuscript-v1 snapshot before submitting it. The rewritten passage must appear once, every intentionally superseded source block must be replaced or deleted, and unrelated blocks, semantic types, styles, marks, Figures, and Designed Pages must remain intact.
+        - A terminal Contest proposal or revision-worker mutation cannot inspect its result afterward. Perform this source-block disposition and duplicate-prose audit before returning the proposal or calling the terminal mutation tool.
+        """;
+
+    public const string EditorManuscriptReadbackDiscipline = """
+        Direct Editor manuscript verification:
+        - After apply_manuscript_operations returns requiresReadback=true, immediately call read_manuscript once for every exact entry in readbackRanges before any further manuscript mutation or final answer. Review Edits reads the current stagedDraft; direct mode reads the persisted manuscript.
+        - Every readback must report the mutation's revision and full sourceHash. Compare the returned rows with the original Context Feed and the user's request, checking especially that rewritten prose appears once and every superseded source block or wording is gone.
+        - MANUSCRIPT_INSERT_WITHOUT_REPLACEMENT is a non-blocking warning for additive work in a non-empty manuscript. If the user actually requested revision, treat it as evidence of an insertion-as-replacement mistake and repair the manuscript in this turn.
+        - A repair is a fresh, complete operation batch against the verified new revision. Never replay or duplicate the earlier payload. Follow the new result's readbackRanges again before continuing.
+        - After start_revision_agents completes or stages chapter prose, inspect each affected chapter's projected manuscript before reporting success. Confirm the assigned revision appears once and the superseded source is absent; correct clear worker mistakes with the normal direct manuscript boundary.
+        """;
+
     public const string VisualDevelopment = """
         Visual-development and concept-art practice:
         - Your exclusive creative remit is the project image library, entity canon, and the user-approved project-wide Visual Direction. Read manuscript and project sources for grounding, but never alter chapters, Figures, Designed Pages, page setup, covers, publication sections, or chapter context. Route page illustration and layout work to Editor and publication/cover work to Publish.
@@ -172,6 +190,8 @@ public static class AssistantWorkflowInstructions
         + "\n\n" + ImageGeneration
         + "\n\n" + ImageSpaceDiscipline
         + "\n\n" + AgentManuscriptProjection
+        + "\n\n" + ManuscriptOperationDiscipline
+        + "\n\n" + EditorManuscriptReadbackDiscipline
         + "\n\n" + BookDesignCraft
         + "\n\n" + TypographyVerification
         + "\n\n" + CompositionDesign

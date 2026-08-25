@@ -201,7 +201,7 @@ IAppDatabaseOperationFactory database, IActService acts,
                 name: "read_manuscript",
                 description:
                     "Read bounded agent-manuscript-v1 semantic rows with stable block IDs, exact text, sparse structure, UTF-16 inline marks, interned paragraph formatting, Figure/Designed Page metadata, source hash, and the current revision token. " +
-                    "The active Context Feed normally already includes the complete current manuscript snapshot for direct edits. Use this tool when that snapshot is missing, incomplete, stale, non-active, or insufficient; then pass the returned revision and operations once to apply_manuscript_operations. For reusable formatting, use the focused Book Text Style tools instead of emitting one operation per block."),
+                    "The active Context Feed normally already includes the complete current manuscript snapshot for direct edits. Use this tool when that snapshot is missing, incomplete, stale, non-active, or insufficient; then pass the returned revision and operations once to apply_manuscript_operations. After a mutation returns requiresReadback=true, call this tool for every exact readbackRanges entry and require the returned revision and sourceHash to match before continuing. For reusable formatting, use the focused Book Text Style tools instead of emitting one operation per block."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, string? query = null, string? blockType = null, string? styleRole = null, int start = 0, int count = 40) =>
@@ -217,7 +217,8 @@ IAppDatabaseOperationFactory database, IActService acts,
                 name: "apply_manuscript_operations",
                 description:
                     "Validate and apply one complete semantic manuscript operation set in a single revision-checked call. " + ManuscriptOperationInput.ToolOperationGuidance + " Use apply_manuscript_style for chapter-wide or repeated reusable styling. " +
-                    "Submit chapterId, expectedRevision, and the operation payload exactly once; in Review Edits mode the result is staged for approval, otherwise it is persisted immediately. Returns compact changed IDs and the new revision without echoing the manuscript. Stale revisions and invalid operations fail closed."),
+                    "Submit chapterId, expectedRevision, and each intended operation payload exactly once; in Review Edits mode the result is staged for approval, otherwise it is persisted immediately. " +
+                    "The result returns operation and block counts, diagnostics, revision, full sourceHash, and exact readbackRanges. When requiresReadback=true, read every returned range and verify the revision, hash, ordering, and absence of superseded prose before continuing. A correction is a fresh operation set against that verified revision, never a replay of the earlier payload. Stale revisions and invalid operations fail closed."),
 
             AIFunctionFactory.Create(
                 method: () => ReadManuscriptMigrationStateAsync(context),

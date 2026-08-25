@@ -165,6 +165,15 @@ Large or sensitive mutations use bounded, revision-safe staging. Editor
 manuscript changes validate and apply one complete operation set in a single
 call against the exact source revision; when Review Edits is enabled, that same
 call creates the in-memory projected overlay and pending change for approval.
+The operation contract distinguishes additive insertion from revision:
+`InsertBlock` never supersedes existing prose, single-block revisions preserve
+identity with `ReplaceBlockText`, and multi-block rewrites must replace or
+delete every superseded source block in the atomic batch. Text/structure
+mutation results include operation and block counts, diagnostics, a full source
+hash, and bounded readback ranges. Editor must read every returned range from
+the persisted or staged source before continuing; insertion-only text against a
+non-empty manuscript remains legal but returns the non-blocking
+`MANUSCRIPT_INSERT_WITHOUT_REPLACEMENT` warning.
 Page and cover scenes use persisted, hashed, expiring, project/conversation-
 scoped stages that cannot be replayed. Image generation creates an unattached
 durable image job; another explicit mutation places or associates the completed
@@ -272,7 +281,13 @@ context plus read/inspect tools use the same sparse projection and preserve
 absolute indexes, revision, source hash, and stable IDs. With Review Edits enabled,
 its pending change is correlated to the parent tool call and adopted into the
 active Editor overlay, while the stored chapter remains unchanged until
-approval. The coordinator cancels and awaits any outstanding progress read
+approval. Core and release workers build automatic context, refresh, validate
+staleness, and apply against the same protected `EditorContentTarget` captured
+by the job; Core chapter JSON is never used as the concurrency check for a
+release worker. Because the worker mutation is terminal, the worker audits
+source-block disposition before submission and the parent Editor rereads the
+affected projected manuscript before reporting completion. The coordinator
+cancels and awaits any outstanding progress read
 before disposing the async enumerator. Completion, cancellation, and failure
 must leave durable terminal state and no concurrent-disposal error.
 
@@ -329,6 +344,10 @@ must leave durable terminal state and no concurrent-disposal error.
 - For tool changes, inspect schemas, prompt guidance, result shapes, mutation
   notices, staging/revision checks, persistence, UI refresh consumers, and the
   owning manual service path together.
+- For manuscript text/structure mutations, confirm insertion-only work warns
+  without being rejected, returned readback ranges include adjacent context and
+  stay within the 100-block read limit, staged and persisted reads match the
+  returned revision/hash, and corrections use a fresh operation batch.
 - For Review/Contest/revision changes, confirm dependency handling, exact target
   ownership, durable terminal state, visible unresolved conflicts, projected
   overlays, authoring-history correlation, and cancellation cleanup.

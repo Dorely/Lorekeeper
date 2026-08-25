@@ -1014,7 +1014,8 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         - Preserve unrelated prose unless the user's request explicitly asks for a full rewrite.
         - Respect the supplied chat context, context feed, and read-only tool results as authoritative story evidence.
         """
-        + "\n\n" + AssistantWorkflowInstructions.AgentManuscriptProjection;
+        + "\n\n" + AssistantWorkflowInstructions.AgentManuscriptProjection
+        + "\n\n" + AssistantWorkflowInstructions.ManuscriptOperationDiscipline;
 
     private static string BuildContestUserPrompt(
         ContestBatch batch,

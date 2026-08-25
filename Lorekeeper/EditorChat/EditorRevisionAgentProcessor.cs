@@ -76,7 +76,12 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
 
             var userPrompt = await BuildWorkerUserPromptAsync(job, session, cancellationToken);
             var contextAssembly = await contextBuilder.BuildAsync(
-                new ContextBuildRequest(project, chapter, userPrompt, ContextBuildPurpose.EditorRevision),
+                new ContextBuildRequest(
+                    project,
+                    chapter,
+                    userPrompt,
+                    ContextBuildPurpose.EditorRevision,
+                    ContentTarget: JobTarget(job)),
                 cancellationToken);
             var systemPrompt = contextAssembly.Assemble();
             var nextOrder = await GetMaxMessageOrderAsync(session.Id, cancellationToken) + 1;
@@ -398,10 +403,10 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
                     CaptureAssignedManuscriptOperationsAsync(edit, assignedChapterId, summary, rationale, expectedRevision, operations, notes),
                 name: "apply_assigned_manuscript_operations",
                 description:
-                    "Terminal mutating tool. Edit only the assigned chapter through semantic insert, replace, delete, move, split, merge, block-type, block-style, or inline-mark operations. " +
+                    "Terminal mutating tool. Edit only the assigned chapter through semantic insert, replace, delete, move, split, merge, block-type, block-style, or inline-mark operations. " + ManuscriptOperationInput.ToolOperationGuidance + " " +
                     "Use stable block IDs and expectedRevision from the assigned-manuscript Context Feed snapshot or a refreshed read_assigned_manuscript result. " +
                     "Semantic styleRole values must be lowercase hyphenated identifiers (for example body or scene-break), and sceneBreak insertions must use an empty text value rather than a visible separator such as ***. " +
-                    "Do not call any more tools after this."),
+                    "Before this terminal call, verify that every superseded source block is replaced or deleted and the revised passage will occur exactly once. Do not call any more tools after this."),
         };
 
         return tools;
@@ -432,6 +437,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
 
         sb.AppendLine("# Output Requirement");
         sb.AppendLine("Use lowercase hyphenated semantic styleRole values. A sceneBreak insertion must have empty text (not ***); use styleRole scene-break or omit it so the default is used.");
+        sb.AppendLine("Before the terminal call, account for every source block in the assigned range as retained, replaced, or deleted. InsertBlock is only for net-new content and must never leave an obsolete version of revised prose elsewhere in the chapter.");
         sb.AppendLine("Call apply_assigned_manuscript_operations exactly once when ready. The coordinator will review the completed/staged change and decide whether any follow-up action is needed.");
         return sb.ToString().TrimEnd();
     }
@@ -841,8 +847,16 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
 
         var chapter = await chapters.GetAsync(session.ChapterId, cancellationToken)
             ?? throw new InvalidOperationException($"Chapter {session.ChapterId} not found.");
-        if (chapter.ManuscriptRevision != edit.ExpectedRevision
-            || !string.Equals(chapter.ManuscriptJson, session.OriginalManuscriptJson, StringComparison.Ordinal))
+        var current = await manuscripts.GetManuscriptAsync(
+            JobTarget(session.Job),
+            session.ChapterId,
+            cancellationToken);
+        if (current is null
+            || current.Document.Revision != edit.ExpectedRevision
+            || !string.Equals(
+                ManuscriptCodec.Serialize(current.Document),
+                session.OriginalManuscriptJson,
+                StringComparison.Ordinal))
         {
             var error = "The assigned manuscript changed after this worker session started. No worker edit was applied.";
             MarkInvalid(session, error, JsonSerializer.Serialize(edit, JsonOptions), stopwatch);

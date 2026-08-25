@@ -3,28 +3,43 @@ using System.ComponentModel;
 namespace Lorekeeper.Manuscripts;
 
 public sealed record ManuscriptOperationInput(
-    [property: Description("Canonical operation name: InsertBlock, ReplaceBlockText, DeleteBlock, MoveBlock, SplitBlock, MergeBlocks, SetBlockType, SetBlockStyle, SetInlineMark, or SetParagraphPresentation.")]
+    [property: Description("Canonical operation name. Use InsertBlock only for genuinely additive content; it never replaces or removes an existing block. Use ReplaceBlockText to revise an existing block while preserving its stable ID. Multi-block rewrites must replace or delete every superseded source block in the same batch before inserting any additional replacement blocks.")]
     string Operation,
-    [property: Description("Stable block ID. Required for every operation except InsertBlock; supply it for InsertBlock when another operation in the same batch will target the new block.")]
+    [property: Description("Exact stable block ID from the current manuscript. Required for every operation except InsertBlock; supply a new unique ID for InsertBlock only when another operation in the same batch must target that inserted block.")]
     string? BlockId = null,
+    [property: Description("Exact second stable block ID. Required only by MergeBlocks and must identify the adjacent block immediately after blockId.")]
     string? SecondBlockId = null,
+    [property: Description("Zero-based document position. InsertBlock adds a new block at this position without removing anything; MoveBlock relocates the existing block to this position.")]
     int? Index = null,
+    [property: Description("Semantic block type used by InsertBlock or SetBlockType: Paragraph, Heading, SceneBreak, BlockQuote, ListItem, Figure, or DesignedPage where the owning tool permits it.")]
     string? BlockType = null,
+    [property: Description("Exact complete block text. For ReplaceBlockText this replaces the selected block's text while preserving its ID; for InsertBlock this is net-new text and leaves every existing block untouched.")]
     string? Text = null,
+    [property: Description("Semantic style role used by InsertBlock, SetBlockType, or SetBlockStyle. Use the exact current or saved style role; do not use this field as a substitute for a Book Text Style ID where a focused style tool is available.")]
     string? StyleRole = null,
+    [property: Description("Zero-based UTF-16 offset used by SplitBlock or as the inclusive start of a SetInlineMark range. It must be a valid boundary in the current exact block text.")]
     int? StartOffset = null,
+    [property: Description("Zero-based UTF-16 exclusive end offset used only by SetInlineMark. It must be a valid boundary in the current exact block text.")]
     int? EndOffset = null,
+    [property: Description("Inline mark name used only by SetInlineMark.")]
     string? Mark = null,
+    [property: Description("Whether SetInlineMark adds/enables the mark; false removes it from the exact range.")]
     bool? Enabled = null,
+    [property: Description("Optional value used by valued inline marks such as Link, Language, or CharacterStyle.")]
     string? Value = null,
+    [property: Description("Existing project image ID used only when inserting or converting a Figure through a tool that permits Figure mutations.")]
     Guid? ImageId = null,
+    [property: Description("Alternative text for a meaningful Figure. Purely decorative Figures must use the focused Figure contract's decorative decision and carry no alternative text.")]
     string? AltText = null,
+    [property: Description("Heading level 1-6 used only by Heading insertions or type changes; it is independent from styleRole.")]
     int? HeadingLevel = null,
     [property: Description("Direct paragraph formatting used only by SetParagraphPresentation. To format a new block in one batch, give InsertBlock an explicit blockId and follow it with SetParagraphPresentation for that ID.")]
     ParagraphPresentation? ParagraphPresentation = null)
 {
     public const string ToolOperationGuidance =
         "Canonical operations are InsertBlock, ReplaceBlockText, DeleteBlock, MoveBlock, SplitBlock, MergeBlocks, SetBlockType, SetBlockStyle, SetInlineMark, and SetParagraphPresentation. " +
+        "InsertBlock is additive: it creates a new block and never replaces or removes existing prose. Use ReplaceBlockText as the default for revising one existing block because it preserves that block's stable ID. " +
+        "For a multi-block rewrite, account for every source block in the intended range: retain it deliberately, replace its text, or delete it in the same atomic batch; insert only genuinely additional replacement blocks and never append a rewritten section while leaving its superseded source in place. " +
         "Use SetBlockStyle—not SetStyleRole—to apply a Book Text Style. For direct formatting on a new block, give InsertBlock an explicit blockId and follow it in the same batch with SetParagraphPresentation for that ID.";
 
     public static IReadOnlyList<ManuscriptOperation> ToOperations(
