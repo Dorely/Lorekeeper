@@ -146,6 +146,24 @@ workflow instructions enforce active-canon precedence, read-only foreign
 references, compact paging and staging, durable work logs, and honest
 verification.
 
+`AssistantWorkflowInstructions.EditorContinuityMemory`, appended by
+`EditorChatFor` to both vector-enabled and vector-disabled Editor prompts,
+keeps Editor continuity memory narrower than ordinary drafting. Continuity-
+sensitive drafting or revision requires focused project searches and relevant
+current-record reads for grounding; search does not itself authorize
+persistence, and a normal prose draft does not trigger a post-draft entity
+reconciliation pass. Stable facts may be persisted only when user-directed or
+corroborated by multiple current/canonical passages and durable beyond the
+scene. Explicit canon changes route to the narrowest owner. Ordinary drafting
+may add a metadata-free `RelevantTo` link for a materially relevant entity, but
+a mere mention does not qualify. Chapter-involvement recaps, choreography,
+temporary state, dialogue/quote archives, and assistant-invented drafting
+texture remain outside entity memory. Voice memory is limited to compact
+abstract traits supported by multiple passages or explicit direction; exact
+dialogue is evidence rather than automatically reusable phrasing and is not
+auto-stored. The examples in this guidance illustrate routing and are not a
+whitelist.
+
 All assistants receive a bounded one-hop direct-reference manifest and
 origin-qualified list/search/read tools. Foreign IDs are valid only through the
 active project's direct links; referenced evidence is read-only and never a

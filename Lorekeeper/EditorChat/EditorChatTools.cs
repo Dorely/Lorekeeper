@@ -490,7 +490,7 @@ IAppDatabaseOperationFactory database, IActService acts,
                 "Each item must include chapterId, reason, and chapter-specific instructions. " +
                 $"Workers can alter only the {(context.ContentTarget.IsCore ? "Core" : "selected release")} chapter body; this coordinator reviews their completed/staged changes and takes follow-up action only if needed. " +
                 (context.ContentTarget.IsCore
-                    ? "Before calling this, make any broader canon, outline, entity, beat, relationship, fact, or synopsis updates yourself. "
+                    ? "Before calling this, make only the broader canon, outline, entity, beat, relationship, fact, or synopsis updates needed under the Editor continuity-memory discipline; a prose revision alone does not authorize a broad post-draft update. "
                     : "Do not change shared outline, canon, entities, beats, relationships, facts, or synopses from this release target. ") +
                 "A successful worker result is already applied or staged; do not rerun it merely because persisted reads still show the pre-review manuscript."));
 
