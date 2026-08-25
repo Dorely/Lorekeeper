@@ -159,47 +159,51 @@
                     @foreach (var model in CodexModels)
                     {
                         <div class="model-row">
-                            <div class="model-fields">
-                                <label><span>@(model.Id == _codexProvider.Id ? "Connection model" : "Display name")</span><input class="form-control form-control-sm" @bind="model.DisplayName" disabled="@(model.Id == _codexProvider.Id)" /></label>
-                                <label>
-                                    <span>Model ID</span>
-                                    <div class="model-id-field">
-                                        <input class="form-control form-control-sm" @bind="model.ModelId" />
-                                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingRowModelId is not null)" @onclick="() => ListRowModelsAsync(model)">@(_listingRowModelId == model.Id ? "Listing…" : "List models")</button>
-                                    </div>
-                                    @if (_rowModels.TryGetValue(model.Id, out var rowModels) && rowModels.Count > 0)
-                                    {
-                                        <select class="form-select form-select-sm" value="@model.ModelId" @onchange="args => OnRowModelSelected(model, args)">
-                                            <option value="">-- Select a model --</option>
-                                            @foreach (var candidate in rowModels)
+                            <div class="model-row-main">
+                                <div class="model-fields">
+                                    <label><span>@(model.Id == _codexProvider.Id ? "Connection model" : "Display name")</span><input class="form-control form-control-sm" @bind="model.DisplayName" disabled="@(model.Id == _codexProvider.Id)" /></label>
+                                    <label>
+                                        <span>Model ID</span>
+                                        <div class="model-id-field">
+                                            <input class="form-control form-control-sm" @bind="model.ModelId" />
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingRowModelId is not null)" @onclick="() => ListRowModelsAsync(model)">@(_listingRowModelId == model.Id ? "Listing…" : "List models")</button>
+                                        </div>
+                                        @if (_rowModels.TryGetValue(model.Id, out var rowModels) && rowModels.Count > 0)
+                                        {
+                                            <select class="form-select form-select-sm" value="@model.ModelId" @onchange="args => OnRowModelSelected(model, args)">
+                                                <option value="">-- Select a model --</option>
+                                                @foreach (var candidate in rowModels)
+                                                {
+                                                    <option value="@candidate">@candidate</option>
+                                                }
+                                            </select>
+                                            <small class="field-note">Pick a discovered model or keep your typed ID.</small>
+                                        }
+                                    </label>
+                                    <label>
+                                        <span>Thinking effort</span>
+                                        <select class="form-select form-select-sm" @bind="model.ReasoningEffort">
+                                            <option value="">Provider default</option>
+                                            @foreach (var choice in ReasoningEffortChoices)
                                             {
-                                                <option value="@candidate">@candidate</option>
+                                                <option value="@choice.Value">@choice.Label</option>
                                             }
                                         </select>
-                                        <small class="field-note">Pick a discovered model or keep your typed ID.</small>
-                                    }
-                                </label>
-                                <label>
-                                    <span>Thinking effort</span>
-                                    <select class="form-select form-select-sm" @bind="model.ReasoningEffort">
-                                        <option value="">Provider default</option>
-                                        @foreach (var choice in ReasoningEffortChoices)
-                                        {
-                                            <option value="@choice.Value">@choice.Label</option>
-                                        }
-                                    </select>
-                                    <small class="field-note">Higher levels use more time and tokens; model support varies.</small>
-                                </label>
-                                @RenderMaxTokenControls(model)
+                                        <small class="field-note">Higher levels use more time and tokens; model support varies.</small>
+                                    </label>
+                                    @RenderMaxTokenControls(model)
+                                </div>
+                                <div class="model-status-panel">
+                                    <div class="model-readiness"><div><span>Chat</span>@RenderChatStatus(model)</div><div><span>Vision</span>@RenderVisionStatus(model)</div>@if (model.IsDefault){<span class="lk-status-pill is-accent">Default</span>}</div>
+                                    @if (ModelReadinessDetail(model) is { } detail){<div class="model-detail">@detail</div>}
+                                    <div class="model-actions">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SaveProviderAsync(model)">Save</button>
+                                        <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test")</button>
+                                        @if (!model.IsDefault){<button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!IsChatReady(model))" title="@DefaultButtonTitle(model)" @onclick="() => SetDefaultAsync(model.Id)">Set default</button>}
+                                        @if (model.CredentialSourceId is not null){<button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleModelDelete(model.Id)">Delete</button>}
+                                    </div>
+                                </div>
                             </div>
-                            <div class="model-readiness"><div><span>Chat</span>@RenderChatStatus(model)</div><div><span>Vision</span>@RenderVisionStatus(model)</div>@if (model.IsDefault){<span class="lk-status-pill is-accent">Default</span>}</div>
-                            <div class="model-actions">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SaveProviderAsync(model)">Save</button>
-                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test")</button>
-                                @if (!model.IsDefault){<button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!IsChatReady(model))" title="@DefaultButtonTitle(model)" @onclick="() => SetDefaultAsync(model.Id)">Set default</button>}
-                                @if (model.CredentialSourceId is not null){<button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleModelDelete(model.Id)">Delete</button>}
-                            </div>
-                            @if (ModelReadinessDetail(model) is { } detail){<div class="model-detail">@detail</div>}
                             @if (_confirmDeleteModelId == model.Id){<div class="inline-confirm"><span>Delete this model configuration?</span><button class="btn btn-sm btn-danger" @onclick="() => DeleteProviderAsync(model)">Delete</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteModelId = null">Cancel</button></div>}
                         </div>
                     }
@@ -239,47 +243,51 @@
                     @foreach (var model in ModelsFor(connection))
                     {
                         <div class="model-row">
-                            <div class="model-fields">
-                                <label><span>@(model.Id == connection.Id ? "Primary model name" : "Model name")</span><input class="form-control form-control-sm" @bind="model.DisplayName" /></label>
-                                <label>
-                                    <span>Model ID</span>
-                                    <div class="model-id-field">
-                                        <input class="form-control form-control-sm" @bind="model.ModelId" />
-                                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingRowModelId is not null)" @onclick="() => ListRowModelsAsync(model)">@(_listingRowModelId == model.Id ? "Listing…" : "List models")</button>
-                                    </div>
-                                    @if (_rowModels.TryGetValue(model.Id, out var rowModels) && rowModels.Count > 0)
-                                    {
-                                        <select class="form-select form-select-sm" value="@model.ModelId" @onchange="args => OnRowModelSelected(model, args)">
-                                            <option value="">-- Select a model --</option>
-                                            @foreach (var candidate in rowModels)
+                            <div class="model-row-main">
+                                <div class="model-fields">
+                                    <label><span>@(model.Id == connection.Id ? "Primary model name" : "Model name")</span><input class="form-control form-control-sm" @bind="model.DisplayName" /></label>
+                                    <label>
+                                        <span>Model ID</span>
+                                        <div class="model-id-field">
+                                            <input class="form-control form-control-sm" @bind="model.ModelId" />
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingRowModelId is not null)" @onclick="() => ListRowModelsAsync(model)">@(_listingRowModelId == model.Id ? "Listing…" : "List models")</button>
+                                        </div>
+                                        @if (_rowModels.TryGetValue(model.Id, out var rowModels) && rowModels.Count > 0)
+                                        {
+                                            <select class="form-select form-select-sm" value="@model.ModelId" @onchange="args => OnRowModelSelected(model, args)">
+                                                <option value="">-- Select a model --</option>
+                                                @foreach (var candidate in rowModels)
+                                                {
+                                                    <option value="@candidate">@candidate</option>
+                                                }
+                                            </select>
+                                            <small class="field-note">Pick a discovered model or keep your typed ID.</small>
+                                        }
+                                    </label>
+                                    <label>
+                                        <span>Thinking effort</span>
+                                        <select class="form-select form-select-sm" @bind="model.ReasoningEffort">
+                                            <option value="">Provider default</option>
+                                            @foreach (var choice in ReasoningEffortChoices)
                                             {
-                                                <option value="@candidate">@candidate</option>
+                                                <option value="@choice.Value">@choice.Label</option>
                                             }
                                         </select>
-                                        <small class="field-note">Pick a discovered model or keep your typed ID.</small>
-                                    }
-                                </label>
-                                <label>
-                                    <span>Thinking effort</span>
-                                    <select class="form-select form-select-sm" @bind="model.ReasoningEffort">
-                                        <option value="">Provider default</option>
-                                        @foreach (var choice in ReasoningEffortChoices)
-                                        {
-                                            <option value="@choice.Value">@choice.Label</option>
-                                        }
-                                    </select>
-                                    <small class="field-note">Higher levels use more time and tokens; model support varies.</small>
-                                </label>
-                                @RenderMaxTokenControls(model)
+                                        <small class="field-note">Higher levels use more time and tokens; model support varies.</small>
+                                    </label>
+                                    @RenderMaxTokenControls(model)
+                                </div>
+                                <div class="model-status-panel">
+                                    <div class="model-readiness"><div><span>Chat</span>@RenderChatStatus(model)</div><div><span>Vision</span>@RenderVisionStatus(model)</div>@if (model.IsDefault){<span class="lk-status-pill is-accent">Default</span>}</div>
+                                    @if (ModelReadinessDetail(model) is { } detail){<div class="model-detail">@detail</div>}
+                                    <div class="model-actions">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SaveProviderAsync(model)">Save</button>
+                                        <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test")</button>
+                                        @if (!model.IsDefault){<button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!IsChatReady(model))" title="@DefaultButtonTitle(model)" @onclick="() => SetDefaultAsync(model.Id)">Set default</button>}
+                                        @if (model.CredentialSourceId is not null){<button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleModelDelete(model.Id)">Delete</button>}
+                                    </div>
+                                </div>
                             </div>
-                            <div class="model-readiness"><div><span>Chat</span>@RenderChatStatus(model)</div><div><span>Vision</span>@RenderVisionStatus(model)</div>@if (model.IsDefault){<span class="lk-status-pill is-accent">Default</span>}</div>
-                            <div class="model-actions">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SaveProviderAsync(model)">Save</button>
-                                <button type="button" class="btn btn-sm btn-outline-info" disabled="@AnyTestRunning" @onclick="() => TestProviderAsync(model)">@(_testingProviderId == model.Id ? "Testing…" : "Test")</button>
-                                @if (!model.IsDefault){<button type="button" class="btn btn-sm btn-outline-primary" disabled="@(!IsChatReady(model))" title="@DefaultButtonTitle(model)" @onclick="() => SetDefaultAsync(model.Id)">Set default</button>}
-                                @if (model.CredentialSourceId is not null){<button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => ToggleModelDelete(model.Id)">Delete</button>}
-                            </div>
-                            @if (ModelReadinessDetail(model) is { } detail){<div class="model-detail">@detail</div>}
                             @if (_confirmDeleteModelId == model.Id){<div class="inline-confirm"><span>Delete this model configuration?</span><button class="btn btn-sm btn-danger" @onclick="() => DeleteProviderAsync(model)">Delete</button><button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteModelId = null">Cancel</button></div>}
                         </div>
                     }
