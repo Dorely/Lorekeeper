@@ -172,7 +172,27 @@ omit it. The Editor unions and deduplicates candidates across facets, verifies
 each with focused `search_project` and `read_chapter` evidence, and rejects
 proximity-only, generic-match-only, or unexplained-score-only candidates before
 assigning revision workers. The complete requested continuity change belongs in
-the later chapter-specific revision instructions, not in an impact query.
+the later chapter-specific revision instructions, not in an impact query. An
+exact downstream read that demonstrates the requested consequence is sufficient
+even without a lexical hit, and explicit whole-book or multi-chapter scope must
+not be silently narrowed because one facet is weak. Mapping and exact
+verification precede mutation. For three or more verified semantic prose
+chapters, Editor makes exactly one `start_revision_agents` call containing the
+complete set. For one or two chapters, direct manuscript tools are the default,
+unless the user explicitly requests one worker call for two genuinely distributed
+chapters. The direct-versus-worker choice is made before mutation; discovery,
+exact reads, and warranted canon updates finish before a separate assistant
+round and tool batch for the worker call. For a set classified as one or two
+chapters, direct manuscript mutations are limited to those verified targets.
+Editor cannot edit the first two targets and delegate the remainder. Pure canon,
+reusable style, typography, Designed Page, layout, and page-scene work remains
+with the coordinator. In a mixed request, qualifying prose is delegated first
+and the coordinator then applies its remaining owned work to the resulting
+projected manuscript.
+Workers receive semantic manuscript tools, may edit text and Figures, preserve
+Designed Page references, and do not own composition or layout. Related Figure
+operations may accompany an assigned prose revision, but Figure-only work does
+not count toward the three-prose-chapter threshold.
 
 `AssistantWorkflowInstructions.EditorContinuityMemory`, appended by
 `EditorChatFor` to both vector-enabled and vector-disabled Editor prompts,
@@ -301,9 +321,10 @@ write operation and dispose it immediately after commit.
 
 ### Contest Mode and revision workers
 
-Contest Mode captures one terminal context and exact target/chapter manuscript
-snapshot, then runs independent selected models without tools. Candidate raw
-responses and validated semantic operation proposals persist independently. The
+Contest Mode remains a one-chapter terminal context and exact target/chapter
+manuscript snapshot, then runs independent selected models without tools; it does
+not expose the multi-chapter revision-worker workflow. Candidate raw responses
+and validated semantic operation proposals persist independently. The
 Review workspace is reachable while the batch runs, streams candidate status,
 and allows explicit per-candidate resolution. Keeping the chat component mounted
 while its pane is hidden preserves the live subscription.
@@ -315,16 +336,26 @@ stored on the batch. Canonical `OriginalManuscriptJson` remains the durable
 validation/audit source and is never appended raw to a candidate prompt.
 
 Editor revision agents are same-turn, prose-only worker sessions assigned to
-specific chapters. The coordinator validates assignments, persists the job and
-session records, runs bounded parallel workers, and receives only compact IDs,
-statuses, summaries, errors, and pending-change IDs. Full prompts, operations,
-proposals, raw responses, and worker transcripts remain in durable session
-detail and never inflate the parent model result.
+specific chapters. For three or more verified semantic prose chapters, the
+coordinator makes one call containing the complete set; one or two chapters use
+direct manuscript tools by default unless the user explicitly requests one
+two-chapter worker call. The coordinator validates assignments, persists the job
+and session records, runs bounded parallel workers, and receives only compact
+IDs, statuses, summaries, errors, and pending-change IDs. Full prompts,
+operations, proposals, raw responses, and worker transcripts remain in durable
+session detail and never inflate the parent model result. This classification
+happens before any manuscript mutation, so Review Edits cannot stage a direct
+change that later blocks delegation for the same chapter.
 
 Each worker uses paginated grounding and filtered source reads, then terminates
-through the semantic manuscript operation boundary. Its automatic manuscript
-context plus read/inspect tools use the same sparse projection and preserve
-absolute indexes, revision, source hash, and stable IDs. With Review Edits enabled,
+through the semantic manuscript operation boundary. Workers receive semantic
+manuscript tools only, may edit text and Figures, preserve Designed Page
+references, and do not perform composition, layout, or page-scene work; the
+coordinator owns those operations. Figures are a semantic exception only within
+an assigned prose revision and do not independently trigger delegation. Its
+automatic manuscript context plus read/inspect tools use the same sparse
+projection and preserve absolute indexes, revision, source hash, and stable IDs.
+With Review Edits enabled,
 its pending change is correlated to the parent tool call and adopted into the
 active Editor overlay, while the stored chapter remains unchanged until
 approval. Core and release workers build automatic context, refresh, validate

@@ -75,7 +75,15 @@ IAppDatabaseOperationFactory database, IActService acts,
         CancellationToken cancellationToken = default)
     {
         var tools = new List<AITool>();
-        var impactDescription = "Read-only book-level impact map for continuity changes. Search expected source content, not edit instructions: use one 2–6-term facet per call and keep combined query plus keywords under ten high-signal terms. Keywords are optional exact aliases or terms expected to coexist with the query; put alternatives in separate calls. Resolve exact chapter, entity, and event IDs first and include only directly affected IDs. anchorChapterId is forward-only for a known originating chapter: omit it for backward, whole-book, bidirectional, or direction-neutral impact. Combine and deduplicate facet candidates yourself, then verify them with focused search_project and read_chapter calls before assigning revisions; reject anchor-only, generic-term-only, and opaque-score-only candidates. Put the complete requested change in revision instructions after retrieval. The map combines outline order, chapter synopses, server-side keyword/body checks, hybrid project-search hits, affected entities/events, adjacency, and downstream chapters.";
+        var impactDescription =
+            "Read-only book-level impact map for continuity changes. Use this before choosing prose targets for an explicit book-wide or multi-chapter request. "
+            + "Search expected source content, not edit instructions: use one 2–6-term facet per call and keep combined query plus keywords under ten high-signal terms. Keywords are optional exact aliases or terms expected to coexist with the query; put alternatives in separate calls. "
+            + "Resolve exact chapter, entity, and event IDs first and include only directly affected IDs. anchorChapterId is forward-only for a known originating chapter: omit it for backward, whole-book, bidirectional, or direction-neutral impact. "
+            + "Combine and deduplicate facet candidates yourself, then verify them with focused search_project and read_chapter calls before assigning revisions. An exact downstream read that demonstrates the requested consequence is sufficient even without a lexical hit; reject anchor-only, generic-term-only, and opaque-score-only candidates. "
+            + (mode == EditorChatToolMode.Normal
+                ? "Do not silently narrow explicit user scope. Classify the complete verified set before any manuscript mutation. For three or more verified semantic prose chapters, make one start_revision_agents call containing the complete set; do not edit the first targets directly. For one or two, direct manuscript tools are the default unless the user explicitly requests one worker call for two. Put the complete requested change in chapter-specific worker instructions after retrieval. "
+                : "Contest Mode has no start_revision_agents tool; use this map only as read-only grounding for the single-chapter start_contest workflow, whose captured conversation retains the complete request. ")
+            + "The map combines outline order, chapter synopses, server-side keyword/body checks, hybrid project-search hits, affected entities/events, adjacency, and downstream chapters.";
 
         tools.Add(AIFunctionFactory.Create(
             method: (int offset = 0, int limit = 50) => ListManuscriptAnnotationsAsync(context, offset, limit),
@@ -485,12 +493,14 @@ IAppDatabaseOperationFactory database, IActService acts,
             method: (EditorRevisionAgentAssignmentInput[] chapters) => StartRevisionAgentsAsync(context, chapters),
             name: "start_revision_agents",
             description:
-                "Run prose-only revision workers only for substantial prose work distributed across multiple chapters or a clearly book-wide affected set. " +
-                "Do not use this for a single chapter, local scene, isolated rewrite, or style pass; use the direct manuscript tools for those requests. " +
-                "Each item must include chapterId, reason, and chapter-specific instructions. " +
+                "Run prose-only revision workers for a verified set of three or more semantic prose chapters, using one call containing the complete set. " +
+                "For one or two chapters, use direct manuscript tools by default; an explicit user request may use one worker call for two genuinely distributed chapters. " +
+                "Choose this path before any manuscript mutation: do not directly mutate a target assigned here or work through the first two targets directly. Call only after discovery, exact reads, and warranted canon/outline/entity mutations, in a separate assistant round and tool batch; do not combine it with discovery, search, read, or mutation tools. " +
+                "After workers finish, direct tools are reserved for specific verified corrections and coordinator-owned non-prose work against the resulting projected manuscript. " +
+                "Each item must include chapterId, reason, and chapter-specific instructions for semantic manuscript work. Workers may edit related Figures, but Figure-only work does not count toward the three-prose-chapter threshold; the coordinator owns reusable style, typography, Designed Page, layout, composition, and page-scene work. " +
                 $"Workers can alter only the {(context.ContentTarget.IsCore ? "Core" : "selected release")} chapter body; this coordinator reviews their completed/staged changes and takes follow-up action only if needed. " +
                 (context.ContentTarget.IsCore
-                    ? "Before calling this, make only the broader canon, outline, entity, beat, relationship, fact, or synopsis updates needed under the Editor continuity-memory discipline; a prose revision alone does not authorize a broad post-draft update. "
+                    ? "Before calling this, make only the broader canon, outline, entity, beat, relationship, fact, or synopsis updates warranted under the Editor continuity-memory discipline; no such mutation is required solely to delegate prose, and a prose revision alone does not authorize a broad post-draft update. "
                     : "Do not change shared outline, canon, entities, beats, relationships, facts, or synopses from this release target. ") +
                 "A successful worker result is already applied or staged; do not rerun it merely because persisted reads still show the pre-review manuscript."));
 
