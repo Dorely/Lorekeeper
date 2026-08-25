@@ -1194,7 +1194,13 @@ else
     {
         CloseMenu();
         if (_activeChapterId == chapterId) return;
-        if (!await LoadChapterAsync(chapterId, _contentTarget, applyRequestedRouteState: false)) return;
+        var carriedMode = _mode;
+        if (!await LoadChapterAsync(
+                chapterId,
+                _contentTarget,
+                applyRequestedRouteState: false,
+                carriedMode: carriedMode))
+            return;
 
         SynchronizeChapter?.Invoke(chapterId);
         await UpdateEditorLocationAsync(EditorHref(chapterId));
@@ -1203,13 +1209,17 @@ else
     private async Task<bool> LoadChapterAsync(
         Guid targetId,
         EditorContentTarget requestedTarget,
-        bool applyRequestedRouteState)
+        bool applyRequestedRouteState,
+        EditorMode? carriedMode = null)
     {
         var project = Project;
         if (project is null) return false;
 
         _restoreChapterAfterRender = false;
-        if (_activeChapterId != targetId || _contentTarget != requestedTarget)
+        var isRealTransition = _activeChapterId != targetId
+            || _contentTarget != requestedTarget
+            || _loadedContentTarget != requestedTarget;
+        if (isRealTransition)
         {
             _manuscriptLocation = null;
             _manuscriptLocationIdentity = null;
@@ -1225,7 +1235,10 @@ else
         if (_activeChapterId is not null && !await FlushAsync())
             return false;
 
-        ResetInlineReviewState();
+        if (isRealTransition)
+            ResetChapterReviewState();
+        else
+            ResetInlineReviewState();
         _contentTarget = requestedTarget;
         _loadedContentTarget = requestedTarget;
 
@@ -1254,10 +1267,20 @@ else
         await RefreshContextSurfacesAsync();
 
         if (await ActivateCurrentContestReviewAsync())
+        {
+            if (carriedMode is not null)
+                await RememberEditorModeAsync(EditorMode.Review);
             return true;
+        }
 
         _contestReviewProjection = null;
         SelectInitialModeForCurrentChapter();
+        if (carriedMode is { } previousMode)
+        {
+            _mode = ResolveCarriedMode(previousMode);
+            SelectOpenCompositionForCurrentChapter();
+            await RememberEditorModeAsync(_mode);
+        }
         if (applyRequestedRouteState
             && Enum.TryParse<EditorMode>(RequestedMode, ignoreCase: true, out var requestedMode))
         {
@@ -2205,6 +2228,11 @@ else
             selectedMode = EditorMode.Edit;
 
         _mode = selectedMode;
+        SelectOpenCompositionForCurrentChapter();
+    }
+
+    private void SelectOpenCompositionForCurrentChapter()
+    {
         if (_mode == EditorMode.Pages)
         {
             var pages = DesignedPageIds;
@@ -2212,6 +2240,15 @@ else
                 _openCompositionId = pages[0];
         }
     }
+
+    private EditorMode ResolveCarriedMode(EditorMode previousMode) => previousMode switch
+    {
+        EditorMode.Review => EditorMode.Review,
+        EditorMode.Read => EditorMode.Read,
+        EditorMode.Edit => CurrentChapterContainsOnlyDesignedPages ? EditorMode.Pages : EditorMode.Edit,
+        EditorMode.Pages => DesignedPageIds.Count > 0 ? EditorMode.Pages : EditorMode.Edit,
+        _ => EditorMode.Edit,
+    };
 
     private bool CurrentChapterContainsOnlyDesignedPages
     {
@@ -2854,6 +2891,17 @@ else
         _pendingReviewScrollBlockId = null;
         _reviewError = null;
         ClearInlineReviewEditors();
+    }
+
+    private void ResetChapterReviewState()
+    {
+        _reviewLoading = false;
+        _reviewPendingBatches = [];
+        _reviewProjection = null;
+        _latestAssistantReview = null;
+        _contestReviewBatches = [];
+        _contestReviewProjection = null;
+        ResetInlineReviewState();
     }
 
     private void ClearInlineReviewEditors()

@@ -221,6 +221,16 @@ Core/release presentation. It is a private selected-chapter trace, not a full
 publication render. Read annotation ranges map rendered text back to stable
 semantic blocks without changing the Press protocol.
 
+Direct chapter selection carries the currently visible mode into the selected
+chapter: Review remains Review, Read remains Read, Edit opens Pages only for a
+Designed-Page-only destination, and Pages remains Pages when the destination has
+any Designed Page. Contest Review always forces Review. Route and reload
+selection instead uses the destination chapter's stored mode or its default;
+the resolved carried mode is then written as that chapter's preference. Chapter
+transitions clear the prior chapter's loaded Review projection, baseline view,
+pending batches, and Contest state before loading the new chapter without
+deleting durable review data.
+
 Edit, Read, and Review also share a transient `ManuscriptViewLocation` scoped to
 the current project, chapter, and Core/release target; it is never persisted as
 manuscript data or workspace preference. Edit records the semantic block ID,
