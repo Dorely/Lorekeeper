@@ -45,8 +45,13 @@
 .inline-confirm { align-items: center; background: var(--lk-danger-soft); border-radius: var(--lk-radius-sm); display: flex; gap: 0.45rem; margin-top: 0.75rem; padding: 0.55rem; }
 .inline-confirm span { color: var(--lk-danger); font-size: 0.78rem; font-weight: 700; margin-right: auto; }
 .connection-footer { border-top: 1px solid var(--lk-line); padding: 0.6rem 1rem; }
-.child-model-form { align-items: end; background: var(--lk-soft); border-top: 1px solid var(--lk-line); display: grid; gap: 0.75rem; grid-template-columns: minmax(12rem, 1fr) repeat(3, minmax(9rem, 0.7fr)) auto; padding: 0.8rem 1rem; }
-.child-model-form > div:first-child { display: grid; }
+.child-model-form { background: var(--lk-soft); border-top: 1px solid var(--lk-line); padding: 0.85rem 1rem; }
+.child-model-header { align-items: flex-start; display: flex; gap: 1rem; justify-content: space-between; margin-bottom: 0.85rem; }
+.child-model-heading { display: grid; gap: 0.2rem; min-width: 0; }
+.child-model-heading strong { font-family: Georgia, "Times New Roman", serif; font-size: 0.92rem; }
+.child-model-heading small { overflow-wrap: anywhere; }
+.child-model-actions { flex: 0 0 auto; }
+.child-model-fields { grid-template-columns: repeat(3, minmax(11rem, 1fr)); }
 .child-model-form small { color: var(--lk-muted); font-size: 0.7rem; }
 .connection-delete-confirm { align-items: center; background: var(--lk-danger-soft); border-top: 1px solid var(--lk-danger-border); display: flex; gap: 0.55rem; padding: 0.8rem 1rem; }
 .connection-delete-confirm > div { display: grid; margin-right: auto; }
@@ -58,8 +63,7 @@
     .model-status-panel { align-items: center; display: flex; flex-wrap: wrap; gap: 0.85rem 1.25rem; padding-top: 0; }
     .model-detail { flex: 1 1 18rem; }
     .model-actions { flex: 0 0 auto; }
-    .child-model-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .child-model-form > div:first-child,.child-model-form > .lk-toolbar { grid-column: 1 / -1; }
+    .child-model-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 760px) {
@@ -69,4 +73,7 @@
 @media (max-width: 520px) {
     .model-fields { grid-template-columns: 1fr; }
     .model-status-panel { align-items: start; flex-direction: column; }
+    .child-model-header { flex-direction: column; }
+    .child-model-actions { width: 100%; }
+    .child-model-fields { grid-template-columns: 1fr; }
 }

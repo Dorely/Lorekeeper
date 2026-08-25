@@ -900,57 +900,61 @@
             return;
 
         <div class="child-model-form">
-            <div><span class="lk-section-kicker">Shared connection</span><strong>Add another model</strong><small>Credentials and endpoint come from @(parent.DisplayName ?? parent.Name).</small></div>
-            <label><span>Display name</span><input class="form-control form-control-sm" placeholder="GPT-5 Mini" @bind="draft.DisplayName" /></label>
-            <label>
-                <span>Model ID</span>
-                <div class="model-id-field">
-                    <input class="form-control form-control-sm" placeholder="gpt-5-mini" @bind="draft.ModelId" />
-                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingChildModelParentId is not null)" @onclick="() => ListChildModelsAsync(parent)">@(_listingChildModelParentId == parent.Id ? "Listing…" : "List models")</button>
-                </div>
-                @if (_childModels.TryGetValue(parent.Id, out var childModels) && childModels.Count > 0)
-                {
-                    <select class="form-select form-select-sm" value="@draft.ModelId" @onchange="args => OnChildModelSelected(parent.Id, args)">
-                        <option value="">-- Select a model --</option>
-                        @foreach (var candidate in childModels)
+            <div class="child-model-header">
+                <div class="child-model-heading"><span class="lk-section-kicker">Shared connection</span><strong>Add another model</strong><small>Credentials and endpoint come from @(parent.DisplayName ?? parent.Name).</small></div>
+                <div class="lk-toolbar child-model-actions"><button type="button" class="btn btn-sm btn-primary" @onclick="() => AddChildModelAsync(parent, draft)">Test and add</button><button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _childForms.Remove(parent.Id)">Cancel</button></div>
+            </div>
+            <div class="model-fields child-model-fields">
+                <label><span>Display name</span><input class="form-control form-control-sm" placeholder="GPT-5 Mini" @bind="draft.DisplayName" /></label>
+                <label>
+                    <span>Model ID</span>
+                    <div class="model-id-field">
+                        <input class="form-control form-control-sm" placeholder="gpt-5-mini" @bind="draft.ModelId" />
+                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_listingChildModelParentId is not null)" @onclick="() => ListChildModelsAsync(parent)">@(_listingChildModelParentId == parent.Id ? "Listing…" : "List models")</button>
+                    </div>
+                    @if (_childModels.TryGetValue(parent.Id, out var childModels) && childModels.Count > 0)
+                    {
+                        <select class="form-select form-select-sm" value="@draft.ModelId" @onchange="args => OnChildModelSelected(parent.Id, args)">
+                            <option value="">-- Select a model --</option>
+                            @foreach (var candidate in childModels)
+                            {
+                                <option value="@candidate">@candidate</option>
+                            }
+                        </select>
+                        <small class="field-note">Pick a discovered model or keep your typed ID.</small>
+                    }
+                </label>
+                <label>
+                    <span>Thinking effort</span>
+                    <select class="form-select form-select-sm" @bind="draft.ReasoningEffort">
+                        <option value="">Provider default</option>
+                        @foreach (var choice in ReasoningEffortChoices)
                         {
-                            <option value="@candidate">@candidate</option>
+                            <option value="@choice.Value">@choice.Label</option>
                         }
                     </select>
-                    <small class="field-note">Pick a discovered model or keep your typed ID.</small>
-                }
-            </label>
-            <label>
-                <span>Thinking effort</span>
-                <select class="form-select form-select-sm" @bind="draft.ReasoningEffort">
-                    <option value="">Provider default</option>
-                    @foreach (var choice in ReasoningEffortChoices)
-                    {
-                        <option value="@choice.Value">@choice.Label</option>
-                    }
-                </select>
-                <small class="field-note">Support depends on the model.</small>
-            </label>
-            <label>
-                <span>Max output tokens</span>
-                <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto" @bind="draft.MaxOutputTokens" />
-                <small class="field-note">Blank uses the per-endpoint auto default.</small>
-            </label>
-            <label>
-                <span>Max input tokens</span>
-                <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto (model/default)" @bind="draft.MaxInputTokens" />
-                <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.</small>
-            </label>
-            <label>
-                <span>Max tokens field</span>
-                <select class="form-select form-select-sm" @bind="draft.MaxTokensField">
-                    @foreach (var choice in MaxTokensFieldChoices)
-                    {
-                        <option value="@choice.Value">@choice.Label</option>
-                    }
-                </select>
-            </label>
-            <div class="lk-toolbar"><button type="button" class="btn btn-sm btn-primary" @onclick="() => AddChildModelAsync(parent, draft)">Test and add</button><button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _childForms.Remove(parent.Id)">Cancel</button></div>
+                    <small class="field-note">Support depends on the model.</small>
+                </label>
+                <label>
+                    <span>Max output tokens</span>
+                    <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto" @bind="draft.MaxOutputTokens" />
+                    <small class="field-note">Blank uses the per-endpoint auto default.</small>
+                </label>
+                <label>
+                    <span>Max input tokens</span>
+                    <input type="number" min="1" step="1" class="form-control form-control-sm" placeholder="Auto (model/default)" @bind="draft.MaxInputTokens" />
+                    <small class="field-note">Advisory context budget used to decide when assistant tool results are compacted. Blank uses a configured per-model value when available, then the general default.</small>
+                </label>
+                <label>
+                    <span>Max tokens field</span>
+                    <select class="form-select form-select-sm" @bind="draft.MaxTokensField">
+                        @foreach (var choice in MaxTokensFieldChoices)
+                        {
+                            <option value="@choice.Value">@choice.Label</option>
+                        }
+                    </select>
+                </label>
+            </div>
         </div>
     };
 
