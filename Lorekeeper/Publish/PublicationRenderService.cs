@@ -849,8 +849,8 @@ public sealed class PublicationRenderProcessor(
                 await db.SaveChangesAsync(cancellationToken);
             },
             cancellationToken);
-        if (result.ProtocolVersion != 7)
-            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 7 is required.");
+        if (result.ProtocolVersion != 8)
+            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 8 is required.");
         if (result.JobId is not null
             && !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a response for a different job.");
@@ -1333,7 +1333,7 @@ public sealed class PublicationRenderProcessor(
         var requiredCoverSurfaces = printProduct is null ? Array.Empty<string>() : RequiredCoverSurfaces(printProduct, release!.PrintCoverMode);
         var payload = new
         {
-            protocolVersion = 7,
+            protocolVersion = 8,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
             outputPurpose = job.TargetKind == PublicationTargetKind.CoreBook

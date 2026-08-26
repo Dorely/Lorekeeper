@@ -4,3 +4,4 @@ pub mod inspect;
 pub mod model;
 pub mod pdf;
 pub mod renderer;
+pub mod typography;

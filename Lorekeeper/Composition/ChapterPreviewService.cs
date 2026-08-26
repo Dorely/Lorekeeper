@@ -82,6 +82,10 @@ public sealed record ChapterPreviewLine(
     double WordSpacing,
     double CharacterSpacing,
     int ZIndex,
+    double BaselineOffsetPoints,
+    bool LightText,
+    bool Artifact,
+    string? Language,
     string? SemanticId = null,
     int? SourceStartUtf16 = null,
     int? SourceEndUtf16 = null);
@@ -92,7 +96,8 @@ public sealed record ChapterPreviewRun(
     bool Underline,
     bool Strikethrough,
     double BaselineShiftEm,
-    double SizeScale);
+    double SizeScale,
+    string? Language = null);
 
 public sealed record ChapterPreviewImage(
     Guid AssetId,
@@ -515,7 +520,7 @@ public sealed class ChapterPreviewService(
                 }).ToArray();
             var payload = new
             {
-                protocolVersion = 7,
+                protocolVersion = 8,
                 jobId = jobId.ToString("N"),
                 profile = "generic-digital-pdf-v1",
                 ink = "Color",
@@ -597,8 +602,8 @@ public sealed class ChapterPreviewService(
                 throw new InvalidOperationException($"Press preview failed. {Limit(stderr)} {Limit(stdout)}".Trim());
             var response = JsonSerializer.Deserialize<LayoutResponse>(stdout, JsonOptions)
                 ?? throw new InvalidDataException("Lorekeeper Press returned an empty layout response.");
-            if (response.ProtocolVersion != 7)
-                throw new InvalidDataException($"Lorekeeper Press returned preview protocol {response.ProtocolVersion}; protocol 7 is required.");
+            if (response.ProtocolVersion != 8)
+                throw new InvalidDataException($"Lorekeeper Press returned preview protocol {response.ProtocolVersion}; protocol 8 is required.");
             if (response.JobId != jobId.ToString("N"))
                 throw new InvalidDataException("Lorekeeper Press returned a preview response for a different job.");
             var firstPage = response.PageMap.Where(item => Guid.TryParse(item.ChapterId, out var mapped) && mapped == chapterId)
@@ -816,11 +821,11 @@ public sealed class ChapterPreviewService(
             using var font = new SKFont(typeface, (float)Math.Max(1, line.Size * run.SizeScale));
             using var paint = new SKPaint
             {
-                Color = TextColor(line.FillRgb, line.Opacity),
+                Color = TextColor(line.LightText ? new[] { 1d, 1d, 1d } : line.FillRgb, line.Opacity),
                 IsAntialias = true,
                 Style = SKPaintStyle.Fill,
             };
-            var runBaseline = baseline - run.BaselineShiftEm * line.Size;
+            var runBaseline = baseline - run.BaselineShiftEm * line.Size * run.SizeScale;
             var runStart = x;
             x += DrawRun(canvas, run.Text, x, runBaseline, font, paint, line.WordSpacing, line.CharacterSpacing);
             if (run.Underline || run.Strikethrough)
@@ -1050,9 +1055,20 @@ public sealed class ChapterPreviewService(
                 line.Text, line.Size, line.X, line.Y, line.RotationDegrees, line.RotationOriginX, line.RotationOriginY, line.Opacity,
                 line.FillRgb, line.SemanticRole, line.LinkPage is int target ? $"#page-{target}" : null,
                 line.Runs.FirstOrDefault()?.Face,
-                line.Runs.Select(run => new ChapterPreviewRun(run.Text, run.Face, run.Underline, run.Strikethrough, run.BaselineShiftEm, run.SizeScale)).ToArray(),
+                line.Runs.Select(run => new ChapterPreviewRun(
+                    run.Text,
+                    run.Face,
+                    run.Underline,
+                    run.Strikethrough,
+                    run.BaselineShiftEm,
+                    run.SizeScale,
+                    run.Language)).ToArray(),
                 line.WordSpacing, line.CharacterSpacing,
                 lineOrder.GetValueOrDefault(index, page.PaintOrder.Length + index),
+                line.BaselineOffsetPoints,
+                line.LightText,
+                line.Artifact,
+                line.Language,
                 line.SemanticId,
                 line.SourceStartUtf16,
                 line.SourceEndUtf16)).ToArray(),
@@ -1130,8 +1146,19 @@ public sealed class ChapterPreviewService(
         int? SourceStartUtf16,
         int? SourceEndUtf16,
         int? LinkPage,
-        LayoutRun[] Runs);
-    private sealed record LayoutRun(string Text, string Face, bool Underline, bool Strikethrough, double BaselineShiftEm, double SizeScale);
+        LayoutRun[] Runs,
+        double BaselineOffsetPoints,
+        bool LightText,
+        bool Artifact,
+        string? Language);
+    private sealed record LayoutRun(
+        string Text,
+        string Face,
+        bool Underline,
+        bool Strikethrough,
+        double BaselineShiftEm,
+        double SizeScale,
+        string? Language = null);
     private sealed record LayoutImage(string AssetId, double X, double Y, double Width, double Height, double RotationDegrees, double Opacity, string Fit, double CropX, double CropY, double SourceLeftFraction, double SourceWidthFraction, string? AltText, bool Decorative);
     private sealed record LayoutShape(string Kind, double X, double Y, double Width, double Height, double RotationDegrees, double Opacity, double[]? FillRgb, double[]? StrokeRgb, double StrokeWidth);
     private sealed record LayoutPageMap(string ChapterId, string BlockId, int PageNumber);

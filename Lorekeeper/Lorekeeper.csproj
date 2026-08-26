@@ -49,6 +49,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Lorekeeper.Tests" />
     <EmbeddedResource Include="..\Lorekeeper.Press\assets\print-products-v1.json" Link="PrintProducts\print-products-v1.json" />
+    <EmbeddedResource Include="..\Lorekeeper.Press\assets\manuscript-typography-v1.json" Link="Typography\manuscript-typography-v1.json" />
   </ItemGroup>
 
   <Target Name="BuildLorekeeperPressRuntime" AfterTargets="Build">

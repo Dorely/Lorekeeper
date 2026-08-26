@@ -866,6 +866,7 @@ mod tests {
                 size: 11.0,
                 x: 54.0,
                 y: 594.0,
+                baseline_offset_points: crate::font::descent_points(FontFace::SerifRegular, 11.0),
                 word_spacing: 0.0,
                 character_spacing: 0.0,
                 rotation_degrees: 0.0,

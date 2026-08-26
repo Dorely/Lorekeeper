@@ -8,8 +8,8 @@ use sha2::{Digest, Sha256};
 use unicode_linebreak::linebreaks;
 
 use crate::font::{
-    assert_supported_language, configure_custom_fonts, custom_family, is_bold, is_italic,
-    measure_text, subset_for_layout,
+    assert_supported_language, configure_custom_fonts, custom_family, is_italic, measure_text,
+    subset_for_layout,
 };
 use crate::image::{DecodedImage, EmbeddedImage, prepare_images};
 use crate::inspect;
@@ -22,6 +22,7 @@ use crate::model::{
 use crate::pdf::{
     PdfOptions, cover_background_total_ink_percent, write_pdf_cancellable_with_progress,
 };
+use crate::typography;
 
 const MAX_ASSETS: usize = 512;
 const MAX_ASSET_BYTES: u64 = 256 * 1024 * 1024;
@@ -893,7 +894,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     report_progress(job_root, request, 98, "Promoting validated artifacts");
     staging.promote(&output)?;
     let response = RenderResponse {
-        protocol_version: 7,
+        protocol_version: 8,
         renderer_version: env!("CARGO_PKG_VERSION"),
         job_id: Some(request.job_id.clone()),
         status: "completed".to_owned(),
@@ -1099,6 +1100,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                 fallback = vec![LayoutRun {
                     text: line.text.clone(), face: FontFace::SerifRegular, underline: false,
                     strikethrough: false, baseline_shift_em: 0.0, size_scale: 1.0,
+                    language: None,
                 }];
                 fallback.as_slice()
             } else { line.runs.as_slice() };
@@ -1110,6 +1112,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                     "strikethrough": run.strikethrough,
                     "baselineShiftEm": run.baseline_shift_em,
                     "sizeScale": run.size_scale,
+                    "language": run.language,
                 });
                 if let Some(fonts) = fonts.as_ref() {
                     let size = line.size * run.size_scale;
@@ -1126,6 +1129,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                 "rotationOriginX": line.rotation_origin_x,
                 "rotationOriginY": line.rotation_origin_y,
                 "opacity": line.opacity,
+                "baselineOffsetPoints": line.baseline_offset_points,
                 "lightText": line.light_text, "fillRgb": line.fill_rgb,
                 "semanticRole": line.semantic_role, "artifact": line.artifact,
                 "language": line.language, "readingOrder": line.reading_order,
@@ -1171,7 +1175,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
-            "protocolVersion": 7,
+            "protocolVersion": 8,
             "rendererVersion": env!("CARGO_PKG_VERSION"),
             "jobId": request.job_id,
             "pages": pages,
@@ -1287,10 +1291,10 @@ fn validate_request(
     job_root: &Path,
     progress: &mut dyn FnMut(usize, usize),
 ) -> RenderResult<std::collections::BTreeMap<String, DecodedImage>> {
-    if request.protocol_version != 7 {
+    if request.protocol_version != 8 {
         return reject(
             "PRESS_PROTOCOL_INVALID",
-            "Lorekeeper Press requires protocol version 7.",
+            "Lorekeeper Press requires protocol version 8.",
         );
     }
     if request.job_id.len() != 32 || !request.job_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -1383,7 +1387,7 @@ fn validate_request(
         .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
     validate_inline_languages(&request.document)
         .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
-    validate_caption_bounds(&request.document, &request.trim)
+    validate_caption_bounds(&request.document, &request.document, &request.trim)
         .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
     if request.assets.len() > MAX_ASSETS {
         return reject(
@@ -1951,6 +1955,7 @@ fn paginate_with_cancellation(
                     keep_with_next: true,
                     alignment: "left".to_owned(),
                     face: FontFace::SansBold,
+                    font_weight: 700,
                     small_caps: false,
                     space_before: 12.0,
                     space_after: 6.0,
@@ -2013,7 +2018,9 @@ fn paginate_with_cancellation(
                             .unwrap_or(true)
                     });
                 if include_chapter_heading && !chapter_title.is_empty() {
-                    pages.push(text_page(vec![(chapter_title.clone(), 22.0)], trim));
+                    let chapter_heading_style = BlockStyle::chapter_heading(trim);
+                    pages.push(empty_body_page());
+                    append_styled_text(&mut pages, &chapter_title, trim, &chapter_heading_style);
                 }
                 let chapter_synopsis = string(chapter, "synopsis");
                 if !chapter_synopsis.is_empty() {
@@ -2027,6 +2034,7 @@ fn paginate_with_cancellation(
                         keep_with_next: true,
                         alignment: "left".to_owned(),
                         face: FontFace::SerifItalic,
+                        font_weight: 400,
                         small_caps: false,
                         space_before: 0.0,
                         space_after: 8.0,
@@ -2128,6 +2136,13 @@ fn paginate_with_cancellation(
                         continue;
                     }
                     if block_type.eq_ignore_ascii_case("Figure") {
+                        let caption_style = block_style(document, &block, trim);
+                        let caption_runs = block_runs(document, &block, &caption_style);
+                        let caption_runs = if caption_runs.is_empty() {
+                            single_run(&string(&block, "caption"), caption_style.face)
+                        } else {
+                            caption_runs
+                        };
                         let presentation = block.get("presentation").unwrap_or(&Value::Null);
                         let placement = string(presentation, "placement");
                         let start_on_new_page = presentation
@@ -2169,6 +2184,7 @@ fn paginate_with_cancellation(
                             .and_then(Value::as_f64)
                             .unwrap_or(6.0) as f32;
                         let caption_placement = string(presentation, "captionPlacement");
+                        let caption_step = caption_style.size * caption_style.line_height.max(1.0);
                         let decorative = block
                             .get("decorative")
                             .and_then(Value::as_bool)
@@ -2193,6 +2209,8 @@ fn paginate_with_cancellation(
                             let mut page = dedicated_figure_page_with_layout(
                                 trim,
                                 &string(&block, "caption"),
+                                &caption_runs,
+                                &caption_style,
                                 string(&block, "assetId"),
                                 width_percent,
                                 focal_x,
@@ -2216,15 +2234,18 @@ fn paginate_with_cancellation(
                             if caption_placement == "Hidden" {
                                 page.lines.clear();
                             } else if caption_placement == "Above" {
-                                let top = trim.height_inches * 72.0 - trim.margin_inches * 72.0;
+                                let top = trim.height_inches * 72.0
+                                    - trim.margin_inches * 72.0
+                                    - caption_style.space_before.max(0.0);
                                 for (index, line) in page.lines.iter_mut().enumerate() {
-                                    line.y = top - index as f32 * 9.0 * 1.6;
+                                    line.y = top - index as f32 * caption_step;
                                 }
                             } else if caption_placement == "Overlay"
                                 && let Some(image) = page.images.first()
                             {
                                 for (index, line) in page.lines.iter_mut().enumerate() {
-                                    line.y = image.y + 12.0 + index as f32 * 9.0 * 1.6;
+                                    line.y =
+                                        image.y + caption_style.size + index as f32 * caption_step;
                                     line.light_text = true;
                                 }
                             }
@@ -2239,6 +2260,8 @@ fn paginate_with_cancellation(
                                 &mut pages,
                                 trim,
                                 &string(&block, "caption"),
+                                &caption_runs,
+                                &caption_style,
                                 string(&block, "assetId"),
                                 width_percent,
                                 focal_x,
@@ -2301,20 +2324,6 @@ fn paginate_with_cancellation(
                         // page break reset collapsed gap
                         previous_space_after = 0.0;
                     }
-                    let runs = if block_type.eq_ignore_ascii_case("SceneBreak")
-                        || block_type.eq_ignore_ascii_case("ListItem")
-                    {
-                        vec![LayoutRun {
-                            text: text.clone(),
-                            face: style.face,
-                            underline: false,
-                            strikethrough: false,
-                            baseline_shift_em: 0.0,
-                            size_scale: 1.0,
-                        }]
-                    } else {
-                        block_runs(document, &block, &style)
-                    };
                     let gap_before = if text.trim().is_empty()
                         && !block_type.eq_ignore_ascii_case("SceneBreak")
                     {
@@ -2327,15 +2336,24 @@ fn paginate_with_cancellation(
                     {
                         pages.len().max(1)
                     } else {
-                        append_styled_runs_with_gap(
-                            &mut pages,
-                            &text,
-                            &runs,
-                            trim,
-                            &style,
-                            block.get("language").and_then(Value::as_str),
-                            gap_before,
-                        )
+                        let language = block.get("language").and_then(Value::as_str);
+                        if block_type.eq_ignore_ascii_case("ListItem") {
+                            let content_runs = block_runs(document, &block, &style);
+                            append_list_item_with_gap(
+                                &mut pages,
+                                &text,
+                                &content_runs,
+                                trim,
+                                &style,
+                                language,
+                                gap_before,
+                            )
+                        } else {
+                            let runs = display_block_runs(document, &block, &style, &text);
+                            append_styled_runs_with_gap(
+                                &mut pages, &text, &runs, trim, &style, language, gap_before,
+                            )
+                        }
                     };
                     previous_space_after = style.space_after;
                     assign_semantic_order_since(
@@ -2446,6 +2464,8 @@ fn append_inline_illustration(
     pages: &mut Vec<LayoutPage>,
     trim: &crate::model::Trim,
     caption: &str,
+    caption_runs: &[LayoutRun],
+    caption_style: &BlockStyle,
     asset_id: String,
     width_percent: f32,
     crop_x_percent: f32,
@@ -2470,23 +2490,28 @@ fn append_inline_illustration(
         _ => margin + (available_width - image_width) / 2.0,
     };
     let line_step = trim.body_font_size_points * trim.body_line_height;
+    let caption_size = caption_style.size;
+    let caption_line_height = caption_style.line_height.max(1.0);
+    let caption_space_before = caption_style.space_before.max(0.0);
+    let caption_space_after = caption_style.space_after.max(0.0);
+    let caption_width = if caption_placement == "Overlay" {
+        (image_width - 12.0).max(0.0)
+    } else {
+        image_width
+    };
     let caption_lines = if caption_placement == "Hidden" {
         Vec::new()
     } else {
-        wrapped_caption(
-            caption,
-            if caption_placement == "Overlay" {
-                image_width - 12.0
-            } else {
-                image_width
-            },
-        )
+        wrapped_caption_with_runs(caption, caption_runs, caption_style, caption_width)
     };
-    let caption_step = 9.0 * 1.6;
+    let caption_step = caption_size * caption_line_height;
     let caption_extent = if caption_lines.is_empty() || caption_placement == "Overlay" {
         0.0
     } else {
-        6.0 + 9.0 * 1.12 + (caption_lines.len() - 1) as f32 * caption_step
+        caption_space_before
+            + caption_size * 1.12
+            + (caption_lines.len() - 1) as f32 * caption_step
+            + caption_space_after
     };
     let required_height = image_height
         + if keep_with_caption {
@@ -2548,18 +2573,22 @@ fn append_inline_illustration(
     });
 
     let first_caption_y = match caption_placement {
-        "Above" => content_top - 9.0 * 0.82,
-        "Overlay" => image_y + 9.0 + caption_lines.len().saturating_sub(1) as f32 * caption_step,
-        _ => image_y - 6.0 - 9.0 * 0.82,
+        "Above" => content_top - caption_space_before - caption_size * 0.82,
+        "Overlay" => {
+            image_y + caption_size + caption_lines.len().saturating_sub(1) as f32 * caption_step
+        }
+        _ => image_y - caption_space_before - caption_size * 0.82,
     };
     let caption_bottom = if caption_lines.is_empty() {
         image_y
     } else {
-        first_caption_y - caption_lines.len().saturating_sub(1) as f32 * caption_step - 9.0 * 0.30
+        first_caption_y
+            - caption_lines.len().saturating_sub(1) as f32 * caption_step
+            - caption_size * 0.30
     };
     if text_wrap.is_empty() || text_wrap == "None" {
         let flow_bottom = if caption_placement == "Below" {
-            caption_bottom
+            caption_bottom - caption_space_after
         } else {
             image_y
         } - spacing_after.max(0.0);
@@ -2571,6 +2600,11 @@ fn append_inline_illustration(
                 size: trim.body_font_size_points,
                 x: margin,
                 y: spacer_y,
+                baseline_offset_points: line_baseline_offset_points(
+                    trim.body_font_size_points,
+                    BlockStyle::body(trim).face,
+                    &[],
+                ),
                 word_spacing: 0.0,
                 character_spacing: 0.0,
                 rotation_degrees: 0.0,
@@ -2598,17 +2632,26 @@ fn append_inline_illustration(
         && caption_bottom < margin;
     if !detach_caption {
         for (index, (text, runs)) in caption_lines.iter().cloned().enumerate() {
-            page.lines.push(LayoutLine {
-                text,
-                runs,
-                size: 9.0,
-                x: image_x
+            let baseline_offset_points =
+                line_baseline_offset_points(caption_size, caption_style.face, &runs);
+            let caption_x = aligned_caption_x(
+                image_x
                     + if caption_placement == "Overlay" {
                         6.0
                     } else {
                         0.0
                     },
+                caption_width,
+                caption_style,
+                &runs,
+            );
+            page.lines.push(LayoutLine {
+                text,
+                runs,
+                size: caption_size,
+                x: caption_x,
                 y: first_caption_y - index as f32 * caption_step,
+                baseline_offset_points,
                 word_spacing: 0.0,
                 character_spacing: 0.0,
                 rotation_degrees: 0.0,
@@ -2632,14 +2675,18 @@ fn append_inline_illustration(
     if detach_caption {
         pages.push(empty_body_page());
         let caption_page = pages.last_mut().expect("caption page");
-        let first_y = page_height - margin - 9.0 * 0.82;
+        let first_y = page_height - margin - caption_size * 0.82;
         for (index, (text, runs)) in caption_lines.into_iter().enumerate() {
+            let baseline_offset_points =
+                line_baseline_offset_points(caption_size, caption_style.face, &runs);
+            let caption_x = aligned_caption_x(margin, available_width, caption_style, &runs);
             caption_page.lines.push(LayoutLine {
                 text,
                 runs,
-                size: 9.0,
-                x: margin,
+                size: caption_size,
+                x: caption_x,
                 y: first_y - index as f32 * caption_step,
+                baseline_offset_points,
                 word_spacing: 0.0,
                 character_spacing: 0.0,
                 rotation_degrees: 0.0,
@@ -2686,7 +2733,8 @@ fn assign_semantic_order_since(
                     line.semantic_parent_id = semantic_parent_id.map(str::to_owned);
                 }
             }
-            if let Some(source) = source_text
+            if !line.artifact
+                && let Some(source) = source_text
                 && let Some((start, end)) =
                     source_utf16_range(source, &mut source_cursor, &line.text)
             {
@@ -2712,10 +2760,7 @@ fn source_utf16_range(
     cursor: &mut usize,
     rendered_line: &str,
 ) -> Option<(usize, usize)> {
-    let mut searchable = rendered_line.strip_suffix('-').unwrap_or(rendered_line);
-    if *cursor == 0 {
-        searchable = searchable.strip_prefix("• ").unwrap_or(searchable);
-    }
+    let searchable = rendered_line.strip_suffix('-').unwrap_or(rendered_line);
     if searchable.is_empty() {
         let offset = source.get(..*cursor)?.encode_utf16().count();
         return Some((offset, offset));
@@ -2992,15 +3037,15 @@ fn designed_page(
                 let font_family_key = scene_style_value(scene, &item, "fontFamilyKey")
                     .and_then(Value::as_str)
                     .unwrap_or("builtin:nunito");
-                let face = regular_face(font_family(font_family_key)).with_emphasis(
-                    scene_style_value(scene, &item, "fontWeight")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(400)
-                        >= 600,
-                    scene_style_value(scene, &item, "italic")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
-                );
+                let font_weight = scene_style_value(scene, &item, "fontWeight")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(400)
+                    .clamp(100, 900) as u16;
+                let italic = scene_style_value(scene, &item, "italic")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let face =
+                    regular_face(font_family(font_family_key)).with_weight(font_weight, italic);
                 let mut text = string(&item, "textBinding");
                 let source_runs = if text.is_empty() {
                     let style = BlockStyle {
@@ -3013,6 +3058,7 @@ fn designed_page(
                         keep_with_next: false,
                         alignment: "left".to_owned(),
                         face,
+                        font_weight,
                         small_caps: false,
                         space_before: 0.0,
                         space_after: 0.0,
@@ -3067,6 +3113,7 @@ fn designed_page(
                                 strikethrough: false,
                                 baseline_shift_em: 0.0,
                                 size_scale: 1.0,
+                                language: None,
                             });
                         }
                         runs.extend(reference_runs);
@@ -3242,6 +3289,7 @@ fn designed_page(
                     let shadow = scene_style_value(scene, &item, "textShadow")
                         .and_then(Value::as_str)
                         .unwrap_or("None");
+                    let baseline_offset_points = line_baseline_offset_points(size, face, &runs);
                     if shadow != "None" {
                         let shadow_index = page.lines.len();
                         let shadow_offset = if shadow == "Strong" { 2.0 } else { 1.0 };
@@ -3251,6 +3299,7 @@ fn designed_page(
                             size,
                             x: line_x + shadow_offset,
                             y: line_y - shadow_offset,
+                            baseline_offset_points,
                             word_spacing: 0.0,
                             character_spacing,
                             rotation_degrees: item
@@ -3286,6 +3335,7 @@ fn designed_page(
                         size,
                         x: line_x,
                         y: line_y,
+                        baseline_offset_points,
                         word_spacing: 0.0,
                         character_spacing,
                         rotation_degrees: item
@@ -4247,6 +4297,13 @@ fn append_publication_sections(
                 .collect::<Vec<_>>();
             previous_was_designed_page = false;
             if block_type.eq_ignore_ascii_case("Figure") {
+                let caption_style = block_style(document, block, trim);
+                let caption_runs = block_runs(document, block, &caption_style);
+                let caption_runs = if caption_runs.is_empty() {
+                    single_run(&string(block, "caption"), caption_style.face)
+                } else {
+                    caption_runs
+                };
                 let presentation = block.get("presentation").unwrap_or(&Value::Null);
                 let placement = string(presentation, "placement");
                 let width_percent = if matches!(placement.as_str(), "FullWidth" | "FullBleed") {
@@ -4271,6 +4328,7 @@ fn append_publication_sections(
                     _ => "center",
                 };
                 let caption_placement = string(presentation, "captionPlacement");
+                let caption_step = caption_style.size * caption_style.line_height.max(1.0);
                 let dedicated = matches!(placement.as_str(), "DedicatedPage" | "FullBleed");
                 if presentation
                     .get("startOnNewPage")
@@ -4284,6 +4342,8 @@ fn append_publication_sections(
                     let mut page = dedicated_figure_page_with_layout(
                         trim,
                         &string(block, "caption"),
+                        &caption_runs,
+                        &caption_style,
                         string(block, "assetId"),
                         width_percent,
                         focal_x,
@@ -4319,15 +4379,17 @@ fn append_publication_sections(
                     if caption_placement == "Hidden" {
                         page.lines.clear();
                     } else if caption_placement == "Above" {
-                        let top = trim.height_inches * 72.0 - trim.margin_inches * 72.0;
+                        let top = trim.height_inches * 72.0
+                            - trim.margin_inches * 72.0
+                            - caption_style.space_before.max(0.0);
                         for (index, line) in page.lines.iter_mut().enumerate() {
-                            line.y = top - index as f32 * 9.0 * 1.6;
+                            line.y = top - index as f32 * caption_step;
                         }
                     } else if caption_placement == "Overlay"
                         && let Some(image) = page.images.first()
                     {
                         for (index, line) in page.lines.iter_mut().enumerate() {
-                            line.y = image.y + 12.0 + index as f32 * 9.0 * 1.6;
+                            line.y = image.y + caption_style.size + index as f32 * caption_step;
                             line.light_text = true;
                         }
                     }
@@ -4344,6 +4406,8 @@ fn append_publication_sections(
                         pages,
                         trim,
                         &string(block, "caption"),
+                        &caption_runs,
+                        &caption_style,
                         string(block, "assetId"),
                         width_percent,
                         focal_x,
@@ -4427,22 +4491,30 @@ fn append_publication_sections(
             {
                 previous_space_after = 0.0;
             }
-            let runs = if block_type.eq_ignore_ascii_case("SceneBreak")
-                || block_type.eq_ignore_ascii_case("ListItem")
-            {
-                single_run(&text, style.face)
+            let language = block.get("language").and_then(Value::as_str);
+            if block_type.eq_ignore_ascii_case("ListItem") {
+                let content_runs = block_runs(document, block, &style);
+                append_list_item_with_gap(
+                    pages,
+                    &text,
+                    &content_runs,
+                    trim,
+                    &style,
+                    language,
+                    previous_space_after,
+                );
             } else {
-                block_runs(document, block, &style)
-            };
-            append_styled_runs_with_gap(
-                pages,
-                &text,
-                &runs,
-                trim,
-                &style,
-                block.get("language").and_then(Value::as_str),
-                previous_space_after,
-            );
+                let runs = display_block_runs(document, block, &style, &text);
+                append_styled_runs_with_gap(
+                    pages,
+                    &text,
+                    &runs,
+                    trim,
+                    &style,
+                    language,
+                    previous_space_after,
+                );
+            }
             previous_space_after = style.space_after;
             assign_semantic_order_since(
                 pages,
@@ -4469,12 +4541,14 @@ fn centered_page(title: &str, subtitle: &str, trim: &crate::model::Trim) -> Layo
     let height = trim.height_inches * 72.0;
     let mut lines = Vec::new();
     if !title.is_empty() {
+        let runs = single_run(title, FontFace::SansBold);
         lines.push(LayoutLine {
             text: title.to_owned(),
-            runs: single_run(title, FontFace::SansBold),
+            runs: runs.clone(),
             size: 22.0,
             x: width * 0.16,
             y: height * 0.62,
+            baseline_offset_points: line_baseline_offset_points(22.0, FontFace::SansBold, &runs),
             word_spacing: 0.0,
             character_spacing: 0.0,
             rotation_degrees: 0.0,
@@ -4495,12 +4569,18 @@ fn centered_page(title: &str, subtitle: &str, trim: &crate::model::Trim) -> Layo
         });
     }
     if !subtitle.is_empty() {
+        let runs = single_run(subtitle, FontFace::SerifRegular);
         lines.push(LayoutLine {
             text: subtitle.to_owned(),
-            runs: single_run(subtitle, FontFace::SerifRegular),
+            runs: runs.clone(),
             size: 11.0,
             x: width * 0.16,
             y: height * 0.54,
+            baseline_offset_points: line_baseline_offset_points(
+                11.0,
+                FontFace::SerifRegular,
+                &runs,
+            ),
             word_spacing: 0.0,
             character_spacing: 0.0,
             rotation_degrees: 0.0,
@@ -4545,12 +4625,14 @@ fn add_running_heads(pages: &mut [LayoutPage], title: &str, trim: &crate::model:
         .skip(1)
         .filter(|page| page.kind == PageKind::Body)
     {
+        let runs = single_run(title, FontFace::SansRegular);
         page.lines.push(LayoutLine {
             text: title.to_owned(),
-            runs: single_run(title, FontFace::SansRegular),
+            runs: runs.clone(),
             size: 8.0,
             x,
             y,
+            baseline_offset_points: line_baseline_offset_points(8.0, FontFace::SansRegular, &runs),
             word_spacing: 0.0,
             character_spacing: 0.0,
             rotation_degrees: 0.0,
@@ -4596,6 +4678,7 @@ fn build_toc_pages_with_limit(
         keep_with_next: true,
         alignment: "left".to_owned(),
         face: FontFace::SerifRegular,
+        font_weight: 400,
         small_caps: false,
         space_before: 0.0,
         space_after: 0.0,
@@ -4632,12 +4715,15 @@ fn build_toc_pages_with_limit(
                 }
                 let page = pages.last_mut().expect("TOC page");
                 let y = next_baseline(page, trim, &style, false);
+                let baseline_offset_points =
+                    line_baseline_offset_points(style.size, style.face, &runs);
                 page.lines.push(LayoutLine {
                     text: line,
                     runs,
                     size: style.size,
                     x: trim.margin_inches * 72.0,
                     y,
+                    baseline_offset_points,
                     word_spacing: 0.0,
                     character_spacing: 0.0,
                     rotation_degrees: 0.0,
@@ -4690,16 +4776,18 @@ fn toc_page(continued: bool, trim: &crate::model::Trim) -> LayoutPage {
     } else {
         "Contents"
     };
+    let runs = single_run(text, FontFace::SansBold);
     LayoutPage {
         kind: PageKind::Body,
         width_points: None,
         height_points: None,
         lines: vec![LayoutLine {
             text: text.to_owned(),
-            runs: single_run(text, FontFace::SansBold),
+            runs: runs.clone(),
             size,
             x: trim.margin_inches * 72.0,
             y: trim.height_inches * 72.0 - trim.margin_inches * 72.0 - size * 0.82,
+            baseline_offset_points: line_baseline_offset_points(size, FontFace::SansBold, &runs),
             word_spacing: 0.0,
             character_spacing: 0.0,
             rotation_degrees: 0.0,
@@ -4776,20 +4864,41 @@ fn wrap_layout_runs(
     lines.into_iter().zip(runs).collect()
 }
 
-fn wrapped_caption(caption: &str, width: f32) -> Vec<(String, Vec<LayoutRun>)> {
-    wrap_layout_runs(
-        caption,
-        &single_run(caption, FontFace::SerifItalic),
-        9.0,
-        width,
-    )
+fn wrapped_caption_with_runs(
+    caption: &str,
+    source_runs: &[LayoutRun],
+    caption_style: &BlockStyle,
+    width: f32,
+) -> Vec<(String, Vec<LayoutRun>)> {
+    let fallback_runs;
+    let runs = if source_runs.is_empty() {
+        fallback_runs = single_run(caption, caption_style.face);
+        fallback_runs.as_slice()
+    } else {
+        source_runs
+    };
+    wrap_layout_runs(caption, runs, caption_style.size, width)
 }
 
-fn validate_caption_bounds(value: &Value, trim: &crate::model::Trim) -> Result<(), Diagnostic> {
+fn aligned_caption_x(origin_x: f32, width: f32, style: &BlockStyle, runs: &[LayoutRun]) -> f32 {
+    let measured = measured_run_width(runs, style.size);
+    origin_x
+        + match style.alignment.as_str() {
+            "center" => ((width - measured) / 2.0).max(0.0),
+            "right" | "end" => (width - measured).max(0.0),
+            _ => 0.0,
+        }
+}
+
+fn validate_caption_bounds(
+    document: &Value,
+    value: &Value,
+    trim: &crate::model::Trim,
+) -> Result<(), Diagnostic> {
     match value {
         Value::Array(values) => {
             for child in values {
-                validate_caption_bounds(child, trim)?;
+                validate_caption_bounds(document, child, trim)?;
             }
         }
         Value::Object(values) => {
@@ -4806,15 +4915,23 @@ fn validate_caption_bounds(value: &Value, trim: &crate::model::Trim) -> Result<(
                     .and_then(Value::as_f64)
                     .unwrap_or(100.0) as f32;
                 let image_width = available_width * (width_percent / 100.0).clamp(0.1, 1.0);
-                let lines = wrapped_caption(caption, image_width).len();
+                let caption_style = block_style(document, value, trim);
+                let caption_runs = block_runs(document, value, &caption_style);
+                let lines =
+                    wrapped_caption_with_runs(caption, &caption_runs, &caption_style, image_width)
+                        .len();
+                let caption_size = caption_style.size;
+                let caption_step = caption_size * caption_style.line_height.max(1.0);
                 let inline = values.contains_key("anchorPosition")
                     && !values
                         .get("startOnNewPage")
                         .and_then(Value::as_bool)
                         .unwrap_or(false);
                 let caption_extent = (if inline { 6.0 } else { 8.0 })
-                    + 9.0 * 1.12
-                    + lines.saturating_sub(1) as f32 * 9.0 * 1.6;
+                    + caption_style.space_before.max(0.0)
+                    + caption_size * 1.12
+                    + lines.saturating_sub(1) as f32 * caption_step
+                    + caption_style.space_after.max(0.0);
                 let fits = if inline {
                     let image_height = (available_height * 0.34).min(image_width * 1.25);
                     image_height + caption_extent <= available_height
@@ -4829,72 +4946,12 @@ fn validate_caption_bounds(value: &Value, trim: &crate::model::Trim) -> Result<(
                 }
             }
             for child in values.values() {
-                validate_caption_bounds(child, trim)?;
+                validate_caption_bounds(document, child, trim)?;
             }
         }
         _ => {}
     }
     Ok(())
-}
-
-fn text_page(lines: Vec<(String, f32)>, trim: &crate::model::Trim) -> LayoutPage {
-    let height = trim.height_inches * 72.0;
-    let x = trim.margin_inches * 72.0;
-    let available_width = trim.width_inches * 72.0 - x * 2.0;
-    let mut y = height - x;
-    let lines = lines
-        .into_iter()
-        .flat_map(|(text, size)| {
-            let face = if size >= 16.0 {
-                FontFace::SansBold
-            } else {
-                FontFace::SerifRegular
-            };
-            wrap_layout_runs(&text, &single_run(&text, face), size, available_width)
-                .into_iter()
-                .map(move |(text, runs)| (text, runs, size))
-        })
-        .map(|(text, runs, size)| {
-            let line = LayoutLine {
-                text,
-                runs,
-                size,
-                x,
-                y,
-                word_spacing: 0.0,
-                character_spacing: 0.0,
-                rotation_degrees: 0.0,
-                rotation_origin_x: None,
-                rotation_origin_y: None,
-                opacity: 1.0,
-                light_text: false,
-                fill_rgb: None,
-                semantic_role: LayoutSemanticRole::Paragraph,
-                artifact: false,
-                language: None,
-                reading_order: None,
-                semantic_id: None,
-                semantic_parent_id: None,
-                source_start_utf16: None,
-                source_end_utf16: None,
-                link_page: None,
-            };
-            y -= size * 1.6;
-            line
-        })
-        .collect();
-    LayoutPage {
-        kind: PageKind::Body,
-        width_points: None,
-        height_points: None,
-        lines,
-        images: Vec::new(),
-        shapes: Vec::new(),
-        paint_order: Vec::new(),
-        barcode_modules: None,
-        page_label: None,
-        bookmark: None,
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -4908,6 +4965,7 @@ struct BlockStyle {
     keep_with_next: bool,
     alignment: String,
     face: FontFace,
+    font_weight: u16,
     small_caps: bool,
     space_before: f32,
     space_after: f32,
@@ -4916,6 +4974,7 @@ struct BlockStyle {
 
 impl BlockStyle {
     fn body(trim: &crate::model::Trim) -> Self {
+        let defaults = &typography::defaults().body;
         Self {
             size: trim.body_font_size_points,
             line_height: trim.body_line_height,
@@ -4924,13 +4983,79 @@ impl BlockStyle {
             first_line_indent: 0.0,
             page_break_before: false,
             keep_with_next: false,
-            alignment: "left".to_owned(),
-            face: FontFace::SerifRegular,
+            alignment: normalized_alignment(&defaults.text_align),
+            face: regular_face(font_family(&defaults.font_family_key))
+                .with_weight(defaults.font_weight, defaults.italic),
+            font_weight: defaults.font_weight,
             small_caps: false,
             space_before: 0.0,
-            space_after: 8.0,
+            space_after: defaults.space_after_points,
             semantic_role: LayoutSemanticRole::Paragraph,
         }
+    }
+
+    fn caption(_trim: &crate::model::Trim) -> Self {
+        let defaults = &typography::defaults().caption;
+        Self {
+            size: defaults.font_size_points,
+            line_height: defaults.line_height,
+            indent: 0.0,
+            right_indent: 0.0,
+            first_line_indent: 0.0,
+            page_break_before: false,
+            keep_with_next: false,
+            alignment: normalized_alignment(&defaults.text_align),
+            face: regular_face(font_family(&defaults.font_family_key))
+                .with_weight(defaults.font_weight, defaults.italic),
+            font_weight: defaults.font_weight,
+            small_caps: false,
+            space_before: defaults.space_before_points,
+            space_after: defaults.space_after_points,
+            semantic_role: LayoutSemanticRole::Caption,
+        }
+    }
+
+    fn chapter_heading(_trim: &crate::model::Trim) -> Self {
+        let defaults = &typography::defaults().chapter_heading;
+        Self {
+            size: defaults.font_size_points,
+            line_height: defaults.line_height,
+            indent: 0.0,
+            right_indent: 0.0,
+            first_line_indent: 0.0,
+            page_break_before: false,
+            keep_with_next: true,
+            alignment: normalized_alignment(&defaults.text_align),
+            face: regular_face(font_family(&defaults.font_family_key))
+                .with_weight(defaults.font_weight, defaults.italic),
+            font_weight: defaults.font_weight,
+            small_caps: false,
+            space_before: defaults.space_before_points,
+            space_after: defaults.space_after_points,
+            semantic_role: LayoutSemanticRole::Heading1,
+        }
+    }
+}
+
+fn update_style_face(
+    style: &mut BlockStyle,
+    family: Option<FontFamily>,
+    weight: Option<u16>,
+    italic: Option<bool>,
+) {
+    let current = style.face;
+    style.font_weight = weight.unwrap_or(style.font_weight);
+    style.face = regular_face(family.unwrap_or_else(|| current.family())).with_weight(
+        style.font_weight,
+        italic.unwrap_or_else(|| is_italic(current)),
+    );
+}
+
+fn normalized_alignment(value: &str) -> String {
+    match value.to_ascii_lowercase().as_str() {
+        "start" => "left".to_owned(),
+        "end" => "right".to_owned(),
+        normalized => normalized.to_owned(),
     }
 }
 
@@ -4947,6 +5072,7 @@ fn append_styled_text(
         strikethrough: false,
         baseline_shift_em: 0.0,
         size_scale: 1.0,
+        language: None,
     }];
     append_styled_runs(pages, text, &runs, trim, style, None)
 }
@@ -4960,6 +5086,89 @@ fn append_styled_runs(
     language: Option<&str>,
 ) -> usize {
     append_styled_runs_with_gap(pages, text, source_runs, trim, style, language, 0.0)
+}
+
+fn append_list_item_with_gap(
+    pages: &mut Vec<LayoutPage>,
+    display_text: &str,
+    content_runs: &[LayoutRun],
+    trim: &crate::model::Trim,
+    style: &BlockStyle,
+    language: Option<&str>,
+    previous_space_after: f32,
+) -> usize {
+    let bullet = typography::defaults().list_item.bullet.as_str();
+    let content_text = display_text.strip_prefix(bullet).unwrap_or(display_text);
+    let mut content_style = style.clone();
+    content_style.first_line_indent = 0.0;
+    let snapshot = pages
+        .iter()
+        .map(|page| page.lines.len())
+        .collect::<Vec<_>>();
+    let first_page = append_styled_runs_with_gap(
+        pages,
+        content_text,
+        content_runs,
+        trim,
+        &content_style,
+        language,
+        previous_space_after,
+    );
+    let page_index = first_page.saturating_sub(1);
+    let Some(page) = pages.get_mut(page_index) else {
+        return first_page;
+    };
+    let line_start = snapshot.get(page_index).copied().unwrap_or_default();
+    let Some(content_index) = page
+        .lines
+        .iter()
+        .enumerate()
+        .skip(line_start)
+        .find_map(|(index, line)| (!line.artifact).then_some(index))
+    else {
+        return first_page;
+    };
+    let content_line = &page.lines[content_index];
+    let marker_runs = single_run(bullet, style.face);
+    let marker_line = LayoutLine {
+        text: bullet.to_owned(),
+        runs: marker_runs.clone(),
+        size: style.size,
+        x: content_line.x + style.first_line_indent,
+        y: content_line.y,
+        baseline_offset_points: line_baseline_offset_points(style.size, style.face, &marker_runs),
+        word_spacing: 0.0,
+        character_spacing: 0.0,
+        rotation_degrees: 0.0,
+        rotation_origin_x: None,
+        rotation_origin_y: None,
+        opacity: 1.0,
+        light_text: false,
+        fill_rgb: None,
+        semantic_role: LayoutSemanticRole::ListItem,
+        artifact: true,
+        language: None,
+        reading_order: None,
+        semantic_id: None,
+        semantic_parent_id: None,
+        source_start_utf16: None,
+        source_end_utf16: None,
+        link_page: None,
+    };
+    page.lines.insert(content_index, marker_line);
+    first_page
+}
+
+fn line_baseline_offset_points(size: f32, fallback_face: FontFace, runs: &[LayoutRun]) -> f32 {
+    if runs.is_empty() {
+        return crate::font::descent_points(fallback_face, size);
+    }
+    runs.iter().fold(0.0, |maximum, run| {
+        let effective_size = size * run.size_scale;
+        let effective_descent = crate::font::descent_points(run.face, effective_size)
+            - effective_size * run.baseline_shift_em;
+        maximum.max(effective_descent)
+    })
 }
 
 fn append_styled_runs_with_gap(
@@ -5107,12 +5316,15 @@ fn append_styled_runs_with_gap(
             } else {
                 next_baseline(page, trim, style, false)
             };
+            let baseline_offset_points =
+                line_baseline_offset_points(style.size, style.face, &line_runs);
             page.lines.push(LayoutLine {
                 text: line.clone(),
                 runs: line_runs,
                 size: style.size,
                 x: line_x + alignment_offset,
                 y,
+                baseline_offset_points,
                 word_spacing,
                 character_spacing: 0.0,
                 rotation_degrees: 0.0,
@@ -5358,6 +5570,7 @@ fn runs_for_line(
             strikethrough: false,
             baseline_shift_em: 0.0,
             size_scale: 1.0,
+            language: None,
         });
     }
     output
@@ -5380,19 +5593,28 @@ fn empty_body_page() -> LayoutPage {
 
 fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> BlockStyle {
     let block_type = string(block, "type");
-    let mut style = BlockStyle::body(trim);
+    let mut style = if block_type.eq_ignore_ascii_case("Figure") {
+        BlockStyle::caption(trim)
+    } else {
+        BlockStyle::body(trim)
+    };
     match block_type.to_ascii_lowercase().as_str() {
         "heading" => {
             let level = block
                 .get("headingLevel")
                 .and_then(Value::as_u64)
-                .unwrap_or(2) as f32;
-            style.size = (24.0 - level * 2.0).max(trim.body_font_size_points + 2.0);
+                .unwrap_or(2)
+                .clamp(1, 6) as u8;
+            let defaults = typography::heading(level);
+            style.size = defaults.font_size_points;
+            style.line_height = defaults.line_height;
             style.keep_with_next = true;
-            style.alignment = "left".to_owned();
-            style.face = FontFace::SansBold;
-            style.space_before = 0.0;
-            style.space_after = 0.0;
+            style.alignment = normalized_alignment(&defaults.text_align);
+            style.face = regular_face(font_family(&defaults.font_family_key))
+                .with_weight(defaults.font_weight, defaults.italic);
+            style.font_weight = defaults.font_weight;
+            style.space_before = defaults.space_before_points;
+            style.space_after = defaults.space_after_points;
             style.semantic_role = match block
                 .get("headingLevel")
                 .and_then(Value::as_u64)
@@ -5404,22 +5626,32 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             };
         }
         "blockquote" => {
-            style.indent = 24.0;
-            style.alignment = "left".to_owned();
-            style.space_before = 0.0;
-            style.space_after = 0.0;
+            let defaults = &typography::defaults().blockquote;
+            style.size = trim.body_font_size_points;
+            style.line_height = trim.body_line_height;
+            style.face = regular_face(font_family(&defaults.font_family_key))
+                .with_weight(defaults.font_weight, defaults.italic);
+            style.font_weight = defaults.font_weight;
+            style.indent = defaults.left_indent_em * style.size;
+            style.alignment = normalized_alignment(&defaults.text_align);
+            style.space_before = defaults.space_before_points;
+            style.space_after = defaults.space_after_points;
         }
         "scenebreak" => {
-            style.alignment = "center".to_owned();
+            let defaults = &typography::defaults().scene_break;
+            style.alignment = normalized_alignment(&defaults.text_align);
             style.keep_with_next = true;
-            style.space_before = 0.0;
-            style.space_after = 0.0;
+            style.space_before = defaults.space_before_points;
+            style.space_after = defaults.space_after_points;
         }
         "listitem" => {
-            style.alignment = "left".to_owned();
+            let defaults = &typography::defaults().list_item;
+            style.alignment = normalized_alignment(&defaults.text_align);
             style.semantic_role = LayoutSemanticRole::ListItem;
-            style.space_before = 0.0;
-            style.space_after = 0.0;
+            style.indent = defaults.left_indent_em * style.size;
+            style.first_line_indent = -defaults.hanging_indent_em * style.size;
+            style.space_before = defaults.space_before_points;
+            style.space_after = defaults.space_after_points;
         }
         _ => {}
     }
@@ -5442,27 +5674,22 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             style.keep_with_next = keep;
         }
         if let Some(alignment) = definition.get("textAlign").and_then(Value::as_str) {
-            style.alignment = alignment.to_ascii_lowercase();
+            style.alignment = normalized_alignment(alignment);
         }
         let family = definition
             .get("fontFamilyKey")
             .or_else(|| definition.get("fontFamily"))
             .and_then(Value::as_str)
-            .map(font_family)
-            .unwrap_or_else(|| style.face.family());
-        let bold = definition
+            .map(font_family);
+        let weight = definition
             .get("fontWeight")
             .and_then(Value::as_u64)
-            .is_some_and(|weight| weight >= 600);
-        let italic = definition
-            .get("italic")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        style.face = regular_face(family).with_emphasis(bold, italic);
-        style.small_caps = definition
-            .get("smallCaps")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+            .map(|weight| weight.clamp(100, 900) as u16);
+        let italic = definition.get("italic").and_then(Value::as_bool);
+        update_style_face(&mut style, family, weight, italic);
+        if let Some(small_caps) = definition.get("smallCaps").and_then(Value::as_bool) {
+            style.small_caps = small_caps;
+        }
         if let Some(value) = definition.get("spaceBeforePoints").and_then(Value::as_f64) {
             style.space_before = value as f32;
         }
@@ -5500,17 +5727,13 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             .get("fontFamilyKey")
             .and_then(Value::as_str)
             .map(font_family);
-        let direct_bold = presentation
+        let direct_weight = presentation
             .get("fontWeight")
             .and_then(Value::as_u64)
-            .map(|weight| weight >= 600);
+            .map(|weight| weight.clamp(100, 900) as u16);
         let direct_italic = presentation.get("italic").and_then(Value::as_bool);
-        if direct_family.is_some() || direct_bold.is_some() || direct_italic.is_some() {
-            style.face = regular_face(direct_family.unwrap_or_else(|| style.face.family()))
-                .with_emphasis(
-                    direct_bold.unwrap_or_else(|| is_bold(style.face)),
-                    direct_italic.unwrap_or_else(|| is_italic(style.face)),
-                );
+        if direct_family.is_some() || direct_weight.is_some() || direct_italic.is_some() {
+            update_style_face(&mut style, direct_family, direct_weight, direct_italic);
         }
         if let Some(small_caps) = presentation.get("smallCaps").and_then(Value::as_bool) {
             style.small_caps = small_caps;
@@ -5562,7 +5785,7 @@ fn block_runs(document: &Value, block: &Value, style: &BlockStyle) -> Vec<Layout
         .into_iter()
         .flatten()
         .filter_map(|span| {
-            let mut text = span.get("text").and_then(Value::as_str)?.to_owned();
+            let text = span.get("text").and_then(Value::as_str)?.to_owned();
             let marks = span
                 .get("marks")
                 .and_then(Value::as_array)
@@ -5574,30 +5797,12 @@ fn block_runs(document: &Value, block: &Value, style: &BlockStyle) -> Vec<Layout
                     .any(|mark| string(mark, "type").eq_ignore_ascii_case(kind))
             };
             let is_code = has("Code");
-            let mut bold = has("Strong")
-                || matches!(
-                    style.face,
-                    FontFace::SerifBold
-                        | FontFace::SerifBoldItalic
-                        | FontFace::SansBold
-                        | FontFace::SansBoldItalic
-                        | FontFace::MonoBold
-                        | FontFace::MonoBoldItalic
-                );
-            let mut italic = has("Emphasis")
-                || matches!(
-                    style.face,
-                    FontFace::SerifItalic
-                        | FontFace::SerifBoldItalic
-                        | FontFace::SansItalic
-                        | FontFace::SansBoldItalic
-                        | FontFace::MonoItalic
-                        | FontFace::MonoBoldItalic
-                );
-            if matches!(style.face, FontFace::Custom(_)) {
-                bold |= false;
-                italic |= is_italic(style.face);
-            }
+            let mut weight = if has("Strong") {
+                700
+            } else {
+                style.font_weight
+            };
+            let mut italic = has("Emphasis") || is_italic(style.face);
             let mut family = if is_code {
                 FontFamily::Mono
             } else {
@@ -5628,7 +5833,7 @@ fn block_runs(document: &Value, block: &Value, style: &BlockStyle) -> Vec<Layout
                     family = font_family(value);
                 }
                 if let Some(value) = definition.get("fontWeight").and_then(Value::as_u64) {
-                    bold = value >= 600;
+                    weight = value.clamp(100, 900) as u16;
                 }
                 if let Some(value) = definition.get("italic").and_then(Value::as_bool) {
                     italic = value;
@@ -5638,31 +5843,82 @@ fn block_runs(document: &Value, block: &Value, style: &BlockStyle) -> Vec<Layout
                 .and_then(|definition| definition.get("smallCaps"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
-            if style.small_caps || has("SmallCaps") || character_small_caps {
-                text = text.to_uppercase();
-            }
+            let small_caps = style.small_caps || has("SmallCaps") || character_small_caps;
             let superscript = has("Superscript");
             let subscript = has("Subscript");
-            Some(LayoutRun {
+            let language = marks
+                .iter()
+                .find(|mark| string(mark, "type").eq_ignore_ascii_case("Language"))
+                .and_then(|mark| mark.get("value").and_then(Value::as_str))
+                .map(str::to_owned);
+            let inline_defaults = &typography::defaults().inline;
+            let (baseline_shift_em, inline_scale) = if superscript {
+                (
+                    inline_defaults.superscript.baseline_shift_em,
+                    inline_defaults.superscript.size_scale,
+                )
+            } else if subscript {
+                (
+                    inline_defaults.subscript.baseline_shift_em,
+                    inline_defaults.subscript.size_scale,
+                )
+            } else {
+                (0.0, 1.0)
+            };
+            let run = LayoutRun {
                 text,
-                face: regular_face(family).with_emphasis(bold, italic),
+                face: regular_face(family).with_weight(weight, italic),
                 underline: has("Underline") || has("Link"),
                 strikethrough: has("Strikethrough"),
-                baseline_shift_em: if superscript {
-                    0.35
-                } else if subscript {
-                    -0.2
-                } else {
-                    0.0
-                },
+                baseline_shift_em,
                 size_scale: character_definition
                     .and_then(|definition| definition.get("fontSizePoints"))
                     .and_then(Value::as_f64)
                     .map_or(1.0, |size| size as f32 / style.size)
-                    * if superscript || subscript { 0.7 } else { 1.0 },
-            })
+                    * inline_scale,
+                language,
+            };
+            if small_caps {
+                Some(synthetic_small_caps(
+                    run,
+                    typography::defaults().inline.small_caps.lowercase_scale,
+                ))
+            } else {
+                Some(vec![run])
+            }
         })
+        .flatten()
         .collect()
+}
+
+fn synthetic_small_caps(run: LayoutRun, lowercase_scale: f32) -> Vec<LayoutRun> {
+    let mut output: Vec<LayoutRun> = Vec::new();
+    for character in run.text.chars() {
+        let is_lowercase = character.is_lowercase();
+        let text = if is_lowercase {
+            character.to_uppercase().collect::<String>()
+        } else {
+            character.to_string()
+        };
+        let size_scale = run.size_scale * if is_lowercase { lowercase_scale } else { 1.0 };
+        if let Some(previous) = output.last_mut()
+            && previous.face == run.face
+            && previous.underline == run.underline
+            && previous.strikethrough == run.strikethrough
+            && previous.baseline_shift_em == run.baseline_shift_em
+            && previous.size_scale == size_scale
+            && previous.language == run.language
+        {
+            previous.text.push_str(&text);
+        } else {
+            output.push(LayoutRun {
+                text,
+                size_scale,
+                ..run.clone()
+            });
+        }
+    }
+    output
 }
 
 fn font_family(value: &str) -> FontFamily {
@@ -5702,6 +5958,7 @@ fn single_run(text: &str, face: FontFace) -> Vec<LayoutRun> {
             strikethrough: false,
             baseline_shift_em: 0.0,
             size_scale: 1.0,
+            language: None,
         })
         .into_iter()
         .collect()
@@ -5710,9 +5967,21 @@ fn single_run(text: &str, face: FontFace) -> Vec<LayoutRun> {
 fn display_block_text(block: &Value) -> String {
     let text = block_text(block);
     match string(block, "type").to_ascii_lowercase().as_str() {
-        "scenebreak" => "* * *".to_owned(),
-        "listitem" => format!("• {text}"),
+        "scenebreak" => typography::defaults().scene_break.text.clone(),
+        "listitem" => format!("{}{text}", typography::defaults().list_item.bullet),
         _ => text,
+    }
+}
+
+fn display_block_runs(
+    document: &Value,
+    block: &Value,
+    style: &BlockStyle,
+    display_text: &str,
+) -> Vec<LayoutRun> {
+    match string(block, "type").to_ascii_lowercase().as_str() {
+        "scenebreak" => single_run(display_text, style.face),
+        _ => block_runs(document, block, style),
     }
 }
 
@@ -5779,9 +6048,12 @@ fn wrap(text: &str, limit: usize) -> Vec<String> {
     lines
 }
 
+#[allow(clippy::too_many_arguments)]
 fn dedicated_figure_page_with_layout(
     trim: &crate::model::Trim,
     label: &str,
+    caption_runs: &[LayoutRun],
+    caption_style: &BlockStyle,
     asset_id: String,
     width_percent: f32,
     crop_x_percent: f32,
@@ -5796,12 +6068,15 @@ fn dedicated_figure_page_with_layout(
         "right" => margin + available_width - image_width,
         _ => margin + (available_width - image_width) / 2.0,
     };
-    let caption_lines = wrapped_caption(label, image_width);
-    let caption_step = 9.0 * 1.6;
-    let first_caption_y =
-        margin + 9.0 * 0.30 + caption_lines.len().saturating_sub(1) as f32 * caption_step;
+    let caption_lines = wrapped_caption_with_runs(label, caption_runs, caption_style, image_width);
+    let caption_size = caption_style.size;
+    let caption_step = caption_size * caption_style.line_height.max(1.0);
+    let first_caption_y = margin
+        + caption_style.space_before.max(0.0)
+        + caption_size * 0.30
+        + caption_lines.len().saturating_sub(1) as f32 * caption_step;
     let available_height = trim.height_inches * 72.0 - margin * 2.0;
-    let image_y = margin + available_height * 0.2;
+    let image_y = margin + available_height * 0.2 + caption_style.space_after.max(0.0);
     let image_height = available_height * 0.75;
     LayoutPage {
         kind: PageKind::Designed,
@@ -5810,29 +6085,35 @@ fn dedicated_figure_page_with_layout(
         lines: caption_lines
             .into_iter()
             .enumerate()
-            .map(|(index, (text, runs))| LayoutLine {
-                text,
-                runs,
-                size: 9.0,
-                x: image_x,
-                y: first_caption_y - index as f32 * caption_step,
-                word_spacing: 0.0,
-                character_spacing: 0.0,
-                rotation_degrees: 0.0,
-                rotation_origin_x: None,
-                rotation_origin_y: None,
-                opacity: 1.0,
-                light_text: false,
-                fill_rgb: None,
-                semantic_role: LayoutSemanticRole::Caption,
-                artifact: false,
-                language: None,
-                reading_order: None,
-                semantic_id: None,
-                semantic_parent_id: None,
-                source_start_utf16: None,
-                source_end_utf16: None,
-                link_page: None,
+            .map(|(index, (text, runs))| {
+                let x = aligned_caption_x(image_x, image_width, caption_style, &runs);
+                let baseline_offset_points =
+                    line_baseline_offset_points(caption_size, caption_style.face, &runs);
+                LayoutLine {
+                    text,
+                    baseline_offset_points,
+                    runs,
+                    size: caption_size,
+                    x,
+                    y: first_caption_y - index as f32 * caption_step,
+                    word_spacing: 0.0,
+                    character_spacing: 0.0,
+                    rotation_degrees: 0.0,
+                    rotation_origin_x: None,
+                    rotation_origin_y: None,
+                    opacity: 1.0,
+                    light_text: false,
+                    fill_rgb: None,
+                    semantic_role: LayoutSemanticRole::Caption,
+                    artifact: false,
+                    language: None,
+                    reading_order: None,
+                    semantic_id: None,
+                    semantic_parent_id: None,
+                    source_start_utf16: None,
+                    source_end_utf16: None,
+                    link_page: None,
+                }
             })
             .collect(),
         images: (!asset_id.is_empty())
@@ -5956,12 +6237,18 @@ fn cover_layout(
                 "Spine copy does not fit the full-wrap cover safe region.",
             ));
         }
+        let runs = single_run(&cover.spine_text, FontFace::SansBold);
         lines.push(LayoutLine {
             text: cover.spine_text.clone(),
-            runs: single_run(&cover.spine_text, FontFace::SansBold),
+            runs: runs.clone(),
             size: spine_size,
             x: spine_center,
             y: bleed + 36.0,
+            baseline_offset_points: line_baseline_offset_points(
+                spine_size,
+                FontFace::SansBold,
+                &runs,
+            ),
             word_spacing: 0.0,
             character_spacing: 0.0,
             rotation_degrees: 90.0,
@@ -5984,12 +6271,14 @@ fn cover_layout(
     if cover.barcode_mode == "LorekeeperBarcode"
         && let Some(isbn) = cover.isbn.as_deref()
     {
+        let runs = single_run(isbn, FontFace::MonoRegular);
         lines.push(LayoutLine {
             text: isbn.to_owned(),
-            runs: single_run(isbn, FontFace::MonoRegular),
+            runs: runs.clone(),
             size: 8.0,
             x: width * 0.08,
             y: height * 0.10 - 12.0,
+            baseline_offset_points: line_baseline_offset_points(8.0, FontFace::MonoRegular, &runs),
             word_spacing: 0.0,
             character_spacing: 0.0,
             rotation_degrees: 0.0,
@@ -6351,29 +6640,33 @@ fn cover_text_lines(
     Ok(lines
         .into_iter()
         .enumerate()
-        .map(|(index, text)| LayoutLine {
-            runs: single_run(&text, face),
-            text,
-            size,
-            x,
-            y: start_y - index as f32 * line_height,
-            word_spacing: 0.0,
-            character_spacing: 0.0,
-            rotation_degrees: 0.0,
-            rotation_origin_x: None,
-            rotation_origin_y: None,
-            opacity: 1.0,
-            light_text: true,
-            fill_rgb: None,
-            semantic_role: LayoutSemanticRole::Paragraph,
-            artifact: false,
-            language: None,
-            reading_order: None,
-            semantic_id: None,
-            semantic_parent_id: None,
-            source_start_utf16: None,
-            source_end_utf16: None,
-            link_page: None,
+        .map(|(index, text)| {
+            let runs = single_run(&text, face);
+            LayoutLine {
+                baseline_offset_points: line_baseline_offset_points(size, face, &runs),
+                runs,
+                text,
+                size,
+                x,
+                y: start_y - index as f32 * line_height,
+                word_spacing: 0.0,
+                character_spacing: 0.0,
+                rotation_degrees: 0.0,
+                rotation_origin_x: None,
+                rotation_origin_y: None,
+                opacity: 1.0,
+                light_text: true,
+                fill_rgb: None,
+                semantic_role: LayoutSemanticRole::Paragraph,
+                artifact: false,
+                language: None,
+                reading_order: None,
+                semantic_id: None,
+                semantic_parent_id: None,
+                source_start_utf16: None,
+                source_end_utf16: None,
+                link_page: None,
+            }
         })
         .collect())
 }
@@ -6651,6 +6944,7 @@ mod tests {
             strikethrough: false,
             baseline_shift_em: 0.0,
             size_scale: 1.0,
+            language: None,
         }];
         let mut pages = Vec::new();
         append_styled_runs(&mut pages, &text, &runs, &trim, &style, None);
@@ -6682,6 +6976,8 @@ mod tests {
             &mut pages,
             &trim,
             "",
+            &[],
+            &BlockStyle::caption(&trim),
             "asset".to_owned(),
             42.0,
             50.0,
@@ -6770,7 +7066,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let request = RenderRequest {
-            protocol_version: 7,
+            protocol_version: 8,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v2".to_owned(),
             ink: "BlackAndWhite".to_owned(),
@@ -6910,6 +7206,151 @@ mod tests {
     }
 
     #[test]
+    fn sparse_named_heading_styles_inherit_generated_heading_emphasis() {
+        let document = serde_json::json!({
+            "styles": [{
+                "semanticRole": "heading",
+                "definition": { "fontSizePoints": 19.0 }
+            }]
+        });
+        let block = serde_json::json!({
+            "type": "Heading",
+            "headingLevel": 2,
+            "styleRole": "heading"
+        });
+        let style = block_style(&document, &block, &standard_trim());
+        assert_eq!(style.face, FontFace::SansBold);
+        assert!((style.size - 19.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn list_items_use_the_shared_hanging_indent() {
+        let trim = standard_trim();
+        let block = serde_json::json!({
+            "type": "ListItem",
+            "styleRole": "list-item"
+        });
+        let style = block_style(&Value::Null, &block, &trim);
+        let defaults = &typography::defaults().list_item;
+        assert!((style.indent - defaults.left_indent_em * style.size).abs() < f32::EPSILON);
+        assert!(
+            (style.first_line_indent + defaults.hanging_indent_em * style.size).abs()
+                < f32::EPSILON
+        );
+    }
+
+    #[test]
+    fn list_markers_are_separate_artifacts_for_every_content_alignment() {
+        let trim = crate::model::Trim {
+            width_inches: 3.5,
+            height_inches: 5.0,
+            margin_inches: 0.75,
+            body_font_size_points: 11.0,
+            body_line_height: 1.4,
+            bleed_inches: 0.0,
+            mirror_margins: false,
+            recto_chapter_starts: false,
+            minimum_widow_lines: 1,
+            minimum_orphan_lines: 1,
+        };
+        let source = "The authored list item wraps across enough lines to verify marker geometry and source ranges.";
+        let block = serde_json::json!({
+            "type": "ListItem",
+            "content": [{ "text": source, "marks": [] }]
+        });
+        let marker = typography::defaults().list_item.bullet.as_str();
+
+        for alignment in ["left", "center", "right", "justify"] {
+            let mut style = block_style(&Value::Null, &block, &trim);
+            style.alignment = alignment.to_owned();
+            let display_text = display_block_text(&block);
+            let content_runs = block_runs(&Value::Null, &block, &style);
+            let mut pages = vec![empty_body_page()];
+            let snapshot = vec![(0usize, 0usize)];
+            append_list_item_with_gap(
+                &mut pages,
+                &display_text,
+                &content_runs,
+                &trim,
+                &style,
+                None,
+                0.0,
+            );
+            assign_semantic_order_since(&mut pages, &snapshot, 7, "list-id", None, Some(source));
+
+            let lines = pages
+                .iter()
+                .flat_map(|page| page.lines.iter())
+                .collect::<Vec<_>>();
+            let marker_line = lines
+                .iter()
+                .find(|line| line.artifact && line.text == marker)
+                .expect("separate list marker");
+            let content_lines = lines
+                .iter()
+                .filter(|line| !line.artifact && line.semantic_role == LayoutSemanticRole::ListItem)
+                .collect::<Vec<_>>();
+            assert!(
+                content_lines.len() > 1,
+                "the fixture must wrap for {alignment}"
+            );
+
+            let authored_x = trim.margin_inches * 72.0 + style.indent;
+            assert_eq!(marker_line.word_spacing, 0.0);
+            assert!(marker_line.source_start_utf16.is_none());
+            assert_eq!(marker_line.semantic_id.as_deref(), Some("list-id"));
+            assert!((marker_line.y - content_lines[0].y).abs() < 0.01);
+
+            let available_width =
+                (trim.width_inches - 2.0 * trim.margin_inches) * 72.0 - style.indent;
+            for line in &content_lines {
+                let measured = measured_run_width(&line.runs, line.size);
+                let alignment_offset = match alignment {
+                    "center" => ((available_width - measured) / 2.0).max(0.0),
+                    "right" => (available_width - measured).max(0.0),
+                    _ => 0.0,
+                };
+                assert!((line.x - (authored_x + alignment_offset)).abs() < 0.01);
+                assert_eq!(line.semantic_id.as_deref(), Some("list-id"));
+                assert!(line.source_start_utf16.is_some());
+                assert!(!line.text.starts_with(marker));
+            }
+            assert!((marker_line.x - (content_lines[0].x + style.first_line_indent)).abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn generated_chapter_heading_uses_the_shared_heading_defaults() {
+        let title = "Generated heading";
+        let layout = paginate(&request_with_document(serde_json::json!({
+            "title": "Test",
+            "sections": [{
+                "chapters": [{ "title": title, "blocks": [] }]
+            }]
+        })))
+        .expect("generated chapter heading layout");
+        let line = layout
+            .pages
+            .iter()
+            .flat_map(|page| page.lines.iter())
+            .find(|line| line.text == title)
+            .expect("generated heading line");
+        let defaults = &typography::defaults().chapter_heading;
+        assert_eq!(line.semantic_role, LayoutSemanticRole::Heading1);
+        assert!((line.size - defaults.font_size_points).abs() < 0.001);
+        assert_eq!(
+            line.runs[0].face,
+            regular_face(font_family(&defaults.font_family_key))
+                .with_weight(defaults.font_weight, defaults.italic)
+        );
+        let width = measure_text(line.runs[0].face, title, line.size);
+        let content_width =
+            (standard_trim().width_inches - 2.0 * standard_trim().margin_inches) * 72.0;
+        let expected_x = standard_trim().margin_inches * 72.0 + (content_width - width) / 2.0;
+        assert!((line.x - expected_x).abs() < 0.01);
+    }
+
+    #[test]
     fn mixed_heading_and_body_sizes_advance_the_vertical_cursor_without_overlap() {
         let trim = crate::model::Trim {
             width_inches: 6.0,
@@ -6923,7 +7364,9 @@ mod tests {
             minimum_widow_lines: 2,
             minimum_orphan_lines: 2,
         };
-        let mut pages = vec![text_page(vec![("Chapter heading".to_owned(), 22.0)], &trim)];
+        let mut pages = vec![empty_body_page()];
+        let chapter_heading = BlockStyle::chapter_heading(&trim);
+        append_styled_text(&mut pages, "Chapter heading", &trim, &chapter_heading);
         let heading = BlockStyle {
             size: 20.0,
             line_height: 1.4,
@@ -6934,6 +7377,7 @@ mod tests {
             keep_with_next: true,
             alignment: "left".to_owned(),
             face: FontFace::SansBold,
+            font_weight: 700,
             small_caps: false,
             space_before: 0.0,
             space_after: 0.0,
@@ -6970,12 +7414,94 @@ mod tests {
 
         let runs = block_runs(&Value::Null, &block, &BlockStyle::body(&standard_trim()));
 
-        assert_eq!(runs.len(), 5);
+        assert_eq!(runs.len(), 6);
         assert_eq!(runs[0].face, crate::model::FontFace::SerifRegular);
         assert_eq!(runs[1].face, crate::model::FontFace::SerifBold);
         assert_eq!(runs[2].face, crate::model::FontFace::SerifItalic);
         assert_eq!(runs[3].face, crate::model::FontFace::MonoRegular);
-        assert_eq!(runs[4].text, " CAPS");
+        assert_eq!(runs[4].text, " ");
+        assert_eq!(runs[5].text, "CAPS");
+        assert!((runs[5].size_scale - 0.8).abs() < 0.001);
+    }
+
+    #[test]
+    fn small_caps_keep_authored_capitals_full_size_and_scale_lowercase_segments() {
+        let block = serde_json::json!({
+            "type": "Paragraph",
+            "content": [{
+                "text": "ABcd",
+                "marks": [{ "type": "SmallCaps" }]
+            }]
+        });
+        let runs = block_runs(&Value::Null, &block, &BlockStyle::body(&standard_trim()));
+        assert_eq!(
+            runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+            "ABCD"
+        );
+        assert_eq!(runs[0].text, "AB");
+        assert!((runs[0].size_scale - 1.0).abs() < f32::EPSILON);
+        assert_eq!(runs[1].text, "CD");
+        assert!((runs[1].size_scale - 0.8).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn baseline_offset_uses_face_metrics_size_scaling_and_shift() {
+        let trim = standard_trim();
+        let regular_face = FontFace::SerifRegular;
+        let regular_runs = single_run("body", regular_face);
+        let regular =
+            line_baseline_offset_points(trim.body_font_size_points, regular_face, &regular_runs);
+        let expected_regular =
+            crate::font::descent_points(regular_face, trim.body_font_size_points);
+        assert!((regular - expected_regular).abs() < 0.0001);
+
+        let scaled_runs = vec![LayoutRun {
+            text: "large".to_owned(),
+            face: FontFace::SansRegular,
+            underline: false,
+            strikethrough: false,
+            baseline_shift_em: 0.0,
+            size_scale: 1.5,
+            language: None,
+        }];
+        let scaled =
+            line_baseline_offset_points(trim.body_font_size_points, regular_face, &scaled_runs);
+        let expected_scaled =
+            crate::font::descent_points(FontFace::SansRegular, trim.body_font_size_points * 1.5);
+        assert!((scaled - expected_scaled).abs() < 0.0001);
+        assert_ne!(regular.to_bits(), scaled.to_bits());
+
+        let mixed_runs = vec![
+            LayoutRun {
+                text: "base".to_owned(),
+                face: regular_face,
+                underline: false,
+                strikethrough: false,
+                baseline_shift_em: 0.0,
+                size_scale: 1.0,
+                language: None,
+            },
+            LayoutRun {
+                text: "subscript".to_owned(),
+                face: FontFace::SansRegular,
+                underline: false,
+                strikethrough: false,
+                baseline_shift_em: -0.2,
+                size_scale: 0.7,
+                language: None,
+            },
+        ];
+        let mixed =
+            line_baseline_offset_points(trim.body_font_size_points, regular_face, &mixed_runs);
+        let expected_subscript =
+            crate::font::descent_points(FontFace::SansRegular, trim.body_font_size_points * 0.7)
+                + trim.body_font_size_points * 0.7 * 0.2;
+        assert!((mixed - expected_subscript.max(expected_regular)).abs() < 0.0001);
+        assert_eq!(
+            mixed.to_bits(),
+            line_baseline_offset_points(trim.body_font_size_points, regular_face, &mixed_runs)
+                .to_bits()
+        );
     }
 
     #[test]
@@ -7004,7 +7530,7 @@ mod tests {
 
         assert_eq!(runs[0].face, FontFace::MonoBoldItalic);
         assert_eq!(runs[0].text, "COMMAND");
-        assert!((runs[0].size_scale - 0.8).abs() < 0.001);
+        assert!((runs[0].size_scale - 0.64).abs() < 0.001);
     }
 
     #[test]
@@ -7203,6 +7729,8 @@ mod tests {
         let page = dedicated_figure_page_with_layout(
             &request.trim,
             "A deliberately long Designed Page caption that wraps safely beneath narrow right-aligned artwork.",
+            &[],
+            &BlockStyle::caption(&request.trim),
             "surface".to_owned(),
             30.0,
             50.0,
@@ -7215,8 +7743,9 @@ mod tests {
         assert!(page.lines.len() >= 3);
         assert!((image.x + image.width - right_edge).abs() < 0.01);
         assert!(page.lines.iter().all(|caption| {
-            (caption.x - image.x).abs() < 0.01
-                && measured_run_width(&caption.runs, caption.size) <= image.width + 0.01
+            let measured = measured_run_width(&caption.runs, caption.size);
+            (caption.x - (image.x + (image.width - measured).max(0.0) / 2.0)).abs() < 0.01
+                && measured <= image.width + 0.01
                 && caption.y < image.y
                 && caption.y - caption.size * 0.30 >= request.trim.margin_inches * 72.0 - 0.01
         }));
@@ -7446,7 +7975,7 @@ mod tests {
 
     fn request_with_document(document: Value) -> RenderRequest {
         RenderRequest {
-            protocol_version: 7,
+            protocol_version: 8,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v2".to_owned(),
             ink: "BlackAndWhite".to_owned(),

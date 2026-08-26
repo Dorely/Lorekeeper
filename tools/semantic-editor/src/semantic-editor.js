@@ -124,9 +124,9 @@ function paragraphStyle(presentation) {
 function editorFontFamily(key) {
     const normalized = key?.trim().toLowerCase();
     if (!normalized) return null;
-    if (normalized === "serif") return "Georgia, 'Times New Roman', serif";
-    if (normalized === "sans") return "Arial, Helvetica, sans-serif";
-    if (normalized === "mono") return "'Courier New', Courier, monospace";
+    if (normalized === "serif") return "'Lorekeeper-builtin-lora', serif";
+    if (normalized === "sans") return "'Lorekeeper-builtin-nunito', sans-serif";
+    if (normalized === "mono") return "'Lorekeeper-builtin-roboto-mono', monospace";
     const safeName = normalized.replaceAll(/[^a-z0-9]+/gu, "-").replaceAll(/^-|-$/gu, "");
     return safeName ? `'Lorekeeper-${safeName}'` : null;
 }
@@ -150,7 +150,12 @@ function textBlockAttrs(element, defaultRole) {
 
 function figureDomStyle(presentation) {
     const value = {...defaultFigurePresentation, ...(presentation || {})};
-    const styles = [`width:${Math.max(5, Math.min(100, Number(value.widthPercent || 100)))}%`];
+    const styles = [
+        `width:${Math.max(5, Math.min(100, Number(value.widthPercent || 100)))}%`,
+        "position:relative",
+        "display:flex",
+        "flex-direction:column"
+    ];
     if (value.alignment === "start") styles.push("margin-left:0", "margin-right:auto");
     else if (value.alignment === "end") styles.push("margin-left:auto", "margin-right:0");
     else styles.push("margin-left:auto", "margin-right:auto");
@@ -281,6 +286,7 @@ const schema = new Schema({
                     "data-image-id": node.attrs.imageId,
                     "data-decorative": String(node.attrs.decorative),
                     "data-accessibility-role": node.attrs.accessibilityRole || "figure",
+                    "data-caption-placement": (node.attrs.presentation || {}).captionPlacement || "below",
                     lang: node.attrs.language || null,
                     "data-presentation": JSON.stringify(node.attrs.presentation || {}),
                     style: figureDomStyle(node.attrs.presentation)
@@ -1943,6 +1949,31 @@ function sanitizeHtmlForPaste(html, styles = [], images = []) {
 function installEditorFontRules(root, fontFamilies) {
     const styleElement = document.createElement("style");
     styleElement.dataset.bookFonts = "true";
+    const bundledFaces = {
+        serif: [
+            ["/fonts/lora/Lora-Regular.ttf", 400, false],
+            ["/fonts/lora/Lora-Italic.ttf", 400, true],
+            ["/fonts/lora/Lora-Bold.ttf", 700, false],
+            ["/fonts/lora/Lora-BoldItalic.ttf", 700, true],
+        ],
+        sans: [
+            ["/fonts/nunito/Nunito-Regular.ttf", 400, false],
+            ["/fonts/nunito/Nunito-Italic.ttf", 400, true],
+            ["/fonts/nunito/Nunito-Bold.ttf", 700, false],
+            ["/fonts/nunito/Nunito-BoldItalic.ttf", 700, true],
+        ],
+        mono: [
+            ["/fonts/roboto-mono/RobotoMono-Regular.ttf", 400, false],
+            ["/fonts/roboto-mono/RobotoMono-Italic.ttf", 400, true],
+            ["/fonts/roboto-mono/RobotoMono-Bold.ttf", 700, false],
+            ["/fonts/roboto-mono/RobotoMono-BoldItalic.ttf", 700, true],
+        ],
+    };
+    for (const [key, faces] of Object.entries(bundledFaces)) {
+        const family = editorFontFamily(key)?.split(",", 1)[0];
+        for (const [url, weight, italic] of faces)
+            styleElement.textContent += `@font-face{font-family:${family};src:url(${JSON.stringify(url)}) format("truetype");font-weight:${weight};font-style:${italic ? "italic" : "normal"};font-display:swap}\n`;
+    }
     for (const family of fontFamilies) {
         const cssFamily = editorFontFamily(family.key);
         if (!cssFamily) continue;
@@ -1954,6 +1985,88 @@ function installEditorFontRules(root, fontFamilies) {
     root.append(styleElement);
 }
 
+function typographyDeclarations(style, extra = {}, includeSpacing = true) {
+    if (!style) return [];
+    const declarations = [];
+    const family = editorFontFamily(style.fontFamilyKey);
+    if (family) declarations.push(`font-family:${family}`);
+    if (Number.isFinite(style.fontSizePoints)) declarations.push(`font-size:${style.fontSizePoints}pt`);
+    if (Number.isInteger(style.fontWeight)) declarations.push(`font-weight:${style.fontWeight}`);
+    if (style.italic === true) declarations.push("font-style:italic");
+    else if (style.italic === false) declarations.push("font-style:normal");
+    const textAlign = typeof style.textAlign === "string" ? style.textAlign.trim().toLowerCase() : "";
+    if (["left", "right", "center", "justify"].includes(textAlign)) declarations.push(`text-align:${textAlign}`);
+    if (Number.isFinite(style.lineHeight)) declarations.push(`line-height:${style.lineHeight}`);
+    if (includeSpacing) {
+        const before = style.spacingBeforePoints ?? style.spaceBeforePoints;
+        const after = style.spacingAfterPoints ?? style.spaceAfterPoints;
+        if (Number.isFinite(before)) declarations.push(`margin-top:${before}pt`);
+        if (Number.isFinite(after)) declarations.push(`margin-bottom:${after}pt`);
+    }
+    if (Number.isFinite(style.leftIndentEm)) declarations.push(`margin-left:${style.leftIndentEm}em`);
+    if (Number.isFinite(style.rightIndentEm)) declarations.push(`margin-right:${style.rightIndentEm}em`);
+    if (Number.isFinite(style.firstLineIndentEm)) declarations.push(`text-indent:${style.firstLineIndentEm}em`);
+    for (const [property, value] of Object.entries(extra))
+        if (value !== null && value !== undefined) declarations.push(`${property}:${value}`);
+    return declarations;
+}
+
+function installTypographyRules(root, typography = {}) {
+    const styleElement = document.createElement("style");
+    styleElement.dataset.bookTypography = "true";
+    const selector = value => `.semantic-editor.semantic-editor .semantic-prosemirror ${value}`;
+    const update = current => {
+        const rules = [];
+        const add = (target, declarations) => {
+            if (declarations.length > 0)
+                rules.push(`${selector(target)}{${declarations.join(";")}}`);
+        };
+        const body = current.body || {};
+        add("> *", typographyDeclarations(body));
+        add("[data-style-role=body]", typographyDeclarations(body));
+        add("[data-style-role=chapter-heading]", typographyDeclarations(current.chapterHeading));
+        const headings = current.headings || {};
+        for (let level = 1; level <= 6; level++)
+            add(`h${level}`, typographyDeclarations(headings[String(level)]));
+        add("[data-style-role=block-quote]", typographyDeclarations(current.blockquote));
+        add("figure figcaption", typographyDeclarations(current.caption));
+        add(".semantic-list-item", [
+            ...typographyDeclarations(body, {}, false),
+            ...typographyDeclarations(current.listItem, {}, false),
+            "list-style:none",
+            "display:block",
+            "position:relative",
+            `margin-left:${current.listItem?.leftIndentEm ?? 1}em`,
+            "padding-left:0",
+            `margin-top:${current.listItem?.spaceBeforePoints ?? 0}pt`,
+            `margin-bottom:${current.listItem?.spaceAfterPoints ?? 0}pt`
+        ]);
+        const bullet = JSON.stringify(current.listItem?.bullet || "• ");
+        const hangingIndent = current.listItem?.hangingIndentEm ?? 1;
+        rules.push(`${selector(".semantic-list-item")}::before{content:${bullet};position:absolute;left:${-hangingIndent}em;}`);
+        add("hr[data-scene-break]", [
+            ...typographyDeclarations(current.sceneBreak, {}, false),
+            `margin-top:${current.sceneBreak?.spaceBeforePoints ?? 0}pt`,
+            `margin-bottom:${current.sceneBreak?.spaceAfterPoints ?? 0}pt`
+        ]);
+        rules.push(`${selector("hr[data-scene-break]")}::after{content:${JSON.stringify(current.sceneBreak?.text || "* * *")}}`);
+        const superscript = current.inline?.superscript || {};
+        const subscript = current.inline?.subscript || {};
+        add("sup", [`font-size:${superscript.sizeScale ?? 0.7}em`, `vertical-align:${superscript.baselineShiftEm ?? 0.35}em`]);
+        add("sub", [`font-size:${subscript.sizeScale ?? 0.7}em`, `vertical-align:${subscript.baselineShiftEm ?? -0.2}em`]);
+        add("code", ["font-family:'Lorekeeper-builtin-roboto-mono',monospace", "font-size:1em"]);
+        add(".semantic-small-caps", ["font-variant-caps:small-caps"]);
+        rules.push(`${selector("figure[data-caption-placement=above]")} > figcaption{order:-1;}`);
+        rules.push(`${selector("figure[data-caption-placement=overlay]")} > figcaption{position:absolute;inset-inline:0;bottom:0;padding:.2em .4em;color:#fff;background:rgb(0 0 0 / 45%);}`);
+        rules.push(`${selector("figure[data-caption-placement=hidden]")} > figcaption{display:block;padding:.25em .5em;border:1px dashed var(--lk-line-strong,#cbd3df);color:var(--lk-text-muted,#647086);background:var(--lk-surface-subtle,transparent);opacity:.9;}`);
+        rules.push(`${selector("figure[data-caption-placement=hidden]")} > figcaption::before{content:"Hidden in Read";display:block;margin-bottom:.2em;font-family:'Lorekeeper-builtin-nunito',sans-serif;font-size:.72em;font-style:normal;font-weight:700;letter-spacing:.04em;}`);
+        styleElement.textContent = rules.join("\n");
+    };
+    update(typography);
+    root.append(styleElement);
+    return {update};
+}
+
 function installNamedStyleRules(root, styles) {
     const styleElement = document.createElement("style");
     styleElement.dataset.bookTextStyles = "true";
@@ -1963,7 +2076,9 @@ function installNamedStyleRules(root, styles) {
             const definition = style.definition || {};
             const selector = style.kind === "character"
                 ? `.semantic-editor.semantic-editor .semantic-prosemirror span[data-character-style=${JSON.stringify(style.semanticRole)} i]`
-                : `.semantic-editor.semantic-editor .semantic-prosemirror [data-style-role=${JSON.stringify(style.semanticRole)} i]`;
+                : style.semanticRole === "figure-caption"
+                    ? `.semantic-editor.semantic-editor .semantic-prosemirror figure[data-style-role=${JSON.stringify(style.semanticRole)} i] > figcaption`
+                    : `.semantic-editor.semantic-editor .semantic-prosemirror [data-style-role=${JSON.stringify(style.semanticRole)} i]`;
             const declarations = [];
             const family = editorFontFamily(definition.fontFamilyKey);
             if (family) declarations.push(`font-family:${family}`);
@@ -2034,7 +2149,7 @@ function hydrateDesignedPageSummaries(document, compositionById) {
     return document;
 }
 
-export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]", fontFamiliesJson = "[]", allowDesignedPages = true, annotationsJson = "[]") {
+export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]", fontFamiliesJson = "[]", allowDesignedPages = true, annotationsJson = "[]", typographyJson = "{}") {
     if (!root || typeof root.replaceChildren !== "function" || root.isConnected === false)
         return null;
 
@@ -2045,6 +2160,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     const pageCompositions = JSON.parse(compositionsJson);
     const fontFamilies = JSON.parse(fontFamiliesJson);
     let reviewAnnotations = JSON.parse(annotationsJson);
+    let typography = JSON.parse(typographyJson);
     const imageById = new Map(projectImages.map(image => [String(image.id).toLowerCase(), image]));
     const compositionById = new Map(pageCompositions.map(composition => [String(composition.id).toLowerCase(), composition]));
     const paragraphRoles = new Set([
@@ -2097,6 +2213,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     root.classList.add("semantic-editor-root");
     root.replaceChildren(editorChrome, surface, status);
     installEditorFontRules(root, fontFamilies);
+    const typographyRules = installTypographyRules(root, typography);
     const namedStyleRules = installNamedStyleRules(root, namedStyles);
 
     let view;
@@ -2754,6 +2871,10 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         setAnnotations(json) {
             reviewAnnotations = typeof json === "string" ? JSON.parse(json) : json;
             view.dispatch(view.state.tr.setMeta(annotationsKey, true));
+        },
+        updateTypography(json) {
+            typography = typeof json === "string" ? JSON.parse(json) : json;
+            typographyRules.update(typography || {});
         },
         getAnnotationRange() {
             return annotationRangeFromSelection(view);

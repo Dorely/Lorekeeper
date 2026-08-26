@@ -2,7 +2,7 @@
 
 ## When to read
 
-Read this chapter when a change touches the owned native renderer, protocol v7,
+Read this chapter when a change touches the owned native renderer, protocol v8,
 render requests, deterministic pagination or shaping, Press runtime packaging,
 physical-product registry entries, stock/spine/cover geometry, cover surfaces,
 PDF versions/output intent/color/ink/transparency, tagged Digital PDF,
@@ -59,7 +59,7 @@ maps. `PublicationRenderWorker` owns recovery/cancellation and
 owns final product-form preflight and deterministic package assembly, consuming
 validated evidence rather than silently rerunning a different validation path.
 
-The native `Lorekeeper.Press` project owns protocol v7, shaping, pagination,
+The native `Lorekeeper.Press` project owns protocol v8, shaping, pagination,
 PDF serialization, color/asset normalization, and post-write inspection.
 The application may request a compact browser layout trace and rasterize it for
 preview, but Press remains the pagination and typesetting authority. App-owned
@@ -97,7 +97,7 @@ rasters are decoded and structurally validated once; validated pixels are
 reused only by interior or cover surfaces that reference them. Shared color
 transforms are reused when interior and cover intent match.
 
-Press protocol v7 owns deterministic layout, English/Latin shaping and glyph
+Press protocol v8 owns deterministic layout, English/Latin shaping and glyph
 diagnostics, custom TTF/OTF staging and embedding, subsetting and ToUnicode
 maps, bounded pagination, headings/TOC, stable block/page maps, inline
 typography, sparse paragraph presentation, flowing Figures, crop positioning,
@@ -105,6 +105,14 @@ bleed, captions, structured Designed Pages and cover scenes, reusable styles,
 vector shapes, reading order, page-size overrides for eligible Digital PDFs,
 full-wrap geometry, EAN-13 bars, and PDF serialization. Structured text
 remains selectable text rather than a rasterized page image.
+The versioned `assets/manuscript-typography-v1.json` contract is embedded by
+both Press and the application. It owns bundled family aliases and default
+metrics for body text, headings, captions, lists, scene breaks, and inline
+marks. Page setup supplies the effective body size and leading; named and
+direct manuscript styles remain sparse overrides. Browser-preview traces carry
+the Press-resolved face, run language, line language, artifact/light-text
+state, and a face-metric baseline offset so Read reproduces the authoritative
+layout without reconstructing typography from browser defaults.
 Block spacing collapses across adjacent semantic blocks. A flowing Figure's
 declared after-spacing participates in that same baseline calculation so the
 following prose enters and remains within the active float exclusion region.
@@ -194,16 +202,16 @@ same boundary; Rust is not compiled at application runtime.
 
 | Path or family | Primary responsibility |
 |---|---|
-| `Lorekeeper.Press/src/model.rs` | Protocol-v7 request/response, product/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
+| `Lorekeeper.Press/src/model.rs` | Protocol-v8 request/response, product/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
 | `Lorekeeper.Press/src/renderer.rs` | Containment, validation, deterministic pagination, composition, cover rendering, atomic promotion, progress, and evidence. |
 | `Lorekeeper.Press/src/pdf.rs` | Owned PDF 1.7/1.3 writer, tagged structure, color/bleed/compositing, fonts, images, and barcodes. |
 | `Lorekeeper.Press/src/font.rs` | TTF/OTF validation, shaping, subsetting, widths, embedding, ToUnicode, and glyph outlines. |
 | `Lorekeeper.Press/src/image.rs` | Bounded raster decoding, alpha/color conversion, crop positioning, and total-ink enforcement. |
 | `Lorekeeper.Press/src/inspect.rs` | Independent post-write geometry, font, color, output-intent, transparency, security, annotation, and tagged-PDF inspection. |
-| `Lorekeeper.Press/src/main.rs` / `src/lib.rs` | `describe`, layout traces, bounded protocol-v7 render CLI, and testable library surface. |
-| `Lorekeeper.Press/tests/conformance_v7.rs` | Protocol, containment, atomicity, determinism, layout, publication, product, cover, typography, color, PDF, and negative evidence harness. |
+| `Lorekeeper.Press/src/main.rs` / `src/lib.rs` | `describe`, layout traces, bounded protocol-v8 render CLI, and testable library surface. |
+| `Lorekeeper.Press/tests/conformance_v8.rs` | Protocol, containment, atomicity, determinism, layout, publication, product, cover, typography, color, PDF, and negative evidence harness. |
 | `Lorekeeper.Press/fixtures/` | Frozen full-model, negative protocol, malformed raw-PDF, and test asset fixtures. |
-| `Lorekeeper.Press/assets/` | Approved fonts/notices, registered ICC profile, and canonical product registry. |
+| `Lorekeeper.Press/assets/` | Approved fonts/notices, registered ICC profile, canonical product registry, and shared manuscript typography defaults. |
 | `Lorekeeper/Publish/PrintProductRegistry.cs` | Application loader/validator for registry version/hash and products plus submitted/normalized/reported page counts, spine, stock, surfaces, cover regions, barcode, duplex, case, jacket, and cloth geometry. |
 | `Lorekeeper/Publish/PublicationCoverService.cs` | Revisioned Core/release cover aggregate, independent product surfaces, canonical bindings, geometry reflow, diagnostics, and acknowledgement invalidation. |
 | `Lorekeeper/Publish/PublicationPressRuntime.cs` | Exact packaged runtime manifest, integrity, `describe`, controlled child environment, and readiness. |

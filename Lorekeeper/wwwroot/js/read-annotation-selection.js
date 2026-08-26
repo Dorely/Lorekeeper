@@ -4,6 +4,11 @@ function lineFor(node) {
         : node?.parentElement?.closest(".chapter-preview-line");
 }
 
+function flowingLines(root) {
+    return [...root.querySelectorAll(".chapter-preview-line")]
+        .filter(line => line.getAttribute("aria-hidden") !== "true");
+}
+
 function offsetWithin(line, node, offset) {
     const range = document.createRange();
     range.selectNodeContents(line);
@@ -14,8 +19,7 @@ function offsetWithin(line, node, offset) {
 function endpoint(line, node, offset) {
     const lineStart = Number(line.dataset.sourceStartUtf16);
     const lineEnd = Number(line.dataset.sourceEndUtf16);
-    const prefix = line.textContent?.startsWith("• ") ? 2 : 0;
-    const displayed = Math.max(0, offsetWithin(line, node, offset) - prefix);
+    const displayed = Math.max(0, offsetWithin(line, node, offset));
     return {
         blockId: line.dataset.blockId,
         offset: Math.min(lineEnd, lineStart + displayed)
@@ -23,7 +27,7 @@ function endpoint(line, node, offset) {
 }
 
 function lineProgress(root, line) {
-    const lines = [...root.querySelectorAll(".chapter-preview-line")];
+    const lines = flowingLines(root);
     const index = Math.max(0, lines.indexOf(line));
     return lines.length <= 1 ? 0 : index / (lines.length - 1);
 }
@@ -48,7 +52,7 @@ function viewportLine(root) {
     const scroll = root.querySelector(".chapter-preview-scroll") || root;
     const bounds = scroll.getBoundingClientRect();
     const center = bounds.top + bounds.height / 2;
-    const lines = [...root.querySelectorAll(".chapter-preview-line")];
+    const lines = flowingLines(root);
     return lines
         .map(line => ({line, distance: Math.abs(line.getBoundingClientRect().top + line.getBoundingClientRect().height / 2 - center)}))
         .sort((left, right) => left.distance - right.distance)[0]?.line || null;
@@ -66,7 +70,7 @@ function viewportPage(root) {
 
 function locationForLine(root, line, offset = null) {
     if (!line) return null;
-    const lines = [...root.querySelectorAll(".chapter-preview-line")];
+    const lines = flowingLines(root);
     const lineIndex = lines.indexOf(line);
     const start = Number(line.dataset.sourceStartUtf16);
     const end = Number(line.dataset.sourceEndUtf16);
@@ -97,7 +101,7 @@ export function captureLocation(root) {
                     anchorOffset: focus.offset,
                     headOffset: focus.offset,
                     logicalProgress: logicalLineProgress(root, focusLine),
-                    fallbackLine: [...root.querySelectorAll(".chapter-preview-line")].indexOf(focusLine) + 1
+                    fallbackLine: flowingLines(root).indexOf(focusLine) + 1
                 };
             }
         }
@@ -118,7 +122,7 @@ export function captureLocation(root) {
 }
 
 function lineForLocation(root, location) {
-    const lines = [...root.querySelectorAll(".chapter-preview-line")];
+    const lines = flowingLines(root);
     if (location?.blockId) {
         const matching = lines.filter(line => line.dataset.blockId === location.blockId);
         const offset = Number(location.headOffset ?? location.anchorOffset ?? 0);
@@ -162,7 +166,7 @@ export function readSelection(root) {
     const endLine = lineFor(domRange.endContainer);
     if (!startLine || !endLine || !root.contains(startLine) || !root.contains(endLine))
         return {error: "Selections must begin and end in flowing manuscript text."};
-    const selectedLines = [...root.querySelectorAll(".chapter-preview-line")]
+    const selectedLines = flowingLines(root)
         .filter(line => {
             try { return domRange.intersectsNode(line); } catch { return false; }
         });
@@ -193,16 +197,15 @@ export function readSelection(root) {
 }
 
 export function selectRange(root, range) {
-    const startLines = [...root.querySelectorAll(`.chapter-preview-line[data-block-id="${CSS.escape(range.startBlockId)}"]`)];
-    const endLines = [...root.querySelectorAll(`.chapter-preview-line[data-block-id="${CSS.escape(range.endBlockId)}"]`)];
+    const startLines = flowingLines(root).filter(line => line.dataset.blockId === range.startBlockId);
+    const endLines = flowingLines(root).filter(line => line.dataset.blockId === range.endBlockId);
     const first = startLines.find(line => Number(line.dataset.sourceStartUtf16) <= range.startOffset
         && Number(line.dataset.sourceEndUtf16) >= range.startOffset) || startLines[0];
     const last = endLines.find(line => Number(line.dataset.sourceStartUtf16) <= range.endOffset
         && Number(line.dataset.sourceEndUtf16) >= range.endOffset) || endLines.at(-1);
     if (!first || !last) return false;
     const point = (line, sourceOffset) => {
-        const prefix = line.textContent?.startsWith("• ") ? 2 : 0;
-        let remaining = prefix + Math.max(0, sourceOffset - Number(line.dataset.sourceStartUtf16));
+        let remaining = Math.max(0, sourceOffset - Number(line.dataset.sourceStartUtf16));
         const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
         let node;
         while ((node = walker.nextNode())) {

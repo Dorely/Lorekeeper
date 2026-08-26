@@ -232,7 +232,7 @@ pub struct RenderResponse {
 impl RenderResponse {
     pub fn failed(status: &str, diagnostic: Diagnostic) -> Self {
         Self {
-            protocol_version: 7,
+            protocol_version: 8,
             renderer_version: env!("CARGO_PKG_VERSION"),
             job_id: None,
             status: status.to_owned(),
@@ -469,6 +469,7 @@ pub struct LayoutLine {
     pub size: f32,
     pub x: f32,
     pub y: f32,
+    pub baseline_offset_points: f32,
     pub word_spacing: f32,
     pub character_spacing: f32,
     pub rotation_degrees: f32,
@@ -511,6 +512,8 @@ pub struct LayoutRun {
     pub strikethrough: bool,
     pub baseline_shift_em: f32,
     pub size_scale: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -555,6 +558,13 @@ impl Serialize for FontFace {
 }
 
 impl FontFace {
+    pub fn with_weight(self, weight: u16, italic: bool) -> Self {
+        match self.family() {
+            FontFamily::Custom(index) => crate::font::custom_face(index, weight, italic),
+            _ => self.with_emphasis(weight >= 600, italic),
+        }
+    }
+
     pub fn with_emphasis(self, bold: bool, italic: bool) -> Self {
         match (self.family(), bold, italic) {
             (FontFamily::Serif, false, false) => Self::SerifRegular,

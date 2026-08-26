@@ -205,6 +205,15 @@ modal; it must not regress to filename dropdowns or native prompts. Bundled and
 imported fonts load from project-owned URLs and are staged identically for Read
 preview and publication.
 
+Edit and Read share the versioned manuscript typography defaults embedded from
+Press. Edit applies the effective project body size and leading to its
+continuous responsive canvas, while Press remains authoritative for physical
+line breaks and pagination. Explicit heading levels, bundled font aliases,
+inline marks, list and scene-break metrics, and Figure caption placement must
+resolve from the same defaults before sparse named styles and direct
+presentation are applied. Switching back to Edit refreshes page-setup
+typography without remounting or replacing the manuscript document.
+
 On revision conflict, the service returns the latest persisted document and
 revision. The adapter adopts that authoritative snapshot, refreshes history,
 and continues without a browser/Electron copy or conflict dialog. Out-of-order
@@ -219,7 +228,9 @@ browser-local preferences restore its mode. Read flushes edits and asks the
 Press-backed preview service to paginate the selected target with the effective
 Core/release presentation. It is a private selected-chapter trace, not a full
 publication render. Read annotation ranges map rendered text back to stable
-semantic blocks without changing the Press protocol.
+semantic blocks through the versioned browser-preview trace; visual artifact
+lines remain present but are excluded from author selection and annotation
+mapping.
 
 Direct chapter selection carries the currently visible mode into the selected
 chapter: Review remains Review, Read remains Read, Edit opens Pages only for a

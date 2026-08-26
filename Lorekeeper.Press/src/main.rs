@@ -17,7 +17,7 @@ fn main() {
             println!(
                 "{}",
                 serde_json::to_string(&json!({
-                    "protocolVersion": 7,
+                    "protocolVersion": 8,
                     "rendererVersion": env!("CARGO_PKG_VERSION"),
                     "printProductRegistryVersion": "2026.08.1",
                     "printProductRegistrySha256": registry_hash,

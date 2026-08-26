@@ -178,13 +178,13 @@
                 }
                 @foreach (var line in page.Lines)
                 {
-                    @if (line.Link is { } link)
+                    @if (line.Link is { } link && !line.Artifact)
                     {
-                        <a class="chapter-preview-line" href="@link" style="@LineStyle(page, line)" data-block-id="@FlowBlockId(line)" data-source-start-utf16="@line.SourceStartUtf16" data-source-end-utf16="@line.SourceEndUtf16" data-location-progress="@FlowLocationProgress(line).ToString(CultureInfo.InvariantCulture)">@RunContent(line)</a>
+                        <a class="chapter-preview-line @(line.Artifact ? "chapter-preview-line-artifact" : null)" href="@link" style="@LineStyle(page, line)" data-block-id="@FlowBlockId(line)" data-source-start-utf16="@line.SourceStartUtf16" data-source-end-utf16="@line.SourceEndUtf16" data-location-progress="@FlowLocationProgress(line).ToString(CultureInfo.InvariantCulture)" lang="@line.Language" aria-hidden="@(line.Artifact ? "true" : null)">@RunContent(line)</a>
                     }
                     else
                     {
-                        <span class="chapter-preview-line" style="@LineStyle(page, line)" data-block-id="@FlowBlockId(line)" data-source-start-utf16="@line.SourceStartUtf16" data-source-end-utf16="@line.SourceEndUtf16" data-location-progress="@FlowLocationProgress(line).ToString(CultureInfo.InvariantCulture)">@RunContent(line)</span>
+                        <span class="chapter-preview-line @(line.Artifact ? "chapter-preview-line-artifact" : null)" style="@LineStyle(page, line)" data-block-id="@FlowBlockId(line)" data-source-start-utf16="@line.SourceStartUtf16" data-source-end-utf16="@line.SourceEndUtf16" data-location-progress="@FlowLocationProgress(line).ToString(CultureInfo.InvariantCulture)" lang="@line.Language" aria-hidden="@(line.Artifact ? "true" : null)">@RunContent(line)</span>
                     }
                 }
                 <footer>@(page.PageLabel ?? string.Empty)</footer>
@@ -392,7 +392,16 @@
         var cropYPercent = Math.Clamp(image.CropY, 0, 1) * 100;
         return $"left:{virtualLeft:R}%;top:0;width:{virtualWidth:R}%;height:100%;object-fit:{fit};object-position:{cropXPercent:R}% {cropYPercent:R}%";
     }
-    private string LineStyle(ChapterPreviewPage page, ChapterPreviewLine line) => $"left:{Percent(line.X, page.WidthPoints)};bottom:{Percent(line.Y - line.Size * .25, page.HeightPoints)};z-index:{line.ZIndex};font-size:{line.Size / page.WidthPoints * 100:R}cqw;font-family:{FontFamily(line.Face)};font-weight:{FontWeight(line.Face)};font-style:{FontStyle(line.Face)};word-spacing:{line.WordSpacing / page.WidthPoints * 100:R}cqw;letter-spacing:{line.CharacterSpacing / page.WidthPoints * 100:R}cqw;opacity:{line.Opacity:R};transform-origin:{((line.RotationOriginX ?? line.X) - line.X) / page.WidthPoints * 100:R}cqw {(line.Y + line.Size * .75 - (line.RotationOriginY ?? line.Y)) / page.WidthPoints * 100:R}cqw;transform:rotate({line.RotationDegrees:R}deg);color:{(line.FillRgb is null ? "#202534" : Color(line.FillRgb))}";
+    private string LineStyle(ChapterPreviewPage page, ChapterPreviewLine line)
+    {
+        var baselineOffset = line.BaselineOffsetPoints;
+        var lineTop = line.Y + line.Size - baselineOffset;
+        var originX = (line.RotationOriginX ?? line.X) - line.X;
+        var originY = lineTop - (line.RotationOriginY ?? line.Y);
+        var transformOrigin = FormattableString.Invariant($"{originX / page.WidthPoints * 100:R}cqw {originY / page.HeightPoints * 100:R}cqh");
+        var color = line.LightText ? "#fff" : line.FillRgb is null ? "#202534" : Color(line.FillRgb);
+        return FormattableString.Invariant($"left:{Percent(line.X, page.WidthPoints)};bottom:{Percent(line.Y - baselineOffset, page.HeightPoints)};z-index:{line.ZIndex};font-size:{line.Size / page.WidthPoints * 100:R}cqw;font-family:{FontFamily(line.Face)};font-weight:{FontWeight(line.Face)};font-style:{FontStyle(line.Face)};word-spacing:{line.WordSpacing / page.WidthPoints * 100:R}cqw;letter-spacing:{line.CharacterSpacing / page.WidthPoints * 100:R}cqw;opacity:{line.Opacity:R};transform-origin:{transformOrigin};transform:rotate({line.RotationDegrees:R}deg);color:{color}");
+    }
     private static string FontFamily(string? face)
     {
         if (face?.StartsWith("Custom", StringComparison.Ordinal) == true
@@ -443,6 +452,8 @@
             builder.OpenElement(sequence++, "span");
             if (!string.IsNullOrEmpty(piece.Style))
                 builder.AddAttribute(sequence++, "style", piece.Style);
+            if (!string.IsNullOrWhiteSpace(piece.Language))
+                builder.AddAttribute(sequence++, "lang", piece.Language);
             if (piece.Highlighted)
             {
                 builder.AddAttribute(sequence++, "class", "chapter-preview-review-highlight");
@@ -465,16 +476,14 @@
         if (blockId is null || line.SourceStartUtf16 is not int lineStart || line.SourceEndUtf16 is not int lineEnd)
             return line.Runs.Count == 0
                 ? [new PreviewTextPiece(line.Text, string.Empty, false)]
-                : line.Runs.Select(run => new PreviewTextPiece(run.Text, RunStyle(run), false)).ToList();
+                : line.Runs.Select(run => new PreviewTextPiece(run.Text, RunStyle(run), false, null, run.Language)).ToList();
         var intervals = AnnotationIntervals(blockId)
             .Where(interval => interval.Start < lineEnd && interval.End > lineStart)
             .ToList();
-        var prefix = line.Text.StartsWith("• ", StringComparison.Ordinal) ? 2 : 0;
-        var displayContentLength = Math.Max(0, line.Text.Length - prefix);
         var boundaries = intervals.SelectMany(interval => new[]
             {
-                prefix + Math.Clamp(interval.Start - lineStart, 0, displayContentLength),
-                prefix + Math.Clamp(interval.End - lineStart, 0, displayContentLength),
+                Math.Clamp(interval.Start - lineStart, 0, line.Text.Length),
+                Math.Clamp(interval.End - lineStart, 0, line.Text.Length),
             })
             .Append(0)
             .Append(line.Text.Length)
@@ -500,14 +509,15 @@
             {
                 var start = runBoundaries[boundaryIndex];
                 var end = runBoundaries[boundaryIndex + 1];
-                var sourceStart = lineStart + Math.Max(0, start - prefix);
-                var sourceEnd = lineStart + Math.Max(0, end - prefix);
+                var sourceStart = lineStart + start;
+                var sourceEnd = lineStart + end;
                 var matching = intervals.FirstOrDefault(interval => sourceStart < interval.End && sourceEnd > interval.Start);
                 result.Add(new PreviewTextPiece(
                     run.Text[(start - runStart)..(end - runStart)],
                     RunStyle(run),
                     matching != default,
-                    matching == default ? null : matching.Id));
+                    matching == default ? null : matching.Id,
+                    run.Language));
             }
             runStart = runEnd;
         }
@@ -533,7 +543,7 @@
         return result;
     }
 
-    private static string? FlowBlockId(ChapterPreviewLine line) => line.SemanticId switch
+    private static string? FlowBlockId(ChapterPreviewLine line) => line.Artifact ? null : line.SemanticId switch
     {
         null or "" => null,
         var id when id.EndsWith(":caption", StringComparison.Ordinal) => id[..^":caption".Length],
@@ -675,7 +685,7 @@
         StateHasChanged();
     }
 
-    private sealed record PreviewTextPiece(string Text, string Style, bool Highlighted, Guid? AnnotationId = null);
+    private sealed record PreviewTextPiece(string Text, string Style, bool Highlighted, Guid? AnnotationId = null, string? Language = null);
     private sealed record ReadSelectionResult(ManuscriptAnnotationRange? Range, string? Error);
     private sealed record PreviewLocationIdentity(Guid ProjectId, Guid ChapterId, EditorContentTarget ContentTarget);
 

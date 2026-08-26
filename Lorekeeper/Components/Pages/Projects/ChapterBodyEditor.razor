@@ -13,6 +13,8 @@
 @inject IManuscriptAnnotationService Annotations
 @inject IProjectImageService Images
 @inject IProjectFontService Fonts
+@inject IProjectPageSetupService PageSetups
+@inject ITypographyDefaultsService TypographyDefaults
 @inject Lorekeeper.Composition.ICompositionService Compositions
 @inject IAuthoringHistoryRuntime AuthoringHistory
 
@@ -56,6 +58,7 @@
     private DotNetObjectReference<ChapterBodyEditor>? _selfRef;
     private bool? _appliedReadOnly;
     private bool? _appliedVisible;
+    private long? _appliedTypographyRevision;
     private bool _initializing;
     private bool _disposed;
     private bool _disposing;
@@ -83,6 +86,10 @@
                     ManuscriptCodec.JsonOptions);
                 var fontFamiliesJson = JsonSerializer.Serialize(
                     await Fonts.ListAsync(ProjectId),
+                    ManuscriptCodec.JsonOptions);
+                var pageSetup = await PageSetups.GetOrCreateAsync(ProjectId);
+                var typographyJson = JsonSerializer.Serialize(
+                    TypographyDefaults.CreateEditorConfiguration(pageSetup),
                     ManuscriptCodec.JsonOptions);
                 var annotationsJson = JsonSerializer.Serialize(
                     await Annotations.ListChapterAsync(ProjectId, ContentTarget, ChapterId),
@@ -116,7 +123,8 @@
                     compositionsJson,
                     fontFamiliesJson,
                     AllowDesignedPages,
-                    annotationsJson);
+                    annotationsJson,
+                    typographyJson);
                 if (_disposed || _disposing)
                 {
                     if (handle is not null)
@@ -127,6 +135,7 @@
                     return;
                 }
                 _handle = handle;
+                _appliedTypographyRevision = pageSetup.Revision;
                 await ApplyPendingLocationAsync();
             }
             catch (JSDisconnectedException) { }
@@ -146,8 +155,12 @@
 
         if (_handle is not null && _appliedVisible != IsVisible)
         {
-            if (IsVisible && !IsReadOnly)
-                await FocusAsync();
+            if (IsVisible)
+            {
+                await RefreshTypographyAsync();
+                if (!IsReadOnly)
+                    await FocusAsync();
+            }
             _appliedVisible = IsVisible;
         }
     }
@@ -567,6 +580,27 @@
         try
         {
             await _handle.InvokeVoidAsync("focus");
+        }
+        catch (JSDisconnectedException) { }
+        catch (OperationCanceledException) { }
+        catch (JSException) { }
+    }
+
+    private async Task RefreshTypographyAsync()
+    {
+        if (_disposed || _handle is null)
+            return;
+
+        try
+        {
+            var pageSetup = await PageSetups.GetOrCreateAsync(ProjectId);
+            if (_appliedTypographyRevision == pageSetup.Revision)
+                return;
+            var typographyJson = JsonSerializer.Serialize(
+                TypographyDefaults.CreateEditorConfiguration(pageSetup),
+                ManuscriptCodec.JsonOptions);
+            await _handle.InvokeVoidAsync("updateTypography", typographyJson);
+            _appliedTypographyRevision = pageSetup.Revision;
         }
         catch (JSDisconnectedException) { }
         catch (OperationCanceledException) { }

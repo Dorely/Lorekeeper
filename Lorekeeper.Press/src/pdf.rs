@@ -950,6 +950,7 @@ where
                         strikethrough: false,
                         baseline_shift_em: 0.0,
                         size_scale: 1.0,
+                        language: None,
                     }];
                     fallback.as_slice()
                 } else {
@@ -977,7 +978,7 @@ where
                         )
                     })?;
                     let run_size = line.size * run.size_scale;
-                    let baseline = line.y + line.size * run.baseline_shift_em;
+                    let baseline = line.y + run_size * run.baseline_shift_em;
                     content.begin_text();
                     content.set_font(Name(font_resource_name(run.face).as_bytes()), run_size);
                     let mut shaped_advance = 0.0;
@@ -1996,6 +1997,7 @@ fn line_outline_edges(
             strikethrough: false,
             baseline_shift_em: 0.0,
             size_scale: 1.0,
+            language: None,
         }];
         fallback.as_slice()
     } else {
@@ -2015,7 +2017,7 @@ fn line_outline_edges(
             &run.text,
             run_size,
             cursor_x,
-            line.y + line.size * run.baseline_shift_em,
+            line.y + run_size * run.baseline_shift_em,
             line.character_spacing,
             line.word_spacing,
         )?;

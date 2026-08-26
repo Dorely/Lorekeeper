@@ -221,6 +221,7 @@ builder.Services.AddScoped<IEditionContentMigrationService, EditionContentMigrat
 builder.Services.AddScoped<IPublicationSectionMigrationService, PublicationSectionMigrationService>();
 builder.Services.AddScoped<IProjectImageService, ProjectImageService>();
 builder.Services.AddScoped<IProjectFontService, ProjectFontService>();
+builder.Services.AddSingleton<ITypographyDefaultsService, TypographyDefaultsService>();
 builder.Services.AddScoped<IManuscriptStyleService, ManuscriptStyleService>();
 builder.Services.AddScoped<Lorekeeper.Composition.ICompositionService, Lorekeeper.Composition.CompositionService>();
 builder.Services.AddScoped<Lorekeeper.Composition.IProjectPageSetupService, Lorekeeper.Composition.ProjectPageSetupService>();

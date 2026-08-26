@@ -131,14 +131,13 @@ pub fn custom_face(index: u16, weight: u16, italic: bool) -> FontFace {
     fonts
         .iter()
         .enumerate()
-        .filter(|(_, candidate)| candidate.family_key == base.family_key)
+        .filter(|(_, candidate)| candidate.family_key.eq_ignore_ascii_case(&base.family_key))
         .min_by_key(|(_, candidate)| {
-            u32::from(candidate.weight.abs_diff(weight))
-                + if candidate.italic == italic {
-                    0
-                } else {
-                    10_000
-                }
+            (
+                candidate.italic != italic,
+                candidate.weight.abs_diff(weight),
+                candidate.weight,
+            )
         })
         .map_or(FontFace::Custom(index), |(candidate, _)| {
             FontFace::Custom(candidate as u16)
@@ -177,6 +176,18 @@ pub fn is_bold(face: FontFace) -> bool {
             .is_some_and(|font| font.weight >= 600),
         _ => false,
     }
+}
+
+/// Returns the positive distance from a face's baseline to its descender edge.
+/// The result is already scaled to the requested point size.
+pub fn descent_points(face: FontFace, size: f32) -> f32 {
+    let Ok(font) = OutlineFontRef::new(font_source(face)) else {
+        return size * 0.2;
+    };
+    (-font
+        .metrics(Size::new(size), LocationRef::default())
+        .descent)
+        .max(0.0)
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -686,5 +697,86 @@ mod tests {
             "the ffi ligature must be shaped as a run"
         );
         assert!(font.character_ids.values().all(|value| *value > 0));
+    }
+
+    #[test]
+    fn staged_faces_inherit_requested_weight_and_italic_variant() {
+        let declarations = [
+            FontDeclaration {
+                id: "regular".to_owned(),
+                family_key: "Project:Fixture".to_owned(),
+                weight: 400,
+                italic: false,
+                relative_path: "regular.ttf".to_owned(),
+                media_type: "font/ttf".to_owned(),
+                byte_length: BODY_FONT.len() as u64,
+                sha256: String::new(),
+                embedding_rights_confirmed: true,
+            },
+            FontDeclaration {
+                id: "medium".to_owned(),
+                family_key: "project:fixture".to_owned(),
+                weight: 500,
+                italic: false,
+                relative_path: "medium.ttf".to_owned(),
+                media_type: "font/ttf".to_owned(),
+                byte_length: BODY_FONT.len() as u64,
+                sha256: String::new(),
+                embedding_rights_confirmed: true,
+            },
+            FontDeclaration {
+                id: "extra-bold".to_owned(),
+                family_key: "project:fixture".to_owned(),
+                weight: 800,
+                italic: false,
+                relative_path: "extra-bold.ttf".to_owned(),
+                media_type: "font/ttf".to_owned(),
+                byte_length: BODY_FONT.len() as u64,
+                sha256: String::new(),
+                embedding_rights_confirmed: true,
+            },
+            FontDeclaration {
+                id: "bold".to_owned(),
+                family_key: "project:fixture".to_owned(),
+                weight: 700,
+                italic: false,
+                relative_path: "bold.ttf".to_owned(),
+                media_type: "font/ttf".to_owned(),
+                byte_length: BODY_FONT.len() as u64,
+                sha256: String::new(),
+                embedding_rights_confirmed: true,
+            },
+            FontDeclaration {
+                id: "italic".to_owned(),
+                family_key: "PROJECT:FIXTURE".to_owned(),
+                weight: 400,
+                italic: true,
+                relative_path: "italic.ttf".to_owned(),
+                media_type: "font/ttf".to_owned(),
+                byte_length: BODY_FONT.len() as u64,
+                sha256: String::new(),
+                embedding_rights_confirmed: true,
+            },
+        ];
+        let sources = BTreeMap::from([
+            ("regular".to_owned(), BODY_FONT.to_vec()),
+            ("medium".to_owned(), BODY_FONT.to_vec()),
+            ("extra-bold".to_owned(), BODY_FONT.to_vec()),
+            ("bold".to_owned(), BODY_FONT.to_vec()),
+            ("italic".to_owned(), BODY_FONT.to_vec()),
+        ]);
+        configure_custom_fonts(&declarations, &sources).expect("staged faces");
+
+        let regular = FontFace::Custom(custom_family("project:fixture").expect("family"));
+        let medium = regular.with_weight(500, false);
+        let extra_bold = regular.with_weight(800, false);
+        let bold = regular.with_weight(700, false);
+        let italic = regular.with_weight(400, true);
+        assert_eq!(medium, FontFace::Custom(1));
+        assert_eq!(extra_bold, FontFace::Custom(2));
+        assert_eq!(bold, FontFace::Custom(3));
+        assert!(!is_italic(bold));
+        assert_eq!(italic, FontFace::Custom(4));
+        assert!(is_italic(italic));
     }
 }

@@ -29,7 +29,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
-    assert_eq!(value["protocolVersion"], 7);
+    assert_eq!(value["protocolVersion"], 8);
     assert_eq!(value["rendererVersion"], "2.1.3");
     assert_eq!(
         value["profiles"],
@@ -62,7 +62,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
         stderr(&output)
     );
     let response = response(&output);
-    assert_eq!(response["protocolVersion"], 7);
+    assert_eq!(response["protocolVersion"], 8);
     assert_eq!(response["rendererVersion"], "2.1.3");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
@@ -1007,7 +1007,7 @@ fn declared_cff_otf_uses_cidfont_type0_and_an_opentype_fontfile3_stream() {
 }
 
 #[test]
-fn protocol_v7_renders_paragraph_presentation_and_structured_page_preview_data() {
+fn protocol_v8_renders_paragraph_presentation_and_structured_page_preview_data() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
     let chapter_id = "50000000-0000-0000-0000-000000000001";
     let figure_id = "60000000-0000-0000-0000-000000000001";
@@ -1605,6 +1605,136 @@ fn overlay_figure_caption_is_rendered_inside_the_image_frame() {
 }
 
 #[test]
+fn figure_caption_marks_survive_all_caption_placements() {
+    for placement in ["Above", "Below", "Overlay", "Hidden"] {
+        let mut job = PreparedJob::new("generic-digital-pdf-v1");
+        job.request["document"]["sections"][0]["chapters"][0]["blocks"] = json!([{
+            "id": format!("marked-caption-{placement}"), "type": "Figure", "styleRole": "figure-caption",
+            "assetId": "90000000-0000-0000-0000-000000000001", "caption": "Marked caption",
+            "altText": "A marked-caption illustration", "decorative": false,
+            "presentation": { "placement": "Centered", "widthPercent": 70, "alignment": "Center",
+                "textWrap": "None", "fit": "Contain", "cropXPercent": 50, "cropYPercent": 50,
+                "spacingBeforePoints": 0, "spacingAfterPoints": 0, "startOnNewPage": false,
+                "keepWithCaption": true, "captionPlacement": placement },
+            "content": [
+                { "type": "Text", "text": "Marked ", "marks": [] },
+                { "type": "Text", "text": "caption", "marks": [{ "type": "Strong" }] }
+            ]
+        }]);
+        job.write_request();
+
+        let trace = job.layout_trace();
+        let caption_lines = trace["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|page| page["lines"].as_array().into_iter().flatten())
+            .filter(|line| line["semanticRole"] == "Caption")
+            .filter(|line| {
+                line["text"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("Marked"))
+            })
+            .collect::<Vec<_>>();
+        if placement == "Hidden" {
+            assert!(caption_lines.is_empty(), "hidden caption must not render");
+            continue;
+        }
+        let marked_run = caption_lines
+            .iter()
+            .flat_map(|line| line["runs"].as_array().into_iter().flatten())
+            .find(|run| run["text"] == "caption")
+            .expect("marked caption run");
+        assert_eq!(marked_run["face"], "SerifBoldItalic");
+        if placement == "Overlay" {
+            assert!(caption_lines.iter().all(|line| line["lightText"] == true));
+        } else {
+            assert!(caption_lines.iter().all(|line| line["lightText"] == false));
+        }
+    }
+}
+
+#[test]
+fn named_caption_style_controls_inline_and_dedicated_figure_layout() {
+    for (index, placement) in ["Centered", "DedicatedPage"].into_iter().enumerate() {
+        let mut job = PreparedJob::new("generic-digital-pdf-v1");
+        job.request["document"]["styles"]
+            .as_array_mut()
+            .expect("document styles")
+            .push(json!({
+                "name": "Conformance caption",
+                "kind": "Paragraph",
+                "semanticRole": "conformance-caption",
+                "definition": {
+                    "fontFamilyKey": "sans",
+                    "fontSizePoints": 13.0,
+                    "lineHeight": 1.75,
+                    "fontWeight": 700,
+                    "italic": true,
+                    "textAlign": "right",
+                    "spaceBeforePoints": 9.0,
+                    "spaceAfterPoints": 11.0
+                }
+            }));
+        job.request["document"]["sections"][0]["chapters"][0]["blocks"] = json!([{
+            "id": format!("named-caption-{index}"),
+            "type": "Figure",
+            "styleRole": "conformance-caption",
+            "assetId": "90000000-0000-0000-0000-000000000001",
+            "caption": "Named caption style sentinel",
+            "altText": "Named caption style illustration",
+            "decorative": false,
+            "presentation": {
+                "placement": placement,
+                "widthPercent": 60,
+                "alignment": "Center",
+                "textWrap": "None",
+                "fit": "Contain",
+                "captionPlacement": "Below"
+            },
+            "content": [{
+                "type": "Text",
+                "text": "Named caption style sentinel",
+                "marks": []
+            }]
+        }]);
+        job.write_request();
+
+        let trace = job.layout_trace();
+        let page = trace["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|page| {
+                page["lines"].as_array().is_some_and(|lines| {
+                    lines
+                        .iter()
+                        .any(|line| line["text"] == "Named caption style sentinel")
+                })
+            })
+            .expect("named caption page");
+        let caption = page["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|line| line["text"] == "Named caption style sentinel")
+            .expect("named caption line");
+        let image = page["images"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|image| image["altText"] == "Named caption style illustration")
+            .expect("named caption image");
+        assert_eq!(caption["size"], 13.0);
+        assert_eq!(caption["runs"][0]["face"], "SansBoldItalic");
+        assert_eq!(caption["semanticRole"], "Caption");
+        assert!(caption["x"].as_f64().unwrap() > image["x"].as_f64().unwrap());
+        assert_eq!(caption["lightText"], false);
+        assert!(caption["y"].as_f64().unwrap() < image["y"].as_f64().unwrap());
+    }
+}
+
+#[test]
 fn full_bleed_figure_occupies_the_complete_physical_leaf() {
     let mut job = PreparedJob::new("kdp-paperback-v1");
     job.request["document"]["sections"][0]["chapters"][0]["blocks"] = json!([{
@@ -2040,6 +2170,7 @@ fn layout_trace_keeps_every_line_inside_the_content_box_and_preserves_text() {
         let size = line["size"].as_f64().expect("size");
         assert!(line["rotationDegrees"].as_f64().is_some());
         assert!(line["opacity"].as_f64().is_some());
+        assert!(line["baselineOffsetPoints"].as_f64().is_some());
         assert!(
             line["runs"]
                 .as_array()
@@ -2404,7 +2535,11 @@ fn emitted_pdf_text_matrices_match_harfrust_layout_positions() {
             "id": "chapter", "title": "", "includeHeading": false,
             "blocks": [{
                 "id": "block", "type": "Paragraph", "styleRole": "body",
-                "content": [{ "type": "Text", "text": "AVATAR office x\u{301}", "marks": [] }]
+                "content": [
+                    { "type": "Text", "text": "base ", "marks": [] },
+                    { "type": "Text", "text": "sup", "marks": [{ "type": "Superscript" }] },
+                    { "type": "Text", "text": " sub", "marks": [{ "type": "Subscript" }] }
+                ]
             }]
         }]
     }]);
@@ -2416,9 +2551,14 @@ fn emitted_pdf_text_matrices_match_harfrust_layout_positions() {
         .unwrap()
         .iter()
         .flat_map(|page| page["lines"].as_array().into_iter().flatten())
-        .find(|line| line["text"] == "AVATAR office x\u{301}")
+        .find(|line| line["text"] == "base sup sub")
         .expect("shaped trace line");
-    let glyphs = line["runs"][0]["glyphs"].as_array().unwrap();
+    let glyph_count = line["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|run| run["glyphs"].as_array().unwrap().len())
+        .sum::<usize>();
     let rendered = response(&job.render());
     let document = Document::load(job.artifact(&rendered, "interior-pdf")).expect("PDF");
     let page_id = *document.get_pages().values().next().unwrap();
@@ -2428,24 +2568,33 @@ fn emitted_pdf_text_matrices_match_harfrust_layout_positions() {
     let matrices = operations
         .iter()
         .filter(|operation| operation.operator == "Tm")
-        .take(glyphs.len())
+        .take(glyph_count)
         .collect::<Vec<_>>();
-    assert_eq!(matrices.len(), glyphs.len());
+    assert_eq!(matrices.len(), glyph_count);
     let mut advance = 0.0;
-    for (matrix, glyph) in matrices.iter().zip(glyphs) {
-        let actual_x = number(&matrix.operands[4]);
-        let actual_y = number(&matrix.operands[5]);
-        let expected_x = line["x"].as_f64().unwrap() + advance + glyph["xOffset"].as_f64().unwrap();
-        let expected_y = line["y"].as_f64().unwrap() + glyph["yOffset"].as_f64().unwrap();
-        assert!(
-            (actual_x - expected_x).abs() < 0.02,
-            "x placement differs: {matrix:?}"
-        );
-        assert!(
-            (actual_y - expected_y).abs() < 0.02,
-            "y placement differs: {matrix:?}"
-        );
-        advance += glyph["xAdvance"].as_f64().unwrap();
+    let mut matrix_index = 0;
+    for run in line["runs"].as_array().unwrap() {
+        let run_size = line["size"].as_f64().unwrap() * run["sizeScale"].as_f64().unwrap();
+        let baseline_shift = run_size * run["baselineShiftEm"].as_f64().unwrap();
+        for glyph in run["glyphs"].as_array().unwrap() {
+            let matrix = &matrices[matrix_index];
+            let actual_x = number(&matrix.operands[4]);
+            let actual_y = number(&matrix.operands[5]);
+            let expected_x =
+                line["x"].as_f64().unwrap() + advance + glyph["xOffset"].as_f64().unwrap();
+            let expected_y =
+                line["y"].as_f64().unwrap() + baseline_shift + glyph["yOffset"].as_f64().unwrap();
+            assert!(
+                (actual_x - expected_x).abs() < 0.02,
+                "x placement differs: {matrix:?}"
+            );
+            assert!(
+                (actual_y - expected_y).abs() < 0.02,
+                "y placement differs: {matrix:?}"
+            );
+            advance += glyph["xAdvance"].as_f64().unwrap();
+            matrix_index += 1;
+        }
     }
 }
 
@@ -3110,9 +3259,9 @@ impl PreparedJob {
         fs::create_dir_all(root.path().join("input/assets")).expect("input assets");
         fs::write(root.path().join("input/assets/pixel.png"), PIXEL_PNG).expect("pixel PNG");
         let mut request: Value =
-            serde_json::from_slice(include_bytes!("../fixtures/full-model-v7.json"))
+            serde_json::from_slice(include_bytes!("../fixtures/full-model-v8.json"))
                 .expect("canonical request");
-        request["protocolVersion"] = json!(7);
+        request["protocolVersion"] = json!(8);
         let profile = match profile {
             "generic-paperback-v1" => "generic-print-v2",
             "kdp-paperback-v1" => "kdp-paperback-v2",
