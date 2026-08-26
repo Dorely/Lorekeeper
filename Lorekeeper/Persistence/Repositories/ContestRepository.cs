@@ -10,10 +10,22 @@ public sealed class ContestRepository(AppDatabaseReadOperation operation) : ICon
             .AsNoTracking()
             .Include(batch => batch.Candidates.OrderBy(candidate => candidate.Order))
             .Where(batch => batch.ProjectId == projectId
-                && (batch.Status == ContestBatchStatus.Running || batch.Status == ContestBatchStatus.Completed))
+                && (batch.Status == ContestBatchStatus.Running
+                    || batch.Status == ContestBatchStatus.Completed
+                    || batch.Status == ContestBatchStatus.Failed))
             .OrderByDescending(batch => batch.CreatedAt)
             .Take(1)
             .ToListAsync(cancellationToken);
+
+    public Task<ContestBatch?> GetUnresolvedByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        operation.Db.ContestBatches
+            .Include(batch => batch.Candidates.OrderBy(candidate => candidate.Order))
+            .Where(batch => batch.ProjectId == projectId
+                && (batch.Status == ContestBatchStatus.Running
+                    || batch.Status == ContestBatchStatus.Completed
+                    || batch.Status == ContestBatchStatus.Failed))
+            .OrderByDescending(batch => batch.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
 
     public async Task DeleteInactiveByProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -21,7 +33,8 @@ public sealed class ContestRepository(AppDatabaseReadOperation operation) : ICon
             .Include(batch => batch.Candidates.OrderBy(candidate => candidate.Order))
             .Where(batch => batch.ProjectId == projectId
                 && batch.Status != ContestBatchStatus.Running
-                && batch.Status != ContestBatchStatus.Completed)
+                && batch.Status != ContestBatchStatus.Completed
+                && batch.Status != ContestBatchStatus.Failed)
             .ToListAsync(cancellationToken);
 
         if (batches.Count == 0) return;

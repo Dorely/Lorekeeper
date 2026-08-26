@@ -37,12 +37,11 @@ public sealed class ChatConversationModelSelectionMigrationTests
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 await db.GetService<IMigrator>().MigrateAsync(PreviousMigration);
-                db.Projects.Add(new Project
-                {
-                    Id = projectId,
-                    Name = "Chat migration fixture",
-                    Slug = $"chat-migration-{projectId:N}",
-                });
+                await LegacyProjectSeed.InsertAsync(
+                    db,
+                    projectId,
+                    "Chat migration fixture",
+                    $"chat-migration-{projectId:N}");
                 await db.SaveChangesAsync();
 
                 foreach (var fixture in fixtures)

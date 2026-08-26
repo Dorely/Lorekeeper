@@ -50,201 +50,6 @@ namespace Lorekeeper.Persistence.Migrations
                     b.ToTable("Acts");
                 });
 
-            modelBuilder.Entity("Lorekeeper.Models.AiChange", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AfterJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ArgumentsJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("BatchId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("BeforeJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CreatedResourceIdsJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DependsOnChangeIdsJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DraftAfterJson")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("Order")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("ReferencedResourceIdsJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RejectionMessage")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("ResolvedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ResourceId")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ResourceKind")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ResultJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ReviewStateJson")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Summary")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ToolCallId")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ToolName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Status");
-
-                    b.HasIndex("BatchId", "Order");
-
-                    b.ToTable("AiChanges");
-                });
-
-            modelBuilder.Entity("Lorekeeper.Models.AiChangeBatch", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("AssistantMessageId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("ContentTargetEditionId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ContentTargetKind")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("ConversationId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ConversationKind")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("ResolvedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "Status", "CreatedAt");
-
-                    b.ToTable("AiChangeBatches");
-                });
-
-            modelBuilder.Entity("Lorekeeper.Models.AssistantReviewBaseline", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ActionLabel")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("AssistantTurnId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("BeforeHash")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("BeforeManuscriptJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("CapturedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("ChapterId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid?>("EditionId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("TargetKey")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("TargetKind")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ChapterId");
-
-                    b.HasIndex("EditionId");
-
-                    b.HasIndex("ProjectId", "ChapterId", "CapturedAt");
-
-                    b.HasIndex("ProjectId", "ChapterId", "TargetKey")
-                        .IsUnique();
-
-                    b.ToTable("AssistantReviewBaselines");
-                });
-
             modelBuilder.Entity("Lorekeeper.Models.BookBrief", b =>
                 {
                     b.Property<Guid>("Id")
@@ -512,10 +317,6 @@ namespace Lorekeeper.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("AcceptedManuscriptJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
                     b.Property<Guid?>("AssistantMessageId")
                         .HasColumnType("TEXT");
 
@@ -549,11 +350,21 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<string>("ErrorMessage")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("OriginalManuscriptHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("OriginalManuscriptJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<long>("OriginalManuscriptRevision")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SelectedCandidateId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Status")
@@ -569,6 +380,11 @@ namespace Lorekeeper.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ConversationId", "CreatedAt");
+
+                    b.HasIndex("ProjectId")
+                        .HasDatabaseName("IX_ContestBatches_ProjectId_Unresolved")
+                        .IsUnique()
+                        .HasFilter("\"Status\" IN ('Running', 'Completed', 'Failed')");
 
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 
@@ -588,6 +404,10 @@ namespace Lorekeeper.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DraftManuscriptJson")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<double?>("DurationMs")
@@ -2504,9 +2324,6 @@ namespace Lorekeeper.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
-                    b.Property<bool>("AiChangeApprovalEnabled")
-                        .HasColumnType("INTEGER");
-
                     b.Property<bool>("ContestModeEnabled")
                         .HasColumnType("INTEGER");
 
@@ -2532,6 +2349,9 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Property<string>("ProjectGuidance")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("ReviewEditsEnabled")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Slug")
                         .IsRequired()
@@ -5423,54 +5243,6 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Project");
                 });
 
-            modelBuilder.Entity("Lorekeeper.Models.AiChange", b =>
-                {
-                    b.HasOne("Lorekeeper.Models.AiChangeBatch", "Batch")
-                        .WithMany("Changes")
-                        .HasForeignKey("BatchId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Batch");
-                });
-
-            modelBuilder.Entity("Lorekeeper.Models.AiChangeBatch", b =>
-                {
-                    b.HasOne("Lorekeeper.Models.Project", "Project")
-                        .WithMany("AiChangeBatches")
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Project");
-                });
-
-            modelBuilder.Entity("Lorekeeper.Models.AssistantReviewBaseline", b =>
-                {
-                    b.HasOne("Lorekeeper.Models.Chapter", "Chapter")
-                        .WithMany()
-                        .HasForeignKey("ChapterId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Lorekeeper.Models.PublicationEdition", "Edition")
-                        .WithMany()
-                        .HasForeignKey("EditionId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
-                    b.HasOne("Lorekeeper.Models.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Chapter");
-
-                    b.Navigation("Edition");
-
-                    b.Navigation("Project");
-                });
-
             modelBuilder.Entity("Lorekeeper.Models.BookBrief", b =>
                 {
                     b.HasOne("Lorekeeper.Models.Project", "Project")
@@ -6767,11 +6539,6 @@ namespace Lorekeeper.Persistence.Migrations
                     b.Navigation("Chapters");
                 });
 
-            modelBuilder.Entity("Lorekeeper.Models.AiChangeBatch", b =>
-                {
-                    b.Navigation("Changes");
-                });
-
             modelBuilder.Entity("Lorekeeper.Models.BookBrief", b =>
                 {
                     b.Navigation("CanonSources");
@@ -6891,8 +6658,6 @@ namespace Lorekeeper.Persistence.Migrations
             modelBuilder.Entity("Lorekeeper.Models.Project", b =>
                 {
                     b.Navigation("Acts");
-
-                    b.Navigation("AiChangeBatches");
 
                     b.Navigation("BookBrief");
 

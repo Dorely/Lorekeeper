@@ -12,6 +12,7 @@ public sealed class ProjectVersionHistoryUiEvents
     public event Action<Guid>? CheckpointCreated;
     public event Action<Guid>? OperationStateChanged;
     public event Action<Guid>? RemoteSyncChanged;
+    public event Action<Guid>? ReviewStateChanged;
 
     public bool IsProjectOperationActive(Guid projectId)
     {
@@ -52,6 +53,18 @@ public sealed class ProjectVersionHistoryUiEvents
     {
         ValidateProjectId(projectId);
         Publish(RemoteSyncChanged, projectId);
+    }
+
+    /// <summary>
+    /// Notifies rendered review surfaces after a durable review setting,
+    /// approval, undo, or contest state transition. This is intentionally
+    /// separate from checkpoint notifications because a live review mutation
+    /// can leave the approved Git head unchanged.
+    /// </summary>
+    public void PublishReviewStateChanged(Guid projectId)
+    {
+        ValidateProjectId(projectId);
+        Publish(ReviewStateChanged, projectId);
     }
 
     private static void Publish(Action<Guid>? handlers, Guid projectId)

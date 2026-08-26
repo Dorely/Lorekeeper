@@ -20,7 +20,8 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   remain intact and independently editable.
 - Six persistent assistant surfaces for outline collaboration, chapter editing,
   writing coaching, research, project images, and publishing, including streaming tools and expandable model-reasoning transcripts,
-  reviewable changes, visual context, background revision agents, and project/surface-
+  direct owning-service mutations, Git-backed Review Edits, visual context,
+  background revision agents, and project/surface-
   scoped composer drafts that survive navigation and reloads until sent.
 - Each of the six assistant chats has a compact per-conversation model picker.
   It groups working models under their saved connection and shows model-only
@@ -67,8 +68,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   of becoming Undo actions. Undo can restore a deleted Designed Page with its original semantic
   content, scene, variants, IDs, and asset references. History is independent of
   the working database, intentionally clears when Lorekeeper exits, and is excluded from
-  project exports. The latest assistant comparison used by Review Edits remains
-  durable and independent.
+  project exports. Review Edits is Git-backed: live changes remain local and
+  dirty until approved, while the latest approved state is Git HEAD; the
+  workflow preference itself is not part of snapshots.
 - Outline treats chapters as format-neutral containers and derives concise,
   non-prescriptive genre-format guidance from the Book Brief. Editor owns
   chapter Figure and Designed Page work; Publish owns publication sections and
@@ -116,13 +118,20 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Switching between Edit, Read, and Review carries the current chapter position;
   Edit restores a semantic caret or node, while Read and Review restore the
   corresponding manuscript viewport without changing Review expansion state.
-- Review remains populated after an assistant manuscript pass is applied: it
-  compares the live Current chapter with the saved Before snapshot from before
-  that pass, so later manual edits remain visible. Pending and Contest review
-  actions retain priority, while the applied comparison is read-only and covers
-  body, structure/formatting, Figures, and Designed Page references. Applied
-  changes use the same collapsed line markers, inline diff cards, and dot rail as
-  active Review, with separate text, formatting, and visual reveal controls.
+- Review compares Git HEAD with live SQLite and is the full manuscript review
+  surface. Pending Review lists affected `(chapter, Core|edition)` targets plus
+  Other changes, supports stable-block grouping, inline text edits, Approve, and
+  Undo, and keeps Figures, formatting, moves, and Designed Pages semantic.
+  Figure captions are editable and Designed Pages show visual before/after
+  previews. A clean chapter uses the newest affecting approved commit versus
+  its parent; historical Undo restores that parent into live state as a normal
+  pending reversal. Partial approval creates a ReviewApproval checkpoint;
+  Approve All checkpoints the complete project.
+- The project top bar places Review Edits beside Checkpoint and shows Pending
+  changes with its count. Enabling Review Edits keeps assistant mutations live
+  but uncheckpointed; disabling it checkpoints completed mutating assistant
+  turns. A project-wide unresolved Contest locks Editor mutations until
+  resolved or discarded; each candidate has an independent durable draft.
 - Exact-target review highlights and notes in Edit and Read, with a collapsible
   margin rail, deterministic outdated-anchor handling, assistant context and
   completion tools, and no effect on manuscript formatting or publication output.
@@ -252,7 +261,8 @@ Snapshots preserve the authored creative areas—project settings and references
 narrative and chapters, canonical graph data, ingest sources, images/fonts and
 visual examples, manuscript styles, compositions, and publication Core/edition
 state. They deliberately omit conversations and drafts, provider credentials and
-OAuth tokens, AI/review/job/staging rows, FTS/vector/context projections,
+OAuth tokens, the Review Edits preference, contest candidate drafts and other
+review/job operational rows, FTS/vector/context projections,
 visual candidates, render artifacts and page maps, audits, migration journals,
 and process-lifetime Undo/Redo. Derived indexes are rebuilt after restore.
 
@@ -522,11 +532,11 @@ removes these drafts; they are not included in database backups or project
 exports. Attached composer images remain project-library assets, but the
 temporary attachment selection itself is not restored with the text draft.
 
-The guarded manuscript/composition and authoring-page migrations create a
-protected SQLite backup before transforming Figure presentation, page-layout
-chapters, cover scenes, page setup, authoring variants, and pending Outline
-changes. They verify semantic text and stable IDs, scene/image ownership and
-geometry, staged Picture Page hashes, active authoring layouts, protected row
+The guarded manuscript/composition, authoring-page, and Review Edits migrations
+create a protected SQLite backup before transforming Figure presentation,
+page-layout chapters, cover scenes, page setup, authoring variants, and legacy
+review/contest state. They verify semantic text and stable IDs, scene/image
+ownership and geometry, candidate draft hashes, active authoring layouts, protected row
 counts, foreign keys, artifacts, hashes, packages, and audits before
 removing obsolete visual state. Every Picture Page retains its original 8.5 × 11
 inch leaf geometry (including 17 × 11 facing spreads) until the authoring

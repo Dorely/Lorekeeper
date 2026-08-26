@@ -153,6 +153,20 @@ edited, subject to same-role validation. A mixed-role legacy frame fails
 closed. Meaningful content that cannot be placed remains in an unplaced tray
 with a blocking diagnostic rather than being discarded.
 
+Figures and Designed Pages are direct owning-service mutations in live SQLite.
+Review Edits compares those semantic changes from Git HEAD to live state rather
+than flattening them into text or a second manuscript representation. Pending Review
+shows Figure metadata with editable captions and Designed Page visual
+before/after previews; structural insertions, moves, formatting, and scene
+changes remain atomic and reviewable. Historical Undo restores the approved
+parent value into live state as a normal pending reversal.
+
+During an unresolved Contest, candidate drafts preserve Figure semantics,
+captions, Designed Page references, and scene structure independently. The
+project-wide Editor lock blocks manual and assistant layout, Figure, and
+Designed Page mutations until the contest is resolved or discarded; authorized
+candidate-draft edits and resolution remain available.
+
 The shared scene vocabulary includes image, text, rectangle, ellipse, line,
 and group objects. Visibility, opacity, locks, grouping, object styles, named
 regions, z-order, and logical reading order have runtime meaning. Authors do
@@ -250,8 +264,9 @@ composition, Core/release fingerprints, and artifact freshness.
 - [`version-history-sync.md`](./version-history-sync.md) owns deterministic
   image/font blob capture and restore; this chapter owns the live asset and
   scene semantics those snapshots represent.
-- [`assistants-chat.md`](./assistants-chat.md) owns shared chat turns, tool
-  staging, assistant context, and model-visible visual preview protocol.
+- [`assistants-chat.md`](./assistants-chat.md) owns shared chat turns, direct
+  assistant mutation policy, assistant context, contest drafts, and model-visible
+  visual preview protocol.
 
 ## Relevant verification
 

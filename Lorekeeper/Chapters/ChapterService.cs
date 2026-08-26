@@ -1,5 +1,6 @@
 using Lorekeeper.Authoring;
 using Lorekeeper.Context;
+using Lorekeeper.EditorChat;
 using Lorekeeper.Graph;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Llm;
@@ -14,7 +15,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Lorekeeper.Chapters;
 
 public class ChapterService(
-    IVectorStore vectors, IEmbeddingService embeddings, ITextChunker chunker, IProjectSearchIndex projectSearch, IGraphAutoLinkService autoLinks, IOutlineGraphSync outlineGraphSync, IContextIndexingService contextIndexing, IVectorIndexWorkCoordinator indexWork, IAppDatabaseOperationFactory database, IManuscriptStyleService manuscriptStyles, IChapterSemanticProjectionService semanticProjection, IProjectMutationCoordinator projectMutations, IAuthoringHistoryRuntime authoringHistory, IAssistantReviewBaselineService assistantReviewBaselines, IAuthoringMutationContextAccessor authoringMutationContext, IManuscriptAnnotationService annotations, ILogger<ChapterService> logger) : IChapterService, IManuscriptService
+    IVectorStore vectors, IEmbeddingService embeddings, ITextChunker chunker, IProjectSearchIndex projectSearch, IGraphAutoLinkService autoLinks, IOutlineGraphSync outlineGraphSync, IContextIndexingService contextIndexing, IVectorIndexWorkCoordinator indexWork, IAppDatabaseOperationFactory database, IManuscriptStyleService manuscriptStyles, IChapterSemanticProjectionService semanticProjection, IProjectMutationCoordinator projectMutations, IAuthoringHistoryRuntime authoringHistory, IAuthoringMutationContextAccessor authoringMutationContext, IManuscriptAnnotationService annotations, IEditorContestMutationGuard contestGuard, IEditorContestMutationContext contestMutationContext, ILogger<ChapterService> logger) : IChapterService, IManuscriptService
 {
     public async Task<IReadOnlyList<Chapter>> ListAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -36,6 +37,7 @@ public class ChapterService(
     }
     public async Task<Chapter> CreateAsync(Guid projectId, Guid? actId = null, string? title = null, string? synopsis = null, Guid? id = null, CancellationToken cancellationToken = default)
     {
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var repo = databaseOperation.Repositories.Chapters;
@@ -82,6 +84,7 @@ public class ChapterService(
         CancellationToken cancellationToken = default)
     {
         var projectId = await GetChapterProjectIdAsync(chapterId, cancellationToken);
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var repo = databaseOperation.Repositories.Chapters;
@@ -159,21 +162,6 @@ public class ChapterService(
             : await EditionSnapshotAsync(target, chapter, cancellationToken);
     }
 
-    public async Task<LatestAssistantReviewSnapshot?> GetLatestAssistantReviewAsync(
-        EditorContentTarget target,
-        Guid chapterId,
-        CancellationToken cancellationToken = default)
-    {
-        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var chapter = await databaseOperation.Repositories.Chapters.GetByIdAsync(chapterId, cancellationToken)
-            ?? throw new KeyNotFoundException("The chapter was not found.");
-        return await assistantReviewBaselines.ReadLatestAsync(
-            chapter.ProjectId,
-            chapter.Id,
-            target,
-            cancellationToken);
-    }
-
     public Task<ManuscriptHistoryMutationResult> UndoAsync(
         EditorContentTarget target,
         Guid chapterId,
@@ -195,6 +183,7 @@ public class ChapterService(
         var projectId = await GetChapterProjectIdAsync(chapterId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         var db = databaseOperation.Db;
         var repo = databaseOperation.Repositories.Chapters;
         var chapter = await repo.GetByIdAsync(chapterId, cancellationToken)
@@ -392,6 +381,10 @@ public class ChapterService(
         ManuscriptDocument document,
         CancellationToken cancellationToken = default)
     {
+        var projectId = await GetChapterProjectIdAsync(chapterId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         if (!target.IsCore)
             return await ReplaceEditionDocumentAsync(target, chapterId, expectedRevision, document, cancellationToken);
         var chapter = await RequireRevisionAsync(chapterId, expectedRevision, cancellationToken);
@@ -421,6 +414,10 @@ public class ChapterService(
         IReadOnlyList<ManuscriptOperation> operations,
         CancellationToken cancellationToken = default)
     {
+        var projectId = await GetChapterProjectIdAsync(chapterId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         if (!target.IsCore)
             return await ApplyEditionAsync(target, chapterId, expectedRevision, operations, acquireLease: true, cancellationToken);
         var chapter = await RequireRevisionAsync(chapterId, expectedRevision, cancellationToken);
@@ -441,6 +438,10 @@ public class ChapterService(
         IReadOnlyList<ManuscriptOperation> operations,
         CancellationToken cancellationToken = default)
     {
+        var projectId = await GetChapterProjectIdAsync(chapterId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         if (!target.IsCore)
             return await ApplyEditionAsync(target, chapterId, expectedRevision, operations, acquireLease: false, cancellationToken);
         var chapter = await RequireRevisionAsync(chapterId, expectedRevision, cancellationToken);
@@ -462,6 +463,10 @@ public class ChapterService(
         IReadOnlyList<ManuscriptOperation> operations,
         CancellationToken cancellationToken = default)
     {
+        var projectId = await GetChapterProjectIdAsync(chapterId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         if (!target.IsCore)
             return await ApplyEditionAsync(target, chapterId, expectedRevision, operations, acquireLease: false, cancellationToken);
         var chapter = await RequireRevisionAsync(chapterId, expectedRevision, cancellationToken);
@@ -535,17 +540,18 @@ public class ChapterService(
         IReadOnlyList<string> changedBlockIds,
         CancellationToken cancellationToken)
     {
-        (ManuscriptMutationResult Result, Chapter Chapter) persisted;
-        await using (await projectMutations.AcquireAsync(chapter.ProjectId, cancellationToken))
-        {
-            persisted = await PersistManuscriptUnderLeaseAsync(
-                chapter,
-                document,
-                changedBlockIds,
-                cancellationToken);
-        }
+        // ReplaceDocumentAsync and ApplyAsync already hold the project-scoped
+        // database operation. Re-acquiring the same project semaphore here would
+        // deadlock contest resolution, which intentionally invokes replacement
+        // through that shared operation.
+        var persisted = await PersistManuscriptUnderLeaseAsync(
+            chapter,
+            document,
+            changedBlockIds,
+            cancellationToken);
 
-        await RefreshPersistedManuscriptAsync(persisted.Chapter, cancellationToken);
+        if (!contestMutationContext.IsAuthorized(persisted.Chapter.ProjectId))
+            await RefreshPersistedManuscriptAsync(persisted.Chapter, cancellationToken);
         return persisted.Result;
     }
 
@@ -640,18 +646,6 @@ public class ChapterService(
             db, document, chapter.ProjectId, chapter.Id, null, null, cancellationToken);
         var target = new AuthoringHistoryTarget(chapter.ProjectId, AuthoringHistoryDocumentKind.CoreChapter, chapter.Id);
         var context = authoringMutationContext.Current;
-        if (context?.IsAssistant == true)
-        {
-            await assistantReviewBaselines.CaptureFirstCommittedAsync(
-                db,
-                chapter.ProjectId,
-                chapter.Id,
-                EditorContentTarget.Core,
-                context.AssistantTurnId,
-                context.ReviewBaselineFor(chapter.Id) ?? ManuscriptCodec.Serialize(previous),
-                context.ActionLabel,
-                cancellationToken);
-        }
 
         try
         {
@@ -665,18 +659,21 @@ public class ChapterService(
                 current?.ManuscriptRevision ?? document.Revision);
         }
 
-        if (context?.IsAssistant == true)
+        if (!contestMutationContext.IsAuthorized(chapter.ProjectId))
         {
-            await authoringHistory.ResetToCurrentAsync(target, afterHistory, CancellationToken.None);
-        }
-        else
-        {
-            await authoringHistory.RecordManualActionAsync(
-                target,
-                beforeHistory,
-                afterHistory,
-                AuthoringSnapshotCodec.DescribeManuscriptAction(beforeHistory, afterHistory, "chapter"),
-                cancellationToken: CancellationToken.None);
+            if (context?.IsAssistant == true)
+            {
+                await authoringHistory.ResetToCurrentAsync(target, afterHistory, CancellationToken.None);
+            }
+            else
+            {
+                await authoringHistory.RecordManualActionAsync(
+                    target,
+                    beforeHistory,
+                    afterHistory,
+                    AuthoringSnapshotCodec.DescribeManuscriptAction(beforeHistory, afterHistory, "chapter"),
+                    cancellationToken: CancellationToken.None);
+            }
         }
         return (new ManuscriptMutationResult(await SnapshotAsync(chapter, cancellationToken), changedBlockIds), chapter);
     }
@@ -888,7 +885,6 @@ public class ChapterService(
         var db = databaseOperation.Db;
         var edition = await RequireEditableEditionAsync(target, chapter.ProjectId, cancellationToken);
         var document = requested with { ManuscriptId = chapter.Id };
-        var beforeReviewManuscript = ManuscriptCodec.Serialize(previous);
         var wasInherited = chapterOverride is null;
         var beforeHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
             db, previous, chapter.ProjectId, chapter.Id, null, edition.Id, cancellationToken,
@@ -944,18 +940,6 @@ public class ChapterService(
             chapter.Id,
             edition.Id);
         var context = authoringMutationContext.Current;
-        if (context?.IsAssistant == true)
-        {
-            await assistantReviewBaselines.CaptureFirstCommittedAsync(
-                db,
-                chapter.ProjectId,
-                chapter.Id,
-                target,
-                context.AssistantTurnId,
-                context.ReviewBaselineFor(chapter.Id) ?? beforeReviewManuscript,
-                context.ActionLabel,
-                cancellationToken);
-        }
 
         try
         {
@@ -970,21 +954,25 @@ public class ChapterService(
             throw new ManuscriptRevisionConflictException(checked(document.Revision - 1), currentRevision);
         }
 
-        if (context?.IsAssistant == true)
+        if (!contestMutationContext.IsAuthorized(chapter.ProjectId))
         {
-            await authoringHistory.ResetToCurrentAsync(historyTarget, afterHistory, CancellationToken.None);
-        }
-        else
-        {
-            await authoringHistory.RecordManualActionAsync(
-                historyTarget,
-                beforeHistory,
-                afterHistory,
-                AuthoringSnapshotCodec.DescribeManuscriptAction(beforeHistory, afterHistory, "chapter"),
-                cancellationToken: CancellationToken.None);
+            if (context?.IsAssistant == true)
+            {
+                await authoringHistory.ResetToCurrentAsync(historyTarget, afterHistory, CancellationToken.None);
+            }
+            else
+            {
+                await authoringHistory.RecordManualActionAsync(
+                    historyTarget,
+                    beforeHistory,
+                    afterHistory,
+                    AuthoringSnapshotCodec.DescribeManuscriptAction(beforeHistory, afterHistory, "chapter"),
+                    cancellationToken: CancellationToken.None);
+            }
         }
         await databaseOperation.DisposeAsync();
-        await TryReindexEditionBodyAsync(target, chapter.Id, cancellationToken);
+        if (!contestMutationContext.IsAuthorized(chapter.ProjectId))
+            await TryReindexEditionBodyAsync(target, chapter.Id, cancellationToken);
         return new ManuscriptMutationResult(
             (await EditionSnapshotAsync(target, chapter, cancellationToken)),
             changedBlockIds);
@@ -1070,6 +1058,7 @@ public class ChapterService(
         var projectId = await GetChapterProjectIdAsync(chapterId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         var db = databaseOperation.Db;
         var repo = databaseOperation.Repositories.Chapters;
         if (target.EditionId is not Guid editionId)
@@ -1316,6 +1305,7 @@ public class ChapterService(
             chapter = await readOperation.Repositories.Chapters.GetByIdAsync(chapterId, cancellationToken);
         if (chapter is null) return;
         var projectId = chapter.ProjectId;
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         var actId = chapter.ActId;
         await using var mutation = await projectMutations.AcquireAsync(projectId, cancellationToken);
 
@@ -1387,6 +1377,7 @@ public class ChapterService(
 
     public async Task ReorderAsync(Guid projectId, Guid? actId, IReadOnlyList<Guid> orderedIds, CancellationToken cancellationToken = default)
     {
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var repo = databaseOperation.Repositories.Chapters;

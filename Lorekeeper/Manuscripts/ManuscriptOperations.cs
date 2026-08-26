@@ -42,7 +42,7 @@ public static class ManuscriptOperations
                     ValidateBlockText(blocks[replaceIndex].Type, replace.Text);
                     blocks[replaceIndex] = blocks[replaceIndex] with
                     {
-                        Content = [new ManuscriptInline { Text = replace.Text }],
+                        Content = ReplaceTextPreservingMarks(blocks[replaceIndex], replace.Text),
                     };
                     changed.Add(replacedBlockId);
                     break;
@@ -227,6 +227,43 @@ public static class ManuscriptOperations
         };
         ManuscriptCodec.Validate(result, source.ManuscriptId, result.Revision);
         return (result, changed.ToList());
+    }
+
+    public static List<ManuscriptInline> ReplaceTextPreservingMarks(
+        ManuscriptBlock block,
+        string replacement)
+    {
+        ArgumentNullException.ThrowIfNull(block);
+        ArgumentNullException.ThrowIfNull(replacement);
+        var source = block.Content;
+        if (source.Count == 0)
+            return [new ManuscriptInline { Text = replacement }];
+
+        var sourceLength = source.Sum(inline => inline.Text.Length);
+        if (sourceLength == 0)
+            return [new ManuscriptInline { Text = replacement, Marks = source[0].Marks.ToList() }];
+
+        var result = new List<ManuscriptInline>(source.Count);
+        var consumed = 0;
+        for (var index = 0; index < source.Count; index++)
+        {
+            var start = index == 0
+                ? 0
+                : (int)Math.Round((double)consumed * replacement.Length / sourceLength, MidpointRounding.AwayFromZero);
+            consumed += source[index].Text.Length;
+            var end = index == source.Count - 1
+                ? replacement.Length
+                : (int)Math.Round((double)consumed * replacement.Length / sourceLength, MidpointRounding.AwayFromZero);
+            if (end < start)
+                end = start;
+            result.Add(new ManuscriptInline
+            {
+                Text = replacement[start..end],
+                Marks = source[index].Marks.ToList(),
+            });
+        }
+
+        return result;
     }
 
     private static void ApplyMark(List<ManuscriptBlock> blocks, SetManuscriptInlineMark operation)

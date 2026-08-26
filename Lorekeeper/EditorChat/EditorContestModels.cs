@@ -57,4 +57,54 @@ public sealed record ContestCandidateReviewLineResolution(
     string? OldText,
     string? NewText,
     ChapterBodyReviewLineAction Action,
-    string? EditedText = null);
+    string? EditedText = null,
+    string? ExpectedDraftHash = null);
+
+/// <summary>
+/// The complete contest review projection. Candidate drafts are returned as
+/// independent semantic manuscript documents; the projection never represents
+/// an accepted or merged live manuscript.
+/// </summary>
+public sealed record EditorContestReviewSnapshot(
+    Guid BatchId,
+    Guid ProjectId,
+    Guid ChapterId,
+    EditorContentTarget ContentTarget,
+    ContestBatchStatus Status,
+    string OriginalManuscriptJson,
+    long OriginalManuscriptRevision,
+    string OriginalManuscriptHash,
+    Guid? SelectedCandidateId,
+    IReadOnlyList<EditorContestCandidateReviewSnapshot> Candidates);
+
+public sealed record EditorContestCandidateReviewSnapshot(
+    Guid CandidateId,
+    int Order,
+    string ProviderName,
+    string ModelName,
+    ContestCandidateStatus Status,
+    string Summary,
+    string DraftManuscriptJson,
+    string? ErrorMessage,
+    bool IsTerminal,
+    string? DraftHash = null,
+    string RawResponse = "",
+    string? Notes = null,
+    double? DurationMs = null);
+
+public sealed record EditorContestLockState(
+    bool IsLocked,
+    Guid? BatchId,
+    Guid? ChapterId,
+    string? ChapterTitle,
+    ContestBatchStatus? Status,
+    string? Message)
+{
+    public static EditorContestLockState Unlocked { get; } = new(
+        false,
+        null,
+        null,
+        null,
+        null,
+        null);
+}

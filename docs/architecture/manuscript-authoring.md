@@ -5,7 +5,7 @@
 Read this chapter completely before changing the manuscript schema, chapter
 body persistence, semantic operations, editor bridge or toolbar, Core/release
 content targets, Book Text Styles, review annotations, process-lifetime Undo/Redo,
-assistant manuscript staging, authoring migrations, or any projection that
+Git-backed Review Edits, authoring migrations, or any projection that
 turns semantic manuscript content into text or searchable/readable order.
 
 Also read it when an image, composition, publishing, import/export, or assistant
@@ -60,9 +60,10 @@ custom semantic roles fail validation rather than being guessed.
 live and nested historical payloads. Startup migration, import adapters, and
 historical audit readers call that explicit boundary; normal runtime services
 accept only current documents. Malformed current documents or non-result audit
-payloads fail closed. Historical `AiChange.ResultJson` may retain legacy plain
-text, and the literal JSON `null` may represent an absent historical snapshot;
-those bytes remain audit history rather than a runtime editing route.
+payloads fail closed. Legacy historical review payloads may retain plain text,
+and the literal JSON `null` may represent an absent historical snapshot; those
+bytes are handled only by guarded migration/import readers rather than a runtime
+editing route.
 
 ### Model-facing manuscript projection
 
@@ -166,12 +167,13 @@ similar prose because repeated language may be intentional.
 Editor assistants never send a full projected document back to an apply call.
 `EditorManuscriptApplyService` converts and validates one complete operation
 batch, verifies the protected source revision, and writes the resulting document
-through `IManuscriptService` or the Review Edits overlay in that same call. The
-result reports compact changed IDs, operation and before/after block counts, the
-full resulting hash, diagnostics, the committed or staged revision, and exact
-bounded readback ranges; no turn-local preview ID or projected document is
-retained. Text and structure changes require focused readback from the resulting
-persisted or staged source. Each range includes one adjacent block on either
+through `IManuscriptService` in that same call. Review Edits controls whether the
+completed turn checkpoints; it does not create an overlay. The result reports
+compact changed IDs, operation and before/after block counts, the full resulting
+hash, diagnostics, the committed live revision, and exact bounded readback
+ranges; no turn-local preview ID or projected document is retained. Text and
+structure changes require focused readback from the resulting live source. Each
+range includes one adjacent block on either
 side where available, overlapping ranges merge, and long ranges split at the
 100-block read limit. An insertion-only text batch against a non-empty source
 returns `MANUSCRIPT_INSERT_WITHOUT_REPLACEMENT` as a warning rather than
@@ -238,9 +240,10 @@ Designed-Page-only destination, and Pages remains Pages when the destination has
 any Designed Page. Contest Review always forces Review. Route and reload
 selection instead uses the destination chapter's stored mode or its default;
 the resolved carried mode is then written as that chapter's preference. Chapter
-transitions clear the prior chapter's loaded Review projection, baseline view,
-pending batches, and Contest state before loading the new chapter without
-deleting durable review data.
+transitions clear the prior chapter's loaded Review projection, comparison
+commit, pending target, and Contest state before loading the new chapter without
+deleting durable Git review data. An active Contest still takes precedence and
+keeps the project-wide Editor lock in force.
 
 Edit, Read, and Review also share a transient `ManuscriptViewLocation` scoped to
 the current project, chapter, and Core/release target; it is never persisted as
@@ -299,10 +302,11 @@ confirmation dialog.
 Annotations are excluded from Undo/Redo, indexing, plain-text projection,
 publication fingerprints, Press requests, and artifacts. They are protected
 assistant context. Tools can page open annotations and complete them, but not
-create or rewrite them. Under Review Edits, completion is a dependent staged
-change so rejecting the manuscript proposal preserves the annotation.
+create or rewrite them. Annotation completion is a live sidecar mutation;
+Review Edits records it in the Git HEAD-to-live comparison with the affected
+target.
 
-### In-process manual history and durable latest assistant review
+### In-process manual history and Git-backed assistant review
 
 The singleton `IAuthoringHistoryRuntime` owns process-lifetime Undo/Redo for Core
 and release chapters, publication prose sections, complete Designed Page
@@ -331,21 +335,20 @@ stream can retain detached data, so orphaned detached compositions and variants
 are removed safely.
 
 Direct assistant mutations are never Undo/Redo actions. After a successful
-assistant commit, the owning service resets the affected target to the committed
-current snapshot, immediately invalidating its manual Undo/Redo buttons. Failed,
-cancelled, staged-only, conflicted, and no-op assistant work leaves history
-unchanged. Assistant history batches, completion statuses, abandoned-batch
-recovery, approval reconnection, and assistant-facing history tools are obsolete.
+assistant mutation, the owning service resets the affected target's manual
+history, immediately invalidating its Undo/Redo buttons. Failed, cancelled,
+conflicted, and no-op assistant work leaves history unchanged. Superseded
+assistant-review persistence and assistant-facing history tools are not runtime
+state.
 
-`IAssistantReviewBaselineService` separately stores the latest applied-assistant
-review anchor for an exact Core/release chapter target: the immediately preceding
-canonical manuscript JSON/hash, source turn, action label, and capture time. The
-first successful chapter mutation in a turn stages this row in the same database
-commit as the manuscript; later mutations in that turn retain the first baseline.
-Once pending and Contest projections are resolved, Review compares that durable
-Before state with live Current, so later manual edits remain visible. Undo, Redo,
-and manual reversion do not rewrite it. A later successful assistant turn replaces
-it. Review baselines are working-database data and are excluded from export/import.
+Review compares canonical live state with Git HEAD. With Review Edits enabled,
+assistant mutations remain local and dirty until the user approves them. With it
+disabled, a completed mutating assistant turn creates a complete checkpoint.
+Pending review supports semantic block approval, Undo, and inline text editing;
+historical review compares the newest affecting approved commit with its parent.
+Undo in historical mode restores the parent value into live state as a normal
+pending reversal. The Review Edits preference is excluded from Git snapshots and
+does not alter manual history or restore behavior.
 
 In-memory snapshots index image, font, and composition dependencies rather than
 copying binary assets. Live dependencies are hard deletion blockers. A
@@ -361,8 +364,8 @@ streams as lifecycle cleanup, not as an Undo action.
 The original structured-manuscript migration uses a protected SQLite backup,
 cross-process lease, journal, transactional live/history conversion, normalized
 text-hash comparison, and recovery-shell fallback. Later v3 composition and v4
-authoring-page cutovers preserve semantic IDs/text, Figures, staged review
-payloads, Picture Page geometry, compositions, artifacts, and hashes while
+authoring-page cutovers preserve semantic IDs/text, Figures, live pending
+manuscript state, Picture Page geometry, compositions, artifacts, and hashes while
 removing obsolete runtime fields through forward migrations. Historical
 migration names and source version numbers remain accurate even though v4 is
 current.
@@ -386,10 +389,10 @@ every one of those consumers.
 | [`Lorekeeper/Manuscripts/EditorContentTarget.cs`](../../Lorekeeper/Manuscripts/EditorContentTarget.cs) | Protected Core/release target carried through manuscript, review, context, apply, and assistant operations. |
 | [`Lorekeeper/Manuscripts/ManuscriptStyleService.cs`](../../Lorekeeper/Manuscripts/ManuscriptStyleService.cs) and [`ManuscriptStyleTemplateExtractor.cs`](../../Lorekeeper/Manuscripts/ManuscriptStyleTemplateExtractor.cs) | Revision-safe Book Text Style ownership and the shared manual/assistant style-capture policy. |
 | [`Lorekeeper/Manuscripts/ManuscriptAnnotationModels.cs`](../../Lorekeeper/Manuscripts/ManuscriptAnnotationModels.cs) and [`ManuscriptAnnotationService.cs`](../../Lorekeeper/Manuscripts/ManuscriptAnnotationService.cs) | Exact-target sidecar annotation contract, rebasing, paging, state, and completion. |
-| [`Lorekeeper/Authoring/`](../../Lorekeeper/Authoring/) and [`Lorekeeper/Models/AssistantReviewBaseline.cs`](../../Lorekeeper/Models/AssistantReviewBaseline.cs) | In-process manual history runtime, selection/dependency state, assistant mutation identity, and the separate durable latest-review baseline. |
+| [`Lorekeeper/Authoring/`](../../Lorekeeper/Authoring/) | In-process manual history runtime, selection/dependency state, and assistant mutation identity; Git-backed review owns pending/approved comparison. |
 | [`Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor`](../../Lorekeeper/Components/Pages/Projects/ChapterBodyEditor.razor), [`ManuscriptViewLocation.cs`](../../Lorekeeper/Components/Pages/Projects/ManuscriptViewLocation.cs), and related Editor components | Shared semantic editor host, revision-aware autosave, transient cross-view location, Figure/style controls, Read/Review modes, annotations, and authoring workspace state. |
 | [`tools/semantic-editor/`](../../tools/semantic-editor/) and shipped bundle under `Lorekeeper/wwwroot/js/` | Exact-pinned ProseMirror schema/adapter source, deterministic build, shipped runtime, and notices. |
-| [`Lorekeeper/EditorChat/EditorManuscriptApplyService.cs`](../../Lorekeeper/EditorChat/EditorManuscriptApplyService.cs) | One-step assistant manuscript operation validation and apply/stage bridge over the canonical manuscript service. |
+| [`Lorekeeper/EditorChat/EditorManuscriptApplyService.cs`](../../Lorekeeper/EditorChat/EditorManuscriptApplyService.cs) | One-step assistant manuscript operation validation and direct apply over the canonical manuscript service. |
 | [`Lorekeeper/Manuscripts/ManuscriptSchemaUpgrade.cs`](../../Lorekeeper/Manuscripts/ManuscriptSchemaUpgrade.cs) | Strict lossless v1-v3 document and nested historical-payload upgrade logic used only by migration/import owners. |
 
 ## Related chapters
@@ -421,8 +424,8 @@ every one of those consumers.
   and update derived graph/search/index state.
 - Confirm assistant revisions distinguish insert from replace, every superseded
   source block is accounted for, direct text/structure applies require all
-  returned range reads with matching revision/hash, and Review Edits reads the
-  staged overlay rather than the persisted source.
+  returned range reads with matching revision/hash, and Review Edits compares
+  the live source with Git HEAD without an overlay.
 - For schema changes, advance the current schema and JSON Schema together, add a
   strict forward upgrader, preserve applied migrations, update versioned import
   handling, and prove live plus historical payload conversion under the guarded
@@ -434,7 +437,7 @@ every one of those consumers.
   authorization.
 - For annotation/history changes, verify same-transaction rebasing, inherited
   release behavior, outdated-state fallback, action coalescing, stale-stream
-  reconciliation, assistant-batch finalization, dependency retention, and
+  reconciliation, Git pending/historical review, dependency retention, and
   export exclusion.
 - Automated .NET tests may cover only startup migration or versioned
   import/export preservation and fail-closed behavior; do not add ordinary

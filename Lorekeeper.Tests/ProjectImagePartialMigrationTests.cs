@@ -32,12 +32,11 @@ public sealed class ProjectImagePartialMigrationTests
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 await db.GetService<IMigrator>().MigrateAsync(PreviousMigration);
-                db.Projects.Add(new Project
-                {
-                    Id = projectId,
-                    Name = "Image partial migration fixture",
-                    Slug = $"image-partial-migration-{projectId:N}",
-                });
+                await LegacyProjectSeed.InsertAsync(
+                    db,
+                    projectId,
+                    "Image partial migration fixture",
+                    $"image-partial-migration-{projectId:N}");
                 db.ProjectImageGenerationJobs.Add(new ProjectImageGenerationJob
                 {
                     Id = jobId,

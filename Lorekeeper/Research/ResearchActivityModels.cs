@@ -12,10 +12,6 @@ public sealed record ResearchEntityActivityItem(
     string Name,
     ResearchEntityActivityState State,
     bool Exists,
-    bool HasPendingChange,
-    Guid? PendingBatchId,
-    Guid? PendingChangeId,
-    string? PendingSummary,
     string Preview,
     DateTime LastTouchedAt,
     IReadOnlyDictionary<string, string?> Properties);
@@ -26,9 +22,6 @@ public enum ResearchEntityActivityState
     Created,
     Updated,
     Linked,
-    PendingCreated,
-    PendingUpdated,
-    PendingLinked,
 }
 
 public sealed record ResearchSourceActivityItem(

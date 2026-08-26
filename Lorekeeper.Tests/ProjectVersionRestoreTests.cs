@@ -564,7 +564,12 @@ public sealed class ProjectVersionRestoreTests
                     repositoryId,
                     projectId,
                     new VersionHistorySnapshotProjectArea(
-                        new ProjectExportProject(projectId, "Imported project", "imported-project", "guidance", true, false),
+                        new ProjectExportProject(projectId, "Imported project", "imported-project", "guidance", true, false)
+                        {
+                            // Schema-v1 snapshots may contain the former
+                            // workflow field, but import must not restore it.
+                            LegacyAiChangeApprovalEnabled = true,
+                        },
                         null,
                         false,
                         []),
@@ -622,6 +627,7 @@ public sealed class ProjectVersionRestoreTests
                 var project = await verify.Projects.AsNoTracking().SingleAsync(item => item.Id == projectId);
                 Assert.Equal("Imported project", project.Name);
                 Assert.Equal("imported-project", project.Slug);
+                Assert.False(project.ReviewEditsEnabled);
                 Assert.Equal(actId, await verify.Acts.Where(item => item.ProjectId == projectId).Select(item => item.Id).SingleAsync());
                 Assert.Equal(chapterId, await verify.Chapters.Where(item => item.ProjectId == projectId).Select(item => item.Id).SingleAsync());
                 Assert.Equal(repositoryId, await verify.ProjectVersionRepositories.Where(item => item.ProjectId == projectId).Select(item => item.Id).SingleAsync());
@@ -800,6 +806,28 @@ public sealed class ProjectVersionRestoreTests
         public Task<int> ClearFailedOperationNoticesAsync(Guid projectId, CancellationToken cancellationToken = default) => Task.FromResult(0);
 
         public Task<ProjectVersionStatusView?> GetStatusAsync(Guid projectId, bool includeCurrentSnapshotHash = true, CancellationToken cancellationToken = default) => Task.FromResult(Status);
+
+        public Task SetReviewEditsEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default) => Task.FromException(new NotSupportedException());
+
+        public Task<ProjectVersionReviewView?> GetReviewAsync(Guid projectId, IReadOnlyCollection<ProjectVersionReviewTarget>? targets = null, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionReviewView?>();
+
+        public Task<ProjectVersionReviewChapter?> GetReviewChapterAsync(Guid projectId, Guid chapterId, EditorContentTarget contentTarget, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionReviewChapter?>();
+
+        public Task<ProjectVersionHistoricalChapterReview?> GetLatestAffectingChapterAsync(Guid projectId, Guid chapterId, EditorContentTarget contentTarget, int maxCommits = 100, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionHistoricalChapterReview?>();
+
+        public Task<ProjectVersionHistoricalRestoreResult> RestoreHistoricalChapterAsync(Guid projectId, Guid chapterId, EditorContentTarget contentTarget, string historicalCommitSha, ProjectVersionReviewConcurrencyToken expectedToken, string semanticMessage = "Undo manuscript to historical checkpoint", string? requestKey = null, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionHistoricalRestoreResult>();
+
+        public Task<ProjectVersionCheckpointView> CreateReviewApprovalCheckpointAsync(Guid projectId, ProjectVersionReviewConcurrencyToken expectedToken, string semanticMessage = "Approved Review Edits", string? requestKey = null, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionCheckpointView>();
+
+        public Task<ProjectVersionCheckpointView> CreateReviewApprovalForOtherAsync(Guid projectId, ProjectVersionReviewConcurrencyToken expectedToken, string semanticMessage = "Approved other project changes", string? requestKey = null, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionCheckpointView>();
+
+        public Task<ProjectVersionCheckpointView> CreateReviewApprovalForBlocksAsync(Guid projectId, ProjectVersionReviewTarget target, IReadOnlyCollection<string> blockIds, ProjectVersionReviewConcurrencyToken expectedToken, string semanticMessage = "Approved selected manuscript changes", string? requestKey = null, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionCheckpointView>();
+
+        public Task<ProjectVersionCheckpointView> ApproveReviewCompositionAsync(Guid projectId, ProjectVersionReviewTarget target, Guid compositionId, ProjectVersionReviewConcurrencyToken expectedToken, string semanticMessage = "Approved Designed Page change", string? requestKey = null, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionCheckpointView>();
+
+        public Task<ProjectVersionReviewBlockMutationResult> RestoreReviewBlocksAsync(Guid projectId, ProjectVersionReviewTarget target, IReadOnlyCollection<string> blockIds, ProjectVersionReviewConcurrencyToken expectedToken, string semanticMessage = "Undid selected manuscript changes", CancellationToken cancellationToken = default) => Unsupported<ProjectVersionReviewBlockMutationResult>();
+
+        public Task<ProjectVersionReviewBlockMutationResult> EditReviewBlockAsync(Guid projectId, ProjectVersionReviewTarget target, string blockId, string text, ProjectVersionReviewConcurrencyToken expectedToken, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionReviewBlockMutationResult>();
 
         public Task<ProjectVersionLoadedCheckpoint> LoadCheckpointAsync(Guid projectId, string commitSha, CancellationToken cancellationToken = default) => Task.FromResult(checkpoint);
 

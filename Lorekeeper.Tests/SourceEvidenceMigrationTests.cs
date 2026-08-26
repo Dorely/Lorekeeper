@@ -29,8 +29,11 @@ public sealed class SourceEvidenceMigrationTests
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 await db.GetService<IMigrator>().MigrateAsync(PreviousMigration);
-                var project = new Project { Id = projectId, Name = "Migration fixture", Slug = $"fixture-{projectId:N}" };
-                db.Projects.Add(project);
+                await LegacyProjectSeed.InsertAsync(
+                    db,
+                    projectId,
+                    "Migration fixture",
+                    $"fixture-{projectId:N}");
                 db.BookBriefs.Add(new BookBrief { ProjectId = projectId });
                 db.IngestSources.Add(new IngestSource
                 {

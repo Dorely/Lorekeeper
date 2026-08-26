@@ -26,7 +26,7 @@ else
 {
     <div class="research-pane">
         <section class="research-chat-pane">
-            <ResearchChatPanel @ref="_chatPanel" ProjectId="Project.Id" OnActivityChanged="ReloadActivityAsync" />
+            <ResearchChatPanel ProjectId="Project.Id" OnActivityChanged="ReloadActivityAsync" />
         </section>
 
         <section class="research-pages-pane">
@@ -63,7 +63,7 @@ else
                         <div class="research-activity-list">
                             @foreach (var entity in _activity.Entities)
                             {
-                                <article class="research-activity-card entity @StateClass(entity.State) @(entity.Exists ? null : "pending-only")"
+                                <article class="research-activity-card entity @StateClass(entity.State)"
                                          role="button"
                                          tabindex="0"
                                          aria-label="Open @entity.Name details"
@@ -75,14 +75,6 @@ else
                                     </div>
                                     <div class="research-activity-meta">
                                         <span>@entity.Type</span>
-                                        @if (entity.HasPendingChange)
-                                        {
-                                            <span>pending review</span>
-                                        }
-                                        @if (!entity.Exists)
-                                        {
-                                            <span>not yet applied</span>
-                                        }
                                     </div>
                                     @if (!string.IsNullOrWhiteSpace(entity.Preview))
                                     {
@@ -149,42 +141,6 @@ else
                             AllowEntityEdit="true"
                             OnClose="CloseEntityDetail"
                             OnSaved="HandleEntitySavedAsync" />
-}
-
-@if (_pendingEntityDetailOpen && _selectedPendingEntity is not null)
-{
-    <div class="modal-backdrop fade show" @onclick="ClosePendingEntityDetail"></div>
-    <div class="modal d-block research-detail-modal" tabindex="-1" role="dialog" aria-modal="true" @onclick="ClosePendingEntityDetail">
-        <div class="modal-dialog modal-lg modal-dialog-scrollable" role="document" @onclick:stopPropagation="true">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <div>
-                        <div class="text-muted small">@_selectedPendingEntity.Type</div>
-                        <h5 class="modal-title">@_selectedPendingEntity.Name</h5>
-                    </div>
-                    <button type="button" class="btn-close" @onclick="ClosePendingEntityDetail" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="research-detail-meta">
-                        <div><span>Status</span><strong>@StateLabel(_selectedPendingEntity.State)</strong></div>
-                        <div><span>Review</span><strong>Pending</strong></div>
-                    </div>
-                    @if (!string.IsNullOrWhiteSpace(_selectedPendingEntity.PendingSummary))
-                    {
-                        <section class="research-detail-section">
-                            <h6>Pending change</h6>
-                            <p>@_selectedPendingEntity.PendingSummary</p>
-                        </section>
-                    }
-                    @RenderProperties(_selectedPendingEntity.Properties)
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-link" @onclick="ClosePendingEntityDetail">Close</button>
-                    <button type="button" class="btn btn-primary" @onclick="OpenReviewFromPendingAsync">Review edits</button>
-                </div>
-            </div>
-        </div>
-    </div>
 }
 
 @if (_sourceDetailOpen && _selectedSourceDetail is not null)
@@ -328,11 +284,8 @@ else
     private Guid? _loadedProjectId;
     private bool _loading = true;
     private string? _actionError;
-    private ResearchChatPanel? _chatPanel;
     private ContextItem? _selectedEntityContext;
     private bool _entityDetailOpen;
-    private ResearchEntityActivityItem? _selectedPendingEntity;
-    private bool _pendingEntityDetailOpen;
     private ResearchSourceDetail? _selectedSourceDetail;
     private SourceVisualCandidateView? _viewingSourceVisual;
     private bool _sourceDetailOpen;
@@ -357,13 +310,6 @@ else
     private Task OpenEntityAsync(ResearchEntityActivityItem entity)
     {
         _actionError = null;
-        if (!entity.Exists)
-        {
-            _selectedPendingEntity = entity;
-            _pendingEntityDetailOpen = true;
-            return Task.CompletedTask;
-        }
-
         _selectedEntityContext = new ContextItem(
             EditorContextKeys.Entity(entity.EntityId),
             ContextItemKind.Entity,
@@ -422,12 +368,6 @@ else
         _selectedEntityContext = null;
     }
 
-    private void ClosePendingEntityDetail()
-    {
-        _pendingEntityDetailOpen = false;
-        _selectedPendingEntity = null;
-    }
-
     private void CloseSourceDetail()
     {
         _viewingSourceVisual = null;
@@ -440,18 +380,8 @@ else
         await ReloadActivityAsync();
     }
 
-    private async Task OpenReviewFromPendingAsync()
-    {
-        ClosePendingEntityDetail();
-        if (_chatPanel is not null)
-            await _chatPanel.OpenPendingChangesAsync();
-    }
-
     private static string StateLabel(ResearchEntityActivityState state) => state switch
     {
-        ResearchEntityActivityState.PendingCreated => "Pending create",
-        ResearchEntityActivityState.PendingUpdated => "Pending update",
-        ResearchEntityActivityState.PendingLinked => "Pending link",
         ResearchEntityActivityState.Created => "Created",
         ResearchEntityActivityState.Updated => "Updated",
         ResearchEntityActivityState.Linked => "Linked",
@@ -462,7 +392,6 @@ else
 
     private static string StateBadgeClass(ResearchEntityActivityState state) => state switch
     {
-        ResearchEntityActivityState.PendingCreated or ResearchEntityActivityState.PendingUpdated or ResearchEntityActivityState.PendingLinked => "bg-warning text-dark",
         ResearchEntityActivityState.Created or ResearchEntityActivityState.Updated => "bg-success",
         ResearchEntityActivityState.Linked => "bg-info text-dark",
         _ => "bg-secondary",

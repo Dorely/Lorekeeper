@@ -113,8 +113,9 @@ The captured canonical areas are:
 - `publication`: Core Book, editions, and publication sections.
 
 Chats, conversations, messages and composer drafts; provider connections,
-OAuth tokens and credentials; AI changes, review baselines, contests, revision
-jobs, ingest/image/publication jobs and staging; FTS5, sqlite-vec, context,
+OAuth tokens and credentials; the Review Edits workflow toggle, contests,
+candidate drafts, revision jobs, ingest/image/publication jobs and other
+operational staging; FTS5, sqlite-vec, context,
 auto-link and other projections; visual candidates; render artifacts, page
 maps, packages, audits and migration journals; process-lifetime Undo/Redo; and
 other operational or derived state are deliberately excluded. Restore rebuilds
@@ -126,10 +127,37 @@ scope and warnings.
 
 The SQLite timeline stores immutable semantic metadata (kind, source, commit,
 parent, manifest/content hashes, revision and message); Git stores the snapshot
-tree. Initial, manual, assistant, imported, and restored checkpoint kinds are
-used by the history and restore services. Repeated content is deduplicated at
-the Git commit boundary, while the timeline can retain the semantic operation
-record.
+tree. Initial, manual, assistant, imported, restored, and `ReviewApproval`
+checkpoint kinds are used by the history and restore services. Repeated content
+is deduplicated at the Git commit boundary, while the timeline can retain the
+semantic operation record.
+
+Review Edits is controlled from the project top bar beside Checkpoint, with a
+Pending changes button and count beside it. The toggle is excluded from Git
+snapshots. When enabled, direct manual and assistant mutations remain in live
+SQLite and are compared as `HEAD → live`; when disabled, completed mutating
+assistant turns checkpoint the complete live project. Existing dirty work is
+included when the preference is enabled, and disabling it while differences are
+pending keeps the preference enabled until Review approves or undoes them.
+
+The Review service returns affected chapter/target summaries, semantic
+manuscript groups, non-manuscript aggregates, dependency groups, contest state,
+selected candidate draft, compared commit metadata, and concurrency tokens.
+Chapter targets are created for manuscript or chapter-attached visual changes;
+chapter metadata remains in the non-manuscript dependency groups so it can be
+reviewed without pretending it is a text edit. Designed Page changes retain
+their semantic composition payload and may render transient before/after
+canvas previews on the owning chapter target.
+Pending mode reviews the Git HEAD-to-live difference. A clean target uses Last
+approved mode, comparing the newest affecting approved commit with its parent;
+historical lookup is cached by `(HEAD SHA, chapter, target, maxCommits)` so a
+broader or narrower bounded history request cannot reuse an incomplete scan.
+Historical Undo restores the parent value into live state and therefore creates
+a normal pending reversal. Chapter-owned Designed Page restores validate and
+repair coupled manuscript references atomically, failing closed when target
+isolation or dependency ownership is ambiguous. Partial approval commits only
+selected live semantic groups through a `ReviewApproval` checkpoint; Approve
+All commits the complete live snapshot.
 
 The History workspace provides the message-bearing checkpoint form. Its timeline
 can compare two checkpoints in chronological order with bounded, readable before/after panes derived
@@ -147,7 +175,9 @@ project, or when repository health is unavailable; an uninitialized project can
 create its first checkpoint. Process-local, project-scoped operation leases keep
 the independently rendered workspace and layout control synchronized. Checkpoint
 refreshes that arrive during restore or synchronization run after the owning
-operation becomes idle.
+operation becomes idle. Unapproved live work remains local and blocks push or
+checkout; checkpoint failures remain durable and leave the project dirty and
+reviewable.
 
 Restore validates manifest identity, every file hash and blob length, the full
 referential graph, required assets/styles/compositions/publication rows, and
@@ -262,13 +292,13 @@ the cutover.
 |---|---|
 | `Lorekeeper/VersionHistory/Snapshots/` | Schema-v1 payloads, canonical JSON, deterministic writer, strict reader, and manifest/blob validation. |
 | `Lorekeeper/VersionHistory/Git/` | Bare-repository paths, Git object/ref operations, history relation, and safe deletion staging. |
-| `Lorekeeper/VersionHistory/Services/` | Checkpoint timeline, dirty-state reconciliation, operation journal, and assistant checkpoint adapter. |
+| `Lorekeeper/VersionHistory/Services/` | Checkpoint timeline, Git HEAD/live dirty-state reconciliation, pending and historical Review modes, operation journal, and assistant checkpoint adapter. |
 | `Lorekeeper/VersionHistory/Compare/` | Pure semantic area summaries, bounded readable before/after text, detailed entries, and restore-selection contract. |
 | `Lorekeeper/VersionHistory/Restore/` | Whole/selective restore, clone import application, exact-head checkout, dependency validation, and projection repair. |
 | `Lorekeeper/VersionHistory/Sync/` | GitHub remote attachment, fetch/fast-forward/push policy, remote checkout coordination, and clone transport. |
 | `Lorekeeper/VersionHistory/GitHub/` | Device authorization, GitHub API transport, connection validation, and non-secret remote views. |
 | `Lorekeeper/Models/ProjectVersion*.cs`, `ProjectGitRemote.cs`, `GitHubConnection.cs` | SQLite identity, checkpoint, operation, remote metadata, and provider credential rows. |
-| `Lorekeeper/Components/Pages/Projects/History/`, `Components/Layout/ProjectCheckpointControl.razor`, and `Settings/VersionControl.razor` | Checkpoint/compare/restore UI, global project checkpoint shortcut, explicit sync controls, rights acknowledgement, and GitHub account setup. |
+| `Lorekeeper/Components/Pages/Projects/History/`, `Components/Pages/Projects/EditorContent.razor`, `Components/Layout/ProjectCheckpointControl.razor`, `Components/Layout/ProjectReviewControls.razor`, and `Settings/VersionControl.razor` | Checkpoint/compare/restore UI, chapter Review modes, top-bar Review Edits/Pending controls, explicit sync controls, rights acknowledgement, and GitHub account setup. |
 
 ## Related chapters
 

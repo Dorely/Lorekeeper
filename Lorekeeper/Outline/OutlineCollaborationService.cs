@@ -8,7 +8,6 @@ using Lorekeeper.EntityVisuals;
 using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
-using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Projects;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -16,7 +15,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Outline;
 
 public sealed class OutlineCollaborationService(
-IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, OutlineCollaborationTools tools, IEntityVisualContextService entityVisualContext, IAiChangeApprovalService changeApproval, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IOutlineWorkingContextBuilder workingContext, IProjectReferenceService projectReferences, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
+ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ILlmProviderService providerService, IChatClientFactory chatClientFactory, OutlineCollaborationTools tools, IEntityVisualContextService entityVisualContext, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IOutlineWorkingContextBuilder workingContext, IProjectReferenceService projectReferences, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<OutlineCollaborationService> logger) : IOutlineCollaborationService
 {
     /// <summary>
     /// Code-owned operating rules composed with the professional charter, Project Guidance,
@@ -250,44 +249,6 @@ they commit to a direction, act on it without a second confirmation.
         return await ComposeSystemPromptAsync(project, cancellationToken);
     }
 
-    public async Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default)
-    {
-        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var projects = databaseOperation.Repositories.Projects;
-        var project = await projects.GetByIdAsync(projectId, cancellationToken)
-            ?? throw new InvalidOperationException($"Project {projectId} not found.");
-        return project.AiChangeApprovalEnabled;
-    }
-
-    public async Task SetAiChangeApprovalEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default)
-    {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        databaseOperation.ShareWithNestedOperations();
-        var projects = databaseOperation.Repositories.Projects;
-        var project = await projects.GetByIdAsync(projectId, cancellationToken)
-            ?? throw new InvalidOperationException($"Project {projectId} not found.");
-        if (project.AiChangeApprovalEnabled == enabled) return;
-        project.AiChangeApprovalEnabled = enabled;
-        project.UpdatedAt = DateTime.UtcNow;
-        projects.Update(project);
-        await databaseOperation.SaveChangesAsync(cancellationToken);
-    }
-
-    public async Task<IReadOnlyList<AiChangeBatch>> ListPendingChangesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await changeApproval.ListPendingBatchesAsync(projectId, cancellationToken);
-
-    public Task ApplyAiChangeAsync(Guid changeId, CancellationToken cancellationToken = default) =>
-        changeApproval.ApplyChangeAsync(changeId, cancellationToken);
-
-    public Task RejectAiChangeAsync(Guid changeId, string? message, CancellationToken cancellationToken = default) =>
-        changeApproval.RejectChangeAsync(changeId, message, cancellationToken);
-
-    public Task ApplyAiChangeBatchAsync(Guid batchId, CancellationToken cancellationToken = default) =>
-        changeApproval.ApplyBatchAsync(batchId, cancellationToken);
-
-    public Task RejectAiChangeBatchAsync(Guid batchId, string? message, CancellationToken cancellationToken = default) =>
-        changeApproval.RejectBatchAsync(batchId, message, cancellationToken);
-
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Outline));
@@ -337,13 +298,6 @@ they commit to a direction, act on it without a second confirmation.
             yield break;
         }
 
-        var unresolvedChanges = await changeApproval.ListPendingBatchesAsync(projectId, cancellationToken);
-        if (unresolvedChanges.Count > 0)
-        {
-            yield return new TurnError("Review the pending AI changes before sending another outline chat message.", Cancelled: false);
-            yield break;
-        }
-
         var visionReady = await providerService.IsVisionProviderWorkingAsync(persistedProvider.Id, cancellationToken);
         if (imageIds.Count > 0 && !visionReady)
         {
@@ -372,7 +326,6 @@ they commit to a direction, act on it without a second confirmation.
         // Resolve the chat client + tools up front so any wiring failure surfaces before we start streaming.
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
-        OutlineToolStagingContext? staging = null;
         OutlineCollaborationContext? toolContext = null;
         var systemPrompt = string.Empty;
         string? setupError = null;
@@ -386,11 +339,9 @@ they commit to a direction, act on it without a second confirmation.
             systemPrompt = await ComposeSystemPromptAsync(project, cancellationToken);
             chat = await chatClientFactory.CreateChatClientAsync(persistedProvider.Id, cancellationToken);
 
-            if (project.AiChangeApprovalEnabled)
-                staging = tools.CreateStagingContext(projectId, conversation.Id, onDirectMutationApplied: OnToolMutated);
-
-            // OnMutated is captured by every mutating tool; we drain it via _mutatedSinceYield.
-            toolContext = new OutlineCollaborationContext(projectId, OnToolMutated, staging, visionReady);
+            // All outline tool mutations are applied immediately to the live project. Review
+            // derives pending work from the version-history baseline rather than a staging overlay.
+            toolContext = new OutlineCollaborationContext(projectId, OnToolMutated, visionReady: visionReady);
             aiTools = await tools.BuildAsync(toolContext, cancellationToken);
         }
         catch (Exception ex)
@@ -523,8 +474,6 @@ they commit to a direction, act on it without a second confirmation.
                     yield break;
                 }
 
-                staging?.BeginToolCall(activeAssistant.Id, pendingCall.CallId, pendingCall.Name, pendingCall.ArgumentsJson);
-
                 var sw = Stopwatch.StartNew();
                 var toolOutcome = await turnEngine.InvokeToolAsync(aiTools, pendingCall, cancellationToken);
                 sw.Stop();
@@ -552,18 +501,6 @@ they commit to a direction, act on it without a second confirmation.
                 await turnEngine.AddMessageAsync(repositories => repositories.OutlineConversations, toolMsg, CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
-                if (staging is not null)
-                {
-                    foreach (var pendingChange in staging.DrainNewChanges())
-                    {
-                        yield return new PendingAiChangeCreated(
-                            pendingChange.BatchId,
-                            pendingChange.Id,
-                            pendingChange.ToolCallId,
-                            pendingChange.ToolName,
-                            pendingChange.Summary);
-                    }
-                }
                 yield return new ToolCallCompleted(pendingCall.CallId, pendingCall.Name, toolError is null ? toolResult : null, toolError, sw.Elapsed.TotalMilliseconds);
 
                 if (DrainMutated())

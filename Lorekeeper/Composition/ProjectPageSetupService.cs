@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.EditorChat;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -20,7 +21,8 @@ public sealed record ProjectPageSetupInput(
     double BodyLineHeight);
 
 public sealed class ProjectPageSetupService(
-    IAppDatabaseOperationFactory database) : IProjectPageSetupService
+    IAppDatabaseOperationFactory database,
+    IEditorContestMutationGuard contestGuard) : IProjectPageSetupService
 {
     public async Task<ProjectPageSetup> GetOrCreateAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -39,6 +41,7 @@ public sealed class ProjectPageSetupService(
         if (!await db.Projects.AnyAsync(item => item.Id == projectId, cancellationToken))
             throw new KeyNotFoundException("Project was not found.");
 
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         var setup = new ProjectPageSetup { ProjectId = projectId };
         db.ProjectPageSetups.Add(setup);
         await db.SaveChangesAsync(cancellationToken);
@@ -53,6 +56,7 @@ public sealed class ProjectPageSetupService(
     {
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         var db = databaseOperation.Db;
         Validate(input);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);

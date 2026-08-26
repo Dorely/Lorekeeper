@@ -158,6 +158,22 @@ automatic checkpoint-push worker is startup-gated on database readiness and
 uses fresh scopes plus durable operation rows; its process-local queue is only a
 wake-up signal.
 
+The shared project top bar owns the Checkpoint, Review Edits, and Pending
+changes controls. History events refresh these controls across independently
+rendered pages and assistant panels. Review Edits is excluded from Git snapshots:
+enabled assistant turns mutate live state without checkpointing, while disabled
+mutating turns checkpoint the complete live project. An unapproved dirty project
+remains local and cannot be pushed or checked out; checkpoint failures stay
+visible and reviewable.
+
+An unresolved Contest restores a project-wide Editor lock after application
+restart. The startup gate and owning mutation services reject Editor manuscript,
+layout, Figure, Designed Page, assistant, revision-worker, and new-contest
+mutations while read-only navigation remains available. Contest candidate draft
+edits and resolution use the explicit authorized path, and the persistent lock
+notice links to the contested chapter's Review page. Non-Editor workspaces and
+their background work remain available.
+
 ### Application-owned interaction surfaces
 
 Product confirmations, alerts, pickers, and modal workflows are Lorekeeper

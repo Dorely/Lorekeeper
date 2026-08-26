@@ -22,6 +22,13 @@ are immutable schema history; current runtime compatibility belongs in forward
 migrations and guarded transformation services, not in retained obsolete
 runtime branches.
 
+The frequently used browser-development database is `Lorekeeper/lorekeeper.db`
+relative to the repository root (for example,
+`C:\Users\jonth\Source\repos\Lorekeeper\Lorekeeper\lorekeeper.db` in the
+primary development checkout). It contains the Falanaras project and other
+developer working data. Migration validation must use a copied database and
+must never mutate this developer-owned original.
+
 ## Scope and ownership
 
 `AppDbContext` owns the EF model and relationships for projects, Book Briefs,
@@ -160,16 +167,21 @@ anchor hashes, projection equality, normalized-text hashes, and visual anchor
 mapping before commit. Legacy illustrated-prose layouts use runtime-authoritative
 paragraph indices; stale advisory hashes may be recorded, but malformed hashes,
 invalid indices, ambiguous mappings, and projection mismatches fail closed.
-The authoring-history retirement is an ordered forward transition: an additive
-table first stores exact-target assistant Review baselines, startup validates and
-backfills the newest committed baseline from populated legacy columns or
-Brotli-compressed committed history entries, and only then a cleanup migration
-drops the obsolete history stream, entry, batch, and dependency tables. Open
-assistant batches are not committed review evidence. The transition runs inside
-the protected startup backup/recovery boundary and validates manuscript identity
-and hashes before accepting any baseline. `DetachedAt` remains current schema;
-startup removes history-only detached composition remnants because process-memory
-Undo/Redo is necessarily empty after launch.
+The Review Edits transition is an ordered, protected forward migration. It
+renames the project workflow column to `ReviewEditsEnabled`, adds contest source
+revision/hash, selected-candidate, and candidate-draft fields, and then
+materializes any unresolved legacy `AiChange`/`AiChangeBatch` effective draft
+into the owning live state in dependency order. Only after identities,
+revisions, hashes, ownership, and relationships validate does cleanup remove
+the obsolete staging/baseline tables and runtime contracts. The old names are
+accepted only inside this guarded migration boundary; they are not current
+workflow state. An unresolved legacy contest is converted to isolated durable
+candidate drafts, its live target is restored to the captured original when
+needed, and the project-wide Editor lock is enabled. Missing or conflicting
+originals/drafts fail closed into the existing recovery boundary with the
+protected backup retained. `DetachedAt` remains current schema; startup removes
+history-only detached composition remnants because process-memory Undo/Redo is
+necessarily empty after launch.
 
 The composition, authoring-page, Core Book, edition-content, physical-product,
 and publication-section cutovers each preserve semantic IDs, assets, foreign
@@ -184,12 +196,14 @@ ingest-source bodies/evidence and mappings, page setup, composition variants,
 Core Book, sparse release overlays, edition snapshots, publication sections,
 cover surfaces, Book Text Styles, visual references, and project-owned font
 families/faces with binary hashes. Non-structural exports omit source bodies,
-selections, and evidence and include a warning. Jobs, staging rows, temporary
+selections, and evidence and include a warning. Jobs, operational review rows, temporary
 visual candidates, unselected source bodies/provenance, assistant transcripts,
-model selections, unpromoted image partials, and durable assistant review
-baselines remain working-database state and are excluded. Manual Undo/Redo is
-process memory only and therefore is
-also absent from every export without adding database rows.
+model selections, unpromoted image partials, and other operational review state
+remain working-database data and are excluded. The current export writes only
+`ReviewEditsEnabled`; a versioned legacy import may read the old preference
+field at its input boundary, but current exports never write that alias. Manual
+Undo/Redo is process memory only and therefore is also absent from every export
+without adding database rows.
 
 Direct `ProjectReference` rows are deliberately omitted from both export kinds.
 When outgoing links exist, the serialized document warning and returned file
@@ -257,8 +271,8 @@ SQLite backup or a portable v24 export.
 ## Related chapters
 
 - [`manuscript-authoring.md`](./manuscript-authoring.md) owns manuscript,
-  styles, annotations, in-process authoring history, durable assistant review
-  baselines, and semantic editor contracts.
+  styles, annotations, in-process authoring history, Git-backed Review Edits,
+  and semantic editor contracts.
 - [`composition-media.md`](./composition-media.md) owns image/font/composition
   relationships, deletion guards, page setup, variants, and canvas previews.
 - [`publishing-model.md`](./publishing-model.md) owns Core/release/section

@@ -26,9 +26,19 @@ public class ContestCandidate
 
     public string ProposedManuscriptJson { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The candidate's private review draft. It is independent from every other
+    /// candidate and from the live chapter until the contest is resolved.
+    /// </summary>
+    public string DraftManuscriptJson { get; set; } = string.Empty;
+
     [NotMapped]
     public string ProposedPlainText =>
         ManuscriptCodec.ProjectPlainText(ManuscriptCodec.Deserialize(ProposedManuscriptJson));
+
+    [NotMapped]
+    public string DraftPlainText =>
+        ManuscriptCodec.ProjectPlainText(ManuscriptCodec.Deserialize(EffectiveDraftManuscriptJson));
 
     public string RawResponse { get; set; } = string.Empty;
 
@@ -43,6 +53,18 @@ public class ContestCandidate
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? CompletedAt { get; set; }
+
+    [NotMapped]
+    public bool IsTerminal => Status is ContestCandidateStatus.Completed
+        or ContestCandidateStatus.Failed
+        or ContestCandidateStatus.Invalid
+        or ContestCandidateStatus.Selected
+        or ContestCandidateStatus.Rejected;
+
+    [NotMapped]
+    public string EffectiveDraftManuscriptJson => string.IsNullOrWhiteSpace(DraftManuscriptJson)
+        ? ProposedManuscriptJson
+        : DraftManuscriptJson;
 }
 
 public enum ContestCandidateStatus

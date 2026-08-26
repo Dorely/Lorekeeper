@@ -44,9 +44,12 @@ public sealed class ImagesChatTurnRunner(
         await using var scope = scopeFactory.CreateAsyncScope();
         var chat = scope.ServiceProvider.GetRequiredService<IImagesChatService>();
         var checkpoints = scope.ServiceProvider.GetRequiredService<IAssistantVersionCheckpointService>();
+        var mutated = false;
         await foreach (var update in chat.SendAsync(projectId, userText, imageIds, providerId, cancellationToken))
         {
-            if (update is ImagesChatAssistantMessageCompleted)
+            if (update is ImagesChatMutated)
+                mutated = true;
+            if (update is ImagesChatAssistantMessageCompleted && mutated)
                 await checkpoints.TryCheckpointAsync(projectId, ChatTurnSurface.Images, cancellationToken);
             yield return update;
         }

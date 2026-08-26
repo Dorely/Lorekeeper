@@ -1,10 +1,13 @@
 using Lorekeeper.Models;
+using Lorekeeper.EditorChat;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Manuscripts;
 
-public sealed class ManuscriptAnnotationService(IAppDatabaseOperationFactory database) : IManuscriptAnnotationService
+public sealed class ManuscriptAnnotationService(
+    IAppDatabaseOperationFactory database,
+    IEditorContestMutationGuard contestGuard) : IManuscriptAnnotationService
 {
     public const int MaxSelectionLength = 32_000;
     public const int MaxNoteLength = 8_000;
@@ -91,6 +94,8 @@ public sealed class ManuscriptAnnotationService(IAppDatabaseOperationFactory dat
     {
         var normalizedNote = NormalizeNote(kind, noteText);
         await using var operation = await database.OpenWriteAsync(projectId, cancellationToken);
+        operation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         var document = await LoadDocumentAsync(operation.Db, projectId, target, chapterId, expectedManuscriptRevision, cancellationToken);
         var resolved = ManuscriptAnnotationAnchors.ResolveSelection(document, range);
         var now = DateTime.UtcNow;
@@ -158,6 +163,8 @@ public sealed class ManuscriptAnnotationService(IAppDatabaseOperationFactory dat
         CancellationToken cancellationToken = default)
     {
         await using var operation = await database.OpenWriteAsync(projectId, cancellationToken);
+        operation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         await ValidateTargetOwnershipAsync(operation.Db, projectId, target, null, cancellationToken);
         var annotation = await RequireAnnotationAsync(operation.Db, projectId, target, annotationId, expectedRevision, cancellationToken);
         var document = await LoadDocumentAsync(operation.Db, projectId, target, annotation.ChapterId, expectedManuscriptRevision, cancellationToken);
@@ -184,6 +191,8 @@ public sealed class ManuscriptAnnotationService(IAppDatabaseOperationFactory dat
         CancellationToken cancellationToken = default)
     {
         await using var operation = await database.OpenWriteAsync(projectId, cancellationToken);
+        operation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         await ValidateTargetOwnershipAsync(operation.Db, projectId, target, null, cancellationToken);
         var annotation = await RequireAnnotationAsync(operation.Db, projectId, target, annotationId, expectedRevision, cancellationToken);
         operation.Db.ManuscriptAnnotations.Remove(annotation);
@@ -198,7 +207,9 @@ public sealed class ManuscriptAnnotationService(IAppDatabaseOperationFactory dat
         long manuscriptRevision,
         CancellationToken cancellationToken = default)
     {
-        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
+        await using var operation = await database.OpenWriteAsync(projectId, cancellationToken);
+        operation.ShareWithNestedOperations();
         var db = operation.Db;
         await ValidateTargetOwnershipAsync(db, projectId, target, chapterId, cancellationToken);
         if (target.IsCore)
@@ -234,6 +245,8 @@ public sealed class ManuscriptAnnotationService(IAppDatabaseOperationFactory dat
         CancellationToken cancellationToken)
     {
         await using var operation = await database.OpenWriteAsync(projectId, cancellationToken);
+        operation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         await ValidateTargetOwnershipAsync(operation.Db, projectId, target, null, cancellationToken);
         var annotation = await RequireAnnotationAsync(operation.Db, projectId, target, annotationId, expectedRevision, cancellationToken);
         mutation(annotation);

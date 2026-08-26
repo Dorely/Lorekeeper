@@ -4,14 +4,16 @@
 @using Lorekeeper.Chapters
 @using Lorekeeper.Authoring
 @using Lorekeeper.Composition
-@using Lorekeeper.Components.Pages.Projects.Outline
 @using Lorekeeper.Context
 @using Lorekeeper.EditorChat
 @using Lorekeeper.Images
+@using Lorekeeper.ImportExport
 @using Lorekeeper.Models
 @using Lorekeeper.Outline
 @using Lorekeeper.Publish
 @using Lorekeeper.Tokens
+@using Lorekeeper.VersionHistory.Restore
+@using Lorekeeper.VersionHistory.Services
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.JSInterop
 @implements IAsyncDisposable
@@ -20,11 +22,14 @@
 @inject IManuscriptAnnotationService Annotations
 @inject IProjectImageService Images
 @inject ICompositionService Compositions
+@inject ICompositionCanvasPreviewService CompositionPreviews
 @inject IEditionContentService EditionContent
 @inject IEditorContextService EditorContext
 @inject IActService Acts
 @inject IEditorChatService Chat
-@inject IAiChangeApprovalService ChangeApproval
+@inject IProjectVersionHistoryService VersionHistory
+@inject IProjectVersionRestoreService VersionRestore
+@inject ProjectVersionHistoryUiEvents HistoryEvents
 @inject ITokenCounter TokenCounter
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -72,9 +77,8 @@ else
                              OnAiTurnStarting="OnAiTurnStartingAsync"
                              OnAiTurnCompleted="OnAiTurnCompletedAsync"
                              OnAiTurnIdle="OnAiTurnIdleAsync"
-                             OnAiChangesApplied="OnAiChangesAppliedAsync"
+                             OnWorkspaceChanged="OnWorkspaceChangedAsync"
                              OnWorkspaceMutated="OnAiWorkspaceMutatedAsync"
-                             OnActiveChapterManuscriptChangesReady="OpenReviewForActiveChapterChangesAsync"
                              OnContestResultsReady="OpenReviewForContestResultsAsync" />
         </aside>
 
@@ -115,6 +119,15 @@ else
             @if (!string.IsNullOrWhiteSpace(_contentTargetNotice))
             {
                 <div class="alert alert-warning editor-target-notice" role="status">@_contentTargetNotice</div>
+            }
+            @if (_projectContestLock is { IsLocked: true } contestLock)
+            {
+                <div class="alert alert-warning editor-target-notice d-flex align-items-center justify-content-between gap-2" role="status">
+                    <span>@(contestLock.Message ?? "The Editor is locked until Contest Review is resolved or discarded.")</span>
+                    <button type="button" class="btn btn-sm btn-outline-dark" @onclick="OpenLockedContestReviewAsync">
+                        Review @(contestLock.ChapterTitle ?? "contested chapter")
+                    </button>
+                </div>
             }
             <div class="chapter-header">
                 @if (_editingTitle)
@@ -158,7 +171,7 @@ else
                         <select id="editor-content-target-select"
                                 class="form-select form-select-sm"
                                 value="@_contentTarget.StorageKey"
-                                disabled="@(_saveState == SaveState.Saving || _chapterLocked || _reviewPendingBatches.Count > 0)"
+                                disabled="@(_saveState == SaveState.Saving || _chapterLocked)"
                                 @onchange="ChangeContentTargetAsync">
                             <option value="core">Core Book</option>
                             @foreach (var release in _enabledEditions)
@@ -180,14 +193,14 @@ else
                         }
                         @if (contentStatus.IsDivergent)
                         {
-                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="RequestResetEditionChapter">Reset chapter to Core</button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" disabled="@EditorMutationLocked" @onclick="RequestResetEditionChapter">Reset chapter to Core</button>
                         }
                     }
                 }
 
-                <button type="button" class="btn btn-sm btn-outline-secondary chapter-icon-btn"
+                <button type="button" class="btn btn-sm btn-outline-secondary chapter-icon-btn" disabled="@EditorMutationLocked"
                         title="Edit title" @onclick="StartEditTitle">✎</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary chapter-icon-btn"
+                <button type="button" class="btn btn-sm btn-outline-secondary chapter-icon-btn" disabled="@EditorMutationLocked"
                         title="New chapter" @onclick="CreateAndGoToOutlineAsync">+</button>
 
                 <div class="small chapter-metrics" title="@ChapterMetricsTitle()">
@@ -295,7 +308,7 @@ else
                                                    CompositionId="selectedCompositionId"
                                                    RefreshSignal="_pageWorkspaceRefreshSignal"
                                                    RequestedSelectionId="_pageWorkspaceSelectionId"
-                                                   InteractionLocked="_chapterLocked"
+                                                   InteractionLocked="@EditorMutationLocked"
                                                    CompositionForked="HandleCompositionForkedAsync" />
                         }
                     </div>
@@ -303,10 +316,10 @@ else
 
                 @if (_mode == EditorMode.Review)
                 {
-                    <div class="chapter-review-surface" @ref="_reviewSurfaceRef" role="region" aria-label="Review staged chapter changes">
+                    <div class="chapter-review-surface" @ref="_reviewSurfaceRef" role="region" aria-label="Review manuscript changes">
                         @if (_reviewLoading)
                         {
-                            <div class="chapter-review-empty"><em>Loading staged changes...</em></div>
+                            <div class="chapter-review-empty"><em>Loading manuscript review…</em></div>
                         }
                         else if (_contestReviewProjection is not null)
                         {
@@ -325,10 +338,22 @@ else
                                         </button>
                                         <button type="button"
                                                 class="btn btn-sm btn-primary"
-                                                disabled="@(_reviewBusy || _contestReviewProjection.Batch.Status == ContestBatchStatus.Running)"
-                                                title="@(_contestReviewProjection.Batch.Status == ContestBatchStatus.Running ? "Wait for all contest candidates to finish before ending Contest Review." : "End Contest Review and keep the current accepted chapter text.")"
+                                                disabled="@(_reviewBusy || !CanResolveContestReview)"
+                                                title="@(CanResolveContestReview ? "Apply the selected candidate draft to the live manuscript." : "Wait for every candidate to complete, fail, or become invalid, then select a completed result.")"
                                                 @onclick="FinishContestReviewAsync">
-                                            Finish contest
+                                            Resolve with selected result
+                                        </button>
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-danger"
+                                                disabled="@_reviewBusy"
+                                                @onclick="RequestDiscardContestAsync">
+                                            Discard contest
+                                        </button>
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-secondary"
+                                                disabled="@_reviewBusy"
+                                                @onclick="RequestCancelContestAsync">
+                                            Cancel contest
                                         </button>
                                     </div>
                                 </div>
@@ -341,8 +366,37 @@ else
                                     </div>
                                 }
 
-                                <div class="contest-review-columns">
+                                <div class="contest-review-candidate-selector" role="tablist" aria-label="Contest candidates">
                                     @foreach (var candidate in _contestReviewProjection.Candidates)
+                                    {
+                                        <button type="button"
+                                                role="tab"
+                                                aria-selected="@(candidate.CandidateId == _selectedContestCandidateId)"
+                                                tabindex="@(candidate.CandidateId == _selectedContestCandidateId ? 0 : -1)"
+                                                disabled="@(candidate.Status != ContestCandidateStatus.Completed)"
+                                                title="@(candidate.Status == ContestCandidateStatus.Failed ? candidate.ErrorMessage : ContestCandidateStatusText(candidate.Status))"
+                                                class="@(candidate.CandidateId == _selectedContestCandidateId ? "active" : string.Empty)"
+                                                @onclick="() => SelectContestCandidateAsync(candidate.CandidateId)">
+                                            <span>Contest @(candidate.Order + 1)</span>
+                                            <small>@candidate.ProviderName · @candidate.ModelName</small>
+                                            <small>@ContestCandidateStatusText(candidate.Status)</small>
+                                        </button>
+                                    }
+                                </div>
+                                @if (_selectedContestCandidateId is Guid selectedContestCandidateId)
+                                {
+                                    <div class="contest-review-candidate-actions">
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-secondary"
+                                                disabled="@_reviewBusy"
+                                                @onclick="() => ResetContestCandidateAsync(selectedContestCandidateId)">
+                                            Reset selected draft
+                                        </button>
+                                    </div>
+                                }
+
+                                <div class="contest-review-columns">
+                                    @foreach (var candidate in _contestReviewProjection.Candidates.Where(candidate => candidate.CandidateId == _selectedContestCandidateId))
                                     {
                                         <section class="@ContestCandidateColumnClass(candidate)" @key="candidate.CandidateId">
                                             <header class="contest-candidate-header">
@@ -538,27 +592,108 @@ else
                             {
                                 <div class="chapter-review-toolbar chapter-review-toolbar--applied">
                                     <div class="chapter-review-summary">
-                                        <strong>Applied assistant changes</strong>
-                                        <span>Current vs Before</span>
+                                        <strong>Manuscript review</strong>
+                                        <span>@ReviewComparisonSubtitle</span>
                                     </div>
-                                    <div class="small text-muted">This comparison includes later manual edits.</div>
+                                    <div class="small text-muted">Review includes text, structure, formatting, and visual changes.</div>
                                     <div class="chapter-review-toolbar-actions">
+                                        @if (_historicalReview is null)
+                                        {
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-secondary"
+                                                    disabled="@(_reviewBusy || _reviewProjection.Blocks.Count == 0)"
+                                                    @onclick="GoToNextReviewBlockAsync">
+                                                Next change
+                                            </button>
+                                            <button type="button"
+                                                    class="btn btn-sm btn-success"
+                                                    disabled="@(_reviewBusy || _reviewView?.Comparison?.IsIdentical != false)"
+                                                    title="Approve all pending manuscript and project changes"
+                                                    @onclick="ApproveCurrentReviewAsync">
+                                                Approve all pending changes
+                                            </button>
+                                        }
                                         <button type="button"
-                                                class="btn btn-sm btn-outline-secondary"
-                                                disabled="@(_reviewBusy || _reviewProjection.Blocks.Count == 0)"
-                                                @onclick="GoToNextReviewBlockAsync">
-                                            Next change
+                                                class="btn btn-sm btn-outline-danger"
+                                                disabled="@(!CanUndoCurrentReview)"
+                                                title="@HistoricalUndoTitle"
+                                                @onclick="UndoCurrentReviewAsync">
+                                            Undo to approved
                                         </button>
                                     </div>
+                                    @if (_historicalReview is not null && HistoricalUndoParentSha is null)
+                                    {
+                                        <div class="small text-muted">This historical checkpoint is the repository root; there is no approved parent snapshot to restore.</div>
+                                    }
                                 </div>
                                 @if (_reviewProjection.IsNoDifference)
                                 {
-                                    <div class="chapter-review-notice">Current matches the saved Before snapshot; there are no differences right now.</div>
+                                    <div class="chapter-review-notice">The live manuscript matches approved HEAD.</div>
+                                }
+                                @if (_reviewCompositionPreviews.Count > 0)
+                                {
+                                    <section class="chapter-review-composition-previews" aria-label="Designed Page before and after previews">
+                                        <h3>Designed Page previews</h3>
+                                        @foreach (var preview in _reviewCompositionPreviews)
+                                        {
+                                            <article class="chapter-review-composition-preview">
+                                                <header>
+                                                    <strong>@CompositionLabel(preview.Composition)</strong>
+                                                    <span>@(preview.Composition.EditionId is Guid editionId ? $"Edition {editionId:N}" : "Core Book")</span>
+                                                </header>
+                                                @if (preview.Error is not null)
+                                                {
+                                                    <p class="chapter-review-composition-preview-error">@preview.Error</p>
+                                                }
+                                                else
+                                                {
+                                                    <div class="chapter-review-composition-preview-panes">
+                                                        <div>
+                                                            <small>Before</small>
+                                                            @if (preview.Before is { } before)
+                                                            {
+                                                                <img src="@PreviewDataUrl(before)" alt="Before preview of @CompositionLabel(preview.Composition)" />
+                                                            }
+                                                            else
+                                                            {
+                                                                <p class="text-muted">(not present)</p>
+                                                            }
+                                                        </div>
+                                                        <div>
+                                                            <small>After</small>
+                                                            @if (preview.After is { } after)
+                                                            {
+                                                                <img src="@PreviewDataUrl(after)" alt="After preview of @CompositionLabel(preview.Composition)" />
+                                                            }
+                                                            else
+                                                            {
+                                                                <p class="text-muted">(not present)</p>
+                                                            }
+                                                        </div>
+                                                    </div>
+                                                }
+                                                <div class="chapter-review-composition-preview-actions">
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-outline-primary"
+                                                            disabled="@(!CanApproveReviewComposition(preview.Composition))"
+                                                            @onclick="() => ApproveReviewCompositionAsync(preview.Composition)">
+                                                        Approve Designed Page
+                                                    </button>
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-outline-danger"
+                                                            disabled="@(!CanUndoReviewComposition(preview.Composition))"
+                                                            @onclick="() => UndoReviewCompositionAsync(preview.Composition)">
+                                                        Undo Designed Page
+                                                    </button>
+                                                </div>
+                                            </article>
+                                        }
+                                    </section>
                                 }
                             }
                             else if (!_reviewProjection.HasChanges)
                             {
-                                <div class="chapter-review-notice">No pending staged chapter-body changes for this chapter.</div>
+                                <div class="chapter-review-notice">No manuscript changes are pending for this chapter.</div>
                             }
                             else
                             {
@@ -583,15 +718,17 @@ else
                                         </button>
                                         <button type="button"
                                                 class="btn btn-sm btn-success"
-                                                disabled="@_reviewBusy"
+                                                disabled="@(!CanResolveAllActiveChapterChanges)"
+                                                title="Approve only this chapter's text and structure changes"
                                                 @onclick="KeepAllActiveChapterChangesAsync">
-                                            Keep all chapter changes
+                                            Approve all chapter manuscript changes
                                         </button>
                                         <button type="button"
                                                 class="btn btn-sm btn-outline-danger"
-                                                disabled="@_reviewBusy"
+                                                disabled="@(!CanResolveAllActiveChapterChanges)"
+                                                title="Undo only this chapter's text and structure changes"
                                                 @onclick="RejectAllActiveChapterChangesAsync">
-                                            Reject all chapter changes
+                                            Undo all chapter manuscript changes
                                         </button>
                                     </div>
                                 </div>
@@ -645,15 +782,18 @@ else
                                                     <div class="review-block-title">@block.Title</div>
                                                     <div class="review-block-summary">@block.Summary</div>
                                                 </div>
-                                                @if (!_reviewProjection.IsReadOnly)
-                                                {
-                                                    <div class="review-block-actions">
+                                                <div class="review-block-actions">
+                                                    @if (!_reviewProjection.IsReadOnly)
+                                                    {
                                                         <button type="button"
                                                                 class="btn btn-sm btn-outline-secondary"
                                                                 disabled="@_reviewBusy"
                                                                 @onclick="() => ToggleReviewBlockAsync(block.Id)">
                                                             Hide
                                                         </button>
+                                                    }
+                                                    @if (CanResolveCurrentReviewBlock(block))
+                                                    {
                                                         <button type="button"
                                                                 class="btn btn-sm btn-outline-primary"
                                                                 disabled="@_reviewBusy"
@@ -666,46 +806,35 @@ else
                                                                 @onclick="() => RejectReviewBlockAsync(block)">
                                                             Reject
                                                         </button>
-                                                        @if (block.CanEdit)
+                                                    }
+                                                    @if (CanInlineEditPendingReviewBlock(block))
+                                                    {
+                                                        @if (IsEditingReviewBlock(block))
                                                         {
-                                                            @if (IsEditingReviewBlock(block))
-                                                            {
-                                                                <button type="button"
-                                                                        class="btn btn-sm btn-outline-primary"
-                                                                        disabled="@_reviewBusy"
-                                                                        @onclick="() => SaveReviewBlockEditAsync(block)">
-                                                                    Save edit
-                                                                </button>
-                                                                <button type="button"
-                                                                        class="btn btn-sm btn-outline-secondary"
-                                                                        disabled="@_reviewBusy"
-                                                                        @onclick="CancelReviewBlockEdit">
-                                                                    Cancel
-                                                                </button>
-                                                            }
-                                                            else
-                                                            {
-                                                                <button type="button"
-                                                                        class="btn btn-sm btn-outline-secondary"
-                                                                        disabled="@_reviewBusy"
-                                                                        @onclick="() => BeginReviewBlockEdit(block)">
-                                                                    Edit
-                                                                </button>
-                                                            }
+                                                            <button type="button"
+                                                                    class="btn btn-sm btn-outline-primary"
+                                                                    disabled="@_reviewBusy"
+                                                                    @onclick="() => SaveReviewBlockEditAsync(block)">
+                                                                Save edit
+                                                            </button>
+                                                            <button type="button"
+                                                                    class="btn btn-sm btn-outline-secondary"
+                                                                    disabled="@_reviewBusy"
+                                                                    @onclick="CancelReviewBlockEdit">
+                                                                Cancel
+                                                            </button>
                                                         }
+                                                        else
+                                                        {
+                                                            <button type="button"
+                                                                    class="btn btn-sm btn-outline-secondary"
+                                                                    disabled="@_reviewBusy"
+                                                                    @onclick="() => BeginReviewBlockEdit(block)">
+                                                                Edit
+                                                            </button>
+                                                        }
+                                                    }
                                                     </div>
-                                                }
-                                                else
-                                                {
-                                                    <div class="review-block-actions">
-                                                        <button type="button"
-                                                                class="btn btn-sm btn-outline-secondary"
-                                                                disabled="@_reviewBusy"
-                                                                @onclick="() => ToggleReviewBlockAsync(block.Id)">
-                                                            Hide
-                                                        </button>
-                                                    </div>
-                                                }
                                             </header>
 
                                             @if (IsRejectingReviewBlock(block))
@@ -796,7 +925,7 @@ else
                                                 {
                                                     <button type="button"
                                                             class="@ReviewLineActionClass(blockId)"
-                                                            title="Review this staged change inline"
+                                                            title="Review this manuscript change inline"
                                                             @onclick="() => ToggleReviewBlockAsync(blockId)">
                                                         Review
                                                     </button>
@@ -940,6 +1069,15 @@ else
                         OnConfirm="ResetEditionChapterAsync"
                         OnCancel="CancelResetEditionChapter" />
 
+    <ConfirmationDialog IsOpen="@(_contestConfirmation is not null)"
+                        Title="@ContestConfirmationTitle"
+                        Message="@ContestConfirmationMessage"
+                        ConfirmLabel="@ContestConfirmationLabel"
+                        Destructive="@(_contestConfirmation == ContestConfirmationAction.Discard)"
+                        Busy="@_reviewBusy"
+                        OnConfirm="ConfirmContestActionAsync"
+                        OnCancel="CancelContestAction" />
+
 }
 
 @code {
@@ -1007,6 +1145,8 @@ else
     private IDisposable? _navHandlerRegistration;
 
     private bool _chapterLocked;
+    private EditorContestLockState _projectContestLock = EditorContestLockState.Unlocked;
+    private Guid? _contestAutoOpenedProjectId;
     private ContextFeedPanel? _contextPanel;
     private int _contextRefreshSignal;
     private bool _contextResetBusy;
@@ -1022,10 +1162,11 @@ else
     private bool _chapterTokenIsExact = true;
     private bool _reviewLoading;
     private ReviewProjection? _reviewProjection;
-    private LatestAssistantReviewSnapshot? _latestAssistantReview;
+    private IReadOnlyList<ReviewCompositionPreview> _reviewCompositionPreviews = [];
+    private ProjectVersionReviewView? _reviewView;
+    private ProjectVersionHistoricalChapterReview? _historicalReview;
     private ContestReviewProjection? _contestReviewProjection;
     private IReadOnlyList<ContestBatch> _contestReviewBatches = [];
-    private IReadOnlyList<AiChangeBatch> _reviewPendingBatches = [];
     private readonly HashSet<string> _expandedReviewBlockIds = new(StringComparer.Ordinal);
     private string? _activeReviewBlockId;
     private string? _pendingReviewScrollBlockId;
@@ -1038,6 +1179,29 @@ else
     private ReviewBlockEdit? _reviewBlockEdit;
     private string? _rejectingReviewBlockId;
     private string _reviewRejectionMessage = string.Empty;
+    private Guid? _selectedContestCandidateId;
+    private ContestConfirmationAction? _contestConfirmation;
+
+    private string ContestConfirmationTitle => _contestConfirmation switch
+    {
+        ContestConfirmationAction.Discard => "Discard this contest?",
+        ContestConfirmationAction.Cancel => "Cancel this contest?",
+        _ => string.Empty,
+    };
+
+    private string ContestConfirmationMessage => _contestConfirmation switch
+    {
+        ContestConfirmationAction.Discard => "All candidate drafts will be discarded and no candidate will change the manuscript.",
+        ContestConfirmationAction.Cancel => "The running contest will be cancelled. Completed candidate drafts will not be applied.",
+        _ => string.Empty,
+    };
+
+    private string ContestConfirmationLabel => _contestConfirmation switch
+    {
+        ContestConfirmationAction.Discard => "Discard contest",
+        ContestConfirmationAction.Cancel => "Cancel contest",
+        _ => "Continue",
+    };
 
     private ManuscriptLocationIdentity? CurrentManuscriptLocationIdentity() =>
         Project?.Id is Guid projectId && _activeChapterId is Guid chapterId
@@ -1047,9 +1211,20 @@ else
     private bool IsCurrentManuscriptLocation(ManuscriptLocationIdentity identity) =>
         CurrentManuscriptLocationIdentity() is { } current && current == identity;
 
-    private bool EditorReadOnly => _chapterLocked || _mode != EditorMode.Edit;
-    private bool LayoutControlsLocked => _chapterLocked;
+    private bool EditorMutationLocked => _chapterLocked || _projectContestLock.IsLocked;
+    private bool EditorReadOnly => EditorMutationLocked || _mode != EditorMode.Edit;
+    private bool LayoutControlsLocked => EditorMutationLocked;
     private bool ContestReviewActive => _contestReviewProjection is not null;
+    private bool CanResolveContestReview => _contestReviewProjection is { } projection
+        && projection.Candidates.All(candidate => candidate.Status is not ContestCandidateStatus.Pending and not ContestCandidateStatus.Running)
+        && projection.Candidates.Any(candidate =>
+            candidate.CandidateId == _selectedContestCandidateId
+            && candidate.Status == ContestCandidateStatus.Completed);
+    private string ReviewComparisonSubtitle => _historicalReview is not null
+        ? "Latest affecting checkpoint"
+        : _reviewView?.Comparison is not null
+            ? "Approved HEAD vs live"
+            : "No approved HEAD checkpoint";
     private ContestBatch? CurrentChapterContest => _current is null
         ? null
         : _contestReviewBatches.FirstOrDefault(batch => batch.ChapterId == _current.Id && batch.Candidates.Count > 0);
@@ -1063,7 +1238,7 @@ else
     {
         ContestBatchStatus.Running => "Open the running Contest Mode review",
         ContestBatchStatus.Completed => "Review Contest Mode candidates",
-        _ => "Review staged chapter changes",
+        _ => "Review manuscript changes against approved HEAD",
     };
     private IReadOnlyList<Guid> DesignedPageIds
     {
@@ -1099,15 +1274,14 @@ else
     }
     private bool EffectiveChatPaneCollapsed => ContestReviewActive || _chatPaneCollapsed;
     private bool EffectiveRightPaneCollapsed => ContestReviewActive || _rightPaneCollapsed;
-    private static readonly JsonSerializerOptions ChangePayloadJsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
     private static readonly JsonSerializerOptions ContestReviewStateJsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
         Converters = { new JsonStringEnumConverter() },
     };
+
+    protected override void OnInitialized() =>
+        HistoryEvents.ReviewStateChanged += HandleReviewStateChanged;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -1129,16 +1303,35 @@ else
             _rightPaneCollapsed = false;
             _contestReviewBatches = [];
             _contestReviewProjection = null;
-            _reviewPendingBatches = [];
+            _projectContestLock = EditorContestLockState.Unlocked;
+            _contestAutoOpenedProjectId = null;
             _reviewProjection = null;
-            _latestAssistantReview = null;
+            _reviewView = null;
+            _historicalReview = null;
             ResetInlineReviewState();
             _chapters = (await Chapters.ListAsync(Project.Id)).ToList();
             _acts = (await Acts.ListAsync(Project.Id)).ToList();
             _enabledEditions = (await EditionContent.ListReleasesAsync(Project.Id))
                 .Where(item => item.Enabled && !item.Archived)
                 .ToList();
+            _projectContestLock = await Chat.GetEditorContestLockStateAsync(Project.Id);
+            _contestReviewBatches = (await Chat.ListCurrentContestBatchesAsync(Project.Id)).ToList();
             _loading = false;
+        }
+
+        if (_projectContestLock is { IsLocked: true, ChapterId: Guid contestedChapterId }
+            && _contestAutoOpenedProjectId != Project.Id)
+        {
+            _contestAutoOpenedProjectId = Project.Id;
+            var contest = _contestReviewBatches.FirstOrDefault(batch => batch.Id == _projectContestLock.BatchId);
+            var contestEditionId = contest?.ContentTargetEditionId;
+            if (ChapterId != contestedChapterId
+                || !string.Equals(RequestedMode, nameof(EditorMode.Review), StringComparison.OrdinalIgnoreCase)
+                || EditionId != contestEditionId)
+            {
+                Nav.NavigateTo(ContestReviewHref(contestedChapterId, contestEditionId), replace: true);
+                return;
+            }
         }
 
         var requestedTarget = EditionId is Guid requestedEditionId
@@ -1415,6 +1608,22 @@ else
         return editionId is Guid id ? $"{path}?edition={id:D}" : path;
     }
 
+    private string ContestReviewHref(Guid chapterId, Guid? editionId)
+    {
+        if (Project is null)
+            return string.Empty;
+        var path = $"/projects/{Project.Slug}/editor/{chapterId}?mode=Review";
+        return editionId is Guid id ? $"{path}&edition={id:D}" : path;
+    }
+
+    private void OpenLockedContestReviewAsync()
+    {
+        if (_projectContestLock.ChapterId is not Guid chapterId)
+            return;
+        var contest = _contestReviewBatches.FirstOrDefault(batch => batch.Id == _projectContestLock.BatchId);
+        Nav.NavigateTo(ContestReviewHref(chapterId, contest?.ContentTargetEditionId));
+    }
+
     private void CloseManuscriptImageModal() => _manuscriptImageModalOpen = false;
 
     private async Task SelectManuscriptImageAsync(ProjectImageView image)
@@ -1640,7 +1849,13 @@ else
         catch (JSException) { }
 
         if (!_disposed)
-            Nav.NavigateTo($"/projects/{project.Slug}/editor/{targetId}", replace: true);
+        {
+            var reviewQuery = _mode == EditorMode.Review
+                || string.Equals(RequestedMode, nameof(EditorMode.Review), StringComparison.OrdinalIgnoreCase)
+                ? "?mode=Review"
+                : string.Empty;
+            Nav.NavigateTo($"/projects/{project.Slug}/editor/{targetId}{reviewQuery}", replace: true);
+        }
     }
 
     private async Task RememberSelectedChapterAsync(Guid chapterId)
@@ -2331,8 +2546,10 @@ else
         {
             _contestReviewBatches = [];
             _contestReviewProjection = null;
-            _reviewPendingBatches = [];
             _reviewProjection = null;
+            _reviewView = null;
+            _historicalReview = null;
+            _reviewCompositionPreviews = [];
             _reviewLoading = false;
             ResetInlineReviewState();
             return;
@@ -2341,6 +2558,7 @@ else
         _reviewLoading = true;
         try
         {
+            _projectContestLock = await Chat.GetEditorContestLockStateAsync(Project.Id);
             _contestReviewBatches = await Chat.ListCurrentContestBatchesAsync(Project.Id);
             var activeContest = _contestReviewBatches
                 .FirstOrDefault(batch => batch.ChapterId == _current.Id && batch.Candidates.Count > 0);
@@ -2351,35 +2569,43 @@ else
             }
 
             _contestReviewProjection = null;
-            await ChangeApproval.PrepareChapterBodyLineReviewAsync(Project.Id, _current.Id);
-            _reviewPendingBatches = await Chat.ListPendingChangesAsync(Project.Id);
-            // Review compares the durable Before anchor with authoritative live
-            // content, never with a potentially stale editor-component cache.
-            var currentReviewManuscript = await Manuscripts.GetManuscriptAsync(_contentTarget, _current.Id)
-                ?? throw new InvalidOperationException("The current chapter manuscript was not found.");
-            _latestAssistantReview = await Manuscripts.GetLatestAssistantReviewAsync(_contentTarget, _current.Id);
-            _reviewProjection = BuildReviewProjection(
-                _current,
-                _reviewPendingBatches,
-                _latestAssistantReview,
-                currentReviewManuscript.Document);
+            _reviewView = await VersionHistory.GetReviewAsync(
+                Project.Id,
+                [new ProjectVersionReviewTarget(_current.Id, _contentTarget)]);
+            _historicalReview = null;
+            var reviewChapter = _reviewView?.Chapters.SingleOrDefault();
+            if (reviewChapter is { HasChanges: true })
+            {
+                _reviewProjection = BuildVersionHistoryReviewProjection(
+                    _current,
+                    reviewChapter,
+                    isReadOnly: true);
+                _reviewCompositionPreviews = await LoadReviewCompositionPreviewsAsync(reviewChapter);
+            }
+            else
+            {
+                _historicalReview = await VersionHistory.GetLatestAffectingChapterAsync(
+                    Project.Id,
+                    _current.Id,
+                    _contentTarget);
+                _reviewProjection = _historicalReview is not null
+                    ? BuildHistoricalReviewProjection(_current, _historicalReview)
+                    : null;
+                _reviewCompositionPreviews = _historicalReview is { } historical
+                    ? await LoadReviewCompositionPreviewsAsync(historical)
+                    : [];
+            }
             _reviewError = null;
             PruneInlineReviewState();
         }
         catch (Exception ex)
         {
-            _contestReviewBatches = await Chat.ListCurrentContestBatchesAsync(Project.Id);
             _contestReviewProjection = null;
-            _reviewPendingBatches = await Chat.ListPendingChangesAsync(Project.Id);
-            var currentReviewManuscript = await Manuscripts.GetManuscriptAsync(_contentTarget, _current.Id)
-                ?? throw new InvalidOperationException("The current chapter manuscript was not found.");
-            _latestAssistantReview = await Manuscripts.GetLatestAssistantReviewAsync(_contentTarget, _current.Id);
-            _reviewProjection = BuildReviewProjection(
-                _current,
-                _reviewPendingBatches,
-                _latestAssistantReview,
-                currentReviewManuscript.Document);
+            _reviewView = null;
+            _historicalReview = null;
+            _reviewProjection = null;
             _reviewError = ex.Message;
+            _reviewCompositionPreviews = [];
             PruneInlineReviewState();
         }
         finally
@@ -2458,10 +2684,9 @@ else
     private void ActivateContestReview(ContestBatch contest)
     {
         _mode = EditorMode.Review;
-        _reviewPendingBatches = [];
         _reviewProjection = null;
-        _latestAssistantReview = null;
         _contestReviewProjection = BuildContestReviewProjection(contest);
+        _selectedContestCandidateId = contest.SelectedCandidateId;
         _reviewError = null;
         PruneInlineReviewState();
     }
@@ -2470,6 +2695,7 @@ else
     {
         if (Project is null || _current is null) return false;
 
+        _projectContestLock = await Chat.GetEditorContestLockStateAsync(Project.Id);
         _contestReviewBatches = await Chat.ListCurrentContestBatchesAsync(Project.Id);
         if (CurrentChapterContest is not { } contest) return false;
 
@@ -2650,10 +2876,12 @@ else
         _ => "Manuscript changes",
     };
 
-    private static string ContestCandidateColumnClass(ContestCandidateProjection candidate)
+    private string ContestCandidateColumnClass(ContestCandidateProjection candidate)
     {
         var classes = "contest-candidate-column";
-        if (candidate.IsWinner)
+        if (candidate.CandidateId == _selectedContestCandidateId)
+            classes += " contest-candidate-column--active";
+        if (candidate.IsSelected)
             classes += " contest-candidate-column--winner";
         if (candidate.Status is ContestCandidateStatus.Failed or ContestCandidateStatus.Invalid)
             classes += " contest-candidate-column--failed";
@@ -2718,33 +2946,206 @@ else
 
     private async Task KeepAllActiveChapterChangesAsync()
     {
-        if (_reviewProjection is null || _reviewProjection.PendingChangeIds.Count == 0) return;
+        if (!CanResolveAllActiveChapterChanges
+            || Project is null
+            || _reviewView is not { Token: { } token })
+            return;
 
-        var changeIds = _reviewProjection.PendingChangeIds.ToArray();
-        await RunReviewActionAsync(() => ChangeApproval.ApplyChangesAsync(changeIds), clearExpandedBlocks: true);
+        var blockIds = CurrentTargetReviewBlockIds();
+        var target = new ProjectVersionReviewTarget(_current!.Id, _contentTarget);
+        await RunReviewActionAsync(
+            () => VersionHistory.CreateReviewApprovalForBlocksAsync(
+                Project.Id,
+                target,
+                blockIds,
+                token,
+                semanticMessage: "Approved all manuscript changes for chapter",
+                requestKey: $"review-chapter-approval:{token.CurrentContentHash}:{target.ContentTarget.StorageKey}:{string.Join(',', blockIds)}"),
+            clearExpandedBlocks: true);
     }
 
     private async Task RejectAllActiveChapterChangesAsync()
     {
-        if (_reviewProjection is null || _reviewProjection.PendingChangeIds.Count == 0) return;
+        if (!CanResolveAllActiveChapterChanges
+            || Project is null
+            || _reviewView is not { Token: { } token })
+            return;
 
-        var changeIds = _reviewProjection.PendingChangeIds.ToArray();
-        await RunReviewActionAsync(async () =>
-        {
-            foreach (var changeId in changeIds)
-                await ChangeApproval.RejectChangeAsync(changeId, message: null);
-        }, clearExpandedBlocks: true);
+        var blockIds = CurrentTargetReviewBlockIds();
+        var target = new ProjectVersionReviewTarget(_current!.Id, _contentTarget);
+        await RunReviewActionAsync(
+            () => VersionHistory.RestoreReviewBlocksAsync(
+                Project.Id,
+                target,
+                blockIds,
+                token,
+                semanticMessage: "Undid all manuscript changes for chapter"),
+            clearExpandedBlocks: true);
     }
 
+    private bool CanResolveAllActiveChapterChanges
+    {
+        get
+        {
+            if (_reviewBusy
+                || _historicalReview is not null
+                || _reviewProjection is not { HasChanges: true }
+                || _reviewView is not { Comparison.IsIdentical: false }
+                || _current is null)
+                return false;
+
+            var chapter = _reviewView.Chapters.SingleOrDefault(item =>
+                item.ChapterId == _current.Id && item.ContentTarget == _contentTarget);
+            return chapter is { Before: not null, After: not null, HasVisualChanges: false }
+                && CurrentTargetReviewBlockIds().Count > 0;
+        }
+    }
+
+    private IReadOnlyList<string> CurrentTargetReviewBlockIds() =>
+        _reviewProjection?.Blocks
+            .SelectMany(ReviewBlockStableIds)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList() ?? [];
+
+    private async Task ApproveCurrentReviewAsync()
+    {
+        if (_historicalReview is not null
+            || _reviewView is not { Comparison.IsIdentical: false, Token: { } token }
+            || Project is null)
+            return;
+
+        await RunReviewActionAsync(
+            async () =>
+            {
+                await VersionHistory.CreateReviewApprovalCheckpointAsync(
+                    Project.Id,
+                    token,
+                    requestKey: $"review-approval:{token.CurrentContentHash}");
+            },
+            clearExpandedBlocks: true);
+    }
+
+    private async Task UndoCurrentReviewAsync()
+    {
+        if (Project is null || _reviewView?.Token is not { } token)
+            return;
+
+        if (_historicalReview is { } historicalReview)
+        {
+            if (HistoricalUndoParentSha is not { } parentCommitSha)
+            {
+                _reviewError = "This historical checkpoint is the repository root; there is no approved parent snapshot to restore.";
+                return;
+            }
+
+            await RunReviewActionAsync(
+                () => VersionHistory.RestoreHistoricalChapterAsync(
+                    Project.Id,
+                    _current!.Id,
+                    _contentTarget,
+                    parentCommitSha,
+                    token,
+                    semanticMessage: "Undo latest affecting checkpoint to approved parent",
+                    requestKey: $"historical-review-undo:{historicalReview.Commit.Sha}:{parentCommitSha}:{token.CurrentContentHash}"),
+                clearExpandedBlocks: true);
+            return;
+        }
+
+        if (_reviewView is not { Comparison.IsIdentical: false }
+            || string.IsNullOrWhiteSpace(_reviewView.Repository.HeadCommitSha))
+            return;
+
+        await RunReviewActionAsync(
+            async () =>
+            {
+                await VersionHistory.RestoreHistoricalChapterAsync(
+                    Project.Id,
+                    _current!.Id,
+                    _contentTarget,
+                    _reviewView.Repository.HeadCommitSha,
+                    token);
+            },
+            clearExpandedBlocks: true);
+    }
+
+    private bool CanUndoCurrentReview =>
+        !_reviewBusy
+        && _reviewView?.Token is not null
+        && (_historicalReview is not null
+            ? _reviewProjection?.HasChanges == true && HistoricalUndoParentSha is not null
+            : _reviewView.Comparison?.IsIdentical == false
+                && !string.IsNullOrWhiteSpace(_reviewView.Repository.HeadCommitSha));
+
+    private string HistoricalUndoTitle =>
+        _historicalReview is not null && HistoricalUndoParentSha is null
+            ? "No approved parent snapshot exists for the repository root checkpoint"
+            : _historicalReview is not null
+                ? "Restore the parent value from the latest affecting checkpoint"
+                : "Restore the approved HEAD value";
+
+    private string? HistoricalUndoParentSha => _historicalReview?.Commit.ParentShas.FirstOrDefault();
+
     private async Task KeepContestCandidateAsync(Guid candidateId) =>
-        await RunReviewActionAsync(() => Chat.KeepContestCandidateAsync(candidateId), clearExpandedBlocks: true);
+        await RunReviewActionAsync(
+            () => Chat.KeepContestCandidateAsync(Project!.Id, candidateId),
+            clearExpandedBlocks: true);
+
+    private async Task SelectContestCandidateAsync(Guid candidateId)
+    {
+        if (_contestReviewProjection is not { } projection
+            || candidateId == _selectedContestCandidateId
+            || Project is null)
+            return;
+
+        var candidate = projection.Candidates.FirstOrDefault(item => item.CandidateId == candidateId);
+        if (candidate is null)
+            return;
+
+        await RunReviewActionAsync(
+            () => Chat.SelectContestCandidateAsync(Project.Id, projection.Batch.Id, candidateId),
+            clearExpandedBlocks: true);
+    }
+
+    private async Task ResetContestCandidateAsync(Guid candidateId)
+    {
+        if (Project is null)
+            return;
+
+        await RunReviewActionAsync(
+            () => Chat.ResetContestCandidateAsync(Project.Id, candidateId),
+            clearExpandedBlocks: true);
+    }
+
+    private void RequestDiscardContestAsync() =>
+        _contestConfirmation = ContestConfirmationAction.Discard;
+
+    private void RequestCancelContestAsync() =>
+        _contestConfirmation = ContestConfirmationAction.Cancel;
+
+    private void CancelContestAction() => _contestConfirmation = null;
+
+    private async Task ConfirmContestActionAsync()
+    {
+        if (_contestConfirmation is not { } action
+            || _contestReviewProjection is not { } projection
+            || Project is null)
+            return;
+
+        _contestConfirmation = null;
+        await RunReviewActionAsync(
+            action == ContestConfirmationAction.Discard
+                ? () => Chat.DiscardContestAsync(Project.Id, projection.Batch.Id)
+                : () => Chat.CancelContestAsync(Project.Id, projection.Batch.Id),
+            clearExpandedBlocks: true);
+    }
 
     private async Task FinishContestReviewAsync()
     {
         if (_contestReviewProjection is null) return;
 
         await RunReviewActionAsync(
-            () => Chat.FinishContestBatchAsync(_contestReviewProjection.Batch.Id),
+            () => Chat.ResolveContestAsync(Project!.Id, _contestReviewProjection.Batch.Id),
             clearExpandedBlocks: true);
 
         if (_contestReviewProjection is null && _reviewProjection?.HasChanges != true)
@@ -2816,6 +3217,12 @@ else
         string? editedText = null,
         string? rejectionMessage = null)
     {
+        if (_historicalReview is not null)
+        {
+            _reviewError = "Historical review is read-only. Use Undo to restore its approved parent value.";
+            return;
+        }
+
         if (block.ContestCandidateId is { } candidateId)
         {
             var contestRequest = new ContestCandidateReviewLineResolution(
@@ -2835,20 +3242,154 @@ else
             return;
         }
 
-        var request = new ChapterBodyReviewLineResolution(
-            block.ChangeId,
-            block.PairId,
-            block.OldRow?.OldLineNumber,
-            block.NewRow?.NewLineNumber,
-            block.OldRow?.Text,
-            block.NewRow?.Text,
-            action,
-            editedText,
-            rejectionMessage);
+        if (Project is null
+            || _reviewView is not { Comparison.IsIdentical: false, Token: { } token })
+        {
+            _reviewError = "This historical comparison cannot be changed. Open the current pending review first.";
+            return;
+        }
 
+        var blockIds = ReviewBlockStableIds(block);
+        if (blockIds.Count == 0)
+        {
+            _reviewError = "This change does not map to a stable manuscript block and cannot be resolved selectively.";
+            return;
+        }
+
+        var target = new ProjectVersionReviewTarget(_current!.Id, _contentTarget);
+        if (action == ChapterBodyReviewLineAction.Edit)
+        {
+            if (blockIds.Count != 1 || editedText is null)
+            {
+                _reviewError = "This text change does not map to one editable manuscript block.";
+                return;
+            }
+
+            await RunReviewActionAsync(
+                () => VersionHistory.EditReviewBlockAsync(
+                    Project.Id,
+                    target,
+                    blockIds.Single(),
+                    editedText,
+                    token),
+                clearExpandedBlocks: true);
+            return;
+        }
+
+        var message = action == ChapterBodyReviewLineAction.Keep
+            ? "Approved selected manuscript block"
+            : string.IsNullOrWhiteSpace(rejectionMessage)
+                ? "Undid selected manuscript block"
+                : $"Undid selected manuscript block: {rejectionMessage.Trim()}";
         await RunReviewActionAsync(
-            () => ChangeApproval.ResolveChapterBodyReviewLineAsync(Project!.Id, _current!.Id, request),
-            clearExpandedBlocks: false);
+            action == ChapterBodyReviewLineAction.Keep
+                ? () => VersionHistory.CreateReviewApprovalForBlocksAsync(
+                    Project.Id,
+                    target,
+                    blockIds,
+                    token,
+                    message,
+                    requestKey: $"review-block-approval:{token.CurrentContentHash}:{string.Join(',', blockIds.Order(StringComparer.Ordinal))}")
+                : () => VersionHistory.RestoreReviewBlocksAsync(
+                    Project.Id,
+                    target,
+                    blockIds,
+                    token,
+                    message),
+            clearExpandedBlocks: true);
+    }
+
+    private bool CanResolveCurrentReviewBlock(ReviewBlock block) =>
+        _reviewProjection is { IsReadOnly: true }
+        && _historicalReview is null
+        && _reviewView is { Comparison.IsIdentical: false }
+        && block.Category != ReviewBlockCategory.Visual
+        && ReviewBlockStableIds(block).Count > 0;
+
+    private bool CanInlineEditPendingReviewBlock(ReviewBlock block) =>
+        block.CanEdit
+        && block.Category == ReviewBlockCategory.Text
+        && block.NewRow is not null
+        && _reviewProjection is { IsReadOnly: true }
+        && _historicalReview is null
+        && _reviewView is { Comparison.IsIdentical: false }
+        && _reviewView.Chapters.Any(item =>
+            item.ChapterId == _current?.Id
+            && item.ContentTarget == _contentTarget
+            && item.Before is not null
+            && item.After is not null)
+        && ReviewBlockStableIds(block).Count == 1;
+
+    private IReadOnlyList<string> ReviewBlockStableIds(ReviewBlock block)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        if (_reviewProjection is { } projection)
+        {
+            var line = projection.Lines.ElementAtOrDefault(Math.Max(0, block.AnchorLine - 1));
+            if (line?.ManuscriptBlockId is { Length: > 0 } currentId)
+                ids.Add(currentId);
+        }
+
+        var chapter = _reviewView?.Chapters.SingleOrDefault(item =>
+            item.ChapterId == _current?.Id && item.ContentTarget == _contentTarget);
+        AddBlockIdFromLine(chapter?.Before, block.OldRow?.OldLineNumber, ids);
+        AddBlockIdFromLine(chapter?.After, block.NewRow?.NewLineNumber, ids);
+        if (FindStructuredBlockIndex(block) is not { } structuredIndex)
+            return ids.ToList();
+
+        AddBlockIdFromIndex(chapter?.Before, structuredIndex, ids);
+        AddBlockIdFromIndex(chapter?.After, structuredIndex, ids);
+        return ids.ToList();
+    }
+
+    private static void AddBlockIdFromLine(
+        ProjectExportChapter? chapter,
+        int? lineNumber,
+        ISet<string> ids)
+    {
+        if (chapter is null || lineNumber is not int line || line < 1)
+            return;
+
+        try
+        {
+            var document = ManuscriptCodec.Deserialize(
+                chapter.ManuscriptJson,
+                chapter.Id,
+                chapter.ManuscriptRevision);
+            var body = ManuscriptCodec.ProjectPlainText(document);
+            var location = BuildReviewLineLocations(
+                    document,
+                    body,
+                    ChapterFormatting.SplitLines(body))
+                .ElementAtOrDefault(line - 1);
+            if (location?.BlockId is { Length: > 0 } blockId)
+                ids.Add(blockId);
+        }
+        catch (InvalidDataException)
+        {
+        }
+    }
+
+    private static void AddBlockIdFromIndex(
+        ProjectExportChapter? chapter,
+        int blockIndex,
+        ISet<string> ids)
+    {
+        if (chapter is null || blockIndex < 1)
+            return;
+
+        try
+        {
+            var document = ManuscriptCodec.Deserialize(
+                chapter.ManuscriptJson,
+                chapter.Id,
+                chapter.ManuscriptRevision);
+            if (document.Content.ElementAtOrDefault(blockIndex - 1) is { } block)
+                ids.Add(block.Id);
+        }
+        catch (InvalidDataException)
+        {
+        }
     }
 
     private async Task RunReviewActionAsync(Func<Task> action, bool clearExpandedBlocks)
@@ -2863,6 +3404,8 @@ else
         try
         {
             await action();
+            if (Project is { } project)
+                HistoryEvents.PublishReviewStateChanged(project.Id);
             ClearInlineReviewEditors();
             if (clearExpandedBlocks)
                 _expandedReviewBlockIds.Clear();
@@ -2904,9 +3447,9 @@ else
     private void ResetChapterReviewState()
     {
         _reviewLoading = false;
-        _reviewPendingBatches = [];
         _reviewProjection = null;
-        _latestAssistantReview = null;
+        _reviewView = null;
+        _historicalReview = null;
         _contestReviewBatches = [];
         _contestReviewProjection = null;
         ResetInlineReviewState();
@@ -2945,78 +3488,29 @@ else
 
     private static ReviewProjection BuildReviewProjection(
         Chapter chapter,
-        IReadOnlyList<AiChangeBatch> batches,
-        LatestAssistantReviewSnapshot? latestAssistantReview = null,
-        ManuscriptDocument? liveDocument = null,
         ReviewDiff? comparisonDiff = null,
         bool isReadOnly = false,
         ManuscriptDocument? comparisonCurrentDocument = null)
     {
-        var changes = CurrentChapterManuscriptChanges(batches, chapter.Id);
-        if (changes.Count == 0 && latestAssistantReview is not null)
-        {
-            try
-            {
-                var before = ManuscriptCodec.Deserialize(latestAssistantReview.BeforeManuscriptJson);
-                if (before.ManuscriptId != chapter.Id)
-                    throw new InvalidDataException("The saved Before snapshot belongs to another chapter.");
-                var current = liveDocument ?? chapter.Manuscript;
-                if (AiChangeReviewDiffBuilder.TryBuild(before, current, chapter.Title, out var appliedDiff))
-                {
-                    var appliedChapter = new Chapter
-                    {
-                        Id = chapter.Id,
-                        ProjectId = chapter.ProjectId,
-                        Title = chapter.Title,
-                        ManuscriptJson = ManuscriptCodec.Serialize(current),
-                        ManuscriptRevision = current.Revision,
-                    };
-                    return BuildReviewProjection(
-                        appliedChapter,
-                        [],
-                        comparisonDiff: appliedDiff,
-                        isReadOnly: true,
-                        comparisonCurrentDocument: current);
-                }
-            }
-            catch (Exception exception) when (exception is JsonException or InvalidDataException or ArgumentException)
-            {
-                // A malformed legacy anchor should not prevent the normal Review
-                // surface from opening.
-            }
-        }
-
-        var proposedBody = changes.Count == 0
-            ? chapter.PlainText
-            : ReadChapterManuscriptChange(AiChangeReviewDrafts.EffectiveAfterJson(changes[^1]))?.PlainText ?? chapter.PlainText;
+        var proposedBody = comparisonCurrentDocument is { } comparison
+            ? ManuscriptCodec.ProjectPlainText(comparison)
+            : chapter.PlainText;
         var lines = ChapterFormatting.SplitLines(proposedBody);
-        var displayLines = lines.Count == 0 && (changes.Count > 0 || comparisonDiff is not null)
+        var displayLines = lines.Count == 0 && comparisonDiff is not null
             ? [string.Empty]
             : lines;
         var width = Math.Max(4, displayLines.Count.ToString().Length);
         var drafts = displayLines
             .Select((text, index) => new ReviewLineDraft(index + 1, text))
             .ToList();
-        var locationDocument = changes.Count == 0
-            ? comparisonCurrentDocument ?? liveDocument ?? chapter.Manuscript
-            : ReadChapterManuscriptChange(AiChangeReviewDrafts.EffectiveAfterJson(changes[^1]))?.Manuscript
-                ?? liveDocument
-                ?? chapter.Manuscript;
+        var locationDocument = comparisonCurrentDocument ?? chapter.Manuscript;
         var lineLocations = BuildReviewLineLocations(locationDocument, proposedBody, displayLines);
         var blocks = new List<ReviewBlock>();
         IReadOnlyList<DiffSection> sections = comparisonDiff?.Sections ?? [];
 
-        if (comparisonDiff is null
-            && changes.Count > 0
-            && AiChangeReviewDiffBuilder.TryBuild(changes, out var pendingDiff))
-        {
-            comparisonDiff = pendingDiff;
-            sections = pendingDiff.Sections;
-        }
-
         if (comparisonDiff is { } diff)
         {
-            var fallbackChangeId = changes.Count > 0 ? changes[^1].Id : isReadOnly ? chapter.Id : Guid.Empty;
+            var fallbackChangeId = isReadOnly ? chapter.Id : Guid.Empty;
             foreach (var section in diff.Sections.Where(section => string.Equals(section.Key, "Body", StringComparison.OrdinalIgnoreCase)))
             {
                 for (var hunkIndex = 0; hunkIndex < section.Hunks.Count; hunkIndex++)
@@ -3086,9 +3580,9 @@ else
             .ToList();
 
         return new ReviewProjection(
-            HasChanges: isReadOnly ? sections.Count > 0 : changes.Count > 0,
-            PendingChangeCount: isReadOnly ? 0 : orderedBlocks.Count > 0 ? orderedBlocks.Count : changes.Count,
-            PendingChangeIds: changes.Select(change => change.Id).ToList(),
+            HasChanges: sections.Count > 0,
+            PendingChangeCount: orderedBlocks.Count,
+            PendingChangeIds: [],
             LineNumberFormat: new string('0', width),
             Blocks: orderedBlocks,
             Lines: drafts
@@ -3113,49 +3607,340 @@ else
             IsNoDifference: isReadOnly && sections.Count == 0);
     }
 
-    private static ContestReviewProjection BuildContestReviewProjection(ContestBatch batch)
+    private static ReviewProjection? BuildVersionHistoryReviewProjection(
+        Chapter chapter,
+        ProjectVersionReviewChapter reviewChapter,
+        bool isReadOnly)
     {
-        var reviews = new Dictionary<Guid, ReviewProjection?>();
-        var states = new Dictionary<Guid, ContestCandidateReviewState>();
-        foreach (var candidate in batch.Candidates.OrderBy(candidate => candidate.Order))
+        if (reviewChapter.Before is null && reviewChapter.After is null)
+            return null;
+
+        var beforePayload = reviewChapter.Before ?? new ProjectExportChapter
         {
-            states[candidate.Id] = ReadContestReviewState(candidate);
-            reviews[candidate.Id] = candidate.Status == ContestCandidateStatus.Completed
-                ? BuildContestCandidateReviewProjection(batch, candidate)
-                : null;
+            Id = reviewChapter.ChapterId,
+            Title = reviewChapter.After?.Title ?? chapter.Title,
+            ManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(reviewChapter.ChapterId)),
+            ManuscriptRevision = 0,
+        };
+        var afterPayload = reviewChapter.After ?? new ProjectExportChapter
+        {
+            Id = reviewChapter.ChapterId,
+            Title = reviewChapter.Before?.Title ?? chapter.Title,
+            ManuscriptJson = ManuscriptCodec.Serialize(ManuscriptCodec.CreateEmpty(reviewChapter.ChapterId)),
+            ManuscriptRevision = 0,
+        };
+        var before = ManuscriptCodec.Deserialize(
+            beforePayload.ManuscriptJson,
+            reviewChapter.ChapterId,
+            beforePayload.ManuscriptRevision);
+        var after = ManuscriptCodec.Deserialize(
+            afterPayload.ManuscriptJson,
+            reviewChapter.ChapterId,
+            afterPayload.ManuscriptRevision);
+        var hasManuscriptDiff = ManuscriptReviewDiffBuilder.TryBuild(
+                before,
+                after,
+                afterPayload.Title,
+                out var diff);
+        var sections = hasManuscriptDiff
+            ? diff.Sections.ToList()
+            : new List<DiffSection>();
+        foreach (var composition in reviewChapter.CompositionChanges)
+        {
+            sections.Add(ManuscriptReviewDiffBuilder.CreateSection(
+                "Visuals",
+                $"Designed Page: {CompositionLabel(composition)}",
+                FormatCompositionReview(composition.Before),
+                FormatCompositionReview(composition.After)));
+        }
+        if (sections.Count == 0)
+            return null;
+
+        diff = new ReviewDiff(
+            string.IsNullOrWhiteSpace(afterPayload.Title) ? "Chapter body" : afterPayload.Title,
+            null,
+            sections);
+
+        var comparisonChapter = new Chapter
+        {
+            Id = reviewChapter.ChapterId,
+            ProjectId = chapter.ProjectId,
+            Title = afterPayload.Title,
+            ManuscriptJson = afterPayload.ManuscriptJson,
+            ManuscriptRevision = after.Revision,
+        };
+        return BuildReviewProjection(
+            comparisonChapter,
+            comparisonDiff: diff,
+            isReadOnly: isReadOnly,
+            comparisonCurrentDocument: after);
+    }
+
+    private static string CompositionLabel(ProjectVersionReviewComposition composition) =>
+        composition.After?.Name
+        ?? composition.Before?.Name
+        ?? composition.CompositionId.ToString("N");
+
+    private static string FormatCompositionReview(ProjectExportPageComposition? composition)
+    {
+        if (composition is null)
+            return "(not present)";
+
+        var variants = composition.Variants
+            .OrderBy(variant => variant.Id)
+            .Select(variant => $"{variant.Id:N} · {variant.GeometryKey} · revision {variant.Revision}");
+        return string.Join(
+            "\n",
+            $"Name: {composition.Name}",
+            $"Composition revision: {composition.Revision}",
+            $"Active variant: {composition.ActiveAuthoringVariantId?.ToString("N") ?? "none"}",
+            "Variants:",
+            string.Join("\n", variants));
+    }
+
+    private bool CanApproveReviewComposition(ProjectVersionReviewComposition composition)
+    {
+        if (_reviewBusy
+            || _historicalReview is not null
+            || Project is null
+            || _current is null
+            || composition.After is null
+            || _reviewView is not { Comparison.IsIdentical: false, Token: not null })
+        {
+            return false;
         }
 
-        var acceptedOperations = BuildContestAcceptedOperations(batch, reviews, states);
+        var target = new ProjectVersionReviewTarget(_current.Id, _contentTarget);
+        return composition.ChapterId == target.ChapterId
+            && (target.ContentTarget.IsCore
+                ? composition.EditionId is null
+                : composition.EditionId == target.ContentTarget.EditionId)
+            && _reviewView.Chapters.Any(chapter =>
+                chapter.ChapterId == target.ChapterId
+                && chapter.ContentTarget == target.ContentTarget
+                && chapter.CompositionChanges.Any(item => item.CompositionId == composition.CompositionId));
+    }
+
+    private async Task ApproveReviewCompositionAsync(ProjectVersionReviewComposition composition)
+    {
+        if (!CanApproveReviewComposition(composition)
+            || Project is not { } project
+            || _current is not { } chapter
+            || _reviewView is not { Token: { } token })
+        {
+            return;
+        }
+
+        var target = new ProjectVersionReviewTarget(chapter.Id, _contentTarget);
+        await RunReviewActionAsync(
+            () => VersionHistory.ApproveReviewCompositionAsync(
+                project.Id,
+                target,
+                composition.CompositionId,
+                token,
+                semanticMessage: $"Approved Designed Page: {CompositionLabel(composition)}",
+                requestKey: $"review-composition-approval:{token.CurrentContentHash}:{target.ContentTarget.StorageKey}:{composition.CompositionId:N}"),
+            clearExpandedBlocks: true);
+    }
+
+    private bool CanUndoReviewComposition(ProjectVersionReviewComposition composition)
+    {
+        if (_historicalReview is not null)
+            return CanUndoHistoricalReviewComposition(composition);
+
+        if (_reviewBusy
+            || Project is null
+            || _current is null
+            || !composition.HasChanges
+            || _reviewView is not { Comparison.IsIdentical: false, Token: not null })
+        {
+            return false;
+        }
+
+        var target = new ProjectVersionReviewTarget(_current.Id, _contentTarget);
+        return (composition.After is null || CompositionMatchesReviewTarget(composition.After, target))
+            && (composition.Before is null || CompositionMatchesReviewTarget(composition.Before, target))
+            && _reviewView.Chapters.Any(chapter =>
+                chapter.ChapterId == target.ChapterId
+                && chapter.ContentTarget == target.ContentTarget
+                && chapter.CompositionChanges.Any(item => item.CompositionId == composition.CompositionId));
+    }
+
+    private bool CanUndoHistoricalReviewComposition(ProjectVersionReviewComposition composition)
+    {
+        if (_reviewBusy
+            || _historicalReview is not { } historicalReview
+            || HistoricalUndoParentSha is null
+            || Project is null
+            || _current is null
+            || !composition.HasChanges
+            || _reviewView?.Token is null)
+        {
+            return false;
+        }
+
+        var target = new ProjectVersionReviewTarget(_current.Id, _contentTarget);
+        return (composition.After is null || CompositionMatchesReviewTarget(composition.After, target))
+            && (composition.Before is null || CompositionMatchesReviewTarget(composition.Before, target))
+            && historicalReview.Compositions is not null
+            && historicalReview.Compositions.Any(item => item.CompositionId == composition.CompositionId);
+    }
+
+    private async Task UndoReviewCompositionAsync(ProjectVersionReviewComposition composition)
+    {
+        if (!CanUndoReviewComposition(composition)
+            || Project is not { } project
+            || _current is not { } chapter
+            || _reviewView is not { Token: { } token })
+        {
+            return;
+        }
+
+        var target = new ProjectVersionReviewTarget(chapter.Id, _contentTarget);
+        if (_historicalReview is { } historicalReview)
+        {
+            if (HistoricalUndoParentSha is not { } parentCommitSha)
+                return;
+
+            await RunReviewActionAsync(
+                () => VersionRestore.RestoreHistoricalCompositionAsync(
+                    project.Id,
+                    target,
+                    composition.CompositionId,
+                    parentCommitSha,
+                    token),
+                clearExpandedBlocks: true);
+            return;
+        }
+
+        await RunReviewActionAsync(
+            () => VersionRestore.RestoreReviewCompositionAsync(
+                project.Id,
+                target,
+                composition.CompositionId,
+                token),
+            clearExpandedBlocks: true);
+    }
+
+    private static bool CompositionMatchesReviewTarget(
+        ProjectExportPageComposition composition,
+        ProjectVersionReviewTarget target) =>
+        composition.ChapterId == target.ChapterId
+        && (target.ContentTarget.IsCore
+            ? composition.EditionId is null
+            : composition.EditionId == target.ContentTarget.EditionId);
+
+    private async Task<IReadOnlyList<ReviewCompositionPreview>> LoadReviewCompositionPreviewsAsync(
+        ProjectVersionReviewChapter reviewChapter)
+    {
+        if (Project is null || reviewChapter.CompositionChanges.Count == 0)
+            return [];
+
+        var previews = new List<ReviewCompositionPreview>(reviewChapter.CompositionChanges.Count);
+        foreach (var composition in reviewChapter.CompositionChanges)
+        {
+            try
+            {
+                var before = await RenderReviewCompositionPreviewAsync(composition.Before);
+                var after = await RenderReviewCompositionPreviewAsync(composition.After);
+                previews.Add(new ReviewCompositionPreview(composition, before, after, null));
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                previews.Add(new ReviewCompositionPreview(composition, null, null, exception.Message));
+            }
+        }
+
+        return previews;
+    }
+
+    private async Task<IReadOnlyList<ReviewCompositionPreview>> LoadReviewCompositionPreviewsAsync(
+        ProjectVersionHistoricalChapterReview historicalReview)
+    {
+        var reviewChapter = new ProjectVersionReviewChapter(
+            historicalReview.ChapterId,
+            historicalReview.ContentTarget,
+            historicalReview.Before,
+            historicalReview.After,
+            new ProjectVersionReviewConcurrencyToken(
+                Guid.Empty,
+                historicalReview.Commit.Sha,
+                null,
+                string.Empty),
+            historicalReview.Compositions);
+        return await LoadReviewCompositionPreviewsAsync(reviewChapter);
+    }
+
+    private async Task<CompositionCanvasPreviewResult?> RenderReviewCompositionPreviewAsync(
+        ProjectExportPageComposition? composition)
+    {
+        if (Project is null || composition is null)
+            return null;
+
+        var variant = composition.Variants
+            .FirstOrDefault(item => item.Id == composition.ActiveAuthoringVariantId)
+            ?? composition.Variants.OrderBy(item => item.Id).FirstOrDefault();
+        if (variant is null)
+            return null;
+
+        var scene = JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
+            ?? throw new InvalidDataException("The Designed Page review scene is empty.");
+        var semantic = ManuscriptCodec.Deserialize(
+            composition.SemanticManuscriptJson,
+            composition.Id,
+            composition.Revision);
+        return await CompositionPreviews.RenderSceneAsync(
+            Project.Id,
+            composition.Id,
+            variant.Revision,
+            scene,
+            semantic,
+            CompositionCanvasPreviewMode.Clean);
+    }
+
+    private static string PreviewDataUrl(CompositionCanvasPreviewResult preview) =>
+        $"data:image/png;base64,{Convert.ToBase64String(preview.Data)}";
+
+    private static ReviewProjection? BuildHistoricalReviewProjection(
+        Chapter chapter,
+        ProjectVersionHistoricalChapterReview historicalReview) =>
+        BuildVersionHistoryReviewProjection(
+            chapter,
+            new ProjectVersionReviewChapter(
+                historicalReview.ChapterId,
+                historicalReview.ContentTarget,
+                historicalReview.Before,
+                historicalReview.After,
+                new ProjectVersionReviewConcurrencyToken(
+                    Guid.Empty,
+                    historicalReview.Commit.Sha,
+                    null,
+                    string.Empty),
+                historicalReview.Compositions),
+            isReadOnly: true);
+
+    private static ContestReviewProjection BuildContestReviewProjection(ContestBatch batch)
+    {
+        var selectedCandidateId = batch.SelectedCandidateId;
         var candidates = new List<ContestCandidateProjection>();
         foreach (var candidate in batch.Candidates.OrderBy(candidate => candidate.Order))
         {
-            var review = reviews[candidate.Id];
+            var isSelected = selectedCandidateId == candidate.Id;
+            var review = isSelected && candidate.Status == ContestCandidateStatus.Completed
+                ? BuildContestCandidateReviewProjection(batch, candidate)
+                : null;
             if (review is not null)
             {
-                var decisionsByBlockId = states[candidate.Id].Lines.ToDictionary(line => line.BlockId, StringComparer.Ordinal);
+                var decisionsByBlockId = ReadContestReviewState(candidate).Lines
+                    .ToDictionary(line => line.BlockId, StringComparer.Ordinal);
                 var blocks = review.Blocks.Select(block =>
                 {
-                    var decision = ContestDecisionForBlock(batch, candidate, decisionsByBlockId, block);
-                    var conflict = false;
-                    string? conflictMessage = null;
-                    if (batch.WinningCandidateId is { } winnerId && winnerId != candidate.Id)
-                    {
-                        conflict = true;
-                        conflictMessage = "A whole contestant is selected. Use Keep everything on this contestant to replace it.";
-                    }
-                    else if (decision is not (ContestCandidateLineDecisionKind.Kept or ContestCandidateLineDecisionKind.Edited)
-                             && FindConflictingAcceptedOperation(block, candidate.Id, acceptedOperations) is { } conflictOperation)
-                    {
-                        conflict = true;
-                        conflictMessage = $"Conflicts with a kept line from contestant {conflictOperation.CandidateOrder + 1}.";
-                    }
-
                     return block with
                     {
                         ContestCandidateId = candidate.Id,
-                        ContestDecision = decision,
-                        HasContestConflict = conflict,
-                        ContestConflictMessage = conflictMessage,
+                        ContestDecision = ContestDecisionForBlock(selectedCandidateId, candidate.Id, decisionsByBlockId, block),
+                        HasContestConflict = false,
+                        ContestConflictMessage = null,
                     };
                 }).ToList();
                 review = review with { Blocks = blocks };
@@ -3170,15 +3955,15 @@ else
                 candidate.Summary,
                 candidate.ErrorMessage,
                 review,
-                batch.WinningCandidateId == candidate.Id,
+                isSelected,
                 candidate.Status == ContestCandidateStatus.Completed
                     && batch.Status == ContestBatchStatus.Completed));
         }
 
         var allBlocks = candidates
+            .Where(candidate => candidate.IsSelected)
             .SelectMany(candidate => candidate.Review?.Blocks ?? [])
             .OrderBy(block => block.AnchorLine)
-            .ThenBy(block => block.ContestCandidateId)
             .ThenBy(block => block.Id, StringComparer.Ordinal)
             .ToList();
 
@@ -3187,180 +3972,39 @@ else
 
     private static ReviewProjection? BuildContestCandidateReviewProjection(ContestBatch batch, ContestCandidate candidate)
     {
-        var fakeBatch = new AiChangeBatch
-        {
-            Id = batch.Id,
-            ProjectId = batch.ProjectId,
-            ConversationId = batch.ConversationId,
-            ConversationKind = AiChangeConversationKind.Editor,
-            CreatedAt = batch.CreatedAt,
-        };
-        var fakeChange = new AiChange
-        {
-            Id = candidate.Id,
-            BatchId = fakeBatch.Id,
-            Batch = fakeBatch,
-            ToolName = "apply_manuscript_operations",
-            Summary = candidate.Summary,
-            BeforeJson = JsonSerializer.Serialize(new ChapterManuscriptChange(
-                batch.ChapterId,
-                batch.ChapterTitle,
-                ManuscriptCodec.Deserialize(batch.OriginalManuscriptJson).Revision,
-                batch.OriginalManuscriptJson), ChangePayloadJsonOptions),
-            AfterJson = JsonSerializer.Serialize(new ChapterManuscriptChange(
-                batch.ChapterId,
-                batch.ChapterTitle,
-                ManuscriptCodec.Deserialize(candidate.ProposedManuscriptJson).Revision,
-                candidate.ProposedManuscriptJson), ChangePayloadJsonOptions),
-            ResourceKind = "ChapterManuscript",
-            ResourceId = batch.ChapterId.ToString("N"),
-            Status = AiChangeStatus.Pending,
-        };
-        fakeBatch.Changes.Add(fakeChange);
+        var before = ManuscriptCodec.Deserialize(batch.OriginalManuscriptJson);
+        var after = ManuscriptCodec.Deserialize(candidate.EffectiveDraftManuscriptJson);
+        ManuscriptCodec.Validate(before, batch.ChapterId, before.Revision);
+        ManuscriptCodec.Validate(after, batch.ChapterId, after.Revision);
+        if (!ManuscriptReviewDiffBuilder.TryBuild(before, after, batch.ChapterTitle, out var diff))
+            return null;
 
         var chapter = new Chapter
         {
             Id = batch.ChapterId,
             ProjectId = batch.ProjectId,
             Title = batch.ChapterTitle,
-            ManuscriptRevision = 1,
-            ManuscriptJson = ManuscriptCodec.Serialize(
-                ManuscriptCodec.FromPlainText(
-                    batch.ChapterId,
-                    batch.OriginalPlainText,
-                    revision: 1,
-                    deterministicIds: true)),
+            ManuscriptRevision = after.Revision,
+            ManuscriptJson = ManuscriptCodec.Serialize(after),
         };
-        return BuildReviewProjection(chapter, [fakeBatch]);
-    }
-
-    private static IReadOnlyList<ContestReviewOperation> BuildContestAcceptedOperations(
-        ContestBatch batch,
-        IReadOnlyDictionary<Guid, ReviewProjection?> reviews,
-        IReadOnlyDictionary<Guid, ContestCandidateReviewState> states)
-    {
-        var operations = new List<ContestReviewOperation>();
-        if (batch.WinningCandidateId is { } winnerId)
-        {
-            if (!reviews.TryGetValue(winnerId, out var winnerReview) || winnerReview is null)
-                return operations;
-            var winner = batch.Candidates.FirstOrDefault(candidate => candidate.Id == winnerId);
-            if (winner is null)
-                return operations;
-
-            var decisions = states.TryGetValue(winnerId, out var state)
-                ? state.Lines.ToDictionary(line => line.BlockId, StringComparer.Ordinal)
-                : new Dictionary<string, ContestCandidateLineDecision>(StringComparer.Ordinal);
-            foreach (var block in winnerReview.Blocks)
-            {
-                if (decisions.TryGetValue(block.Id, out var decision)
-                    && decision.Decision == ContestCandidateLineDecisionKind.Rejected)
-                {
-                    continue;
-                }
-
-                if (BuildContestOperation(block, winner.Id, winner.Order) is { } operation)
-                    operations.Add(operation);
-            }
-
-            return operations;
-        }
-
-        foreach (var candidate in batch.Candidates.OrderBy(candidate => candidate.Order))
-        {
-            if (!reviews.TryGetValue(candidate.Id, out var review) || review is null)
-                continue;
-            if (!states.TryGetValue(candidate.Id, out var state))
-                continue;
-
-            var blocksById = review.Blocks.ToDictionary(block => block.Id, StringComparer.Ordinal);
-            foreach (var decision in state.Lines)
-            {
-                if (decision.Decision is not (ContestCandidateLineDecisionKind.Kept or ContestCandidateLineDecisionKind.Edited))
-                    continue;
-                if (!blocksById.TryGetValue(decision.BlockId, out var block))
-                    continue;
-                if (BuildContestOperation(block, candidate.Id, candidate.Order) is { } operation)
-                    operations.Add(operation);
-            }
-        }
-
-        return operations;
+        return BuildReviewProjection(
+            chapter,
+            comparisonDiff: diff,
+            isReadOnly: true,
+            comparisonCurrentDocument: after);
     }
 
     private static ContestCandidateLineDecisionKind? ContestDecisionForBlock(
-        ContestBatch batch,
-        ContestCandidate candidate,
+        Guid? selectedCandidateId,
+        Guid candidateId,
         IReadOnlyDictionary<string, ContestCandidateLineDecision> decisionsByBlockId,
         ReviewBlock block)
     {
         if (decisionsByBlockId.TryGetValue(block.Id, out var decision))
             return decision.Decision;
-        return batch.WinningCandidateId == candidate.Id
+        return selectedCandidateId == candidateId
             ? ContestCandidateLineDecisionKind.Kept
             : null;
-    }
-
-    private static ContestReviewOperation? FindConflictingAcceptedOperation(
-        ReviewBlock block,
-        Guid candidateId,
-        IReadOnlyList<ContestReviewOperation> acceptedOperations)
-    {
-        var operation = BuildContestOperation(block, candidateId, candidateOrder: -1);
-        return operation is null
-            ? null
-            : acceptedOperations.FirstOrDefault(existing => ContestOperationsConflict(existing, operation));
-    }
-
-    private static ContestReviewOperation? BuildContestOperation(ReviewBlock block, Guid candidateId, int candidateOrder)
-    {
-        if (block.OldRow?.OldLineNumber is int oldLineNumber)
-            return new ContestReviewOperation(candidateId, block.Id, candidateOrder, oldLineNumber - 1, DeleteCount: 1);
-
-        if (block.NewRow is not null)
-        {
-            var rowIndex = RowIndex(block.Hunk.Rows, block.NewRow);
-            return new ContestReviewOperation(
-                candidateId,
-                block.Id,
-                candidateOrder,
-                FindContestInsertionIndex(block.Hunk.Rows, rowIndex),
-                DeleteCount: 0);
-        }
-
-        return null;
-    }
-
-    private static int FindContestInsertionIndex(IReadOnlyList<DiffRow> rows, int rowIndex)
-    {
-        for (var index = rowIndex - 1; index >= 0; index--)
-        {
-            if (rows[index].OldLineNumber is int previousLine)
-                return previousLine;
-        }
-
-        for (var index = rowIndex + 1; index < rows.Count; index++)
-        {
-            if (rows[index].OldLineNumber is int nextLine)
-                return Math.Max(0, nextLine - 1);
-        }
-
-        return 0;
-    }
-
-    private static bool ContestOperationsConflict(ContestReviewOperation left, ContestReviewOperation right)
-    {
-        if (left.CandidateId == right.CandidateId)
-            return false;
-
-        var leftInsertion = left.DeleteCount == 0;
-        var rightInsertion = right.DeleteCount == 0;
-        if (leftInsertion || rightInsertion)
-            return leftInsertion && rightInsertion && left.StartIndex == right.StartIndex;
-
-        var leftEnd = left.StartIndex + left.DeleteCount - 1;
-        var rightEnd = right.StartIndex + right.DeleteCount - 1;
-        return left.StartIndex <= rightEnd && right.StartIndex <= leftEnd;
     }
 
     private static ContestCandidateReviewState ReadContestReviewState(ContestCandidate candidate)
@@ -3502,38 +4146,6 @@ else
             }
         }
     };
-
-    private static IReadOnlyList<AiChange> CurrentChapterManuscriptChanges(IReadOnlyList<AiChangeBatch> batches, Guid chapterId) => batches
-        .SelectMany(batch => batch.Changes)
-        .Where(change => change.Status == AiChangeStatus.Pending && IsChapterManuscriptChangeFor(change, chapterId))
-        .OrderBy(change => change.Batch.CreatedAt)
-        .ThenBy(change => change.Order)
-        .ToList();
-
-    private static bool IsChapterManuscriptChangeFor(AiChange change, Guid chapterId)
-    {
-        if (!string.Equals(change.ResourceKind, "ChapterManuscript", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return ReadChapterManuscriptChange(change.BeforeJson)?.Id == chapterId
-            || ReadChapterManuscriptChange(AiChangeReviewDrafts.EffectiveAfterJson(change))?.Id == chapterId;
-    }
-
-    private static ChapterManuscriptChange? ReadChapterManuscriptChange(string json)
-    {
-        if (string.IsNullOrWhiteSpace(json) || json == "null") return null;
-
-        try
-        {
-            return JsonSerializer.Deserialize<ChapterManuscriptChange>(json, ChangePayloadJsonOptions);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
 
     private static int FindDeletionAnchorLine(IReadOnlyList<DiffRow> rows, int rowIndex, int lineCount)
     {
@@ -4276,7 +4888,7 @@ else
         }
     }
 
-    private async Task OnAiChangesAppliedAsync()
+    private async Task OnWorkspaceChangedAsync()
     {
         var locationIdentity = CurrentManuscriptLocationIdentity();
         var location = await CaptureCurrentLocationAsync();
@@ -4411,7 +5023,7 @@ else
 
     private async Task OnAiWorkspaceMutatedAsync(EditorWorkspaceMutated mutation)
     {
-        await OnAiChangesAppliedAsync();
+        await OnWorkspaceChangedAsync();
         if (mutation.Kind != EditorWorkspaceMutationKind.PageComposition || Project is null)
             return;
 
@@ -4529,6 +5141,29 @@ else
         }
     }
 
+    private async void HandleReviewStateChanged(Guid projectId)
+    {
+        if (_disposed || Project?.Id != projectId)
+            return;
+
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                if (_mode == EditorMode.Review || ContestReviewActive)
+                    await RefreshReviewChangesAsync();
+                if (!_disposed)
+                    StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
     private async Task RefreshContextSurfacesAsync()
     {
         _contextRefreshSignal++;
@@ -4562,6 +5197,7 @@ else
     {
         if (_disposed) return;
         _disposed = true;
+        HistoryEvents.ReviewStateChanged -= HandleReviewStateChanged;
 
         _navHandlerRegistration?.Dispose();
         _navHandlerRegistration = null;
@@ -4580,6 +5216,7 @@ else
     private enum SaveState { Idle, Saving, Saved, IndexFailed, SaveFailed }
 
     private enum EditorMode { Edit, Read, Pages, Review }
+    private enum ContestConfirmationAction { Discard, Cancel }
 
     private readonly record struct EditorDocumentState(
         Guid ChapterId,
@@ -4608,6 +5245,12 @@ else
         bool IsReadOnly = false,
         bool IsNoDifference = false);
 
+    private sealed record ReviewCompositionPreview(
+        ProjectVersionReviewComposition Composition,
+        CompositionCanvasPreviewResult? Before,
+        CompositionCanvasPreviewResult? After,
+        string? Error);
+
     private sealed record ContestReviewProjection(
         ContestBatch Batch,
         IReadOnlyList<ContestCandidateProjection> Candidates,
@@ -4622,7 +5265,7 @@ else
         string Summary,
         string? ErrorMessage,
         ReviewProjection? Review,
-        bool IsWinner,
+        bool IsSelected,
         bool CanKeepEverything);
 
     private sealed record ReviewLine(
@@ -4693,13 +5336,6 @@ else
         string? NewText,
         string? EditedText,
         DateTime UpdatedAtUtc);
-
-    private sealed record ContestReviewOperation(
-        Guid CandidateId,
-        string BlockId,
-        int CandidateOrder,
-        int StartIndex,
-        int DeleteCount);
 
     private enum ContestCandidateLineDecisionKind
     {

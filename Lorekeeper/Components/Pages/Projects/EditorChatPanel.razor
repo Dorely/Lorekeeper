@@ -1,12 +1,10 @@
 @using Lorekeeper.ChatTurns
-@using Lorekeeper.Components.Pages.Projects.Outline
 @using Lorekeeper.Chapters
 @using Lorekeeper.Context
 @using Lorekeeper.EditorChat
 @using Lorekeeper.Llm
 @using Lorekeeper.Models
 @using Lorekeeper.Manuscripts
-@using Lorekeeper.Outline
 @using Lorekeeper.Projects
 @using Lorekeeper.Tokens
 @implements IAsyncDisposable
@@ -36,12 +34,12 @@
              InputChanged="SetInput"
              Placeholder="Type a message..."
              Running="@_running"
-             ComposerDisabled="@(ChatDisabled || _running || _resetting || PendingReviewCount > 0)"
-             SendDisabled="@(ChatDisabled || _resetting || string.IsNullOrWhiteSpace(_input) || PendingReviewCount > 0 || !ContestCanSend)"
+             ComposerDisabled="@(ChatDisabled || _running || _resetting || ContestCandidateCount > 0)"
+             SendDisabled="@(ChatDisabled || _resetting || string.IsNullOrWhiteSpace(_input) || ContestCandidateCount > 0 || !ContestCanSend)"
              ModelOptions="@_modelOptions"
              SelectedProviderId="@PickerSelectedProviderId"
              UnavailableModelLabel="@(_chatSelection?.Message ?? "No available chat models")"
-             ModelPickerDisabled="@(_loading || _running || _resetting || ChatTurns.GetActiveTurn(ProjectId) is not null || PendingReviewCount > 0)"
+             ModelPickerDisabled="@(_loading || _running || _resetting || ChatTurns.GetActiveTurn(ProjectId) is not null || ContestCandidateCount > 0)"
              OnModelChanged="OnModelChangedAsync"
              OnSend="SendAsync"
              OnStop="CancelAsync"
@@ -51,7 +49,7 @@
              ResetComposerKey="@_resetComposerKey">
     <HeaderActions>
             <button type="button" class="btn btn-link btn-sm editor-chat-reset" title="Start over"
-                    disabled="@(_loading || _running || _resetting || PendingReviewCount > 0)" @onclick="ResetAsync">Reset</button>
+                    disabled="@(_loading || _running || _resetting || ContestCandidateCount > 0)" @onclick="ResetAsync">Reset</button>
     </HeaderActions>
     <ExtraControls>
         @if (ChatDisabled)
@@ -62,24 +60,11 @@
         }
         <div class="editor-chat-controls">
             <div class="editor-chat-controls-row">
-                <label class="editor-chat-approval" title="Queue AI changes to existing data for review before applying them">
-                    <input class="form-check-input" type="checkbox" checked="@_approvalEnabled"
-                           disabled="@(ChatDisabled || _running)" @onchange="OnApprovalChangedAsync" />
-                    <span>Review edits</span>
-                </label>
-
                 <label class="editor-chat-contest-toggle" title="Use read-only chat preparation, then compare up to three model candidates in Review mode">
                     <input class="form-check-input" type="checkbox" checked="@_contestEnabled"
                            disabled="@(ChatDisabled || _running)" @onchange="OnContestEnabledChangedAsync" />
                     <span>Contest Mode</span>
                 </label>
-
-                @if (PendingChangeCount > 0)
-                {
-                    <button type="button" class="btn btn-link btn-sm editor-chat-pending" title="Review pending AI edits" @onclick="OpenPendingChangesAsync">
-                        Pending changes @PendingChangeCount
-                    </button>
-                }
 
                 @if (ContestCandidateCount > 0)
                 {
@@ -99,12 +84,6 @@
         </div>
     </ExtraControls>
 </ChatSurface>
-
-<PendingAiChangesModal ProjectId="@ProjectId"
-                       Batches="@_pendingBatches"
-                       IsOpen="@_showPendingChanges"
-                       OnClose="ClosePendingChanges"
-                       OnChanged="HandlePendingChangesChangedAsync" />
 
 @code {
     private const string ConversationTokenUnitLabel = "chat tokens";
@@ -127,9 +106,8 @@
     [Parameter] public EventCallback OnAiTurnStarting { get; set; }
     [Parameter] public EventCallback OnAiTurnCompleted { get; set; }
     [Parameter] public EventCallback OnAiTurnIdle { get; set; }
-    [Parameter] public EventCallback OnAiChangesApplied { get; set; }
+    [Parameter] public EventCallback OnWorkspaceChanged { get; set; }
     [Parameter] public EventCallback<EditorWorkspaceMutated> OnWorkspaceMutated { get; set; }
-    [Parameter] public EventCallback OnActiveChapterManuscriptChangesReady { get; set; }
     [Parameter] public EventCallback OnContestResultsReady { get; set; }
 
     private int _forceScrollKey;
@@ -146,8 +124,6 @@
     private bool _running;
     private bool _loading = true;
     private bool _resetting;
-    private bool _approvalEnabled = true;
-    private bool _showPendingChanges;
     private string? _error;
     private CancellationTokenSource? _listenCts;
     private Guid? _listeningTurnId;
@@ -162,7 +138,6 @@
     private int _deferredWorkVersion;
     private CancellationTokenSource? _deferredWorkCts;
     private bool _disposed;
-    private List<AiChangeBatch> _pendingBatches = [];
     private List<ContestBatch> _contestBatches = [];
     private List<LlmProvider> _providers = [];
     private string? _pendingUserText;
@@ -182,13 +157,8 @@
     private string? ActiveModelId => _activeTurnModel?.ModelId ?? _chatAvailability?.Provider?.ModelId;
     private int? ActiveMaxInputTokens => _activeTurnModel?.MaxInputTokens ?? _chatAvailability?.Provider?.MaxInputTokens;
     private int ConversationTokenLimit => TokenLimits.Resolve(ActiveMaxInputTokens, ActiveModelId);
-    private int PendingChangeCount => _pendingBatches.Sum(batch => batch.Changes.Count(IsUnresolvedReviewChange));
     private int ContestCandidateCount => _contestBatches.Sum(batch => batch.Candidates.Count);
     private bool HasRunningContest => _contestBatches.Any(batch => batch.Status == ContestBatchStatus.Running);
-    private int PendingReviewCount => PendingChangeCount + ContestCandidateCount;
-
-    private static bool IsUnresolvedReviewChange(AiChange change) =>
-        change.Status is AiChangeStatus.Pending or AiChangeStatus.Conflict;
     private string ContestReviewTitle => HasRunningContest
         ? "Open the running Contest Mode review"
         : "Review Contest Mode candidates";
@@ -256,8 +226,6 @@
                     }
                     else
                     {
-                        if (work == DeferredEditorChatWork.ChatState)
-                            await LoadPendingChangesAsync(openIfPending: false, cancellationToken: cts.Token);
                         await RefreshSystemPromptAsync(cts.Token);
                         UpdateConversationTokenCount();
                     }
@@ -310,7 +278,6 @@
         _renderable = [];
         _live = null;
         _pendingUserText = null;
-        _pendingBatches = [];
         _contestBatches = [];
         _providers = [];
         _chatAvailability = null;
@@ -346,7 +313,6 @@
             _conversation = await Chat.GetOrCreateAsync(ProjectId, cancellationToken);
             _messages = (await Chat.LoadMessagesAsync(_conversation.Id, cancellationToken)).ToList();
             _messageImages = await ImageAttachments.LoadForSurfaceAsync(ProjectId, ChatTurnSurface.Editor, cancellationToken);
-            _approvalEnabled = await Chat.GetAiChangeApprovalEnabledAsync(ProjectId, cancellationToken);
             _selectedProviderId = _conversation.SelectedProviderId;
             await LoadChatProviderStateAsync(cancellationToken);
             _providers = await ProviderService.ListWorkingChatProvidersAsync(cancellationToken);
@@ -356,7 +322,6 @@
             _contestProviderSlot2Id = contestSettings.ProviderSlot2Id;
             _contestProviderSlot3Id = contestSettings.ProviderSlot3Id;
             await RefreshSystemPromptAsync(cancellationToken);
-            await LoadPendingChangesAsync(openIfPending: false, cancellationToken: cancellationToken);
             await LoadContestBatchesAsync(openIfAvailable: true, cancellationToken: cancellationToken);
             var activeTurn = ChatTurns.GetActiveTurn(ProjectId);
             RebuildRenderable(activeTurn?.StartedAtUtc);
@@ -408,19 +373,14 @@
             _error = "Choose at least one Contest Mode model before sending.";
             return;
         }
-        if (PendingChangeCount > 0)
-        {
-            await OpenPendingChangesAsync();
-            return;
-        }
         if (_contestBatches.Any(batch => batch.Status == ContestBatchStatus.Running))
         {
-            await OpenPendingChangesAsync();
+            await OpenContestReviewAsync();
             return;
         }
         if (ContestCandidateCount > 0)
         {
-            await OpenPendingChangesAsync();
+            await OpenContestReviewAsync();
             return;
         }
         if (_chatAvailability?.Provider is not { } provider)
@@ -669,8 +629,8 @@
             case EditorChatMutated:
                 await TryRunPostToolUiRefreshAsync("editor mutation refresh", async () =>
                 {
-                    if (OnAiChangesApplied.HasDelegate)
-                        await OnAiChangesApplied.InvokeAsync();
+                    if (OnWorkspaceChanged.HasDelegate)
+                        await OnWorkspaceChanged.InvokeAsync();
                     await RefreshSystemPromptAsync();
                     UpdateConversationTokenCount();
                     StateHasChanged();
@@ -682,18 +642,10 @@
                 {
                     if (OnWorkspaceMutated.HasDelegate)
                         await OnWorkspaceMutated.InvokeAsync(mutation);
-                    else if (OnAiChangesApplied.HasDelegate)
-                        await OnAiChangesApplied.InvokeAsync();
+                    else if (OnWorkspaceChanged.HasDelegate)
+                        await OnWorkspaceChanged.InvokeAsync();
                     await RefreshSystemPromptAsync();
                     UpdateConversationTokenCount();
-                    StateHasChanged();
-                });
-                break;
-
-            case EditorChatPendingAiChangeCreated:
-                await TryRunPostToolUiRefreshAsync("pending change refresh", async () =>
-                {
-                    await LoadPendingChangesAsync(openIfPending: false);
                     StateHasChanged();
                 });
                 break;
@@ -744,7 +696,6 @@
                 await TryRunPostToolUiRefreshAsync("assistant completion refresh", async () =>
                 {
                     await ReloadFromDbAsync();
-                    await LoadPendingChangesAsync(openIfPending: true, routeActiveChapterBodyToParent: true);
                     await LoadContestBatchesAsync(openIfAvailable: false);
                 });
                 RequestScroll();
@@ -757,7 +708,6 @@
                 await TryRunPostToolUiRefreshAsync("turn error refresh", async () =>
                 {
                     await ReloadFromDbAsync();
-                    await LoadPendingChangesAsync(openIfPending: false);
                     await LoadContestBatchesAsync(openIfAvailable: false);
                 });
                 RequestScroll();
@@ -806,42 +756,13 @@
         UpdateConversationTokenCount();
     }
 
-    private async Task LoadPendingChangesAsync(
-        bool openIfPending,
-        bool routeActiveChapterBodyToParent = false,
-        CancellationToken cancellationToken = default)
-    {
-        _pendingBatches = (await Chat.ListPendingChangesAsync(ProjectId, cancellationToken)).ToList();
-        if (openIfPending && PendingChangeCount > 0)
-        {
-            var routeActiveChapterToLineReview = ShouldRouteActiveChapterToLineReview();
-            var hasModalPendingChanges = HasModalPendingChanges(routeActiveChapterToLineReview);
-            if (routeActiveChapterBodyToParent && routeActiveChapterToLineReview && OnActiveChapterManuscriptChangesReady.HasDelegate)
-                await OnActiveChapterManuscriptChangesReady.InvokeAsync();
-
-            if (!routeActiveChapterBodyToParent || hasModalPendingChanges || !routeActiveChapterToLineReview)
-            {
-                _showPendingChanges = true;
-            }
-            else
-            {
-                _showPendingChanges = false;
-            }
-        }
-        if (PendingChangeCount == 0)
-            _showPendingChanges = false;
-    }
-
     private async Task LoadContestBatchesAsync(
         bool openIfAvailable,
         CancellationToken cancellationToken = default)
     {
         _contestBatches = (await Chat.ListCurrentContestBatchesAsync(ProjectId, cancellationToken)).ToList();
-        if (PendingChangeCount > 0)
-            return;
         if (openIfAvailable && ContestCandidateCount > 0)
         {
-            _showPendingChanges = false;
             if (OnContestResultsReady.HasDelegate)
                 await OnContestResultsReady.InvokeAsync();
         }
@@ -856,15 +777,6 @@
 
         candidate.RawResponse = rawResponse;
         candidate.UpdatedAt = DateTime.UtcNow;
-    }
-
-    private async Task OnApprovalChangedAsync(ChangeEventArgs args)
-    {
-        var enabled = args.Value is bool boolValue
-            ? boolValue
-            : bool.TryParse(args.Value?.ToString(), out var parsed) && parsed;
-        _approvalEnabled = enabled;
-        await Chat.SetAiChangeApprovalEnabledAsync(ProjectId, enabled);
     }
 
     private async Task OnContestEnabledChangedAsync(ChangeEventArgs args)
@@ -885,38 +797,12 @@
         await Chat.SetContestProviderAsync(ProjectId, slot, providerId);
     }
 
-    private async Task OpenPendingChangesAsync()
-    {
-        if (PendingChangeCount > 0)
-        {
-            _showPendingChanges = true;
-            return;
-        }
-
-        if (ContestCandidateCount > 0)
-            await OpenContestReviewAsync();
-    }
-
     private async Task OpenContestReviewAsync()
     {
         if (ContestCandidateCount == 0) return;
 
-        _showPendingChanges = false;
         if (OnContestResultsReady.HasDelegate)
             await OnContestResultsReady.InvokeAsync();
-    }
-
-    private void ClosePendingChanges() => _showPendingChanges = false;
-
-    private async Task HandlePendingChangesChangedAsync()
-    {
-        await LoadPendingChangesAsync(openIfPending: false);
-        await ReloadFromDbAsync();
-        if (OnAiChangesApplied.HasDelegate)
-            await OnAiChangesApplied.InvokeAsync();
-        await RefreshSystemPromptAsync();
-        UpdateConversationTokenCount();
-        StateHasChanged();
     }
 
     private IEnumerable<int> ContestProviderIds()
@@ -958,29 +844,6 @@
 
     private bool IsWorkingProvider(int providerId) =>
         _providers.Any(provider => provider.Id == providerId);
-
-    private bool ShouldRouteActiveChapterToLineReview()
-    {
-        if (CurrentChapterId is not { } chapterId) return false;
-
-        var activeChapterChanges = _pendingBatches
-            .SelectMany(batch => batch.Changes)
-            .Where(change => change.Status == AiChangeStatus.Pending && AiChangeReviewDiffBuilder.IsChapterManuscriptChangeFor(change, chapterId))
-            .ToList();
-        return activeChapterChanges.Count > 0
-            && activeChapterChanges.All(AiChangeReviewDiffBuilder.CanUseChapterLineReview);
-    }
-
-    private bool HasModalPendingChanges(bool routeActiveChapterToLineReview)
-    {
-        if (CurrentChapterId is not { } chapterId) return PendingChangeCount > 0;
-
-        return _pendingBatches
-            .SelectMany(batch => batch.Changes)
-            .Any(change => IsUnresolvedReviewChange(change)
-                && (!routeActiveChapterToLineReview
-                    || !AiChangeReviewDiffBuilder.IsChapterManuscriptChangeFor(change, chapterId)));
-    }
 
     private void RebuildRenderable(DateTime? excludeMessagesCreatedAtOrAfter = null)
     {
@@ -1054,7 +917,7 @@
 
     private async Task OnModelChangedAsync(int? providerId)
     {
-        if (_loading || _running || _resetting || PendingReviewCount > 0) return;
+        if (_loading || _running || _resetting || ContestCandidateCount > 0) return;
         if (ChatTurns.GetActiveTurn(ProjectId) is not null)
         {
             _error = "Editor Chat is still working in another window. Stop or wait for that turn before changing its model.";

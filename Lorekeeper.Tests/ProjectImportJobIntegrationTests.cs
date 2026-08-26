@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
+using Lorekeeper.EditorChat;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Fonts;
 using Lorekeeper.ImportExport;
@@ -389,7 +390,7 @@ public sealed class ProjectImportJobIntegrationTests
             DefaultProxy<IContextIndexingService>(),
             DefaultProxy<IEntityVisualExampleService>(),
             new BookBriefService(database, DefaultProxy<IContextIndexingService>()),
-            new ManuscriptStyleService(database),
+            new ManuscriptStyleService(database, DefaultProxy<IEditorContestMutationGuard>()),
             DefaultProxy<IIngestVectorIndexingService>(),
             indexWork,
             new ProjectImportJobNotifier(),
@@ -563,7 +564,7 @@ public sealed class ProjectImportJobIntegrationTests
             contextIndexing,
             DefaultProxy<IEntityVisualExampleService>(),
             new BookBriefService(database, contextIndexing),
-            new ManuscriptStyleService(database),
+            new ManuscriptStyleService(database, DefaultProxy<IEditorContestMutationGuard>()),
             DefaultProxy<IIngestVectorIndexingService>(),
             indexWork,
             new ProjectImportJobNotifier(),
@@ -597,7 +598,7 @@ public sealed class ProjectImportJobIntegrationTests
             importedFigure.ImageId);
         Assert.Equal("A regional map", importedFigure.AltText);
         Assert.Equal("Eastern road", ManuscriptCodec.Text(importedFigure));
-        var styles = await new ManuscriptStyleService(Database(db)).ListAsync(project.Id);
+        var styles = await new ManuscriptStyleService(Database(db), DefaultProxy<IEditorContestMutationGuard>()).ListAsync(project.Id);
         Assert.Equal(2, styles.Count);
         ManuscriptStyleService.ValidateDocumentReferences(imported.Manuscript, styles);
         Assert.Contains(
@@ -784,7 +785,7 @@ public sealed class ProjectImportJobIntegrationTests
             DefaultProxy<IContextIndexingService>(),
             DefaultProxy<IEntityVisualExampleService>(),
             new BookBriefService(database, DefaultProxy<IContextIndexingService>()),
-            new ManuscriptStyleService(database),
+            new ManuscriptStyleService(database, DefaultProxy<IEditorContestMutationGuard>()),
             DefaultProxy<IIngestVectorIndexingService>(),
             new VectorIndexWorkCoordinator(NullLogger<VectorIndexWorkCoordinator>.Instance),
             new ProjectImportJobNotifier(),

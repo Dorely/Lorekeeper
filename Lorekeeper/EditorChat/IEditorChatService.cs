@@ -1,5 +1,4 @@
 using Lorekeeper.Models;
-using Lorekeeper.Outline;
 using Lorekeeper.Images;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Llm;
@@ -12,16 +11,20 @@ public interface IEditorChatService
     Task<IReadOnlyList<EditorMessage>> LoadMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default);
     Task<ChatProviderAvailability> GetChatProviderAvailabilityAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task SetSelectedProviderAsync(Guid projectId, int? providerId, CancellationToken cancellationToken = default);
-    Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default);
-    Task SetAiChangeApprovalEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default);
     Task<EditorContestSettings> GetContestSettingsAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task SetContestModeEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default);
     Task SetContestProviderAsync(Guid projectId, int slot, int? providerId, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<AiChangeBatch>> ListPendingChangesAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ContestBatch>> ListCurrentContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<EditorContestReviewSnapshot?> GetContestReviewAsync(Guid projectId, Guid batchId, CancellationToken cancellationToken = default);
+    Task<EditorContestLockState> GetEditorContestLockStateAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task SelectContestCandidateAsync(Guid projectId, Guid batchId, Guid candidateId, CancellationToken cancellationToken = default);
+    Task ResetContestCandidateAsync(Guid projectId, Guid candidateId, CancellationToken cancellationToken = default);
     Task ResolveContestCandidateLineAsync(Guid projectId, Guid chapterId, ContestCandidateReviewLineResolution request, CancellationToken cancellationToken = default);
-    Task KeepContestCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default);
-    Task FinishContestBatchAsync(Guid batchId, CancellationToken cancellationToken = default);
+    Task ResolveContestAsync(Guid projectId, Guid batchId, CancellationToken cancellationToken = default);
+    Task DiscardContestAsync(Guid projectId, Guid batchId, CancellationToken cancellationToken = default);
+    Task CancelContestAsync(Guid projectId, Guid batchId, CancellationToken cancellationToken = default);
+    Task KeepContestCandidateAsync(Guid projectId, Guid candidateId, CancellationToken cancellationToken = default);
+    Task FinishContestBatchAsync(Guid projectId, Guid batchId, CancellationToken cancellationToken = default);
     IAsyncEnumerable<EditorChatTurnUpdate> SendAsync(Guid projectId, Guid? currentChapterId, Guid? currentCompositionId, EditorContentTarget contentTarget, string userText, IReadOnlyList<Guid> imageIds, int providerId, CancellationToken cancellationToken = default);
     Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default);
 }
@@ -37,8 +40,6 @@ public sealed class EditorChatContext(
     Action onMutated,
     bool reviewEdits,
     bool autoPinReadEntities,
-    OutlineToolStagingContext? outlineStaging,
-    EditorChatChangeStagingContext? editorStaging,
     CancellationToken turnCancellationToken)
 {
     private readonly object _imageGenerationLock = new();
@@ -59,8 +60,6 @@ public sealed class EditorChatContext(
     public Action OnMutated { get; } = onMutated;
     public bool ReviewEdits { get; } = reviewEdits;
     public bool AutoPinReadEntities { get; } = autoPinReadEntities;
-    public OutlineToolStagingContext? OutlineStaging { get; } = outlineStaging;
-    public EditorChatChangeStagingContext? EditorStaging { get; } = editorStaging;
     public CancellationToken TurnCancellationToken { get; } = turnCancellationToken;
     public Guid? CurrentAssistantMessageId { get; private set; }
     public string CurrentToolCallId { get; private set; } = string.Empty;
@@ -90,8 +89,6 @@ public sealed class EditorChatContext(
         CurrentArgumentsJson = string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson;
         lock (_imageGenerationLock)
             _currentImageGenerationJobId = null;
-        OutlineStaging?.BeginToolCall(assistantMessageId, toolCallId, toolName, argumentsJson);
-        EditorStaging?.BeginToolCall(assistantMessageId, toolCallId, toolName, argumentsJson);
     }
 
     public void TrackImageGenerationJob(Guid jobId)

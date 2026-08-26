@@ -52,8 +52,6 @@ public class AppDbContext(
     public DbSet<ProjectImageMessageVisual> ProjectImageMessageVisuals => Set<ProjectImageMessageVisual>();
     public DbSet<ChatMessageImageAttachment> ChatMessageImageAttachments => Set<ChatMessageImageAttachment>();
     public DbSet<ProjectImageChatAttachment> ProjectImageChatAttachments => Set<ProjectImageChatAttachment>();
-    public DbSet<AiChangeBatch> AiChangeBatches => Set<AiChangeBatch>();
-    public DbSet<AiChange> AiChanges => Set<AiChange>();
     public DbSet<ContestBatch> ContestBatches => Set<ContestBatch>();
     public DbSet<ContestCandidate> ContestCandidates => Set<ContestCandidate>();
     public DbSet<EditorRevisionJob> EditorRevisionJobs => Set<EditorRevisionJob>();
@@ -105,7 +103,6 @@ public class AppDbContext(
     public DbSet<PageComposition> PageCompositions => Set<PageComposition>();
     public DbSet<PageCompositionVariant> PageCompositionVariants => Set<PageCompositionVariant>();
     public DbSet<CompositionMutationStage> CompositionMutationStages => Set<CompositionMutationStage>();
-    public DbSet<AssistantReviewBaseline> AssistantReviewBaselines => Set<AssistantReviewBaseline>();
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
         optionsBuilder.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
@@ -495,25 +492,6 @@ public class AppDbContext(
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<AssistantReviewBaseline>(entity =>
-        {
-            entity.HasIndex(e => new { e.ProjectId, e.ChapterId, e.TargetKey }).IsUnique();
-            entity.HasIndex(e => new { e.ProjectId, e.ChapterId, e.CapturedAt });
-            entity.Property(e => e.TargetKind).HasConversion<string>();
-            entity.HasOne(e => e.Project)
-                .WithMany()
-                .HasForeignKey(e => e.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne(e => e.Chapter)
-                .WithMany()
-                .HasForeignKey(e => e.ChapterId)
-                .OnDelete(DeleteBehavior.Cascade);
-            entity.HasOne(e => e.Edition)
-                .WithMany()
-                .HasForeignKey(e => e.EditionId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
         modelBuilder.Entity<EditorMessageVisual>(entity =>
         {
             entity.HasIndex(e => new { e.MessageId, e.SortOrder });
@@ -678,33 +656,13 @@ public class AppDbContext(
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<AiChangeBatch>(entity =>
-        {
-            entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
-            entity.Property(e => e.ConversationKind).HasConversion<string>();
-            entity.Property(e => e.Status).HasConversion<string>();
-
-            entity.HasOne(e => e.Project)
-                .WithMany(p => p.AiChangeBatches)
-                .HasForeignKey(e => e.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<AiChange>(entity =>
-        {
-            entity.HasIndex(e => new { e.BatchId, e.Order });
-            entity.HasIndex(e => e.Status);
-            entity.Property(e => e.Status).HasConversion<string>();
-
-            entity.HasOne(e => e.Batch)
-                .WithMany(b => b.Changes)
-                .HasForeignKey(e => e.BatchId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
         modelBuilder.Entity<ContestBatch>(entity =>
         {
             entity.HasIndex(e => new { e.ProjectId, e.Status, e.CreatedAt });
+            entity.HasIndex(e => e.ProjectId)
+                .HasDatabaseName("IX_ContestBatches_ProjectId_Unresolved")
+                .IsUnique()
+                .HasFilter("\"Status\" IN ('Running', 'Completed', 'Failed')");
             entity.HasIndex(e => new { e.ConversationId, e.CreatedAt });
             entity.Property(e => e.Status).HasConversion<string>();
 

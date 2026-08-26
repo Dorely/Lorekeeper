@@ -3,7 +3,6 @@ namespace Lorekeeper.Persistence.Repositories;
 public sealed class DatabaseRepositories(AppDatabaseReadOperation operation)
 {
     public IActRepository Acts { get; } = new ActRepository(operation);
-    public IAiChangeRepository AiChanges { get; } = new AiChangeRepository(operation);
     public IChapterRepository Chapters { get; } = new ChapterRepository(operation);
     public IContestRepository Contests { get; } = new ContestRepository(operation);
     public IEditorContextPreferenceRepository EditorContextPreferences { get; } = new EditorContextPreferenceRepository(operation);

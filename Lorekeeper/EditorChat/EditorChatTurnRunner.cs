@@ -48,9 +48,12 @@ public sealed class EditorChatTurnRunner(
         await using var scope = scopeFactory.CreateAsyncScope();
         var chat = scope.ServiceProvider.GetRequiredService<IEditorChatService>();
         var checkpoints = scope.ServiceProvider.GetRequiredService<IAssistantVersionCheckpointService>();
+        var mutated = false;
         await foreach (var update in chat.SendAsync(projectId, currentChapterId, currentCompositionId, contentTarget, userText, imageIds, providerId, cancellationToken))
         {
-            if (update is EditorChatAssistantMessageCompleted)
+            if (update is EditorChatMutated or EditorWorkspaceMutated)
+                mutated = true;
+            if (update is EditorChatAssistantMessageCompleted && mutated)
                 await checkpoints.TryCheckpointAsync(projectId, ChatTurnSurface.Editor, cancellationToken);
             yield return update;
         }

@@ -27,8 +27,7 @@ public sealed record EditorRevisionAgentRunResult(
     Guid JobId,
     EditorRevisionJobStatus Status,
     IReadOnlyList<EditorRevisionSessionResult> Sessions,
-    string? ErrorMessage,
-    IReadOnlyList<Guid> PendingChangeIds);
+    string? ErrorMessage);
 
 public sealed record EditorRevisionJobProgress(
     Guid JobId,

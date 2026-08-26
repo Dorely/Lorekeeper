@@ -17,7 +17,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.Research;
 
 public sealed class ResearchService(
-IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ISearchProviderService searchProviders, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IContextBuilder contextBuilder, OutlineCollaborationTools outlineTools, IAiChangeApprovalService changeApproval, IWebIngestCandidateService webCandidates, IEntityService entities, ResearchTools tools, IEntityVisualContextService entityVisualContext, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<ResearchService> logger) : IResearchService
+ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachments, ISearchProviderService searchProviders, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IContextBuilder contextBuilder, IWebIngestCandidateService webCandidates, IEntityService entities, ResearchTools tools, IEntityVisualContextService entityVisualContext, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<ResearchService> logger) : IResearchService
 {
     public const string ResearchWorkflowInstructions = """
         You are Lorekeeper's Research Mode: a factual research agent for a long-form writing project.
@@ -136,33 +136,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         return await BuildSystemPromptAsync(project, cancellationToken);
     }
 
-    public async Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default)
-    {
-        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var projects = databaseOperation.Repositories.Projects;
-        var project = await projects.GetByIdAsync(projectId, cancellationToken)
-            ?? throw new InvalidOperationException($"Project {projectId} not found.");
-        return project.AiChangeApprovalEnabled;
-    }
-
-    public async Task SetAiChangeApprovalEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default)
-    {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        databaseOperation.ShareWithNestedOperations();
-        var projects = databaseOperation.Repositories.Projects;
-        var project = await projects.GetByIdAsync(projectId, cancellationToken)
-            ?? throw new InvalidOperationException($"Project {projectId} not found.");
-        if (project.AiChangeApprovalEnabled == enabled) return;
-
-        project.AiChangeApprovalEnabled = enabled;
-        project.UpdatedAt = DateTime.UtcNow;
-        projects.Update(project);
-        await databaseOperation.SaveChangesAsync(cancellationToken);
-    }
-
-    public Task<IReadOnlyList<AiChangeBatch>> ListPendingChangesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        changeApproval.ListPendingBatchesAsync(projectId, cancellationToken);
-
     public async Task<ResearchActivity> GetActivityAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
@@ -176,21 +149,11 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         foreach (var message in history.Where(message => message.Role == ResearchMessageRole.Tool))
             AddToolEntityTouches(entityTouches, message, toolCalls);
 
-        var pendingBatches = (await changeApproval.ListPendingBatchesAsync(projectId, cancellationToken))
-            .Where(batch => batch.ConversationKind == AiChangeConversationKind.Research
-                && batch.ConversationId == conversation.Id)
-            .ToList();
-        foreach (var batch in pendingBatches)
-        {
-            foreach (var change in batch.Changes.Where(change => change.Status == AiChangeStatus.Pending))
-                AddPendingEntityTouches(entityTouches, batch, change);
-        }
-
         var entityItems = new List<ResearchEntityActivityItem>();
         foreach (var touch in entityTouches.Values.OrderByDescending(touch => touch.LastTouchedAt))
         {
             var entity = await entities.GetAsync(projectId, touch.EntityId, cancellationToken);
-            if (entity is null && !touch.HasPendingChange)
+            if (entity is null)
                 continue;
 
             var properties = entity?.Properties
@@ -204,11 +167,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 name,
                 touch.State,
                 Exists: entity is not null,
-                touch.HasPendingChange,
-                touch.PendingBatchId,
-                touch.PendingChangeId,
-                touch.PendingSummary,
-                FirstNonEmpty(touch.Preview, BuildPropertyPreview(properties), touch.PendingSummary, string.Empty),
+                FirstNonEmpty(touch.Preview, BuildPropertyPreview(properties), string.Empty),
                 touch.LastTouchedAt,
                 new Dictionary<string, string?>(properties, StringComparer.OrdinalIgnoreCase)));
         }
@@ -333,7 +292,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
 
         IChatClient chat = null!;
         IList<AITool> aiTools = null!;
-        OutlineToolStagingContext? staging = null;
         string systemPrompt = string.Empty;
         ContextAssembly? initialAssembly = null;
         ResearchToolContext? toolContext = null;
@@ -351,13 +309,9 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                         + "\n\n" + AssistantWorkflowInstructions.EntityVisualExamples),
                 cancellationToken);
             systemPrompt = initialAssembly.Assemble();
-            if (project.AiChangeApprovalEnabled)
-                staging = outlineTools.CreateStagingContext(
-                    projectId,
-                    conversation.Id,
-                    AiChangeConversationKind.Research,
-                    OnToolMutated);
-            toolContext = new ResearchToolContext(projectId, conversation.Id, OnToolMutated, staging, visionReady);
+            // Research tools always mutate the live project. Review derives pending work from
+            // the version-history baseline rather than a per-turn staging overlay.
+            toolContext = new ResearchToolContext(projectId, conversation.Id, OnToolMutated, visionReady: visionReady);
             aiTools = await tools.BuildAsync(toolContext, cancellationToken);
         }
         catch (Exception ex)
@@ -490,7 +444,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 }
 
                 var sw = Stopwatch.StartNew();
-                staging?.BeginToolCall(activeAssistant.Id, pendingCall.CallId, pendingCall.Name, pendingCall.ArgumentsJson);
                 var toolOutcome = await turnEngine.InvokeToolAsync(aiTools, pendingCall, cancellationToken);
                 sw.Stop();
 
@@ -517,18 +470,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                 await turnEngine.AddMessageAsync(repositories => repositories.ResearchConversations, toolMessage, CancellationToken.None);
 
                 resultContents.Add(new FunctionResultContent(pendingCall.CallId, toolResult ?? string.Empty));
-                if (staging is not null)
-                {
-                    foreach (var pendingChange in staging.DrainNewChanges())
-                    {
-                        yield return new ResearchPendingAiChangeCreated(
-                            pendingChange.BatchId,
-                            pendingChange.Id,
-                            pendingChange.ToolCallId,
-                            pendingChange.ToolName,
-                            pendingChange.Summary);
-                    }
-                }
                 yield return new ResearchToolCallCompleted(
                     pendingCall.CallId,
                     pendingCall.Name,
@@ -685,74 +626,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         }
     }
 
-    private static void AddPendingEntityTouches(
-        IDictionary<Guid, EntityTouch> touches,
-        AiChangeBatch batch,
-        AiChange change)
-    {
-        if (TryReadEntityChange(change.AfterJson, out var entityChange))
-        {
-            var state = string.Equals(change.BeforeJson, "null", StringComparison.OrdinalIgnoreCase)
-                ? ResearchEntityActivityState.PendingCreated
-                : ResearchEntityActivityState.PendingUpdated;
-            UpsertEntityTouch(
-                touches,
-                entityChange.Id,
-                entityChange.Type,
-                entityChange.Name,
-                state,
-                change.Summary,
-                change.CreatedAt,
-                pendingBatchId: batch.Id,
-                pendingChangeId: change.Id,
-                pendingSummary: change.Summary,
-                properties: entityChange.Properties);
-            return;
-        }
-
-        if (TryReadEntityLinkChange(change.AfterJson, out var linkChange))
-        {
-            UpsertEntityTouch(
-                touches,
-                linkChange.FromId,
-                string.Empty,
-                string.Empty,
-                ResearchEntityActivityState.PendingLinked,
-                change.Summary,
-                change.CreatedAt,
-                pendingBatchId: batch.Id,
-                pendingChangeId: change.Id,
-                pendingSummary: change.Summary);
-            UpsertEntityTouch(
-                touches,
-                linkChange.ToId,
-                string.Empty,
-                string.Empty,
-                ResearchEntityActivityState.PendingLinked,
-                change.Summary,
-                change.CreatedAt,
-                pendingBatchId: batch.Id,
-                pendingChangeId: change.Id,
-                pendingSummary: change.Summary);
-            return;
-        }
-
-        if (TryParseEntityResource(change.ResourceId, out var entityId))
-        {
-            UpsertEntityTouch(
-                touches,
-                entityId,
-                string.Empty,
-                string.Empty,
-                ResearchEntityActivityState.PendingUpdated,
-                change.Summary,
-                change.CreatedAt,
-                pendingBatchId: batch.Id,
-                pendingChangeId: change.Id,
-                pendingSummary: change.Summary);
-        }
-    }
-
     private static bool IsEntityActivityTool(string toolName) =>
         toolName is "read_entity"
             or "list_entity_links"
@@ -845,9 +718,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         ResearchEntityActivityState state,
         string preview,
         DateTime touchedAt,
-        Guid? pendingBatchId = null,
-        Guid? pendingChangeId = null,
-        string? pendingSummary = null,
         IReadOnlyDictionary<string, string?>? properties = null)
     {
         if (!touches.TryGetValue(entityId, out var touch))
@@ -862,14 +732,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         if (StatePriority(state) >= StatePriority(touch.State)) touch.State = state;
         if (touchedAt > touch.LastTouchedAt) touch.LastTouchedAt = touchedAt;
 
-        if (pendingChangeId is not null)
-        {
-            touch.HasPendingChange = true;
-            touch.PendingBatchId = pendingBatchId;
-            touch.PendingChangeId = pendingChangeId;
-            touch.PendingSummary = pendingSummary;
-        }
-
         if (properties is not null)
         {
             touch.Properties ??= new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
@@ -880,9 +742,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
 
     private static int StatePriority(ResearchEntityActivityState state) => state switch
     {
-        ResearchEntityActivityState.PendingCreated => 70,
-        ResearchEntityActivityState.PendingUpdated => 65,
-        ResearchEntityActivityState.PendingLinked => 60,
         ResearchEntityActivityState.Created => 50,
         ResearchEntityActivityState.Updated => 40,
         ResearchEntityActivityState.Linked => 30,
@@ -964,48 +823,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         }
 
         return result;
-    }
-
-    private static bool TryReadEntityChange(string json, out OutlineEntityChange value)
-    {
-        value = default!;
-        if (string.IsNullOrWhiteSpace(json) || string.Equals(json.Trim(), "null", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        try
-        {
-            value = JsonSerializer.Deserialize<OutlineEntityChange>(json) ?? default!;
-            return value is not null && value.Id != Guid.Empty;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static bool TryReadEntityLinkChange(string json, out OutlineEntityLinkChange value)
-    {
-        value = default!;
-        if (string.IsNullOrWhiteSpace(json) || string.Equals(json.Trim(), "null", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        try
-        {
-            value = JsonSerializer.Deserialize<OutlineEntityLinkChange>(json) ?? default!;
-            return value is not null && value.FromId != Guid.Empty && value.ToId != Guid.Empty;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static bool TryParseEntityResource(string resourceId, out Guid entityId)
-    {
-        entityId = Guid.Empty;
-        const string prefix = "Entity:";
-        return resourceId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            && Guid.TryParse(resourceId[prefix.Length..], out entityId);
     }
 
     private static string BuildPropertyPreview(IReadOnlyDictionary<string, string?> properties)
@@ -1100,10 +917,6 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         public string Type { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
         public ResearchEntityActivityState State { get; set; } = ResearchEntityActivityState.Read;
-        public bool HasPendingChange { get; set; }
-        public Guid? PendingBatchId { get; set; }
-        public Guid? PendingChangeId { get; set; }
-        public string? PendingSummary { get; set; }
         public string Preview { get; set; } = string.Empty;
         public DateTime LastTouchedAt { get; set; } = DateTime.MinValue;
         public Dictionary<string, string?>? Properties { get; set; }

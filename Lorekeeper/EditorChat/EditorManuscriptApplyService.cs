@@ -26,10 +26,7 @@ public sealed class EditorManuscriptApplyService(
         if (snapshot is null)
             return $"Error: manuscript {chapterId:N} was not found.";
 
-        var source = context.ReviewEdits
-            && context.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
-                ? staged
-                : snapshot.Document;
+        var source = snapshot.Document;
         if (source.Revision != expectedRevision)
             return $"Error: manuscript revision conflict; expected {expectedRevision}, current revision is {source.Revision}.";
 
@@ -56,47 +53,15 @@ public sealed class EditorManuscriptApplyService(
                 : [];
             var diagnostics = BuildDiagnostics(source, converted);
             var sourceHash = ManuscriptCodec.HashPlainText(ManuscriptCodec.ProjectPlainText(document));
-            var styleCatalog = context.ReviewEdits && context.EditorStaging is not null
-                ? await context.EditorStaging.ListManuscriptStyleDraftsAsync(
-                    manuscriptStyles,
-                    context.TurnCancellationToken)
-                : null;
+            var styleCatalog = await manuscriptStyles.ListAsync(
+                context.ProjectId,
+                context.TurnCancellationToken);
             await manuscripts.ValidateDocumentReferencesAsync(
                 context.ContentTarget,
                 chapterId,
                 document,
                 styleCatalog,
                 context.TurnCancellationToken);
-
-            if (context.ReviewEdits && context.EditorStaging is not null)
-            {
-                var stagedResult = JsonSerializer.Serialize(new
-                {
-                    ok = true,
-                    staged = true,
-                    targetId = chapterId,
-                    expectedRevision,
-                    revision = document.Revision,
-                    sourceHash,
-                    changedIds = changedBlockIds,
-                    changedBlockCount = changedBlockIds.Count,
-                    beforeBlockCount = source.Content.Count,
-                    afterBlockCount = document.Content.Count,
-                    operationCounts,
-                    diagnostics,
-                    requiresReadback,
-                    readbackRanges,
-                    summary = $"Applied manuscript edit to {changedBlockIds.Count} block(s); it is ready for review.",
-                }, ManuscriptCodec.JsonOptions);
-                await context.EditorStaging.StageChapterManuscriptEditAsync(
-                    chapter,
-                    source,
-                    document,
-                    $"Edit {changedBlockIds.Count} manuscript block(s)",
-                    stagedResult,
-                    context.TurnCancellationToken);
-                return stagedResult;
-            }
 
             var result = await manuscripts.ReplaceDocumentAsync(
                 context.ContentTarget,

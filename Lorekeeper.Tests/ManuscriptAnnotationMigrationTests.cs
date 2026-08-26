@@ -98,7 +98,11 @@ public sealed class ManuscriptAnnotationMigrationTests
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 await db.GetService<IMigrator>().MigrateAsync(PreviousMigration);
-                db.Projects.Add(new Project { Id = projectId, Name = "Protected project", Slug = $"protected-{projectId:N}" });
+                await LegacyProjectSeed.InsertAsync(
+                    db,
+                    projectId,
+                    "Protected project",
+                    $"protected-{projectId:N}");
                 db.Chapters.Add(new Chapter
                 {
                     Id = chapterId,
@@ -157,7 +161,7 @@ public sealed class ManuscriptAnnotationMigrationTests
     }
 
     [Fact]
-    public async Task AuthoringHistoryCleanupBackfillsDurableAndLegacyReviewBaselines()
+    public async Task AuthoringHistoryCleanupDropsRetiredReviewBaselines()
     {
         var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -244,7 +248,11 @@ public sealed class ManuscriptAnnotationMigrationTests
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 await db.GetService<IMigrator>().MigrateAsync(AuthoringHistoryPreviousMigration);
-                db.Projects.Add(new Project { Id = projectId, Name = "Review baseline fixture", Slug = $"review-baseline-{projectId:N}" });
+                await LegacyProjectSeed.InsertAsync(
+                    db,
+                    projectId,
+                    "Review baseline fixture",
+                    $"review-baseline-{projectId:N}");
                 db.Chapters.Add(new Chapter
                 {
                     Id = chapterId,
@@ -480,21 +488,8 @@ public sealed class ManuscriptAnnotationMigrationTests
                 var chapter = await db.Chapters.AsNoTracking().SingleAsync(item => item.Id == chapterId);
                 Assert.Equal(4, chapter.ManuscriptRevision);
                 Assert.Equal(manuscript, chapter.ManuscriptJson);
-                var baselines = await db.AssistantReviewBaselines.AsNoTracking().ToListAsync();
-                Assert.Equal(3, baselines.Count);
-                var durable = baselines.Single(item => item.ChapterId == chapterId && item.TargetKey == "core");
-                Assert.Equal(legacyBeforeManuscript, durable.BeforeManuscriptJson);
-                Assert.Equal(legacyBeforeHash, durable.BeforeHash);
-                Assert.Equal(durableTurnId, durable.AssistantTurnId);
-                Assert.Equal("Newer committed review", durable.ActionLabel);
-                var durableOnly = baselines.Single(item => item.ChapterId == durableOnlyChapterId && item.TargetKey == "core");
-                Assert.Equal(durableOnlyManuscript, durableOnly.BeforeManuscriptJson);
-                Assert.Equal(durableOnlyHash, durableOnly.BeforeHash);
-                Assert.Equal(durableOnlyTurnId, durableOnly.AssistantTurnId);
-                Assert.Equal("Durable columns", durableOnly.ActionLabel);
-                var legacy = baselines.Single(item => item.TargetKey == $"edition:{editionId:N}");
-                Assert.Equal(legacyBeforeManuscript, legacy.BeforeManuscriptJson);
-                Assert.Equal(legacyBeforeHash, legacy.BeforeHash);
+                Assert.Null(await db.Database.SqlQueryRaw<string>(
+                    "SELECT name AS Value FROM sqlite_master WHERE type = 'table' AND name = 'AssistantReviewBaselines'").FirstOrDefaultAsync());
                 Assert.Null(await db.Database.SqlQueryRaw<string>(
                     "SELECT name AS Value FROM sqlite_master WHERE type = 'table' AND name LIKE 'AuthoringHistory%'").FirstOrDefaultAsync());
                 Assert.Null(await db.Database.SqlQueryRaw<string>(

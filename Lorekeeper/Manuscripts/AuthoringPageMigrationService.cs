@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Data.Common;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -69,9 +70,6 @@ public sealed class AuthoringPageMigrationService(
                 .ToListAsync(cancellationToken);
             var covers = await db.PublicationCoverDesigns.OrderBy(item => item.Id).ToListAsync(cancellationToken);
             var placements = await db.PublicationImagePlacements.OrderBy(item => item.Id).ToListAsync(cancellationToken);
-            var pendingDesignedPages = await db.AiChanges
-                .Where(item => item.ToolName == "insert_outline_designed_page" && item.Status == AiChangeStatus.Pending)
-                .ToListAsync(cancellationToken);
             var sourceText = chapters.Select(item => SemanticText(item.ManuscriptJson)).ToArray();
             var sourceCompositionText = compositions.Select(item => SemanticText(item.SemanticManuscriptJson)).ToArray();
             var artifactState = await ArtifactStateAsync(db, cancellationToken);
@@ -102,8 +100,7 @@ public sealed class AuthoringPageMigrationService(
                 cover.CompositionSceneJson = UpgradeScene(cover.CompositionSceneJson, removeGuides: true);
             foreach (var placement in placements)
                 placement.PresentationJson = UpgradeJson(placement.PresentationJson, removeGuides: false);
-            foreach (var change in pendingDesignedPages)
-                change.ArgumentsJson = UpgradeDesignedPageArguments(change.ArgumentsJson);
+            await UpgradeLegacyPendingDesignedPageArgumentsAsync(db, cancellationToken);
 
             await db.PublicationArtifacts.ExecuteUpdateAsync(
                 setters => setters.SetProperty(item => item.IsLegacy, true), cancellationToken);
@@ -298,6 +295,56 @@ public sealed class AuthoringPageMigrationService(
         node.Remove("EditionId");
         Rewrite(node, removeGuides: false);
         return node.ToJsonString(ManuscriptCodec.JsonOptions);
+    }
+
+    private static async Task UpgradeLegacyPendingDesignedPageArgumentsAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var connection = db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+            await connection.OpenAsync(cancellationToken);
+        await using (var exists = connection.CreateCommand())
+        {
+            exists.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            exists.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'AiChanges' LIMIT 1;";
+            if (await exists.ExecuteScalarAsync(cancellationToken) is null)
+                return;
+        }
+
+        var rows = new List<(string Id, string Arguments)>();
+        await using (var select = connection.CreateCommand())
+        {
+            select.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            select.CommandText = """
+                SELECT Id, ArgumentsJson
+                FROM AiChanges
+                WHERE lower(Status) = 'pending'
+                  AND ToolName = 'insert_outline_designed_page';
+                """;
+            await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                rows.Add((reader.GetValue(0).ToString()!, reader.IsDBNull(1) ? string.Empty : reader.GetString(1)));
+        }
+
+        foreach (var row in rows)
+        {
+            await using var update = connection.CreateCommand();
+            update.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            update.CommandText = "UPDATE AiChanges SET ArgumentsJson = $arguments, UpdatedAt = $updatedAt WHERE Id = $id;";
+            AddParameter(update, "$arguments", UpgradeDesignedPageArguments(row.Arguments));
+            AddParameter(update, "$updatedAt", DateTime.UtcNow);
+            AddParameter(update, "$id", row.Id);
+            await update.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static void AddParameter(DbCommand command, string name, object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
     }
 
     internal static string UpgradeJson(string json, bool removeGuides)

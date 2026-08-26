@@ -2,12 +2,6 @@ namespace Lorekeeper.Manuscripts;
 
 public interface IManuscriptService
 {
-    Task<Lorekeeper.Authoring.LatestAssistantReviewSnapshot?> GetLatestAssistantReviewAsync(
-        EditorContentTarget target,
-        Guid chapterId,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult<Lorekeeper.Authoring.LatestAssistantReviewSnapshot?>(null);
-
     Task<ManuscriptHistoryMutationResult> UndoAsync(
         EditorContentTarget target,
         Guid chapterId,

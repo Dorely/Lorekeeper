@@ -5,6 +5,7 @@ public enum ProjectVersionCheckpointKind
     Initial,
     Manual,
     Assistant,
+    ReviewApproval,
     Imported,
     Restored,
 }

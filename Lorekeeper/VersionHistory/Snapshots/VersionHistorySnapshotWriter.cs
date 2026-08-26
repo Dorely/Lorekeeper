@@ -42,6 +42,14 @@ public sealed class VersionHistorySnapshotWriter(
 
         var exported = await projectExport.ExportProjectAsync(projectId, ProjectExportKind.Full, cancellationToken);
         var document = exported.Document();
+        // Review Edits is a local workflow setting, not canonical creative
+        // content. Keep the legacy import field readable, but omit it from all
+        // newly-created Git snapshots so toggling the workflow cannot dirty
+        // version history.
+        document = document with
+        {
+            Project = document.Project with { LegacyAiChangeApprovalEnabled = null },
+        };
         var supplemental = await ReadSupplementalStateAsync(projectId, cancellationToken);
         var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
 

@@ -949,19 +949,25 @@ public sealed class ManuscriptMigrationService(
     {
         if (!await TableExistsAsync("Chapters", cancellationToken))
             return false;
-        await using var connection = await OpenAsync(_connectionString, cancellationToken);
-        await using var command = connection.CreateCommand();
-        command.CommandText =
+
+        var checks = new List<string>
+        {
             """
-            SELECT CASE WHEN
+            EXISTS (
+                SELECT 1 FROM Chapters
+                WHERE CASE WHEN json_valid(ManuscriptJson) = 1
+                    THEN COALESCE(json_extract(ManuscriptJson, '$.schemaVersion'), 0)
+                    ELSE 0 END NOT IN (1, 2, 3, 4)
+                   OR COALESCE(json_extract(ManuscriptJson, '$.manuscriptId'), '') COLLATE NOCASE != Id COLLATE NOCASE
+                   OR COALESCE(json_extract(ManuscriptJson, '$.revision'), -1) != ManuscriptRevision)
+            """
+        };
+
+        if (await HasColumnAsync("ContestBatches", "OriginalManuscriptJson", cancellationToken)
+            && await HasColumnAsync("ContestBatches", "AcceptedManuscriptJson", cancellationToken))
+        {
+            checks.Add("""
                 EXISTS (
-                    SELECT 1 FROM Chapters
-                    WHERE CASE WHEN json_valid(ManuscriptJson) = 1
-                        THEN COALESCE(json_extract(ManuscriptJson, '$.schemaVersion'), 0)
-                        ELSE 0 END NOT IN (1, 2, 3, 4)
-                       OR lower(COALESCE(json_extract(ManuscriptJson, '$.manuscriptId'), '')) != lower(Id)
-                       OR COALESCE(json_extract(ManuscriptJson, '$.revision'), -1) != ManuscriptRevision)
-                OR EXISTS (
                     SELECT 1 FROM ContestBatches
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                             THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
@@ -969,20 +975,41 @@ public sealed class ManuscriptMigrationService(
                        OR CASE WHEN json_valid(AcceptedManuscriptJson) = 1
                             THEN COALESCE(json_extract(AcceptedManuscriptJson, '$.schemaVersion'), 0)
                             ELSE 0 END NOT IN (1, 2, 3, 4))
-                OR EXISTS (
+                """);
+        }
+
+        if (await HasColumnAsync("ContestCandidates", "ProposedManuscriptJson", cancellationToken))
+        {
+            checks.Add("""
+                EXISTS (
                     SELECT 1 FROM ContestCandidates
                     WHERE CASE WHEN json_valid(ProposedManuscriptJson) = 1
                         THEN COALESCE(json_extract(ProposedManuscriptJson, '$.schemaVersion'), 0)
                         ELSE 0 END NOT IN (1, 2, 3, 4))
-                OR EXISTS (
+                """);
+        }
+
+        if (await HasColumnAsync("EditorRevisionSessions", "OriginalManuscriptJson", cancellationToken))
+        {
+            checks.Add("""
+                EXISTS (
                     SELECT 1 FROM EditorRevisionSessions
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                         THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
                         ELSE 0 END NOT IN (1, 2, 3, 4))
-            THEN 1 ELSE 0 END;
-            """;
+                """);
+        }
+
+        await using var connection = await OpenAsync(_connectionString, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT CASE WHEN {string.Join(" OR ", checks)} THEN 1 ELSE 0 END;";
         if (Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken)) == 1)
             return true;
+
+        if (!await TableExistsAsync("AiChanges", cancellationToken)
+            || !await HasColumnAsync("AiChanges", "BeforeJson", cancellationToken)
+            || !await HasColumnAsync("AiChanges", "AfterJson", cancellationToken))
+            return false;
 
         await using var aiChanges = connection.CreateCommand();
         aiChanges.CommandText =
@@ -1030,12 +1057,15 @@ public sealed class ManuscriptMigrationService(
         {
             if (!await TableExistsAsync(_connectionString, spec.Table, cancellationToken))
                 continue;
+            var columns = await ExistingColumnsAsync(connection, spec.Table, spec.Columns, cancellationToken);
+            if (columns.Count == 0)
+                continue;
             await using var command = connection.CreateCommand();
-            command.CommandText = $"SELECT {string.Join(", ", spec.Columns)} FROM {spec.Table};";
+            command.CommandText = $"SELECT {string.Join(", ", columns)} FROM {spec.Table};";
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                for (var index = 0; index < spec.Columns.Count; index++)
+                for (var index = 0; index < columns.Count; index++)
                 {
                     if (!reader.IsDBNull(index)
                         && ManuscriptSchemaUpgrade.ContainsV1Document(reader.GetString(index)))
@@ -1086,16 +1116,19 @@ public sealed class ManuscriptMigrationService(
         {
             if (!await TableExistsAsync(_connectionString, spec.Table, cancellationToken))
                 continue;
+            var columns = await ExistingColumnsAsync(connection, spec.Table, spec.Columns, cancellationToken);
+            if (columns.Count == 0)
+                continue;
             var rows = new List<(string Id, string?[] Values)>();
             await using (var select = connection.CreateCommand())
             {
                 select.Transaction = transaction;
-                select.CommandText = $"SELECT {spec.IdColumn}, {string.Join(", ", spec.Columns)} FROM {spec.Table};";
+                select.CommandText = $"SELECT {spec.IdColumn}, {string.Join(", ", columns)} FROM {spec.Table};";
                 await using var reader = await select.ExecuteReaderAsync(cancellationToken);
                 while (await reader.ReadAsync(cancellationToken))
                 {
-                    var values = new string?[spec.Columns.Count];
-                    for (var index = 0; index < spec.Columns.Count; index++)
+                    var values = new string?[columns.Count];
+                    for (var index = 0; index < columns.Count; index++)
                         values[index] = reader.IsDBNull(index + 1) ? null : reader.GetString(index + 1);
                     rows.Add((reader.GetString(0), values));
                 }
@@ -1115,7 +1148,7 @@ public sealed class ManuscriptMigrationService(
                     var result = ManuscriptSchemaUpgrade.UpgradeEmbeddedV1Documents(value);
                     if (result.Count == 0)
                         continue;
-                    assignments.Add($"{spec.Columns[index]} = $value{index}");
+                    assignments.Add($"{columns[index]} = $value{index}");
                     update.Parameters.AddWithValue($"$value{index}", result.Json);
                     sourceHashes.AddRange(result.SourceHashes);
                     targetHashes.AddRange(result.TargetHashes);
@@ -1417,6 +1450,22 @@ public sealed class ManuscriptMigrationService(
                 return true;
         }
         return false;
+    }
+
+    private static async Task<IReadOnlyList<string>> ExistingColumnsAsync(
+        SqliteConnection connection,
+        string table,
+        IReadOnlyList<string> candidates,
+        CancellationToken cancellationToken)
+    {
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info(\"{table}\");";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            existing.Add(reader.GetString(1));
+
+        return candidates.Where(existing.Contains).ToArray();
     }
 
     private Task<bool> TableExistsAsync(string table, CancellationToken cancellationToken) =>

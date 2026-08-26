@@ -16,7 +16,6 @@ public sealed class ResearchToolContext(
     Guid projectId,
     Guid conversationId,
     Action onMutated,
-    OutlineToolStagingContext? staging = null,
     bool visionReady = false)
 {
     private readonly List<EntityVisualContextReference> _entityVisuals = [];
@@ -25,7 +24,6 @@ public sealed class ResearchToolContext(
     public Guid ProjectId { get; } = projectId;
     public Guid ConversationId { get; } = conversationId;
     public Action OnMutated { get; } = onMutated;
-    public OutlineToolStagingContext? Staging { get; } = staging;
     public bool VisionReady { get; } = visionReady;
     public void QueueEntityVisuals(IEnumerable<EntityVisualContextReference> values) => _entityVisuals.AddRange(values);
     public void QueueReferenceVisual(ReferenceVisualReadResult value) { if (value.DataDelivered) _referenceVisuals.Add(value); }
@@ -98,12 +96,12 @@ public sealed class ResearchTools(
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read one explicitly paginated graph entity by id, including properties, structured wiki data, all adjacent manual and AutoMention links, bounded relation context, and canonical visual references. Full identity fields and GUIDs repeat on every page; omit pageNumber for page 1 and follow nextPageArguments. When Review edits is enabled, returns the latest staged entity and link state from this turn."),
+                description: "Read one explicitly paginated graph entity by id, including properties, structured wiki data, all adjacent manual and AutoMention links, bounded relation context, and canonical visual references. Full identity fields and GUIDs repeat on every page; omit pageNumber for page 1 and follow nextPageArguments. Returns the latest live entity and link state from this project."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(context, entityId, pageNumber),
                 name: "list_entity_links",
-                description: "List explicitly paginated graph links adjacent to an entity, including structural HasChild links and semantic story relationships. Full identity fields repeat on every page; follow nextPageArguments until complete. When Review edits is enabled, includes staged entity and link changes from this turn."),
+                description: "List explicitly paginated graph links adjacent to an entity, including structural HasChild links and semantic story relationships. Full identity fields repeat on every page; follow nextPageArguments until complete. Includes the latest live entity and link state from this project."),
 
             AIFunctionFactory.Create(
                 method: (Guid pageId, string? imageUrl = null) => InspectWebImageAsync(context, pageId, imageUrl),
@@ -118,7 +116,9 @@ public sealed class ResearchTools(
         };
 
         var outlineContext = new OutlineCollaborationContext(
-            context.ProjectId, context.OnMutated, context.Staging, context.VisionReady, context.QueueEntityVisuals, context.QueueReferenceVisual);
+            context.ProjectId, context.OnMutated, visionReady: context.VisionReady,
+            onVisualsQueued: context.QueueEntityVisuals,
+            onReferenceVisualQueued: context.QueueReferenceVisual);
         tools.AddRange(await outlineTools.BuildResearchSharedAsync(outlineContext));
 
         return tools;
@@ -246,12 +246,6 @@ public sealed class ResearchTools(
 
     private async Task<string> ReadEntityAsync(ResearchToolContext context, Guid entityId, int? pageNumber)
     {
-        if (context.Staging is not null)
-        {
-            await QueueEntityVisualsAsync(context, entityId);
-            return await context.Staging.ReadEntityAsync(entityId, addedToContextFeed: false, EntityRelationOptions, pageNumber);
-        }
-
         var entity = await entities.GetAsync(context.ProjectId, entityId);
         if (entity is null)
             return $"Error: entity {entityId} not found in this project.";
@@ -344,20 +338,6 @@ public sealed class ResearchTools(
             return $"Error: {targetValidation.Error} Use one grounded entity id.";
         if (targetValidation.Targets is not [var target])
             return "Error: one entity target is required.";
-        IReadOnlyList<EntityVisualTarget> targets = [target];
-        if (context.Staging is not null)
-        {
-            var after = new EntityVisualChange(
-                "import",
-                CandidateId: candidateId,
-                Targets: targets,
-                Crop: crop,
-                CropFileName: cropFileName?.Trim() ?? string.Empty,
-                CropAltText: cropAltText?.Trim() ?? string.Empty);
-            return await context.Staging.StageExternalChangeAsync(
-                "Import a researched image as an entity canonical reference", null, after,
-                new { status = "staged", candidateId, entityTarget = target }, "EntityCanonicalReference", candidateId.ToString("N"));
-        }
         var attached = new List<EntityVisualExampleView>();
         try
         {
@@ -403,9 +383,6 @@ public sealed class ResearchTools(
 
     private async Task<string> ListEntityLinksAsync(ResearchToolContext context, Guid entityId, int? pageNumber)
     {
-        if (context.Staging is not null)
-            return await context.Staging.ListEntityLinksAsync(entityId, pageNumber);
-
         var entity = await entities.GetAsync(context.ProjectId, entityId);
         if (entity is null)
             return $"Error: entity {entityId} not found in this project.";

@@ -7,6 +7,43 @@ namespace Lorekeeper.VersionHistory.Restore;
 
 public interface IProjectVersionRestoreService
 {
+    /// <summary>
+    /// Restores only non-manuscript project state to the approved head. Live
+    /// Core chapters and every existing edition override are synthesized back
+    /// into that validated head before the canonical SQLite restore. No Git
+    /// checkpoint is created, so manuscript differences remain reviewable.
+    /// </summary>
+    Task RestoreReviewOtherAsync(
+        Guid projectId,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Restores one Designed Page composition from the approved Git head into
+    /// the live project. Only the selected composition is changed; all other
+    /// live manuscript and project state remains intact, and no Git checkpoint
+    /// is created so the restored state remains reviewable.
+    /// </summary>
+    Task RestoreReviewCompositionAsync(
+        Guid projectId,
+        ProjectVersionReviewTarget target,
+        Guid compositionId,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Restores one Designed Page composition from a historical parent
+    /// snapshot into live SQLite. The resulting state remains pending against
+    /// the approved Git head and no Git checkpoint is created.
+    /// </summary>
+    Task RestoreHistoricalCompositionAsync(
+        Guid projectId,
+        ProjectVersionReviewTarget target,
+        Guid compositionId,
+        string historicalCommitSha,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        CancellationToken cancellationToken = default);
+
     Task<VersionHistoryRestoreResult> RestoreAsync(
         Guid projectId,
         string targetCommitSha,

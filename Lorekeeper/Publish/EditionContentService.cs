@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Lorekeeper.Authoring;
+using Lorekeeper.EditorChat;
 using Lorekeeper.Knowledge;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
@@ -60,7 +61,8 @@ public sealed class EditionContentService(
     IProjectSearchIndex projectSearch,
     IVectorStore vectors,
     IManuscriptAnnotationService annotations,
-    IAuthoringHistoryRuntime? authoringHistory = null) : IEditionContentService
+    IAuthoringHistoryRuntime? authoringHistory,
+    IEditorContestMutationGuard contestGuard) : IEditionContentService
 {
     public async Task<IReadOnlyList<EditionContentReleaseView>> ListReleasesAsync(
         Guid projectId,
@@ -115,11 +117,6 @@ public sealed class EditionContentService(
         var discardedHistoryTargets = new List<AuthoringHistoryTarget>();
         if (!enabled)
         {
-            var activeReview = await db.AiChangeBatches.AsNoTracking().AnyAsync(
-                item => item.ProjectId == projectId
-                    && item.ContentTargetEditionId == editionId
-                    && item.Status == AiChangeBatchStatus.Pending,
-                cancellationToken);
             var activeContest = await db.ContestBatches.AsNoTracking().AnyAsync(
                 item => item.ProjectId == projectId
                     && item.ContentTargetEditionId == editionId
@@ -135,7 +132,7 @@ public sealed class EditionContentService(
                     && item.ContentTargetEditionId == editionId
                     && item.Status == EditorMessageStatus.Pending,
                 cancellationToken);
-            if (activeReview || activeContest || activeRevision || activeTurn)
+            if (activeContest || activeRevision || activeTurn)
                 throw new InvalidOperationException("Resolve or cancel active edition assistant, review, contest, and revision work before discarding edition content.");
             var compositions = await db.PageCompositions
                 .Where(item => item.ProjectId == projectId && item.EditionId == editionId)
@@ -208,6 +205,7 @@ public sealed class EditionContentService(
         bool confirmed,
         CancellationToken cancellationToken = default)
     {
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;

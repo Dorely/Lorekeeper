@@ -11,9 +11,7 @@ using Lorekeeper.Images;
 using Lorekeeper.Llm;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
-using Lorekeeper.Outline;
 using Lorekeeper.Persistence;
-using Lorekeeper.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
@@ -21,7 +19,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorChatService(
-    IAppDatabaseOperationFactory database, IChapterService chapters, IChatImageAttachmentService imageAttachments, IContextBuilder contextBuilder, IProjectImageService projectImages, IEntityVisualContextService entityVisualContext, IProjectImageGenerationRuntime imageRuntime, ILlmProviderService providerService, IChatClientFactory chatClientFactory, EditorChatTools tools, OutlineCollaborationTools outlineTools, IEditorContestService contestService, IEditorRevisionJobNotifier revisionJobNotifier, IEditorRevisionAgentService revisionAgents, IAiChangeApprovalService changeApproval, IServiceScopeFactory scopeFactory, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IAuthoringMutationContextAccessor authoringMutationContext, IOptions<AgentOptions> options, ILogger<EditorChatService> logger) : IEditorChatService
+    IAppDatabaseOperationFactory database, IChapterService chapters, IChatImageAttachmentService imageAttachments, IContextBuilder contextBuilder, IProjectImageService projectImages, IEntityVisualContextService entityVisualContext, IProjectImageGenerationRuntime imageRuntime, ILlmProviderService providerService, IChatClientFactory chatClientFactory, EditorChatTools tools, IEditorContestService contestService, IEditorContestMutationGuard contestGuard, IEditorRevisionJobNotifier revisionJobNotifier, IEditorRevisionAgentService revisionAgents, IServiceScopeFactory scopeFactory, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IAuthoringMutationContextAccessor authoringMutationContext, IOptions<AgentOptions> options, ILogger<EditorChatService> logger) : IEditorChatService
 {
     private const string _initialAssistantGreeting =
         "I'm ready to work on the draft with you. Tell me what you want to shape, revise, or check in the current chapter.";
@@ -103,29 +101,6 @@ public sealed class EditorChatService(
         await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<bool> GetAiChangeApprovalEnabledAsync(Guid projectId, CancellationToken cancellationToken = default)
-    {
-        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var projects = databaseOperation.Repositories.Projects;
-        var project = await projects.GetByIdAsync(projectId, cancellationToken)
-            ?? throw new InvalidOperationException($"Project {projectId} not found.");
-        return project.AiChangeApprovalEnabled;
-    }
-
-    public async Task SetAiChangeApprovalEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default)
-    {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        databaseOperation.ShareWithNestedOperations();
-        var projects = databaseOperation.Repositories.Projects;
-        var project = await projects.GetByIdAsync(projectId, cancellationToken)
-            ?? throw new InvalidOperationException($"Project {projectId} not found.");
-        if (project.AiChangeApprovalEnabled == enabled) return;
-        project.AiChangeApprovalEnabled = enabled;
-        project.UpdatedAt = DateTime.UtcNow;
-        projects.Update(project);
-        await databaseOperation.SaveChangesAsync(cancellationToken);
-    }
-
     public Task<EditorContestSettings> GetContestSettingsAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         contestService.GetSettingsAsync(projectId, cancellationToken);
 
@@ -135,11 +110,32 @@ public sealed class EditorChatService(
     public Task SetContestProviderAsync(Guid projectId, int slot, int? providerId, CancellationToken cancellationToken = default) =>
         contestService.SetContestProviderAsync(projectId, slot, providerId, cancellationToken);
 
-    public async Task<IReadOnlyList<AiChangeBatch>> ListPendingChangesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        await changeApproval.ListPendingBatchesAsync(projectId, cancellationToken);
-
     public async Task<IReadOnlyList<ContestBatch>> ListCurrentContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         await contestService.ListCurrentContestBatchesAsync(projectId, cancellationToken);
+
+    public Task<EditorContestReviewSnapshot?> GetContestReviewAsync(
+        Guid projectId,
+        Guid batchId,
+        CancellationToken cancellationToken = default) =>
+        contestService.GetReviewAsync(projectId, batchId, cancellationToken);
+
+    public Task<EditorContestLockState> GetEditorContestLockStateAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default) =>
+        contestService.GetEditorLockStateAsync(projectId, cancellationToken);
+
+    public Task SelectContestCandidateAsync(
+        Guid projectId,
+        Guid batchId,
+        Guid candidateId,
+        CancellationToken cancellationToken = default) =>
+        contestService.SelectCandidateAsync(projectId, batchId, candidateId, cancellationToken);
+
+    public Task ResetContestCandidateAsync(
+        Guid projectId,
+        Guid candidateId,
+        CancellationToken cancellationToken = default) =>
+        contestService.ResetCandidateAsync(projectId, candidateId, cancellationToken);
 
     public Task ResolveContestCandidateLineAsync(
         Guid projectId,
@@ -148,14 +144,33 @@ public sealed class EditorChatService(
         CancellationToken cancellationToken = default) =>
         contestService.ResolveCandidateLineAsync(projectId, chapterId, request, cancellationToken);
 
-    public Task KeepContestCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default) =>
-        contestService.KeepCandidateAsync(candidateId, cancellationToken);
+    public Task KeepContestCandidateAsync(Guid projectId, Guid candidateId, CancellationToken cancellationToken = default) =>
+        contestService.KeepCandidateAsync(projectId, candidateId, cancellationToken);
 
-    public Task FinishContestBatchAsync(Guid batchId, CancellationToken cancellationToken = default) =>
-        contestService.FinishContestBatchAsync(batchId, cancellationToken);
+    public Task ResolveContestAsync(
+        Guid projectId,
+        Guid batchId,
+        CancellationToken cancellationToken = default) =>
+        contestService.ResolveContestBatchAsync(projectId, batchId, cancellationToken);
+
+    public Task DiscardContestAsync(
+        Guid projectId,
+        Guid batchId,
+        CancellationToken cancellationToken = default) =>
+        contestService.DiscardContestBatchAsync(projectId, batchId, cancellationToken);
+
+    public Task CancelContestAsync(
+        Guid projectId,
+        Guid batchId,
+        CancellationToken cancellationToken = default) =>
+        contestService.CancelContestBatchAsync(projectId, batchId, cancellationToken);
+
+    public Task FinishContestBatchAsync(Guid projectId, Guid batchId, CancellationToken cancellationToken = default) =>
+        contestService.FinishContestBatchAsync(projectId, batchId, cancellationToken);
 
     public async Task ResetAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         using var maintenance = turnRuntime.TryBeginMaintenance(new ChatTurnKey(projectId, ChatTurnSurface.Editor));
         if (maintenance is null)
             throw new InvalidOperationException("Editor Chat is still working in another window. Stop or wait for that turn before resetting the conversation.");
@@ -190,6 +205,16 @@ public sealed class EditorChatService(
         if (string.IsNullOrWhiteSpace(userText))
             throw new ArgumentException("Message cannot be empty.", nameof(userText));
 
+        var activeContestLock = await contestGuard.GetLockStateAsync(projectId, cancellationToken);
+        if (activeContestLock.IsLocked)
+        {
+            yield return new EditorChatTurnError(
+                activeContestLock.Message
+                    ?? "Resolve or discard the active Contest Review before sending another editor chat message.",
+                Cancelled: false);
+            yield break;
+        }
+
         var conversation = await GetOrCreateAsync(projectId, cancellationToken);
 
         var persistedSelection = await providerService.ResolveChatModelSelectionAsync(
@@ -204,13 +229,6 @@ public sealed class EditorChatService(
         if (persistedProvider.Id != providerId)
         {
             yield return new EditorChatTurnError(ChatModelSelectionMessages.Changed, Cancelled: false);
-            yield break;
-        }
-
-        var unresolvedChanges = await changeApproval.ListPendingBatchesAsync(projectId, cancellationToken);
-        if (unresolvedChanges.Count > 0)
-        {
-            yield return new EditorChatTurnError("Review the pending AI changes before sending another editor chat message.", Cancelled: false);
             yield break;
         }
 
@@ -307,18 +325,6 @@ public sealed class EditorChatService(
 
             chat = await chatClientFactory.CreateChatClientAsync(persistedProvider.Id, cancellationToken);
 
-            OutlineToolStagingContext? outlineStaging = null;
-            EditorChatChangeStagingContext? editorStaging = null;
-            if (project.AiChangeApprovalEnabled)
-            {
-                outlineStaging = outlineTools.CreateStagingContext(
-                    projectId,
-                    conversation.Id,
-                    AiChangeConversationKind.Editor,
-                    OnToolMutated);
-                editorStaging = new EditorChatChangeStagingContext(database, projectId, conversation.Id, contentTarget);
-            }
-
             editorContext = new EditorChatContext(
                 projectId,
                 conversation.Id,
@@ -328,11 +334,9 @@ public sealed class EditorChatService(
                 persistedProvider.Id,
                 visionReady,
                 OnToolMutated,
-                project.AiChangeApprovalEnabled,
+                project.ReviewEditsEnabled,
                 autoPinReadEntities: !contestModeEnabled,
-                outlineStaging,
-                editorStaging,
-                cancellationToken);
+                turnCancellationToken: cancellationToken);
             aiTools = await tools.BuildAsync(editorContext, contestModeEnabled ? EditorChatToolMode.ContestPreparation : EditorChatToolMode.Normal, cancellationToken);
         }
         catch (Exception ex)
@@ -493,11 +497,30 @@ public sealed class EditorChatService(
                 var stopwatch = Stopwatch.StartNew();
                 var aiFunction = aiTools.OfType<AIFunction>().FirstOrDefault(function => function.Name == pendingCall.Name);
                 ChatToolInvocationOutcome toolOutcome;
+                ChatToolInvocationOutcome? contestLockOutcome = null;
+                if (aiFunction is not null)
+                {
+                    try
+                    {
+                        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
+                    }
+                    catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
+                    {
+                        contestLockOutcome = new ChatToolInvocationOutcome(
+                            exception.Message,
+                            exception.Message,
+                            Cancelled: false);
+                    }
+                }
                 if (aiFunction is null)
                 {
                     var message = $"Unknown tool '{pendingCall.Name}'.";
                     logger.LogWarning("Editor chat tool '{Tool}' failed: {Message}", pendingCall.Name, message);
                     toolOutcome = new ChatToolInvocationOutcome($"Error: {message}", message, Cancelled: false);
+                }
+                else if (contestLockOutcome is not null)
+                {
+                    toolOutcome = contestLockOutcome;
                 }
                 else if (IsRevisionAgentsTool(pendingCall.Name))
                 {
@@ -654,25 +677,6 @@ public sealed class EditorChatService(
                 var modelImages = editorContext.DrainModelOnlyImages();
                 if (modelImages.Count > 0)
                     modelOnlyImagesForNextRound.AddRange(modelImages);
-                foreach (var pendingChange in editorContext.OutlineStaging?.DrainNewChanges() ?? [])
-                {
-                    yield return new EditorChatPendingAiChangeCreated(
-                        pendingChange.BatchId,
-                        pendingChange.Id,
-                        pendingChange.ToolCallId,
-                        pendingChange.ToolName,
-                        pendingChange.Summary);
-                }
-                foreach (var pendingChange in editorContext.EditorStaging?.DrainNewChanges() ?? [])
-                {
-                    yield return new EditorChatPendingAiChangeCreated(
-                        pendingChange.BatchId,
-                        pendingChange.Id,
-                        pendingChange.ToolCallId,
-                        pendingChange.ToolName,
-                        pendingChange.Summary);
-                }
-
                 yield return new EditorChatToolCallCompleted(
                     pendingCall.CallId,
                     pendingCall.Name,
@@ -691,6 +695,7 @@ public sealed class EditorChatService(
                     && string.Equals(pendingCall.Name, "start_contest", StringComparison.Ordinal)
                     && editorContext.TryTakeContestRequest(out var contestRequest))
                 {
+                    await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
                     var contestSnapshotToolResults = resultContents
                         .OfType<FunctionResultContent>()
                         .Where(result => result.CallId != pendingCall.CallId)
@@ -1232,8 +1237,7 @@ public sealed class EditorChatService(
     private static bool ShouldRefreshForCompletedRevisionSession(
         EditorChatContext editorContext,
         EditorChatRevisionJobUpdated update) =>
-        !editorContext.ReviewEdits
-        && update.Kind == EditorRevisionJobUpdateKind.SessionCompleted
+        update.Kind == EditorRevisionJobUpdateKind.SessionCompleted
         && update.SessionId is { } sessionId
         && update.Progress.Sessions.Any(session =>
             session.SessionId == sessionId

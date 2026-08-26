@@ -19,7 +19,7 @@ using Microsoft.Extensions.Options;
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorRevisionAgentProcessor(
-IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, IContextBuilder contextBuilder, IEntityVisualContextService entityVisualContext, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IProjectSearchService projectSearch, IProjectFactService projectFacts, IEntityService entities, IEntityTypeService entityTypes, IEntityRelationContextService entityRelations, IEntityVisualExampleService entityVisualExamples, IOptions<EditorChatOptions> options, IEditorRevisionJobNotifier notifier, ILogger<EditorRevisionAgentProcessor> logger)
+    IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, IContextBuilder contextBuilder, IEntityVisualContextService entityVisualContext, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IProjectSearchService projectSearch, IProjectFactService projectFacts, IEntityService entities, IEntityTypeService entityTypes, IEntityRelationContextService entityRelations, IEntityVisualExampleService entityVisualExamples, IOptions<EditorChatOptions> options, IEditorRevisionJobNotifier notifier, IEditorContestMutationGuard contestGuard, ILogger<EditorRevisionAgentProcessor> logger)
 {
     private static EditorContentTarget JobTarget(EditorRevisionJob job) => EditorContentTarget.From(
         Enum.TryParse<EditorContentTargetKind>(job.ContentTargetKind, out var kind) ? kind : EditorContentTargetKind.Core,
@@ -245,7 +245,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
                     }
 
                     if (string.Equals(pendingCall.Name, "apply_assigned_manuscript_operations", StringComparison.Ordinal) && toolError is null)
-                        toolResult = await ApplyCapturedEditAsync(project, session, edit, pendingCall, stopwatch, cancellationToken);
+                        toolResult = await ApplyCapturedEditAsync(session, edit, stopwatch, cancellationToken);
 
                     await AddMessageAsync(new EditorRevisionMessage
                     {
@@ -477,7 +477,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         sb.AppendLine("# Output Requirement");
         sb.AppendLine("Use lowercase hyphenated semantic styleRole values. A sceneBreak insertion must have empty text (not ***); use styleRole scene-break or omit it so the default is used.");
         sb.AppendLine("Before the terminal call, account for every source block in the assigned range as retained, replaced, or deleted. InsertBlock is only for net-new content and must never leave an obsolete version of revised prose elsewhere in the chapter.");
-        sb.AppendLine("Call apply_assigned_manuscript_operations exactly once when ready. The coordinator will review the completed/staged change and decide whether any follow-up action is needed.");
+        sb.AppendLine("Call apply_assigned_manuscript_operations exactly once when ready. The coordinator will review the completed live change and decide whether any follow-up action is needed.");
         return sb.ToString().TrimEnd();
     }
 
@@ -866,17 +866,16 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         edit.ExpectedRevision = expectedRevision;
         edit.Operations = operations ?? [];
         edit.Notes = notes?.Trim() ?? string.Empty;
-        return Task.FromResult("Semantic manuscript operations recorded. The system is applying or staging them now. Do not call any more tools.");
+        return Task.FromResult("Semantic manuscript operations recorded. The system is applying them now. Do not call any more tools.");
     }
 
     private async Task<string> ApplyCapturedEditAsync(
-        Project project,
         EditorRevisionSession session,
         CapturedChapterEdit edit,
-        PendingToolCall pendingCall,
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
+        await contestGuard.EnsureMutationAllowedAsync(session.Job.ProjectId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var revisions = databaseOperation.Repositories.EditorRevisions;
@@ -920,19 +919,9 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         var newBody = ManuscriptCodec.ProjectPlainText(proposedDocument);
         var result = BuildEditResult(session.ChapterTitle, session.OriginalPlainText, newBody, edit);
 
-        if (project.AiChangeApprovalEnabled)
-        {
-            var changeId = await StageChapterBodyEditAsync(
-                project, session, edit, pendingCall, proposedDocument, result, cancellationToken);
-            edit.Notes = AppendNote(edit.Notes, $"Staged pending change {changeId:N} for review.");
-            result = AppendResultLine(result, $"Staged pending change {changeId:N} for review.");
-        }
-        else
-        {
-            await manuscripts.ApplyAsync(JobTarget(session.Job), session.ChapterId, edit.ExpectedRevision, operations, cancellationToken);
-            edit.Notes = AppendNote(edit.Notes, $"Applied directly to {changedBlockIds.Count} manuscript block(s).");
-            result = AppendResultLine(result, $"Applied directly to {changedBlockIds.Count} manuscript block(s).");
-        }
+        await manuscripts.ApplyAsync(JobTarget(session.Job), session.ChapterId, edit.ExpectedRevision, operations, cancellationToken);
+        edit.Notes = AppendNote(edit.Notes, $"Applied directly to {changedBlockIds.Count} manuscript block(s).");
+        result = AppendResultLine(result, $"Applied directly to {changedBlockIds.Count} manuscript block(s).");
 
         session.Status = EditorRevisionSessionStatus.Completed;
         session.Summary = edit.Summary;
@@ -948,60 +937,6 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         revisions.UpdateSession(session);
         await databaseOperation.SaveChangesAsync(cancellationToken);
         return result;
-    }
-
-    private async Task<Guid> StageChapterBodyEditAsync(
-        Project project,
-        EditorRevisionSession session,
-        CapturedChapterEdit edit,
-        PendingToolCall pendingCall,
-        ManuscriptDocument proposedDocument,
-        string result,
-        CancellationToken cancellationToken)
-    {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        databaseOperation.ShareWithNestedOperations();
-        var changes = databaseOperation.Repositories.AiChanges;
-        var batch = new AiChangeBatch
-        {
-            ProjectId = project.Id,
-            ConversationKind = AiChangeConversationKind.Editor,
-            ConversationId = session.Job.ConversationId,
-            AssistantMessageId = session.Job.AssistantMessageId,
-            ContentTargetKind = session.Job.ContentTargetKind,
-            ContentTargetEditionId = session.Job.ContentTargetEditionId,
-        };
-        await changes.AddBatchAsync(batch, cancellationToken);
-        await databaseOperation.SaveChangesAsync(cancellationToken);
-
-        var change = new AiChange
-        {
-            BatchId = batch.Id,
-            Order = 0,
-            ToolCallId = session.Job.ToolCallId,
-            ToolName = "apply_assigned_manuscript_operations",
-            ArgumentsJson = pendingCall.ArgumentsJson,
-            Summary = edit.Summary,
-            BeforeJson = JsonSerializer.Serialize(new ChapterManuscriptChange(
-                session.ChapterId,
-                session.ChapterTitle,
-                ManuscriptCodec.Deserialize(session.OriginalManuscriptJson).Revision,
-                session.OriginalManuscriptJson)),
-            AfterJson = JsonSerializer.Serialize(new ChapterManuscriptChange(
-                session.ChapterId,
-                session.ChapterTitle,
-                proposedDocument.Revision,
-                ManuscriptCodec.Serialize(proposedDocument))),
-            ResultJson = JsonSerializer.Serialize(new { result }),
-            ResourceKind = "ChapterManuscript",
-            ResourceId = Resource("Chapter", session.ChapterId),
-            CreatedResourceIdsJson = "[]",
-            ReferencedResourceIdsJson = JsonSerializer.Serialize(new[] { Resource("Chapter", session.ChapterId) }),
-            DependsOnChangeIdsJson = "[]",
-        };
-        await changes.AddChangeAsync(change, cancellationToken);
-        await databaseOperation.SaveChangesAsync(cancellationToken);
-        return change.Id;
     }
 
     private static string? ValidateEdit(EditorRevisionSession session, CapturedChapterEdit edit)
@@ -1053,8 +988,6 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
 
     private static string AppendResultLine(string result, string extra) =>
         string.IsNullOrWhiteSpace(result) ? extra : $"{result}\n{extra}";
-
-    private static string Resource(string kind, Guid id) => $"{kind}:{id:N}";
 
     private static void MarkInvalid(EditorRevisionSession session, string error, string rawResponse, Stopwatch stopwatch)
     {

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Data;
+using System.Data.Common;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -190,28 +191,7 @@ public sealed class VisualCompositionMigrationService(
                         .SetProperty(item => item.CompositionSceneJson, cover.CompositionSceneJson),
                     cancellationToken);
             }
-            foreach (var change in await db.AiChanges
-                .Where(item => item.Status == AiChangeStatus.Pending
-                    && (item.ToolName == "create_chapter" || item.ToolName == "update_chapter"))
-                .ToListAsync(cancellationToken))
-            {
-                if (ContainsVisualChoice(change.ArgumentsJson))
-                {
-                    change.Status = AiChangeStatus.Conflict;
-                    change.ErrorMessage = "RequiresReplan: choose Figures or Designed Pages within the chapter's semantic manuscript.";
-                    change.UpdatedAt = DateTime.UtcNow;
-                    continue;
-                }
-                change.ArgumentsJson = RemoveVisualFields(change.ArgumentsJson);
-                change.BeforeJson = RemoveVisualFields(change.BeforeJson);
-                change.AfterJson = RemoveVisualFields(change.AfterJson);
-                if (change.DraftAfterJson is not null)
-                    change.DraftAfterJson = RemoveVisualFields(change.DraftAfterJson);
-                if (change.ReviewStateJson is not null)
-                    change.ReviewStateJson = RemoveVisualFields(change.ReviewStateJson);
-                change.ResultJson = RemoveVisualFields(change.ResultJson);
-                change.UpdatedAt = DateTime.UtcNow;
-            }
+            await NormalizeLegacyPendingChapterChangesAsync(db, cancellationToken);
             await db.PublicationArtifacts.ExecuteUpdateAsync(
                 setters => setters.SetProperty(item => item.IsLegacy, true),
                 cancellationToken);
@@ -981,6 +961,87 @@ public sealed class VisualCompositionMigrationService(
 
     private static string AggregateHash(IEnumerable<string> hashes) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\n", hashes))));
+
+    private static async Task NormalizeLegacyPendingChapterChangesAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var connection = db.Database.GetDbConnection();
+        if (connection.State != ConnectionState.Open)
+            await connection.OpenAsync(cancellationToken);
+        var rows = new List<(string Id, string Arguments, string Before, string After, string? Draft, string? Review, string Result)>();
+        await using (var select = connection.CreateCommand())
+        {
+            select.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            select.CommandText = """
+                SELECT Id, ArgumentsJson, BeforeJson, AfterJson, DraftAfterJson,
+                       ReviewStateJson, ResultJson
+                FROM AiChanges
+                WHERE lower(Status) = 'pending'
+                  AND ToolName IN ('create_chapter', 'update_chapter');
+                """;
+            await using var reader = await select.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+                rows.Add((
+                    reader.GetValue(0).ToString()!,
+                    reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                    reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
+                    reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    reader.IsDBNull(5) ? null : reader.GetString(5),
+                    reader.IsDBNull(6) ? string.Empty : reader.GetString(6)));
+        }
+
+        foreach (var row in rows)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (ContainsVisualChoice(row.Arguments))
+            {
+                await using var conflict = connection.CreateCommand();
+                conflict.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+                conflict.CommandText = """
+                    UPDATE AiChanges
+                    SET Status = 'Conflict',
+                        ErrorMessage = $error,
+                        UpdatedAt = $updatedAt
+                    WHERE Id = $id;
+                    """;
+                AddParameter(conflict, "$error", "RequiresReplan: choose Figures or Designed Pages within the chapter's semantic manuscript.");
+                AddParameter(conflict, "$updatedAt", DateTime.UtcNow);
+                AddParameter(conflict, "$id", row.Id);
+                await conflict.ExecuteNonQueryAsync(cancellationToken);
+                continue;
+            }
+
+            await using var update = connection.CreateCommand();
+            update.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+            update.CommandText = """
+                UPDATE AiChanges
+                SET ArgumentsJson = $arguments, BeforeJson = $before,
+                    AfterJson = $after, DraftAfterJson = $draft,
+                    ReviewStateJson = $review, ResultJson = $result,
+                    UpdatedAt = $updatedAt
+                WHERE Id = $id;
+                """;
+            AddParameter(update, "$arguments", RemoveVisualFields(row.Arguments));
+            AddParameter(update, "$before", RemoveVisualFields(row.Before));
+            AddParameter(update, "$after", RemoveVisualFields(row.After));
+            AddParameter(update, "$draft", row.Draft is string draft ? RemoveVisualFields(draft) : DBNull.Value);
+            AddParameter(update, "$review", row.Review is string review ? RemoveVisualFields(review) : DBNull.Value);
+            AddParameter(update, "$result", RemoveVisualFields(row.Result));
+            AddParameter(update, "$updatedAt", DateTime.UtcNow);
+            AddParameter(update, "$id", row.Id);
+            await update.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static void AddParameter(DbCommand command, string name, object value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
+    }
 
     private static IReadOnlySet<string> Columns(params string[] names) =>
         names.ToHashSet(StringComparer.Ordinal);

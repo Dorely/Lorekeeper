@@ -155,7 +155,7 @@ public sealed class ProjectImportExportService(
                 project.Slug,
                 project.ProjectGuidance,
                 project.IncludeCurrentChapterInContext,
-                project.AiChangeApprovalEnabled),
+                project.ReviewEditsEnabled),
             PageSetup = await db.ProjectPageSetups.AsNoTracking()
                 .Where(item => item.ProjectId == projectId)
                 .Select(item => new ProjectExportPageSetup(

@@ -36,12 +36,11 @@ public sealed class PublishConversationMigrationTests
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 await db.GetService<IMigrator>().MigrateAsync(PreviousMigration);
-                db.Projects.Add(new Project
-                {
-                    Id = projectId,
-                    Name = "Existing book",
-                    Slug = $"existing-{projectId:N}",
-                });
+                await LegacyProjectSeed.InsertAsync(
+                    db,
+                    projectId,
+                    "Existing book",
+                    $"existing-{projectId:N}");
                 await db.SaveChangesAsync();
                 await db.Database.ExecuteSqlInterpolatedAsync(
                     $"""

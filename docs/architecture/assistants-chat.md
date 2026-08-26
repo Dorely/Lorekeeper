@@ -21,15 +21,16 @@ This chapter owns the six interactive assistant surfaces—Outline, Editor,
 Writing Coach, Research, Images, and Publish—and their shared conversation
 protocol. It covers active-turn lifetime, transcript replay, model selection,
 tool invocation and streaming, prompt assembly, token accounting and
-compaction, image attachments, mutation refresh signals, durable review
-proposals, contests, and prose revision workers.
+compaction, image attachments, mutation refresh signals, Git-backed Review Edits,
+contests, and prose revision workers.
 
 Feature adapters choose the charter, automatic context, and intentional subset
 of domain tools for their surface. They do not reimplement domain validation or
-persistence. Every mutation must cross the same owning application service used
-by manual UI actions. Domain chapters remain authoritative for the state being
-read or changed; this chapter is authoritative for how assistants reach those
-boundaries and how the user reviews their work.
+persistence. Every mutation crosses the same owning application service used by
+manual UI actions and updates live SQLite immediately. Domain chapters remain
+authoritative for the state being read or changed; this chapter is authoritative
+for how assistants reach those boundaries and how the user reviews their work
+against Git HEAD.
 
 ## Current architecture and invariants
 
@@ -65,7 +66,7 @@ reasoning they received.
 
 Because protocol metadata disappears on later turns, assistant prose is the
 durable work log. A tool-using assistant narrates meaningful phases and closes
-with a self-contained account of completed or staged work, decisions,
+with a self-contained account of completed work, decisions,
 verification, diagnostics, and remaining actions. That prose supports historical
 continuity but never replaces fresh context or focused rereads for mutable IDs,
 revisions, or project state.
@@ -143,7 +144,7 @@ protected Project Guidance and Book Brief, the direct-reference manifest, and
 the feature's current working context. User-owned direction remains distinguishable
 from code-owned rules and must not be persisted as seeded guidance. The shared
 workflow instructions enforce active-canon precedence, read-only foreign
-references, compact paging and staging, durable work logs, and honest
+references, compact paging and owning-service mutations, durable work logs, and honest
 verification.
 
 `SystemPromptComposer` adds the shared
@@ -227,17 +228,19 @@ together. Results should return changed identities, revisions, counts,
 diagnostics, and recovery guidance—not entire unchanged documents or binary
 payloads.
 
-Large or sensitive mutations use bounded, revision-safe staging. Editor
-manuscript changes validate and apply one complete operation set in a single
-call against the exact source revision; when Review Edits is enabled, that same
-call creates the in-memory projected overlay and pending change for approval.
+Large or sensitive mutations use bounded, revision-safe owning-service writes.
+Editor manuscript changes validate and apply one complete operation set in a
+single call against the exact source revision. Review Edits changes checkpoint
+policy only: when enabled, the mutation is written to live SQLite and remains
+uncheckpointed for Git review; when disabled, the completed mutating turn may
+checkpoint the complete live project.
 The operation contract distinguishes additive insertion from revision:
 `InsertBlock` never supersedes existing prose, single-block revisions preserve
 identity with `ReplaceBlockText`, and multi-block rewrites must replace or
 delete every superseded source block in the atomic batch. Text/structure
 mutation results include operation and block counts, diagnostics, a full source
 hash, and bounded readback ranges. Editor must read every returned range from
-the persisted or staged source before continuing; insertion-only text against a
+the live source before continuing; insertion-only text against a
 non-empty manuscript remains legal but returns the non-blocking
 `MANUSCRIPT_INSERT_WITHOUT_REPLACEMENT` warning.
 Page and cover scenes use persisted, hashed, expiring, project/conversation-
@@ -276,8 +279,9 @@ narrative evidence, and bounded canonical visuals. It does not mutate canon,
 outline, manuscript, or publishing state.
 
 Research combines bounded project/direct-reference reads with configured web
-search, safe cached page reads, image/source promotion, and staged graph
-mutations. Search and fetch security remains in Research services. Its activity
+search, safe cached page reads, image/source promotion, and direct graph
+mutations through Research services. Search and fetch security remains in
+Research services. Its activity
 view derives from touched entities and accessed cached sources rather than a
 separate assistant-authored log.
 
@@ -297,48 +301,71 @@ profile versions, ISBN invention, and vendor-acceptance claims are unavailable.
 
 ### Review Edits and approval
 
-Reviewable tool mutations persist as `AiChangeBatch` and `AiChange` rows.
-Outline and Research stage canon/structure changes through their feature staging
-contexts. Editor manuscript changes can write directly or enter an in-memory
-projected overlay when Review Edits is enabled. `IAiChangeApprovalService` is
-the single approval/rejection boundary; it enforces dependencies, revision and
-semantic concurrency, reconnects approved Editor changes to their originating
-authoring-history turn batch, and leaves genuine conflicts visible and
-rejectable.
+Review Edits is a project workflow preference, not a second manuscript or
+overlay store. The top bar places the Review Edits toggle beside Checkpoint and
+shows Pending changes with its count. Enabling the toggle keeps existing dirty
+work and lets assistant tools mutate live SQLite without checkpointing. When it
+is disabled, a completed mutating assistant turn checkpoints the complete live
+project; read-only and no-op turns do not checkpoint. The shared checkpoint
+adapter checks the preference itself, so image and Publish callers cannot bypass
+the policy. A checkpoint failure stays visible and leaves the project dirty and
+reviewable.
 
-Only plain paragraph/scene-break changes use the line-oriented Editor Review
-tab. Figure, Designed Page, inline formatting, named-style, semantic-structure,
-or other visual changes remain in the pending-edits modal with distinct text,
-structure, and visual diffs. A staged Designed Page preallocates its composition
-and block IDs, and acceptance creates its manuscript reference, composition, and
-exact authoring variant atomically. Artwork placement remains a separate
-revision-checked mutation using an already-completed image.
+Pending Review compares Git HEAD with the current live state. Its chooser lists
+affected `(chapter, Core|edition)` targets and an Other changes aggregate rather
+than individual assistant batches. The Review page is the full manuscript review
+surface: it groups semantic text edits by stable block ID, supports inline text
+editing and Approve/Undo, and keeps insertions, deletions, moves, formatting,
+Figures, and Designed Pages semantic. Figure metadata includes editable
+captions; Designed Pages expose visual before/after previews. Partial approval
+creates a `ReviewApproval` checkpoint for selected live semantic groups; Approve
+All checkpoints the complete live snapshot. Operations reject stale Git HEAD,
+live-manuscript, or contest tokens.
 
-The pending-edits modal distinguishes one resource group, its originating batch,
-and the complete pending set. Its global keep action submits every currently
-pending, conflict-free change through one `ApplyChangesAsync` call so batches
-retain chronological ordering while sharing index deferral, post-apply refresh,
-and one assistant checkpoint per affected surface. A failure in one batch does
-not prevent independent later batches from being attempted: successful changes
-are checkpointed, failed changes remain conflicted and reviewable, and the modal
-reloads durable statuses after both complete and partial application. Known
-conflicts disable the global action until they are rejected; resource- and
-batch-scoped keep/reject controls remain available for focused review.
+A clean chapter/target opens Last approved mode. The service finds the newest
+affecting approved commit (cached by HEAD SHA, chapter, and target) and compares
+that commit with its parent. Historical Undo writes the parent value into live
+SQLite and therefore creates a normal pending reversal. Manuscript groups and
+chapter-owned Designed Pages support historical undo; composition restore also
+repairs or refuses coupled manuscript references so it cannot orphan a Designed
+Page block. Other changes display only current pending work. There is no
+semantic-manuscript warning or plain-text normalization path.
 
-Repository updates for review rows attach or update only the intended root.
-Detached `Batch.Changes` graphs must never be attached during status changes.
-Reads are no-tracking; mutations reuse the locally tracked root inside one short
-write operation and dispose it immediately after commit.
+Repository review operations use the project mutation and database write
+boundaries, retain concurrency tokens, and leave any failed or stale operation
+visible for recovery. Approved work advances Git; unapproved local work remains
+dirty and blocks push or checkout until it is approved or undone.
 
 ### Contest Mode and revision workers
 
-Contest Mode remains a one-chapter terminal context and exact target/chapter
-manuscript snapshot, then runs independent selected models without tools; it does
-not expose the multi-chapter revision-worker workflow. Candidate raw responses
-and validated semantic operation proposals persist independently. The
-Review workspace is reachable while the batch runs, streams candidate status,
-and allows explicit per-candidate resolution. Keeping the chat component mounted
-while its pane is hidden preserves the live subscription.
+Contest Mode is a one-chapter, exact-target review context with one durable
+candidate draft per configured provider/model. The Review page shows an
+equal-width, keyboard-accessible selector containing only configured slots
+(`Contest 1 | Contest 2 | Contest 3`); running candidates show progress, failed
+candidates are disabled with their error, and completed candidates are
+selectable. The selected candidate persists, defaulting to the first completed
+candidate. The page renders only that candidate's semantic diff against the
+captured contest original.
+
+Each completed candidate has an independent draft. Inline text edits, rejected
+text rows, Figure caption edits, and supported semantic formatting stay in that
+candidate; switching candidates never mixes changes or writes directly to the
+live manuscript. Structural operations remain atomic, and Reset candidate
+restores the generated proposal. Resolve with selected result is available only
+after every configured candidate is completed, failed, or invalid. Resolution
+checks the captured original revision/hash, applies the selected draft
+atomically, marks all candidates resolved, releases the project-wide Editor
+lock, and leaves the result as a normal pending Git-backed change. Discard keeps
+the original live manuscript. A running contest must be cancelled through an
+application-owned confirmation first, and Discard remains available when every
+candidate fails.
+
+While a contest is running or awaiting resolution, the entire Editor is locked:
+manual manuscript, layout, Figure, Designed Page, assistant, revision-worker,
+and new-contest mutations are rejected by owning services. Read-only navigation
+remains available with a persistent link back to the contested chapter's Review
+page. Candidate editing and resolution use the explicit contest-authorized path.
+The lock is restored at startup whenever an unresolved contest exists.
 
 The captured Contest system transcript excludes the automatic Current Chapter
 context item. Each candidate instead receives the exact batch-source
@@ -352,11 +379,11 @@ coordinator makes one call containing the complete set; one or two chapters use
 direct manuscript tools by default unless the user explicitly requests one
 two-chapter worker call. The coordinator validates assignments, persists the job
 and session records, runs bounded parallel workers, and receives only compact
-IDs, statuses, summaries, errors, and pending-change IDs. Full prompts,
+IDs, statuses, summaries, errors, and live-mutation summaries. Full prompts,
 operations, proposals, raw responses, and worker transcripts remain in durable
 session detail and never inflate the parent model result. This classification
-happens before any manuscript mutation, so Review Edits cannot stage a direct
-change that later blocks delegation for the same chapter.
+happens before any manuscript mutation, so the coordinator can assign verified
+targets without depending on a review overlay.
 
 Each session captures the active Editor turn's exact provider/model row before
 workers start. A worker resolves that explicit provider ID through normal chat
@@ -370,9 +397,9 @@ terminal-apply instruction; it may still perform needed read/search grounding.
 If its second response also omits tools, the session is Invalid with distinct
 empty-output or text-only detail. A partially successful job remains Completed
 when valid edits succeeded, but returns an error summary for every incomplete
-session alongside the full session details. Review Edits adopts completed worker
-changes through the exact acyclic pending-worker query rather than loading the
-full bidirectional batch graph in a no-tracking context. Cancellation durably
+session alongside the full session details. Completed worker mutations are
+reviewed as part of the Git HEAD-to-live comparison rather than adopted through
+a pending-worker query. Cancellation durably
 finalizes the job and sessions, returns that Cancelled result to the shared tool
 boundary, and lets the invocation layer stop the parent turn without a second
 service-level cancellation exception.
@@ -385,15 +412,14 @@ coordinator owns those operations. Figures are a semantic exception only within
 an assigned prose revision and do not independently trigger delegation. Its
 automatic manuscript context plus read/inspect tools use the same sparse
 projection and preserve absolute indexes, revision, source hash, and stable IDs.
-With Review Edits enabled,
-its pending change is correlated to the parent tool call and adopted into the
-active Editor overlay, while the stored chapter remains unchanged until
-approval. Core and release workers build automatic context, refresh, validate
-staleness, and apply against the same protected `EditorContentTarget` captured
-by the job; Core chapter JSON is never used as the concurrency check for a
-release worker. Because the worker mutation is terminal, the worker audits
-source-block disposition before submission and the parent Editor rereads the
-affected projected manuscript before reporting completion. The coordinator
+With Review Edits enabled, its live mutation remains uncheckpointed; with the
+preference disabled, the runner checkpoints the complete project. Core and
+release workers build automatic context, refresh, validate staleness, and apply
+against the same protected `EditorContentTarget` captured by the job; Core
+chapter JSON is never used as the concurrency check for a release worker.
+Because the worker mutation is terminal, the worker audits source-block
+disposition before submission and the parent Editor rereads the affected live
+manuscript before reporting completion. The coordinator
 cancels and awaits any outstanding progress read
 before disposing the async enumerator. Completion, cancellation, and failure
 must leave durable terminal state and no concurrent-disposal error.
@@ -405,13 +431,13 @@ must leave durable terminal state and no concurrent-disposal error.
 | [`Lorekeeper/ChatTurns/`](../../Lorekeeper/ChatTurns/) | Shared surface identity, active-turn lifetime, protocol engine, text-only replay, compaction, message-store boundary, and image attachments. |
 | [`Lorekeeper/Components/Chat/`](../../Lorekeeper/Components/Chat/) | Shared chat shell, model picker, transcript models/token projection, tool chips, and composer behavior. |
 | [`Lorekeeper/Llm/SystemPromptComposer.cs`](../../Lorekeeper/Llm/SystemPromptComposer.cs) and [`AssistantWorkflowInstructions.cs`](../../Lorekeeper/Llm/AssistantWorkflowInstructions.cs) | One system-role prompt pipeline and code-owned cross-surface workflow/tool rules. |
-| [`Lorekeeper/Outline/OutlineCollaborationService.cs`](../../Lorekeeper/Outline/OutlineCollaborationService.cs), [`OutlineCollaborationTools.cs`](../../Lorekeeper/Outline/OutlineCollaborationTools.cs), working-context/staging/approval helpers, and [`OutlineChatTurnRunner.cs`](../../Lorekeeper/Outline/OutlineChatTurnRunner.cs) | Outline assistant adapter, automatic context, structural/canon tools, review staging/approval, diffs, and turn updates. |
-| [`Lorekeeper/EditorChat/`](../../Lorekeeper/EditorChat/) | Editor adapter/tools, one-step revision-safe manuscript apply, Review staging, contests, revision jobs/workers, and active-turn updates. |
+| [`Lorekeeper/Outline/OutlineCollaborationService.cs`](../../Lorekeeper/Outline/OutlineCollaborationService.cs), [`OutlineCollaborationTools.cs`](../../Lorekeeper/Outline/OutlineCollaborationTools.cs), and [`OutlineChatTurnRunner.cs`](../../Lorekeeper/Outline/OutlineChatTurnRunner.cs) | Outline assistant adapter, automatic context, direct structural/canon mutations, and turn updates. |
+| [`Lorekeeper/EditorChat/`](../../Lorekeeper/EditorChat/) | Editor adapter/tools, one-step revision-safe manuscript apply, Git-backed Review page, contests, revision jobs/workers, and active-turn updates. |
 | [`Lorekeeper/Writing/`](../../Lorekeeper/Writing/) | Writing Coach service, read-only tool catalog, runner, and writing-sample application boundary. |
 | [`Lorekeeper/Research/ResearchService.cs`](../../Lorekeeper/Research/ResearchService.cs), [`ResearchTools.cs`](../../Lorekeeper/Research/ResearchTools.cs), [`ResearchChatTurnRunner.cs`](../../Lorekeeper/Research/ResearchChatTurnRunner.cs), and [`ResearchTurnUpdate.cs`](../../Lorekeeper/Research/ResearchTurnUpdate.cs) | Research chat adapter/tools, streaming, and turn lifetime; guarded fetch and cached-source ownership remain in providers and narrative context. |
 | [`Lorekeeper/ImagesChat/`](../../Lorekeeper/ImagesChat/) | Images assistant, turn context, visual-canon tools, job reconnection, and streaming updates. |
 | [`Lorekeeper/Publish/PublishChatService.cs`](../../Lorekeeper/Publish/PublishChatService.cs), [`PublishChatTurnRunner.cs`](../../Lorekeeper/Publish/PublishChatTurnRunner.cs), and [`PublishTurnUpdate.cs`](../../Lorekeeper/Publish/PublishTurnUpdate.cs) | Publish conversation, protected visible-target context, turn lifetime, and refresh updates; the publication chapter owns its domain tool catalog. |
-| Conversation/message, `AiChange*`, `Contest*`, and `EditorRevision*` models and repositories | Durable transcript, model-selection, review, contest, and worker audit boundaries for all six surfaces. |
+| Conversation/message, `Contest*`, and `EditorRevision*` models and repositories | Durable transcript, model-selection, independent contest drafts, and worker audit boundaries; Git owns approved and pending creative review state. |
 | Assistant `*ChatPanel.razor` components under `Lorekeeper/Components/Pages/Projects/` | Thin adapters that hydrate transcripts, subscribe to active turns, render review/progress state, and route mutation notices to owning workspaces. |
 
 ## Related chapters
@@ -421,7 +447,7 @@ must leave durable terminal state and no concurrent-disposal error.
   and automatic context projections.
 - [manuscript-authoring.md](manuscript-authoring.md) owns manuscript operations,
   editor targets, annotations, Book Text Styles, process-lifetime manual
-  Undo/Redo, and durable Review Edits baselines. Successful assistant mutations
+  Undo/Redo, and Git-backed Review Edits. Successful assistant mutations
   invalidate affected manual history and are not themselves undoable.
 - [providers-background.md](providers-background.md) owns provider resolution,
   OAuth, wire compatibility, request limits, and non-chat background queues.
@@ -449,15 +475,16 @@ must leave durable terminal state and no concurrent-disposal error.
   and audit rows remain intact, replay stays text-only, and exhausted eligible
   results fail closed before another provider request.
 - For tool changes, inspect schemas, prompt guidance, result shapes, mutation
-  notices, staging/revision checks, persistence, UI refresh consumers, and the
+  notices, owning-service revision checks, persistence, UI refresh consumers, and the
   owning manual service path together.
 - For manuscript text/structure mutations, confirm insertion-only work warns
   without being rejected, returned readback ranges include adjacent context and
-  stay within the 100-block read limit, staged and persisted reads match the
-  returned revision/hash, and corrections use a fresh operation batch.
-- For Review/Contest/revision changes, confirm dependency handling, exact target
-  ownership, durable terminal state, visible unresolved conflicts, projected
-  overlays, authoring-history correlation, and cancellation cleanup.
+  stay within the 100-block read limit, live reads match the returned
+  revision/hash, and corrections use a fresh operation batch.
+- For Review/Contest/revision changes, confirm Git HEAD-to-live and historical
+  modes, semantic grouping, stale-token rejection, exact target ownership,
+  durable candidate drafts, project-wide Editor locking, terminal state,
+  resolution/discard behavior, and cancellation cleanup.
 - Do not add ordinary assistant, UI, editor, or service automated tests. Use
   compilation, static inspection, and explicitly authorized manual integration
   checks; migration-only persistence changes may use the approved migration

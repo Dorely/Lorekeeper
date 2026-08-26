@@ -34,8 +34,174 @@ public sealed class ProjectVersionRestoreService(
     IGraphStore graph,
     IGraphAutoLinkService autoLinks,
     IProjectSearchIndex searchIndex,
-    IGitRepositoryStore? git = null) : IProjectVersionRestoreService
+    IGitRepositoryStore? git = null,
+    ProjectVersionHistoryService? historyService = null,
+    ProjectVersionHistoryUiEvents? historyEvents = null) : IProjectVersionRestoreService
 {
+    public async Task RestoreReviewOtherAsync(
+        Guid projectId,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        CancellationToken cancellationToken = default)
+    {
+        if (projectId == Guid.Empty)
+            throw new ArgumentException("A project ID is required.", nameof(projectId));
+        ArgumentNullException.ThrowIfNull(expectedToken);
+
+        var warnings = new List<string>();
+        var unresolved = new List<VersionHistoryUnresolvedReference>();
+        VersionHistorySnapshotPayload restorePayload;
+        var historyCoordinator = historyService ?? history as ProjectVersionHistoryService
+            ?? throw new InvalidOperationException("Scoped review restore requires the project version-history service implementation.");
+        await using (var mutationLease = await projectMutations.AcquireAsync(projectId, cancellationToken))
+        {
+            var context = await historyCoordinator.LoadReviewSnapshotUnderLeaseAsync(projectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectId} has no version-history repository.");
+            EnsureReviewTokenMatches(context.Status, expectedToken);
+
+            var approved = context.Approved;
+            var current = context.Current;
+            ValidateWholePayload(approved.Payload);
+            ValidateWholePayload(current.Payload);
+            restorePayload = SynthesizeOtherReviewRestore(approved.Payload, current.Payload);
+            ValidateWholePayload(restorePayload);
+            warnings.Add("Restored non-manuscript project state to the approved review head; live manuscript targets were preserved.");
+
+            await using var operation = await database.OpenWriteAsync(cancellationToken);
+            await using var transaction = await operation.Db.Database.BeginTransactionAsync(cancellationToken);
+            var db = operation.Db;
+            await ValidateDatabaseIdentityAsync(db, restorePayload, cancellationToken);
+            await RefuseQueuedWorkAsync(db, projectId, cancellationToken);
+            await ClearOperationalStateAsync(db, projectId, cancellationToken);
+            await ReplaceCanonicalStateAsync(db, restorePayload, unresolved, warnings, cancellationToken);
+            await operation.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        await RebuildProjectionsAsync(projectId, restorePayload, warnings, CancellationToken.None);
+        (historyEvents ?? throw new InvalidOperationException("Scoped review restore requires the review event publisher.")).PublishReviewStateChanged(projectId);
+    }
+
+    public Task RestoreReviewCompositionAsync(
+        Guid projectId,
+        ProjectVersionReviewTarget target,
+        Guid compositionId,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        CancellationToken cancellationToken = default)
+    {
+        if (projectId == Guid.Empty)
+            throw new ArgumentException("A project ID is required.", nameof(projectId));
+        ArgumentNullException.ThrowIfNull(target);
+        ValidateReviewTarget(target);
+        if (compositionId == Guid.Empty)
+            throw new ArgumentException("A composition ID is required.", nameof(compositionId));
+        ArgumentNullException.ThrowIfNull(expectedToken);
+
+        return RestoreCompositionAsync(
+            projectId,
+            target,
+            compositionId,
+            expectedToken,
+            historicalCommitSha: null,
+            cancellationToken);
+    }
+
+    public Task RestoreHistoricalCompositionAsync(
+        Guid projectId,
+        ProjectVersionReviewTarget target,
+        Guid compositionId,
+        string historicalCommitSha,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        CancellationToken cancellationToken = default)
+    {
+        if (projectId == Guid.Empty)
+            throw new ArgumentException("A project ID is required.", nameof(projectId));
+        ArgumentNullException.ThrowIfNull(target);
+        ValidateReviewTarget(target);
+        if (compositionId == Guid.Empty)
+            throw new ArgumentException("A composition ID is required.", nameof(compositionId));
+        if (string.IsNullOrWhiteSpace(historicalCommitSha))
+            throw new ArgumentException("A historical parent commit SHA is required.", nameof(historicalCommitSha));
+        ArgumentNullException.ThrowIfNull(expectedToken);
+
+        return RestoreCompositionAsync(
+            projectId,
+            target,
+            compositionId,
+            expectedToken,
+            historicalCommitSha,
+            cancellationToken);
+    }
+
+    private async Task RestoreCompositionAsync(
+        Guid projectId,
+        ProjectVersionReviewTarget target,
+        Guid compositionId,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        string? historicalCommitSha,
+        CancellationToken cancellationToken)
+    {
+
+        var warnings = new List<string>();
+        var unresolved = new List<VersionHistoryUnresolvedReference>();
+        VersionHistorySnapshotPayload restorePayload;
+        var historyCoordinator = historyService ?? history as ProjectVersionHistoryService
+            ?? throw new InvalidOperationException("Scoped review restore requires the project version-history service implementation.");
+
+        await using (var mutationLease = await projectMutations.AcquireAsync(projectId, cancellationToken))
+        {
+            var context = await historyCoordinator.LoadReviewSnapshotUnderLeaseAsync(projectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectId} has no version-history repository.");
+            EnsureReviewTokenMatches(context.Status, expectedToken);
+
+            var approved = context.Approved;
+            var current = context.Current;
+            ValidateWholePayload(approved.Payload);
+            ValidateWholePayload(current.Payload);
+            VersionHistorySnapshotPayload sourcePayload;
+            if (historicalCommitSha is null)
+            {
+                sourcePayload = approved.Payload;
+            }
+            else
+            {
+                sourcePayload = historyCoordinator.LoadCheckpointUnderLease(
+                    context.Status.Repository.RepositoryId,
+                    historicalCommitSha,
+                    projectId,
+                    cancellationToken).Payload;
+                ValidateWholePayload(sourcePayload);
+            }
+
+            ValidateManuscriptCompositionReferences(approved.Payload);
+            ValidateManuscriptCompositionReferences(current.Payload);
+            ValidateManuscriptCompositionReferences(sourcePayload);
+            restorePayload = SynthesizeCompositionRestore(
+                sourcePayload,
+                current.Payload,
+                target,
+                compositionId);
+            ValidateWholePayload(restorePayload);
+            ValidateManuscriptCompositionReferences(restorePayload);
+
+            warnings.Add(historicalCommitSha is null
+                ? "Restored the selected Designed Page to the approved review head; all other live project state was preserved."
+                : "Restored the selected Designed Page to its historical parent snapshot; all other live project state was preserved.");
+
+            await using var operation = await database.OpenWriteAsync(cancellationToken);
+            await using var transaction = await operation.Db.Database.BeginTransactionAsync(cancellationToken);
+            var db = operation.Db;
+            await ValidateDatabaseIdentityAsync(db, restorePayload, cancellationToken);
+            await RefuseQueuedWorkAsync(db, projectId, cancellationToken);
+            await ClearOperationalStateAsync(db, projectId, cancellationToken);
+            await ReplaceCanonicalStateAsync(db, restorePayload, unresolved, warnings, cancellationToken);
+            await operation.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        await RebuildProjectionsAsync(projectId, restorePayload, warnings, CancellationToken.None);
+        (historyEvents ?? throw new InvalidOperationException("Scoped review restore requires the review event publisher.")).PublishReviewStateChanged(projectId);
+    }
+
     public async Task<VersionHistoryRestoreResult> RestoreAsync(
         Guid projectId,
         string targetCommitSha,
@@ -155,7 +321,9 @@ public sealed class ProjectVersionRestoreService(
                 Slug = payload.Project.Project.Slug,
                 ProjectGuidance = payload.Project.Project.ProjectGuidance,
                 IncludeCurrentChapterInContext = payload.Project.Project.IncludeCurrentChapterInContext,
-                AiChangeApprovalEnabled = payload.Project.Project.AiChangeApprovalEnabled,
+                // Workflow policy is local state and is deliberately not
+                // restored from either current or legacy project snapshots.
+                ReviewEditsEnabled = false,
                 ContestModeEnabled = payload.Project.ContestModeEnabled,
                 CreatedAt = now,
                 UpdatedAt = now,
@@ -494,6 +662,347 @@ public sealed class ProjectVersionRestoreService(
         };
     }
 
+    private static VersionHistorySnapshotPayload SynthesizeOtherReviewRestore(
+        VersionHistorySnapshotPayload approved,
+        VersionHistorySnapshotPayload current)
+    {
+        if (approved.RepositoryId != current.RepositoryId || approved.ProjectId != current.ProjectId)
+            throw new VersionHistoryRestoreException(
+                "ProjectIdentityMismatch",
+                "The approved and live review snapshots do not share project identity.");
+
+        var approvedEditions = approved.Publication.PublicationEditions
+            .ToDictionary(edition => edition.Id);
+        var currentEditions = current.Publication.PublicationEditions
+            .ToDictionary(edition => edition.Id);
+        var editions = approved.Publication.PublicationEditions
+            .Select(approvedEdition => currentEditions.TryGetValue(approvedEdition.Id, out var liveEdition)
+                ? approvedEdition with { ChapterOverrides = liveEdition.ChapterOverrides.ToList() }
+                : approvedEdition)
+            // A newly-created edition has no approved metadata to restore to.
+            // Keep it intact so its live manuscript overrides are not silently
+            // discarded by an Other-only undo.
+            .Concat(current.Publication.PublicationEditions
+                .Where(edition => !approvedEditions.ContainsKey(edition.Id)))
+            .ToList();
+
+        return approved with
+        {
+            Narrative = approved.Narrative with
+            {
+                Chapters = current.Narrative.Chapters.ToList(),
+            },
+            Publication = approved.Publication with
+            {
+                PublicationEditions = editions,
+            },
+        };
+    }
+
+    private static VersionHistorySnapshotPayload SynthesizeCompositionRestore(
+        VersionHistorySnapshotPayload source,
+        VersionHistorySnapshotPayload current,
+        ProjectVersionReviewTarget target,
+        Guid compositionId)
+    {
+        if (source.RepositoryId != current.RepositoryId || source.ProjectId != current.ProjectId)
+            throw new VersionHistoryRestoreException(
+                "ProjectIdentityMismatch",
+                "The composition restore source and live snapshot do not share project identity.");
+
+        var currentComposition = FindUniqueComposition(current, compositionId, "live");
+        var sourceComposition = FindUniqueComposition(source, compositionId, "source");
+        if (currentComposition is null && sourceComposition is null)
+            throw new InvalidOperationException("The Designed Page no longer exists in either the live project or restore source.");
+        if (currentComposition is not null && !CompositionMatchesReviewTarget(currentComposition, target)
+            || sourceComposition is not null && !CompositionMatchesReviewTarget(sourceComposition, target))
+        {
+            throw new InvalidOperationException(
+                "The Designed Page does not belong to the reviewed chapter and content target.");
+        }
+        if (ProjectVersionReviewComposition.SemanticallyEquals(sourceComposition, currentComposition))
+            throw new InvalidOperationException("The Designed Page is already at the requested restore state.");
+
+        var liveCompositions = current.Composition.PageCompositions
+            .Where(item => item.Id != compositionId)
+            .ToList();
+        if (sourceComposition is not null)
+        {
+            var liveIndex = -1;
+            for (var index = 0; index < current.Composition.PageCompositions.Count; index++)
+            {
+                if (current.Composition.PageCompositions[index].Id == compositionId)
+                {
+                    liveIndex = index;
+                    break;
+                }
+            }
+
+            if (currentComposition is null || liveIndex < 0 || liveIndex > liveCompositions.Count)
+                liveCompositions.Add(sourceComposition);
+            else
+                liveCompositions.Insert(liveIndex, sourceComposition);
+        }
+
+        var restored = current with
+        {
+            Composition = current.Composition with
+            {
+                PageCompositions = liveCompositions,
+            },
+        };
+        if (sourceComposition is null)
+        {
+            var references = FindCompositionReferences(current, compositionId);
+            if (references.Any(reference => reference.Target != target))
+            {
+                throw new VersionHistoryRestoreException(
+                    "CompositionDependencyOutsideTarget",
+                    "The Designed Page is referenced by another manuscript target; restore was refused to preserve target isolation.");
+            }
+
+            if (references.SingleOrDefault() is { } reference)
+            {
+                var sourceDocument = FindSnapshotManuscriptDocument(source, target)
+                    ?? throw new VersionHistoryRestoreException(
+                        "CompositionDependencyTargetUnavailable",
+                        "The restore source does not contain the reviewed manuscript target needed to remove the Designed Page reference.");
+                var sourceBlocks = sourceDocument.Content.ToDictionary(block => block.Id, StringComparer.Ordinal);
+                var restoredBlocks = new List<ManuscriptBlock>(reference.Document.Content.Count);
+                foreach (var block in reference.Document.Content)
+                {
+                    if (block.Type == ManuscriptBlockType.DesignedPage
+                        && block.PageCompositionId == compositionId)
+                    {
+                        if (sourceBlocks.TryGetValue(block.Id, out var sourceBlock))
+                        {
+                            if (sourceBlock.Type == ManuscriptBlockType.DesignedPage
+                                && sourceBlock.PageCompositionId == compositionId)
+                            {
+                                throw new VersionHistoryRestoreException(
+                                    "AmbiguousCompositionDependency",
+                                    "The restore source still contains the selected Designed Page reference, so the coupled manuscript change is ambiguous.");
+                            }
+
+                            restoredBlocks.Add(sourceBlock);
+                        }
+
+                        continue;
+                    }
+
+                    restoredBlocks.Add(block);
+                }
+
+                var restoredDocument = reference.Document with
+                {
+                    Revision = checked(reference.Document.Revision + 1),
+                    Content = restoredBlocks,
+                };
+                restored = ReplaceSnapshotManuscriptDocument(
+                    restored,
+                    target,
+                    restoredDocument);
+            }
+        }
+
+        return restored;
+    }
+
+    private static ProjectExportPageComposition? FindUniqueComposition(
+        VersionHistorySnapshotPayload payload,
+        Guid compositionId,
+        string snapshotLabel)
+    {
+        var matches = payload.Composition.PageCompositions
+            .Where(item => item.Id == compositionId)
+            .ToList();
+        if (matches.Count > 1)
+        {
+            throw new VersionHistoryRestoreException(
+                "DuplicateCompositionIdentity",
+                $"The {snapshotLabel} snapshot contains duplicate identity for the selected Designed Page.");
+        }
+
+        return matches.SingleOrDefault();
+    }
+
+    private static IReadOnlyList<SnapshotManuscriptDocument> FindCompositionReferences(
+        VersionHistorySnapshotPayload payload,
+        Guid compositionId) =>
+        EnumerateSnapshotManuscriptDocuments(payload)
+            .Where(item => item.Document.Content.Any(block =>
+                block.Type == ManuscriptBlockType.DesignedPage
+                && block.PageCompositionId == compositionId))
+            .ToList();
+
+    private static ManuscriptDocument? FindSnapshotManuscriptDocument(
+        VersionHistorySnapshotPayload payload,
+        ProjectVersionReviewTarget target)
+    {
+        if (target.ContentTarget.IsCore)
+        {
+            var chapter = payload.Narrative.Chapters.SingleOrDefault(item => item.Id == target.ChapterId);
+            return chapter is null
+                ? null
+                : ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);
+        }
+
+        var edition = payload.Publication.PublicationEditions
+            .SingleOrDefault(item => item.Id == target.ContentTarget.EditionId);
+        if (edition is null)
+            return null;
+
+        var chapterOverride = edition.ChapterOverrides
+            .SingleOrDefault(item => item.ChapterId == target.ChapterId);
+        if (chapterOverride is not null)
+        {
+            return ManuscriptCodec.Deserialize(
+                chapterOverride.ManuscriptJson,
+                chapterOverride.ChapterId,
+                chapterOverride.Revision);
+        }
+
+        var coreChapter = payload.Narrative.Chapters.SingleOrDefault(item => item.Id == target.ChapterId);
+        return coreChapter is null
+            ? null
+            : ManuscriptCodec.Deserialize(coreChapter.ManuscriptJson, coreChapter.Id, coreChapter.ManuscriptRevision);
+    }
+
+    private static VersionHistorySnapshotPayload ReplaceSnapshotManuscriptDocument(
+        VersionHistorySnapshotPayload payload,
+        ProjectVersionReviewTarget target,
+        ManuscriptDocument document)
+    {
+        var serialized = ManuscriptCodec.Serialize(document);
+        if (target.ContentTarget.IsCore)
+        {
+            var chapters = payload.Narrative.Chapters
+                .Select(chapter => chapter.Id == target.ChapterId
+                    ? chapter with
+                    {
+                        ManuscriptJson = serialized,
+                        ManuscriptRevision = document.Revision,
+                    }
+                    : chapter)
+                .ToList();
+            return payload with
+            {
+                Narrative = payload.Narrative with { Chapters = chapters },
+            };
+        }
+
+        var editions = payload.Publication.PublicationEditions
+            .Select(edition => edition.Id == target.ContentTarget.EditionId
+                ? edition with
+                {
+                    ChapterOverrides = edition.ChapterOverrides
+                        .Select(chapterOverride => chapterOverride.ChapterId == target.ChapterId
+                            ? chapterOverride with
+                            {
+                                ManuscriptJson = serialized,
+                                Revision = document.Revision,
+                            }
+                            : chapterOverride)
+                        .ToList(),
+                }
+                : edition)
+            .ToList();
+        return payload with
+        {
+            Publication = payload.Publication with { PublicationEditions = editions },
+        };
+    }
+
+    private static void ValidateManuscriptCompositionReferences(VersionHistorySnapshotPayload payload)
+    {
+        var compositionIds = payload.Composition.PageCompositions
+            .Select(item => item.Id)
+            .ToHashSet();
+        foreach (var manuscript in EnumerateSnapshotManuscriptDocuments(payload))
+        {
+            foreach (var block in manuscript.Document.Content)
+            {
+                if (block.Type == ManuscriptBlockType.DesignedPage
+                    && block.PageCompositionId is Guid compositionId
+                    && !compositionIds.Contains(compositionId))
+                {
+                    throw new VersionHistoryRestoreException(
+                        "MissingCompositionDependency",
+                        $"Manuscript target '{manuscript.Target.ContentTarget.StorageKey}' references missing Designed Page composition '{compositionId:N}'.");
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<SnapshotManuscriptDocument> EnumerateSnapshotManuscriptDocuments(
+        VersionHistorySnapshotPayload payload)
+    {
+        foreach (var chapter in payload.Narrative.Chapters)
+        {
+            yield return new SnapshotManuscriptDocument(
+                new ProjectVersionReviewTarget(chapter.Id, EditorContentTarget.Core),
+                ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision));
+        }
+
+        foreach (var edition in payload.Publication.PublicationEditions)
+        {
+            foreach (var chapterOverride in edition.ChapterOverrides)
+            {
+                yield return new SnapshotManuscriptDocument(
+                    new ProjectVersionReviewTarget(
+                        chapterOverride.ChapterId,
+                        EditorContentTarget.ForEdition(edition.Id)),
+                    ManuscriptCodec.Deserialize(
+                        chapterOverride.ManuscriptJson,
+                        chapterOverride.ChapterId,
+                        chapterOverride.Revision));
+            }
+        }
+    }
+
+    private sealed record SnapshotManuscriptDocument(
+        ProjectVersionReviewTarget Target,
+        ManuscriptDocument Document);
+
+    private static void EnsureReviewTokenMatches(
+        ProjectVersionStatusView status,
+        ProjectVersionReviewConcurrencyToken expectedToken)
+    {
+        if (status.Repository.RepositoryId != expectedToken.RepositoryId
+            || !string.Equals(status.Repository.HeadCommitSha, expectedToken.HeadCommitSha, StringComparison.Ordinal)
+            || !string.Equals(status.Repository.HeadContentHash, expectedToken.HeadContentHash, StringComparison.Ordinal)
+            || !string.Equals(status.CurrentContentHash, expectedToken.CurrentContentHash, StringComparison.Ordinal))
+        {
+            throw new ProjectVersionReviewConcurrencyException(
+                "The project changed after this review was loaded. Reload the review before continuing.");
+        }
+    }
+
+    private static void ValidateReviewTarget(ProjectVersionReviewTarget target)
+    {
+        if (target.ChapterId == Guid.Empty)
+            throw new ArgumentException("A review target must identify a chapter.", nameof(target));
+        if (!Enum.IsDefined(target.ContentTarget.Kind))
+            throw new ArgumentException("The review content target is invalid.", nameof(target));
+        if (target.ContentTarget.IsCore)
+        {
+            if (target.ContentTarget.EditionId is not null)
+                throw new ArgumentException("The Core review target cannot include an edition ID.", nameof(target));
+            return;
+        }
+
+        if (target.ContentTarget.EditionId is not Guid editionId || editionId == Guid.Empty)
+            throw new ArgumentException("An edition review target requires an edition ID.", nameof(target));
+    }
+
+    private static bool CompositionMatchesReviewTarget(
+        ProjectExportPageComposition composition,
+        ProjectVersionReviewTarget target) =>
+        composition.ChapterId == target.ChapterId
+        && (target.ContentTarget.IsCore
+            ? composition.EditionId is null
+            : composition.EditionId == target.ContentTarget.EditionId);
+
     private static VersionHistorySnapshotNarrativeArea MergeSelectedChapters(
         VersionHistorySnapshotNarrativeArea current,
         VersionHistorySnapshotNarrativeArea target,
@@ -716,7 +1225,10 @@ public sealed class ProjectVersionRestoreService(
                 && (item.Status == ProjectImportJobStatus.Queued || item.Status == ProjectImportJobStatus.Running), cancellationToken)
             || await db.EditorRevisionJobs.AnyAsync(item => item.ProjectId == projectId
                 && (item.Status == EditorRevisionJobStatus.Queued || item.Status == EditorRevisionJobStatus.Running), cancellationToken)
-            || await db.ContestBatches.AnyAsync(item => item.ProjectId == projectId && item.Status == ContestBatchStatus.Running, cancellationToken)
+            || await db.ContestBatches.AnyAsync(item => item.ProjectId == projectId
+                && (item.Status == ContestBatchStatus.Running
+                    || item.Status == ContestBatchStatus.Completed
+                    || item.Status == ContestBatchStatus.Failed), cancellationToken)
             || await db.ProjectImageGenerationJobs.AnyAsync(item => item.ProjectId == projectId
                 && (item.Status == ProjectImageGenerationJobStatus.Queued || item.Status == ProjectImageGenerationJobStatus.Running), cancellationToken)
             || await db.PublicationPreparationJobs.AnyAsync(item => item.ProjectId == projectId
@@ -778,9 +1290,7 @@ public sealed class ProjectVersionRestoreService(
         await db.ProjectImageMessageVisuals.Where(item => item.Message.Conversation.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.SourceVisualCandidates.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.ProjectImageMasks.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
-        await db.AssistantReviewBaselines.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.ProjectImageGenerationJobs.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
-        await db.AiChangeBatches.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.ContestBatches.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.EditorRevisionJobs.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
         await db.ProjectImportJobs.Where(item => item.ProjectId == projectId).ExecuteDeleteAsync(cancellationToken);
@@ -843,7 +1353,9 @@ public sealed class ProjectVersionRestoreService(
         project.Slug = payload.Project.Project.Slug;
         project.ProjectGuidance = payload.Project.Project.ProjectGuidance;
         project.IncludeCurrentChapterInContext = payload.Project.Project.IncludeCurrentChapterInContext;
-        project.AiChangeApprovalEnabled = payload.Project.Project.AiChangeApprovalEnabled;
+        // Workflow policy is local state. Keep the existing project's value;
+        // schema-v1 snapshots may still contain the legacy input field, but it
+        // must never change this setting during restore.
         project.ContestModeEnabled = payload.Project.ContestModeEnabled;
         project.UpdatedAt = DateTime.UtcNow;
         if (payload.Project.PageSetup is { } setup)

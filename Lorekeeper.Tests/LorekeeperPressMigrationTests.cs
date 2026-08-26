@@ -154,13 +154,16 @@ public sealed class LorekeeperPressMigrationTests
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 await db.GetService<IMigrator>().MigrateAsync(PreviousMigration);
-                db.Projects.Add(new Project { Id = projectId, Name = "Existing", Slug = $"existing-{projectId:N}" });
-                db.Projects.Add(new Project
-                {
-                    Id = pictureProjectId,
-                    Name = "Installed picture book",
-                    Slug = $"picture-{pictureProjectId:N}",
-                });
+                await LegacyProjectSeed.InsertAsync(
+                    db,
+                    projectId,
+                    "Existing",
+                    $"existing-{projectId:N}");
+                await LegacyProjectSeed.InsertAsync(
+                    db,
+                    pictureProjectId,
+                    "Installed picture book",
+                    $"picture-{pictureProjectId:N}");
                 db.Acts.Add(new Act { Id = actId, ProjectId = projectId, Title = "Existing act" });
                 db.ManuscriptStyleDefinitions.Add(new ManuscriptStyleDefinition
                 {
@@ -564,6 +567,14 @@ public sealed class LorekeeperPressMigrationTests
                 var authoringJournal = await db.ManuscriptMigrationJournals.AsNoTracking()
                     .SingleAsync(item => item.MigrationName == AuthoringPageMigrationService.MigrationName);
                 Assert.Contains("\"restoredPicturePages\":1", authoringJournal.ValidationReportJson, StringComparison.Ordinal);
+                var retiredReviewTables = await db.Database.SqlQueryRaw<int>(
+                    """
+                    SELECT COUNT(*) AS Value
+                    FROM sqlite_master
+                    WHERE type = 'table'
+                      AND name IN ('AiChanges', 'AiChangeBatches', 'AssistantReviewBaselines')
+                    """).SingleAsync();
+                Assert.Equal(0, retiredReviewTables);
                 Assert.False((await recovery.GetStateAsync()).RecoveryRequired);
             }
         }

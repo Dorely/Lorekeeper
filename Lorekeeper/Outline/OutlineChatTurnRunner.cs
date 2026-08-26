@@ -44,9 +44,12 @@ public sealed class OutlineChatTurnRunner(
         await using var scope = scopeFactory.CreateAsyncScope();
         var chat = scope.ServiceProvider.GetRequiredService<IOutlineCollaborationService>();
         var checkpoints = scope.ServiceProvider.GetRequiredService<IAssistantVersionCheckpointService>();
+        var mutated = false;
         await foreach (var update in chat.SendAsync(projectId, userText, imageIds, providerId, cancellationToken))
         {
-            if (update is AssistantMessageCompleted)
+            if (update is OutlineMutated)
+                mutated = true;
+            if (update is AssistantMessageCompleted && mutated)
                 await checkpoints.TryCheckpointAsync(projectId, ChatTurnSurface.Outline, cancellationToken);
             yield return update;
         }

@@ -33,10 +33,9 @@ public class Project
     public bool IncludeCurrentChapterInContext { get; set; } = true;
 
     /// <summary>
-    /// When true, mutating AI tool calls are staged for user approval before they are
-    /// applied to the project's durable outline state.
+    /// When true, assistant edits participate in the Review Edits workflow.
     /// </summary>
-    public bool AiChangeApprovalEnabled { get; set; }
+    public bool ReviewEditsEnabled { get; set; }
 
     /// <summary>
     /// When true, editor chat prepares generation requests with read-only tools, then
@@ -79,7 +78,6 @@ public class Project
 
     public ICollection<ProjectImageChatAttachment> ProjectImageChatAttachments { get; set; } = [];
 
-    public ICollection<AiChangeBatch> AiChangeBatches { get; set; } = [];
 
     public ICollection<ContestBatch> ContestBatches { get; set; } = [];
 

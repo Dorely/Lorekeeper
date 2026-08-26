@@ -12,8 +12,6 @@ using Lorekeeper.Llm;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Outline;
-using Lorekeeper.Persistence;
-using Lorekeeper.Persistence.Repositories;
 using Lorekeeper.Publish;
 using Lorekeeper.Search;
 using Microsoft.EntityFrameworkCore;
@@ -24,7 +22,7 @@ using SkiaSharp;
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorChatTools(
-IAppDatabaseOperationFactory database, IActService acts,
+IActService acts,
     IChapterService chapters,
     IManuscriptService manuscripts,
     IManuscriptAnnotationService annotations,
@@ -95,7 +93,7 @@ IAppDatabaseOperationFactory database, IActService acts,
             tools.Add(AIFunctionFactory.Create(
                 method: (Guid annotationId, long expectedRevision) => CompleteManuscriptAnnotationAsync(context, annotationId, expectedRevision),
                 name: "complete_manuscript_annotation",
-                description: "Permanently complete one user review annotation in the protected selected Core/release target. Use only after applying the requested manuscript edit or when the user explicitly instructs you to complete it. This cannot create or rewrite user note text. With Review edits enabled, completion is staged and depends on the corresponding staged manuscript edit when one exists."));
+                description: "Permanently complete one user review annotation in the protected selected Core/release target. Use only after applying the requested manuscript edit or when the user explicitly instructs you to complete it. This cannot create or rewrite user note text."));
         }
 
         tools.AddRange([
@@ -159,17 +157,17 @@ IAppDatabaseOperationFactory database, IActService acts,
                 method: (string query, int topK = 10, string? type = null, string? parentId = null) =>
                     SearchEntitiesAsync(context, query, topK, type, parentId),
                 name: "search_entities",
-                description: "Compact entity discovery with full IDs, total/returned counts, completeness, labeled previews, and exact read_entity arguments. Review mode includes staged state."),
+                description: "Compact entity discovery with full IDs, total/returned counts, completeness, labeled previews, and exact read_entity arguments."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
                 name: "read_entity",
-                description: "Read one explicitly paginated graph entity by id, including properties, structured wiki data, all adjacent manual and AutoMention links, bounded relation context, and visible thumbnail chips for attached canonical visual references. Full identity fields and GUIDs are repeated on every page. Omit pageNumber for page 1 and follow nextPageArguments. When Review edits is enabled, returns the latest staged entity and link state from this turn. In normal editor chat, this also adds the entity's data—but not its graph relationships—to the active chapter's Context Feed."),
+                description: "Read one explicitly paginated graph entity by id, including properties, structured wiki data, all adjacent manual and AutoMention links, bounded relation context, and visible thumbnail chips for attached canonical visual references. Full identity fields and GUIDs are repeated on every page. Omit pageNumber for page 1 and follow nextPageArguments. In normal editor chat, this also adds the entity's data—but not its graph relationships—to the active chapter's Context Feed."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ListEntityLinksAsync(context, entityId, pageNumber),
                 name: "list_entity_links",
-                description: "List explicitly paginated graph links adjacent to an entity, including structural HasChild links and semantic story relationships. Full entity identity is repeated on every page; follow nextPageArguments until pagination.isComplete or hasNextPage is false. When Review edits is enabled, includes staged entity and link changes from this turn."),
+                description: "List explicitly paginated graph links adjacent to an entity, including structural HasChild links and semantic story relationships. Full entity identity is repeated on every page; follow nextPageArguments until pagination.isComplete or hasNextPage is false."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId) => ListEntityVisualExamplesAsync(context, entityId),
@@ -184,7 +182,7 @@ IAppDatabaseOperationFactory database, IActService acts,
                     "Read one paginated page of a chapter's current body with line numbers (0001: ...). " +
                     "Use chapter ids from the Context Feed outline when available; use list_chapters for missing ids, line counts, and page counts. " +
                     "Provide pageNumber to read a specific page of the full chapter; omit it to read page 1. " +
-                    "Always returns content plus pagination metadata. If this turn already staged an edit to the chapter, returns the latest staged body for this turn."),
+                     "Always returns content plus pagination metadata from the current persisted manuscript."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, string? blockId = null, int? pageNumber = null) =>
@@ -218,7 +216,7 @@ IAppDatabaseOperationFactory database, IActService acts,
                 name: "inspect_manuscript",
                 description:
                     "Validate a manuscript and structurally search all blocks by optional text, blockType, and semantic styleRole. " +
-                    "Returns at most 40 matching agent-manuscript-v1 rows plus bounded normalization/schema diagnostics, total counts, start, and hasMore. Review mode inspects the current staged manuscript."),
+                    "Returns at most 40 matching agent-manuscript-v1 rows plus bounded normalization/schema diagnostics, total counts, start, and hasMore from the current persisted manuscript."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, long expectedRevision, ManuscriptOperationInput[] operations) =>
@@ -226,7 +224,7 @@ IAppDatabaseOperationFactory database, IActService acts,
                 name: "apply_manuscript_operations",
                 description:
                     "Validate and apply one complete semantic manuscript operation set in a single revision-checked call. " + ManuscriptOperationInput.ToolOperationGuidance + " Use apply_manuscript_style for chapter-wide or repeated reusable styling. " +
-                    "Submit chapterId, expectedRevision, and each intended operation payload exactly once; in Review Edits mode the result is staged for approval, otherwise it is persisted immediately. " +
+                     "Submit chapterId, expectedRevision, and each intended operation payload exactly once; the validated result is persisted immediately and becomes part of the normal pending Git-backed review. " +
                     "The result returns operation and block counts, diagnostics, revision, full sourceHash, and exact readbackRanges. When requiresReadback=true, read every returned range and verify the revision, hash, ordering, and absence of superseded prose before continuing. A correction is a fresh operation set against that verified revision, never a replay of the earlier payload. Stale revisions and invalid operations fail closed."),
 
             AIFunctionFactory.Create(
@@ -499,11 +497,11 @@ IAppDatabaseOperationFactory database, IActService acts,
                 "Choose this path before any manuscript mutation: do not directly mutate a target assigned here or work through the first two targets directly. Call only after discovery, exact reads, and warranted canon/outline/entity mutations, in a separate assistant round and tool batch; do not combine it with discovery, search, read, or mutation tools. " +
                 "After workers finish, direct tools are reserved for specific verified corrections and coordinator-owned non-prose work against the resulting projected manuscript. " +
                 "Each item must include chapterId, reason, and chapter-specific instructions for semantic manuscript work. Workers may edit related Figures, but Figure-only work does not count toward the three-prose-chapter threshold; the coordinator owns reusable style, typography, Designed Page, layout, composition, and page-scene work. " +
-                $"Workers can alter only the {(context.ContentTarget.IsCore ? "Core" : "selected release")} chapter body; this coordinator reviews their completed/staged changes and takes follow-up action only if needed. " +
+                 $"Workers can alter only the {(context.ContentTarget.IsCore ? "Core" : "selected release")} chapter body; this coordinator reviews their completed live changes and takes follow-up action only if needed. " +
                 (context.ContentTarget.IsCore
                     ? "Before calling this, make only the broader canon, outline, entity, beat, relationship, fact, or synopsis updates warranted under the Editor continuity-memory discipline; no such mutation is required solely to delegate prose, and a prose revision alone does not authorize a broad post-draft update. "
                     : "Do not change shared outline, canon, entities, beats, relationships, facts, or synopses from this release target. ") +
-                "A successful worker result is already applied or staged; do not rerun it merely because persisted reads still show the pre-review manuscript."));
+                 "A successful worker result is already applied; do not rerun it merely because a stale read still shows the pre-revision manuscript."));
 
         if (context.ContentTarget.IsCore)
         {
@@ -511,7 +509,6 @@ IAppDatabaseOperationFactory database, IActService acts,
             foreach (var outlineTool in await outlineTools.BuildEditorSharedAsync(new OutlineCollaborationContext(
                 context.ProjectId,
                 context.OnMutated,
-                context.OutlineStaging,
                 bookBriefUpdatePolicy: BookBriefUpdatePolicy.ExplicitUserRequestOnly,
                 surface: OutlineToolSurface.Editor)))
             {
@@ -541,11 +538,7 @@ IAppDatabaseOperationFactory database, IActService acts,
         JsonSerializer.Serialize(
             new
             {
-                styles = ctx.ReviewEdits && ctx.EditorStaging is not null
-                    ? await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
-                        manuscriptStyles,
-                        ctx.TurnCancellationToken)
-                    : await manuscriptStyles.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken),
+                styles = await manuscriptStyles.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken),
             },
             ManuscriptCodec.JsonOptions);
 
@@ -594,10 +587,8 @@ IAppDatabaseOperationFactory database, IActService acts,
                 ? styles.FirstOrDefault(style => style.Id == currentId)
                     ?? throw new InvalidOperationException("The Book Text Style was not found.")
                 : null;
-            var stagedStyleId = styleId
-                ?? (ctx.ReviewEdits && ctx.EditorStaging is not null ? Guid.NewGuid() : null);
             var input = new ManuscriptStyleInput(
-                    stagedStyleId,
+                    styleId,
                     name,
                     parsedKind,
                     current?.SemanticRole ?? ManuscriptStyleService.RoleFromName(name),
@@ -688,24 +679,8 @@ IAppDatabaseOperationFactory database, IActService acts,
 
             var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken)
                 ?? throw new InvalidDataException("The chapter manuscript was not found.");
-            var sourceIsStaged = false;
-            ManuscriptDocument document;
-            if (ctx.ReviewEdits
-                && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var stagedDocument) == true)
-            {
-                document = stagedDocument;
-                sourceIsStaged = true;
-            }
-            else
-            {
-                document = snapshot.Document;
-            }
-
-            var styles = ctx.ReviewEdits && ctx.EditorStaging is not null
-                ? await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
-                    manuscriptStyles,
-                    ctx.TurnCancellationToken)
-                : await manuscriptStyles.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken);
+            var document = snapshot.Document;
+            var styles = await manuscriptStyles.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken);
             var preview = await chapterPreviews.RenderPageAsync(
                 ctx.ProjectId,
                 chapterId,
@@ -746,7 +721,7 @@ IAppDatabaseOperationFactory database, IActService acts,
                 pageCount = preview.PageCount,
                 pageLabel = preview.Page.PageLabel,
                 revision = document.Revision,
-                source = sourceIsStaged ? "stagedDraft" : "persisted",
+                source = "persisted",
                 dimensions = new { widthPixels = preview.PixelWidth, heightPixels = preview.PixelHeight },
                 visualId,
                 diagnostics = preview.Diagnostics.Take(12),
@@ -918,10 +893,7 @@ IAppDatabaseOperationFactory database, IActService acts,
             throw new InvalidOperationException("The chapter was not found in this project.");
         var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken)
             ?? throw new InvalidOperationException("The chapter manuscript was not found.");
-        var source = ctx.ReviewEdits
-            && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
-                ? staged
-                : snapshot.Document;
+        var source = snapshot.Document;
         if (source.Revision != expectedRevision)
             throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
         ManuscriptBlock block;
@@ -935,7 +907,7 @@ IAppDatabaseOperationFactory database, IActService acts,
         }
         var styles = await CurrentManuscriptStylesAsync(ctx);
         var input = new ManuscriptStyleInput(
-            ctx.ReviewEdits && ctx.EditorStaging is not null ? Guid.NewGuid() : null,
+            null,
             name,
             ManuscriptStyleKind.Paragraph,
             ManuscriptStyleService.RoleFromName(name),
@@ -958,10 +930,7 @@ IAppDatabaseOperationFactory database, IActService acts,
                 throw new InvalidOperationException("Choose a paragraph Book Text Style for manuscript blocks.");
             var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken)
                 ?? throw new InvalidOperationException("The chapter manuscript was not found.");
-            var source = ctx.ReviewEdits
-                && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
-                    ? staged
-                    : snapshot.Document;
+            var source = snapshot.Document;
             if (source.Revision != expectedRevision)
                 throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
             var operations = ManuscriptStyleTemplateExtractor.BuildApplyOperations(
@@ -1003,11 +972,7 @@ IAppDatabaseOperationFactory database, IActService acts,
     }
 
     private async Task<IReadOnlyList<ManuscriptStyleView>> CurrentManuscriptStylesAsync(EditorChatContext ctx) =>
-        ctx.ReviewEdits && ctx.EditorStaging is not null
-            ? await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
-                manuscriptStyles,
-                ctx.TurnCancellationToken)
-            : await manuscriptStyles.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken);
+        await manuscriptStyles.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken);
 
     private async Task<string> UpsertManuscriptStyleInputAsync(
         EditorChatContext ctx,
@@ -1015,31 +980,6 @@ IAppDatabaseOperationFactory database, IActService acts,
         ManuscriptStyleView? current,
         IReadOnlyList<ManuscriptStyleView> styles)
     {
-        if (ctx.ReviewEdits && ctx.EditorStaging is not null)
-        {
-            var preview = ManuscriptStyleService.PreviewUpsert(styles, input);
-            var payload = JsonSerializer.Serialize(
-                new
-                {
-                    ok = true,
-                    staged = true,
-                    targetId = preview.Id,
-                    revision = preview.Revision,
-                    preview.Name,
-                    kind = preview.Kind.ToString(),
-                    summary = $"Saved Book Text Style '{preview.Name}'.",
-                    mutation = new { kind = "manuscriptStyles" },
-                },
-                ManuscriptCodec.JsonOptions);
-            await ctx.EditorStaging.StageManuscriptStyleChangeAsync(
-                current,
-                input,
-                preview,
-                $"Upsert Book Text Style {preview.Name}",
-                payload,
-                ctx.TurnCancellationToken);
-            return payload;
-        }
         var style = await manuscriptStyles.UpsertAsync(
             ctx.ProjectId,
             input,
@@ -1062,38 +1002,6 @@ IAppDatabaseOperationFactory database, IActService acts,
         Guid styleId,
         long expectedRevision)
     {
-        if (ctx.ReviewEdits && ctx.EditorStaging is not null)
-        {
-            if (ctx.EditorStaging.HasStagedManuscriptEdits)
-            {
-                throw new InvalidOperationException(
-                    "Do not delete Book Text Styles in the same review turn as manuscript edits. "
-                    + "Apply or reject the manuscript changes first.");
-            }
-            var before = (await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
-                    manuscriptStyles,
-                    ctx.TurnCancellationToken))
-                .FirstOrDefault(style => style.Id == styleId)
-                ?? throw new InvalidOperationException("The Book Text Style was not found.");
-            if (before.Revision != expectedRevision)
-                throw new ManuscriptStyleConflictException(expectedRevision, before.Revision);
-            await manuscriptStyles.ValidateDeleteAsync(
-                ctx.ProjectId,
-                styleId,
-                expectedRevision,
-                ctx.TurnCancellationToken);
-            var payload = JsonSerializer.Serialize(
-                new { staged = true, deletedStyleId = styleId, expectedRevision },
-                ManuscriptCodec.JsonOptions);
-            await ctx.EditorStaging.StageManuscriptStyleChangeAsync(
-                before,
-                null,
-                null,
-                $"Delete Book Text Style {before.Name}",
-                payload,
-                ctx.TurnCancellationToken);
-            return payload;
-        }
         await manuscriptStyles.DeleteAsync(
             ctx.ProjectId,
             styleId,
@@ -1356,11 +1264,6 @@ IAppDatabaseOperationFactory database, IActService acts,
             var chapter = await chapters.GetAsync(assignment.ChapterId);
             if (chapter is null || chapter.ProjectId != ctx.ProjectId)
                 return $"Error: chapter {assignment.ChapterId} not found in this project.";
-            if (ctx.ReviewEdits
-                && ctx.EditorStaging?.TryGetChapterManuscriptDraft(assignment.ChapterId, out _) == true)
-            {
-                return $"Error: chapter {assignment.ChapterId:N} already has a staged manuscript revision in this turn. Review the existing staged change instead of starting another revision worker.";
-            }
         }
 
         var selection = await providerService.ResolveChatModelSelectionAsync(ctx.ProviderId, ctx.TurnCancellationToken);
@@ -1380,25 +1283,6 @@ IAppDatabaseOperationFactory database, IActService acts,
         var result = await revisionAgents.RunAsync(request, ctx.TurnCancellationToken);
         if (result.Status == EditorRevisionJobStatus.Cancelled || ctx.TurnCancellationToken.IsCancellationRequested)
             return EditorRevisionAgentService.SerializeRunResult(result);
-
-        if (ctx.ReviewEdits && ctx.EditorStaging is not null)
-        {
-            await using var databaseOperation = await database.OpenReadAsync(ctx.TurnCancellationToken);
-            var aiChanges = databaseOperation.Repositories.AiChanges;
-            var pendingChanges = await aiChanges.ListPendingRevisionWorkerChangesAsync(
-                ctx.ProjectId,
-                ctx.ConversationId,
-                ctx.CurrentAssistantMessageId,
-                ctx.CurrentToolCallId,
-                ctx.TurnCancellationToken);
-            var pendingChangesById = pendingChanges.ToDictionary(change => change.Id);
-            foreach (var changeId in result.PendingChangeIds)
-            {
-                if (!pendingChangesById.TryGetValue(changeId, out var change))
-                    throw new InvalidOperationException($"The staged revision-worker change {changeId:N} could not be reloaded.");
-                ctx.EditorStaging.AdoptChapterManuscriptChange(change);
-            }
-        }
 
         return EditorRevisionAgentService.SerializeRunResult(result);
     }
@@ -1454,9 +1338,6 @@ IAppDatabaseOperationFactory database, IActService acts,
             parent = parsedParent;
         }
 
-        if (ctx.ReviewEdits && ctx.OutlineStaging is not null)
-            return await ctx.OutlineStaging.SearchEntitiesAsync(query, topK, type, parent);
-
         var searchTerms = SearchTerms(query);
 
         var matches = new List<(StoryEntity Entity, int Score)>();
@@ -1496,29 +1377,6 @@ IAppDatabaseOperationFactory database, IActService acts,
 
     private async Task<string> ReadEntityAsync(EditorChatContext ctx, Guid entityId, int? pageNumber)
     {
-        if (ctx.ReviewEdits && ctx.OutlineStaging is not null)
-        {
-            var stagedEntityType = await ctx.OutlineStaging.GetEntityTypeAsync(entityId);
-            if (stagedEntityType is null)
-                return $"Error: entity {entityId} not found in this project.";
-
-            var stagedAddedToContextFeed = false;
-            if (ctx.AutoPinReadEntities && ctx.CurrentChapterId is { } stagedCurrentChapterId && IsSearchableEntityType(stagedEntityType))
-            {
-                await editorContext.SetItemIncludedAsync(
-                    ctx.ProjectId,
-                    stagedCurrentChapterId,
-                    ContextItemKind.Entity,
-                    EditorContextKeys.Entity(entityId),
-                    isIncluded: true);
-                ctx.OnMutated();
-                stagedAddedToContextFeed = true;
-            }
-
-            await AddEntityVisualsToModelAsync(ctx, entityId);
-            return await ctx.OutlineStaging.ReadEntityAsync(entityId, stagedAddedToContextFeed, _detailEntityRelationOptions, pageNumber);
-        }
-
         var entity = await entities.GetAsync(ctx.ProjectId, entityId);
         if (entity is null)
             return $"Error: entity {entityId} not found in this project.";
@@ -1580,13 +1438,6 @@ IAppDatabaseOperationFactory database, IActService acts,
     {
         try
         {
-            if (ctx.OutlineStaging is not null)
-            {
-                var after = new EntityVisualChange("attach", EntityId: entityId, ImageId: imageId, Label: label?.Trim() ?? string.Empty);
-                return await ctx.OutlineStaging.StageExternalChangeAsync(
-                    "Attach a canonical visual reference to an entity", null, after,
-                    new { status = "staged", entityId, imageId, label }, "EntityCanonicalReference", $"{entityId:N}/{imageId:N}");
-            }
             var example = await entityVisualExamples.AttachAsync(ctx.ProjectId, entityId, imageId, label, EntityVisualExampleOrigin.Agent);
             ctx.AddModelOnlyImage(example.Image);
             ctx.OnMutated();
@@ -1602,16 +1453,6 @@ IAppDatabaseOperationFactory database, IActService acts,
     {
         try
         {
-            if (ctx.OutlineStaging is not null)
-            {
-                var current = await entityVisualExamples.GetAsync(ctx.ProjectId, exampleId);
-                if (current is null) return "Error: entity canonical visual reference was not found.";
-                var before = new EntityVisualChange("update", current.Id, current.EntityId, current.Image.Id, Label: current.Label, SortOrder: current.SortOrder);
-                var after = before with { Label = label.Trim(), SortOrder = sortOrder ?? current.SortOrder };
-                return await ctx.OutlineStaging.StageExternalChangeAsync(
-                    "Update an entity canonical visual reference", before, after,
-                    new { status = "staged", canonicalReferenceId = exampleId, label, sortOrder }, "EntityCanonicalReference", exampleId.ToString("N"));
-            }
             var example = await entityVisualExamples.UpdateAsync(ctx.ProjectId, exampleId, label, sortOrder);
             ctx.OnMutated();
             return JsonSerializer.Serialize(VisualExamplePayload(example));
@@ -1624,15 +1465,6 @@ IAppDatabaseOperationFactory database, IActService acts,
 
     private async Task<string> DetachProjectImageFromEntityAsync(EditorChatContext ctx, Guid exampleId)
     {
-        if (ctx.OutlineStaging is not null)
-        {
-            var current = await entityVisualExamples.GetAsync(ctx.ProjectId, exampleId);
-            if (current is null) return "Error: entity canonical visual reference was not found.";
-            var before = new EntityVisualChange("detach", current.Id, current.EntityId, current.Image.Id, Label: current.Label, SortOrder: current.SortOrder);
-            return await ctx.OutlineStaging.StageExternalChangeAsync(
-                "Detach an entity canonical visual reference", before, null,
-                new { status = "staged", canonicalReferenceId = exampleId }, "EntityCanonicalReference", exampleId.ToString("N"));
-        }
         await entityVisualExamples.DetachAsync(ctx.ProjectId, exampleId);
         ctx.OnMutated();
         return JsonSerializer.Serialize(new { status = "detached", canonicalReferenceId = exampleId });
@@ -1661,28 +1493,13 @@ IAppDatabaseOperationFactory database, IActService acts,
             object? canonicalReference = null;
             if (targetValidation.Targets is [var target])
             {
-                if (ctx.OutlineStaging is null)
-                {
-                    var example = await entityVisualExamples.AttachAsync(
-                        ctx.ProjectId,
-                        target.EntityId,
-                        image.Id,
-                        target.Label,
-                        EntityVisualExampleOrigin.Agent);
-                    canonicalReference = VisualExamplePayload(example);
-                }
-                else
-                {
-                    var after = new EntityVisualChange("attach", EntityId: target.EntityId, ImageId: image.Id, Label: target.Label?.Trim() ?? string.Empty);
-                    var staged = await ctx.OutlineStaging.StageExternalChangeAsync(
-                        $"Attach cropped canonical reference to entity {target.EntityId:N}",
-                        null,
-                        after,
-                        new { status = "staged", target.EntityId, imageId = image.Id, target.Label },
-                        "EntityCanonicalReference",
-                        $"{target.EntityId:N}/{image.Id:N}");
-                    canonicalReference = JsonSerializer.Deserialize<JsonElement>(staged);
-                }
+                var example = await entityVisualExamples.AttachAsync(
+                    ctx.ProjectId,
+                    target.EntityId,
+                    image.Id,
+                    target.Label,
+                    EntityVisualExampleOrigin.Agent);
+                canonicalReference = VisualExamplePayload(example);
             }
 
             ctx.AddVisual(await BuildVisualAsync(ctx, image, image.FileName, "Cropped project image saved to the library."));
@@ -1772,9 +1589,6 @@ IAppDatabaseOperationFactory database, IActService acts,
 
     private async Task<string> ListEntityLinksAsync(EditorChatContext ctx, Guid entityId, int? pageNumber)
     {
-        if (ctx.ReviewEdits && ctx.OutlineStaging is not null)
-            return await ctx.OutlineStaging.ListEntityLinksAsync(entityId, pageNumber);
-
         var entity = await entities.GetAsync(ctx.ProjectId, entityId);
         if (entity is null)
             return $"Error: entity {entityId} not found in this project.";
@@ -1808,11 +1622,6 @@ IAppDatabaseOperationFactory database, IActService acts,
 
         var body = (await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapter.Id, ctx.TurnCancellationToken))?.PlainText ?? chapter.PlainText;
         var source = "persisted";
-        if (ctx.ReviewEdits && ctx.EditorStaging?.TryGetChapterBodyDraft(chapter.Id, out var draftBody) == true)
-        {
-            body = draftBody;
-            source = "stagedDraft";
-        }
 
         var requestedPageNumber = pageNumber ?? 1;
         if (requestedPageNumber < 1)
@@ -1934,15 +1743,12 @@ IAppDatabaseOperationFactory database, IActService acts,
         var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken);
         if (snapshot is null)
             return $"Error: manuscript {chapterId:N} was not found.";
-        var document = ctx.ReviewEdits
-            && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
-                ? staged
-                : snapshot.Document;
+        var document = snapshot.Document;
         startBlock = Math.Clamp(startBlock, 0, document.Content.Count);
         blockCount = Math.Clamp(blockCount, 1, 100);
         return AgentManuscriptProjection.SerializeDocument(
             document,
-            ReferenceEquals(document, snapshot.Document) ? "persisted" : "stagedDraft",
+            "persisted",
             startBlock,
             blockCount,
             chapter.Id,
@@ -1965,15 +1771,11 @@ IAppDatabaseOperationFactory database, IActService acts,
         var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken);
         if (snapshot is null)
             return $"Error: manuscript {chapterId:N} was not found.";
-        var stagedDraft = ctx.ReviewEdits
-            && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
-            ? staged
-            : null;
-        var document = stagedDraft ?? snapshot.Document;
+        var document = snapshot.Document;
         var inspection = ManuscriptInspection.Inspect(document, query, blockType, styleRole, start, count);
         return AgentManuscriptProjection.SerializeInspection(
             document,
-            stagedDraft is not null ? "stagedDraft" : "persisted",
+            "persisted",
             inspection,
             chapter.Id,
             chapter.Title,
@@ -2082,10 +1884,7 @@ IAppDatabaseOperationFactory database, IActService acts,
         var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken);
         if (snapshot is null)
             return JsonSerializer.Serialize(new { ok = false, code = "NOT_FOUND", summary = "Manuscript was not found." });
-        var document = ctx.ReviewEdits
-            && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
-                ? staged
-                : snapshot.Document;
+        var document = snapshot.Document;
         var visuals = document.Content.Where(block => block.Type is ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage).ToList();
         start = Math.Clamp(start, 0, visuals.Count);
         count = Math.Clamp(count, 1, 50);
@@ -2235,48 +2034,6 @@ IAppDatabaseOperationFactory database, IActService acts,
         try
         {
             var initialContent = new DesignedPageInitialContent { LayoutMode = layoutMode };
-            if (ctx.ReviewEdits && ctx.EditorStaging is not null)
-            {
-                var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken)
-                    ?? throw new KeyNotFoundException("Manuscript was not found.");
-                var source = ctx.EditorStaging.TryGetChapterManuscriptDraft(chapterId, out var staged)
-                    ? staged
-                    : snapshot.Document;
-                if (source.Revision != expectedRevision)
-                    throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
-
-                var identity = new DesignedPageIdentity(Guid.NewGuid(), Guid.NewGuid().ToString("N"));
-                var applied = ManuscriptOperations.Apply(
-                    source,
-                    [new InsertManuscriptBlock(
-                        blockIndex,
-                        ManuscriptBlockType.DesignedPage,
-                        string.Empty,
-                        ManuscriptStyleRoles.DesignedPage,
-                        PageCompositionId: identity.CompositionId,
-                        BlockId: identity.BlockId)]);
-                var stagedResult = JsonSerializer.Serialize(new
-                {
-                    ok = true,
-                    staged = true,
-                    requiresReview = true,
-                    targetId = identity.CompositionId,
-                    revision = applied.Document.Revision,
-                    changedIds = applied.ChangedBlockIds,
-                    variantId = (Guid?)null,
-                    layoutMode,
-                    summary = $"{LayoutLabel(layoutMode)} Designed Page is ready for review.",
-                });
-                await ctx.EditorStaging.StageChapterManuscriptEditAsync(
-                    chapter,
-                    source,
-                    applied.Document,
-                    $"Insert {LayoutLabel(layoutMode)} Designed Page '{(string.IsNullOrWhiteSpace(name) ? "Designed page" : name.Trim())}'",
-                    stagedResult,
-                    ctx.TurnCancellationToken);
-                return stagedResult;
-            }
-
             var result = await compositions.CreateDesignedPageAsync(
                 ctx.ContentTarget,
                 ctx.ProjectId,
@@ -2332,10 +2089,7 @@ IAppDatabaseOperationFactory database, IActService acts,
 
         var snapshot = await manuscripts.GetManuscriptAsync(ctx.ContentTarget, chapterId, ctx.TurnCancellationToken)
             ?? throw new KeyNotFoundException("Manuscript was not found.");
-        var source = ctx.ReviewEdits
-            && ctx.EditorStaging?.TryGetChapterManuscriptDraft(chapterId, out var staged) == true
-                ? staged
-                : snapshot.Document;
+        var source = snapshot.Document;
         if (source.Revision != expectedRevision)
             throw new ManuscriptRevisionConflictException(expectedRevision, source.Revision);
 
@@ -2343,40 +2097,13 @@ IAppDatabaseOperationFactory database, IActService acts,
         var returnedChangedIds = changedIdLimit is int limit
             ? applied.ChangedBlockIds.Take(limit).ToList()
             : applied.ChangedBlockIds;
-        var styleCatalog = ctx.ReviewEdits && ctx.EditorStaging is not null
-            ? await ctx.EditorStaging.ListManuscriptStyleDraftsAsync(
-                manuscriptStyles,
-                ctx.TurnCancellationToken)
-            : null;
+        var styleCatalog = await manuscriptStyles.ListAsync(ctx.ProjectId, ctx.TurnCancellationToken);
         await manuscripts.ValidateDocumentReferencesAsync(
             ctx.ContentTarget,
             chapterId,
             applied.Document,
             styleCatalog,
             ctx.TurnCancellationToken);
-
-        if (ctx.ReviewEdits && ctx.EditorStaging is not null)
-        {
-            var stagedResult = JsonSerializer.Serialize(new
-            {
-                ok = true,
-                staged = true,
-                targetId = chapterId,
-                revision = applied.Document.Revision,
-                changedIds = returnedChangedIds,
-                changedBlockCount = applied.ChangedBlockIds.Count,
-                summary = resultSummary,
-                selectId,
-            });
-            await ctx.EditorStaging.StageChapterManuscriptEditAsync(
-                chapter,
-                source,
-                applied.Document,
-                reviewSummary,
-                stagedResult,
-                ctx.TurnCancellationToken);
-            return stagedResult;
-        }
 
         var result = await manuscripts.ReplaceDocumentAsync(
             ctx.ContentTarget,
@@ -3370,22 +3097,6 @@ IAppDatabaseOperationFactory database, IActService acts,
                 ?? throw new KeyNotFoundException("The review annotation was not found in the selected content target.");
             if (annotation.Revision != expectedRevision)
                 throw new InvalidOperationException($"Annotation revision conflict: expected {expectedRevision}, current revision is {annotation.Revision}.");
-            if (context.ReviewEdits && context.EditorStaging is not null)
-            {
-                var result = JsonSerializer.Serialize(new
-                {
-                    ok = true,
-                    annotationId,
-                    requiresReview = true,
-                    summary = "Annotation completion staged. It will be permanent only if the reviewed dependent edit is kept.",
-                });
-                await context.EditorStaging.StageAnnotationCompletionAsync(
-                    annotation,
-                    result,
-                    context.TurnCancellationToken);
-                return result;
-            }
-
             await annotations.CompleteAsync(
                 context.ProjectId,
                 context.ContentTarget,

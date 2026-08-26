@@ -22,17 +22,16 @@ public sealed class ManuscriptMigrationIntegrationTests
         await using (var db = fixture.CreateDbContext())
         {
             await db.GetService<IMigrator>().MigrateAsync("20260801003844_PublishConversationsV13");
-            var project = new Project
-            {
-                Name = "Current book",
-                Slug = $"current-{Guid.NewGuid():N}",
-            };
-            db.Projects.Add(project);
-            await db.SaveChangesAsync();
+            var projectId = Guid.NewGuid();
+            await LegacyProjectSeed.InsertAsync(
+                db,
+                projectId,
+                "Current book",
+                $"current-{projectId:N}");
             var now = DateTime.UtcNow;
             await db.Database.ExecuteSqlInterpolatedAsync($"""
                 INSERT INTO PublishConversations (Id, ProjectId, CreatedAt, UpdatedAt)
-                VALUES ({conversationId}, {project.Id}, {now}, {now});
+                VALUES ({conversationId}, {projectId}, {now}, {now});
                 """);
 
             await fixture.CreateService().ApplyPendingAsync(db);
@@ -167,6 +166,12 @@ public sealed class ManuscriptMigrationIntegrationTests
             .Select(item => new { item.Status, item.ErrorMessage, item.CompletedAt })
             .SingleAsync();
         var candidates = await migrated.ContestCandidates.AsNoTracking()
+            .Select(candidate => new
+            {
+                candidate.Order,
+                candidate.Status,
+                candidate.ErrorMessage,
+            })
             .OrderBy(candidate => candidate.Order)
             .ToListAsync();
         Assert.Equal(ContestBatchStatus.Failed, batch.Status);
@@ -244,10 +249,7 @@ public sealed class ManuscriptMigrationIntegrationTests
         await using (var db = fixture.CreateDbContext())
             await service.ApplyPendingAsync(db);
 
-        await using var verificationDb = fixture.CreateDbContext();
-        var changes = await verificationDb.AiChanges.AsNoTracking()
-            .OrderBy(change => change.Order)
-            .ToListAsync();
+        var changes = await fixture.ReadLegacyChangesAsync();
         var pending = changes[0];
         Assert.Equal("ChapterManuscript", pending.ResourceKind);
         Assert.Equal("apply_manuscript_operations", pending.ToolName);
@@ -388,18 +390,8 @@ public sealed class ManuscriptMigrationIntegrationTests
 
         await using var verification = fixture.CreateDbContext();
         Assert.True(await verification.Projects.AnyAsync());
-        Assert.Equal(
-            "null",
-            await verification.AiChanges.AsNoTracking()
-                .Where(change => change.Status == AiChangeStatus.Applied)
-                .Select(change => change.BeforeJson)
-                .SingleAsync());
-        Assert.Equal(
-            "Linked two entities.",
-            await verification.AiChanges.AsNoTracking()
-                .Where(change => change.Status == AiChangeStatus.Applied)
-                .Select(change => change.ResultJson)
-                .SingleAsync());
+        Assert.Equal("null", await fixture.ReadLegacyAppliedFieldAsync("BeforeJson"));
+        Assert.Equal("Linked two entities.", await fixture.ReadLegacyAppliedFieldAsync("ResultJson"));
         Assert.False((await service.GetStateAsync()).RecoveryRequired);
         Assert.False(await fixture.AnySchemaV1PayloadsAsync());
     }
@@ -543,18 +535,8 @@ public sealed class ManuscriptMigrationIntegrationTests
 
         await using var verification = fixture.CreateDbContext();
         Assert.Equal("Recover versioned content", (await verification.Chapters.SingleAsync()).PlainText);
-        Assert.Equal(
-            "null",
-            await verification.AiChanges.AsNoTracking()
-                .Where(change => change.Status == AiChangeStatus.Applied)
-                .Select(change => change.BeforeJson)
-                .SingleAsync());
-        Assert.Equal(
-            "Linked two entities.",
-            await verification.AiChanges.AsNoTracking()
-                .Where(change => change.Status == AiChangeStatus.Applied)
-                .Select(change => change.ResultJson)
-                .SingleAsync());
+        Assert.Equal("null", await fixture.ReadLegacyAppliedFieldAsync("BeforeJson"));
+        Assert.Equal("Linked two entities.", await fixture.ReadLegacyAppliedFieldAsync("ResultJson"));
         Assert.False((await restartedService.GetStateAsync()).RecoveryRequired);
         Assert.False(await fixture.AnySchemaV1PayloadsAsync());
     }
@@ -622,8 +604,7 @@ public sealed class ManuscriptMigrationIntegrationTests
 
         await using var verification = fixture.CreateDbContext();
         var style = await verification.ManuscriptStyleDefinitions.AsNoTracking().SingleAsync();
-        var pending = await verification.AiChanges.AsNoTracking()
-            .SingleAsync(change => change.Status == AiChangeStatus.Pending);
+        var pending = await fixture.ReadLegacyPendingChangeAsync();
         var proposed = Assert.Single(
             ManuscriptSchemaUpgrade.ExtractCurrentDocuments(pending.AfterJson));
         var styles = new[]
@@ -943,6 +924,57 @@ public sealed class ManuscriptMigrationIntegrationTests
                 await change.ExecuteNonQueryAsync();
             }
         }
+
+        public async Task<IReadOnlyList<LegacyChangeRow>> ReadLegacyChangesAsync()
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT "Order", ResourceKind, ToolName, BeforeJson, AfterJson,
+                       ArgumentsJson, ResultJson, Status
+                FROM AiChanges
+                ORDER BY "Order";
+                """;
+            var rows = new List<LegacyChangeRow>();
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                rows.Add(new(
+                    reader.GetInt32(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetString(3),
+                    reader.GetString(4),
+                    reader.GetString(5),
+                    reader.GetString(6),
+                    reader.GetString(7)));
+            return rows;
+        }
+
+        public async Task<LegacyChangeRow> ReadLegacyPendingChangeAsync()
+        {
+            var changes = await ReadLegacyChangesAsync();
+            return Assert.Single(changes, change => change.Status == "Pending");
+        }
+
+        public async Task<string> ReadLegacyAppliedFieldAsync(string fieldName)
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT \"{fieldName}\" FROM AiChanges WHERE Status = 'Applied';";
+            return Assert.IsType<string>(await command.ExecuteScalarAsync());
+        }
+
+        public sealed record LegacyChangeRow(
+            int Order,
+            string ResourceKind,
+            string ToolName,
+            string BeforeJson,
+            string AfterJson,
+            string ArgumentsJson,
+            string ResultJson,
+            string Status);
 
         public async Task SetHistoricalTerminalAuditPayloadsAsync()
         {

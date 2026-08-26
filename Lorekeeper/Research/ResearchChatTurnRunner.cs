@@ -44,9 +44,12 @@ public sealed class ResearchChatTurnRunner(
         await using var scope = scopeFactory.CreateAsyncScope();
         var chat = scope.ServiceProvider.GetRequiredService<IResearchService>();
         var checkpoints = scope.ServiceProvider.GetRequiredService<IAssistantVersionCheckpointService>();
+        var mutated = false;
         await foreach (var update in chat.SendAsync(projectId, userText, imageIds, providerId, cancellationToken))
         {
-            if (update is ResearchAssistantMessageCompleted)
+            if (update is ResearchGraphMutated)
+                mutated = true;
+            if (update is ResearchAssistantMessageCompleted && mutated)
                 await checkpoints.TryCheckpointAsync(projectId, ChatTurnSurface.Research, cancellationToken);
             yield return update;
         }

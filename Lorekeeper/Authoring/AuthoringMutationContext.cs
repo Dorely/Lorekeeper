@@ -2,16 +2,9 @@ namespace Lorekeeper.Authoring;
 
 public sealed record AuthoringMutationContext(
     Guid AssistantTurnId,
-    string ActionLabel,
-    IReadOnlyDictionary<Guid, string>? ReviewBaselineManuscripts = null)
+    string ActionLabel)
 {
     public bool IsAssistant => AssistantTurnId != Guid.Empty;
-
-    public string? ReviewBaselineFor(Guid chapterId) =>
-        ReviewBaselineManuscripts is not null
-        && ReviewBaselineManuscripts.TryGetValue(chapterId, out var manuscriptJson)
-            ? manuscriptJson
-            : null;
 }
 
 public interface IAuthoringMutationContextAccessor
@@ -19,8 +12,7 @@ public interface IAuthoringMutationContextAccessor
     AuthoringMutationContext? Current { get; }
     IDisposable BeginAssistantTurn(
         Guid turnId,
-        string actionLabel,
-        IReadOnlyDictionary<Guid, string>? reviewBaselineManuscripts = null);
+        string actionLabel);
 }
 
 public sealed class AuthoringMutationContextAccessor : IAuthoringMutationContextAccessor
@@ -36,12 +28,11 @@ public sealed class AuthoringMutationContextAccessor : IAuthoringMutationContext
 
     public IDisposable BeginAssistantTurn(
         Guid turnId,
-        string actionLabel,
-        IReadOnlyDictionary<Guid, string>? reviewBaselineManuscripts = null)
+        string actionLabel)
     {
         var previous = _current;
         var previousAmbient = Ambient.Value;
-        _current = new AuthoringMutationContext(turnId, actionLabel, reviewBaselineManuscripts);
+        _current = new AuthoringMutationContext(turnId, actionLabel);
         Ambient.Value = _current;
         return new Scope(() =>
         {

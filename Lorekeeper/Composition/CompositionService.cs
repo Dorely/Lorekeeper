@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Lorekeeper.Authoring;
+using Lorekeeper.EditorChat;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -59,9 +60,18 @@ public sealed class CompositionService(
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IAuthoringHistoryRuntime authoringHistory,
     IAuthoringMutationContextAccessor authoringMutationContext,
-    ICompositionCanvasPreviewService canvasPreviews) : ICompositionService
+    ICompositionCanvasPreviewService canvasPreviews,
+    IEditorContestMutationGuard contestGuard) : ICompositionService
 {
     private static readonly JsonSerializerOptions JsonOptions = ManuscriptCodec.JsonOptions;
+
+    private Task EnsureChapterMutationAllowedAsync(
+        Guid projectId,
+        PageComposition composition,
+        CancellationToken cancellationToken) =>
+        composition.ChapterId is Guid
+            ? contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken)
+            : Task.CompletedTask;
 
     public Task<AuthoringHistoryState> GetHistoryStateAsync(
         Guid projectId,
@@ -92,6 +102,7 @@ public sealed class CompositionService(
     {
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         var db = databaseOperation.Db;
         var current = await AuthoringSnapshotCodec.CaptureCompositionAsync(db, projectId, compositionId, "", cancellationToken);
         var historyTarget = CompositionHistoryTarget(projectId, compositionId);
@@ -214,6 +225,7 @@ public sealed class CompositionService(
     {
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         var db = databaseOperation.Db;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var chapter = await db.Chapters.AsNoTracking().SingleOrDefaultAsync(item => item.Id == chapterId && item.ProjectId == projectId, cancellationToken)
@@ -388,6 +400,7 @@ public sealed class CompositionService(
         var current = await db.PageCompositions.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId && item.DetachedAt == null, cancellationToken)
             ?? throw new KeyNotFoundException("Page composition was not found in this project.");
+        await EnsureChapterMutationAllowedAsync(projectId, current, cancellationToken);
         if (current.EditionId is not null)
             throw new InvalidOperationException("Edition-owned Designed Pages require the selected release geometry.");
         var targetSetup = await ResolveCompositionSetupAsync(current, cancellationToken);
@@ -414,6 +427,7 @@ public sealed class CompositionService(
             .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
             .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId && item.DetachedAt == null, cancellationToken)
             ?? throw new KeyNotFoundException("Page composition was not found in this project.");
+        await EnsureChapterMutationAllowedAsync(projectId, composition, cancellationToken);
         if (composition.EditionId is not null)
             throw new InvalidOperationException("Edition-owned Designed Pages cannot select a Core authoring variant.");
         var setupUnderLease = await ResolveCompositionSetupAsync(composition, cancellationToken)
@@ -449,6 +463,7 @@ public sealed class CompositionService(
     {
         await using var databaseOperation = await database.OpenWriteAsync(composition.ProjectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
+        await EnsureChapterMutationAllowedAsync(composition.ProjectId, composition, cancellationToken);
         var db = databaseOperation.Db;
         var scene = JsonSerializer.Deserialize<CompositionScene>(source.SceneJson, JsonOptions)
             ?? throw new InvalidDataException("The composition scene is empty.");
@@ -558,6 +573,7 @@ public sealed class CompositionService(
         var composition = await db.PageCompositions.SingleOrDefaultAsync(
             item => item.Id == compositionId && item.ProjectId == projectId && item.DetachedAt == null,
             cancellationToken) ?? throw new KeyNotFoundException("Page composition was not found in this project.");
+        await EnsureChapterMutationAllowedAsync(projectId, composition, cancellationToken);
         var edition = (await effectiveConfigurations.ResolveReleaseAsync(projectId, editionId, cancellationToken)).Edition;
         if (composition.EditionId != edition.Id)
             throw new InvalidOperationException("The Designed Page does not belong to the selected release content.");
@@ -719,6 +735,7 @@ public sealed class CompositionService(
                 && item.DetachedAt == null && item.Composition.ProjectId == projectId
                 && item.Composition.DetachedAt == null, cancellationToken)
             ?? throw new KeyNotFoundException("Composition variant was not found in this project.");
+        await EnsureChapterMutationAllowedAsync(projectId, variant.Composition, cancellationToken);
         if (!VariantMatchesEdition(variant, edition))
             throw new InvalidDataException("The selected variant is incompatible with this edition.");
         variant.Composition.ActiveAuthoringVariantId = variant.Id;
@@ -827,6 +844,7 @@ public sealed class CompositionService(
         if (variant.Revision != expectedRevision)
             throw new CompositionRevisionConflictException(expectedRevision, variant.Revision);
         EnsureTarget(target, variant.Composition);
+        await EnsureChapterMutationAllowedAsync(projectId, variant.Composition, cancellationToken);
         await ValidateVariantGeometryAsync(projectId, variant.GeometryKey, scene, cancellationToken);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         var geometryKey = await ExactGeometryKeyAsync(projectId, variant.GeometryKey, scene, cancellationToken);
@@ -1128,6 +1146,7 @@ public sealed class CompositionService(
             ?? throw new KeyNotFoundException("Composition workspace was not found in this project.");
         var composition = variant.Composition;
         EnsureTarget(target, composition);
+        await EnsureChapterMutationAllowedAsync(projectId, composition, cancellationToken);
         if (composition.Revision != expectedCompositionRevision
             || variant.Revision != expectedVariantRevision)
             return new CompositionWorkspaceSaveResult(composition, variant, Applied: false);
@@ -1197,10 +1216,6 @@ public sealed class CompositionService(
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
         scene = scene with { Guides = [] };
-        await db.CompositionMutationStages
-            .Where(item => item.ProjectId == projectId
-                && (item.ExpiresAt <= DateTime.UtcNow || item.AppliedAt != null))
-            .ExecuteDeleteAsync(cancellationToken);
         var variant = await db.PageCompositionVariants.AsNoTracking()
             .Include(item => item.Composition)
             .SingleOrDefaultAsync(item => item.Id == variantId && item.DetachedAt == null
@@ -1209,6 +1224,11 @@ public sealed class CompositionService(
         if (variant.Revision != expectedRevision)
             throw new CompositionRevisionConflictException(expectedRevision, variant.Revision);
         EnsureTarget(target, variant.Composition);
+        await EnsureChapterMutationAllowedAsync(projectId, variant.Composition, cancellationToken);
+        await db.CompositionMutationStages
+            .Where(item => item.ProjectId == projectId
+                && (item.ExpiresAt <= DateTime.UtcNow || item.AppliedAt != null))
+            .ExecuteDeleteAsync(cancellationToken);
         await ValidateVariantGeometryAsync(projectId, variant.GeometryKey, scene, cancellationToken);
         var payload = SerializeAndValidate(scene, variant.Composition.SemanticManuscriptJson);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
@@ -1268,6 +1288,7 @@ public sealed class CompositionService(
         if (variant.Revision != expectedRevision)
             throw new CompositionRevisionConflictException(expectedRevision, variant.Revision);
         EnsureTarget(target, variant.Composition);
+        await EnsureChapterMutationAllowedAsync(projectId, variant.Composition, cancellationToken);
         var scene = JsonSerializer.Deserialize<CompositionScene>(stage.OperationsJson, JsonOptions)
             ?? throw new InvalidDataException("The staged composition is empty.");
         await ValidateVariantGeometryAsync(projectId, variant.GeometryKey, scene, cancellationToken);
@@ -1324,9 +1345,6 @@ public sealed class CompositionService(
         var db = databaseOperation.Db;
         if (operations.Count is < 1 or > 200)
             throw new ArgumentException("A semantic composition stage requires 1 to 200 focused manuscript operations.");
-        await db.CompositionMutationStages
-            .Where(item => item.ProjectId == projectId && (item.ExpiresAt <= DateTime.UtcNow || item.AppliedAt != null))
-            .ExecuteDeleteAsync(cancellationToken);
         var composition = await db.PageCompositions.AsNoTracking()
             .Include(item => item.Variants.Where(variant => variant.DetachedAt == null))
             .SingleOrDefaultAsync(item => item.Id == compositionId && item.ProjectId == projectId
@@ -1335,6 +1353,10 @@ public sealed class CompositionService(
         if (composition.Revision != expectedRevision)
             throw new CompositionRevisionConflictException(expectedRevision, composition.Revision);
         EnsureTarget(target, composition);
+        await EnsureChapterMutationAllowedAsync(projectId, composition, cancellationToken);
+        await db.CompositionMutationStages
+            .Where(item => item.ProjectId == projectId && (item.ExpiresAt <= DateTime.UtcNow || item.AppliedAt != null))
+            .ExecuteDeleteAsync(cancellationToken);
         var current = ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision);
         var preview = ManuscriptOperations.Apply(current, ManuscriptOperationInput.ToOperations(operations)).Document;
         ValidateSemanticFragment(preview);
@@ -1399,6 +1421,7 @@ public sealed class CompositionService(
         if (composition.Revision != expectedRevision)
             throw new CompositionRevisionConflictException(expectedRevision, composition.Revision);
         EnsureTarget(target, composition);
+        await EnsureChapterMutationAllowedAsync(projectId, composition, cancellationToken);
         var inputs = JsonSerializer.Deserialize<List<ManuscriptOperationInput>>(stage.OperationsJson, JsonOptions)
             ?? throw new InvalidDataException("The staged semantic operations are empty.");
         var current = ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision);
@@ -1455,9 +1478,6 @@ public sealed class CompositionService(
         scene = scene with { Guides = [] };
         if (semanticOperations.Count > 200)
             throw new ArgumentException("A composition workspace stage accepts at most 200 focused semantic operations.");
-        await db.CompositionMutationStages
-            .Where(item => item.ProjectId == projectId && (item.ExpiresAt <= DateTime.UtcNow || item.AppliedAt != null))
-            .ExecuteDeleteAsync(cancellationToken);
         var variant = await db.PageCompositionVariants.AsNoTracking().Include(item => item.Composition)
             .SingleOrDefaultAsync(item => item.Id == variantId && item.CompositionId == compositionId
                 && item.DetachedAt == null && item.Composition.ProjectId == projectId
@@ -1468,6 +1488,10 @@ public sealed class CompositionService(
         if (variant.Revision != expectedVariantRevision)
             throw new CompositionRevisionConflictException(expectedVariantRevision, variant.Revision);
         EnsureTarget(target, variant.Composition);
+        await EnsureChapterMutationAllowedAsync(projectId, variant.Composition, cancellationToken);
+        await db.CompositionMutationStages
+            .Where(item => item.ProjectId == projectId && (item.ExpiresAt <= DateTime.UtcNow || item.AppliedAt != null))
+            .ExecuteDeleteAsync(cancellationToken);
         var current = ManuscriptCodec.Deserialize(
             variant.Composition.SemanticManuscriptJson,
             compositionId,
@@ -1549,6 +1573,7 @@ public sealed class CompositionService(
         if (variant.Revision != payload.ExpectedVariantRevision)
             throw new CompositionRevisionConflictException(payload.ExpectedVariantRevision, variant.Revision);
         EnsureTarget(target, variant.Composition);
+        await EnsureChapterMutationAllowedAsync(projectId, variant.Composition, cancellationToken);
         var current = ManuscriptCodec.Deserialize(variant.Composition.SemanticManuscriptJson, stage.TargetId, expectedCompositionRevision);
         var applied = payload.SemanticOperations.Count == 0
             ? (Document: current, ChangedBlockIds: (IReadOnlyList<string>)[])

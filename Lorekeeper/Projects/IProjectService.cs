@@ -16,9 +16,6 @@ public interface IProjectService
     /// <summary>Toggle whether the currently-open chapter is included in the assembled context.</summary>
     Task<Project> SetIncludeCurrentChapterAsync(Guid id, bool include, CancellationToken cancellationToken = default);
 
-    /// <summary>Toggle whether AI tool mutations are queued for user approval.</summary>
-    Task<Project> SetAiChangeApprovalAsync(Guid id, bool enabled, CancellationToken cancellationToken = default);
-
     /// <summary>
     /// Deletes the project and cascades to all child graph nodes (and their edges, transitively),
     /// and to all vector chunks stored under the project's scope key.

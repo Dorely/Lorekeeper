@@ -92,8 +92,17 @@ public sealed record ProjectExportProject(
     string Slug,
     string ProjectGuidance,
     bool IncludeCurrentChapterInContext,
-    bool AiChangeApprovalEnabled)
+    [property: JsonIgnore] bool ReviewEditsEnabled)
 {
+    /// <summary>
+    /// Legacy v19-and-earlier import input. It is intentionally nullable and
+    /// never populated by current exports, so the renamed workflow setting does
+    /// not leak into new project files.
+    /// </summary>
+    [JsonPropertyName("aiChangeApprovalEnabled")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? LegacyAiChangeApprovalEnabled { get; init; }
+
     [JsonPropertyName("systemPrompt")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? LegacySystemPrompt { get; init; }

@@ -9,7 +9,6 @@ namespace Lorekeeper.EditorChat;
 [JsonDerivedType(typeof(EditorChatToolCallArgumentsDelta), typeDiscriminator: "tool-args")]
 [JsonDerivedType(typeof(EditorChatToolCallCompleted), typeDiscriminator: "tool-end")]
 [JsonDerivedType(typeof(EditorChatContextTrimmed), typeDiscriminator: "context-trimmed")]
-[JsonDerivedType(typeof(EditorChatPendingAiChangeCreated), typeDiscriminator: "pending-change")]
 [JsonDerivedType(typeof(EditorChatContestStarted), typeDiscriminator: "contest-start")]
 [JsonDerivedType(typeof(EditorChatContestCandidateUpdated), typeDiscriminator: "contest-candidate")]
 [JsonDerivedType(typeof(EditorChatContestCandidateJsonDelta), typeDiscriminator: "contest-json")]
@@ -54,8 +53,6 @@ public sealed record EditorChatVisualAttachment(
     string ContentType = "",
     string FileName = "",
     byte[]? Data = null);
-
-public sealed record EditorChatPendingAiChangeCreated(Guid BatchId, Guid ChangeId, string ToolCallId, string ToolName, string Summary) : EditorChatTurnUpdate;
 
 public sealed record EditorChatContestStarted(Guid BatchId) : EditorChatTurnUpdate;
 

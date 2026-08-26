@@ -3,6 +3,7 @@ using System.Text.Json;
 using Lorekeeper.Chapters;
 using Lorekeeper.Composition;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.EditorChat;
 using Lorekeeper.Images;
 using Lorekeeper.Ingest;
 using Lorekeeper.Llm;
@@ -19,7 +20,7 @@ using Lorekeeper.Writing;
 namespace Lorekeeper.Context;
 
 public sealed class ContextBuilder(
-IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, ICompositionService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, IProjectReferenceService projectReferences, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter) : IEditorContextService
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, ICompositionService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, IProjectReferenceService projectReferences, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter, IEditorContestMutationGuard contestGuard) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
         ContextBuildRequest request,
@@ -324,7 +325,8 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         bool isIncluded,
         CancellationToken cancellationToken = default)
     {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var preferences = databaseOperation.Repositories.EditorContextPreferences;
         if (string.IsNullOrWhiteSpace(key))
@@ -364,6 +366,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         Guid chapterId,
         CancellationToken cancellationToken = default)
     {
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
 

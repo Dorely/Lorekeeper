@@ -1,24 +1,33 @@
 @using Lorekeeper.Models
+@using Lorekeeper.Chapters
 @using Lorekeeper.Projects
 @using Lorekeeper.VersionHistory.Services
 @implements IDisposable
 @inject NavigationManager Navigation
 @inject IProjectService Projects
+@inject IChapterService Chapters
 @inject IProjectVersionHistoryService VersionHistory
 @inject ProjectVersionHistoryUiEvents HistoryEvents
 
 <div class="project-checkpoint-control" @onmouseenter="RefreshStatusAsync" @onfocusin="RefreshStatusAsync">
+    <ProjectReviewControls Project="_project" />
+
     <button type="button"
             class="project-checkpoint-button"
             title="@CheckpointTitle"
             aria-label="@CheckpointTitle"
             aria-busy="@_busy"
-            disabled="@(!CanCheckpoint)"
-            @onclick="CreateCheckpointAsync">
+            disabled="@(!CanCheckpointAction)"
+            @onclick="HandleCheckpointActionAsync">
         @if (_busy)
         {
             <span aria-hidden="true" class="project-checkpoint-spinner"></span>
             <span>Checkpointing…</span>
+        }
+        else if (ReviewPending)
+        {
+            <span aria-hidden="true">↗</span>
+            <span>Review pending</span>
         }
         else
         {
@@ -61,7 +70,14 @@
         && _project is not null
         && !HistoryEvents.IsProjectOperationActive(_project.Id)
         && HistoryAvailable
+        && !ReviewPending
         && (_status?.Repository.HeadCommitSha is null || _status.Repository.IsDirty);
+
+    private bool ReviewPending => _project?.ReviewEditsEnabled == true
+        && _status?.Repository.HeadCommitSha is not null
+        && _status.Repository.IsDirty;
+
+    private bool CanCheckpointAction => CanCheckpoint || (!_loading && !_busy && ReviewPending);
 
     private string CheckpointTitle => _busy
         ? "Saving a local checkpoint"
@@ -71,6 +87,8 @@
                 ? "Project history is unavailable"
                 : _status.Repository.HeadCommitSha is null
                     ? "Create the first local checkpoint"
+                    : ReviewPending
+                    ? "Review pending manuscript and project changes before creating a checkpoint"
                     : _status.Repository.IsDirty
                     ? "Save the current project as a local checkpoint"
                     : "There are no uncheckpointed changes";
@@ -80,6 +98,7 @@
         Navigation.LocationChanged += OnLocationChanged;
         HistoryEvents.CheckpointCreated += HandleCheckpointCreated;
         HistoryEvents.OperationStateChanged += HandleOperationStateChanged;
+        HistoryEvents.ReviewStateChanged += HandleReviewStateChanged;
     }
 
     protected override async Task OnInitializedAsync()
@@ -187,6 +206,55 @@
         }
     }
 
+    private async Task HandleCheckpointActionAsync()
+    {
+        if (ReviewPending)
+        {
+            await OpenPendingReviewAsync();
+            return;
+        }
+
+        await CreateCheckpointAsync();
+    }
+
+    private async Task OpenPendingReviewAsync()
+    {
+        if (_project is not { } project || !ReviewPending)
+            return;
+
+        _error = null;
+        try
+        {
+            var review = await VersionHistory.GetReviewAsync(
+                project.Id,
+                cancellationToken: _lifetimeCancellation.Token);
+            var chapter = review?.Chapters.FirstOrDefault(item => item.HasChanges);
+            if (chapter is null)
+            {
+                var firstChapter = (await Chapters.ListAsync(project.Id, _lifetimeCancellation.Token)).FirstOrDefault();
+                if (firstChapter is not null)
+                {
+                    Navigation.NavigateTo(
+                        $"/projects/{Uri.EscapeDataString(project.Slug)}/editor/{firstChapter.Id:D}?mode=Review");
+                    return;
+                }
+            }
+            var editionQuery = chapter?.ContentTarget.EditionId is Guid editionId
+                ? $"&edition={editionId:N}"
+                : string.Empty;
+            var chapterPath = chapter is null ? string.Empty : $"/{chapter.ChapterId:D}";
+            Navigation.NavigateTo(
+                $"/projects/{Uri.EscapeDataString(project.Slug)}/editor{chapterPath}?mode=Review{editionQuery}");
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+    }
+
     private async Task CreateCheckpointAsync()
     {
         if (!CanCheckpoint || _project is not { } project)
@@ -255,7 +323,7 @@
         {
             await InvokeAsync(async () =>
             {
-                await RefreshStatusAsync();
+                await LoadCurrentProjectAsync();
                 if (!_disposed)
                     StateHasChanged();
             });
@@ -291,6 +359,28 @@
         }
     }
 
+    private async void HandleReviewStateChanged(Guid projectId)
+    {
+        if (_disposed || _project?.Id != projectId)
+            return;
+
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadCurrentProjectAsync();
+                if (!_disposed)
+                    StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -300,6 +390,7 @@
         Navigation.LocationChanged -= OnLocationChanged;
         HistoryEvents.CheckpointCreated -= HandleCheckpointCreated;
         HistoryEvents.OperationStateChanged -= HandleOperationStateChanged;
+        HistoryEvents.ReviewStateChanged -= HandleReviewStateChanged;
         _lifetimeCancellation.Cancel();
         _lifetimeCancellation.Dispose();
     }

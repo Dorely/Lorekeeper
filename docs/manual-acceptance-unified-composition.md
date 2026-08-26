@@ -1,5 +1,8 @@
 # Unified composition manual acceptance checklist
 
+Manual acceptance status: NOT EXECUTED. Browser automation and screenshots are
+intentionally not run as part of this documentation pass.
+
 Use this checklist after automated migration, editor, Press, build, and startup
 verification. The Core Book Publish-workspace checks below are authorized for
 the live test project; terminate the browser host after the run.
@@ -64,8 +67,10 @@ the live test project; terminate the browser host after the run.
   warning names its global effect. Reset the release chapter and confirm the
   saved style remains available.
 - Exercise Review Edits, a contest/revision job, and one Editor-assistant change
-  in release mode. Attempt to switch targets mid-operation and confirm it is
-  blocked; confirm accepted changes cannot land in another target.
+  in release mode. Confirm the top bar keeps Review Edits beside Checkpoint and
+  shows Pending changes with its count. Attempt to switch targets mid-operation
+  and confirm it is blocked; confirm approved changes cannot land in another
+  target and unapproved live work remains reviewable.
 - In Publish, verify the difference banner counts text, movement, Figures,
   formatting, styles, and Designed Pages without treating cloned IDs alone as a
   change. Follow chapter/block/composition/object warning links back to the exact
@@ -118,14 +123,52 @@ the live test project; terminate the browser host after the run.
   supported Core/release fields and identifies BISAC/Thema, keywords, expanded
   contributors, price, territories, and publication date as external portal
   follow-up instead of claiming to store or submit them.
-- Stage a large scene once, apply by stage ID, and verify the payload is neither
-  repeated nor replayable.
+- Apply a large scene through its owning service and verify the mutation is
+  revision-checked, applied once, and represented in Git-backed pending review.
 - Confirm Images and Outline expose only free-standing generation. Confirm
   Editor and Publish default reusable art and ordinary flowing Figures to
   free-standing generation, and use a geometry-bound target only when artwork
   must honor a concrete page, frame, Figure placement, or cover region. Verify
   bound guidance does not crop or resize the stored raster, and confirm no
   assistant claims vendor acceptance or that a URL was downloaded.
+
+## Review Edits and Contest review
+
+- Create manual and assistant changes with Review Edits enabled. Confirm the
+  top bar places Review Edits beside Checkpoint and Pending changes beside it
+  with the current count. Confirm the chooser lists affected chapter/Core or
+  edition targets plus Other changes, rather than individual assistant batches.
+- Open a pending chapter and confirm Review compares Git HEAD with live state,
+  groups text by stable block ID, allows inline editing, Approve, and Undo, and
+  keeps insertions, deletions, moves, formatting, Figures, captions, and
+  Designed Pages semantic. Confirm Designed Page visual before/after previews
+  and no semantic-manuscript warning. Approve one group and then Approve All;
+  verify the first creates a ReviewApproval checkpoint for selected groups and
+  the second checkpoints the complete live snapshot.
+- Return to a clean chapter and confirm Review shows the newest affecting
+  approved commit against its parent. Undo a historical block and verify the
+  parent value is restored to live state and appears as a normal pending
+  reversal. Confirm Other changes displays only current pending work.
+- Start a contest with two or more configured candidates. Confirm the equal-
+  width `Contest 1 | Contest 2 | Contest 3` selector renders only configured
+  slots, persists selection, shows progress for running candidates, disables
+  failed candidates with their error, and enables completed candidates.
+- Edit text inline, reject a text row, edit a Figure caption, and reset each
+  candidate. Switch candidates repeatedly and confirm every candidate preserves
+  its own draft, no accepted lines are mixed into another candidate, and the
+  original live manuscript is unchanged during review.
+- While the contest runs or awaits resolution, attempt manuscript, layout,
+  Figure, Designed Page, assistant, revision-worker, and new-contest mutations
+  from different Editor routes. Confirm they are blocked while read-only
+  navigation remains available with a link back to the contested Review page.
+- Complete or fail every candidate, resolve with the selected result, and
+  verify the captured original revision/hash is checked, the selected draft is
+  applied atomically, the Editor lock releases, and the result remains a normal
+  pending Git-backed change. Start another contest and discard it; confirm the
+  original live manuscript is retained. For a running contest, verify the
+  application-owned cancellation confirmation occurs before discard. Confirm
+  an all-failed contest can still be discarded and never leaves the Editor
+  permanently locked.
 
 ## Manuscript Figures
 
@@ -172,8 +215,9 @@ the live test project; terminate the browser host after the run.
   inline emphasis remains.
 - Ask Editor to extract a style from one stable block and apply it across a
   chapter. Confirm the transcript contains compact create/apply calls rather
-  than one `setBlockStyle` operation per paragraph, and that Review edits stages
-  the style before the dependent manuscript change.
+  than one `setBlockStyle` operation per paragraph, and that Review Edits shows
+  the live style and dependent manuscript change against Git HEAD without
+  flattening the semantic document.
 - Confirm every toolbar button and select has understandable hover text and no
   Advanced control or floating formatting menu exists. Select a Figure by
   clicking its artwork, scroll the manuscript, and confirm its styled
@@ -308,15 +352,16 @@ the live test project; terminate the browser host after the run.
   a successful direct change. Confirm the affected document's buttons invalidate
   immediately and the assistant change is not undoable. Confirm unrelated Core,
   release, chapter, section, Designed Page, and cover streams remain isolated.
-  Repeat with failed, cancelled, staged-only, conflicted, and no-op work and
-  confirm history is unchanged. With Review Edits enabled, approve a chapter
-  change and confirm the durable Before/Current comparison remains available
-  even though the approved assistant mutation invalidates manual history.
+  Repeat with failed, cancelled, conflicted, and no-op work and confirm history
+  is unchanged. With Review Edits enabled, approve a chapter change and confirm
+  the Git HEAD/live comparison advances while the approved assistant mutation
+  invalidates manual history.
 - Create more than 100 actions in one disposable document and confirm only the
   newest 100 remain while Undo reaches the advanced baseline without losing the
   document. After Undo, make a new edit and confirm Redo is cleared.
 - Fully exit Lorekeeper and restart it. Confirm all Undo/Redo state is empty while
-  live documents and the latest assistant Review comparison remain intact.
+  live documents, pending Git review, and any unresolved Contest lock remain
+  intact.
 - Remove an image or custom font referenced only by retained history. Confirm a
   Lorekeeper-owned warning offers Cancel or Delete and clear history; Cancel
   preserves both, while confirmation clears only affected current-process streams

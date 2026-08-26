@@ -1,0 +1,448 @@
+@using Lorekeeper.Manuscripts
+@using Lorekeeper.EditorChat
+@using Lorekeeper.Models
+@using Lorekeeper.Projects
+@using Lorekeeper.VersionHistory.Compare
+@using Lorekeeper.VersionHistory.Restore
+@using Lorekeeper.VersionHistory.Services
+@implements IDisposable
+@inject NavigationManager Navigation
+@inject IProjectService Projects
+@inject IEditorChatService Chat
+@inject IProjectVersionHistoryService VersionHistory
+@inject IProjectVersionRestoreService Restore
+@inject ProjectVersionHistoryUiEvents HistoryEvents
+
+<div class="project-review-controls" @onmouseenter="RefreshAsync" @onfocusin="RefreshAsync">
+    @if (Project is not null)
+    {
+        <label class="project-review-toggle" title="Keep the approved Git checkpoint as the review baseline">
+            <input type="checkbox"
+                   checked="@_reviewEditsEnabled"
+                   disabled="@(_loading || _busy || IsProjectLocked)"
+                   @onchange="OnReviewEditsChangedAsync" />
+            <span>Review Edits</span>
+        </label>
+
+        @if (PendingChapterCount > 0 || OtherChangeCount > 0)
+        {
+            <button type="button"
+                    class="project-review-pending"
+                    aria-expanded="@_chooserOpen"
+                    aria-controls="project-review-pending-list"
+                    disabled="@(_loading || _busy)"
+                    title="Choose a pending chapter review"
+                    @onclick="ToggleChooserAsync">
+                Pending changes <span class="project-review-count">@(PendingChapterCount + OtherChangeCount)</span>
+            </button>
+        }
+
+        @if (_chooserOpen)
+        {
+            <div id="project-review-pending-list"
+                 class="project-review-chooser"
+                 role="dialog"
+                 aria-label="Pending changes">
+                <div class="project-review-chooser-header">
+                    <strong>Pending changes</strong>
+                    <button type="button" class="btn-close btn-close-sm" aria-label="Close pending changes" @onclick="CloseChooser"></button>
+                </div>
+                @if (_loading)
+                {
+                    <p class="project-review-chooser-empty">Loading review targets…</p>
+                }
+                else if (PendingChapterCount == 0 && OtherChangeCount == 0)
+                {
+                    <p class="project-review-chooser-empty">No pending changes.</p>
+                }
+                else
+                {
+                    @foreach (var chapter in PendingChapters)
+                    {
+                        <button type="button" class="project-review-target" @onclick="() => OpenChapterReview(chapter)">
+                            <span class="project-review-target-title">@ChapterLabel(chapter)</span>
+                            <span class="project-review-target-kind">@TargetLabel(chapter.ContentTarget)</span>
+                        </button>
+                    }
+                    @if (OtherChangeCount > 0)
+                    {
+                        <button type="button" class="project-review-target project-review-target--other" @onclick="OpenOtherReviewAsync">
+                            <span class="project-review-target-title">Other changes</span>
+                            <span class="project-review-target-kind">@OtherChangeCount item@(OtherChangeCount == 1 ? string.Empty : "s")</span>
+                        </button>
+                    }
+                }
+            </div>
+        }
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_error))
+    {
+        <span class="project-review-feedback project-review-feedback--error" role="alert">@_error</span>
+    }
+</div>
+
+@if (_showOtherReview && OtherGitEntries.Count > 0)
+{
+    <div class="project-review-other-backdrop" role="presentation" @onclick="CloseOtherReview"></div>
+    <section class="project-review-other-modal" role="dialog" aria-modal="true" aria-label="Other pending changes">
+        <header>
+            <div>
+                <strong>Other pending changes</strong>
+                <p>Semantic project changes outside the manuscript review.</p>
+            </div>
+            <button type="button" class="btn-close" aria-label="Close" @onclick="CloseOtherReview"></button>
+        </header>
+        <div class="project-review-other-list">
+                    @foreach (var group in OtherDependencyGroups)
+                    {
+                        <section class="project-review-other-group">
+                            <header>
+                                <strong>@group.Label</strong>
+                                <span>@(group.IsAtomic ? "Atomic dependency group" : "Reviewable aggregate")</span>
+                            </header>
+                            @foreach (var entry in group.Entries)
+                            {
+                                <article>
+                                    <strong>@entry.Label</strong>
+                                    <span>@entry.Category · @entry.Change</span>
+                                    @if (entry.BeforeText is not null || entry.AfterText is not null)
+                                    {
+                                        <div class="project-review-other-before-after">
+                                            <div><small>Before</small><p>@(entry.BeforeText ?? "(not present)")</p></div>
+                                            <div><small>After</small><p>@(entry.AfterText ?? "(not present)")</p></div>
+                                        </div>
+                                    }
+                                </article>
+                            }
+                        </section>
+                    }
+        </div>
+        <p class="project-review-other-note">Approval and undo are scoped to non-manuscript areas. Pending Core and edition manuscript targets stay available for review.</p>
+        <footer>
+            <button type="button" class="btn btn-sm btn-success" disabled="@(_busy || IsProjectLocked)" @onclick="ApproveOtherReviewAsync">Approve other changes</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || IsProjectLocked)" @onclick="RequestUndoOtherReview">Undo all Other changes</button>
+        </footer>
+    </section>
+}
+
+<ConfirmationDialog IsOpen="_otherUndoConfirmationOpen"
+                    Title="Undo all Other changes?"
+                    Message="This restores non-manuscript project state to approved HEAD. Pending Core and edition manuscript changes remain available for review."
+                    ConfirmLabel="Undo Other changes"
+                    Destructive="true"
+                    Busy="@_busy"
+                    OnConfirm="ConfirmUndoOtherReviewAsync"
+                    OnCancel="CancelUndoOtherReview" />
+
+@code {
+    [Parameter] public Project? Project { get; set; }
+
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private ProjectVersionReviewView? _review;
+    private bool _reviewEditsEnabled;
+    private bool _chooserOpen;
+    private bool _showOtherReview;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _refreshing;
+    private bool _disposed;
+    private bool _contestLocked;
+    private bool _otherUndoConfirmationOpen;
+    private string? _error;
+
+    private bool IsProjectLocked => Project is { } project
+        && (HistoryEvents.IsProjectOperationActive(project.Id) || _contestLocked);
+
+    private IReadOnlyList<ProjectVersionReviewChapter> PendingChapters
+    {
+        get
+        {
+            var chapters = _review?.Chapters
+                .Where(chapter => chapter.HasChanges)
+                .ToList() ?? [];
+            return chapters
+                .OrderBy(chapter => chapter.ContentTarget.IsCore ? 0 : 1)
+                .ThenBy(chapter => chapter.After?.Order ?? chapter.Before?.Order ?? int.MaxValue)
+                .ThenBy(chapter => chapter.After?.Title ?? chapter.Before?.Title ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+    }
+
+    private int PendingChapterCount => PendingChapters.Count;
+
+    private int OtherChangeCount => OtherGitEntries.Count;
+
+    private IReadOnlyList<ProjectVersionReviewDependencyGroup> OtherDependencyGroups =>
+        _review?.DependencyGroups
+            .Where(group => !group.IsManuscriptScoped)
+            .Select(group => group with
+            {
+                Entries = group.Entries
+                    .Where(entry => !IsChapterReviewableEntry(group, entry))
+                    .ToList(),
+            })
+            .Where(group => group.Entries.Count > 0)
+            .ToList() ?? [];
+
+    private IReadOnlyList<VersionHistorySnapshotChangeEntry> OtherGitEntries => OtherDependencyGroups
+        .SelectMany(group => group.Entries)
+        .ToList();
+
+    private bool IsChapterReviewableEntry(
+        ProjectVersionReviewDependencyGroup group,
+        VersionHistorySnapshotChangeEntry entry)
+    {
+        if (_review is null)
+            return false;
+
+        if (group.Key.StartsWith("composition/compositions", StringComparison.Ordinal)
+            && Guid.TryParse(entry.Key, out var compositionId))
+        {
+            return _review.Chapters.Any(chapter => chapter.CompositionChanges.Any(composition =>
+                composition.CompositionId == compositionId));
+        }
+
+        // An edition entry whose only semantic changes are chapter overrides
+        // is represented by the edition chapter targets. Keep edition metadata
+        // in Other, but do not duplicate override-only manuscript changes.
+        if (group.Key.StartsWith("publication/editions", StringComparison.Ordinal)
+            && entry.ManuscriptChanged
+            && !entry.MetadataChanged
+            && Guid.TryParse(entry.Key, out var editionId))
+        {
+            return _review.Chapters.Any(chapter =>
+                chapter.ContentTarget.EditionId == editionId
+                && chapter.HasManuscriptChanges);
+        }
+
+        return false;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Project is null)
+        {
+            _review = null;
+            _loading = false;
+            return;
+        }
+
+        await RefreshAsync();
+    }
+
+    protected override void OnInitialized() =>
+        HistoryEvents.ReviewStateChanged += HandleReviewStateChanged;
+
+    private async Task RefreshAsync()
+    {
+        if (_disposed || _refreshing || Project is not { } project)
+            return;
+
+        _refreshing = true;
+        _loading = true;
+        _error = null;
+        try
+        {
+            _reviewEditsEnabled = (await Projects.GetByIdAsync(project.Id, _lifetimeCancellation.Token))?.ReviewEditsEnabled ?? false;
+            _contestLocked = (await Chat.GetEditorContestLockStateAsync(project.Id, _lifetimeCancellation.Token)).IsLocked;
+            _review = await VersionHistory.GetReviewAsync(project.Id, cancellationToken: _lifetimeCancellation.Token);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+            _review = null;
+        }
+        finally
+        {
+            _loading = false;
+            _refreshing = false;
+        }
+    }
+
+    private async Task OnReviewEditsChangedAsync(ChangeEventArgs args)
+    {
+        if (Project is not { } project || IsProjectLocked)
+            return;
+
+        var enabled = args.Value is bool value
+            ? value
+            : bool.TryParse(args.Value?.ToString(), out var parsed) && parsed;
+        if (!enabled && _review is { Comparison.IsIdentical: false })
+        {
+            _reviewEditsEnabled = true;
+            _error = "Review Edits must stay enabled until pending changes are approved or undone.";
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await VersionHistory.SetReviewEditsEnabledAsync(project.Id, enabled, _lifetimeCancellation.Token);
+            _reviewEditsEnabled = enabled;
+            HistoryEvents.PublishReviewStateChanged(project.Id);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ToggleChooserAsync()
+    {
+        if (_chooserOpen)
+        {
+            _chooserOpen = false;
+            return;
+        }
+
+        await RefreshAsync();
+        _chooserOpen = true;
+    }
+
+    private void CloseChooser() => _chooserOpen = false;
+
+    private void OpenChapterReview(ProjectVersionReviewChapter chapter)
+    {
+        if (Project is not { } project)
+            return;
+
+        _chooserOpen = false;
+        var editionQuery = chapter.ContentTarget.EditionId is Guid editionId
+            ? $"&edition={editionId:N}"
+            : string.Empty;
+        Navigation.NavigateTo($"/projects/{Uri.EscapeDataString(project.Slug)}/editor/{chapter.ChapterId:D}?mode=Review{editionQuery}");
+    }
+
+    private async Task OpenOtherReviewAsync()
+    {
+        if (Project is not { } project)
+            return;
+
+        _chooserOpen = false;
+        try
+        {
+            _showOtherReview = true;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _error = exception.Message;
+        }
+    }
+
+    private void CloseOtherReview() => _showOtherReview = false;
+
+    private async Task ApproveOtherReviewAsync()
+    {
+        if (Project is not { } project
+            || IsProjectLocked
+            || _review is not { Comparison.IsIdentical: false, Token: { } token })
+            return;
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await VersionHistory.CreateReviewApprovalForOtherAsync(
+                project.Id,
+                token,
+                semanticMessage: "Approved other project changes",
+                requestKey: $"review-other:{token.CurrentContentHash}",
+                cancellationToken: _lifetimeCancellation.Token);
+            _showOtherReview = false;
+            await RefreshAsync();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void RequestUndoOtherReview()
+    {
+        if (!IsProjectLocked)
+            _otherUndoConfirmationOpen = true;
+    }
+
+    private void CancelUndoOtherReview() => _otherUndoConfirmationOpen = false;
+
+    private async Task ConfirmUndoOtherReviewAsync()
+    {
+        if (Project is not { } project
+            || IsProjectLocked
+            || _review is not { Comparison.IsIdentical: false, Token: { } token })
+            return;
+
+        _busy = true;
+        _error = null;
+        _otherUndoConfirmationOpen = false;
+        try
+        {
+            await Restore.RestoreReviewOtherAsync(
+                project.Id,
+                token,
+                cancellationToken: _lifetimeCancellation.Token);
+            _showOtherReview = false;
+            await RefreshAsync();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private string ChapterLabel(ProjectVersionReviewChapter chapter) =>
+        chapter.After?.Title ?? chapter.Before?.Title ?? $"Chapter {chapter.ChapterId:N}";
+
+    private static string TargetLabel(EditorContentTarget target) =>
+        target.IsCore ? "Core Book" : $"Edition {target.EditionId:N}";
+
+    private async void HandleReviewStateChanged(Guid projectId)
+    {
+        if (_disposed || Project?.Id != projectId)
+            return;
+
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                await RefreshAsync();
+                if (!_disposed)
+                    StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _disposed = true;
+        HistoryEvents.ReviewStateChanged -= HandleReviewStateChanged;
+        _lifetimeCancellation.Cancel();
+        _lifetimeCancellation.Dispose();
+    }
+}

@@ -209,7 +209,6 @@ builder.Services.AddScoped<IChapterService>(services => services.GetRequiredServ
 builder.Services.AddScoped<IManuscriptService>(services => services.GetRequiredService<ChapterService>());
 builder.Services.AddScoped<IManuscriptAnnotationService, ManuscriptAnnotationService>();
 builder.Services.AddSingleton<Lorekeeper.Authoring.IAuthoringHistoryRuntime, Lorekeeper.Authoring.AuthoringHistoryRuntime>();
-builder.Services.AddScoped<Lorekeeper.Authoring.IAssistantReviewBaselineService, Lorekeeper.Authoring.AssistantReviewBaselineService>();
 builder.Services.AddScoped<Lorekeeper.Authoring.IAuthoringMutationContextAccessor, Lorekeeper.Authoring.AuthoringMutationContextAccessor>();
 builder.Services.AddSingleton<IDatabaseMigrationRecoveryService, DatabaseMigrationRecoveryService>();
 builder.Services.AddSingleton<IManuscriptMigrationService, ManuscriptMigrationService>();
@@ -250,7 +249,6 @@ builder.Services.AddScoped<IProjectFactService, ProjectFactService>();
 builder.Services.AddScoped<IOutlineGraphSync, OutlineGraphSync>();
 builder.Services.AddScoped<IOutlineWorkingContextBuilder, OutlineWorkingContextBuilder>();
 builder.Services.AddScoped<OutlineCollaborationTools>();
-builder.Services.AddScoped<IAiChangeApprovalService, AiChangeApprovalService>();
 builder.Services.AddScoped<IOutlineCollaborationService, OutlineCollaborationService>();
 builder.Services.AddSingleton<IBookFormatGuidanceService, BookFormatGuidanceService>();
 builder.Services.AddSingleton<IOutlineChatTurnRunner, OutlineChatTurnRunner>();
@@ -346,6 +344,9 @@ builder.Services.AddScoped<IEntityRelationContextService, EntityRelationContextS
 builder.Services.AddScoped<EditorChatTools>();
 builder.Services.AddScoped<EditorManuscriptApplyService>();
 builder.Services.AddScoped<IEditorContestService, EditorContestService>();
+builder.Services.AddSingleton<IEditorContestRunRegistry, EditorContestRunRegistry>();
+builder.Services.AddScoped<IEditorContestMutationContext, EditorContestMutationContext>();
+builder.Services.AddScoped<IEditorContestMutationGuard, EditorContestMutationGuard>();
 builder.Services.AddSingleton<IEditorRevisionJobNotifier, EditorRevisionJobNotifier>();
 builder.Services.AddScoped<EditorRevisionAgentProcessor>();
 builder.Services.AddScoped<IEditorRevisionAgentService, EditorRevisionAgentService>();

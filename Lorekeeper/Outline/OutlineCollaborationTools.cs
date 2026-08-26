@@ -40,7 +40,6 @@ public enum OutlineToolSurface
 public sealed class OutlineCollaborationContext(
     Guid projectId,
     Action onMutated,
-    OutlineToolStagingContext? staging = null,
     bool visionReady = false,
     Action<IEnumerable<EntityVisualContextReference>>? onVisualsQueued = null,
     Action<ReferenceVisualReadResult>? onReferenceVisualQueued = null,
@@ -52,7 +51,6 @@ public sealed class OutlineCollaborationContext(
     private readonly HashSet<Guid> _imageGenerationJobIds = [];
     public Guid ProjectId { get; } = projectId;
     public Action OnMutated { get; } = onMutated;
-    public OutlineToolStagingContext? Staging { get; } = staging;
     public bool VisionReady { get; } = visionReady;
     public BookBriefUpdatePolicy BookBriefUpdatePolicy { get; } = bookBriefUpdatePolicy;
     public OutlineToolSurface Surface { get; } = surface;
@@ -125,13 +123,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         MaxLinksPerNode = 8,
     };
 
-    public OutlineToolStagingContext CreateStagingContext(
-        Guid projectId,
-        Guid conversationId,
-        AiChangeConversationKind conversationKind = AiChangeConversationKind.Outline,
-        Action? onDirectMutationApplied = null) =>
-        new(database, projectId, conversationId, conversationKind, acts, chapters, entities, entityTypes,
-            entityVisualExamples, onDirectMutationApplied);
     public Task<IList<AITool>> BuildAsync(
         OutlineCollaborationContext context,
         CancellationToken cancellationToken = default)
@@ -669,11 +660,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
 
     private async Task<string> ReadEntityAsync(OutlineCollaborationContext ctx, Guid entityId, int? pageNumber)
     {
-        if (ctx.Staging is not null)
-        {
-            await QueueEntityVisualsAsync(ctx, entityId);
-            return await ctx.Staging.ReadEntityAsync(entityId, addedToContextFeed: false, EntityRelationOptions, pageNumber);
-        }
         var entity = await entities.GetAsync(ctx.ProjectId, entityId);
         if (entity is null) return $"Error: entity {entityId} not found in this project.";
         var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
@@ -712,7 +698,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
 
     private async Task<string> ListEntityLinksAsync(OutlineCollaborationContext ctx, Guid entityId, int? pageNumber)
     {
-        if (ctx.Staging is not null) return await ctx.Staging.ListEntityLinksAsync(entityId, pageNumber);
         var entity = await entities.GetAsync(ctx.ProjectId, entityId);
         if (entity is null) return $"Error: entity {entityId} not found in this project.";
         var links = await entities.ListLinksAsync(ctx.ProjectId, entityId);
@@ -734,13 +719,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
     {
         try
         {
-            if (ctx.Staging is not null)
-            {
-                var after = new EntityVisualChange("attach", EntityId: entityId, ImageId: imageId, Label: label?.Trim() ?? string.Empty);
-                return await ctx.Staging.StageExternalChangeAsync(
-                    "Attach a canonical visual reference to an entity", null, after,
-                    new { status = "staged", entityId, imageId, label }, "EntityCanonicalReference", $"{entityId:N}/{imageId:N}");
-            }
             var example = await entityVisualExamples.AttachAsync(ctx.ProjectId, entityId, imageId, label, EntityVisualExampleOrigin.Agent);
             ctx.OnMutated();
             await QueueEntityVisualsAsync(ctx, entityId);
@@ -753,16 +731,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
     {
         try
         {
-            if (ctx.Staging is not null)
-            {
-                var current = await entityVisualExamples.GetAsync(ctx.ProjectId, exampleId);
-                if (current is null) return "Error: entity canonical visual reference was not found.";
-                var before = new EntityVisualChange("update", current.Id, current.EntityId, current.Image.Id, Label: current.Label, SortOrder: current.SortOrder);
-                var after = before with { Label = label.Trim(), SortOrder = sortOrder ?? current.SortOrder };
-                return await ctx.Staging.StageExternalChangeAsync(
-                    "Update an entity canonical visual reference", before, after,
-                    new { status = "staged", canonicalReferenceId = exampleId, label, sortOrder }, "EntityCanonicalReference", exampleId.ToString("N"));
-            }
             var example = await entityVisualExamples.UpdateAsync(ctx.ProjectId, exampleId, label, sortOrder);
             ctx.OnMutated();
             return JsonSerializer.Serialize(VisualPayload(example));
@@ -772,15 +740,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
 
     private async Task<string> DetachEntityVisualAsync(OutlineCollaborationContext ctx, Guid exampleId)
     {
-        if (ctx.Staging is not null)
-        {
-            var current = await entityVisualExamples.GetAsync(ctx.ProjectId, exampleId);
-            if (current is null) return "Error: entity canonical visual reference was not found.";
-            var before = new EntityVisualChange("detach", current.Id, current.EntityId, current.Image.Id, Label: current.Label, SortOrder: current.SortOrder);
-            return await ctx.Staging.StageExternalChangeAsync(
-                "Detach an entity canonical visual reference", before, null,
-                new { status = "staged", canonicalReferenceId = exampleId }, "EntityCanonicalReference", exampleId.ToString("N"));
-        }
         await entityVisualExamples.DetachAsync(ctx.ProjectId, exampleId);
         ctx.OnMutated();
         return JsonSerializer.Serialize(new { status = "detached", canonicalReferenceId = exampleId });
@@ -809,28 +768,13 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             object? canonicalReference = null;
             if (targetValidation.Targets is [var target])
             {
-                if (ctx.Staging is null)
-                {
-                    var example = await entityVisualExamples.AttachAsync(
-                        ctx.ProjectId,
-                        target.EntityId,
-                        image.Id,
-                        target.Label,
-                        EntityVisualExampleOrigin.Agent);
-                    canonicalReference = VisualPayload(example);
-                }
-                else
-                {
-                    var after = new EntityVisualChange("attach", EntityId: target.EntityId, ImageId: image.Id, Label: target.Label?.Trim() ?? string.Empty);
-                    var staged = await ctx.Staging.StageExternalChangeAsync(
-                        $"Attach cropped canonical reference to entity {target.EntityId:N}",
-                        null,
-                        after,
-                        new { status = "staged", target.EntityId, imageId = image.Id, target.Label },
-                        "EntityCanonicalReference",
-                        $"{target.EntityId:N}/{image.Id:N}");
-                    canonicalReference = JsonSerializer.Deserialize<JsonElement>(staged);
-                }
+                var example = await entityVisualExamples.AttachAsync(
+                    ctx.ProjectId,
+                    target.EntityId,
+                    image.Id,
+                    target.Label,
+                    EntityVisualExampleOrigin.Agent);
+                canonicalReference = VisualPayload(example);
             }
 
             ctx.QueueVisuals([
@@ -909,9 +853,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
 
     private async Task<string> ListOutlineAsync(OutlineCollaborationContext ctx)
     {
-        if (ctx.Staging is not null)
-            return await ctx.Staging.ListOutlineAsync();
-
         var actList = await acts.ListAsync(ctx.ProjectId);
         var allChapters = await chapters.ListAsync(ctx.ProjectId);
         var byAct = allChapters.Where(c => c.ActId is not null)
@@ -990,9 +931,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         [Description("1–2 sentence summary of what this act covers.")] string synopsis)
     {
         if (string.IsNullOrWhiteSpace(title)) return "Error: title is required.";
-        if (ctx.Staging is not null)
-            return await ctx.Staging.CreateActAsync(title, synopsis);
-
         var act = await acts.CreateAsync(ctx.ProjectId, title.Trim(), synopsis?.Trim());
         ctx.OnMutated();
         return JsonSerializer.Serialize(new { id = act.Id, order = act.Order, title = act.Title, synopsis = act.Synopsis });
@@ -1004,9 +942,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         string? title,
         string? synopsis)
     {
-        if (ctx.Staging is not null)
-            return await ctx.Staging.UpdateActAsync(actId, title, synopsis);
-
         var existing = await acts.GetAsync(actId);
         if (existing is null || existing.ProjectId != ctx.ProjectId)
             return $"Error: act {actId} not found in this project.";
@@ -1018,9 +953,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
 
     private async Task<string> DeleteActAsync(OutlineCollaborationContext ctx, Guid actId)
     {
-        if (ctx.Staging is not null)
-            return await ctx.Staging.DeleteActAsync(actId);
-
         var existing = await acts.GetAsync(actId);
         if (existing is null || existing.ProjectId != ctx.ProjectId)
             return $"Error: act {actId} not found in this project.";
@@ -1042,9 +974,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         var (resolvedActId, error) = await ResolveActAsync(ctx, actId, allowUnassigned: true);
         if (error is not null) return error;
 
-        if (ctx.Staging is not null)
-            return await ctx.Staging.CreateChapterAsync(resolvedActId, title, synopsis);
-
         var ch = await chapters.CreateAsync(ctx.ProjectId, resolvedActId, title.Trim(), synopsis?.Trim());
 
         ctx.OnMutated();
@@ -1065,14 +994,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             if (error is not null) return error;
             assignment = new ChapterActAssignment(resolved);
         }
-
-        if (ctx.Staging is not null)
-            return await ctx.Staging.UpdateChapterAsync(
-                chapterId,
-                title,
-                synopsis,
-                assignment?.Value,
-                moveChapter: actId is not null);
 
         var existing = await chapters.GetAsync(chapterId);
         if (existing is null || existing.ProjectId != ctx.ProjectId)
@@ -1263,9 +1184,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             });
         }
 
-        if (ctx.Staging is not null)
-            return await ctx.Staging.DeleteChapterAsync(chapterId);
-
         if (existing is null)
             return $"Error: chapter {chapterId} not found in this project.";
 
@@ -1279,9 +1197,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
     private async Task<string> ReorderActsAsync(OutlineCollaborationContext ctx, Guid[] orderedIds)
     {
         if (orderedIds is null || orderedIds.Length == 0) return "Error: orderedIds is required.";
-
-        if (ctx.Staging is not null)
-            return await ctx.Staging.ReorderActsAsync(orderedIds);
 
         var existing = await acts.ListAsync(ctx.ProjectId);
         var existingIds = existing.Select(a => a.Id).ToHashSet();
@@ -1305,9 +1220,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         var (bucket, error) = await ResolveActAsync(ctx, actId, allowUnassigned: true);
         if (error is not null) return error;
 
-        if (ctx.Staging is not null)
-            return await ctx.Staging.ReorderChaptersAsync(bucket, orderedIds);
-
         var bucketChapters = (await chapters.ListAsync(ctx.ProjectId))
             .Where(c => c.ActId == bucket)
             .ToList();
@@ -1328,9 +1240,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
 
     private async Task<string> ListEntityTypesAsync(OutlineCollaborationContext ctx)
     {
-        if (ctx.Staging is not null)
-            return await ctx.Staging.ListEntityTypesAsync();
-
         var list = await entityTypes.ListAsync(ctx.ProjectId, includeStructural: true);
         return JsonSerializer.Serialize(list.Select(t => new
         {
@@ -1345,9 +1254,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
 
     private async Task<string> ListEntitiesAsync(OutlineCollaborationContext ctx, string? type, int page)
     {
-        if (ctx.Staging is not null)
-            return await ctx.Staging.ListEntitiesAsync(type, page);
-
         const int pageSize = 20;
         page = Math.Max(1, page);
         var typeNames = await SearchableTypeNamesAsync(ctx.ProjectId, type);
@@ -1391,9 +1297,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             if (!Guid.TryParse(parentId, out var p)) return $"Error: parentId '{parentId}' is not a valid Guid.";
             parent = p;
         }
-
-        if (ctx.Staging is not null)
-            return await ctx.Staging.SearchEntitiesAsync(query, topK, type, parent);
 
         var searchTerms = SearchTerms(query);
         var typeNames = await SearchableTypeNamesAsync(ctx.ProjectId, type);
@@ -1451,13 +1354,9 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         if (!string.IsNullOrWhiteSpace(parentId))
         {
             if (!Guid.TryParse(parentId, out var p)) return $"Error: parentId '{parentId}' is not a valid Guid.";
-            if (ctx.Staging is not null)
-            {
-                parent = p;
-            }
             // For Event (beats) the parent must be a chapter we know about. Validate up front so
             // the chat surface gets a clear error instead of lazily upserting a phantom node.
-            else if (string.Equals(type.Trim(), EventNodeType, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(type.Trim(), EventNodeType, StringComparison.OrdinalIgnoreCase))
             {
                 var chapter = await chapters.GetAsync(p);
                 if (chapter is null || chapter.ProjectId != ctx.ProjectId)
@@ -1473,9 +1372,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             properties.TryAdd("key", name.Trim());
             properties.TryAdd("value", string.Empty);
         }
-
-        if (ctx.Staging is not null)
-            return await ctx.Staging.CreateEntityAsync(trimmedType, name, properties, parent, order);
 
         var duplicate = await FindDuplicateForCreateAsync(ctx, trimmedType, name, properties, parent);
         if (duplicate is not null)
@@ -1572,9 +1468,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         try { propertiesToRemove = ParseStringArrayJson(propertiesToRemoveJson); }
         catch (Exception ex) { return $"Error: propertiesToRemoveJson is not a valid JSON array of strings: {ex.Message}"; }
 
-        if (ctx.Staging is not null)
-            return await ctx.Staging.UpdateEntityAsync(id, name, propertiesToSet, propertiesToRemove);
-
         try
         {
             var updated = await entities.UpdateAsync(ctx.ProjectId, id, name?.Trim(), propertiesToSet, propertiesToRemove);
@@ -1590,9 +1483,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
     private async Task<string> DeleteEntityAsync(OutlineCollaborationContext ctx, string entityId)
     {
         if (!Guid.TryParse(entityId, out var id)) return $"Error: entityId '{entityId}' is not a valid Guid.";
-        if (ctx.Staging is not null)
-            return await ctx.Staging.DeleteEntityAsync(id);
-
         try
         {
             var existing = await entities.GetAsync(ctx.ProjectId, id);
@@ -1635,9 +1525,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             parsed.Add(g);
         }
 
-        if (ctx.Staging is not null)
-            return await ctx.Staging.ReorderEntitiesAsync(type, parent, parsed);
-
         try
         {
             var trimmedType = type.Trim();
@@ -1679,9 +1566,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         Dictionary<string, string?>? properties;
         try { properties = ParsePropertiesJson(propertiesJson); }
         catch (Exception ex) { return $"Error: propertiesJson is not a valid JSON object: {ex.Message}"; }
-
-        if (ctx.Staging is not null)
-            return await ctx.Staging.LinkEntitiesAsync(from, to, edgeType, properties);
 
         try
         {
@@ -2009,9 +1893,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
 
         if (!Guid.TryParse(actId, out var parsed))
             return (null, $"Error: actId '{actId}' is not a valid Guid or 'unassigned'.");
-
-        if (ctx.Staging is not null)
-            return (parsed, null);
 
         var act = await acts.GetAsync(parsed);
         if (act is null || act.ProjectId != ctx.ProjectId)

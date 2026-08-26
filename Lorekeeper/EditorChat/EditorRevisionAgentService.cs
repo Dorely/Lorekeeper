@@ -3,14 +3,13 @@ using Lorekeeper.Chapters;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
-using Lorekeeper.Persistence.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorRevisionAgentService(
-IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, IOptions<EditorChatOptions> options, IServiceScopeFactory scopeFactory, IEditorRevisionJobNotifier notifier, ILogger<EditorRevisionAgentService> logger) : IEditorRevisionAgentService
+IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, IOptions<EditorChatOptions> options, IServiceScopeFactory scopeFactory, IEditorRevisionJobNotifier notifier, IEditorContestMutationGuard contestGuard, ILogger<EditorRevisionAgentService> logger) : IEditorRevisionAgentService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -34,6 +33,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             var revisions = databaseOperation.Repositories.EditorRevisions;
             _ = await projects.GetByIdAsync(request.ProjectId, cancellationToken)
                 ?? throw new InvalidOperationException($"Project {request.ProjectId} not found.");
+            await contestGuard.EnsureMutationAllowedAsync(request.ProjectId, cancellationToken);
 
             var seenChapterIds = new HashSet<Guid>();
             var chaptersById = new Dictionary<Guid, Chapter>();
@@ -206,7 +206,6 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
     private async Task<EditorRevisionAgentRunResult> FinalizeJobAsync(Guid jobId, bool cancelled, CancellationToken cancellationToken)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        var changes = databaseOperation.Repositories.AiChanges;
         var job = await databaseOperation.Db.EditorRevisionJobs
             .AsTracking()
             .Include(item => item.Sessions.OrderBy(session => session.Order))
@@ -253,15 +252,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             updateKind,
             DateTime.UtcNow));
 
-        var pendingChangeIds = (await changes.ListPendingRevisionWorkerChangesAsync(
-                job.ProjectId,
-                job.ConversationId,
-                job.AssistantMessageId,
-                job.ToolCallId,
-                cancellationToken))
-            .Select(change => change.Id)
-            .ToList();
-        return ToRunResult(job, pendingChangeIds);
+        return ToRunResult(job);
     }
 
     private static string? BuildJobErrorMessage(IReadOnlyList<EditorRevisionSession> sessions)
@@ -310,17 +301,14 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         return normalized;
     }
 
-    private static EditorRevisionAgentRunResult ToRunResult(
-        EditorRevisionJob job,
-        IReadOnlyList<Guid> pendingChangeIds) => new(
+    private static EditorRevisionAgentRunResult ToRunResult(EditorRevisionJob job) => new(
         job.Id,
         job.Status,
         job.Sessions
             .OrderBy(session => session.Order)
             .Select(ToSessionResult)
             .ToList(),
-        job.ErrorMessage,
-        pendingChangeIds);
+        job.ErrorMessage);
 
     private static EditorRevisionSessionResult ToSessionResult(EditorRevisionSession session) => new(
         session.Id,

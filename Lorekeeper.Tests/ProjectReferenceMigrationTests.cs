@@ -34,21 +34,18 @@ public sealed class ProjectReferenceMigrationTests
             {
                 await db.GetService<IMigrator>().MigrateAsync(PreviousMigration);
 
-                var firstProject = new Project
-                {
-                    Id = firstProjectId,
-                    Name = "First volume",
-                    Slug = "first-volume",
-                    ProjectGuidance = "Preserve the first volume's canon.",
-                };
-                var secondProject = new Project
-                {
-                    Id = secondProjectId,
-                    Name = "Second volume",
-                    Slug = "second-volume",
-                    ProjectGuidance = "Continue the established world.",
-                };
-                db.Projects.AddRange(firstProject, secondProject);
+                await LegacyProjectSeed.InsertAsync(
+                    db,
+                    firstProjectId,
+                    "First volume",
+                    "first-volume",
+                    "Preserve the first volume's canon.");
+                await LegacyProjectSeed.InsertAsync(
+                    db,
+                    secondProjectId,
+                    "Second volume",
+                    "second-volume",
+                    "Continue the established world.");
                 db.BookBriefs.AddRange(
                     new BookBrief { ProjectId = firstProjectId, Premise = "The first volume premise." },
                     new BookBrief { ProjectId = secondProjectId, Premise = "The second volume premise." });

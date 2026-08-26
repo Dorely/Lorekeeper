@@ -1,5 +1,7 @@
 using Lorekeeper.ChatTurns;
 using Lorekeeper.Models;
+using Lorekeeper.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.VersionHistory.Services;
 
@@ -13,6 +15,7 @@ public interface IAssistantVersionCheckpointService
 
 public sealed class AssistantVersionCheckpointService(
     IProjectVersionHistoryService history,
+    IAppDatabaseOperationFactory database,
     ILogger<AssistantVersionCheckpointService> logger) : IAssistantVersionCheckpointService
 {
     public async Task TryCheckpointAsync(
@@ -22,6 +25,15 @@ public sealed class AssistantVersionCheckpointService(
     {
         try
         {
+            await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+            var reviewEditsEnabled = await databaseOperation.Db.Projects
+                .AsNoTracking()
+                .Where(project => project.Id == projectId)
+                .Select(project => (bool?)project.ReviewEditsEnabled)
+                .SingleOrDefaultAsync(cancellationToken);
+            if (reviewEditsEnabled is null || reviewEditsEnabled.Value)
+                return;
+
             await history.CreateCheckpointAsync(
                 projectId,
                 ProjectVersionCheckpointKind.Assistant,

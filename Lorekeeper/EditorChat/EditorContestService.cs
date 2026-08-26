@@ -1,9 +1,10 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading.Channels;
+using Lorekeeper.Authoring;
 using Lorekeeper.Chapters;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
@@ -19,18 +20,12 @@ using Microsoft.Extensions.AI;
 namespace Lorekeeper.EditorChat;
 
 public sealed class EditorContestService(
-IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IEntityVisualContextService entityVisualContext, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, ILogger<EditorContestService> logger) : IEditorContestService
+IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptService manuscripts, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IEntityVisualContextService entityVisualContext, IBookBriefService bookBriefs, ISystemPromptComposer systemPrompts, IEditorContestMutationContext contestMutationContext, IEditorContestRunRegistry contestRuns, IAuthoringHistoryRuntime authoringHistory, ILogger<EditorContestService> logger) : IEditorContestService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
         WriteIndented = true,
-    };
-    private static readonly JsonSerializerOptions ReviewStateJsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        PropertyNameCaseInsensitive = true,
-        WriteIndented = false,
-        Converters = { new JsonStringEnumConverter() },
     };
     private static readonly TimeSpan CandidateRawResponseSaveInterval = TimeSpan.FromMilliseconds(750);
     private const int CandidateRawResponseSaveChars = 512;
@@ -38,6 +33,22 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
     private static EditorContentTarget BatchTarget(ContestBatch batch) => EditorContentTarget.From(
         Enum.TryParse<EditorContentTargetKind>(batch.ContentTargetKind, out var kind) ? kind : EditorContentTargetKind.Core,
         batch.ContentTargetEditionId);
+
+    private static bool EnsureDefaultSelectedCandidate(ContestBatch batch)
+    {
+        if (batch.SelectedCandidateId is not null)
+            return false;
+
+        var firstCompleted = batch.Candidates
+            .OrderBy(candidate => candidate.Order)
+            .FirstOrDefault(candidate => candidate.Status == ContestCandidateStatus.Completed);
+        if (firstCompleted is null)
+            return false;
+
+        batch.SelectedCandidateId = firstCompleted.Id;
+        batch.UpdatedAt = DateTime.UtcNow;
+        return true;
+    }
 
     public async Task<EditorContestSettings> GetSettingsAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -55,7 +66,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
 
     public async Task SetContestModeEnabledAsync(Guid projectId, bool enabled, CancellationToken cancellationToken = default)
     {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var projects = databaseOperation.Repositories.Projects;
         var project = await projects.GetByIdAsync(projectId, cancellationToken)
@@ -70,7 +81,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
 
     public async Task SetContestProviderAsync(Guid projectId, int slot, int? providerId, CancellationToken cancellationToken = default)
     {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var projects = databaseOperation.Repositories.Projects;
         if (slot is < 1 or > 3)
@@ -103,16 +114,121 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
 
     public async Task<IReadOnlyList<ContestBatch>> ListCurrentContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
-        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         var contests = databaseOperation.Repositories.Contests;
-        return await contests.ListCurrentByProjectAsync(projectId, cancellationToken);
+        var batches = await contests.ListCurrentByProjectAsync(projectId, cancellationToken);
+        var changed = false;
+        foreach (var batch in batches)
+        {
+            if (!EnsureDefaultSelectedCandidate(batch))
+                continue;
+
+            contests.UpdateBatch(batch);
+            changed = true;
+        }
+
+        if (changed)
+            await databaseOperation.SaveChangesAsync(cancellationToken);
+
+        return batches;
     }
+
+    public async Task<EditorContestReviewSnapshot?> GetReviewAsync(
+        Guid projectId,
+        Guid batchId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        var batch = await databaseOperation.Repositories.Contests.GetBatchAsync(batchId, cancellationToken);
+        if (batch is null || batch.ProjectId != projectId || !batch.IsUnresolved)
+            return null;
+
+        if (EnsureDefaultSelectedCandidate(batch))
+        {
+            databaseOperation.Repositories.Contests.UpdateBatch(batch);
+            await databaseOperation.SaveChangesAsync(cancellationToken);
+        }
+
+        return ToReviewSnapshot(batch);
+    }
+
+    public async Task<EditorContestLockState> GetEditorLockStateAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var batch = await databaseOperation.Repositories.Contests.GetUnresolvedByProjectAsync(projectId, cancellationToken);
+        return batch is null
+            ? EditorContestLockState.Unlocked
+            : new EditorContestLockState(
+                true,
+                batch.Id,
+                batch.ChapterId,
+                batch.ChapterTitle,
+                batch.Status,
+                "Contest Review must be resolved or discarded before the Editor can be changed.");
+    }
+
+    public async Task EnsureEditorMutationAllowedAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        var state = await GetEditorLockStateAsync(projectId, cancellationToken);
+        if (state.IsLocked)
+            throw new InvalidOperationException(state.Message
+                ?? "Contest Review must be resolved or discarded before changing the Editor.");
+    }
+
     public async Task DiscardInactiveContestBatchesAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var contests = databaseOperation.Repositories.Contests;
         await contests.DeleteInactiveByProjectAsync(projectId, cancellationToken);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task SelectCandidateAsync(
+        Guid projectId,
+        Guid batchId,
+        Guid candidateId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var batch = await databaseOperation.Repositories.Contests.GetBatchAsync(batchId, cancellationToken)
+            ?? throw new InvalidOperationException($"Contest batch {batchId} not found.");
+        EnsureBatchProject(batch, projectId);
+        EnsureBatchReviewable(batch);
+        var candidate = batch.Candidates.SingleOrDefault(item => item.Id == candidateId)
+            ?? throw new InvalidOperationException($"Contest candidate {candidateId} does not belong to this contest.");
+        if (candidate.Status != ContestCandidateStatus.Completed)
+            throw new InvalidOperationException("Only completed contest candidates can be selected.");
+
+        batch.SelectedCandidateId = candidateId;
+        batch.UpdatedAt = DateTime.UtcNow;
+        databaseOperation.Repositories.Contests.UpdateBatch(batch);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task ResetCandidateAsync(
+        Guid projectId,
+        Guid candidateId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        var candidate = await databaseOperation.Repositories.Contests.GetCandidateAsync(candidateId, cancellationToken)
+            ?? throw new InvalidOperationException($"Contest candidate {candidateId} not found.");
+        EnsureBatchProject(candidate.Batch, projectId);
+        EnsureBatchReviewable(candidate.Batch);
+        if (candidate.Status != ContestCandidateStatus.Completed)
+            throw new InvalidOperationException("Only completed contest candidates have a review draft.");
+
+        var proposedJson = RequireManuscriptJson(candidate.ProposedManuscriptJson, "generated proposal");
+        _ = ManuscriptCodec.Deserialize(proposedJson);
+        candidate.DraftManuscriptJson = proposedJson;
+        candidate.UpdatedAt = DateTime.UtcNow;
+        databaseOperation.Repositories.Contests.UpdateCandidate(candidate);
         await databaseOperation.SaveChangesAsync(cancellationToken);
     }
     public async IAsyncEnumerable<EditorContestRunUpdate> StartContestAsync(
@@ -135,6 +251,8 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         if (chapter.ProjectId != projectId)
             throw new InvalidOperationException($"Chapter {request.ChapterId} does not belong to project {projectId}.");
 
+        await EnsureEditorMutationAllowedAsync(projectId, cancellationToken);
+
         var providers = await ResolveContestProvidersAsync(project, cancellationToken);
         if (providers.Count == 0)
             throw new InvalidOperationException("Choose at least one Contest Mode model before starting a contest.");
@@ -154,7 +272,8 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             ContentTargetEditionId = request.ContentTarget.EditionId,
             ChapterTitle = chapter.Title,
             OriginalManuscriptJson = ManuscriptCodec.Serialize(source.Document),
-            AcceptedManuscriptJson = ManuscriptCodec.Serialize(source.Document),
+            OriginalManuscriptRevision = source.Document.Revision,
+            OriginalManuscriptHash = HashManuscriptContent(source.Document),
             ContextSnapshotJson = JsonSerializer.Serialize(snapshot, JsonOptions),
             Status = ContestBatchStatus.Running,
         };
@@ -167,16 +286,35 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             ModelName = provider.ModelName,
             Status = ContestCandidateStatus.Pending,
         }).ToList();
-        await using (var writeOperation = await database.OpenWriteAsync(cancellationToken))
+        var contestRun = contestRuns.Register(batch.Id, cancellationToken);
+        try
         {
-            var contests = writeOperation.Repositories.Contests;
-            await contests.AddBatchAsync(batch, cancellationToken);
-            foreach (var candidate in candidateRows)
-                await contests.AddCandidateAsync(candidate, cancellationToken);
-            await writeOperation.SaveChangesAsync(cancellationToken);
+            await using (var writeOperation = await database.OpenWriteAsync(projectId, cancellationToken))
+            {
+                var contests = writeOperation.Repositories.Contests;
+                if (await contests.GetUnresolvedByProjectAsync(projectId, cancellationToken) is not null)
+                    throw new InvalidOperationException(
+                        "Only one Contest Review can be active at a time. Resolve or discard the existing contest first.");
+                await contests.AddBatchAsync(batch, cancellationToken);
+                foreach (var candidate in candidateRows)
+                    await contests.AddCandidateAsync(candidate, cancellationToken);
+                await writeOperation.SaveChangesAsync(cancellationToken);
+            }
+        }
+        catch
+        {
+            contestRun.Complete();
+            contestRuns.TryRemove(batch.Id, contestRun);
+            contestRun.Dispose();
+            throw;
         }
 
-        yield return new EditorContestStarted(batch.Id);
+        var contestToken = contestRun.Token;
+        Dictionary<Task<ContestCandidateResult>, ContestCandidate>? runningTasks = null;
+        var runFinalized = false;
+        try
+        {
+            yield return new EditorContestStarted(batch.Id);
 
         var progressChannel = Channel.CreateUnbounded<ContestCandidateRawProgress>(new UnboundedChannelOptions
         {
@@ -187,14 +325,14 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         var rawResponseBuffers = candidateRows.ToDictionary(candidate => candidate.Id, _ => new StringBuilder());
         var lastRawSaveAt = candidateRows.ToDictionary(candidate => candidate.Id, _ => DateTime.UtcNow);
         var lastRawSaveLength = candidateRows.ToDictionary(candidate => candidate.Id, _ => 0);
-        var tasks = new Dictionary<Task<ContestCandidateResult>, ContestCandidate>();
+        var tasks = runningTasks = new Dictionary<Task<ContestCandidateResult>, ContestCandidate>();
         foreach (var candidate in candidateRows)
         {
             IChatClient? chat = null;
             string? setupError = null;
             try
             {
-                chat = await chatClientFactory.CreateChatClientAsync(candidate.ProviderId, cancellationToken);
+                chat = await chatClientFactory.CreateChatClientAsync(candidate.ProviderId, contestToken);
             }
             catch (Exception ex)
             {
@@ -205,17 +343,17 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             if (setupError is not null || chat is null)
             {
                 MarkCandidateFailed(candidate, setupError ?? "Could not create chat client.", invalid: false);
-                await SaveCandidateAsync(candidate, cancellationToken);
+                await SaveCandidateAsync(candidate, CancellationToken.None);
                 yield return new EditorContestCandidateUpdated(batch.Id, candidate.Id, candidate.Status);
                 continue;
             }
 
             candidate.Status = ContestCandidateStatus.Running;
             candidate.UpdatedAt = DateTime.UtcNow;
-            await SaveCandidateAsync(candidate, cancellationToken);
+            await SaveCandidateAsync(candidate, CancellationToken.None);
             yield return new EditorContestCandidateUpdated(batch.Id, candidate.Id, candidate.Status);
 
-            tasks[RunCandidateAsync(chat, batch, candidate, snapshot, progressChannel.Writer, cancellationToken)] = candidate;
+            tasks[RunCandidateAsync(chat, batch, candidate, snapshot, progressChannel.Writer, contestToken)] = candidate;
         }
 
         Task<ContestCandidateRawProgress>? progressTask = null;
@@ -267,15 +405,17 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
                 candidate.Notes = string.IsNullOrWhiteSpace(result.Response.Notes) ? null : result.Response.Notes.Trim();
                 candidate.MutationsJson = JsonSerializer.Serialize(result.Response.Operations, JsonOptions);
                 candidate.ProposedManuscriptJson = ManuscriptCodec.Serialize(result.ProposedDocument);
+                candidate.DraftManuscriptJson = candidate.ProposedManuscriptJson;
                 candidate.DurationMs = result.Duration.TotalMilliseconds;
                 candidate.Status = ContestCandidateStatus.Completed;
                 candidate.CompletedAt = DateTime.UtcNow;
                 candidate.UpdatedAt = DateTime.UtcNow;
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (contestToken.IsCancellationRequested)
             {
                 candidate.Status = ContestCandidateStatus.Failed;
                 candidate.ErrorMessage = "Cancelled.";
+                candidate.CompletedAt = DateTime.UtcNow;
                 candidate.UpdatedAt = DateTime.UtcNow;
             }
             catch (ContestCandidateInvalidException ex)
@@ -295,15 +435,64 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             yield return new EditorContestCandidateUpdated(batch.Id, candidate.Id, candidate.Status);
         }
 
-        batch.Status = candidateRows.Any(candidate => candidate.Status == ContestCandidateStatus.Completed)
+        batch.Status = contestToken.IsCancellationRequested
+            ? ContestBatchStatus.Cancelled
+            : candidateRows.Any(candidate => candidate.Status == ContestCandidateStatus.Completed)
             ? ContestBatchStatus.Completed
             : ContestBatchStatus.Failed;
         batch.CompletedAt = DateTime.UtcNow;
         batch.UpdatedAt = DateTime.UtcNow;
-        if (batch.Status == ContestBatchStatus.Failed)
+        if (batch.Status == ContestBatchStatus.Cancelled)
+        {
+            foreach (var candidate in candidateRows.Where(candidate => !candidate.IsTerminal))
+            {
+                MarkCandidateFailed(candidate, "Cancelled.", invalid: false);
+                await SaveCandidateAsync(candidate, CancellationToken.None);
+            }
+            batch.ErrorMessage = "Contest cancelled by the user.";
+        }
+        else if (batch.Status == ContestBatchStatus.Failed)
             batch.ErrorMessage = "No contest candidate completed successfully.";
         await SaveBatchAsync(batch, CancellationToken.None);
+        runFinalized = true;
         yield return new EditorContestCompleted(batch.Id, batch.Status);
+        }
+        finally
+        {
+            if (!runFinalized)
+            {
+                var wasCancelled = contestRun.Token.IsCancellationRequested;
+                contestRun.Cancel();
+                if (runningTasks is not null && runningTasks.Count > 0)
+                {
+                    try
+                    {
+                        await Task.WhenAll(runningTasks.Keys);
+                    }
+                    catch (Exception exception)
+                    {
+                        logger.LogDebug(exception, "Contest candidate tasks ended while closing contest {BatchId}.", batch.Id);
+                    }
+                }
+
+                try
+                {
+                    await FinalizeAbandonedContestAsync(
+                        batch.Id,
+                        wasCancelled,
+                        null,
+                        CancellationToken.None);
+                }
+                catch (Exception exception)
+                {
+                    logger.LogError(exception, "Contest {BatchId} stopped, but its terminal state could not be persisted.", batch.Id);
+                }
+            }
+
+            contestRun.Complete();
+            contestRuns.TryRemove(batch.Id, contestRun);
+            contestRun.Dispose();
+        }
     }
 
     public async Task ResolveCandidateLineAsync(
@@ -312,512 +501,243 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         ContestCandidateReviewLineResolution request,
         CancellationToken cancellationToken = default)
     {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        databaseOperation.ShareWithNestedOperations();
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         var contests = databaseOperation.Repositories.Contests;
         var candidate = await contests.GetCandidateAsync(request.CandidateId, cancellationToken)
             ?? throw new InvalidOperationException($"Contest candidate {request.CandidateId} not found.");
-        if (candidate.Status != ContestCandidateStatus.Completed)
-            throw new InvalidOperationException("Only completed contest candidates can be reviewed.");
-
         var batch = candidate.Batch;
         if (batch.ProjectId != projectId || batch.ChapterId != chapterId)
             throw new InvalidOperationException("The contest candidate does not belong to the active chapter.");
-        if (batch.Status == ContestBatchStatus.Running)
-            throw new InvalidOperationException("Wait for the running contest to finish before reviewing candidate lines.");
-        if (batch.Status != ContestBatchStatus.Completed)
-            throw new InvalidOperationException("This contest is no longer active.");
+        EnsureBatchReviewable(batch);
+        if (candidate.Status != ContestCandidateStatus.Completed)
+            throw new InvalidOperationException("Only completed contest candidates can be reviewed.");
 
-        var chapter = await chapters.GetAsync(batch.ChapterId, cancellationToken)
-            ?? throw new InvalidOperationException($"Chapter {batch.ChapterId} not found.");
-        var current = await manuscripts.GetManuscriptAsync(BatchTarget(batch), chapter.Id, cancellationToken)
-            ?? throw new InvalidOperationException("The contest manuscript target no longer exists.");
-        if (!ManuscriptCodec.IsPlainTextOnly(current.Document)
-            || !ManuscriptCodec.IsPlainTextOnly(
-                ManuscriptCodec.Deserialize(candidate.ProposedManuscriptJson)))
+        var original = ManuscriptCodec.Deserialize(RequireManuscriptJson(
+            batch.OriginalManuscriptJson,
+            "contest original manuscript"));
+        var draft = ManuscriptCodec.Deserialize(RequireManuscriptJson(
+            candidate.EffectiveDraftManuscriptJson,
+            "contest candidate draft"));
+        if (request.ExpectedDraftHash is { } expectedDraftHash
+            && !string.Equals(HashManuscriptContent(draft), expectedDraftHash, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
-                "Line-by-line contest review is unavailable for semantically formatted manuscripts. "
-                + "Keep or reject the complete structured candidate.");
+                "This candidate draft changed in another review window. Refresh the contest before editing it.");
         }
-        if (!ManuscriptCodec.ContentEquals(current.Document, EffectiveAcceptedManuscript(batch)))
-            throw new InvalidOperationException("The chapter changed outside Contest Review. Finish or restart the contest before continuing.");
-
-        if (!TryBuildCandidateDiff(batch, candidate, out var diff))
-            throw new InvalidOperationException("This candidate no longer has a renderable chapter-body diff.");
-
-        var target = FindContestLineTarget(candidate.Id, diff, request)
-            ?? throw new InvalidOperationException("This contest review line changed. Refresh Review mode and try again.");
-
-        if (batch.WinningCandidateId is { } winnerId
-            && winnerId != candidate.Id
-            && request.Action is ChapterBodyReviewLineAction.Keep or ChapterBodyReviewLineAction.Edit)
-        {
-            throw new InvalidOperationException("A whole contestant is currently selected. Use Keep everything on another contestant to replace it.");
-        }
-
-        var state = ReadReviewState(candidate);
-        var editedText = request.Action == ChapterBodyReviewLineAction.Edit
-            ? NormalizeSingleLineEditText(request.EditedText)
-            : null;
-        UpsertReviewDecision(state, request, editedText);
-        candidate.ReviewStateJson = WriteReviewState(state);
+        var updated = ApplyLineDecision(original, draft, request);
+        candidate.DraftManuscriptJson = ManuscriptCodec.Serialize(updated);
         candidate.UpdatedAt = DateTime.UtcNow;
         contests.UpdateCandidate(candidate);
-
-        var acceptedBody = RebuildAcceptedBody(batch);
-        var acceptedSource = EffectiveAcceptedManuscript(batch);
-        batch.AcceptedManuscriptJson = ManuscriptCodec.Serialize(
-            ManuscriptCodec.ReparsePreservingBlockIds(acceptedSource, acceptedBody));
-        batch.UpdatedAt = DateTime.UtcNow;
-        contests.UpdateBatch(batch);
-
-        var acceptedDocument = ManuscriptCodec.Deserialize(batch.AcceptedManuscriptJson);
-        if (!ManuscriptCodec.ContentEquals(current.Document, acceptedDocument))
-            await manuscripts.ReplaceDocumentAsync(
-                BatchTarget(batch),
-                chapter.Id,
-                current.Revision,
-                acceptedDocument,
-                cancellationToken);
-
         await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task KeepCandidateAsync(Guid candidateId, CancellationToken cancellationToken = default)
+    public async Task KeepCandidateAsync(Guid projectId, Guid candidateId, CancellationToken cancellationToken = default)
     {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        databaseOperation.ShareWithNestedOperations();
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         var contests = databaseOperation.Repositories.Contests;
         var candidate = await contests.GetCandidateAsync(candidateId, cancellationToken)
             ?? throw new InvalidOperationException($"Contest candidate {candidateId} not found.");
+        var batch = candidate.Batch;
+        EnsureBatchProject(batch, projectId);
+        EnsureBatchReviewable(batch);
         if (candidate.Status != ContestCandidateStatus.Completed)
             throw new InvalidOperationException("Only completed contest candidates can be kept.");
-
-        var batch = candidate.Batch;
-        if (batch.Status == ContestBatchStatus.Running)
-            throw new InvalidOperationException("Wait for the running contest to finish before keeping a contestant.");
-        if (batch.Status != ContestBatchStatus.Completed)
-            throw new InvalidOperationException("This contest is no longer active.");
-
-        var chapter = await chapters.GetAsync(batch.ChapterId, cancellationToken)
-            ?? throw new InvalidOperationException($"Chapter {batch.ChapterId} not found.");
-        var current = await manuscripts.GetManuscriptAsync(BatchTarget(batch), chapter.Id, cancellationToken)
-            ?? throw new InvalidOperationException("The contest manuscript target no longer exists.");
-        if (!ManuscriptCodec.ContentEquals(current.Document, EffectiveAcceptedManuscript(batch)))
-            throw new InvalidOperationException("The chapter changed outside Contest Review. Finish or restart the contest before continuing.");
-
-        foreach (var batchCandidate in batch.Candidates)
-        {
-            batchCandidate.ReviewStateJson = "{}";
-            batchCandidate.UpdatedAt = DateTime.UtcNow;
-            contests.UpdateCandidate(batchCandidate);
-        }
-
-        batch.AcceptedManuscriptJson = candidate.ProposedManuscriptJson;
-        batch.WinningCandidateId = candidate.Id;
+        batch.SelectedCandidateId = candidate.Id;
         batch.UpdatedAt = DateTime.UtcNow;
         contests.UpdateBatch(batch);
-
-        var proposedDocument = ManuscriptCodec.Deserialize(candidate.ProposedManuscriptJson);
-        if (!ManuscriptCodec.ContentEquals(current.Document, proposedDocument))
-            await manuscripts.ReplaceDocumentAsync(
-                BatchTarget(batch),
-                chapter.Id,
-                current.Revision,
-                proposedDocument,
-                cancellationToken);
-
         await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task FinishContestBatchAsync(Guid batchId, CancellationToken cancellationToken = default)
+    public async Task FinishContestBatchAsync(Guid projectId, Guid batchId, CancellationToken cancellationToken = default)
     {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        await ResolveContestBatchAsync(projectId, batchId, cancellationToken);
+    }
+
+    public async Task ResolveContestBatchAsync(
+        Guid projectId,
+        Guid batchId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var contests = databaseOperation.Repositories.Contests;
         var batch = await contests.GetBatchAsync(batchId, cancellationToken)
             ?? throw new InvalidOperationException($"Contest batch {batchId} not found.");
-        if (batch.Status == ContestBatchStatus.Running)
-            throw new InvalidOperationException("Wait for the running contest to finish before ending Contest Review.");
-        if (batch.Status is not ContestBatchStatus.Completed)
-            return;
+        EnsureBatchProject(batch, projectId);
+        EnsureBatchReviewable(batch);
+        if (batch.Candidates.Any(candidate => !candidate.IsTerminal))
+            throw new InvalidOperationException("Every contest candidate must finish before the contest can be resolved.");
 
-        var now = DateTime.UtcNow;
-        if (batch.WinningCandidateId is { } winnerId)
+        if (batch.SelectedCandidateId is not { } selectedId)
+            throw new InvalidOperationException("Select a completed contest candidate before resolving the contest.");
+
+        var selected = batch.Candidates.SingleOrDefault(candidate => candidate.Id == selectedId);
+        if (selected?.Status != ContestCandidateStatus.Completed)
+            throw new InvalidOperationException("Select a completed contest candidate before resolving the contest.");
+
+        var chapter = await chapters.GetAsync(batch.ChapterId, cancellationToken)
+            ?? throw new InvalidOperationException($"Chapter {batch.ChapterId} not found.");
+        var current = await manuscripts.GetManuscriptAsync(BatchTarget(batch), chapter.Id, cancellationToken)
+            ?? throw new InvalidOperationException("The contest manuscript target no longer exists.");
+        var original = ManuscriptCodec.Deserialize(RequireManuscriptJson(
+            batch.OriginalManuscriptJson,
+            "contest original manuscript"));
+        if (current.Document.Revision != batch.OriginalManuscriptRevision
+            || !string.Equals(HashManuscriptContent(current.Document), batch.OriginalManuscriptHash, StringComparison.Ordinal)
+            || !ManuscriptCodec.ContentEquals(current.Document, original))
         {
-            foreach (var candidate in batch.Candidates)
-            {
-                candidate.Status = candidate.Id == winnerId
-                    ? ContestCandidateStatus.Selected
-                    : candidate.Status == ContestCandidateStatus.Completed
-                        ? ContestCandidateStatus.Rejected
-                        : candidate.Status;
-                candidate.UpdatedAt = now;
-                contests.UpdateCandidate(candidate);
-            }
+            throw new InvalidOperationException(
+                "The chapter changed outside Contest Review. Resolve or restart the contest from the current manuscript.");
         }
 
-        batch.Status = ContestBatchStatus.Finished;
+        var draft = ManuscriptCodec.Deserialize(RequireManuscriptJson(
+            selected.EffectiveDraftManuscriptJson,
+            "selected contest candidate draft"));
+        await manuscripts.ValidateDocumentReferencesAsync(
+            BatchTarget(batch),
+            batch.ChapterId,
+            draft,
+            cancellationToken: cancellationToken);
+        var target = BatchTarget(batch);
+        var historyTarget = new AuthoringHistoryTarget(
+            batch.ProjectId,
+            target.IsCore ? AuthoringHistoryDocumentKind.CoreChapter : AuthoringHistoryDocumentKind.EditionChapter,
+            batch.ChapterId,
+            target.EditionId);
+        var beforeHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
+            databaseOperation.Db,
+            original,
+            batch.ProjectId,
+            batch.ChapterId,
+            null,
+            target.EditionId,
+            cancellationToken);
+        var afterHistory = string.Empty;
+        await using var transaction = await databaseOperation.Db.Database.BeginTransactionAsync(cancellationToken);
+        using (contestMutationContext.BeginAuthorizedMutation(batch.ProjectId))
+        {
+            await manuscripts.ReplaceDocumentAsync(
+                target,
+                chapter.Id,
+                current.Revision,
+                draft,
+                cancellationToken);
+
+            afterHistory = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
+                databaseOperation.Db,
+                draft,
+                batch.ProjectId,
+                batch.ChapterId,
+                null,
+                target.EditionId,
+                cancellationToken);
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var candidate in batch.Candidates)
+        {
+            candidate.Status = candidate.Id == selected.Id
+                ? ContestCandidateStatus.Selected
+                : candidate.Status == ContestCandidateStatus.Completed
+                    ? ContestCandidateStatus.Rejected
+                    : candidate.Status;
+            candidate.UpdatedAt = now;
+            contests.UpdateCandidate(candidate);
+        }
+
+        batch.SelectedCandidateId = selected.Id;
+        batch.WinningCandidateId = selected.Id;
+        batch.Status = ContestBatchStatus.Resolved;
         batch.UpdatedAt = now;
         batch.CompletedAt ??= now;
         contests.UpdateBatch(batch);
         await databaseOperation.SaveChangesAsync(cancellationToken);
-    }
-
-    private static string EffectiveAcceptedBody(ContestBatch batch) =>
-        string.IsNullOrEmpty(batch.AcceptedPlainText) && !string.IsNullOrEmpty(batch.OriginalPlainText)
-            ? batch.OriginalPlainText
-            : batch.AcceptedPlainText;
-
-    private static ManuscriptDocument EffectiveAcceptedManuscript(ContestBatch batch) =>
-        string.IsNullOrWhiteSpace(batch.AcceptedManuscriptJson)
-            ? ManuscriptCodec.Deserialize(batch.OriginalManuscriptJson)
-            : ManuscriptCodec.Deserialize(batch.AcceptedManuscriptJson);
-
-    private static bool TryBuildCandidateDiff(ContestBatch batch, ContestCandidate candidate, out ReviewDiff diff)
-    {
-        var change = new AiChange
+        await transaction.CommitAsync(cancellationToken);
+        await transaction.DisposeAsync();
+        await databaseOperation.DisposeAsync();
+        try
         {
-            ToolName = "apply_manuscript_operations",
-            ResourceKind = "ChapterManuscript",
-            BeforeJson = JsonSerializer.Serialize(ContestChange(batch, batch.OriginalManuscriptJson)),
-            AfterJson = JsonSerializer.Serialize(ContestChange(batch, candidate.ProposedManuscriptJson)),
-            Status = AiChangeStatus.Pending,
-        };
-        return AiChangeReviewDiffBuilder.TryBuild(change, out diff);
-    }
-
-    private static ChapterManuscriptChange ContestChange(ContestBatch batch, string manuscriptJson)
-    {
-        var manuscript = ManuscriptCodec.Deserialize(manuscriptJson);
-        return new ChapterManuscriptChange(
-            batch.ChapterId,
-            batch.ChapterTitle,
-            manuscript.Revision,
-            manuscriptJson);
-    }
-
-    private static ContestLineTarget? FindContestLineTarget(
-        Guid candidateId,
-        ReviewDiff diff,
-        ContestCandidateReviewLineResolution request) =>
-        EnumerateContestLineTargets(candidateId, diff)
-            .FirstOrDefault(target =>
-                string.Equals(target.BlockId, request.BlockId, StringComparison.Ordinal)
-                && target.PairId == request.PairId
-                && target.OldLineNumber == request.OldLineNumber
-                && target.NewLineNumber == request.NewLineNumber
-                && string.Equals(target.OldText, request.OldText, StringComparison.Ordinal)
-                && string.Equals(target.NewText, request.NewText, StringComparison.Ordinal));
-
-    private static IEnumerable<ContestLineTarget> EnumerateContestLineTargets(Guid candidateId, ReviewDiff diff)
-    {
-        foreach (var section in diff.Sections.Where(section => string.Equals(section.Key, "Body", StringComparison.OrdinalIgnoreCase)))
-        {
-            for (var hunkIndex = 0; hunkIndex < section.Hunks.Count; hunkIndex++)
-            {
-                var hunk = section.Hunks[hunkIndex];
-                var consumedPairIds = new HashSet<int>();
-                for (var rowIndex = 0; rowIndex < hunk.Rows.Count; rowIndex++)
-                {
-                    var row = hunk.Rows[rowIndex];
-                    if (row.Kind == DiffRowKind.Context)
-                        continue;
-
-                    if (row.PairId is int pairId)
-                    {
-                        if (!consumedPairIds.Add(pairId))
-                            continue;
-
-                        var oldRowIndex = -1;
-                        var newRowIndex = -1;
-                        DiffRow? oldRow = null;
-                        DiffRow? newRow = null;
-                        for (var pairIndex = 0; pairIndex < hunk.Rows.Count; pairIndex++)
-                        {
-                            var candidateRow = hunk.Rows[pairIndex];
-                            if (candidateRow.PairId != pairId) continue;
-                            if (candidateRow.Kind == DiffRowKind.Removed)
-                            {
-                                oldRow = candidateRow;
-                                oldRowIndex = pairIndex;
-                            }
-                            else if (candidateRow.Kind == DiffRowKind.Added)
-                            {
-                                newRow = candidateRow;
-                                newRowIndex = pairIndex;
-                            }
-                        }
-
-                        var targetIndex = newRowIndex >= 0 ? newRowIndex : oldRowIndex;
-                        if (targetIndex >= 0)
-                        {
-                            yield return CreateContestLineTarget(
-                                candidateId,
-                                hunk,
-                                hunkIndex,
-                                targetIndex,
-                                oldRow,
-                                newRow,
-                                pairId);
-                        }
-
-                        continue;
-                    }
-
-                    yield return row.Kind == DiffRowKind.Added
-                        ? CreateContestLineTarget(candidateId, hunk, hunkIndex, rowIndex, oldRow: null, row, pairId: null)
-                        : CreateContestLineTarget(candidateId, hunk, hunkIndex, rowIndex, row, newRow: null, pairId: null);
-                }
-            }
+            await authoringHistory.RecordManualActionAsync(
+                historyTarget,
+                beforeHistory,
+                afterHistory,
+                "Resolve Contest Review",
+                cancellationToken: CancellationToken.None);
         }
-    }
-
-    private static ContestLineTarget CreateContestLineTarget(
-        Guid candidateId,
-        DiffHunk hunk,
-        int hunkIndex,
-        int rowIndex,
-        DiffRow? oldRow,
-        DiffRow? newRow,
-        int? pairId)
-    {
-        var blockId = BuildReviewBlockId(candidateId, hunk, hunkIndex, rowIndex, oldRow, newRow, pairId);
-        return new ContestLineTarget(
-            blockId,
-            pairId,
-            oldRow?.OldLineNumber,
-            newRow?.NewLineNumber,
-            oldRow?.Text,
-            newRow?.Text,
-            hunk,
-            rowIndex,
-            oldRow,
-            newRow);
-    }
-
-    private static string BuildReviewBlockId(
-        Guid ownerId,
-        DiffHunk hunk,
-        int hunkIndex,
-        int rowIndex,
-        DiffRow? oldRow,
-        DiffRow? newRow,
-        int? pairId) =>
-        $"review-{ownerId:N}-{hunk.NewStart}-{hunk.OldStart}-{hunkIndex}-{oldRow?.OldLineNumber ?? 0}-{newRow?.NewLineNumber ?? 0}-{pairId ?? 0}-{rowIndex}";
-
-    private static ContestCandidateReviewState ReadReviewState(ContestCandidate candidate)
-    {
-        if (string.IsNullOrWhiteSpace(candidate.ReviewStateJson) || candidate.ReviewStateJson == "{}")
-            return new ContestCandidateReviewState([]);
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Contest {BatchId} resolved, but authoring history could not be updated.", batch.Id);
+        }
 
         try
         {
-            return JsonSerializer.Deserialize<ContestCandidateReviewState>(candidate.ReviewStateJson, ReviewStateJsonOptions)
-                ?? new ContestCandidateReviewState([]);
+            await manuscripts.RefreshDerivedStateAsync(target, chapter.Id, CancellationToken.None);
         }
-        catch (JsonException)
+        catch (Exception exception)
         {
-            return new ContestCandidateReviewState([]);
-        }
-    }
-
-    private static string WriteReviewState(ContestCandidateReviewState state) =>
-        state.Lines.Count == 0
-            ? "{}"
-            : JsonSerializer.Serialize(state, ReviewStateJsonOptions);
-
-    private static void UpsertReviewDecision(
-        ContestCandidateReviewState state,
-        ContestCandidateReviewLineResolution request,
-        string? editedText)
-    {
-        var decision = request.Action switch
-        {
-            ChapterBodyReviewLineAction.Keep => ContestCandidateLineDecisionKind.Kept,
-            ChapterBodyReviewLineAction.Reject => ContestCandidateLineDecisionKind.Rejected,
-            ChapterBodyReviewLineAction.Edit => ContestCandidateLineDecisionKind.Edited,
-            _ => throw new InvalidOperationException($"Unsupported contest review action '{request.Action}'."),
-        };
-
-        state.Lines.RemoveAll(line => string.Equals(line.BlockId, request.BlockId, StringComparison.Ordinal));
-        state.Lines.Add(new ContestCandidateLineDecision(
-            request.BlockId,
-            decision,
-            request.PairId,
-            request.OldLineNumber,
-            request.NewLineNumber,
-            request.OldText,
-            request.NewText,
-            editedText,
-            DateTime.UtcNow));
-    }
-
-    private static string RebuildAcceptedBody(ContestBatch batch)
-    {
-        var operations = new List<ContestReviewOperation>();
-        if (batch.WinningCandidateId is { } winnerId)
-        {
-            var winner = batch.Candidates.FirstOrDefault(candidate => candidate.Id == winnerId)
-                ?? throw new InvalidOperationException("The selected contest winner no longer exists.");
-            operations.AddRange(BuildWinnerOperations(batch, winner));
-        }
-        else
-        {
-            foreach (var candidate in batch.Candidates.OrderBy(candidate => candidate.Order))
-            {
-                if (!TryBuildCandidateDiff(batch, candidate, out var diff))
-                    continue;
-
-                var targetsByBlockId = EnumerateContestLineTargets(candidate.Id, diff)
-                    .ToDictionary(target => target.BlockId, StringComparer.Ordinal);
-                foreach (var decision in ReadReviewState(candidate).Lines)
-                {
-                    if (decision.Decision is not (ContestCandidateLineDecisionKind.Kept or ContestCandidateLineDecisionKind.Edited))
-                        continue;
-                    if (!targetsByBlockId.TryGetValue(decision.BlockId, out var target))
-                        continue;
-
-                    operations.Add(BuildOperation(candidate, target, decision.Decision, decision.EditedText));
-                }
-            }
-        }
-
-        var acceptedOperations = new List<ContestReviewOperation>();
-        foreach (var operation in operations.OrderBy(operation => operation.CandidateOrder).ThenBy(operation => operation.SortLine))
-        {
-            var conflict = acceptedOperations.FirstOrDefault(existing => OperationsConflict(existing, operation));
-            if (conflict is not null)
-                throw new InvalidOperationException("This contest line conflicts with an already kept line from another contestant.");
-
-            acceptedOperations.Add(operation);
-        }
-
-        var lines = ChapterFormatting.SplitLines(batch.OriginalPlainText).ToList();
-        foreach (var operation in acceptedOperations
-            .OrderByDescending(operation => operation.StartIndex)
-            .ThenByDescending(operation => operation.SortLine))
-        {
-            lines.RemoveRange(operation.StartIndex, operation.DeleteCount);
-            lines.InsertRange(operation.StartIndex, operation.ReplacementLines);
-        }
-
-        return ChapterFormatting.JoinLines(lines);
-    }
-
-    private static IEnumerable<ContestReviewOperation> BuildWinnerOperations(ContestBatch batch, ContestCandidate winner)
-    {
-        if (!TryBuildCandidateDiff(batch, winner, out var diff))
-            yield break;
-
-        var decisions = ReadReviewState(winner).Lines.ToDictionary(line => line.BlockId, StringComparer.Ordinal);
-        foreach (var target in EnumerateContestLineTargets(winner.Id, diff))
-        {
-            if (decisions.TryGetValue(target.BlockId, out var decision))
-            {
-                if (decision.Decision == ContestCandidateLineDecisionKind.Rejected)
-                    continue;
-                if (decision.Decision == ContestCandidateLineDecisionKind.Edited)
-                {
-                    yield return BuildOperation(winner, target, decision.Decision, decision.EditedText);
-                    continue;
-                }
-            }
-
-            yield return BuildOperation(winner, target, ContestCandidateLineDecisionKind.Kept, editedText: null);
+            logger.LogError(exception, "Contest {BatchId} resolved, but derived manuscript state could not be refreshed.", batch.Id);
         }
     }
 
-    private static ContestReviewOperation BuildOperation(
-        ContestCandidate candidate,
-        ContestLineTarget target,
-        ContestCandidateLineDecisionKind decision,
-        string? editedText)
+    public async Task DiscardContestBatchAsync(
+        Guid projectId,
+        Guid batchId,
+        CancellationToken cancellationToken = default)
     {
-        var replacementText = decision == ContestCandidateLineDecisionKind.Edited
-            ? NormalizeSingleLineEditText(editedText)
-            : target.NewText;
-
-        if (target.OldRow is not null && target.NewRow is not null)
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        var contests = databaseOperation.Repositories.Contests;
+        var batch = await contests.GetBatchAsync(batchId, cancellationToken)
+            ?? throw new InvalidOperationException($"Contest batch {batchId} not found.");
+        EnsureBatchProject(batch, projectId);
+        if (!batch.IsUnresolved)
+            return;
+        if (batch.Status == ContestBatchStatus.Running
+            && contestRuns.TryGet(batch.Id, out _))
         {
-            var oldLineNumber = target.OldLineNumber ?? throw new InvalidOperationException("The contest line no longer has an original line number.");
-            return new ContestReviewOperation(
-                candidate.Id,
-                target.BlockId,
-                candidate.Order,
-                target.NewLineNumber ?? oldLineNumber,
-                oldLineNumber - 1,
-                DeleteCount: 1,
-                [replacementText ?? string.Empty]);
+            throw new InvalidOperationException(
+                "The contest is still running. Cancel it and wait for cancellation to finish before discarding it.");
         }
 
-        if (target.NewRow is not null)
+        // Candidate drafts never mutate live state, including while candidates are
+        // running, so discard only closes this persisted lock.
+        var now = DateTime.UtcNow;
+        foreach (var candidate in batch.Candidates)
         {
-            return new ContestReviewOperation(
-                candidate.Id,
-                target.BlockId,
-                candidate.Order,
-                target.NewLineNumber ?? int.MaxValue,
-                FindCurrentInsertionIndex(target, int.MaxValue),
-                DeleteCount: 0,
-                [replacementText ?? string.Empty]);
+            if (!candidate.IsTerminal)
+                candidate.Status = ContestCandidateStatus.Rejected;
+            candidate.UpdatedAt = now;
+            contests.UpdateCandidate(candidate);
         }
-
-        if (target.OldRow is not null)
-        {
-            var oldLineNumber = target.OldLineNumber ?? throw new InvalidOperationException("The contest line no longer has an original line number.");
-            var replacement = decision == ContestCandidateLineDecisionKind.Edited
-                ? [replacementText ?? string.Empty]
-                : Array.Empty<string>();
-            return new ContestReviewOperation(
-                candidate.Id,
-                target.BlockId,
-                candidate.Order,
-                oldLineNumber,
-                oldLineNumber - 1,
-                DeleteCount: 1,
-                replacement);
-        }
-
-        throw new InvalidOperationException("The contest line no longer maps to a candidate edit.");
+        batch.Status = ContestBatchStatus.Discarded;
+        batch.ErrorMessage = "Contest discarded by the user.";
+        batch.CompletedAt ??= now;
+        batch.UpdatedAt = now;
+        contests.UpdateBatch(batch);
+        await databaseOperation.SaveChangesAsync(cancellationToken);
     }
 
-    private static bool OperationsConflict(ContestReviewOperation left, ContestReviewOperation right)
+    public async Task CancelContestBatchAsync(
+        Guid projectId,
+        Guid batchId,
+        CancellationToken cancellationToken = default)
     {
-        if (left.CandidateId == right.CandidateId)
-            return false;
-
-        var leftInsertion = left.DeleteCount == 0;
-        var rightInsertion = right.DeleteCount == 0;
-        if (leftInsertion || rightInsertion)
-            return leftInsertion && rightInsertion && left.StartIndex == right.StartIndex;
-
-        var leftEnd = left.StartIndex + left.DeleteCount - 1;
-        var rightEnd = right.StartIndex + right.DeleteCount - 1;
-        return left.StartIndex <= rightEnd && right.StartIndex <= leftEnd;
-    }
-
-    private static int FindCurrentInsertionIndex(ContestLineTarget target, int currentLineCount) =>
-        FindInsertionIndex(target.Hunk.Rows, target.RowIndex, currentLineCount, useOldLineNumbers: true);
-
-    private static int FindInsertionIndex(IReadOnlyList<DiffRow> rows, int rowIndex, int lineCount, bool useOldLineNumbers)
-    {
-        for (var index = rowIndex - 1; index >= 0; index--)
+        await using (var operation = await database.OpenReadAsync(cancellationToken))
         {
-            var lineNumber = useOldLineNumbers ? rows[index].OldLineNumber : rows[index].NewLineNumber;
-            if (lineNumber is int previousLine)
-                return Math.Clamp(previousLine, 0, lineCount);
+            var batch = await operation.Repositories.Contests.GetBatchAsync(batchId, cancellationToken)
+                ?? throw new InvalidOperationException($"Contest batch {batchId} not found.");
+            EnsureBatchProject(batch, projectId);
+            if (!batch.IsUnresolved)
+                return;
         }
 
-        for (var index = rowIndex + 1; index < rows.Count; index++)
+        if (contestRuns.TryGet(batchId, out var run) && run is not null)
         {
-            var lineNumber = useOldLineNumbers ? rows[index].OldLineNumber : rows[index].NewLineNumber;
-            if (lineNumber is int nextLine)
-                return Math.Clamp(nextLine - 1, 0, lineCount);
+            run.Cancel();
+            await run.WaitForCompletionAsync(cancellationToken);
+            return;
         }
 
-        return lineCount == int.MaxValue ? 0 : lineCount;
+        await DiscardContestBatchAsync(projectId, batchId, cancellationToken);
     }
 
     private static string NormalizeSingleLineEditText(string? text)
@@ -827,6 +747,198 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             throw new InvalidOperationException("Line edits must stay on one line.");
         return normalized;
     }
+
+    private static ManuscriptDocument ApplyLineDecision(
+        ManuscriptDocument original,
+        ManuscriptDocument draft,
+        ContestCandidateReviewLineResolution request)
+    {
+        if (string.IsNullOrWhiteSpace(request.BlockId))
+            throw new InvalidOperationException("A contest line must identify its semantic manuscript block.");
+
+        var blockId = ResolveReviewBlockId(original, draft, request);
+        var originalBlocks = original.Content;
+        var draftBlocks = draft.Content.ToList();
+        var originalIndex = originalBlocks.FindIndex(block =>
+            string.Equals(block.Id, blockId, StringComparison.Ordinal));
+        var draftIndex = draftBlocks.FindIndex(block =>
+            string.Equals(block.Id, blockId, StringComparison.Ordinal));
+        if (originalIndex >= 0
+            && request.OldText is { } oldText
+            && !string.Equals(ManuscriptCodec.Text(originalBlocks[originalIndex]), oldText, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The contest review line changed. Refresh the selected candidate and try again.");
+        }
+        if (draftIndex >= 0
+            && request.NewText is { } newText
+            && !string.Equals(ManuscriptCodec.Text(draftBlocks[draftIndex]), newText, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The contest review line changed. Refresh the selected candidate and try again.");
+        }
+
+        switch (request.Action)
+        {
+            case ChapterBodyReviewLineAction.Keep:
+                return draft;
+
+            case ChapterBodyReviewLineAction.Edit:
+                if (draftIndex < 0)
+                    throw new InvalidOperationException("The edited contest block is no longer present in this candidate draft.");
+                var draftBlock = draftBlocks[draftIndex];
+                if (draftBlock.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.DesignedPage)
+                    throw new InvalidOperationException("Non-text manuscript blocks cannot be edited as a line.");
+                draftBlocks[draftIndex] = draftBlock with
+                {
+                    Content = ManuscriptOperations.ReplaceTextPreservingMarks(
+                        draftBlock,
+                        NormalizeSingleLineEditText(request.EditedText)),
+                };
+                return draft with { Content = draftBlocks };
+
+            case ChapterBodyReviewLineAction.Reject:
+                if (originalIndex < 0)
+                {
+                    // This block exists only in the generated candidate. Rejecting
+                    // it removes the candidate block and cannot affect live state.
+                    if (draftIndex < 0)
+                        throw new InvalidOperationException("The rejected contest block is no longer present in this candidate draft.");
+                    draftBlocks.RemoveAt(draftIndex);
+                    return draft with { Content = draftBlocks };
+                }
+
+                var originalBlock = originalBlocks[originalIndex];
+                if (draftIndex >= 0)
+                {
+                    draftBlocks[draftIndex] = originalBlock;
+                }
+                else
+                {
+                    draftBlocks.Insert(FindRestoredBlockIndex(originalBlocks, draftBlocks, originalIndex), originalBlock);
+                }
+                return draft with { Content = draftBlocks };
+
+            default:
+                throw new InvalidOperationException($"Unsupported contest review action '{request.Action}'.");
+        }
+    }
+
+    private static string ResolveReviewBlockId(
+        ManuscriptDocument original,
+        ManuscriptDocument draft,
+        ContestCandidateReviewLineResolution request)
+    {
+        if (original.Content.Any(block => string.Equals(block.Id, request.BlockId, StringComparison.Ordinal))
+            || draft.Content.Any(block => string.Equals(block.Id, request.BlockId, StringComparison.Ordinal)))
+            return request.BlockId;
+
+        // Older clients sent a generated hunk identifier rather than the stable
+        // semantic block ID. Accept that shape during rollout by resolving the
+        // changed line's text to its unique block, but persist only the stable ID.
+        var candidateMatches = draft.Content
+            .Where(block => string.Equals(ManuscriptCodec.Text(block), request.NewText, StringComparison.Ordinal))
+            .ToList();
+        if (candidateMatches.Count == 1)
+            return candidateMatches[0].Id;
+
+        var originalMatches = original.Content
+            .Where(block => string.Equals(ManuscriptCodec.Text(block), request.OldText, StringComparison.Ordinal))
+            .ToList();
+        if (originalMatches.Count == 1)
+            return originalMatches[0].Id;
+
+        throw new InvalidOperationException("The contest review block changed. Refresh the selected candidate and try again.");
+    }
+
+    private static int FindRestoredBlockIndex(
+        IReadOnlyList<ManuscriptBlock> original,
+        IReadOnlyList<ManuscriptBlock> draft,
+        int originalIndex)
+    {
+        for (var index = originalIndex + 1; index < original.Count; index++)
+        {
+            var next = FindBlockIndex(draft, original[index].Id);
+            if (next >= 0)
+                return next;
+        }
+
+        for (var index = originalIndex - 1; index >= 0; index--)
+        {
+            var previous = FindBlockIndex(draft, original[index].Id);
+            if (previous >= 0)
+                return previous + 1;
+        }
+
+        return Math.Clamp(originalIndex, 0, draft.Count);
+    }
+
+    private static int FindBlockIndex(IReadOnlyList<ManuscriptBlock> blocks, string id)
+    {
+        for (var index = 0; index < blocks.Count; index++)
+        {
+            if (string.Equals(blocks[index].Id, id, StringComparison.Ordinal))
+                return index;
+        }
+
+        return -1;
+    }
+
+    private static EditorContestReviewSnapshot ToReviewSnapshot(ContestBatch batch)
+    {
+        var selectedCandidateId = batch.SelectedCandidateId;
+        return new EditorContestReviewSnapshot(
+            batch.Id,
+            batch.ProjectId,
+            batch.ChapterId,
+            BatchTarget(batch),
+            batch.Status,
+            batch.OriginalManuscriptJson,
+            batch.OriginalManuscriptRevision,
+            batch.OriginalManuscriptHash,
+            selectedCandidateId,
+            batch.Candidates
+                .OrderBy(candidate => candidate.Order)
+                .Select(candidate => new EditorContestCandidateReviewSnapshot(
+                    candidate.Id,
+                    candidate.Order,
+                    candidate.ProviderName,
+                    candidate.ModelName,
+                    candidate.Status,
+                    candidate.Summary,
+                    candidate.EffectiveDraftManuscriptJson,
+                    candidate.ErrorMessage,
+                    candidate.IsTerminal,
+                    candidate.Status == ContestCandidateStatus.Completed
+                        && !string.IsNullOrWhiteSpace(candidate.EffectiveDraftManuscriptJson)
+                        ? HashManuscriptContent(ManuscriptCodec.Deserialize(candidate.EffectiveDraftManuscriptJson))
+                        : null,
+                    candidate.RawResponse,
+                    candidate.Notes,
+                    candidate.DurationMs))
+                .ToList());
+    }
+
+    private static void EnsureBatchProject(ContestBatch batch, Guid projectId)
+    {
+        if (batch.ProjectId != projectId)
+            throw new InvalidOperationException("The contest does not belong to this project.");
+    }
+
+    private static void EnsureBatchReviewable(ContestBatch batch)
+    {
+        if (!batch.IsUnresolved)
+            throw new InvalidOperationException("This contest is no longer active.");
+        if (batch.Status == ContestBatchStatus.Running)
+            throw new InvalidOperationException("Wait for the running contest to finish before reviewing it.");
+    }
+
+    private static string RequireManuscriptJson(string? json, string label) =>
+        string.IsNullOrWhiteSpace(json)
+            ? throw new InvalidDataException($"The {label} is empty.")
+            : json;
+
+    private static string HashManuscriptContent(ManuscriptDocument document) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
+            JsonSerializer.Serialize(document.Content, ManuscriptCodec.JsonOptions))));
 
     private async Task SaveCandidateAsync(ContestCandidate candidate, CancellationToken cancellationToken)
     {
@@ -839,6 +951,37 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
     {
         await using var operation = await database.OpenWriteAsync(cancellationToken);
         operation.Repositories.Contests.UpdateBatch(batch);
+        await operation.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task FinalizeAbandonedContestAsync(
+        Guid batchId,
+        bool cancelled,
+        string? errorMessage,
+        CancellationToken cancellationToken)
+    {
+        await using var operation = await database.OpenWriteAsync(cancellationToken);
+        var contests = operation.Repositories.Contests;
+        var batch = await contests.GetBatchAsync(batchId, cancellationToken);
+        if (batch is null || !batch.IsUnresolved)
+            return;
+
+        var now = DateTime.UtcNow;
+        foreach (var candidate in batch.Candidates.Where(candidate => !candidate.IsTerminal))
+        {
+            MarkCandidateFailed(candidate, cancelled ? "Cancelled." : "Contest run stopped unexpectedly.", invalid: false);
+            contests.UpdateCandidate(candidate);
+        }
+
+        batch.Status = cancelled ? ContestBatchStatus.Cancelled : ContestBatchStatus.Failed;
+        batch.ErrorMessage = cancelled
+            ? "Contest cancelled by the user."
+            : string.IsNullOrWhiteSpace(errorMessage)
+                ? "Contest run stopped unexpectedly."
+                : errorMessage;
+        batch.CompletedAt ??= now;
+        batch.UpdatedAt = now;
+        contests.UpdateBatch(batch);
         await operation.SaveChangesAsync(cancellationToken);
     }
 
@@ -1129,48 +1272,6 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         TimeSpan Duration);
 
     private sealed record ContestCandidateRawProgress(Guid CandidateId, string Delta);
-
-    private sealed record ContestLineTarget(
-        string BlockId,
-        int? PairId,
-        int? OldLineNumber,
-        int? NewLineNumber,
-        string? OldText,
-        string? NewText,
-        DiffHunk Hunk,
-        int RowIndex,
-        DiffRow? OldRow,
-        DiffRow? NewRow);
-
-    private sealed record ContestCandidateReviewState(List<ContestCandidateLineDecision> Lines);
-
-    private sealed record ContestCandidateLineDecision(
-        string BlockId,
-        ContestCandidateLineDecisionKind Decision,
-        int? PairId,
-        int? OldLineNumber,
-        int? NewLineNumber,
-        string? OldText,
-        string? NewText,
-        string? EditedText,
-        DateTime UpdatedAtUtc);
-
-    private sealed record ContestReviewOperation(
-        Guid CandidateId,
-        string BlockId,
-        int CandidateOrder,
-        int SortLine,
-        int StartIndex,
-        int DeleteCount,
-        IReadOnlyList<string> ReplacementLines);
-
-    private enum ContestCandidateLineDecisionKind
-    {
-        Kept,
-        Rejected,
-        Edited,
-        Cleared,
-    }
 
     private enum ContestCandidateFailureKind
     {

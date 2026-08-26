@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.EditorChat;
 using Lorekeeper.Fonts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
@@ -31,7 +32,8 @@ public interface IManuscriptStyleService
 }
 
 public sealed class ManuscriptStyleService(
-    IAppDatabaseOperationFactory database) : IManuscriptStyleService
+    IAppDatabaseOperationFactory database,
+    IEditorContestMutationGuard contestGuard) : IManuscriptStyleService
 {
     public static readonly IReadOnlySet<string> BuiltInParagraphRoles = new HashSet<string>(
         [
@@ -127,8 +129,9 @@ public sealed class ManuscriptStyleService(
         ManuscriptStyleInput input,
         CancellationToken cancellationToken = default)
     {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         var db = databaseOperation.Db;
         input = input with { Definition = NormalizeDefinition(input.Definition) };
         ValidateInput(input);
@@ -356,6 +359,7 @@ public sealed class ManuscriptStyleService(
     {
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
+        await contestGuard.EnsureMutationAllowedAsync(projectId, cancellationToken);
         var db = databaseOperation.Db;
         var style = await RequireDeletableAsync(
             projectId,

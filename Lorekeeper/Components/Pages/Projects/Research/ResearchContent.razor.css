@@ -80,10 +80,6 @@
     outline: none;
 }
 
-.research-activity-card.pending-only {
-    border-style: dashed;
-}
-
 .research-activity-card.failed {
     border-color: var(--lk-danger);
 }

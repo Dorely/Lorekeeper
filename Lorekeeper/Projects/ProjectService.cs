@@ -132,24 +132,6 @@ public class ProjectService(
         return project;
     }
 
-    public async Task<Project> SetAiChangeApprovalAsync(Guid id, bool enabled, CancellationToken cancellationToken = default)
-    {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        databaseOperation.ShareWithNestedOperations();
-        var repo = databaseOperation.Repositories.Projects;
-        var project = await repo.GetByIdAsync(id, cancellationToken)
-            ?? throw new InvalidOperationException($"Project {id} not found.");
-
-        if (project.AiChangeApprovalEnabled != enabled)
-        {
-            project.AiChangeApprovalEnabled = enabled;
-            project.UpdatedAt = DateTime.UtcNow;
-            repo.Update(project);
-            await databaseOperation.SaveChangesAsync(cancellationToken);
-        }
-        return project;
-    }
-
     public Task DeleteAsync(Guid id, CancellationToken cancellationToken = default) =>
         DeleteAsync(id, detachIncomingReferences: false, cancellationToken);
 
