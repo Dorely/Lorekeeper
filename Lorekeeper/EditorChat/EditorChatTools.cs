@@ -1378,14 +1378,24 @@ IAppDatabaseOperationFactory database, IActService acts,
             selectedProvider.ModelId,
             assignments);
         var result = await revisionAgents.RunAsync(request, ctx.TurnCancellationToken);
+        if (result.Status == EditorRevisionJobStatus.Cancelled || ctx.TurnCancellationToken.IsCancellationRequested)
+            return EditorRevisionAgentService.SerializeRunResult(result);
+
         if (ctx.ReviewEdits && ctx.EditorStaging is not null)
         {
             await using var databaseOperation = await database.OpenReadAsync(ctx.TurnCancellationToken);
             var aiChanges = databaseOperation.Repositories.AiChanges;
+            var pendingChanges = await aiChanges.ListPendingRevisionWorkerChangesAsync(
+                ctx.ProjectId,
+                ctx.ConversationId,
+                ctx.CurrentAssistantMessageId,
+                ctx.CurrentToolCallId,
+                ctx.TurnCancellationToken);
+            var pendingChangesById = pendingChanges.ToDictionary(change => change.Id);
             foreach (var changeId in result.PendingChangeIds)
             {
-                var change = await aiChanges.GetChangeAsync(changeId, ctx.TurnCancellationToken)
-                    ?? throw new InvalidOperationException($"The staged revision-worker change {changeId:N} could not be reloaded.");
+                if (!pendingChangesById.TryGetValue(changeId, out var change))
+                    throw new InvalidOperationException($"The staged revision-worker change {changeId:N} could not be reloaded.");
                 ctx.EditorStaging.AdoptChapterManuscriptChange(change);
             }
         }

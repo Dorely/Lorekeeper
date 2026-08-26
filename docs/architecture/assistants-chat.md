@@ -359,7 +359,12 @@ terminal-apply instruction; it may still perform needed read/search grounding.
 If its second response also omits tools, the session is Invalid with distinct
 empty-output or text-only detail. A partially successful job remains Completed
 when valid edits succeeded, but returns an error summary for every incomplete
-session alongside the full session details.
+session alongside the full session details. Review Edits adopts completed worker
+changes through the exact acyclic pending-worker query rather than loading the
+full bidirectional batch graph in a no-tracking context. Cancellation durably
+finalizes the job and sessions, returns that Cancelled result to the shared tool
+boundary, and lets the invocation layer stop the parent turn without a second
+service-level cancellation exception.
 
 Each worker uses paginated grounding and filtered source reads, then terminates
 through the semantic manuscript operation boundary. Workers receive semantic

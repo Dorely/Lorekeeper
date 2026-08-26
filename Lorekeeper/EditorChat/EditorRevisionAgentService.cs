@@ -113,9 +113,6 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         }
 
         var result = await FinalizeJobAsync(jobId, cancelled, CancellationToken.None);
-        if (cancelled)
-            throw new OperationCanceledException(cancellationToken);
-
         return result;
     }
 
