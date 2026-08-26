@@ -88,7 +88,9 @@ transcripts, review/contest state, writing samples, ingest/import jobs, images,
 masks, entity visual links, fonts, publication state, composition, and binary
 assets. Image-generation partials are durable job-owned binary artifacts until
 explicit promotion moves one into the ordinary project image library. SQLite
-startup uses a busy timeout and WAL journal mode. sqlite-vec and
+deletes unpromoted partials associated with a final image when that image is
+deleted, while orphan partials remain job-owned. SQLite startup uses a busy
+timeout and WAL journal mode. sqlite-vec and
 internal FTS5 structures are initialized outside ordinary EF migrations and are
 regenerable indexes, not authoritative project data.
 

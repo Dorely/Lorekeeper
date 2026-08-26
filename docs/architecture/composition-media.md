@@ -109,7 +109,9 @@ workspace exposes them behind the owning image or job card. Promotion is an
 explicit atomic transfer: the partial is normalized through the ordinary image
 asset boundary, stored as a separate unattached project image with provenance,
 and removed from the partial collection. It never inherits entity associations
-or a placement.
+or a placement. Deleting a final image also deletes every unpromoted partial
+still associated with that image; already promoted images and unrelated orphan
+partials remain independent.
 
 The shared prompt composer gives generation and editing the same spatial
 discipline. A reserved or quiet region must be explicit when copy needs space;

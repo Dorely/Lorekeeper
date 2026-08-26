@@ -1346,7 +1346,7 @@ public class AppDbContext(
             entity.HasOne(e => e.FinalOutputImage)
                 .WithMany()
                 .HasForeignKey(e => e.FinalOutputImageId)
-                .OnDelete(DeleteBehavior.SetNull);
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<ProjectImageMask>(entity =>

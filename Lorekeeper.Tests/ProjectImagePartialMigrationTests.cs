@@ -10,10 +10,10 @@ namespace Lorekeeper.Tests;
 
 public sealed class ProjectImagePartialMigrationTests
 {
-    private const string PreviousMigration = "20260824164122_AddLlmProviderMaxInputTokens";
+    private const string PreviousMigration = "20260826073737_AddProjectImagePartials";
 
     [Fact]
-    public async Task ExistingImageJobsSurviveAndOwnDurablePartialsAfterMigration()
+    public async Task ExistingImageJobsAndPartialsSurviveCascadeMigration()
     {
         var directory = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -25,6 +25,9 @@ public sealed class ProjectImagePartialMigrationTests
                 .Options;
             var projectId = Guid.NewGuid();
             var jobId = Guid.NewGuid();
+            var partialId = Guid.NewGuid();
+            var orphanPartialId = Guid.NewGuid();
+            var finalImageId = Guid.NewGuid();
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
@@ -44,20 +47,6 @@ public sealed class ProjectImagePartialMigrationTests
                     Count = 1,
                     OutputStatesJson = "[]",
                 });
-                await db.SaveChangesAsync();
-            }
-
-            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
-                await db.Database.MigrateAsync();
-
-            var partialId = Guid.NewGuid();
-            var finalImageId = Guid.NewGuid();
-            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
-            {
-                var job = await db.ProjectImageGenerationJobs.AsNoTracking().SingleAsync(item => item.Id == jobId);
-                Assert.Equal("Preserved generation job", job.Label);
-                Assert.Equal("Preserve this prompt", job.Prompt);
-
                 db.PublishAssets.Add(new PublishAsset
                 {
                     Id = finalImageId,
@@ -82,8 +71,33 @@ public sealed class ProjectImagePartialMigrationTests
                     Height = 1,
                     FinalOutputImageId = finalImageId,
                 });
+                db.ProjectImagePartials.Add(new ProjectImagePartial
+                {
+                    Id = orphanPartialId,
+                    ProjectId = projectId,
+                    JobId = jobId,
+                    OutputIndex = 0,
+                    Attempt = 2,
+                    PartialImageIndex = 0,
+                    FileName = "orphan-partial.png",
+                    ContentType = "image/png",
+                    Data = [7, 8, 9],
+                    Width = 1,
+                    Height = 1,
+                });
                 await db.SaveChangesAsync();
-                var partial = await db.ProjectImagePartials.AsNoTracking().SingleAsync();
+            }
+
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+                await db.Database.MigrateAsync();
+
+            await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
+            {
+                var job = await db.ProjectImageGenerationJobs.AsNoTracking().SingleAsync(item => item.Id == jobId);
+                Assert.Equal("Preserved generation job", job.Label);
+                Assert.Equal("Preserve this prompt", job.Prompt);
+
+                var partial = await db.ProjectImagePartials.AsNoTracking().SingleAsync(item => item.Id == partialId);
                 Assert.Equal(projectId, partial.ProjectId);
                 Assert.Equal(jobId, partial.JobId);
                 Assert.Equal(finalImageId, partial.FinalOutputImageId);
@@ -110,14 +124,14 @@ public sealed class ProjectImagePartialMigrationTests
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 await db.PublishAssets.Where(item => item.Id == finalImageId).ExecuteDeleteAsync();
-                var partial = await db.ProjectImagePartials.AsNoTracking().SingleAsync(item => item.Id == partialId);
-                Assert.Null(partial.FinalOutputImageId);
+                Assert.False(await db.ProjectImagePartials.AsNoTracking().AnyAsync(item => item.Id == partialId));
+                Assert.True(await db.ProjectImagePartials.AsNoTracking().AnyAsync(item => item.Id == orphanPartialId));
             }
 
             await using (var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance))
             {
                 await db.ProjectImageGenerationJobs.Where(item => item.Id == jobId).ExecuteDeleteAsync();
-                Assert.False(await db.ProjectImagePartials.AsNoTracking().AnyAsync(item => item.Id == partialId));
+                Assert.False(await db.ProjectImagePartials.AsNoTracking().AnyAsync(item => item.Id == orphanPartialId));
             }
         }
         finally
