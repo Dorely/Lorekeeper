@@ -59,10 +59,20 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             if (chapter.ProjectId != job.ProjectId)
                 throw new InvalidOperationException($"Chapter {session.ChapterId} does not belong to project {job.ProjectId}.");
 
-            var providerAvailability = await providerService.GetDefaultChatProviderAvailabilityAsync(cancellationToken);
-            var provider = providerAvailability.Provider;
-            if (!providerAvailability.IsAvailable || provider is null)
-                throw new InvalidOperationException(providerAvailability.Message);
+            if (session.ProviderId is not { } selectedProviderId
+                || string.IsNullOrWhiteSpace(session.ModelName))
+            {
+                throw new InvalidOperationException("This revision session has no captured chat provider/model selection. Start a new revision request.");
+            }
+
+            var selection = await providerService.ResolveChatModelSelectionAsync(selectedProviderId, cancellationToken);
+            if (!selection.IsAvailable || selection.Provider is not { } provider || provider.Id != selectedProviderId)
+                throw new InvalidOperationException(selection.Message);
+            if (!string.Equals(provider.ModelId, session.ModelName, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"The captured revision model '{session.ModelName}' is no longer configured on provider {selectedProviderId}. Start a new revision request.");
+            }
 
             var chat = await chatClientFactory.CreateChatClientAsync(provider.Id, cancellationToken);
 
@@ -127,8 +137,13 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             };
 
             var maxIterations = Math.Clamp(options.Value.RevisionAgents.MaxToolIterations, 1, 50);
-            for (var iteration = 0; iteration < maxIterations; iteration++)
+            var attempt = 0;
+            var correctiveRetryUsed = false;
+            var correctiveRetryPending = false;
+            while (attempt < maxIterations || correctiveRetryPending)
             {
+                attempt++;
+                correctiveRetryPending = false;
                 var assistant = new EditorRevisionMessage
                 {
                     SessionId = session.Id,
@@ -177,7 +192,31 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
 
                 if (pendingCalls.Count == 0)
                 {
-                    MarkInvalid(session, "Worker finished without editing the assigned chapter.", textBuilder.ToString(), stopwatch);
+                    var response = textBuilder.ToString();
+                    if (!correctiveRetryUsed)
+                    {
+                        correctiveRetryUsed = true;
+                        correctiveRetryPending = true;
+                        var correctivePrompt = BuildNoToolCallCorrection(response);
+                        await AddMessageAsync(new EditorRevisionMessage
+                        {
+                            SessionId = session.Id,
+                            Order = nextOrder++,
+                            Role = EditorRevisionMessageRole.User,
+                            Content = correctivePrompt,
+                            Status = EditorRevisionMessageStatus.Completed,
+                        }, cancellationToken);
+                        if (!string.IsNullOrWhiteSpace(response))
+                            messages.Add(new ChatMessage(ChatRole.Assistant, response));
+                        messages.Add(new ChatMessage(ChatRole.User, correctivePrompt));
+                        NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.Progress);
+                        continue;
+                    }
+
+                    var failure = string.IsNullOrWhiteSpace(response)
+                        ? "Worker returned no output and did not edit the assigned chapter after one corrective retry."
+                        : "Worker returned text but did not call the required manuscript tool after one corrective retry.";
+                    MarkInvalid(session, failure, response, stopwatch);
                     await SaveSessionAsync(session, cancellationToken);
                     NotifyJob(job, session.Id, EditorRevisionJobUpdateKind.SessionCompleted);
                     return;
@@ -441,6 +480,11 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         sb.AppendLine("Call apply_assigned_manuscript_operations exactly once when ready. The coordinator will review the completed/staged change and decide whether any follow-up action is needed.");
         return sb.ToString().TrimEnd();
     }
+
+    private static string BuildNoToolCallCorrection(string response) =>
+        string.IsNullOrWhiteSpace(response)
+            ? "Your previous response was empty, so no edit was made. Continue the assigned revision now. You may use read/search tools if grounding is still needed; then call apply_assigned_manuscript_operations exactly once as the terminal tool call. Do not provide another text-only response."
+            : "Your previous response contained text but no tool call, so no edit was made. Continue the assigned revision now. You may use read/search tools if grounding is still needed; then call apply_assigned_manuscript_operations exactly once as the terminal tool call. Do not provide another text-only response.";
 
     private async Task<string> ReadParentEditorHistoryAsync(Guid conversationId, int? pageNumber)
     {

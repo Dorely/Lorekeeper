@@ -347,6 +347,20 @@ session detail and never inflate the parent model result. This classification
 happens before any manuscript mutation, so Review Edits cannot stage a direct
 change that later blocks delegation for the same chapter.
 
+Each session captures the active Editor turn's exact provider/model row before
+workers start. A worker resolves that explicit provider ID through normal chat
+model selection and fails closed if it is unavailable or its captured model has
+changed; it never falls back to the global default. Job setup disposes its write
+operation before launching parallel scoped workers, and finalization reloads
+the job in a separate tracked write operation so no worker shares an ambient
+database context or duplicates its tracked job graph. A worker that returns no
+tool call receives one corrective retry with its prior response and an explicit
+terminal-apply instruction; it may still perform needed read/search grounding.
+If its second response also omits tools, the session is Invalid with distinct
+empty-output or text-only detail. A partially successful job remains Completed
+when valid edits succeeded, but returns an error summary for every incomplete
+session alongside the full session details.
+
 Each worker uses paginated grounding and filtered source reads, then terminates
 through the semantic manuscript operation boundary. Workers receive semantic
 manuscript tools only, may edit text and Figures, preserve Designed Page

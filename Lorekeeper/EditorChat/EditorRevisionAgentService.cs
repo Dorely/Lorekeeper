@@ -4,6 +4,7 @@ using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Lorekeeper.Persistence.Repositories;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.EditorChat;
@@ -20,76 +21,83 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
         EditorRevisionAgentRunRequest request,
         CancellationToken cancellationToken = default)
     {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        databaseOperation.ShareWithNestedOperations();
-        var projects = databaseOperation.Repositories.Projects;
-        var revisions = databaseOperation.Repositories.EditorRevisions;
         var assignments = NormalizeAssignments(request.Chapters);
         if (assignments.Count == 0)
             throw new InvalidOperationException("At least one chapter assignment is required.");
 
-        _ = await projects.GetByIdAsync(request.ProjectId, cancellationToken)
-            ?? throw new InvalidOperationException($"Project {request.ProjectId} not found.");
-
-        var seenChapterIds = new HashSet<Guid>();
-        var chaptersById = new Dictionary<Guid, Chapter>();
-        foreach (var assignment in assignments)
+        Guid jobId;
+        List<Guid> sessionIds;
+        await using (var databaseOperation = await database.OpenWriteAsync(cancellationToken))
         {
-            if (!seenChapterIds.Add(assignment.ChapterId))
-                throw new InvalidOperationException($"Chapter {assignment.ChapterId} appears more than once in the revision assignment list.");
+            databaseOperation.ShareWithNestedOperations();
+            var projects = databaseOperation.Repositories.Projects;
+            var revisions = databaseOperation.Repositories.EditorRevisions;
+            _ = await projects.GetByIdAsync(request.ProjectId, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {request.ProjectId} not found.");
 
-            var chapter = await chapters.GetAsync(assignment.ChapterId, cancellationToken)
-                ?? throw new InvalidOperationException($"Chapter {assignment.ChapterId} not found.");
-            if (chapter.ProjectId != request.ProjectId)
-                throw new InvalidOperationException($"Chapter {assignment.ChapterId} does not belong to project {request.ProjectId}.");
-            chaptersById[assignment.ChapterId] = chapter;
-        }
-
-        var job = new EditorRevisionJob
-        {
-            ProjectId = request.ProjectId,
-            ConversationId = request.ConversationId,
-            AssistantMessageId = request.AssistantMessageId,
-            ToolCallId = request.ToolCallId,
-            ArgumentsJson = request.ArgumentsJson,
-            ContentTargetKind = request.ContentTarget.Kind.ToString(),
-            ContentTargetEditionId = request.ContentTarget.EditionId,
-            Status = EditorRevisionJobStatus.Running,
-        };
-        await revisions.AddJobAsync(job, cancellationToken);
-
-        for (var i = 0; i < assignments.Count; i++)
-        {
-            var assignment = assignments[i];
-            var chapter = chaptersById[assignment.ChapterId];
-            var source = await manuscripts.GetManuscriptAsync(request.ContentTarget, chapter.Id, cancellationToken)
-                ?? throw new InvalidOperationException($"Chapter {chapter.Id} manuscript was not found.");
-            await revisions.AddSessionAsync(new EditorRevisionSession
+            var seenChapterIds = new HashSet<Guid>();
+            var chaptersById = new Dictionary<Guid, Chapter>();
+            foreach (var assignment in assignments)
             {
-                JobId = job.Id,
-                Order = i,
-                ChapterId = chapter.Id,
-                ChapterTitle = chapter.Title,
-                Reason = assignment.Reason,
-                Instructions = assignment.Instructions,
-                OriginalManuscriptJson = ManuscriptCodec.Serialize(source.Document),
-                Status = EditorRevisionSessionStatus.Queued,
-            }, cancellationToken);
+                if (!seenChapterIds.Add(assignment.ChapterId))
+                    throw new InvalidOperationException($"Chapter {assignment.ChapterId} appears more than once in the revision assignment list.");
+
+                var chapter = await chapters.GetAsync(assignment.ChapterId, cancellationToken)
+                    ?? throw new InvalidOperationException($"Chapter {assignment.ChapterId} not found.");
+                if (chapter.ProjectId != request.ProjectId)
+                    throw new InvalidOperationException($"Chapter {assignment.ChapterId} does not belong to project {request.ProjectId}.");
+                chaptersById[assignment.ChapterId] = chapter;
+            }
+
+            var job = new EditorRevisionJob
+            {
+                ProjectId = request.ProjectId,
+                ConversationId = request.ConversationId,
+                AssistantMessageId = request.AssistantMessageId,
+                ToolCallId = request.ToolCallId,
+                ArgumentsJson = request.ArgumentsJson,
+                ContentTargetKind = request.ContentTarget.Kind.ToString(),
+                ContentTargetEditionId = request.ContentTarget.EditionId,
+                Status = EditorRevisionJobStatus.Running,
+            };
+            await revisions.AddJobAsync(job, cancellationToken);
+            jobId = job.Id;
+
+            sessionIds = new List<Guid>(assignments.Count);
+            for (var i = 0; i < assignments.Count; i++)
+            {
+                var assignment = assignments[i];
+                var chapter = chaptersById[assignment.ChapterId];
+                var source = await manuscripts.GetManuscriptAsync(request.ContentTarget, chapter.Id, cancellationToken)
+                    ?? throw new InvalidOperationException($"Chapter {chapter.Id} manuscript was not found.");
+                var session = new EditorRevisionSession
+                {
+                    JobId = job.Id,
+                    Order = i,
+                    ChapterId = chapter.Id,
+                    ChapterTitle = chapter.Title,
+                    Reason = assignment.Reason,
+                    Instructions = assignment.Instructions,
+                    OriginalManuscriptJson = ManuscriptCodec.Serialize(source.Document),
+                    ProviderId = request.ProviderId,
+                    ModelName = request.ModelId,
+                    Status = EditorRevisionSessionStatus.Queued,
+                };
+                await revisions.AddSessionAsync(session, cancellationToken);
+                sessionIds.Add(session.Id);
+            }
+
+            await databaseOperation.SaveChangesAsync(cancellationToken);
+            notifier.Notify(new EditorRevisionJobUpdate(
+                request.ProjectId,
+                request.ConversationId,
+                request.ToolCallId,
+                job.Id,
+                null,
+                EditorRevisionJobUpdateKind.Created,
+                DateTime.UtcNow));
         }
 
-        await databaseOperation.SaveChangesAsync(cancellationToken);
-        notifier.Notify(new EditorRevisionJobUpdate(
-            request.ProjectId,
-            request.ConversationId,
-            request.ToolCallId,
-            job.Id,
-            null,
-            EditorRevisionJobUpdateKind.Created,
-            DateTime.UtcNow));
-
-        var created = await revisions.GetJobAsync(job.Id, cancellationToken)
-            ?? throw new InvalidOperationException($"Revision job {job.Id} could not be reloaded.");
-        var sessionIds = created.Sessions.OrderBy(session => session.Order).Select(session => session.Id).ToList();
         var maxConcurrency = Math.Clamp(options.Value.RevisionAgents.MaxConcurrency, 1, 8);
         using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
 
@@ -104,7 +112,7 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             cancelled = true;
         }
 
-        var result = await FinalizeJobAsync(job.Id, cancelled, CancellationToken.None);
+        var result = await FinalizeJobAsync(jobId, cancelled, CancellationToken.None);
         if (cancelled)
             throw new OperationCanceledException(cancellationToken);
 
@@ -201,10 +209,11 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
     private async Task<EditorRevisionAgentRunResult> FinalizeJobAsync(Guid jobId, bool cancelled, CancellationToken cancellationToken)
     {
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        databaseOperation.ShareWithNestedOperations();
         var changes = databaseOperation.Repositories.AiChanges;
-        var repo = databaseOperation.Repositories.EditorRevisions;
-        var job = await repo.GetJobAsync(jobId, cancellationToken)
+        var job = await databaseOperation.Db.EditorRevisionJobs
+            .AsTracking()
+            .Include(item => item.Sessions.OrderBy(session => session.Order))
+            .FirstOrDefaultAsync(item => item.Id == jobId, cancellationToken)
             ?? throw new InvalidOperationException($"Revision job {jobId} not found.");
 
         if (cancelled)
@@ -216,7 +225,6 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
                 session.ErrorMessage = "Cancelled.";
                 session.CompletedAt = DateTime.UtcNow;
                 session.UpdatedAt = DateTime.UtcNow;
-                repo.UpdateSession(session);
             }
         }
 
@@ -228,11 +236,9 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
                 : sessions.Any(session => session.Status == EditorRevisionSessionStatus.Completed)
                     ? EditorRevisionJobStatus.Completed
                     : EditorRevisionJobStatus.Failed;
-        if (job.Status == EditorRevisionJobStatus.Failed)
-            job.ErrorMessage = "No revision worker completed a valid chapter-body edit.";
+        job.ErrorMessage = BuildJobErrorMessage(sessions);
         job.CompletedAt = DateTime.UtcNow;
         job.UpdatedAt = DateTime.UtcNow;
-        repo.UpdateJob(job);
         await databaseOperation.SaveChangesAsync(cancellationToken);
 
         var updateKind = job.Status switch
@@ -259,6 +265,25 @@ IAppDatabaseOperationFactory database, IChapterService chapters, IManuscriptServ
             .Select(change => change.Id)
             .ToList();
         return ToRunResult(job, pendingChangeIds);
+    }
+
+    private static string? BuildJobErrorMessage(IReadOnlyList<EditorRevisionSession> sessions)
+    {
+        var incomplete = sessions
+            .Where(session => session.Status != EditorRevisionSessionStatus.Completed)
+            .ToList();
+        if (incomplete.Count == 0)
+            return null;
+
+        var completedCount = sessions.Count - incomplete.Count;
+        var examples = incomplete
+            .Take(3)
+            .Select(session => $"{session.ChapterTitle} ({session.Status}): {session.ErrorMessage ?? "No detail was recorded."}");
+        var remaining = incomplete.Count > 3 ? $"; {incomplete.Count - 3} additional session(s) incomplete" : string.Empty;
+        var outcome = completedCount == 0
+            ? "No revision worker completed a valid chapter-body edit."
+            : $"Revision workers completed {completedCount} of {sessions.Count} chapter edit(s).";
+        return $"{outcome} Incomplete sessions: {string.Join("; ", examples)}{remaining}";
     }
 
     private static List<EditorRevisionAgentAssignmentInput> NormalizeAssignments(IReadOnlyList<EditorRevisionAgentAssignmentInput>? input)

@@ -19,6 +19,8 @@ public sealed record EditorRevisionAgentRunRequest(
     string ToolCallId,
     string ArgumentsJson,
     EditorContentTarget ContentTarget,
+    int ProviderId,
+    string ModelId,
     IReadOnlyList<EditorRevisionAgentAssignmentInput> Chapters);
 
 public sealed record EditorRevisionAgentRunResult(

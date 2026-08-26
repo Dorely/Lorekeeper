@@ -37,6 +37,7 @@ IAppDatabaseOperationFactory database, IActService acts,
     IEditorContextService editorContext,
     IEntityRelationContextService entityRelations,
     IProjectSearchService projectSearch,
+    ILlmProviderService providerService,
     IReferenceVisualService referenceVisuals,
     IEditorRevisionAgentService revisionAgents,
     OutlineCollaborationTools outlineTools,
@@ -1345,8 +1346,6 @@ IAppDatabaseOperationFactory database, IActService acts,
 
     private async Task<string> StartRevisionAgentsAsync(EditorChatContext ctx, EditorRevisionAgentAssignmentInput[] assignments)
     {
-        await using var databaseOperation = await database.OpenReadAsync(default);
-        var aiChanges = databaseOperation.Repositories.AiChanges;
         if (assignments is null || assignments.Length == 0)
             return "Error: chapters is required.";
 
@@ -1364,6 +1363,10 @@ IAppDatabaseOperationFactory database, IActService acts,
             }
         }
 
+        var selection = await providerService.ResolveChatModelSelectionAsync(ctx.ProviderId, ctx.TurnCancellationToken);
+        if (!selection.IsAvailable || selection.Provider is not { } selectedProvider)
+            return $"Error: {selection.Message}";
+
         var request = new EditorRevisionAgentRunRequest(
             ctx.ProjectId,
             ctx.ConversationId,
@@ -1371,10 +1374,14 @@ IAppDatabaseOperationFactory database, IActService acts,
             ctx.CurrentToolCallId,
             ctx.CurrentArgumentsJson,
             ctx.ContentTarget,
+            ctx.ProviderId,
+            selectedProvider.ModelId,
             assignments);
         var result = await revisionAgents.RunAsync(request, ctx.TurnCancellationToken);
         if (ctx.ReviewEdits && ctx.EditorStaging is not null)
         {
+            await using var databaseOperation = await database.OpenReadAsync(ctx.TurnCancellationToken);
+            var aiChanges = databaseOperation.Repositories.AiChanges;
             foreach (var changeId in result.PendingChangeIds)
             {
                 var change = await aiChanges.GetChangeAsync(changeId, ctx.TurnCancellationToken)
