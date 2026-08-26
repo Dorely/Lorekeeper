@@ -2866,7 +2866,13 @@ else
             ClearInlineReviewEditors();
             if (clearExpandedBlocks)
                 _expandedReviewBlockIds.Clear();
-
+        }
+        catch (Exception ex)
+        {
+            _reviewError = ex.Message;
+        }
+        try
+        {
             await ReconcileCurrentChapterAsync(refreshContextSurfaces: true);
             await RefreshReviewChangesAsync();
             _reviewRefreshSignal++;
@@ -2875,7 +2881,9 @@ else
         }
         catch (Exception ex)
         {
-            _reviewError = ex.Message;
+            _reviewError = string.IsNullOrWhiteSpace(_reviewError)
+                ? ex.Message
+                : $"{_reviewError} Review refresh also failed: {ex.Message}";
         }
         finally
         {

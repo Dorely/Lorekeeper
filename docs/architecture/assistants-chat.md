@@ -314,6 +314,17 @@ and block IDs, and acceptance creates its manuscript reference, composition, and
 exact authoring variant atomically. Artwork placement remains a separate
 revision-checked mutation using an already-completed image.
 
+The pending-edits modal distinguishes one resource group, its originating batch,
+and the complete pending set. Its global keep action submits every currently
+pending, conflict-free change through one `ApplyChangesAsync` call so batches
+retain chronological ordering while sharing index deferral, post-apply refresh,
+and one assistant checkpoint per affected surface. A failure in one batch does
+not prevent independent later batches from being attempted: successful changes
+are checkpointed, failed changes remain conflicted and reviewable, and the modal
+reloads durable statuses after both complete and partial application. Known
+conflicts disable the global action until they are rejected; resource- and
+batch-scoped keep/reject controls remain available for focused review.
+
 Repository updates for review rows attach or update only the intended root.
 Detached `Batch.Changes` graphs must never be attached during status changes.
 Reads are no-tracking; mutations reuse the locally tracked root inside one short

@@ -33,6 +33,9 @@
         else
         {
             <div class="pending-ai-actions">
+                <button type="button" class="btn btn-sm btn-success"
+                        disabled="@(_busy || !AllPendingChangesCanApply)"
+                        @onclick="KeepAllPendingChangesAsync">Keep all pending</button>
                 <button type="button" class="btn btn-sm btn-primary" disabled="@(_busy || !SelectedBatchCanApply)" @onclick="ApplySelectedBatchAsync">Keep batch</button>
                 <button type="button" class="btn btn-sm btn-outline-danger" disabled="@(_busy || !SelectedBatchHasUnresolved)" @onclick="RejectSelectedBatchAsync">Reject batch</button>
             </div>
@@ -384,10 +387,10 @@
 
         @if (_applying)
         {
-            <div class="pending-ai-applying-overlay" role="status" aria-live="polite" aria-label="Applying changes">
+            <div class="pending-ai-applying-overlay" role="status" aria-live="polite" aria-label="@_applyingStatus">
                 <div class="pending-ai-applying-card">
                     <div class="spinner-border spinner-border-sm" aria-hidden="true"></div>
-                    <span>Applying changes...</span>
+                    <span>@_applyingStatus</span>
                 </div>
             </div>
         }
@@ -407,6 +410,7 @@
     private string? _error;
     private bool _busy;
     private bool _applying;
+    private string _applyingStatus = "Applying changes...";
     private DiffViewMode _diffViewMode = DiffViewMode.Inline;
     private ElementReference _modalEl;
     private IJSObjectReference? _autoSizer;
@@ -422,6 +426,8 @@
     private IReadOnlyList<PendingChangeItem> Flattened => _flattened;
     private IReadOnlyList<PendingChangeGroup> Grouped => _grouped;
     private PendingChangeGroup? SelectedGroup => _selectedGroup;
+    private bool AllPendingChangesCanApply => Flattened.Any(item => item.Change.Status == AiChangeStatus.Pending)
+        && Flattened.All(item => item.Change.Status != AiChangeStatus.Conflict);
     private bool SelectedBatchCanApply => SelectedGroup?.PrimaryBatch is { } batch
         && batch.Changes.Any(change => change.Status == AiChangeStatus.Pending)
         && batch.Changes.All(change => change.Status != AiChangeStatus.Conflict);
@@ -575,6 +581,18 @@
         await RunAsync(() => ChangeApproval.ApplyBatchAsync(batchId.Value), applying: true);
     }
 
+    private async Task KeepAllPendingChangesAsync()
+    {
+        var changeIds = Flattened
+            .Where(item => item.Change.Status == AiChangeStatus.Pending)
+            .Select(item => item.Change.Id)
+            .Distinct()
+            .ToArray();
+        if (changeIds.Length == 0) return;
+
+        await RunAsync(() => ChangeApproval.ApplyChangesAsync(changeIds), applying: true);
+    }
+
     private async Task RejectSelectedBatchAsync()
     {
         var batchId = SelectedGroup?.PrimaryBatch.Id;
@@ -609,6 +627,7 @@
     {
         _busy = true;
         _applying = applying;
+        _applyingStatus = "Applying changes...";
         _error = null;
         try
         {
@@ -620,12 +639,30 @@
 
             await action();
             _rejectionMessage = string.Empty;
-            if (OnChanged.HasDelegate)
-                await OnChanged.InvokeAsync();
         }
         catch (Exception ex)
         {
             _error = ex.Message;
+        }
+        try
+        {
+            if (OnChanged.HasDelegate)
+            {
+                if (applying)
+                {
+                    _applyingStatus = "Refreshing review...";
+                    StateHasChanged();
+                    await Task.Yield();
+                }
+
+                await OnChanged.InvokeAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = string.IsNullOrWhiteSpace(_error)
+                ? ex.Message
+                : $"{_error} Review refresh also failed: {ex.Message}";
         }
         finally
         {

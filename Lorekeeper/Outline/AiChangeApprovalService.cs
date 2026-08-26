@@ -329,60 +329,112 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
 
     public async Task ApplyChangesAsync(IReadOnlyCollection<Guid> changeIds, CancellationToken cancellationToken = default)
     {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        databaseOperation.ShareWithNestedOperations();
-        var changes = databaseOperation.Repositories.AiChanges;
         if (changeIds.Count == 0) return;
 
-        var selectedChanges = new List<AiChange>();
-        foreach (var changeId in changeIds.Distinct())
+        var checkpointTargets = new List<(Guid ProjectId, ChatTurnSurface Surface)>();
+        var failures = new List<ExceptionDispatchInfo>();
+        ExceptionDispatchInfo? cancellation = null;
+        var selectedPendingCount = 0;
+        var appliedSelectedCount = 0;
+
+        await using (var databaseOperation = await database.OpenWriteAsync(cancellationToken))
         {
-            var change = await changes.GetChangeAsync(changeId, cancellationToken)
-                ?? throw new InvalidOperationException($"AI change {changeId} not found.");
-            selectedChanges.Add(change);
-        }
-
-        if (selectedChanges.Count == 0) return;
-
-        var touchedBatches = selectedChanges
-            .Select(change => change.Batch)
-            .GroupBy(batch => batch.Id)
-            .Select(group => group.First())
-            .ToList();
-        var checkpointTargets = selectedChanges
-            .Where(change => change.Status == AiChangeStatus.Pending)
-            .Select(change => (change.Batch.ProjectId, Surface: SurfaceFor(change.Batch.ConversationKind)))
-            .Distinct()
-            .ToList();
-
-        await using var indexDeferral = indexWork.BeginDeferral();
-        ExceptionDispatchInfo? capturedException = null;
-        try
-        {
-            foreach (var group in selectedChanges
-                .GroupBy(change => change.Batch)
-                .OrderBy(group => group.Key.CreatedAt))
+            databaseOperation.ShareWithNestedOperations();
+            var changes = databaseOperation.Repositories.AiChanges;
+            var selectedChanges = new List<AiChange>();
+            foreach (var changeId in changeIds.Distinct())
             {
-                using var authoringTurn = await BeginReviewedEditorTurnAsync(group.Key, cancellationToken);
-                foreach (var change in group.OrderBy(change => change.Order))
-                    await ApplyChangeCoreAsync(change.Batch, change, cancellationToken);
+                var change = await changes.GetChangeAsync(changeId, cancellationToken)
+                    ?? throw new InvalidOperationException($"AI change {changeId} not found.");
+                selectedChanges.Add(change);
             }
-        }
-        catch (Exception ex)
-        {
-            capturedException = ExceptionDispatchInfo.Capture(ex);
-        }
-        finally
-        {
-            foreach (var batch in touchedBatches)
-                UpdateBatchStatus(batch);
-            await databaseOperation.SaveChangesAsync(CancellationToken.None);
-            await indexDeferral.FlushAsync(CancellationToken.None);
+
+            if (selectedChanges.Count == 0) return;
+
+            var touchedBatches = selectedChanges
+                .Select(change => change.Batch)
+                .GroupBy(batch => batch.Id)
+                .Select(group => group.First())
+                .ToList();
+            var initiallyPendingChangeIds = touchedBatches
+                .SelectMany(batch => batch.Changes)
+                .Where(change => change.Status == AiChangeStatus.Pending)
+                .Select(change => change.Id)
+                .ToHashSet();
+            var selectedChangeIds = selectedChanges.Select(change => change.Id).ToHashSet();
+            selectedPendingCount = initiallyPendingChangeIds.Count(selectedChangeIds.Contains);
+
+            await using var indexDeferral = indexWork.BeginDeferral();
+            try
+            {
+                foreach (var group in selectedChanges
+                    .GroupBy(change => change.Batch.Id)
+                    .OrderBy(group => group.First().Batch.CreatedAt))
+                {
+                    var batch = group.First().Batch;
+                    try
+                    {
+                        using var authoringTurn = await BeginReviewedEditorTurnAsync(batch, cancellationToken);
+                        foreach (var change in group.OrderBy(change => change.Order))
+                            await ApplyChangeCoreAsync(batch, change, cancellationToken);
+                    }
+                    catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
+                    {
+                        cancellation = ExceptionDispatchInfo.Capture(ex);
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!batch.Changes.Any(change => change.Status == AiChangeStatus.Conflict))
+                        {
+                            var failedChange = group
+                                .OrderBy(change => change.Order)
+                                .FirstOrDefault(change => change.Status == AiChangeStatus.Pending);
+                            if (failedChange is not null)
+                            {
+                                failedChange.Status = AiChangeStatus.Conflict;
+                                failedChange.ErrorMessage = ex.Message;
+                                failedChange.UpdatedAt = DateTime.UtcNow;
+                                changes.UpdateChange(failedChange);
+                            }
+                        }
+
+                        failures.Add(ExceptionDispatchInfo.Capture(ex));
+                    }
+                }
+            }
+            finally
+            {
+                foreach (var batch in touchedBatches)
+                    UpdateBatchStatus(batch);
+                await databaseOperation.SaveChangesAsync(CancellationToken.None);
+                await indexDeferral.FlushAsync(CancellationToken.None);
+            }
+
+            var newlyAppliedChanges = touchedBatches
+                .SelectMany(batch => batch.Changes)
+                .Where(change => initiallyPendingChangeIds.Contains(change.Id)
+                    && change.Status == AiChangeStatus.Applied)
+                .ToList();
+            appliedSelectedCount = newlyAppliedChanges.Count(change => selectedChangeIds.Contains(change.Id));
+            checkpointTargets.AddRange(newlyAppliedChanges
+                .Select(change => (change.Batch.ProjectId, Surface: SurfaceFor(change.Batch.ConversationKind)))
+                .Distinct());
         }
 
-        capturedException?.Throw();
+        cancellation?.Throw();
         foreach (var (projectId, surface) in checkpointTargets)
             await versionCheckpoints.TryCheckpointAsync(projectId, surface, CancellationToken.None);
+
+        if (failures.Count == 0) return;
+        if (failures.Count == 1 && appliedSelectedCount == 0)
+            failures[0].Throw();
+
+        throw new InvalidOperationException(
+            $"Applied {appliedSelectedCount} of {selectedPendingCount} selected pending changes. "
+            + $"{failures.Count} independent batch{(failures.Count == 1 ? string.Empty : "es")} could not be applied; "
+            + $"conflicted changes remain available for review. First error: {failures[0].SourceException.Message}",
+            new AggregateException(failures.Select(failure => failure.SourceException)));
     }
 
     private static ChatTurnSurface SurfaceFor(AiChangeConversationKind conversationKind) => conversationKind switch
