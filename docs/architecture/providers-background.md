@@ -225,10 +225,15 @@ has its own configurable 64 MiB byte cap rather than inheriting the smaller uplo
 limit. Image options also bound request attempts, timeout, partials, references,
 output count, and one parallel provider request by default.
 
-`IProjectImageJobService` persists request/audit state and provider output.
+`IProjectImageJobService` persists request/audit state, every valid streamed
+partial, and provider output. Partial writes are serialized per output and
+awaited before that output becomes terminal; each write uses a fresh scope, so
+no database context spans the provider stream. Received partials survive retry,
+cancellation, failure, and restart, while invalid or oversized partials fail the
+affected attempt through the normal retry/error path.
 `IProjectImageGenerationRuntime` is a singleton FIFO runtime with at most one
 active job per project, cancellation propagated through providers and retries,
-partial previews, terminal waiters, and notifications. The startup worker marks
+durable partial preview URLs, terminal waiters, and notifications. The startup worker marks
 interrupted running jobs failed and resumes queued work after database readiness.
 
 ### Queue, worker, and notification contract
@@ -249,7 +254,8 @@ app-process coordinators appropriate to their lifetime. The common invariants ar
 5. Propagate explicit cancellation through processors and provider calls. Record a
    truthful terminal or resumable state rather than reporting silent success.
 6. Treat notifiers and buffered subscriptions as live presentation aids only;
-   persisted state remains the audit and restart source of truth.
+   persisted state—including image partials captured from provider progress—remains
+   the audit and restart source of truth.
 7. Reconcile interrupted work according to the feature's documented contract.
    Never apply one generic resume policy to unlike jobs.
 

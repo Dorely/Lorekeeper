@@ -202,6 +202,128 @@
     white-space: nowrap;
 }
 
+.partials-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1060;
+    display: grid;
+    place-items: center;
+    padding: 1.25rem;
+    background: var(--lk-backdrop);
+}
+
+.partials-modal {
+    width: min(48rem, 100%);
+    max-height: min(38rem, calc(100dvh - 2.5rem));
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    border: 1px solid var(--lk-line);
+    border-radius: var(--lk-radius-lg);
+    background: var(--bs-body-bg, #fff);
+    box-shadow: var(--lk-shadow-md);
+    overflow: hidden;
+}
+
+.partials-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 0.9rem;
+    border-bottom: 1px solid var(--lk-line);
+    background: var(--lk-soft);
+}
+
+.partials-modal-header h5 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.partials-modal-header span {
+    color: var(--lk-muted);
+    font-size: 0.82rem;
+}
+
+.partials-modal-grid {
+    min-height: 0;
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    overflow-y: auto;
+}
+
+.partials-group {
+    min-width: 0;
+    display: grid;
+    gap: 0.45rem;
+}
+
+.partials-group h6 {
+    margin: 0;
+    color: var(--lk-muted);
+    font-size: 0.78rem;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.partials-group-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+    gap: 0.75rem;
+}
+
+.partial-card {
+    min-width: 0;
+    display: grid;
+    grid-template-rows: 9rem auto;
+    border: 1px solid var(--lk-line);
+    border-radius: var(--lk-radius-md);
+    background: var(--lk-surface);
+    overflow: hidden;
+}
+
+.partial-preview-button {
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    padding: 0.35rem;
+    border: 0;
+    background: var(--lk-soft);
+}
+
+.partial-preview-button img {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.partial-card-body {
+    min-width: 0;
+    display: grid;
+    gap: 0.4rem;
+    align-content: start;
+    padding: 0.55rem;
+}
+
+.partial-card-body strong,
+.partial-card-body span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.partial-card-body strong {
+    font-size: 0.78rem;
+}
+
+.partial-card-body span {
+    color: var(--lk-muted);
+    font-size: 0.72rem;
+}
+
 .mask-modal-backdrop {
     position: fixed;
     inset: 0;

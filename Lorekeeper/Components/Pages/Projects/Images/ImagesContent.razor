@@ -80,6 +80,10 @@ else
                             </div>
                             <ImageEntityAssociations ProjectId="@Project.Id" ImageId="@image.Id" />
                             <div class="image-actions">
+                                @if (PartialsForImage(image.Id) is { Count: > 0 } imagePartials)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenImagePartials(image)">Partials (@imagePartials.Count)</button>
+                                }
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AttachToChatAsync(image)">Attach to Chat</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenCropModal(image)">Crop</button>
                                 <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenMaskModal(image)">Edit</button>
@@ -204,6 +208,62 @@ else
                       Closed="CloseImageModal" />
 }
 
+@if (_partialModalOpen)
+{
+    <div class="partials-modal-backdrop" @onclick="ClosePartialsModal">
+        <section class="partials-modal" role="dialog" aria-modal="true" aria-label="@PartialsModalTitle" @onclick:stopPropagation="true">
+            <header class="partials-modal-header">
+                <div>
+                    <h5>Partials</h5>
+                    <span>@PartialsModalTitle</span>
+                </div>
+                <button type="button" class="btn-close" aria-label="Close" @onclick="ClosePartialsModal"></button>
+            </header>
+            <div class="partials-modal-grid">
+                @foreach (var group in SelectedPartials.GroupBy(partial => new { partial.OutputIndex, partial.Attempt }))
+                {
+                    <section class="partials-group" @key="group.Key">
+                        <h6>Output @(group.Key.OutputIndex + 1) · Attempt @group.Key.Attempt</h6>
+                        <div class="partials-group-grid">
+                            @foreach (var partial in group)
+                            {
+                                <article class="partial-card" @key="partial.Id">
+                                    <button type="button" class="partial-preview-button" @onclick="() => OpenPartialViewer(partial)">
+                                        <img src="@partial.PreviewUrl" alt="@PartialAlt(partial)" />
+                                    </button>
+                                    <div class="partial-card-body">
+                                        <strong>Partial @(partial.PartialImageIndex + 1)</strong>
+                                        <span>@partial.Width × @partial.Height · @partial.ContentType</span>
+                                        <button type="button"
+                                                class="btn btn-sm btn-primary"
+                                                disabled="@_promotingPartialIds.Contains(partial.Id)"
+                                                @onclick="() => PromotePartialAsync(partial)">
+                                            @(_promotingPartialIds.Contains(partial.Id) ? "Promoting..." : "Promote")
+                                        </button>
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                    </section>
+                }
+            </div>
+        </section>
+    </div>
+}
+
+@if (_viewPartial is not null)
+{
+    <ImageViewerModal ImageUrl="@PartialFullUrl(_viewPartial)"
+                      Title="@_viewPartial.FileName"
+                      AltText="@PartialAlt(_viewPartial)"
+                      Details="@PartialViewerDetails(_viewPartial)"
+                      Closed="ClosePartialViewer">
+        <Actions>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => DownloadPartialAsync(_viewPartial)">Download</button>
+        </Actions>
+    </ImageViewerModal>
+}
+
 @if (_maskModalOpen && _editingImage is not null)
 {
     <div class="mask-modal-backdrop" @onclick="CloseMaskModal">
@@ -266,6 +326,7 @@ else
     private IReadOnlyDictionary<Guid, ProjectImageChapterUsageView> _chapterUsage =
         new Dictionary<Guid, ProjectImageChapterUsageView>();
     private IReadOnlyList<ProjectImageJobView> _jobs = [];
+    private IReadOnlyList<ProjectImagePartialView> _partials = [];
     private ProjectImageGenerationRuntimeSnapshot _runtimeSnapshot = new([]);
     private ProjectImageView? _editingImage;
     private ProjectImageView? _croppingImage;
@@ -273,6 +334,11 @@ else
     private List<EntityVisualTarget> _editEntityTargets = [];
     private bool _inheritEditEntityTargets = true;
     private ProjectImageView? _viewImage;
+    private ProjectImagePartialView? _viewPartial;
+    private Guid? _partialModalImageId;
+    private Guid? _partialModalJobId;
+    private string _partialModalOwnerLabel = string.Empty;
+    private readonly HashSet<Guid> _promotingPartialIds = [];
     private IJSObjectReference? _downloadModule;
     private IJSObjectReference? _maskModule;
     private ElementReference _maskCanvas;
@@ -311,9 +377,26 @@ else
                 || image.Prompt.Contains(_query, StringComparison.OrdinalIgnoreCase)).ToList();
 
     private IReadOnlyList<ProjectImageJobView> VisibleJobs =>
-        _jobs.Where(job => IsActiveJob(job.Status))
+        _jobs.Where(job => IsActiveJob(job.Status) || OrphanPartialsForJob(job.Id).Count > 0)
             .OrderByDescending(job => job.CreatedAt)
             .ToList();
+
+    private bool _partialModalOpen => _partialModalImageId is not null || _partialModalJobId is not null;
+
+    private string PartialsModalTitle => string.IsNullOrWhiteSpace(_partialModalOwnerLabel)
+        ? "Generated image partials"
+        : _partialModalOwnerLabel;
+
+    private IReadOnlyList<ProjectImagePartialView> SelectedPartials =>
+        (_partialModalImageId is Guid imageId
+            ? PartialsForImage(imageId)
+            : _partialModalJobId is Guid jobId
+                ? OrphanPartialsForJob(jobId)
+                : [])
+        .OrderBy(partial => partial.OutputIndex)
+        .ThenBy(partial => partial.Attempt)
+        .ThenBy(partial => partial.PartialImageIndex)
+        .ToList();
 
     protected override void OnInitialized() =>
         ImageRuntime.StateChanged += OnRuntimeStateChanged;
@@ -375,9 +458,10 @@ else
         {
             _codexConnected = await Providers.IsCodexConnectedAsync();
             await ReloadImageLibraryAsync();
-            _jobs = await ImageJobs.ListJobsAsync(Project.Id);
+            await ReloadJobsAndPartialsAsync();
             _runtimeSnapshot = ImageRuntime.GetSnapshot();
             RefreshOpenImages();
+            CloseEmptyPartialsModal();
         }
         catch (Exception ex)
         {
@@ -398,9 +482,10 @@ else
                 _runtimeSnapshot = ImageRuntime.GetSnapshot();
                 if (Project is not null)
                 {
-                    _jobs = await ImageJobs.ListJobsAsync(Project.Id);
+                    await ReloadJobsAndPartialsAsync();
                     await ReloadImageLibraryAsync();
                     RefreshOpenImages();
+                    CloseEmptyPartialsModal();
                 }
                 StateHasChanged();
             });
@@ -556,9 +641,85 @@ else
         await _downloadModule.InvokeVoidAsync("downloadBytes", data.FileName, data.ContentType, Convert.ToBase64String(data.Data));
     }
 
+    private async Task DownloadPartialAsync(ProjectImagePartialView partial)
+    {
+        if (_downloadModule is null || Project is null) return;
+        var data = await ImageJobs.GetPartialDataAsync(Project.Id, partial.JobId, partial.Id);
+        if (data is null) return;
+        await _downloadModule.InvokeVoidAsync("downloadBytes", data.FileName, data.ContentType, Convert.ToBase64String(data.Data));
+    }
+
     private void OpenImageModal(ProjectImageView image) => _viewImage = image;
 
     private void CloseImageModal() => _viewImage = null;
+
+    private void OpenImagePartials(ProjectImageView image)
+    {
+        _partialModalImageId = image.Id;
+        _partialModalJobId = null;
+        _partialModalOwnerLabel = image.FileName;
+    }
+
+    private void OpenJobPartials(ProjectImageJobView job)
+    {
+        _partialModalImageId = null;
+        _partialModalJobId = job.Id;
+        _partialModalOwnerLabel = job.Label;
+    }
+
+    private void ClosePartialsModal()
+    {
+        _partialModalImageId = null;
+        _partialModalJobId = null;
+        _partialModalOwnerLabel = string.Empty;
+        _viewPartial = null;
+    }
+
+    private void OpenPartialViewer(ProjectImagePartialView partial) => _viewPartial = partial;
+
+    private void ClosePartialViewer() => _viewPartial = null;
+
+    private async Task PromotePartialAsync(ProjectImagePartialView partial)
+    {
+        if (Project is null || !_promotingPartialIds.Add(partial.Id)) return;
+        _error = null;
+        _status = null;
+        try
+        {
+            var promoted = await ImageJobs.PromotePartialAsync(Project.Id, partial.Id);
+            _status = $"{promoted.FileName} promoted to the image library.";
+            _viewPartial = null;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            await ReloadJobsAndPartialsAsync();
+            CloseEmptyPartialsModal();
+        }
+        finally
+        {
+            _promotingPartialIds.Remove(partial.Id);
+        }
+    }
+
+    private IReadOnlyList<ProjectImagePartialView> PartialsForImage(Guid imageId) =>
+        _partials.Where(partial => partial.FinalOutputImageId == imageId).ToList();
+
+    private IReadOnlyList<ProjectImagePartialView> OrphanPartialsForJob(Guid jobId) =>
+        _partials.Where(partial => partial.JobId == jobId && partial.FinalOutputImageId is null).ToList();
+
+    private static string PartialAlt(ProjectImagePartialView partial) =>
+        $"Output {partial.OutputIndex + 1}, attempt {partial.Attempt}, partial {partial.PartialImageIndex + 1}";
+
+    private static string PartialFullUrl(ProjectImagePartialView partial) =>
+        partial.PreviewUrl.Replace("?maxEdge=640", string.Empty, StringComparison.Ordinal);
+
+    private static IReadOnlyList<string> PartialViewerDetails(ProjectImagePartialView partial) =>
+        [
+            $"Output {partial.OutputIndex + 1} · Attempt {partial.Attempt} · Partial {partial.PartialImageIndex + 1}",
+            $"{partial.Width} × {partial.Height} · {partial.ContentType}",
+        ];
 
     private async Task ReloadImageLibraryAsync()
     {
@@ -566,6 +727,26 @@ else
         _images = await Images.ListAsync(Project.Id);
         _chapterUsage = (await Images.ListChapterUsageAsync(Project.Id))
             .ToDictionary(usage => usage.ImageId);
+    }
+
+    private async Task ReloadJobsAndPartialsAsync()
+    {
+        if (Project is null) return;
+        _partials = await ImageJobs.ListPartialsAsync(Project.Id);
+        var jobs = (await ImageJobs.ListJobsAsync(Project.Id, take: 100)).ToList();
+        var knownJobIds = jobs.Select(job => job.Id).ToHashSet();
+        foreach (var jobId in _partials.Select(partial => partial.JobId).Distinct().Where(jobId => !knownJobIds.Contains(jobId)))
+        {
+            if (await ImageJobs.GetJobAsync(Project.Id, jobId) is { } job)
+                jobs.Add(job);
+        }
+        _jobs = jobs;
+    }
+
+    private void CloseEmptyPartialsModal()
+    {
+        if (_partialModalOpen && SelectedPartials.Count == 0)
+            ClosePartialsModal();
     }
 
     private ProjectImageChapterUsageView? ChapterUsage(Guid imageId) =>
@@ -717,7 +898,7 @@ else
         var runtimeJob = RuntimeJob(job.Id);
         <article class="image-card image-job-card" @key="job.Id">
             <div class="image-job-preview">
-                @if (runtimeJob?.Outputs.FirstOrDefault(output => !string.IsNullOrWhiteSpace(output.PartialImageDataUrl)) is { PartialImageDataUrl: { } partialUrl })
+                @if (runtimeJob?.Outputs.FirstOrDefault(output => !string.IsNullOrWhiteSpace(output.PartialImageUrl)) is { PartialImageUrl: { } partialUrl })
                 {
                     <img src="@partialUrl" alt="Partial image preview" />
                 }
@@ -760,6 +941,12 @@ else
                 {
                     <p class="small text-danger mb-0">@job.Error</p>
                 }
+                @if (OrphanPartialsForJob(job.Id) is { Count: > 0 } jobPartials)
+                {
+                    <div class="image-actions">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenJobPartials(job)">Partials (@jobPartials.Count)</button>
+                    </div>
+                }
                 @foreach (var output in (runtimeJob?.Outputs ?? job.OutputStates.Select(ToRuntimeOutput)).OrderBy(output => output.OutputIndex))
                 {
                     <div class="image-output-row">
@@ -788,7 +975,7 @@ else
             state.CallId,
             state.LastEventType,
             state.EventCount,
-            PartialImageDataUrl: null);
+            PartialImageUrl: null);
 
     private static bool IsActiveJob(ProjectImageGenerationJobStatus status) =>
         status is ProjectImageGenerationJobStatus.Queued or ProjectImageGenerationJobStatus.Running;

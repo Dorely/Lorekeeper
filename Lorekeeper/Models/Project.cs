@@ -109,6 +109,8 @@ public class Project
 
     public ICollection<ProjectImageGenerationJob> ProjectImageGenerationJobs { get; set; } = [];
 
+    public ICollection<ProjectImagePartial> ProjectImagePartials { get; set; } = [];
+
     public ICollection<ProjectImageMask> ProjectImageMasks { get; set; } = [];
 
     public ICollection<ProjectFontFamily> FontFamilies { get; set; } = [];

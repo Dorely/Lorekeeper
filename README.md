@@ -146,6 +146,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   placement is a separate revision-safe step using that image ID. Generation
   and inspection reserve quiet space for actual copy regions while requiring
   the rest of the frame to contribute purposeful visual information or atmosphere.
+  Generation partials remain available behind a `Partials` action on their final
+  image or unfinished job card; authors can inspect, download, or promote a
+  partial into a separate unattached library image.
   The Images library keeps every card at one bounded size, marks assets used by
   chapters, and disables deletion until every semantic Figure and chapter-owned
   Designed Page reference has been removed or replaced; the image service

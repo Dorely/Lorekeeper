@@ -7,6 +7,10 @@ public interface IProjectImageJobService
     Task<IReadOnlyList<ProjectImageJobView>> ListJobsAsync(Guid projectId, int take = 25, CancellationToken cancellationToken = default);
     Task<ProjectImageJobView?> GetJobAsync(Guid projectId, Guid jobId, CancellationToken cancellationToken = default);
     Task<ProjectImageJobView?> GetJobAsync(Guid jobId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProjectImagePartialView>> ListPartialsAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<ProjectImagePartialData?> GetPartialDataAsync(Guid projectId, Guid jobId, Guid partialId, CancellationToken cancellationToken = default);
+    Task<ProjectImagePartialView> SavePartialAsync(Guid projectId, Guid jobId, int outputIndex, int attempt, ProjectImageProviderProgress progress, CancellationToken cancellationToken = default);
+    Task<ProjectImageView> PromotePartialAsync(Guid projectId, Guid partialId, CancellationToken cancellationToken = default);
     Task<ProjectImageJobView> CreateGenerateJobAsync(Guid projectId, ProjectImageGenerateJobRequest request, CancellationToken cancellationToken = default);
     Task<ProjectImageJobView> CreateEditJobAsync(Guid projectId, ProjectImageEditJobRequest request, CancellationToken cancellationToken = default);
     Task<ProjectImageGenerationWorkItem?> TryStartNextQueuedJobAsync(Guid projectId, CancellationToken cancellationToken = default);

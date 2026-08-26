@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Lorekeeper.Composition;
 using Lorekeeper.EntityVisuals;
+using Lorekeeper.Llm;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -53,6 +54,206 @@ public sealed class ProjectImageJobService(
         return job is null ? null : ToView(job);
     }
 
+    public async Task<IReadOnlyList<ProjectImagePartialView>> ListPartialsAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var partials = await databaseOperation.Db.ProjectImagePartials
+            .AsNoTracking()
+            .Where(partial => partial.ProjectId == projectId)
+            .OrderByDescending(partial => partial.CreatedAt)
+            .ThenBy(partial => partial.JobId)
+            .ThenBy(partial => partial.OutputIndex)
+            .ThenBy(partial => partial.Attempt)
+            .ThenBy(partial => partial.PartialImageIndex)
+            .Select(partial => new ProjectImagePartialView(
+                partial.Id,
+                partial.JobId,
+                partial.OutputIndex,
+                partial.Attempt,
+                partial.PartialImageIndex,
+                partial.FileName,
+                partial.ContentType,
+                string.Empty,
+                partial.Width,
+                partial.Height,
+                partial.Provider,
+                partial.MainlineModel,
+                partial.ImageModel,
+                partial.RequestId,
+                partial.ResponseId,
+                partial.CallId,
+                partial.ItemId,
+                partial.LastEventType,
+                partial.EventCount,
+                partial.FinalOutputImageId,
+                partial.CreatedAt,
+                partial.UpdatedAt))
+            .ToListAsync(cancellationToken);
+        return partials.Select(partial => WithPartialPreviewUrl(projectId, partial)).ToList();
+    }
+
+    public async Task<ProjectImagePartialData?> GetPartialDataAsync(
+        Guid projectId,
+        Guid jobId,
+        Guid partialId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var partial = await databaseOperation.Db.ProjectImagePartials
+            .AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId
+                && candidate.JobId == jobId
+                && candidate.Id == partialId, cancellationToken);
+        return partial is null
+            ? null
+            : new ProjectImagePartialData(
+                partial.Id,
+                partial.FileName,
+                partial.ContentType,
+                partial.Data,
+                partial.Width,
+                partial.Height,
+                partial.UpdatedAt);
+    }
+
+    public async Task<ProjectImagePartialView> SavePartialAsync(
+        Guid projectId,
+        Guid jobId,
+        int outputIndex,
+        int attempt,
+        ProjectImageProviderProgress progress,
+        CancellationToken cancellationToken = default)
+    {
+        if (progress.Kind != ProjectImageProviderProgressKind.PartialImage)
+            throw new InvalidOperationException("Only partial-image provider progress can be persisted.");
+        if (outputIndex < 0 || attempt <= 0 || progress.PartialImageIndex is not { } partialImageIndex || partialImageIndex < 0)
+            throw new InvalidDataException("Image partial metadata is missing a valid output, attempt, or partial index.");
+
+        var payload = ParsePartialDataUrl(progress.PartialImageDataUrl, ResolveProviderOutputLimit());
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var job = await db.ProjectImageGenerationJobs
+            .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == jobId, cancellationToken)
+            ?? throw new InvalidOperationException("Image generation job was not found.");
+        if (outputIndex >= job.Count)
+            throw new InvalidDataException("Image partial output index is outside the requested output count.");
+
+        var existing = await db.ProjectImagePartials
+            .FirstOrDefaultAsync(candidate => candidate.JobId == jobId
+                && candidate.OutputIndex == outputIndex
+                && candidate.Attempt == attempt
+                && candidate.PartialImageIndex == partialImageIndex, cancellationToken);
+        if (existing is not null)
+            return ToPartialView(projectId, existing);
+
+        var now = DateTime.UtcNow;
+        var partial = new ProjectImagePartial
+        {
+            ProjectId = projectId,
+            JobId = jobId,
+            OutputIndex = outputIndex,
+            Attempt = attempt,
+            PartialImageIndex = partialImageIndex,
+            FileName = PartialFileName(job.Label, outputIndex, attempt, partialImageIndex, payload.ContentType),
+            ContentType = payload.ContentType,
+            Data = payload.Data,
+            Width = payload.Width,
+            Height = payload.Height,
+            Provider = job.Provider,
+            MainlineModel = job.MainlineModel,
+            ImageModel = job.ImageModel,
+            RequestId = Clean(progress.RequestId),
+            ResponseId = Clean(progress.ResponseId),
+            CallId = Clean(progress.CallId),
+            ItemId = Clean(progress.ItemId),
+            LastEventType = Clean(progress.LastEventType),
+            EventCount = Math.Max(0, progress.EventCount),
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        await db.ProjectImagePartials.AddAsync(partial, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return ToPartialView(projectId, partial);
+    }
+
+    public async Task<ProjectImageView> PromotePartialAsync(
+        Guid projectId,
+        Guid partialId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var partial = await db.ProjectImagePartials
+            .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == partialId, cancellationToken)
+            ?? throw new InvalidOperationException("Image partial was not found or has already been promoted.");
+        var job = await db.ProjectImageGenerationJobs
+            .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == partial.JobId, cancellationToken)
+            ?? throw new InvalidOperationException("The image job for this partial was not found.");
+        var project = await GetProjectAsync(projectId, cancellationToken);
+        var now = DateTime.UtcNow;
+        var storedImage = ProjectImageBinary.Normalize(
+            partial.Data,
+            partial.ContentType,
+            partial.FileName,
+            ResolveProviderOutputLimit());
+        var asset = new PublishAsset
+        {
+            ProjectId = projectId,
+            Source = job.Kind == ProjectImageGenerationJobKind.Edit ? PublishAssetSource.Edited : PublishAssetSource.Generated,
+            FileName = PromotionFileName(job.Label, partial.OutputIndex, partial.Attempt, partial.PartialImageIndex, storedImage.ContentType),
+            ContentType = storedImage.ContentType,
+            Data = storedImage.Data,
+            AltText = job.AltText,
+            Prompt = job.Prompt,
+            GenerationModel = string.IsNullOrWhiteSpace(partial.ImageModel) ? job.ImageModel : partial.ImageModel,
+            SourceMetadataJson = JsonSerializer.Serialize(new
+            {
+                PartialId = partial.Id,
+                JobId = job.Id,
+                JobKind = job.Kind.ToString(),
+                partial.OutputIndex,
+                partial.Attempt,
+                partial.PartialImageIndex,
+                partial.Provider,
+                partial.MainlineModel,
+                partial.ImageModel,
+                partial.RequestId,
+                partial.ResponseId,
+                partial.CallId,
+                partial.ItemId,
+                partial.LastEventType,
+                partial.EventCount,
+                partial.FinalOutputImageId,
+                OriginalRaster = new
+                {
+                    partial.ContentType,
+                    partial.Width,
+                    partial.Height,
+                    SizeBytes = partial.Data.LongLength,
+                },
+                StoredRaster = new
+                {
+                    storedImage.ContentType,
+                    storedImage.Width,
+                    storedImage.Height,
+                    SizeBytes = storedImage.Data.LongLength,
+                },
+            }, JsonOptions),
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+
+        await db.PublishAssets.AddAsync(asset, cancellationToken);
+        db.ProjectImagePartials.Remove(partial);
+        project.UpdatedAt = now;
+        await db.SaveChangesAsync(cancellationToken);
+        return ProjectImageService.ToView(projectId, asset);
+    }
+
     public async Task<ProjectImageJobView> CreateGenerateJobAsync(
         Guid projectId,
         ProjectImageGenerateJobRequest request,
@@ -88,6 +289,7 @@ public sealed class ProjectImageJobService(
             EntityVisualTargetsJson = SerializeTargets(entityTargets),
             InheritSourceEntityTargets = false,
             OutputStatesJson = SerializeOutputStates(CreateInitialOutputStates(count)),
+            Provider = CodexProvider.Name,
             MainlineModel = options.Value.DefaultMainlineModel,
             ImageModel = options.Value.DefaultImageModel,
             CreatedAt = now,
@@ -163,6 +365,7 @@ public sealed class ProjectImageJobService(
             EntityVisualTargetsJson = SerializeTargets(targets),
             InheritSourceEntityTargets = request.InheritSourceEntityTargets,
             OutputStatesJson = SerializeOutputStates(CreateInitialOutputStates(count)),
+            Provider = CodexProvider.Name,
             MainlineModel = options.Value.DefaultMainlineModel,
             ImageModel = options.Value.DefaultImageModel,
             CreatedAt = now,
@@ -397,6 +600,17 @@ public sealed class ProjectImageJobService(
         };
 
         await db.PublishAssets.AddAsync(asset, cancellationToken);
+        var partials = await db.ProjectImagePartials
+            .Where(partial => partial.ProjectId == projectId
+                && partial.JobId == jobId
+                && partial.OutputIndex == outputIndex
+                && partial.FinalOutputImageId == null)
+            .ToListAsync(cancellationToken);
+        foreach (var partial in partials)
+        {
+            partial.FinalOutputImageId = asset.Id;
+            partial.UpdatedAt = now;
+        }
         job.Provider = result.Provider;
         job.MainlineModel = result.MainlineModel;
         job.ImageModel = result.ImageModel;
@@ -669,6 +883,37 @@ public sealed class ProjectImageJobService(
             job.TargetGeometryJson,
             DeserializeStrings(job.ProviderRevisedPromptsJson));
 
+    private static ProjectImagePartialView WithPartialPreviewUrl(Guid projectId, ProjectImagePartialView partial) =>
+        partial with
+        {
+            PreviewUrl = $"/projects/{projectId:N}/image-jobs/{partial.JobId:N}/partials/{partial.Id:N}/content?maxEdge=640",
+        };
+
+    private static ProjectImagePartialView ToPartialView(Guid projectId, ProjectImagePartial partial) =>
+        new(
+            partial.Id,
+            partial.JobId,
+            partial.OutputIndex,
+            partial.Attempt,
+            partial.PartialImageIndex,
+            partial.FileName,
+            partial.ContentType,
+            $"/projects/{projectId:N}/image-jobs/{partial.JobId:N}/partials/{partial.Id:N}/content?maxEdge=640",
+            partial.Width,
+            partial.Height,
+            partial.Provider,
+            partial.MainlineModel,
+            partial.ImageModel,
+            partial.RequestId,
+            partial.ResponseId,
+            partial.CallId,
+            partial.ItemId,
+            partial.LastEventType,
+            partial.EventCount,
+            partial.FinalOutputImageId,
+            partial.CreatedAt,
+            partial.UpdatedAt);
+
     private static string SerializeTargets(IEnumerable<EntityVisualTarget>? targets) => JsonSerializer.Serialize(
         (targets ?? []).Where(target => target.EntityId != Guid.Empty).DistinctBy(target => target.EntityId).ToList(), JsonOptions);
 
@@ -907,6 +1152,50 @@ public sealed class ProjectImageJobService(
 
     private static string ExtensionForContentType(string contentType) =>
         contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ? "jpg" : contentType.Equals("image/webp", StringComparison.OrdinalIgnoreCase) ? "webp" : "png";
+
+    private static ImagePayload ParsePartialDataUrl(string? dataUrl, int maxBytes)
+    {
+        if (string.IsNullOrWhiteSpace(dataUrl))
+            throw new InvalidDataException("Image partial did not contain image data.");
+
+        string contentType;
+        byte[] data;
+        try
+        {
+            (contentType, data) = DataUrl.Parse(dataUrl);
+        }
+        catch (Exception ex) when (ex is ArgumentException or FormatException)
+        {
+            throw new InvalidDataException("Image partial was not a valid base64 data URL.", ex);
+        }
+
+        if (data.Length == 0)
+            throw new InvalidDataException("Image partial was empty.");
+        if (data.Length > maxBytes)
+            throw new InvalidDataException($"Image partial exceeds the configured {maxBytes / 1024 / 1024:N0} MB provider-output limit.");
+
+        using var stream = new SKMemoryStream(data);
+        using var codec = SKCodec.Create(stream) ?? throw new InvalidDataException("Image partial is not a supported raster image.");
+        var encodedContentType = codec.EncodedFormat switch
+        {
+            SKEncodedImageFormat.Png => "image/png",
+            SKEncodedImageFormat.Jpeg => "image/jpeg",
+            SKEncodedImageFormat.Webp => "image/webp",
+            _ => throw new InvalidDataException("Image partial must be PNG, JPEG, or WebP."),
+        };
+        using var bitmap = SKBitmap.Decode(data) ?? throw new InvalidDataException("Image partial could not be decoded.");
+        if (bitmap.Width <= 0 || bitmap.Height <= 0)
+            throw new InvalidDataException("Image partial dimensions are invalid.");
+
+        _ = contentType;
+        return new ImagePayload(encodedContentType, data, bitmap.Width, bitmap.Height);
+    }
+
+    private static string PartialFileName(string label, int outputIndex, int attempt, int partialImageIndex, string contentType) =>
+        $"{SafeFileNameStem(label, "partial")}-output-{outputIndex + 1}-attempt-{attempt}-partial-{partialImageIndex + 1}.{ExtensionForContentType(contentType)}";
+
+    private static string PromotionFileName(string label, int outputIndex, int attempt, int partialImageIndex, string contentType) =>
+        $"{SafeFileNameStem(label, "partial")}-output-{outputIndex + 1}-attempt-{attempt}-partial-{partialImageIndex + 1}.{ExtensionForContentType(contentType)}";
 
     private static string SafeFileNameStem(string value, string fallback)
     {

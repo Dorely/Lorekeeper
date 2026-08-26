@@ -263,25 +263,69 @@ public sealed class ProjectImageGenerationRuntime(
                     StartedAt: DateTime.UtcNow));
                 UpdateRuntimeOutput(workItem.JobId, outputIndex, ProjectImageOutputStatus.Running, attempt, $"Starting image request attempt {attempt} of {maxAttempts}.");
 
-                var progress = new ActionProgress(update => HandleProviderProgress(workItem.ProjectId, workItem.JobId, outputIndex, attempt, update));
-                ProjectImageProviderResult result;
+                var partialQueue = new PartialPersistenceQueue(
+                    scopeFactory,
+                    workItem.ProjectId,
+                    workItem.JobId,
+                    outputIndex,
+                    attempt,
+                    partial =>
+                    {
+                        if (!UpdateRuntimeOutput(
+                            workItem.JobId,
+                            outputIndex,
+                            ProjectImageOutputStatus.Generating,
+                            attempt,
+                            $"Received partial image {partial.PartialImageIndex + 1}.",
+                            partialImageUrl: partial.PreviewUrl))
+                        {
+                            NotifyStateChanged();
+                        }
+                    });
+                var progress = new ActionProgress(update =>
+                {
+                    HandleProviderProgress(workItem.ProjectId, workItem.JobId, outputIndex, attempt, update);
+                    if (update.Kind == ProjectImageProviderProgressKind.PartialImage)
+                        partialQueue.Enqueue(update);
+                });
+                ProjectImageProviderResult? result = null;
+                Exception? requestError = null;
                 await using (var scope = scopeFactory.CreateAsyncScope())
                 {
                     var provider = scope.ServiceProvider.GetRequiredService<IProjectImageProvider>();
                     var images = scope.ServiceProvider.GetRequiredService<IProjectImageService>();
                     var jobs = scope.ServiceProvider.GetRequiredService<IProjectImageJobService>();
-                    result = workItem.Kind == ProjectImageGenerationJobKind.Edit
-                        ? await provider.EditAsync(await BuildEditRequestAsync(workItem, images, jobs, cancellationToken), cancellationToken, progress)
-                        : await provider.GenerateAsync(await BuildGenerateRequestAsync(workItem, images, cancellationToken), cancellationToken, progress);
+                    try
+                    {
+                        result = workItem.Kind == ProjectImageGenerationJobKind.Edit
+                            ? await provider.EditAsync(await BuildEditRequestAsync(workItem, images, jobs, cancellationToken), cancellationToken, progress)
+                            : await provider.GenerateAsync(await BuildGenerateRequestAsync(workItem, images, cancellationToken), cancellationToken, progress);
+                    }
+                    catch (Exception ex)
+                    {
+                        requestError = ex;
+                    }
 
-                    if (result.Images.Count == 0)
+                    try
+                    {
+                        await partialQueue.CompleteAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        requestError ??= ex;
+                    }
+
+                    if (requestError is not null)
+                        System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(requestError).Throw();
+
+                    if (result is null || result.Images.Count == 0)
                         throw new ProjectImageProviderException("Image request completed without an image.", "missing_image");
 
                     cancellationToken.ThrowIfCancellationRequested();
                     await jobs.SaveGeneratedOutputAsync(workItem.ProjectId, workItem.JobId, outputIndex, result, result.Images[0], cancellationToken);
                 }
 
-                UpdateRuntimeOutput(workItem.JobId, outputIndex, ProjectImageOutputStatus.Succeeded, attempt, "Image saved.", partialImageDataUrl: null);
+                UpdateRuntimeOutput(workItem.JobId, outputIndex, ProjectImageOutputStatus.Succeeded, attempt, "Image saved.", partialImageUrl: null);
                 return null;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -395,7 +439,7 @@ public sealed class ProjectImageGenerationRuntime(
             callId: update.CallId,
             lastEventType: update.LastEventType,
             eventCount: update.EventCount,
-            partialImageDataUrl: update.PartialImageDataUrl);
+            partialImageUrl: null);
 
         if (update.Kind != ProjectImageProviderProgressKind.PartialImage)
         {
@@ -471,7 +515,7 @@ public sealed class ProjectImageGenerationRuntime(
                 CallId: null,
                 LastEventType: null,
                 EventCount: 0,
-                PartialImageDataUrl: null))
+                PartialImageUrl: null))
             .ToList();
         var runtimeJob = new ProjectImageGenerationJobRuntimeView(workItem.ProjectId, workItem.JobId, IsRunning: true, outputs);
         var cancellation = new CancellationTokenSource();
@@ -489,7 +533,7 @@ public sealed class ProjectImageGenerationRuntime(
         return cancellation;
     }
 
-    private void UpdateRuntimeOutput(
+    private bool UpdateRuntimeOutput(
         Guid jobId,
         int outputIndex,
         ProjectImageOutputStatus status,
@@ -502,16 +546,16 @@ public sealed class ProjectImageGenerationRuntime(
         string? callId = null,
         string? lastEventType = null,
         int eventCount = 0,
-        string? partialImageDataUrl = null)
+        string? partialImageUrl = null)
     {
         lock (_lock)
         {
             if (!_jobs.TryGetValue(jobId, out var job))
-                return;
+                return false;
 
             var previous = job.Outputs.FirstOrDefault(output => output.OutputIndex == outputIndex);
             if (previous?.Status == ProjectImageOutputStatus.Cancelled && status != ProjectImageOutputStatus.Cancelled)
-                return;
+                return false;
             var outputs = job.Outputs
                 .Where(output => output.OutputIndex != outputIndex)
                 .Append(new ProjectImageOutputRuntimeView(
@@ -526,13 +570,14 @@ public sealed class ProjectImageGenerationRuntime(
                     callId,
                     lastEventType,
                     eventCount,
-                    partialImageDataUrl ?? previous?.PartialImageDataUrl))
+                    partialImageUrl ?? previous?.PartialImageUrl))
                 .OrderBy(output => output.OutputIndex)
                 .ToList();
             _jobs[jobId] = job with { Outputs = outputs };
         }
 
         NotifyStateChanged();
+        return true;
     }
 
     private void MarkJobNotRunning(Guid jobId)
@@ -561,7 +606,7 @@ public sealed class ProjectImageGenerationRuntime(
                             Status = ProjectImageOutputStatus.Cancelled,
                             Message = "Image request cancelled.",
                             Error = string.Empty,
-                            PartialImageDataUrl = null,
+                            PartialImageUrl = null,
                         })
                 .ToList();
             _jobs[jobId] = job with { IsRunning = false, Outputs = outputs };
@@ -708,5 +753,53 @@ public sealed class ProjectImageGenerationRuntime(
     private sealed class ActionProgress(Action<ProjectImageProviderProgress> report) : IProgress<ProjectImageProviderProgress>
     {
         public void Report(ProjectImageProviderProgress value) => report(value);
+    }
+
+    private sealed class PartialPersistenceQueue(
+        IServiceScopeFactory scopeFactory,
+        Guid projectId,
+        Guid jobId,
+        int outputIndex,
+        int attempt,
+        Action<ProjectImagePartialView> onPersisted)
+    {
+        private readonly object _lock = new();
+        private Task _tail = Task.CompletedTask;
+        private int _nextPartialIndex;
+
+        public void Enqueue(ProjectImageProviderProgress progress)
+        {
+            lock (_lock)
+            {
+                var partialIndex = progress.PartialImageIndex is >= 0
+                    ? progress.PartialImageIndex.Value
+                    : _nextPartialIndex;
+                _nextPartialIndex = Math.Max(_nextPartialIndex, partialIndex + 1);
+                _tail = PersistAfterAsync(_tail, progress with { PartialImageIndex = partialIndex });
+            }
+        }
+
+        public async Task CompleteAsync()
+        {
+            Task tail;
+            lock (_lock)
+                tail = _tail;
+            await tail;
+        }
+
+        private async Task PersistAfterAsync(Task previous, ProjectImageProviderProgress progress)
+        {
+            await previous;
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var jobs = scope.ServiceProvider.GetRequiredService<IProjectImageJobService>();
+            var partial = await jobs.SavePartialAsync(
+                projectId,
+                jobId,
+                outputIndex,
+                attempt,
+                progress,
+                CancellationToken.None);
+            onPersisted(partial);
+        }
     }
 }

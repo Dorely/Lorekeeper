@@ -86,7 +86,9 @@ The application stores local state in SQLite through `AppDbContext`, including
 provider/OAuth configuration, projects, Book Briefs, outline/graph state,
 transcripts, review/contest state, writing samples, ingest/import jobs, images,
 masks, entity visual links, fonts, publication state, composition, and binary
-assets. SQLite startup uses a busy timeout and WAL journal mode. sqlite-vec and
+assets. Image-generation partials are durable job-owned binary artifacts until
+explicit promotion moves one into the ordinary project image library. SQLite
+startup uses a busy timeout and WAL journal mode. sqlite-vec and
 internal FTS5 structures are initialized outside ordinary EF migrations and are
 regenerable indexes, not authoritative project data.
 
@@ -182,8 +184,9 @@ cover surfaces, Book Text Styles, visual references, and project-owned font
 families/faces with binary hashes. Non-structural exports omit source bodies,
 selections, and evidence and include a warning. Jobs, staging rows, temporary
 visual candidates, unselected source bodies/provenance, assistant transcripts,
-model selections and durable assistant review baselines remain working-database
-state and are excluded. Manual Undo/Redo is process memory only and therefore is
+model selections, unpromoted image partials, and durable assistant review
+baselines remain working-database state and are excluded. Manual Undo/Redo is
+process memory only and therefore is
 also absent from every export without adding database rows.
 
 Direct `ProjectReference` rows are deliberately omitted from both export kinds.

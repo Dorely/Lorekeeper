@@ -64,6 +64,39 @@ public sealed record ProjectImageData(
     string AltText,
     DateTime UpdatedAt);
 
+public sealed record ProjectImagePartialView(
+    Guid Id,
+    Guid JobId,
+    int OutputIndex,
+    int Attempt,
+    int PartialImageIndex,
+    string FileName,
+    string ContentType,
+    string PreviewUrl,
+    int Width,
+    int Height,
+    string Provider,
+    string MainlineModel,
+    string ImageModel,
+    string? RequestId,
+    string? ResponseId,
+    string? CallId,
+    string? ItemId,
+    string? LastEventType,
+    int EventCount,
+    Guid? FinalOutputImageId,
+    DateTime CreatedAt,
+    DateTime UpdatedAt);
+
+public sealed record ProjectImagePartialData(
+    Guid Id,
+    string FileName,
+    string ContentType,
+    byte[] Data,
+    int Width,
+    int Height,
+    DateTime UpdatedAt);
+
 public sealed record ProjectImageGenerateJobRequest(
     string Prompt,
     string Size,
@@ -302,4 +335,4 @@ public sealed record ProjectImageOutputRuntimeView(
     string? CallId,
     string? LastEventType,
     int EventCount,
-    string? PartialImageDataUrl);
+    string? PartialImageUrl);

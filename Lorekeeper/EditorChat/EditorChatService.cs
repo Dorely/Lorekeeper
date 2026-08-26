@@ -993,7 +993,7 @@ public sealed class EditorChatService(
                 output.Message,
                 string.IsNullOrWhiteSpace(output.Error) ? null : output.Error,
                 output.Attempt,
-                output.PartialImageDataUrl))
+                output.PartialImageUrl))
             .ToList();
 
         return BuildImageGenerationJobUpdate(
@@ -1015,7 +1015,7 @@ public sealed class EditorChatService(
                 output.Message,
                 string.IsNullOrWhiteSpace(output.Error) ? null : output.Error,
                 output.Attempt,
-                PartialImageDataUrl: null))
+                PartialImageUrl: null))
             .ToList();
 
         return BuildImageGenerationJobUpdate(
@@ -1044,7 +1044,7 @@ public sealed class EditorChatService(
             CountOutputs(outputs, ProjectImageOutputStatus.Failed.ToString()),
             CountOutputs(outputs, ProjectImageOutputStatus.Cancelled.ToString()),
             outputs,
-            outputs.LastOrDefault(output => !string.IsNullOrWhiteSpace(output.PartialImageDataUrl))?.PartialImageDataUrl);
+            outputs.LastOrDefault(output => !string.IsNullOrWhiteSpace(output.PartialImageUrl))?.PartialImageUrl);
     }
 
     private static string ImageProgressKey(EditorChatImageGenerationJobUpdated progress)
@@ -1058,7 +1058,7 @@ public sealed class EditorChatService(
             .Append(progress.CompletedCount).Append('|')
             .Append(progress.FailedCount).Append('|')
             .Append(progress.CancelledCount).Append('|')
-            .Append(StableStringHash(progress.LatestPartialImageDataUrl));
+            .Append(StableStringHash(progress.LatestPartialImageUrl));
 
         foreach (var output in progress.Outputs)
         {
@@ -1068,7 +1068,7 @@ public sealed class EditorChatService(
                 .Append(output.Attempt).Append(':')
                 .Append(output.Message).Append(':')
                 .Append(output.ErrorMessage).Append(':')
-                .Append(StableStringHash(output.PartialImageDataUrl));
+                .Append(StableStringHash(output.PartialImageUrl));
         }
 
         return sb.ToString();

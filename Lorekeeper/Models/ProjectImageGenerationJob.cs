@@ -68,6 +68,8 @@ public class ProjectImageGenerationJob
     public DateTime? StartedAt { get; set; }
 
     public DateTime? CompletedAt { get; set; }
+
+    public ICollection<ProjectImagePartial> Partials { get; set; } = [];
 }
 
 public enum ProjectImageGenerationJobKind

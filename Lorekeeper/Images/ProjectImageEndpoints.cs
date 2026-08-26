@@ -34,6 +34,33 @@ public static class ProjectImageEndpoints
             });
 
         endpoints.MapGet(
+            "/projects/{projectId:guid}/image-jobs/{jobId:guid}/partials/{partialId:guid}/content",
+            async (
+                Guid projectId,
+                Guid jobId,
+                Guid partialId,
+                [FromQuery] int? maxEdge,
+                IProjectImageJobService imageJobs,
+                CancellationToken cancellationToken) =>
+            {
+                var partial = await imageJobs.GetPartialDataAsync(projectId, jobId, partialId, cancellationToken);
+                if (partial is null)
+                    return Results.NotFound();
+
+                var data = maxEdge is int edge && edge > 0
+                    ? ProjectImageResize.Resize(partial.Data, partial.ContentType, edge)
+                    : partial.Data;
+                var etag = $"\"{partial.Id:N}-{partial.UpdatedAt.Ticks:x}-{data.LongLength:x}\"";
+                return Results.File(
+                    data,
+                    partial.ContentType,
+                    fileDownloadName: null,
+                    lastModified: partial.UpdatedAt,
+                    entityTag: new Microsoft.Net.Http.Headers.EntityTagHeaderValue(etag),
+                    enableRangeProcessing: true);
+            });
+
+        endpoints.MapGet(
             "/projects/{projectId:guid}/image-masks/{maskId:guid}/content",
             async (
                 Guid projectId,

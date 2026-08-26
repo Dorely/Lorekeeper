@@ -35,8 +35,9 @@ geometry, and preview rules.
 `IProjectImageService` owns reusable project assets and local crops. It is the
 authority for metadata, image bytes, usage projections, upload, crop/reuse,
 and deletion guards. `IProjectImageJobService` owns durable generation/edit
-job records and prompt/audit metadata. `IProjectImageGenerationRuntime` owns
-FIFO execution, retry/cancellation propagation, partial previews, and job
+job records, prompt/audit metadata, received partial-image artifacts, and
+explicit partial promotion. `IProjectImageGenerationRuntime` owns FIFO
+execution, retry/cancellation propagation, ordered partial capture, and job
 notifications. Provider transport remains behind `IProjectImageProvider`;
 the application never lets a provider-specific response become the asset or
 placement contract.
@@ -99,6 +100,16 @@ the shared 0.001 log-ratio tolerance produces
 `LAYOUT_IMAGE_ASPECT_MISMATCH`. Generation does not infer publication DPI
 readiness; placed-image validation owns DPI diagnostics. The provider-output
 byte boundary is separately configurable and defaults to 64 MiB.
+
+Every valid streamed partial is retained as exact job-owned PNG, JPEG, or WebP
+bytes, identified by output, request attempt, and provider partial index. A
+successful final output associates its partials with that output image; partials
+from interrupted, failed, or cancelled outputs remain on their job. The Images
+workspace exposes them behind the owning image or job card. Promotion is an
+explicit atomic transfer: the partial is normalized through the ordinary image
+asset boundary, stored as a separate unattached project image with provenance,
+and removed from the partial collection. It never inherits entity associations
+or a placement.
 
 The shared prompt composer gives generation and editing the same spatial
 discipline. A reserved or quiet region must be explicit when copy needs space;
@@ -208,7 +219,7 @@ composition, Core/release fingerprints, and artifact freshness.
 | Path or family | Primary responsibility |
 |---|---|
 | `Lorekeeper/Images/IProjectImageService.cs` / `ProjectImageService.cs` | Reusable image-library reads, uploads, crops, metadata, usage projections, and deletion guards. |
-| `Lorekeeper/Images/IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Durable generation/edit job records, structured briefs, provider audit fields, output validation, and diagnostics. |
+| `Lorekeeper/Images/IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Durable generation/edit job records, streamed partial artifacts, explicit promotion, structured briefs, provider audit fields, output validation, and diagnostics. |
 | `Lorekeeper/Images/AgentProjectImageWorkflow.cs` | Assistant generation/edit boundary, terminal-state waiting, reconnectable jobs, target diagnostics, and unattached output semantics. |
 | `Lorekeeper/Images/ImagePromptComposer.cs` | Structured generation/edit briefs, reference labels, reserved regions, spatial guidance, and rendered-text policy. |
 | `Lorekeeper/EntityVisuals/` | Canonical entity-image associations, visual context, bounded reference reads, and provenance. |

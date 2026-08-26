@@ -79,7 +79,7 @@ public sealed record EditorChatImageGenerationOutputProgress(
     string Message,
     string? ErrorMessage,
     int Attempt,
-    string? PartialImageDataUrl);
+    string? PartialImageUrl);
 
 public sealed record EditorChatImageGenerationJobUpdated(
     string ToolCallId,
@@ -93,7 +93,7 @@ public sealed record EditorChatImageGenerationJobUpdated(
     int FailedCount,
     int CancelledCount,
     IReadOnlyList<EditorChatImageGenerationOutputProgress> Outputs,
-    string? LatestPartialImageDataUrl) : EditorChatTurnUpdate;
+    string? LatestPartialImageUrl) : EditorChatTurnUpdate;
 
 public sealed record EditorChatAssistantMessageCompleted(Guid MessageId) : EditorChatTurnUpdate;
 

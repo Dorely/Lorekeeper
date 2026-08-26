@@ -94,6 +94,7 @@ public class AppDbContext(
     public DbSet<PublicationPreparationJob> PublicationPreparationJobs => Set<PublicationPreparationJob>();
     public DbSet<PublishAsset> PublishAssets => Set<PublishAsset>();
     public DbSet<ProjectImageGenerationJob> ProjectImageGenerationJobs => Set<ProjectImageGenerationJob>();
+    public DbSet<ProjectImagePartial> ProjectImagePartials => Set<ProjectImagePartial>();
     public DbSet<ProjectImageMask> ProjectImageMasks => Set<ProjectImageMask>();
     public DbSet<EntityVisualExample> EntityVisualExamples => Set<EntityVisualExample>();
     public DbSet<SourceVisualCandidate> SourceVisualCandidates => Set<SourceVisualCandidate>();
@@ -1323,6 +1324,29 @@ public class AppDbContext(
                 .WithMany(p => p.ProjectImageGenerationJobs)
                 .HasForeignKey(e => e.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectImagePartial>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProjectId, e.CreatedAt });
+            entity.HasIndex(e => new { e.JobId, e.OutputIndex, e.Attempt, e.PartialImageIndex }).IsUnique();
+            entity.HasIndex(e => new { e.ProjectId, e.JobId, e.OutputIndex, e.Attempt });
+            entity.HasIndex(e => e.FinalOutputImageId);
+
+            entity.HasOne(e => e.Project)
+                .WithMany(p => p.ProjectImagePartials)
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Job)
+                .WithMany(job => job.Partials)
+                .HasForeignKey(e => e.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.FinalOutputImage)
+                .WithMany()
+                .HasForeignKey(e => e.FinalOutputImageId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<ProjectImageMask>(entity =>
