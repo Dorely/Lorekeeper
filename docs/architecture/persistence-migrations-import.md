@@ -169,6 +169,16 @@ malformed non-result audit payloads fail closed into protected recovery. Legacy
 plain text is permitted only in its documented historical audit boundary and
 is preserved byte-for-byte.
 
+The manuscript migration preflight validates contest source snapshots
+independently of the retired `AcceptedManuscriptJson` column, which is absent
+from the current schema. Non-empty candidate proposals and drafts must be
+structured v1-v4 documents; failed, invalid, pending, and running candidates
+may legitimately retain empty proposal/draft fields, while completed and
+selected candidates require a proposal. Legacy v1 discovery and upgrade also
+includes `DraftManuscriptJson` when that optional column exists. Empty candidate
+proposals remain empty during legacy transforms so an unsuccessful historical
+runner is not rewritten as an empty manuscript.
+
 The structured-manuscript cutover validates legacy paragraph counts, bounds,
 anchor hashes, projection equality, normalized-text hashes, and visual anchor
 mapping before commit. Legacy illustrated-prose layouts use runtime-authoritative

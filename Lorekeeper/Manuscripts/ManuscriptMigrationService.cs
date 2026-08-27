@@ -465,7 +465,13 @@ public sealed class ManuscriptMigrationService(
                 rows.Add((Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1)), reader.GetString(2)));
         }
 
-        foreach (var row in rows.Where(row => !IsManuscript(row.Value, row.ChapterId)))
+        // Failed/invalid candidates can legitimately have no generated
+        // manuscript. Preserve that empty audit value rather than turning it
+        // into an empty manuscript merely because another legacy payload
+        // caused this transform to run.
+        foreach (var row in rows.Where(row =>
+                     !string.IsNullOrWhiteSpace(row.Value)
+                     && !IsManuscript(row.Value, row.ChapterId)))
         {
             var manuscript = ManuscriptCodec.FromPlainText(row.ChapterId, row.Value, revision: 1, deterministicIds: true);
             await using var update = connection.CreateCommand();
@@ -963,8 +969,7 @@ public sealed class ManuscriptMigrationService(
             """
         };
 
-        if (await HasColumnAsync("ContestBatches", "OriginalManuscriptJson", cancellationToken)
-            && await HasColumnAsync("ContestBatches", "AcceptedManuscriptJson", cancellationToken))
+        if (await HasColumnAsync("ContestBatches", "OriginalManuscriptJson", cancellationToken))
         {
             checks.Add("""
                 EXISTS (
@@ -972,9 +977,22 @@ public sealed class ManuscriptMigrationService(
                     WHERE CASE WHEN json_valid(OriginalManuscriptJson) = 1
                             THEN COALESCE(json_extract(OriginalManuscriptJson, '$.schemaVersion'), 0)
                             ELSE 0 END NOT IN (1, 2, 3, 4)
-                       OR CASE WHEN json_valid(AcceptedManuscriptJson) = 1
-                            THEN COALESCE(json_extract(AcceptedManuscriptJson, '$.schemaVersion'), 0)
-                            ELSE 0 END NOT IN (1, 2, 3, 4))
+                       )
+                """);
+        }
+
+        // AcceptedManuscriptJson was removed at the current review-workflow
+        // boundary. Keep its historical check independent so the current
+        // ContestBatches schema still validates OriginalManuscriptJson.
+        if (await HasColumnAsync("ContestBatches", "AcceptedManuscriptJson", cancellationToken))
+        {
+            checks.Add("""
+                EXISTS (
+                    SELECT 1 FROM ContestBatches
+                    WHERE NULLIF(trim(AcceptedManuscriptJson), '') IS NOT NULL
+                      AND CASE WHEN json_valid(AcceptedManuscriptJson) = 1
+                        THEN COALESCE(json_extract(AcceptedManuscriptJson, '$.schemaVersion'), 0)
+                        ELSE 0 END NOT IN (1, 2, 3, 4))
                 """);
         }
 
@@ -983,8 +1001,27 @@ public sealed class ManuscriptMigrationService(
             checks.Add("""
                 EXISTS (
                     SELECT 1 FROM ContestCandidates
-                    WHERE CASE WHEN json_valid(ProposedManuscriptJson) = 1
+                    WHERE NULLIF(trim(ProposedManuscriptJson), '') IS NOT NULL
+                      AND CASE WHEN json_valid(ProposedManuscriptJson) = 1
                         THEN COALESCE(json_extract(ProposedManuscriptJson, '$.schemaVersion'), 0)
+                        ELSE 0 END NOT IN (1, 2, 3, 4))
+                """);
+            checks.Add("""
+                EXISTS (
+                    SELECT 1 FROM ContestCandidates
+                    WHERE lower(Status) IN ('completed', 'selected')
+                      AND NULLIF(trim(ProposedManuscriptJson), '') IS NULL)
+                """);
+        }
+
+        if (await HasColumnAsync("ContestCandidates", "DraftManuscriptJson", cancellationToken))
+        {
+            checks.Add("""
+                EXISTS (
+                    SELECT 1 FROM ContestCandidates
+                    WHERE NULLIF(trim(DraftManuscriptJson), '') IS NOT NULL
+                      AND CASE WHEN json_valid(DraftManuscriptJson) = 1
+                        THEN COALESCE(json_extract(DraftManuscriptJson, '$.schemaVersion'), 0)
                         ELSE 0 END NOT IN (1, 2, 3, 4))
                 """);
         }
@@ -1226,63 +1263,116 @@ public sealed class ManuscriptMigrationService(
             string,
             Dictionary<ManuscriptStyleKind, HashSet<string>>>(
                 StringComparer.OrdinalIgnoreCase);
+        var payloadQueries = new List<string>();
+        await AddDirectPayloadQueryAsync(
+            connection,
+            transaction,
+            payloadQueries,
+            "Chapters",
+            "ProjectId",
+            "ManuscriptJson",
+            0,
+            cancellationToken);
+        await AddDirectPayloadQueryAsync(
+            connection,
+            transaction,
+            payloadQueries,
+            "ContestBatches",
+            "ProjectId",
+            "OriginalManuscriptJson",
+            0,
+            cancellationToken);
+        await AddDirectPayloadQueryAsync(
+            connection,
+            transaction,
+            payloadQueries,
+            "ContestBatches",
+            "ProjectId",
+            "AcceptedManuscriptJson",
+            0,
+            cancellationToken);
+
+        var candidateColumns = await ExistingColumnsAsync(
+            connection,
+            "ContestCandidates",
+            ["BatchId", "ProposedManuscriptJson", "DraftManuscriptJson", "ReviewStateJson"],
+            cancellationToken);
+        var batchColumns = await ExistingColumnsAsync(
+            connection,
+            "ContestBatches",
+            ["Id", "ProjectId"],
+            cancellationToken);
+        if (batchColumns.Count == 2 && candidateColumns.Contains("BatchId", StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var column in new[] { "ProposedManuscriptJson", "DraftManuscriptJson", "ReviewStateJson" })
+            {
+                if (!candidateColumns.Contains(column, StringComparer.OrdinalIgnoreCase))
+                    continue;
+                payloadQueries.Add($"""
+                    SELECT batch.ProjectId, candidate.{column}, 0
+                    FROM ContestCandidates candidate
+                    JOIN ContestBatches batch ON batch.Id = candidate.BatchId
+                    """);
+            }
+        }
+
+        var sessionColumns = await ExistingColumnsAsync(
+            connection,
+            "EditorRevisionSessions",
+            ["JobId", "OriginalManuscriptJson", "OperationsJson", "ProposalJson"],
+            cancellationToken);
+        var jobColumns = await ExistingColumnsAsync(
+            connection,
+            "EditorRevisionJobs",
+            ["Id", "ProjectId"],
+            cancellationToken);
+        if (jobColumns.Count == 2 && sessionColumns.Contains("JobId", StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var column in new[] { "OriginalManuscriptJson", "OperationsJson", "ProposalJson" })
+            {
+                if (!sessionColumns.Contains(column, StringComparer.OrdinalIgnoreCase))
+                    continue;
+                payloadQueries.Add($"""
+                    SELECT job.ProjectId, session.{column}, 0
+                    FROM EditorRevisionSessions session
+                    JOIN EditorRevisionJobs job ON job.Id = session.JobId
+                    """);
+            }
+        }
+
+        var changeColumns = await ExistingColumnsAsync(
+            connection,
+            "AiChanges",
+            ["BatchId", "ArgumentsJson", "BeforeJson", "AfterJson", "DraftAfterJson", "ReviewStateJson", "ResultJson"],
+            cancellationToken);
+        var changeBatchColumns = await ExistingColumnsAsync(
+            connection,
+            "AiChangeBatches",
+            ["Id", "ProjectId"],
+            cancellationToken);
+        if (changeBatchColumns.Count == 2 && changeColumns.Contains("BatchId", StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var column in new[] { "ArgumentsJson", "BeforeJson", "AfterJson", "DraftAfterJson", "ReviewStateJson", "ResultJson" })
+            {
+                if (!changeColumns.Contains(column, StringComparer.OrdinalIgnoreCase))
+                    continue;
+                var resultFlag = string.Equals(column, "ResultJson", StringComparison.Ordinal) ? 1 : 0;
+                payloadQueries.Add($"""
+                    SELECT batch.ProjectId, change.{column}, {resultFlag}
+                    FROM AiChanges change
+                    JOIN AiChangeBatches batch ON batch.Id = change.BatchId
+                    """);
+            }
+        }
+
         await using (var selectPayloads = connection.CreateCommand())
         {
             selectPayloads.Transaction = transaction;
-            selectPayloads.CommandText =
-                """
-                SELECT ProjectId, ManuscriptJson, 0 FROM Chapters
-                UNION ALL SELECT ProjectId, OriginalManuscriptJson, 0 FROM ContestBatches
-                UNION ALL SELECT ProjectId, AcceptedManuscriptJson, 0 FROM ContestBatches
-                UNION ALL
-                    SELECT batch.ProjectId, candidate.ProposedManuscriptJson, 0
-                    FROM ContestCandidates candidate
-                    JOIN ContestBatches batch ON batch.Id = candidate.BatchId
-                UNION ALL
-                    SELECT batch.ProjectId, candidate.ReviewStateJson, 0
-                    FROM ContestCandidates candidate
-                    JOIN ContestBatches batch ON batch.Id = candidate.BatchId
-                UNION ALL
-                    SELECT job.ProjectId, session.OriginalManuscriptJson, 0
-                    FROM EditorRevisionSessions session
-                    JOIN EditorRevisionJobs job ON job.Id = session.JobId
-                UNION ALL
-                    SELECT job.ProjectId, session.OperationsJson, 0
-                    FROM EditorRevisionSessions session
-                    JOIN EditorRevisionJobs job ON job.Id = session.JobId
-                UNION ALL
-                    SELECT job.ProjectId, session.ProposalJson, 0
-                    FROM EditorRevisionSessions session
-                    JOIN EditorRevisionJobs job ON job.Id = session.JobId
-                UNION ALL
-                    SELECT batch.ProjectId, change.ArgumentsJson, 0
-                    FROM AiChanges change
-                    JOIN AiChangeBatches batch ON batch.Id = change.BatchId
-                UNION ALL
-                    SELECT batch.ProjectId, change.BeforeJson, 0
-                    FROM AiChanges change
-                    JOIN AiChangeBatches batch ON batch.Id = change.BatchId
-                UNION ALL
-                    SELECT batch.ProjectId, change.AfterJson, 0
-                    FROM AiChanges change
-                    JOIN AiChangeBatches batch ON batch.Id = change.BatchId
-                UNION ALL
-                    SELECT batch.ProjectId, change.DraftAfterJson, 0
-                    FROM AiChanges change
-                    JOIN AiChangeBatches batch ON batch.Id = change.BatchId
-                UNION ALL
-                    SELECT batch.ProjectId, change.ReviewStateJson, 0
-                    FROM AiChanges change
-                    JOIN AiChangeBatches batch ON batch.Id = change.BatchId
-                UNION ALL
-                    SELECT batch.ProjectId, change.ResultJson, 1
-                    FROM AiChanges change
-                    JOIN AiChangeBatches batch ON batch.Id = change.BatchId;
-                """;
+            selectPayloads.CommandText = string.Join("\nUNION ALL\n", payloadQueries);
             await using var reader = await selectPayloads.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                if (reader.IsDBNull(1))
+                if (reader.IsDBNull(1) || string.IsNullOrWhiteSpace(reader.GetString(1)))
                     continue;
                 var projectId = reader.GetString(0);
                 var payload = reader.GetString(1);
@@ -1399,6 +1489,26 @@ public sealed class ManuscriptMigrationService(
         {
             return false;
         }
+    }
+
+    private static async Task AddDirectPayloadQueryAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        ICollection<string> payloadQueries,
+        string table,
+        string projectColumn,
+        string payloadColumn,
+        int resultFlag,
+        CancellationToken cancellationToken)
+    {
+        var columns = await ExistingColumnsAsync(
+            connection,
+            table,
+            [projectColumn, payloadColumn],
+            cancellationToken);
+        if (columns.Count != 2)
+            return;
+        payloadQueries.Add($"SELECT {projectColumn}, {payloadColumn}, {resultFlag} FROM {table}");
     }
 
     private static string AllocateMigratedStyleName(string requestedName, ISet<string> usedNames)
@@ -1681,7 +1791,7 @@ public sealed class ManuscriptMigrationService(
     [
         new("Chapters", "Id", ["ManuscriptJson"]),
         new("ContestBatches", "Id", ["OriginalManuscriptJson", "AcceptedManuscriptJson"]),
-        new("ContestCandidates", "Id", ["ProposedManuscriptJson", "ReviewStateJson"]),
+        new("ContestCandidates", "Id", ["ProposedManuscriptJson", "DraftManuscriptJson", "ReviewStateJson"]),
         new("EditorRevisionSessions", "Id", ["OriginalManuscriptJson", "OperationsJson", "ProposalJson"]),
         new(
             "AiChanges",

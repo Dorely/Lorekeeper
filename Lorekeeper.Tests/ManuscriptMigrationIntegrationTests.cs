@@ -501,6 +501,122 @@ public sealed class ManuscriptMigrationIntegrationTests
     }
 
     [Fact]
+    public async Task CurrentSchemaDiscardedFailedAndInvalidCandidatesWithEmptyDraftsRemainHealthy()
+    {
+        using var fixture = new MigrationFixture();
+        var chapterId = await fixture.CreateV7DatabaseAsync("Current content");
+        var service = fixture.CreateService();
+        await using (var initialMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(initialMigration);
+        await fixture.AdvanceToCurrentSchemaAsync();
+        await fixture.AddCurrentContestAsync(
+            chapterId,
+            ("Failed", string.Empty, string.Empty),
+            ("Invalid", string.Empty, string.Empty));
+
+        await using (var restart = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(restart);
+
+        var recovery = await fixture.CreateRecoveryService().GetStateAsync();
+        Assert.False(recovery.RecoveryRequired, recovery.Error ?? "Recovery was requested without an error.");
+    }
+
+    [Fact]
+    public async Task CurrentSchemaContestOriginalIsValidatedWithoutLegacyAcceptedColumn()
+    {
+        using var fixture = new MigrationFixture();
+        var chapterId = await fixture.CreateV7DatabaseAsync("Current content");
+        var service = fixture.CreateService();
+        await using (var initialMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(initialMigration);
+        await fixture.AdvanceToCurrentSchemaAsync();
+        var batch = await fixture.AddCurrentContestAsync(
+            chapterId,
+            ("Failed", string.Empty, string.Empty));
+        await fixture.SetContestOriginalAsync(batch.BatchId, "{malformed");
+
+        await using (var restart = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(restart);
+
+        var recovery = await fixture.CreateRecoveryService().GetStateAsync();
+        Assert.True(recovery.RecoveryRequired);
+        Assert.Equal(ManuscriptMigrationService.SchemaV3MigrationName, recovery.MigrationName);
+        Assert.Contains("malformed current manuscript", recovery.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CurrentSchemaNonEmptyMalformedCandidateDraftFailsClosed()
+    {
+        using var fixture = new MigrationFixture();
+        var chapterId = await fixture.CreateV7DatabaseAsync("Current content");
+        var service = fixture.CreateService();
+        await using (var initialMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(initialMigration);
+        await fixture.AdvanceToCurrentSchemaAsync();
+        _ = await fixture.AddCurrentContestAsync(
+            chapterId,
+            ("Failed", string.Empty, "{malformed"));
+
+        await using (var restart = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(restart);
+
+        var recovery = await fixture.CreateRecoveryService().GetStateAsync();
+        Assert.True(recovery.RecoveryRequired);
+        Assert.Equal(ManuscriptMigrationService.SchemaV3MigrationName, recovery.MigrationName);
+        Assert.Contains("malformed current manuscript", recovery.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CurrentSchemaCompletedAndSelectedCandidatesRequireProposals()
+    {
+        using var fixture = new MigrationFixture();
+        var chapterId = await fixture.CreateV7DatabaseAsync("Current content");
+        var service = fixture.CreateService();
+        await using (var initialMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(initialMigration);
+        await fixture.AdvanceToCurrentSchemaAsync();
+        await fixture.AddCurrentContestAsync(
+            chapterId,
+            ("Completed", string.Empty, string.Empty),
+            ("Selected", string.Empty, string.Empty));
+
+        await using (var restart = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(restart);
+
+        var recovery = await fixture.CreateRecoveryService().GetStateAsync();
+        Assert.True(recovery.RecoveryRequired);
+        Assert.Equal(ManuscriptMigrationService.SchemaV3MigrationName, recovery.MigrationName);
+    }
+
+    [Fact]
+    public async Task CurrentSchemaV1CandidateDraftIsUpgradedWhenDraftColumnExists()
+    {
+        using var fixture = new MigrationFixture();
+        var chapterId = await fixture.CreateV7DatabaseAsync("Current content");
+        var service = fixture.CreateService();
+        await using (var initialMigration = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(initialMigration);
+        await fixture.AdvanceToCurrentSchemaAsync();
+        var contest = await fixture.AddCurrentContestAsync(
+            chapterId,
+            ("Failed", string.Empty, null));
+        await fixture.SetCandidateDraftToSchemaV1Async(contest.CandidateId);
+
+        await using (var restart = fixture.CreateDbContext())
+            await service.ApplyPendingAsync(restart);
+
+        var recovery = await fixture.CreateRecoveryService().GetStateAsync();
+        Assert.False(recovery.RecoveryRequired, recovery.Error ?? "Recovery was requested without an error.");
+        await using var verification = fixture.CreateDbContext();
+        var draft = await verification.ContestCandidates
+            .AsNoTracking()
+            .Where(candidate => candidate.Id == contest.CandidateId)
+            .Select(candidate => candidate.DraftManuscriptJson)
+            .SingleAsync();
+        Assert.Equal(ManuscriptDocument.CurrentSchemaVersion, ManuscriptCodec.Deserialize(draft).SchemaVersion);
+    }
+
+    [Fact]
     public async Task ScheduledRecoveryRestoresAndUpgradesDatabaseWithHistoricalAuditPayloads()
     {
         using var fixture = new MigrationFixture();
@@ -719,6 +835,135 @@ public sealed class ManuscriptMigrationIntegrationTests
                 await chapter.ExecuteNonQueryAsync();
             }
             return chapterId;
+        }
+
+        public async Task AdvanceToCurrentSchemaAsync()
+        {
+            await using var db = CreateDbContext();
+            await db.GetService<IMigrator>().MigrateAsync();
+        }
+
+        public async Task<(Guid BatchId, Guid CandidateId)> AddCurrentContestAsync(
+            Guid chapterId,
+            params (string Status, string ProposedManuscriptJson, string? DraftManuscriptJson)[] candidates)
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            Guid projectId;
+            string chapterTitle;
+            string originalManuscriptJson;
+            long originalRevision;
+            await using (var chapter = connection.CreateCommand())
+            {
+                chapter.CommandText = """
+                    SELECT ProjectId, Title, ManuscriptJson, ManuscriptRevision
+                    FROM Chapters
+                    WHERE Id = $chapterId;
+                    """;
+                chapter.Parameters.AddWithValue("$chapterId", chapterId.ToString().ToUpperInvariant());
+                await using var reader = await chapter.ExecuteReaderAsync();
+                Assert.True(await reader.ReadAsync());
+                projectId = Guid.Parse(reader.GetString(0));
+                chapterTitle = reader.GetString(1);
+                originalManuscriptJson = reader.GetString(2);
+                originalRevision = reader.GetInt64(3);
+            }
+
+            var batchId = Guid.NewGuid();
+            var now = DateTime.UtcNow;
+            var originalHash = ManuscriptCodec.HashPlainText(
+                ManuscriptCodec.ProjectPlainText(ManuscriptCodec.Deserialize(originalManuscriptJson)));
+            await using (var batch = connection.CreateCommand())
+            {
+                batch.CommandText = """
+                    INSERT INTO ContestBatches
+                        (Id, ProjectId, ConversationId, AssistantMessageId, ChapterId,
+                         ContentTargetKind, ContentTargetEditionId, ChapterTitle,
+                         OriginalManuscriptJson, OriginalManuscriptRevision,
+                         OriginalManuscriptHash, WinningCandidateId, SelectedCandidateId,
+                         ContextSnapshotJson, Status, ErrorMessage, CreatedAt, UpdatedAt,
+                         CompletedAt)
+                    VALUES
+                        ($id, $projectId, $conversationId, NULL, $chapterId,
+                         'Core', NULL, $chapterTitle, $original, $revision,
+                         $hash, NULL, NULL, '{}', 'Discarded', NULL, $now, $now, $now);
+                    """;
+                batch.Parameters.AddWithValue("$id", batchId.ToString().ToUpperInvariant());
+                batch.Parameters.AddWithValue("$projectId", projectId.ToString().ToUpperInvariant());
+                batch.Parameters.AddWithValue("$conversationId", Guid.NewGuid().ToString().ToUpperInvariant());
+                batch.Parameters.AddWithValue("$chapterId", chapterId.ToString().ToUpperInvariant());
+                batch.Parameters.AddWithValue("$chapterTitle", chapterTitle);
+                batch.Parameters.AddWithValue("$original", originalManuscriptJson);
+                batch.Parameters.AddWithValue("$revision", originalRevision);
+                batch.Parameters.AddWithValue("$hash", originalHash);
+                batch.Parameters.AddWithValue("$now", now);
+                Assert.Equal(1, await batch.ExecuteNonQueryAsync());
+            }
+
+            var firstCandidateId = Guid.Empty;
+            for (var index = 0; index < candidates.Length; index++)
+            {
+                var candidate = candidates[index];
+                var candidateId = Guid.NewGuid();
+                await using var row = connection.CreateCommand();
+                row.CommandText = """
+                    INSERT INTO ContestCandidates
+                        (Id, BatchId, "Order", ProviderId, ProviderName, ModelName,
+                         Status, Summary, MutationsJson, ProposedManuscriptJson,
+                         DraftManuscriptJson, RawResponse, ReviewStateJson, Notes,
+                         ErrorMessage, DurationMs, CreatedAt, UpdatedAt, CompletedAt)
+                    VALUES
+                        ($id, $batchId, $order, 1, 'Provider', 'Model', $status,
+                         'Summary', '[]', $proposed, $draft, '', '{}', NULL, NULL,
+                         NULL, $now, $now, $now);
+                    """;
+                row.Parameters.AddWithValue("$id", candidateId.ToString().ToUpperInvariant());
+                row.Parameters.AddWithValue("$batchId", batchId.ToString().ToUpperInvariant());
+                row.Parameters.AddWithValue("$order", index);
+                row.Parameters.AddWithValue("$status", candidate.Status);
+                row.Parameters.AddWithValue("$proposed", candidate.ProposedManuscriptJson);
+                row.Parameters.AddWithValue("$draft", candidate.DraftManuscriptJson ?? string.Empty);
+                row.Parameters.AddWithValue("$now", now);
+                Assert.Equal(1, await row.ExecuteNonQueryAsync());
+                if (index == 0)
+                    firstCandidateId = candidateId;
+            }
+
+            return (batchId, firstCandidateId);
+        }
+
+        public async Task SetContestOriginalAsync(Guid batchId, string value)
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE ContestBatches SET OriginalManuscriptJson = $value WHERE Id = $id;";
+            command.Parameters.AddWithValue("$value", value);
+            command.Parameters.AddWithValue("$id", batchId.ToString().ToUpperInvariant());
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+
+        public async Task SetCandidateDraftToSchemaV1Async(Guid candidateId)
+        {
+            await using var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync();
+            string draft;
+            await using (var select = connection.CreateCommand())
+            {
+                select.CommandText = """
+                    SELECT ManuscriptJson
+                    FROM Chapters
+                    LIMIT 1;
+                    """;
+                draft = (string)(await select.ExecuteScalarAsync())!;
+            }
+            var node = System.Text.Json.Nodes.JsonNode.Parse(draft)!.AsObject();
+            node["schemaVersion"] = 1;
+            await using var update = connection.CreateCommand();
+            update.CommandText = "UPDATE ContestCandidates SET DraftManuscriptJson = $draft WHERE Id = $id;";
+            update.Parameters.AddWithValue("$draft", node.ToJsonString(ManuscriptCodec.JsonOptions));
+            update.Parameters.AddWithValue("$id", candidateId.ToString().ToUpperInvariant());
+            Assert.Equal(1, await update.ExecuteNonQueryAsync());
         }
 
         public async Task AddLegacyRevisionSessionsAsync(Guid chapterId)
