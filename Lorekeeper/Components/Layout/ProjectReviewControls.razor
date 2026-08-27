@@ -8,11 +8,9 @@
 @using Lorekeeper.VersionHistory.Services
 @implements IDisposable
 @inject NavigationManager Navigation
-@inject IProjectService Projects
-@inject IActService Acts
-@inject IEditorChatService Chat
 @inject IProjectVersionHistoryService VersionHistory
 @inject IProjectVersionRestoreService Restore
+@inject IServiceScopeFactory ScopeFactory
 @inject ProjectVersionHistoryUiEvents HistoryEvents
 
 <div class="project-review-controls">
@@ -34,7 +32,7 @@
                     aria-controls="project-review-pending-list"
                     disabled="@(_loading || _busy)"
                     title="Choose a pending chapter review"
-                    @onclick="ToggleChooserAsync">
+                    @onclick="ToggleChooser">
                 Pending changes <span class="project-review-count">@(PendingChapterCount + OtherChangeCount)</span>
             </button>
         }
@@ -139,6 +137,7 @@
 
 @code {
     [Parameter] public Project? Project { get; set; }
+    [Parameter] public EventCallback<ProjectVersionReviewView?> ReviewLoaded { get; set; }
 
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private ProjectVersionReviewView? _review;
@@ -147,12 +146,16 @@
     private bool _showOtherReview;
     private bool _loading = true;
     private bool _busy;
-    private bool _refreshing;
     private bool _disposed;
     private bool _contestLocked;
     private bool _otherUndoConfirmationOpen;
     private string? _error;
     private IReadOnlyDictionary<Guid, int> _actOrderById = new Dictionary<Guid, int>();
+    private Guid? _loadedProjectId;
+    private bool _refreshRequested;
+    private bool _backgroundRefreshing;
+    private CancellationTokenSource? _backgroundRefreshCancellation;
+    private int _refreshGeneration;
 
     private bool IsProjectLocked => Project is { } project
         && (HistoryEvents.IsProjectOperationActive(project.Id) || _contestLocked);
@@ -235,53 +238,170 @@
         return false;
     }
 
-    protected override async Task OnParametersSetAsync()
+    protected override Task OnParametersSetAsync()
     {
         if (Project is null)
         {
+            CancelBackgroundRefresh();
             _review = null;
             _actOrderById = new Dictionary<Guid, int>();
             _loading = false;
-            return;
+            _loadedProjectId = null;
+            _refreshRequested = false;
+            return Task.CompletedTask;
         }
 
-        await RefreshAsync();
+        if (_loadedProjectId != Project.Id)
+        {
+            CancelBackgroundRefresh();
+            _loadedProjectId = Project.Id;
+            _review = null;
+            _actOrderById = new Dictionary<Guid, int>();
+            _loading = true;
+            _error = null;
+            _refreshRequested = true;
+        }
+
+        return Task.CompletedTask;
     }
 
     protected override void OnInitialized() =>
         HistoryEvents.ReviewStateChanged += HandleReviewStateChanged;
 
-    private async Task RefreshAsync()
+    protected override Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_disposed || _refreshing || Project is not { } project)
+        if (_refreshRequested && !_disposed && !_backgroundRefreshing && Project is { } project)
+        {
+            _refreshRequested = false;
+            _ = RefreshAfterRenderAsync(project.Id);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task RefreshAfterRenderAsync(Guid projectId)
+    {
+        if (_disposed || _backgroundRefreshing || Project?.Id != projectId)
             return;
 
-        _refreshing = true;
-        _loading = true;
-        _error = null;
+        var generation = ++_refreshGeneration;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+        _backgroundRefreshCancellation = cancellation;
+        _backgroundRefreshing = true;
         try
         {
-            _reviewEditsEnabled = (await Projects.GetByIdAsync(project.Id, _lifetimeCancellation.Token))?.ReviewEditsEnabled ?? false;
-            _contestLocked = (await Chat.GetEditorContestLockStateAsync(project.Id, _lifetimeCancellation.Token)).IsLocked;
-            _review = await VersionHistory.GetReviewAsync(project.Id, cancellationToken: _lifetimeCancellation.Token);
-            var acts = await Acts.ListAsync(project.Id, _lifetimeCancellation.Token);
-            _actOrderById = acts
-                .Select((act, index) => (act.Id, index))
-                .ToDictionary(item => item.Id, item => item.index);
+            var result = await Task.Run(
+                () => LoadRefreshResultAsync(projectId, cancellation.Token),
+                cancellation.Token);
+            if (!IsCurrentBackgroundRefresh(generation, projectId, cancellation))
+                return;
+
+            await InvokeAsync(async () =>
+            {
+                if (!IsCurrentBackgroundRefresh(generation, projectId, cancellation))
+                    return;
+
+                _reviewEditsEnabled = result.ReviewEditsEnabled;
+                _contestLocked = result.ContestLocked;
+                _review = result.Review;
+                _actOrderById = result.ActOrderById;
+                _loading = false;
+                await ReviewLoaded.InvokeAsync(result.Review);
+                StateHasChanged();
+            });
         }
-        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+        }
+        catch (ObjectDisposedException)
         {
         }
         catch (Exception exception)
         {
-            _error = exception.Message;
-            _review = null;
+            if (IsCurrentBackgroundRefresh(generation, projectId, cancellation))
+            {
+                try
+                {
+                    await InvokeAsync(() =>
+                    {
+                        if (!IsCurrentBackgroundRefresh(generation, projectId, cancellation))
+                            return;
+
+                        _error = exception.Message;
+                        _review = null;
+                        _loading = false;
+                        StateHasChanged();
+                    });
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+            }
         }
         finally
         {
-            _loading = false;
-            _refreshing = false;
+            if (ReferenceEquals(_backgroundRefreshCancellation, cancellation))
+            {
+                _backgroundRefreshCancellation = null;
+                _backgroundRefreshing = false;
+            }
+
+            try
+            {
+                if (!_disposed)
+                    await InvokeAsync(StateHasChanged);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
         }
+    }
+
+    private async Task<ReviewControlRefreshResult> LoadRefreshResultAsync(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var projects = scope.ServiceProvider.GetRequiredService<IProjectService>();
+        var chat = scope.ServiceProvider.GetRequiredService<IEditorChatService>();
+        var versionHistory = scope.ServiceProvider.GetRequiredService<IProjectVersionHistoryService>();
+        var acts = scope.ServiceProvider.GetRequiredService<IActService>();
+
+        var reviewEditsEnabled = (await projects.GetByIdAsync(projectId, cancellationToken))?.ReviewEditsEnabled ?? false;
+        var contestLocked = (await chat.GetEditorContestLockStateAsync(projectId, cancellationToken)).IsLocked;
+        var review = await versionHistory.GetReviewAsync(projectId, cancellationToken: cancellationToken);
+        var orderedActs = await acts.ListAsync(projectId, cancellationToken);
+        var actOrderById = orderedActs
+            .Select((act, index) => (act.Id, index))
+            .ToDictionary(item => item.Id, item => item.index);
+        return new ReviewControlRefreshResult(reviewEditsEnabled, contestLocked, review, actOrderById);
+    }
+
+    private bool IsCurrentBackgroundRefresh(
+        int generation,
+        Guid projectId,
+        CancellationTokenSource cancellation) =>
+        !_disposed
+        && generation == _refreshGeneration
+        && Project?.Id == projectId
+        && ReferenceEquals(_backgroundRefreshCancellation, cancellation)
+        && !cancellation.IsCancellationRequested;
+
+    private void CancelBackgroundRefresh()
+    {
+        _refreshGeneration++;
+        _backgroundRefreshCancellation?.Cancel();
+    }
+
+    private void QueueBackgroundRefresh()
+    {
+        if (_disposed || Project is null)
+            return;
+
+        CancelBackgroundRefresh();
+        _loading = true;
+        _error = null;
+        _refreshRequested = true;
     }
 
     private async Task OnReviewEditsChangedAsync(ChangeEventArgs args)
@@ -305,7 +425,6 @@
         {
             await VersionHistory.SetReviewEditsEnabledAsync(project.Id, enabled, _lifetimeCancellation.Token);
             _reviewEditsEnabled = enabled;
-            HistoryEvents.PublishReviewStateChanged(project.Id);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -317,7 +436,7 @@
         }
     }
 
-    private async Task ToggleChooserAsync()
+    private void ToggleChooser()
     {
         if (_chooserOpen)
         {
@@ -325,7 +444,6 @@
             return;
         }
 
-        await RefreshAsync();
         _chooserOpen = true;
     }
 
@@ -379,7 +497,6 @@
                 requestKey: $"review-other:{token.CurrentContentHash}",
                 cancellationToken: _lifetimeCancellation.Token);
             _showOtherReview = false;
-            await RefreshAsync();
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -416,7 +533,6 @@
                 token,
                 cancellationToken: _lifetimeCancellation.Token);
             _showOtherReview = false;
-            await RefreshAsync();
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -441,11 +557,10 @@
 
         try
         {
-            await InvokeAsync(async () =>
+            await InvokeAsync(() =>
             {
-                await RefreshAsync();
-                if (!_disposed)
-                    StateHasChanged();
+                QueueBackgroundRefresh();
+                StateHasChanged();
             });
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
@@ -463,7 +578,14 @@
 
         _disposed = true;
         HistoryEvents.ReviewStateChanged -= HandleReviewStateChanged;
+        CancelBackgroundRefresh();
         _lifetimeCancellation.Cancel();
         _lifetimeCancellation.Dispose();
     }
+
+    private sealed record ReviewControlRefreshResult(
+        bool ReviewEditsEnabled,
+        bool ContestLocked,
+        ProjectVersionReviewView? Review,
+        IReadOnlyDictionary<Guid, int> ActOrderById);
 }

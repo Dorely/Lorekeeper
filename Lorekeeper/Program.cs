@@ -115,6 +115,7 @@ builder.Services.AddSingleton(new GitRepositoryStoreOptions
 builder.Services.AddSingleton<IGitRepositoryStore, GitRepositoryStore>();
 builder.Services.AddSingleton<IVersionHistorySnapshotReader, VersionHistorySnapshotReader>();
 builder.Services.AddSingleton<IVersionHistorySnapshotComparer, VersionHistorySnapshotComparer>();
+builder.Services.AddSingleton<ProjectVersionHistoryCache>();
 builder.Services.AddScoped<IVersionHistorySnapshotWriter, VersionHistorySnapshotWriter>();
 builder.Services.AddScoped<ProjectVersionHistoryService>();
 builder.Services.AddScoped<IProjectVersionHistoryService>(services =>

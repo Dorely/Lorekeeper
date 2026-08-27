@@ -22,13 +22,13 @@
 @inject IManuscriptAnnotationService Annotations
 @inject IProjectImageService Images
 @inject ICompositionService Compositions
-@inject ICompositionCanvasPreviewService CompositionPreviews
 @inject IEditionContentService EditionContent
 @inject IEditorContextService EditorContext
 @inject IActService Acts
 @inject IEditorChatService Chat
 @inject IProjectVersionHistoryService VersionHistory
 @inject IProjectVersionRestoreService VersionRestore
+@inject IServiceScopeFactory ScopeFactory
 @inject ProjectVersionHistoryUiEvents HistoryEvents
 @inject ITokenCounter TokenCounter
 @inject NavigationManager Nav
@@ -1086,6 +1086,7 @@ else
 
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private readonly SemaphoreSlim _chapterRefreshGate = new(1, 1);
+    private readonly CancellationTokenSource _reviewRefreshLifetimeCancellation = new();
 
     private List<Chapter> _chapters = [];
     private List<Act> _acts = [];
@@ -1172,6 +1173,10 @@ else
     private string? _reviewError;
     private bool _reviewBusy;
     private bool _reviewRefreshPending;
+    private bool _reviewRefreshRequested;
+    private bool _reviewRefreshInFlight;
+    private long _reviewRefreshSequence;
+    private CancellationTokenSource? _reviewRefreshCancellation;
     private ReviewBlockEdit? _reviewBlockEdit;
     private string? _rejectingReviewBlockId;
     private string _reviewRejectionMessage = string.Empty;
@@ -1281,10 +1286,15 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
-        if (Project is null) return;
+        if (Project is null)
+        {
+            CancelReviewRefresh();
+            return;
+        }
 
         if (_loadedProjectId != Project.Id)
         {
+            CancelReviewRefresh();
             _loadedProjectId = Project.Id;
             _loading = true;
             _current = null;
@@ -1484,7 +1494,7 @@ else
             _pageWorkspaceSelectionId = RequestedObjectId;
         }
         if (_mode == EditorMode.Review)
-            await RefreshReviewChangesAsync();
+            QueueReviewRefresh();
         return true;
     }
 
@@ -1655,6 +1665,13 @@ else
         if (firstRender)
         {
             _navHandlerRegistration = Nav.RegisterLocationChangingHandler(OnLocationChangingAsync);
+        }
+
+        if (_reviewRefreshRequested && !_reviewRefreshInFlight
+            && Project is not null && _current is not null)
+        {
+            _reviewRefreshRequested = false;
+            _ = RefreshReviewAfterRenderAsync();
         }
 
         if (Project is not null && (_restoreChapterAfterRender || _current is not null || _pendingRememberChapterId is not null))
@@ -2324,6 +2341,8 @@ else
             RememberManuscriptLocation(locationIdentity, capturedLocation);
 
         _mode = mode;
+        if (mode != EditorMode.Review)
+            CancelReviewRefresh();
         if (mode == EditorMode.Pages)
         {
             var pages = DesignedPageIds;
@@ -2536,6 +2555,41 @@ else
         _contextFeedOpen = !_contextFeedOpen;
     }
 
+    private void QueueReviewRefresh()
+    {
+        if (Project is null || _current is null)
+            return;
+
+        _reviewLoading = true;
+        _reviewRefreshRequested = true;
+        _reviewRefreshCancellation?.Cancel();
+    }
+
+    private async Task RefreshReviewAfterRenderAsync()
+    {
+        try
+        {
+            await RefreshReviewChangesAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            try
+            {
+                if (!_disposed)
+                    await InvokeAsync(StateHasChanged);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+    }
+
     private async Task RefreshReviewChangesAsync(bool showLoadingState = true)
     {
         if (Project is null || _current is null)
@@ -2551,66 +2605,171 @@ else
             return;
         }
 
+        var project = Project;
+        var chapter = _current;
+        var target = _contentTarget;
+        var sequence = ++_reviewRefreshSequence;
+        var previousCancellation = _reviewRefreshCancellation;
+        previousCancellation?.Cancel();
+        using var refreshCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            _reviewRefreshLifetimeCancellation.Token);
+        _reviewRefreshCancellation = refreshCancellation;
+        _reviewRefreshInFlight = true;
+        _reviewRefreshRequested = false;
         if (showLoadingState)
             _reviewLoading = true;
+
+        var cancellationToken = refreshCancellation.Token;
         try
         {
-            _projectContestLock = await Chat.GetEditorContestLockStateAsync(Project.Id);
-            _contestReviewBatches = await Chat.ListCurrentContestBatchesAsync(Project.Id);
-            var activeContest = _contestReviewBatches
-                .FirstOrDefault(batch => batch.ChapterId == _current.Id && batch.Candidates.Count > 0);
-            if (activeContest is not null)
+            var result = await Task.Run(
+                () => LoadReviewRefreshResultAsync(
+                    project.Id,
+                    chapter,
+                    target,
+                    cancellationToken),
+                cancellationToken);
+            if (!IsCurrentReviewRefresh(sequence, project.Id, chapter.Id, target))
+                return;
+
+            _projectContestLock = result.ContestLock;
+            _contestReviewBatches = result.ContestBatches;
+            if (result.ActiveContest is not null)
             {
-                ActivateContestReview(activeContest);
+                _contestReviewProjection = null;
+                _reviewView = null;
+                _historicalReview = null;
+                _reviewProjection = null;
+                _reviewCompositionPreviews = [];
+                ActivateContestReview(result.ActiveContest);
                 return;
             }
 
             _contestReviewProjection = null;
-            _reviewView = await VersionHistory.GetReviewAsync(
-                Project.Id,
-                [new ProjectVersionReviewTarget(_current.Id, _contentTarget)]);
-            _historicalReview = null;
-            var reviewChapter = _reviewView?.Chapters.SingleOrDefault();
-            if (reviewChapter is { HasChanges: true })
-            {
-                _reviewProjection = BuildVersionHistoryReviewProjection(
-                    _current,
-                    reviewChapter,
-                    isReadOnly: true);
-                _reviewCompositionPreviews = await LoadReviewCompositionPreviewsAsync(reviewChapter);
-            }
-            else
-            {
-                _historicalReview = await VersionHistory.GetLatestAffectingChapterAsync(
-                    Project.Id,
-                    _current.Id,
-                    _contentTarget);
-                _reviewProjection = _historicalReview is not null
-                    ? BuildHistoricalReviewProjection(_current, _historicalReview)
-                    : null;
-                _reviewCompositionPreviews = _historicalReview is { } historical
-                    ? await LoadReviewCompositionPreviewsAsync(historical)
-                    : [];
-            }
+            _reviewView = result.Review;
+            _historicalReview = result.HistoricalReview;
+            _reviewProjection = result.Projection;
+            _reviewCompositionPreviews = result.CompositionPreviews;
             _reviewError = null;
             PruneInlineReviewState();
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
         catch (Exception ex)
         {
-            _contestReviewProjection = null;
-            _reviewView = null;
-            _historicalReview = null;
-            _reviewProjection = null;
-            _reviewError = ex.Message;
-            _reviewCompositionPreviews = [];
-            PruneInlineReviewState();
+            if (IsCurrentReviewRefresh(sequence, project.Id, chapter.Id, target))
+            {
+                _contestReviewProjection = null;
+                _reviewView = null;
+                _historicalReview = null;
+                _reviewProjection = null;
+                _reviewError = ex.Message;
+                _reviewCompositionPreviews = [];
+                PruneInlineReviewState();
+            }
         }
         finally
         {
-            if (showLoadingState)
-                _reviewLoading = false;
+            if (ReferenceEquals(_reviewRefreshCancellation, refreshCancellation))
+            {
+                _reviewRefreshCancellation = null;
+                _reviewRefreshInFlight = false;
+                if (IsCurrentReviewRefresh(sequence, project.Id, chapter.Id, target)
+                    && showLoadingState)
+                {
+                    _reviewLoading = false;
+                }
+            }
         }
     }
+
+    private async Task<ReviewRefreshResult> LoadReviewRefreshResultAsync(
+        Guid projectId,
+        Chapter chapter,
+        EditorContentTarget target,
+        CancellationToken cancellationToken)
+    {
+        using var scope = ScopeFactory.CreateScope();
+        var chat = scope.ServiceProvider.GetRequiredService<IEditorChatService>();
+        var versionHistory = scope.ServiceProvider.GetRequiredService<IProjectVersionHistoryService>();
+        var compositionPreviews = scope.ServiceProvider.GetRequiredService<ICompositionCanvasPreviewService>();
+
+        var contestLock = await chat.GetEditorContestLockStateAsync(projectId, cancellationToken);
+        var contestBatches = await chat.ListCurrentContestBatchesAsync(projectId, cancellationToken);
+        var activeContest = contestBatches
+            .FirstOrDefault(batch => batch.ChapterId == chapter.Id && batch.Candidates.Count > 0);
+        if (activeContest is not null)
+        {
+            return new ReviewRefreshResult(
+                contestLock,
+                contestBatches,
+                activeContest,
+                null,
+                null,
+                null,
+                []);
+        }
+
+        var review = await versionHistory.GetReviewAsync(
+            projectId,
+            [new ProjectVersionReviewTarget(chapter.Id, target)],
+            cancellationToken);
+        ReviewProjection? reviewProjection = null;
+        ProjectVersionHistoricalChapterReview? historicalReview = null;
+        IReadOnlyList<ReviewCompositionPreview> reviewCompositionPreviews;
+        var reviewChapter = review?.Chapters.SingleOrDefault();
+        if (reviewChapter is { HasChanges: true })
+        {
+            reviewProjection = BuildVersionHistoryReviewProjection(
+                chapter,
+                reviewChapter,
+                isReadOnly: true);
+            reviewCompositionPreviews = await LoadReviewCompositionPreviewsAsync(
+                reviewChapter,
+                projectId,
+                compositionPreviews,
+                cancellationToken);
+        }
+        else
+        {
+            historicalReview = await versionHistory.GetLatestAffectingChapterAsync(
+                projectId,
+                chapter.Id,
+                target,
+                cancellationToken: cancellationToken);
+            reviewProjection = historicalReview is not null
+                ? BuildHistoricalReviewProjection(chapter, historicalReview)
+                : null;
+            reviewCompositionPreviews = historicalReview is { } historical
+                ? await LoadReviewCompositionPreviewsAsync(
+                    historical,
+                    projectId,
+                    compositionPreviews,
+                    cancellationToken)
+                : [];
+        }
+
+        return new ReviewRefreshResult(
+            contestLock,
+            contestBatches,
+            null,
+            review,
+            historicalReview,
+            reviewProjection,
+            reviewCompositionPreviews);
+    }
+
+    private bool IsCurrentReviewRefresh(
+        long sequence,
+        Guid projectId,
+        Guid chapterId,
+        EditorContentTarget target) =>
+        !_disposed
+        && sequence == _reviewRefreshSequence
+        && Project?.Id == projectId
+        && _current?.Id == chapterId
+        && _contentTarget == target;
 
     private async Task OpenReviewForActiveChapterChangesAsync()
     {
@@ -3451,6 +3610,7 @@ else
 
     private void ResetChapterReviewState()
     {
+        CancelReviewRefresh();
         _reviewLoading = false;
         _reviewProjection = null;
         _reviewView = null;
@@ -3458,6 +3618,14 @@ else
         _contestReviewBatches = [];
         _contestReviewProjection = null;
         ResetInlineReviewState();
+    }
+
+    private void CancelReviewRefresh()
+    {
+        _reviewRefreshSequence++;
+        _reviewRefreshRequested = false;
+        _reviewLoading = false;
+        _reviewRefreshCancellation?.Cancel();
     }
 
     private void ClearInlineReviewEditors()
@@ -3840,18 +4008,30 @@ else
             : composition.EditionId == target.ContentTarget.EditionId);
 
     private async Task<IReadOnlyList<ReviewCompositionPreview>> LoadReviewCompositionPreviewsAsync(
-        ProjectVersionReviewChapter reviewChapter)
+        ProjectVersionReviewChapter reviewChapter,
+        Guid projectId,
+        ICompositionCanvasPreviewService compositionPreviews,
+        CancellationToken cancellationToken = default)
     {
-        if (Project is null || reviewChapter.CompositionChanges.Count == 0)
+        if (reviewChapter.CompositionChanges.Count == 0)
             return [];
 
         var previews = new List<ReviewCompositionPreview>(reviewChapter.CompositionChanges.Count);
         foreach (var composition in reviewChapter.CompositionChanges)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var before = await RenderReviewCompositionPreviewAsync(composition.Before);
-                var after = await RenderReviewCompositionPreviewAsync(composition.After);
+                var before = await RenderReviewCompositionPreviewAsync(
+                    composition.Before,
+                    projectId,
+                    compositionPreviews,
+                    cancellationToken);
+                var after = await RenderReviewCompositionPreviewAsync(
+                    composition.After,
+                    projectId,
+                    compositionPreviews,
+                    cancellationToken);
                 previews.Add(new ReviewCompositionPreview(composition, before, after, null));
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -3864,7 +4044,10 @@ else
     }
 
     private async Task<IReadOnlyList<ReviewCompositionPreview>> LoadReviewCompositionPreviewsAsync(
-        ProjectVersionHistoricalChapterReview historicalReview)
+        ProjectVersionHistoricalChapterReview historicalReview,
+        Guid projectId,
+        ICompositionCanvasPreviewService compositionPreviews,
+        CancellationToken cancellationToken = default)
     {
         var reviewChapter = new ProjectVersionReviewChapter(
             historicalReview.ChapterId,
@@ -3877,13 +4060,20 @@ else
                 null,
                 string.Empty),
             historicalReview.Compositions);
-        return await LoadReviewCompositionPreviewsAsync(reviewChapter);
+        return await LoadReviewCompositionPreviewsAsync(
+            reviewChapter,
+            projectId,
+            compositionPreviews,
+            cancellationToken);
     }
 
     private async Task<CompositionCanvasPreviewResult?> RenderReviewCompositionPreviewAsync(
-        ProjectExportPageComposition? composition)
+        ProjectExportPageComposition? composition,
+        Guid projectId,
+        ICompositionCanvasPreviewService compositionPreviews,
+        CancellationToken cancellationToken = default)
     {
-        if (Project is null || composition is null)
+        if (composition is null)
             return null;
 
         var variant = composition.Variants
@@ -3898,13 +4088,14 @@ else
             composition.SemanticManuscriptJson,
             composition.Id,
             composition.Revision);
-        return await CompositionPreviews.RenderSceneAsync(
-            Project.Id,
+        return await compositionPreviews.RenderSceneAsync(
+            projectId,
             composition.Id,
             variant.Revision,
             scene,
             semantic,
-            CompositionCanvasPreviewMode.Clean);
+            CompositionCanvasPreviewMode.Clean,
+            cancellationToken);
     }
 
     private static string PreviewDataUrl(CompositionCanvasPreviewResult preview) =>
@@ -5216,6 +5407,8 @@ else
         if (_disposed) return;
         _disposed = true;
         HistoryEvents.ReviewStateChanged -= HandleReviewStateChanged;
+        _reviewRefreshLifetimeCancellation.Cancel();
+        _reviewRefreshCancellation?.Cancel();
 
         _navHandlerRegistration?.Dispose();
         _navHandlerRegistration = null;
@@ -5229,6 +5422,7 @@ else
         }
         _saveGate.Dispose();
         _chapterRefreshGate.Dispose();
+        _reviewRefreshLifetimeCancellation.Dispose();
     }
 
     private enum SaveState { Idle, Saving, Saved, IndexFailed, SaveFailed }
@@ -5262,6 +5456,15 @@ else
         IReadOnlyList<ReviewLine> Lines,
         bool IsReadOnly = false,
         bool IsNoDifference = false);
+
+    private sealed record ReviewRefreshResult(
+        EditorContestLockState ContestLock,
+        IReadOnlyList<ContestBatch> ContestBatches,
+        ContestBatch? ActiveContest,
+        ProjectVersionReviewView? Review,
+        ProjectVersionHistoricalChapterReview? HistoricalReview,
+        ReviewProjection? Projection,
+        IReadOnlyList<ReviewCompositionPreview> CompositionPreviews);
 
     private sealed record ReviewCompositionPreview(
         ProjectVersionReviewComposition Composition,

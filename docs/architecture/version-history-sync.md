@@ -146,15 +146,22 @@ selected candidate draft, compared commit metadata, and concurrency tokens.
 Review loading captures the live project at most once per request and uses the
 snapshot writer's validated artifact directly; it must not reread the emitted
 temporary tree merely to recover its hash or payload. Immutable approved Git
-artifacts may be reused through a small bounded cache keyed by repository and
-commit SHA, while historical scans reuse adjacent commit snapshots locally and
-retain their existing `(HEAD SHA, chapter, target, maxCommits)` result cache.
-These caches never replace an authoritative live snapshot/token check for a
-mutation, and they are naturally replaced when HEAD advances rather than
-becoming a live-state TTL cache. The shared checkpoint control does not refresh
-full project status from hover/focus or same-project chapter/mode/query
-navigation; history events and project changes remain explicit refresh
-boundaries.
+artifacts are reused through an application-level bounded cache keyed by
+repository and commit SHA, while historical scans reuse adjacent commit
+snapshots locally and retain a bounded `(HEAD SHA, chapter, target, maxCommits)`
+result cache across short-lived dependency scopes. Live SQLite snapshots are
+never cached. Initial checkpoint status, pending-target discovery, manuscript
+Review projection, historical lookup, and Designed Page preview work starts
+after the owning surface renders and runs in a fresh dependency scope outside
+the Blazor circuit; cancellation and project/chapter/target generations prevent
+stale results from reaching the UI. The top-bar pending result also supplies the
+checkpoint control's live dirty status, so project entry does not export the
+same live snapshot twice. These caches never replace an authoritative live
+snapshot/token check for a mutation, and they are naturally replaced when HEAD
+advances rather than becoming a live-state TTL cache. The shared checkpoint
+control does not refresh full project status from hover/focus or same-project
+chapter/mode/query navigation; history events and project changes remain
+explicit refresh boundaries.
 Chapter targets are created for manuscript or chapter-attached visual changes;
 chapter metadata remains in the non-manuscript dependency groups so it can be
 reviewed without pretending it is a text edit. Designed Page changes retain

@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
@@ -23,14 +22,12 @@ public sealed class ProjectVersionHistoryService(
     IVersionHistorySnapshotReader snapshotReader,
     IVersionHistorySnapshotComparer snapshotComparer,
     IGitRepositoryStore git,
+    ProjectVersionHistoryCache reviewCache,
     ProjectVersionHistoryUiEvents historyEvents,
     IProjectVersionAutoPushQueue autoPushQueue,
     IManuscriptService manuscripts) : IProjectVersionHistoryService
 {
     private const string TemporaryDirectoryPrefix = "lorekeeper-version-history-";
-    private const int MaxLoadedGitCheckpointCacheEntries = 8;
-    private readonly ConcurrentDictionary<HistoricalChapterReviewCacheKey, HistoricalChapterReviewCacheEntry> _historicalChapterReviewCache = new();
-    private readonly ConcurrentDictionary<GitCheckpointCacheKey, LoadedGitCheckpoint> _loadedGitCheckpointCache = new();
 
     public async Task<ProjectVersionRepositoryView?> GetRepositoryAsync(
         Guid projectId,
@@ -443,14 +440,16 @@ public sealed class ProjectVersionHistoryService(
             return null;
         EnsureReviewRepositoryUsable(status.Repository);
 
-        var cacheKey = new HistoricalChapterReviewCacheKey(
-            status.Repository.RepositoryId,
-            status.Repository.HeadCommitSha,
-            chapterId,
-            contentTarget.StorageKey,
-            maxCommits);
-        if (_historicalChapterReviewCache.TryGetValue(cacheKey, out var cached))
-            return cached.Review;
+        if (reviewCache.TryGetHistoricalChapterReview(
+                status.Repository.RepositoryId,
+                status.Repository.HeadCommitSha,
+                chapterId,
+                contentTarget.StorageKey,
+                maxCommits,
+                out var cached))
+        {
+            return cached;
+        }
 
         ProjectVersionHistoricalChapterReview? result = null;
         const int maxScanCheckpointEntries = 4;
@@ -518,7 +517,13 @@ public sealed class ProjectVersionHistoryService(
             break;
         }
 
-        _historicalChapterReviewCache[cacheKey] = new HistoricalChapterReviewCacheEntry(result);
+        reviewCache.SetHistoricalChapterReview(
+            status.Repository.RepositoryId,
+            status.Repository.HeadCommitSha,
+            chapterId,
+            contentTarget.StorageKey,
+            maxCommits,
+            result);
         return result;
     }
 
@@ -2367,8 +2372,7 @@ public sealed class ProjectVersionHistoryService(
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var cacheKey = new GitCheckpointCacheKey(repositoryId, commitSha);
-        if (!_loadedGitCheckpointCache.TryGetValue(cacheKey, out var loaded))
+        if (!reviewCache.TryGetGitCheckpoint(repositoryId, commitSha, out var loaded))
         {
             var commit = git.GetCommitMetadata(repositoryId, commitSha);
             var files = git.ReadTree(repositoryId, commitSha);
@@ -2385,8 +2389,7 @@ public sealed class ProjectVersionHistoryService(
                 CleanupTemporaryDirectory(temporaryDirectory);
             }
 
-            _loadedGitCheckpointCache[cacheKey] = loaded;
-            TrimLoadedGitCheckpointCache();
+            reviewCache.SetGitCheckpoint(repositoryId, commitSha, loaded);
         }
 
         if (recordedCheckpoint is not null
@@ -2399,16 +2402,6 @@ public sealed class ProjectVersionHistoryService(
         }
 
         return loaded;
-    }
-
-    private void TrimLoadedGitCheckpointCache()
-    {
-        while (_loadedGitCheckpointCache.Count > MaxLoadedGitCheckpointCacheEntries)
-        {
-            var key = _loadedGitCheckpointCache.Keys.FirstOrDefault();
-            if (key == default || !_loadedGitCheckpointCache.TryRemove(key, out _))
-                break;
-        }
     }
 
     private GitHeadInfo? ReadExistingHead(ProjectVersionRepository repository)
@@ -2598,24 +2591,6 @@ public sealed class ProjectVersionHistoryService(
         operation.AcknowledgedAt,
         operation.CreatedAt,
         operation.UpdatedAt);
-
-    private sealed record LoadedGitCheckpoint(
-        GitCommitMetadata Commit,
-        VersionHistorySnapshotManifest Manifest,
-        VersionHistorySnapshotPayload Payload);
-
-    private readonly record struct HistoricalChapterReviewCacheKey(
-        Guid RepositoryId,
-        string HeadCommitSha,
-        Guid ChapterId,
-        string ContentTargetKey,
-        int MaxCommits);
-
-    private readonly record struct GitCheckpointCacheKey(
-        Guid RepositoryId,
-        string CommitSha);
-
-    private sealed record HistoricalChapterReviewCacheEntry(ProjectVersionHistoricalChapterReview? Review);
 
     private static void ValidateProjectId(Guid projectId)
     {

@@ -5,12 +5,12 @@
 @implements IDisposable
 @inject NavigationManager Navigation
 @inject IProjectService Projects
-@inject IChapterService Chapters
 @inject IProjectVersionHistoryService VersionHistory
+@inject IServiceScopeFactory ScopeFactory
 @inject ProjectVersionHistoryUiEvents HistoryEvents
 
 <div class="project-checkpoint-control">
-    <ProjectReviewControls Project="_project" />
+    <ProjectReviewControls Project="_project" ReviewLoaded="HandleReviewLoadedAsync" />
 
     <button type="button"
             class="project-checkpoint-button"
@@ -52,13 +52,16 @@
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private Project? _project;
     private ProjectVersionStatusView? _status;
+    private ProjectVersionReviewView? _latestReview;
     private string? _error;
     private string? _message;
     private bool _loading = true;
     private bool _busy;
-    private bool _refreshing;
     private bool _disposed;
     private int _loadGeneration;
+    private bool _statusLoadRequested;
+    private bool _statusLoading;
+    private CancellationTokenSource? _statusLoadCancellation;
 
     private bool HistoryAvailable => _status?.Repository.Health is
         ProjectVersionRepositoryHealth.Uninitialized or
@@ -106,6 +109,17 @@
         await LoadCurrentProjectAsync();
     }
 
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_statusLoadRequested && !_statusLoading && !_disposed && _project is { } project)
+        {
+            _statusLoadRequested = false;
+            _ = LoadStatusAfterRenderAsync(project.Id, _loadGeneration);
+        }
+
+        return Task.CompletedTask;
+    }
+
     private async void OnLocationChanged(object? sender, LocationChangedEventArgs args)
     {
         if (_disposed)
@@ -140,9 +154,12 @@
     private async Task LoadCurrentProjectAsync()
     {
         var generation = ++_loadGeneration;
+        _statusLoadRequested = false;
+        _statusLoadCancellation?.Cancel();
         _loading = true;
         _project = null;
         _status = null;
+        _latestReview = null;
         _error = null;
         _message = null;
 
@@ -164,10 +181,10 @@
                 await VersionHistory.EnsureRepositoryAsync(
                     project.Id,
                     _lifetimeCancellation.Token);
-                _status = await VersionHistory.GetStatusAsync(
-                    project.Id,
-                    includeCurrentSnapshotHash: true,
-                    _lifetimeCancellation.Token);
+                if (!IsCurrent(generation))
+                    return;
+
+                QueueStatusLoad();
             }
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
@@ -185,35 +202,57 @@
         }
     }
 
-    private async Task RefreshStatusAsync()
+    private async Task LoadStatusAfterRenderAsync(Guid projectId, int generation)
     {
-        if (_disposed || _loading || _busy || _refreshing || _project is not { } project)
-            return;
-
-        var generation = _loadGeneration;
-        _refreshing = true;
-        _error = null;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+        _statusLoadCancellation = cancellation;
+        _statusLoading = true;
         try
         {
-            var status = await VersionHistory.GetStatusAsync(
-                project.Id,
-                includeCurrentSnapshotHash: true,
-                _lifetimeCancellation.Token);
-            if (IsCurrent(generation))
+            var status = await Task.Run(async () =>
+            {
+                using var scope = ScopeFactory.CreateScope();
+                var versionHistory = scope.ServiceProvider.GetRequiredService<IProjectVersionHistoryService>();
+                return await versionHistory.GetStatusAsync(
+                    projectId,
+                    includeCurrentSnapshotHash: false,
+                    cancellation.Token);
+            }, cancellation.Token);
+            if (IsCurrent(generation) && _project?.Id == projectId && _latestReview is null)
                 _status = status;
         }
-        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
         }
         catch (Exception exception)
         {
-            if (IsCurrent(generation))
+            if (IsCurrent(generation) && _project?.Id == projectId && _latestReview is null)
                 _error = $"History status unavailable: {exception.Message}";
         }
         finally
         {
-            _refreshing = false;
+            if (ReferenceEquals(_statusLoadCancellation, cancellation))
+            {
+                _statusLoadCancellation = null;
+                _statusLoading = false;
+            }
+
+            if (!_disposed)
+            {
+                try { await InvokeAsync(StateHasChanged); }
+                catch (ObjectDisposedException) { }
+            }
         }
+    }
+
+    private void QueueStatusLoad()
+    {
+        if (_disposed || _project is null)
+            return;
+
+        _statusLoadCancellation?.Cancel();
+        _statusLoadRequested = true;
+        _error = null;
     }
 
     private async Task HandleCheckpointActionAsync()
@@ -235,24 +274,20 @@
         _error = null;
         try
         {
-            var review = await VersionHistory.GetReviewAsync(
-                project.Id,
-                cancellationToken: _lifetimeCancellation.Token);
-            var chapter = review?.Chapters.FirstOrDefault(item => item.HasChanges);
-            if (chapter is null)
-            {
-                var firstChapter = (await Chapters.ListAsync(project.Id, _lifetimeCancellation.Token)).FirstOrDefault();
-                if (firstChapter is not null)
+            var chapter = _latestReview?.Chapters.FirstOrDefault(item => item.HasChanges);
+            var fallbackChapterId = chapter is null
+                ? await Task.Run(async () =>
                 {
-                    Navigation.NavigateTo(
-                        $"/projects/{Uri.EscapeDataString(project.Slug)}/editor/{firstChapter.Id:D}?mode=Review");
-                    return;
-                }
-            }
+                    using var scope = ScopeFactory.CreateScope();
+                    var chapters = scope.ServiceProvider.GetRequiredService<IChapterService>();
+                    return (await chapters.ListAsync(project.Id, _lifetimeCancellation.Token)).FirstOrDefault()?.Id;
+                }, _lifetimeCancellation.Token)
+                : null;
             var editionQuery = chapter?.ContentTarget.EditionId is Guid editionId
                 ? $"&edition={editionId:N}"
                 : string.Empty;
-            var chapterPath = chapter is null ? string.Empty : $"/{chapter.ChapterId:D}";
+            var chapterId = chapter?.ChapterId ?? fallbackChapterId;
+            var chapterPath = chapterId is null ? string.Empty : $"/{chapterId:D}";
             Navigation.NavigateTo(
                 $"/projects/{Uri.EscapeDataString(project.Slug)}/editor{chapterPath}?mode=Review{editionQuery}");
         }
@@ -282,14 +317,12 @@
                 ProjectVersionCheckpointKind.Manual,
                 SemanticMessage,
                 cancellationToken: _lifetimeCancellation.Token);
-            var status = await VersionHistory.GetStatusAsync(
-                project.Id,
-                includeCurrentSnapshotHash: true,
-                _lifetimeCancellation.Token);
             if (IsCurrent(generation))
             {
-                _status = status;
+                _status = null;
+                _latestReview = null;
                 _message = "Checkpoint saved locally.";
+                QueueStatusLoad();
             }
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
@@ -324,6 +357,18 @@
 
     private bool IsCurrent(int generation) => !_disposed && generation == _loadGeneration;
 
+    private Task HandleReviewLoadedAsync(ProjectVersionReviewView? review)
+    {
+        if (_disposed || _project is not { } project || review?.Repository.ProjectId != project.Id)
+            return Task.CompletedTask;
+
+        _latestReview = review;
+        _status = new ProjectVersionStatusView(review.Repository, review.Token.CurrentContentHash);
+        _error = null;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
     private async void HandleCheckpointCreated(Guid projectId)
     {
         if (_disposed || _project?.Id != projectId || _busy || HistoryEvents.IsProjectOperationActive(projectId))
@@ -353,12 +398,11 @@
 
         try
         {
-            await InvokeAsync(async () =>
+            await InvokeAsync(() =>
             {
                 if (!HistoryEvents.IsProjectOperationActive(projectId) && !_busy)
-                    await RefreshStatusAsync();
-                if (!_disposed)
-                    StateHasChanged();
+                    QueueStatusLoad();
+                StateHasChanged();
             });
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
@@ -401,7 +445,9 @@
         HistoryEvents.CheckpointCreated -= HandleCheckpointCreated;
         HistoryEvents.OperationStateChanged -= HandleOperationStateChanged;
         HistoryEvents.ReviewStateChanged -= HandleReviewStateChanged;
+        _statusLoadCancellation?.Cancel();
         _lifetimeCancellation.Cancel();
         _lifetimeCancellation.Dispose();
     }
+
 }
