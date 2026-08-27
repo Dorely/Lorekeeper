@@ -78,6 +78,7 @@ public enum ContextItemKind
     ProjectReferences,
     WritingSample,
     Entity,
+    PendingReviewChanges,
     ChapterReference,
     ActReference,
     IngestSourceReference,

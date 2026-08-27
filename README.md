@@ -126,7 +126,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   previews. A clean chapter uses the newest affecting approved commit versus
   its parent; historical Undo restores that parent into live state as a normal
   pending reversal. Partial approval creates a ReviewApproval checkpoint;
-  Approve All checkpoints the complete project.
+  Keep All checkpoints the complete project. While Review Edits is enabled,
+  Editor Chat receives a compact pending-review summary and read-only paginated
+  tools for inspecting exact target diffs.
 - The project top bar places Review Edits beside Checkpoint and shows Pending
   changes with its count. Enabling Review Edits keeps assistant mutations live
   but uncheckpointed; disabling it checkpoints completed mutating assistant

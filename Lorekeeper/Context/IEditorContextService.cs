@@ -47,6 +47,7 @@ public static class EditorContextKeys
     public const string ManuscriptStyles = "manuscript-styles";
     public const string ProjectOutline = "project-outline";
     public const string ProjectFacts = "project-facts";
+    public const string PendingReviewChanges = "pending-review-changes";
 
     public static string WritingSample(Guid sampleId) => $"writing-sample:{sampleId:N}";
     public static string Entity(Guid entityId) => $"entity:{entityId:N}";

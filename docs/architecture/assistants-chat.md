@@ -271,7 +271,12 @@ styles, composition, page setup, and image workflows appropriate to the
 protected `EditorContentTarget`. The conversation is project-scoped, not
 chapter-scoped. In release-content mode the target is fixed; outline/canon and
 unsafe shared-style mutations are omitted. Page and canvas previews are the
-visual verification gates for pagination and composition work.
+visual verification gates for pagination and composition work. When Review Edits
+is enabled, Editor also receives a protected compact summary of pending targets
+and read-only `list_pending_review_changes` and `read_pending_review_diff` tools.
+Those tools are project-scoped, revision-bound evidence only; they do not
+approve, reject, or mutate changes and are not exposed to Contest Preparation or
+revision-worker turns.
 
 Writing Coach owns project-level coaching around editable writing samples. Its
 tools are read-only for project facts, the current sample, direct-reference
@@ -313,8 +318,9 @@ reviewable.
 
 Pending Review compares Git HEAD with the current live state. Its chooser lists
 affected `(chapter, Core|edition)` targets and an Other changes aggregate rather
-than individual assistant batches. The Review page is the full manuscript review
-surface: it groups semantic text edits by stable block ID, supports inline text
+than individual assistant batches. The
+Review page is the full manuscript review surface: it groups semantic text edits
+by stable block ID, supports inline text
 editing and Approve/Undo, and keeps insertions, deletions, moves, formatting,
 Figures, and Designed Pages semantic. Figure metadata includes editable
 captions; Designed Pages expose visual before/after previews. Partial approval
@@ -335,6 +341,17 @@ Repository review operations use the project mutation and database write
 boundaries, retain concurrency tokens, and leave any failed or stale operation
 visible for recovery. Approved work advances Git; unapproved local work remains
 dirty and blocks push or checkout until it is approved or undone.
+
+While Review Edits is enabled, the normal Editor assistant's pending-review inspector rereads the
+current review for every request and emits a bounded compact summary only when
+pending work exists. `list_pending_review_changes` returns deterministic
+outline-ordered chapter Core/release targets followed by entity, relationship,
+and Other entries; `read_pending_review_diff` returns semantic manuscript
+hunks/rows, Designed Page details, or bounded comparer text for one exact target.
+Both envelopes carry an opaque `reviewRevision` through every continuation and
+return `REVIEW_STALE` when live state or approved history changes. The assistant
+must relist after that error, keep unrelated pre-existing pending work separate,
+and use owning mutation/readback or visual-verification tools for any change.
 
 ### Contest Mode and revision workers
 

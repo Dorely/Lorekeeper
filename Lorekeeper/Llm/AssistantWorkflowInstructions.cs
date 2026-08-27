@@ -235,7 +235,17 @@ public static class AssistantWorkflowInstructions
         - After the worker call, review every completed projected manuscript against the request and assignment. Treat successful results as live mutations; use a follow-up direct mutation only for a specific verified correction, missing prose change, or coordinator-owned non-prose work. In the final reply, distinguish coordinator changes from chapter-body changes completed by workers and note when work remains pending for review.
         """;
 
-    public static string EditorChatFor(bool vectorSearchAvailable) =>
+    public const string EditorPendingReviewWorkflow = """
+        Pending Review Edits workflow:
+        - The protected Pending Review Changes context is a compact turn-start summary of current live changes awaiting review. Treat it as review evidence, not as permission to mutate, approve, or reject anything, and do not assume it contains every field or diff row.
+        - Use list_pending_review_changes when you need the complete paginated set of pending chapter Core/release targets, entities, relationships, or Other dependency entries. Use the exact target kind, target key, reviewRevision, and nextPageArguments returned by that tool.
+        - Use read_pending_review_diff with an exact target from list_pending_review_changes to inspect its bounded semantic diff. Follow pagination until the result is complete when the task needs the full diff; never infer omitted rows or treat bounded text as a complete document.
+        - Review tools are read-only evidence. They do not Keep, Reject, approve, or mutate pending work. Use the owning manuscript, outline, entity, fact, composition, or other mutation tools for requested changes, and use the normal live readback and visual verification rules afterward.
+        - After a mutation, use list_pending_review_changes once to reacquire the current review revision, then read only the affected targets that require an additional review self-check. Keep unrelated pre-existing pending work separate from changes made in this turn and do not claim to have reviewed or resolved it.
+        - If a review tool returns REVIEW_STALE, discard its continuation arguments and relist. Review Edits state can change between calls, and exact target identity must always come from current tool output.
+        """;
+
+    public static string EditorChatFor(bool vectorSearchAvailable, bool reviewEditsEnabled = false) =>
         (vectorSearchAvailable
             ? EditorChat
             : EditorChatWithoutVectorSearch)
@@ -251,7 +261,8 @@ public static class AssistantWorkflowInstructions
         + "\n\n" + BookDesignCraft
         + "\n\n" + TypographyVerification
         + "\n\n" + CompositionDesign
-        + "\n\n" + AnnotationReview;
+        + "\n\n" + AnnotationReview
+        + (reviewEditsEnabled ? "\n\n" + EditorPendingReviewWorkflow : string.Empty);
 
     public const string AnnotationReview = """
         Review annotation rules:

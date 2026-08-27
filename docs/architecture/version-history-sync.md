@@ -178,6 +178,26 @@ chapter metadata remains in the non-manuscript dependency groups so it can be
 reviewed without pretending it is a text edit. Designed Page changes retain
 their semantic composition payload and may render transient before/after
 canvas previews on the owning chapter target.
+
+The Editor pending-review inspector is a scoped, stateless read adapter over
+that Review service. It is available only to normal Editor turns while Review
+Edits is enabled and validates the persisted preference before and after each
+review read. Its compact automatic context is protected and non-removable. The
+`list_pending_review_changes` and `read_pending_review_diff` envelopes carry an
+opaque revision derived from the repository, approved commit, and current live
+review token; page/detail continuation arguments repeat that revision and stale
+requests return `REVIEW_STALE`. Live snapshots are reread for every request;
+there is no live-state TTL cache. Chapter targets retain exact Core/release
+identity and outline order. Other entries remain associated with their atomic
+dependency-group metadata. Semantic manuscript reads emit only bounded
+Body/Structure/Visual hunks and rows, while entity/relationship/Other reads use
+bounded comparer text. These read tools never approve, reject, or mutate state
+and are not exposed to Contest Preparation or revision-worker turns.
+
+Review context is evidence rather than mutation authority. After a mutation the
+Editor reacquires the current list once and reads only affected targets as an
+additional self-check; it keeps unrelated pending work separate and follows
+the normal owning-service readback and visual-verification contracts.
 Pending mode reviews the Git HEAD-to-live difference. A clean target uses Last
 approved mode, comparing the newest affecting approved commit with its parent;
 historical lookup is cached by `(HEAD SHA, chapter, target, maxCommits)` so a

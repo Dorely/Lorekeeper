@@ -20,16 +20,22 @@ using Lorekeeper.Writing;
 namespace Lorekeeper.Context;
 
 public sealed class ContextBuilder(
-IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, ICompositionService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, IProjectReferenceService projectReferences, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter, IEditorContestMutationGuard contestGuard) : IEditorContextService
+IAppDatabaseOperationFactory database, IActService acts, IChapterService chapters, IProjectFactService projectFacts, IWritingSampleService writingSamples, IEntityService entities, IProjectImageService images, IEntityVisualExampleService entityVisualExamples, IManuscriptService manuscripts, IManuscriptAnnotationService annotations, IChapterSemanticProjectionService semanticProjection, IManuscriptStyleService manuscriptStyles, ICompositionService compositions, IProjectPageSetupService pageSetups, IEmbeddingService embeddings, IBookBriefService bookBriefs, IProjectReferenceService projectReferences, ISystemPromptComposer systemPrompts, IProjectSearchService projectSearch, ITokenCounter tokenCounter, IEditorContestMutationGuard contestGuard, IEditorPendingReviewInspector pendingReviewInspector) : IEditorContextService
 {
     public async Task<ContextAssembly> BuildAsync(
         ContextBuildRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+        var pendingReviewSummary = request.Purpose == ContextBuildPurpose.Editor
+            && !request.Project.ContestModeEnabled
+            && request.Project.ReviewEditsEnabled
+            ? await pendingReviewInspector.GetAutomaticSummaryAsync(request.Project.Id, cancellationToken)
+            : null;
+
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var preferences = databaseOperation.Repositories.EditorContextPreferences;
-        ArgumentNullException.ThrowIfNull(request);
         var project = request.Project;
         var currentChapter = request.ActiveChapter;
         var preferenceMap = currentChapter is null
@@ -50,6 +56,19 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         var projectReferencesItem = await BuildProjectReferencesItemAsync(project.Id, cancellationToken);
         if (projectReferencesItem is not null)
             items.Add(projectReferencesItem);
+        if (pendingReviewSummary is not null)
+        {
+            items.Add(new ContextItem(
+                Key: EditorContextKeys.PendingReviewChanges,
+                Kind: ContextItemKind.PendingReviewChanges,
+                Label: "Pending Review Changes",
+                Body: pendingReviewSummary,
+                IsEnabled: true,
+                IsRemovable: false,
+                Badge: "Review",
+                Reason: "Current project changes awaiting Review Edits approval",
+                IsProtected: true));
+        }
 
         if (request.Purpose is ContextBuildPurpose.Images or ContextBuildPurpose.Research or ContextBuildPurpose.Publish)
         {
@@ -233,7 +252,9 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             ContextBuildPurpose.Editor when project.ContestModeEnabled =>
                 AssistantWorkflowInstructions.EditorContestPreparationWorkflow,
             ContextBuildPurpose.Editor =>
-                AssistantWorkflowInstructions.EditorChatFor(await embeddings.IsAvailableAsync(cancellationToken)),
+                AssistantWorkflowInstructions.EditorChatFor(
+                    await embeddings.IsAvailableAsync(cancellationToken),
+                    project.ReviewEditsEnabled),
             ContextBuildPurpose.EditorRevision =>
                 AssistantWorkflowInstructions.EditorRevisionWorker
                 + "\n\n" + AssistantWorkflowInstructions.AgentManuscriptProjection

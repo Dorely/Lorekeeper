@@ -169,7 +169,8 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             node => node.StableKey(),
             node => node.Label ?? node.Key,
             Hash,
-            metadataHash: Hash));
+            metadataHash: Hash,
+            readableText: GraphNodeReadableText));
         accumulator.Add(CompareItems(
             "edges",
             baseline.Graph.Edges,
@@ -177,7 +178,8 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             EdgeKey,
             edge => edge.EdgeType,
             Hash,
-            metadataHash: Hash));
+            metadataHash: Hash,
+            readableText: GraphEdgeReadableText));
         return accumulator.Build();
     }
 
@@ -575,6 +577,49 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
 
     private static BoundedText? CompositionReadableText(ProjectExportPageComposition composition) =>
         ReadManuscriptText(composition.SemanticManuscriptJson, composition.Id, composition.Revision);
+
+    private static BoundedText GraphNodeReadableText(ProjectExportNode node) =>
+        BoundText(string.Join(
+            "\n",
+            new[] { $"Type: {node.NodeType}", $"Key: {node.Key}", $"Label: {node.Label ?? node.Key}" }
+                .Concat(node.Properties
+                    .OrderBy(property => property.Key, StringComparer.Ordinal)
+                    .Select(property => $"{property.Key}: {ReadableGraphValue(property.Value)}"))))
+        ?? new BoundedText(string.Empty, false);
+
+    private static BoundedText GraphEdgeReadableText(ProjectExportEdge edge) =>
+        BoundText(string.Join(
+            "\n",
+            new[] { $"From: {edge.From.StableKey}", $"To: {edge.To.StableKey}", $"Type: {edge.EdgeType}" }
+                .Concat(edge.Properties
+                    .OrderBy(property => property.Key, StringComparer.Ordinal)
+                    .Select(property => $"{property.Key}: {ReadableGraphValue(property.Value)}"))))
+        ?? new BoundedText(string.Empty, false);
+
+    private static string ReadableGraphValue(object? value) => value switch
+    {
+        null => "(none)",
+        string text => text,
+        bool boolean => boolean ? "true" : "false",
+        JsonElement element when element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined
+            => "(none)",
+        JsonElement element => element.ToString(),
+        JsonDocument document => document.RootElement.ToString(),
+        JsonNode node => node.ToJsonString(),
+        _ => SerializeGraphValue(value),
+    };
+
+    private static string SerializeGraphValue(object value)
+    {
+        try
+        {
+            return JsonSerializer.Serialize(value);
+        }
+        catch (JsonException)
+        {
+            return Convert.ToString(value) ?? "(unavailable)";
+        }
+    }
 
     private static BoundedText BookBriefReadableText(ProjectExportBookBrief brief) =>
         BoundText(string.Join(

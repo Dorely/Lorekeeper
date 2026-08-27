@@ -338,6 +338,7 @@ builder.Services.AddSingleton<IPublicationPressMigrationService, PublicationPres
 builder.Services.AddScoped<ContextBuilder>();
 builder.Services.AddScoped<IContextBuilder>(sp => sp.GetRequiredService<ContextBuilder>());
 builder.Services.AddScoped<IEditorContextService>(sp => sp.GetRequiredService<ContextBuilder>());
+builder.Services.AddScoped<IEditorPendingReviewInspector, EditorPendingReviewInspector>();
 builder.Services.AddScoped<IVectorIndexWorkCoordinator, VectorIndexWorkCoordinator>();
 builder.Services.AddScoped<IContextIndexingService, ContextIndexingService>();
 builder.Services.AddScoped<IContextRecommendationService, ContextRecommendationService>();

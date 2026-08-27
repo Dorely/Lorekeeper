@@ -33,6 +33,7 @@ IActService acts,
     IEntityTypeService entityTypes,
     IProjectFactService projectFacts,
     IEditorContextService editorContext,
+    IEditorPendingReviewInspector pendingReviewInspector,
     IEntityRelationContextService entityRelations,
     IProjectSearchService projectSearch,
     ILlmProviderService providerService,
@@ -94,6 +95,31 @@ IActService acts,
                 method: (Guid annotationId, long expectedRevision) => CompleteManuscriptAnnotationAsync(context, annotationId, expectedRevision),
                 name: "complete_manuscript_annotation",
                 description: "Permanently complete one user review annotation in the protected selected Core/release target. Use only after applying the requested manuscript edit or when the user explicitly instructs you to complete it. This cannot create or rewrite user note text."));
+
+            if (context.ReviewEdits)
+            {
+                tools.Add(AIFunctionFactory.Create(
+                    method: (int pageNumber = 1, string? reviewRevision = null) =>
+                        pendingReviewInspector.ListPendingTargetsAsync(
+                            context.ProjectId,
+                            pageNumber,
+                            reviewRevision,
+                            context.TurnCancellationToken),
+                    name: "list_pending_review_changes",
+                    description: "Read-only compact pagination of the current project changes awaiting Review Edits approval. Returns chapter Core/release targets in outline order, entities, relationships, and Other dependency entries with exact target keys, reviewRevision, and detail-read arguments. Do not pass a project ID; the current Editor project is used. Relist when REVIEW_STALE is returned."));
+
+                tools.Add(AIFunctionFactory.Create(
+                    method: (string targetKind, string targetKey, int pageNumber = 1, string? reviewRevision = null) =>
+                        pendingReviewInspector.ReadPendingDiffAsync(
+                            context.ProjectId,
+                            targetKind,
+                            targetKey,
+                            pageNumber,
+                            reviewRevision,
+                            context.TurnCancellationToken),
+                    name: "read_pending_review_diff",
+                    description: "Read-only paginated semantic detail for one exact pending-review target returned by list_pending_review_changes. Returns manuscript Body/Structure/Visual hunks and rows, Designed Page semantic details, or bounded entity/Other before/after information. Pass the exact target kind, target key, reviewRevision, and page arguments; this tool never approves, rejects, or mutates changes."));
+            }
         }
 
         tools.AddRange([
