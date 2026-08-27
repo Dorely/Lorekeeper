@@ -133,7 +133,13 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   changes with its count. Enabling Review Edits keeps assistant mutations live
   but uncheckpointed; disabling it checkpoints completed mutating assistant
   turns. A project-wide unresolved Contest locks Editor mutations until
-  resolved or discarded; each candidate has an independent durable draft.
+  resolved or discarded; each candidate has an independent durable draft. A
+  contest keeps the current Editor layout visible while it runs, then appears
+  in the normal Review page when opened explicitly; the initiating turn leaves
+  the mounted Editor in read-only Edit mode after completion. The main assistant
+  establishes an exact prose target and revision before launching tool-less
+  contestants, whose natural-prose responses become isolated semantic drafts
+  through deterministic, structure-preserving mapping.
 - Exact-target review highlights and notes in Edit and Read, with a collapsible
   margin rail, deterministic outdated-anchor handling, assistant context and
   completion tools, and no effect on manuscript formatting or publication output.

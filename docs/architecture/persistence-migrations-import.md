@@ -29,6 +29,13 @@ primary development checkout). It contains the Falanaras project and other
 developer working data. Migration validation must use a copied database and
 must never mutate this developer-owned original.
 
+New Contest batches store a versioned immutable task/target/context envelope in
+the existing `ContestBatch.ContextSnapshotJson` field. The envelope records the
+coordinator-established prose task, ordered stable block IDs, expected source
+revision, and captured evidence without requiring a schema migration. Older bare
+context snapshots remain valid historical audit payloads; unresolved legacy rows
+are never reinterpreted as new prose-runner input after restart.
+
 ## Scope and ownership
 
 `AppDbContext` owns the EF model and relationships for projects, Book Briefs,

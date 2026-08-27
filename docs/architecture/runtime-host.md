@@ -169,9 +169,13 @@ visible and reviewable.
 An unresolved Contest restores a project-wide Editor lock after application
 restart. The startup gate and owning mutation services reject Editor manuscript,
 layout, Figure, Designed Page, assistant, revision-worker, and new-contest
-mutations while read-only navigation remains available. Contest candidate draft
-edits and resolution use the explicit authorized path, and the persistent lock
-notice links to the contested chapter's Review page. Non-Editor workspaces and
+mutations while read-only navigation remains available. Contest start and
+candidate progress preserve the current Editor mode, chapter, target, pane
+visibility, and layout preferences. When the initiating assistant turn ends,
+the mounted Editor switches only to read-only Edit if the contest remains
+unresolved. Candidate draft edits and resolution use the explicit authorized
+path, and the persistent lock notice links to the contested chapter's normal
+Review page; the contest is not opened automatically. Non-Editor workspaces and
 their background work remain available.
 
 ### Application-owned interaction surfaces

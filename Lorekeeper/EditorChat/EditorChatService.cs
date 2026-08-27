@@ -722,7 +722,7 @@ public sealed class EditorChatService(
                                 yield return new EditorChatContestCandidateUpdated(candidateUpdated.BatchId, candidateUpdated.CandidateId, candidateUpdated.Status.ToString());
                                 break;
                             case EditorContestCandidateRawResponseDelta rawDelta:
-                                yield return new EditorChatContestCandidateJsonDelta(rawDelta.BatchId, rawDelta.CandidateId, rawDelta.Delta, rawDelta.RawResponse);
+                                yield return new EditorChatContestCandidateProseDelta(rawDelta.BatchId, rawDelta.CandidateId, rawDelta.Delta, rawDelta.RawResponse);
                                 break;
                             case EditorContestCompleted completed:
                                 yield return new EditorChatContestCompleted(completed.BatchId, completed.Status.ToString());

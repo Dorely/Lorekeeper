@@ -79,31 +79,19 @@ else
                              OnAiTurnIdle="OnAiTurnIdleAsync"
                              OnWorkspaceChanged="OnWorkspaceChangedAsync"
                              OnWorkspaceMutated="OnAiWorkspaceMutatedAsync"
+                             OnContestStateChanged="OnContestStateChangedAsync"
                              OnContestResultsReady="OpenReviewForContestResultsAsync" />
         </aside>
 
         @if (EffectiveChatPaneCollapsed)
         {
-            @if (ContestReviewActive)
-            {
-                <button type="button"
-                        class="editor-pane-tab editor-pane-tab--left"
-                        title="Refresh Contest Review"
-                        aria-label="Refresh Contest Review"
-                        @onclick="OpenReviewModeAsync">
-                    <span>Contest</span>
-                </button>
-            }
-            else
-            {
-                <button type="button"
-                        class="editor-pane-tab editor-pane-tab--left"
-                        title="Open Editor Chat"
-                        aria-label="Open Editor Chat"
-                        @onclick="ToggleChatPane">
-                    <span>Chat</span>
-                </button>
-            }
+            <button type="button"
+                    class="editor-pane-tab editor-pane-tab--left"
+                    title="Open Editor Chat"
+                    aria-label="Open Editor Chat"
+                    @onclick="ToggleChatPane">
+                <span>Chat</span>
+            </button>
         }
 
         <div class='@EditorSplitterClass("chat", EffectiveChatPaneCollapsed)'
@@ -171,7 +159,7 @@ else
                         <select id="editor-content-target-select"
                                 class="form-select form-select-sm"
                                 value="@_contentTarget.StorageKey"
-                                disabled="@(_saveState == SaveState.Saving || _chapterLocked)"
+                                disabled="@(_saveState == SaveState.Saving || ReadOnlyNavigationLocked)"
                                 @onchange="ChangeContentTargetAsync">
                             <option value="core">Core Book</option>
                             @foreach (var release in _enabledEditions)
@@ -215,17 +203,15 @@ else
             <div class="chapter-mode-bar" role="group" aria-label="Chapter mode">
                 <button type="button"
                         class="@ModeButtonClass(EditorMode.Edit)"
-                        disabled="@ContestReviewActive"
                         aria-pressed="@(_mode == EditorMode.Edit)"
                         @onclick="() => SetModeAsync(EditorMode.Edit)">Edit</button>
                 <button type="button"
                         class="@ModeButtonClass(EditorMode.Read)"
-                        disabled="@ContestReviewActive"
                         aria-pressed="@(_mode == EditorMode.Read)"
                         @onclick="() => SetModeAsync(EditorMode.Read)">Read</button>
                 <button type="button"
                         class="@ModeButtonClass(EditorMode.Pages)"
-                        disabled="@(ContestReviewActive || DesignedPageIds.Count == 0)"
+                        disabled="@(DesignedPageIds.Count == 0)"
                         aria-pressed="@(_mode == EditorMode.Pages)"
                         title="@(DesignedPageIds.Count == 0 ? "Insert a Designed Page in Edit mode first." : "Edit Designed Pages in this chapter")"
                         @onclick="() => SetModeAsync(EditorMode.Pages)">Pages</button>
@@ -1001,7 +987,7 @@ else
                                 class="btn btn-sm btn-outline-secondary panel-title-action"
                                 title="Reset this chapter's Assistant Memory to its default context"
                                 aria-label="Reset this chapter's Assistant Memory to its default context"
-                                disabled="@(_activeChapterId is null || LayoutControlsLocked || _contextResetBusy)"
+                                disabled="@(_activeChapterId is null || AssistantContextControlsLocked || _contextResetBusy)"
                                 @onclick="ResetAssistantMemoryAsync">
                             @(_contextResetBusy ? "Resetting…" : "Reset")
                         </button>
@@ -1034,7 +1020,7 @@ else
                         </button>
                         <button type="button"
                                 class="btn btn-sm btn-outline-secondary panel-title-action"
-                                disabled="@(_activeChapterId is null || LayoutControlsLocked)"
+                                disabled="@(_activeChapterId is null || AssistantContextControlsLocked)"
                                 @onclick="OpenImagesModal">
                             Images
                         </button>
@@ -1056,7 +1042,7 @@ else
                                     IsOpen="_imagesModalOpen"
                                     Title="Choose an image for assistant context"
                                     PrimaryActionLabel="Add to context"
-                                    PrimaryActionEnabled="@(!LayoutControlsLocked && _activeChapterId is not null)"
+                                    PrimaryActionEnabled="@(!AssistantContextControlsLocked && _activeChapterId is not null)"
                                     OnClose="CloseImagesModal"
                                     OnPrimaryAction="AddImageToContextAsync" />
 
@@ -1162,7 +1148,6 @@ else
 
     private bool _chapterLocked;
     private EditorContestLockState _projectContestLock = EditorContestLockState.Unlocked;
-    private Guid? _contestAutoOpenedProjectId;
     private ContextFeedPanel? _contextPanel;
     private int _contextRefreshSignal;
     private bool _contextResetBusy;
@@ -1235,6 +1220,8 @@ else
     private bool EditorMutationLocked => _chapterLocked || _projectContestLock.IsLocked;
     private bool EditorReadOnly => EditorMutationLocked || _mode != EditorMode.Edit;
     private bool LayoutControlsLocked => EditorMutationLocked;
+    private bool ReadOnlyNavigationLocked => _chapterLocked && !_projectContestLock.IsLocked;
+    private bool AssistantContextControlsLocked => ReadOnlyNavigationLocked;
     private bool ContestReviewActive => _contestReviewProjection is not null;
     private bool CanResolveContestReview => _contestReviewProjection is { } projection
         && projection.Candidates.All(candidate => candidate.Status is not ContestCandidateStatus.Pending and not ContestCandidateStatus.Running)
@@ -1293,8 +1280,8 @@ else
         _openCompositionId = compositionId;
         StateHasChanged();
     }
-    private bool EffectiveChatPaneCollapsed => ContestReviewActive || _chatPaneCollapsed;
-    private bool EffectiveRightPaneCollapsed => ContestReviewActive || _rightPaneCollapsed;
+    private bool EffectiveChatPaneCollapsed => _chatPaneCollapsed;
+    private bool EffectiveRightPaneCollapsed => _rightPaneCollapsed;
     private static readonly JsonSerializerOptions ContestReviewStateJsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
@@ -1330,7 +1317,6 @@ else
             _contestReviewBatches = [];
             _contestReviewProjection = null;
             _projectContestLock = EditorContestLockState.Unlocked;
-            _contestAutoOpenedProjectId = null;
             _reviewProjection = null;
             _reviewView = null;
             _historicalReview = null;
@@ -1343,21 +1329,6 @@ else
             _projectContestLock = await Chat.GetEditorContestLockStateAsync(Project.Id);
             _contestReviewBatches = (await Chat.ListCurrentContestBatchesAsync(Project.Id)).ToList();
             _loading = false;
-        }
-
-        if (_projectContestLock is { IsLocked: true, ChapterId: Guid contestedChapterId }
-            && _contestAutoOpenedProjectId != Project.Id)
-        {
-            _contestAutoOpenedProjectId = Project.Id;
-            var contest = _contestReviewBatches.FirstOrDefault(batch => batch.Id == _projectContestLock.BatchId);
-            var contestEditionId = contest?.ContentTargetEditionId;
-            if (ChapterId != contestedChapterId
-                || !string.Equals(RequestedMode, nameof(EditorMode.Review), StringComparison.OrdinalIgnoreCase)
-                || EditionId != contestEditionId)
-            {
-                Nav.NavigateTo(ContestReviewHref(contestedChapterId, contestEditionId), replace: true);
-                return;
-            }
         }
 
         var requestedTarget = EditionId is Guid requestedEditionId
@@ -1485,13 +1456,7 @@ else
         _pendingRememberChapterId = targetId;
         await RefreshContextSurfacesAsync();
 
-        if (await ActivateCurrentContestReviewAsync())
-        {
-            if (carriedMode is not null)
-                await RememberEditorModeAsync(EditorMode.Review);
-            return true;
-        }
-
+        await RefreshContestStateAsync();
         _contestReviewProjection = null;
         SelectInitialModeForCurrentChapter();
         if (carriedMode is { } previousMode)
@@ -1540,7 +1505,7 @@ else
 
     private void OpenImagesModal()
     {
-        if (LayoutControlsLocked) return;
+        if (AssistantContextControlsLocked) return;
         _imagesModalOpen = true;
     }
 
@@ -2069,11 +2034,6 @@ else
     private string EditorGridClass()
     {
         var classes = "editor-grid";
-        if (ContestReviewActive)
-        {
-            classes += " editor-grid--contest-review";
-        }
-
         if (EffectiveChatPaneCollapsed)
         {
             classes += " editor-grid--chat-collapsed";
@@ -2328,7 +2288,7 @@ else
         }
         SelectInitialModeForCurrentChapter();
         await ApplyEditorReadOnlyAsync(EditorReadOnly);
-        if (_mode == EditorMode.Review && !ContestReviewActive)
+        if (_mode == EditorMode.Review)
             await RefreshReviewChangesAsync();
     }
 
@@ -2342,7 +2302,6 @@ else
     private async Task SetModeAsync(EditorMode mode)
     {
         if (_mode == mode) return;
-        if (ContestReviewActive && mode != EditorMode.Review) return;
         if (mode == EditorMode.Pages && DesignedPageIds.Count == 0) return;
 
         var locationIdentity = CurrentManuscriptLocationIdentity();
@@ -2362,7 +2321,10 @@ else
 
         _mode = mode;
         if (mode != EditorMode.Review)
+        {
             CancelReviewRefresh();
+            _contestReviewProjection = null;
+        }
         if (mode == EditorMode.Pages)
         {
             var pages = DesignedPageIds;
@@ -2393,14 +2355,12 @@ else
 
     private async Task ToggleChatPane()
     {
-        if (ContestReviewActive) return;
         _chatPaneCollapsed = !_chatPaneCollapsed;
         await RememberPaneCollapsedAsync("chat", _chatPaneCollapsed);
     }
 
     private async Task ToggleRightPane()
     {
-        if (ContestReviewActive) return;
         _rightPaneCollapsed = !_rightPaneCollapsed;
         await RememberPaneCollapsedAsync("memory", _rightPaneCollapsed);
     }
@@ -2470,7 +2430,7 @@ else
 
     private void SelectInitialModeForCurrentChapter()
     {
-        if (_current is null || ContestReviewActive) return;
+        if (_current is null) return;
 
         var selectedMode = _rememberedChapterModes.GetValueOrDefault(_current.Id,
             CurrentChapterContainsOnlyDesignedPages ? EditorMode.Pages : EditorMode.Edit);
@@ -2817,7 +2777,27 @@ else
 
     private async Task OpenReviewForContestResultsAsync()
     {
+        if (_projectContestLock is { IsLocked: true, ChapterId: Guid chapterId })
+        {
+            var contest = _contestReviewBatches.FirstOrDefault(batch => batch.Id == _projectContestLock.BatchId);
+            var editionId = contest?.ContentTargetEditionId;
+            if (_current?.Id != chapterId || _contentTarget.EditionId != editionId)
+            {
+                Nav.NavigateTo(ContestReviewHref(chapterId, editionId));
+                return;
+            }
+        }
+
         await OpenReviewModeAsync();
+    }
+
+    private async Task OnContestStateChangedAsync()
+    {
+        await RefreshContestStateAsync();
+        if (_mode == EditorMode.Review)
+            await RefreshReviewChangesAsync(showLoadingState: false);
+        else if (!_disposed)
+            StateHasChanged();
     }
 
     private async Task OpenReviewModeAsync()
@@ -2870,16 +2850,13 @@ else
         PruneInlineReviewState();
     }
 
-    private async Task<bool> ActivateCurrentContestReviewAsync()
+    private async Task RefreshContestStateAsync()
     {
-        if (Project is null || _current is null) return false;
+        if (Project is null)
+            return;
 
         _projectContestLock = await Chat.GetEditorContestLockStateAsync(Project.Id);
         _contestReviewBatches = await Chat.ListCurrentContestBatchesAsync(Project.Id);
-        if (CurrentChapterContest is not { } contest) return false;
-
-        ActivateContestReview(contest);
-        return true;
     }
 
     private async Task GoToNextReviewBlockAsync()
@@ -5062,14 +5039,27 @@ else
         var location = await CaptureCurrentLocationAsync();
         if (locationIdentity is not null)
             RememberManuscriptLocation(locationIdentity, location);
+        var switchedToEdit = false;
         try
         {
             await ReconcileCurrentChapterAsync(refreshContextSurfaces: true);
-            if (!await ActivateCurrentContestReviewAsync() && _mode == EditorMode.Review)
+            await RefreshContestStateAsync();
+            if (_projectContestLock.IsLocked)
+            {
+                _contestReviewProjection = null;
+                if (_mode != EditorMode.Edit)
+                {
+                    CancelReviewRefresh();
+                    _mode = EditorMode.Edit;
+                    switchedToEdit = true;
+                    await RememberEditorModeAsync(EditorMode.Edit);
+                }
+            }
+            else if (_mode == EditorMode.Review)
             {
                 await RefreshReviewChangesAsync();
             }
-            if (location is not null)
+            if (!switchedToEdit && location is not null)
                 QueueManuscriptLocationRestore();
         }
         catch (JSDisconnectedException) { }
@@ -5109,7 +5099,8 @@ else
             // or parameter refresh). Reconcile from persistence even when no active
             // runtime turn remains, but do not signal the chat to reload itself again.
             await ReconcileCurrentChapterAsync(refreshContextSurfaces: false, flushDraft: true);
-            if (!await ActivateCurrentContestReviewAsync() && _mode == EditorMode.Review)
+            await RefreshContestStateAsync();
+            if (_mode == EditorMode.Review)
                 await RefreshReviewChangesAsync();
             if (location is not null)
                 QueueManuscriptLocationRestore();
@@ -5395,7 +5386,7 @@ else
         {
             await InvokeAsync(async () =>
             {
-                if (_mode == EditorMode.Review || ContestReviewActive)
+                if (_mode == EditorMode.Review)
                     await RefreshReviewChangesAsync();
                 if (!_disposed)
                     StateHasChanged();

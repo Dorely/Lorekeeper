@@ -237,13 +237,24 @@ mapping.
 Direct chapter selection carries the currently visible mode into the selected
 chapter: Review remains Review, Read remains Read, Edit opens Pages only for a
 Designed-Page-only destination, and Pages remains Pages when the destination has
-any Designed Page. Contest Review always forces Review. Route and reload
-selection instead uses the destination chapter's stored mode or its default;
-the resolved carried mode is then written as that chapter's preference. Chapter
-transitions clear the prior chapter's loaded Review projection, comparison
-commit, pending target, and Contest state before loading the new chapter without
-deleting durable Git review data. An active Contest still takes precedence and
-keeps the project-wide Editor lock in force.
+any Designed Page. An unresolved Contest does not force Review or change the
+selected chapter, target, mode, or pane state. Route and reload selection instead
+uses the destination chapter's stored mode or its default; the resolved carried
+mode is then written as that chapter's preference. Chapter transitions clear the
+prior chapter's loaded Review projection, comparison commit, pending target, and
+Contest state before loading the new chapter without deleting durable Git review
+data. An active Contest keeps the project-wide Editor lock in force, so Edit and
+Pages remain readable but their mutations are disabled. The contest projection
+appears in the normal Review surface only after the user explicitly selects
+Review.
+
+Contest generation is limited to an explicitly fenced, contiguous range of
+paragraph-like blocks at an exact manuscript revision. Tool-less contestants
+return natural prose; the contest service deterministically replaces only the
+declared block text, preserves the surrounding semantic document and block
+presentation, and rejects ambiguous paragraph counts or structural targets.
+Generated proposals and later candidate review edits remain isolated drafts
+until atomic resolution applies the selected draft to live state.
 
 Edit, Read, and Review also share a transient `ManuscriptViewLocation` scoped to
 the current project, chapter, and Core/release target; it is never persisted as

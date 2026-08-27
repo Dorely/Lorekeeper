@@ -62,7 +62,7 @@
             <div class="editor-chat-controls-row">
                 <label class="editor-chat-contest-toggle" title="Use read-only chat preparation, then compare up to three model candidates in Review mode">
                     <input class="form-check-input" type="checkbox" checked="@_contestEnabled"
-                           disabled="@(ChatDisabled || _running)" @onchange="OnContestEnabledChangedAsync" />
+                           disabled="@(ChatDisabled || _running || ContestCandidateCount > 0)" @onchange="OnContestEnabledChangedAsync" />
                     <span>Contest Mode</span>
                 </label>
 
@@ -108,6 +108,7 @@
     [Parameter] public EventCallback OnAiTurnIdle { get; set; }
     [Parameter] public EventCallback OnWorkspaceChanged { get; set; }
     [Parameter] public EventCallback<EditorWorkspaceMutated> OnWorkspaceMutated { get; set; }
+    [Parameter] public EventCallback OnContestStateChanged { get; set; }
     [Parameter] public EventCallback OnContestResultsReady { get; set; }
 
     private int _forceScrollKey;
@@ -322,7 +323,7 @@
             _contestProviderSlot2Id = contestSettings.ProviderSlot2Id;
             _contestProviderSlot3Id = contestSettings.ProviderSlot3Id;
             await RefreshSystemPromptAsync(cancellationToken);
-            await LoadContestBatchesAsync(openIfAvailable: true, cancellationToken: cancellationToken);
+            await LoadContestBatchesAsync(cancellationToken);
             var activeTurn = ChatTurns.GetActiveTurn(ProjectId);
             RebuildRenderable(activeTurn?.StartedAtUtc);
             if (activeTurn is not null)
@@ -653,7 +654,8 @@
             case EditorChatContestStarted:
                 await TryRunPostToolUiRefreshAsync("contest start refresh", async () =>
                 {
-                    await LoadContestBatchesAsync(openIfAvailable: true);
+                    await LoadContestBatchesAsync();
+                    await NotifyContestStateChangedAsync();
                     StateHasChanged();
                 });
                 break;
@@ -661,12 +663,13 @@
             case EditorChatContestCandidateUpdated:
                 await TryRunPostToolUiRefreshAsync("contest candidate refresh", async () =>
                 {
-                    await LoadContestBatchesAsync(openIfAvailable: true);
+                    await LoadContestBatchesAsync();
+                    await NotifyContestStateChangedAsync();
                     StateHasChanged();
                 });
                 break;
 
-            case EditorChatContestCandidateJsonDelta delta:
+            case EditorChatContestCandidateProseDelta delta:
                 ApplyContestCandidateRawResponseDelta(delta.CandidateId, delta.RawResponse);
                 StateHasChanged();
                 break;
@@ -674,7 +677,8 @@
             case EditorChatContestCompleted:
                 await TryRunPostToolUiRefreshAsync("contest completion refresh", async () =>
                 {
-                    await LoadContestBatchesAsync(openIfAvailable: true);
+                    await LoadContestBatchesAsync();
+                    await NotifyContestStateChangedAsync();
                     StateHasChanged();
                 });
                 break;
@@ -696,7 +700,7 @@
                 await TryRunPostToolUiRefreshAsync("assistant completion refresh", async () =>
                 {
                     await ReloadFromDbAsync();
-                    await LoadContestBatchesAsync(openIfAvailable: false);
+                    await LoadContestBatchesAsync();
                 });
                 RequestScroll();
                 StateHasChanged();
@@ -708,7 +712,7 @@
                 await TryRunPostToolUiRefreshAsync("turn error refresh", async () =>
                 {
                     await ReloadFromDbAsync();
-                    await LoadContestBatchesAsync(openIfAvailable: false);
+                    await LoadContestBatchesAsync();
                 });
                 RequestScroll();
                 StateHasChanged();
@@ -756,16 +760,15 @@
         UpdateConversationTokenCount();
     }
 
-    private async Task LoadContestBatchesAsync(
-        bool openIfAvailable,
-        CancellationToken cancellationToken = default)
+    private async Task LoadContestBatchesAsync(CancellationToken cancellationToken = default)
     {
         _contestBatches = (await Chat.ListCurrentContestBatchesAsync(ProjectId, cancellationToken)).ToList();
-        if (openIfAvailable && ContestCandidateCount > 0)
-        {
-            if (OnContestResultsReady.HasDelegate)
-                await OnContestResultsReady.InvokeAsync();
-        }
+    }
+
+    private async Task NotifyContestStateChangedAsync()
+    {
+        if (OnContestStateChanged.HasDelegate)
+            await OnContestStateChanged.InvokeAsync();
     }
 
     private void ApplyContestCandidateRawResponseDelta(Guid candidateId, string rawResponse)
@@ -781,6 +784,9 @@
 
     private async Task OnContestEnabledChangedAsync(ChangeEventArgs args)
     {
+        if (ContestCandidateCount > 0)
+            return;
+
         var enabled = args.Value is bool boolValue
             ? boolValue
             : bool.TryParse(args.Value?.ToString(), out var parsed) && parsed;
@@ -792,6 +798,9 @@
 
     private async Task OnContestProviderChangedAsync(int slot, ChangeEventArgs args)
     {
+        if (ContestCandidateCount > 0)
+            return;
+
         var providerId = int.TryParse(args.Value?.ToString(), out var parsed) ? parsed : (int?)null;
         SetLocalContestProvider(slot, providerId);
         await Chat.SetContestProviderAsync(ProjectId, slot, providerId);
@@ -832,7 +841,7 @@
     {
         <select class="form-select form-select-sm editor-chat-contest-select"
                 value="@(selectedProviderId?.ToString() ?? string.Empty)"
-                disabled="@(ChatDisabled || _running)"
+                disabled="@(ChatDisabled || _running || ContestCandidateCount > 0)"
                 @onchange="args => OnContestProviderChangedAsync(slot, args)">
             <option value="">Model @slot</option>
             @foreach (var provider in _providers)

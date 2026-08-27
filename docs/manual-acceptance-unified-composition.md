@@ -153,6 +153,22 @@ the live test project; terminate the browser host after the run.
   width `Contest 1 | Contest 2 | Contest 3` selector renders only configured
   slots, persists selection, shows progress for running candidates, disables
   failed candidates with their error, and enables completed candidates.
+- Before starting, confirm the coordinator uses read-only context tools to name
+  an explicit task and contiguous paragraph-like block target at the current
+  manuscript revision. Confirm starting and streaming the contest preserve the
+  current chapter, Core/edition target, pane visibility, route, and mode. When
+  the initiating turn completes, confirm only the mounted Editor mode changes
+  to read-only Edit; Review opens only through an explicit Review or contest
+  action and routes to the contested chapter/target when necessary.
+- Inspect completed candidates and confirm the runner responses are natural
+  prose produced without tools or a JSON/operation schema. Confirm a single
+  target block preserves its stable ID, type, style, and presentation; a
+  multi-block target is accepted only when its paragraph sequence maps
+  unambiguously one-to-one to the declared contiguous blocks. Confirm empty,
+  ambiguous, noncontiguous, or structural targets fail closed and every block
+  outside the declared target remains unchanged. Confirm a harmless fenced prose
+  response or `Revised text` label is normalized without exposing that wrapper in
+  the candidate draft, while machine-readable or structural output fails closed.
 - Edit text inline, reject a text row, edit a Figure caption, and reset each
   candidate. Switch candidates repeatedly and confirm every candidate preserves
   its own draft, no accepted lines are mixed into another candidate, and the

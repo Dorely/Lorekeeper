@@ -160,8 +160,7 @@ export function attachColumnLayout(elements, projectId) {
     };
     const collapsedClasses = [
         "editor-grid--chat-collapsed",
-        "editor-grid--right-collapsed",
-        "editor-grid--contest-review"
+        "editor-grid--right-collapsed"
     ];
     const ratios = readStoredRatios(projectId);
     let maximums = { ...minimums };

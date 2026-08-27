@@ -13,7 +13,10 @@ public sealed record EditorContestSettings(
 
 public sealed record EditorContestStartRequest(
     Guid ChapterId,
-    EditorContentTarget ContentTarget);
+    EditorContentTarget ContentTarget,
+    string Task,
+    IReadOnlyList<string> TargetBlockIds,
+    long ExpectedRevision);
 
 public sealed record ContestTurnSnapshot(
     IReadOnlyList<ContestChatMessageSnapshot> Messages,
@@ -22,6 +25,17 @@ public sealed record ContestTurnSnapshot(
 public sealed record ContestChatMessageSnapshot(
     string Role,
     string Content);
+
+/// <summary>
+/// Immutable, versioned evidence captured at the moment the coordinator starts
+/// a contest. The old contest rows contain a bare <see cref="ContestTurnSnapshot" />;
+/// keeping this as a new envelope lets the runtime continue to recognize those
+/// rows while making new contests self-describing and restart-safe.
+/// </summary>
+public sealed record ContestContextEnvelope(
+    int SchemaVersion,
+    EditorContestStartRequest Request,
+    ContestTurnSnapshot Snapshot);
 
 public abstract record EditorContestRunUpdate;
 
@@ -36,12 +50,6 @@ public sealed record EditorContestCandidateRawResponseDelta(
     string RawResponse) : EditorContestRunUpdate;
 
 public sealed record EditorContestCompleted(Guid BatchId, ContestBatchStatus Status) : EditorContestRunUpdate;
-
-public sealed record ContestCandidateResponse(
-    string Summary,
-    long ExpectedRevision,
-    IReadOnlyList<ManuscriptOperationInput> Operations,
-    string? Notes = null);
 
 public sealed record ContestCandidateProvider(
     int Id,

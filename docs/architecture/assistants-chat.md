@@ -355,8 +355,21 @@ and use owning mutation/readback or visual-verification tools for any change.
 
 ### Contest Mode and revision workers
 
-Contest Mode is a one-chapter, exact-target review context with one durable
-candidate draft per configured provider/model. The Review page shows an
+Contest Mode is a one-chapter, exact-target prose review context with one durable
+candidate draft per configured provider/model. The coordinating Editor assistant
+first uses its read-only context tools to establish a concise standalone task,
+the current manuscript revision, and one ordered contiguous range of existing
+paragraph-like stable block IDs. The contest service validates that source fence
+before launch. Each candidate receives an immutable context branch plus the
+explicit task and exact source manuscript, runs with tool use explicitly disabled,
+and returns natural prose rather than JSON or semantic operations. The service
+maps a single prose paragraph to a single target block, or maps an unambiguous
+one-to-one paragraph sequence to a multi-block target, while preserving block
+identity, type, style, inline-mark structure, presentation, and every block
+outside the target. Empty, machine-readable, structural, noncontiguous, stale, or
+paragraph-count-mismatched results fail closed.
+
+The Review page shows an
 equal-width, keyboard-accessible selector containing only configured slots
 (`Contest 1 | Contest 2 | Contest 3`); running candidates show progress, failed
 candidates are disabled with their error, and completed candidates are
@@ -381,14 +394,26 @@ While a contest is running or awaiting resolution, the entire Editor is locked:
 manual manuscript, layout, Figure, Designed Page, assistant, revision-worker,
 and new-contest mutations are rejected by owning services. Read-only navigation
 remains available with a persistent link back to the contested chapter's Review
-page. Candidate editing and resolution use the explicit contest-authorized path.
+page, and the user's chat and Assistant Memory pane state is preserved. Starting
+or updating a contest only refreshes its lock and candidate state; it does not
+open Review, change chapter or content target, collapse panes, or change the
+current mode. The initiating Editor turn switches only its current mode to Edit
+when it completes with an unresolved contest, leaving that Edit surface
+read-only. Candidate editing and resolution use the explicit contest-authorized
+path, and the completed contest is shown in the normal Review page only when the
+user opens Review or follows the contest review/lock-notice action. Contest
+configuration and provider controls remain unavailable while candidates exist.
 The lock is restored at startup whenever an unresolved contest exists.
 
-The captured Contest system transcript excludes the automatic Current Chapter
-context item. Each candidate instead receives the exact batch-source
-`agent-manuscript-v1` projection once, generated from the canonical manuscript
-stored on the batch. Canonical `OriginalManuscriptJson` remains the durable
-validation/audit source and is never appended raw to a candidate prompt.
+New contests persist a versioned immutable context envelope containing the
+coordinator's explicit task/target fence and its captured text/tool evidence.
+Candidate prompting omits the coordinator system prompt so its tool instructions
+cannot become contestant instructions; captured user, assistant, and tool
+material is quoted as evidence. Each candidate also receives the exact
+batch-source `agent-manuscript-v1` projection once, generated from the canonical
+manuscript stored on the batch. Canonical `OriginalManuscriptJson` remains the
+durable validation/audit source. Legacy context snapshots remain inert audit data
+for already persisted contests and are not replayed through the new runner path.
 
 Editor revision agents are same-turn, prose-only worker sessions assigned to
 specific chapters. For three or more verified semantic prose chapters, the

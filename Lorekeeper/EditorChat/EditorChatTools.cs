@@ -82,7 +82,7 @@ IActService acts,
             + "Combine and deduplicate facet candidates yourself, then verify them with focused search_project and read_chapter calls before assigning revisions. An exact downstream read that demonstrates the requested consequence is sufficient even without a lexical hit; reject anchor-only, generic-term-only, and opaque-score-only candidates. "
             + (mode == EditorChatToolMode.Normal
                 ? "Do not silently narrow explicit user scope. Classify the complete verified set before any manuscript mutation. For three or more verified semantic prose chapters, make one start_revision_agents call containing the complete set; do not edit the first targets directly. For one or two, direct manuscript tools are the default unless the user explicitly requests one worker call for two. Put the complete requested change in chapter-specific worker instructions after retrieval. "
-                : "Contest Mode has no start_revision_agents tool; use this map only as read-only grounding for the single-chapter start_contest workflow, whose captured conversation retains the complete request. ")
+                : "Contest Mode has no start_revision_agents tool; use this map only as read-only grounding for the single-chapter start_contest workflow, which captures the current context branch together with your explicit task and target. ")
             + "The map combines outline order, chapter synopses, server-side keyword/body checks, hybrid project-search hits, affected entities/events, adjacency, and downstream chapters.";
 
         tools.Add(AIFunctionFactory.Create(
@@ -234,7 +234,7 @@ IActService acts,
                 name: "read_manuscript",
                 description:
                     "Read bounded agent-manuscript-v1 semantic rows with stable block IDs, exact text, sparse structure, UTF-16 inline marks, interned paragraph formatting, Figure/Designed Page metadata, source hash, and the current revision token. " +
-                    "The active Context Feed normally already includes the complete current manuscript snapshot for direct edits. Use this tool when that snapshot is missing, incomplete, stale, non-active, or insufficient; then pass the returned revision and operations once to apply_manuscript_operations. After a mutation returns requiresReadback=true, call this tool for every exact readbackRanges entry and require the returned revision and sourceHash to match before continuing. For reusable formatting, use the focused Book Text Style tools instead of emitting one operation per block."),
+                    "The active Context Feed normally already includes the complete current manuscript snapshot for direct edits. Use this tool when that snapshot is missing, incomplete, stale, non-active, or insufficient. In Contest Mode, use the returned stable IDs and revision to choose one contiguous paragraph-like target, then pass them to start_contest; do not attempt to mutate the manuscript from Contest Mode. In normal Editor Mode, pass the returned revision and operations once to apply_manuscript_operations. After a mutation returns requiresReadback=true, call this tool for every exact readbackRanges entry and require the returned revision and sourceHash to match before continuing. For reusable formatting, use the focused Book Text Style tools instead of emitting one operation per block."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, string? query = null, string? blockType = null, string? styleRole = null, int start = 0, int count = 40) =>
@@ -301,11 +301,15 @@ IActService acts,
         if (mode == EditorChatToolMode.ContestPreparation)
         {
             tools.Add(AIFunctionFactory.Create(
-                method: (Guid chapterId) => StartContestAsync(context, chapterId),
+                method: (Guid chapterId, string task, string[] targetBlockIds, long expectedRevision) =>
+                    StartContestAsync(context, chapterId, task, targetBlockIds, expectedRevision),
                 name: "start_contest",
                 description:
-                    "Start a Contest Mode generation job for chapter-body mutations. " +
-                    "Call this exactly once after gathering enough read-only context. "));
+                    "Start a Contest Mode prose-generation job for one exact, contiguous range of existing paragraph-like manuscript blocks. " +
+                    "Before calling, gather context, identify the precise target block IDs in document order, and pass the current manuscript revision. " +
+                    "The task must be a concise standalone instruction for contestants, not merely the user's unscoped request. " +
+                    "Figures, Designed Pages, scene breaks, non-contiguous targets, structural edits, and formatting changes are not supported. " +
+                    "Call this exactly once and make it the final tool call of the turn. "));
             return tools;
         }
 
@@ -2727,7 +2731,10 @@ IActService acts,
 
     private async Task<string> StartContestAsync(
         EditorChatContext ctx,
-        Guid chapterId)
+        Guid chapterId,
+        string task,
+        string[] targetBlockIds,
+        long expectedRevision)
     {
         if (chapterId == Guid.Empty)
             return "Error: chapterId is required.";
@@ -2736,9 +2743,21 @@ IActService acts,
         if (chapter is null || chapter.ProjectId != ctx.ProjectId)
             return $"Error: chapter {chapterId} not found in this project.";
 
-        ctx.RequestContest(new EditorContestStartRequest(chapterId, ctx.ContentTarget));
+        if (string.IsNullOrWhiteSpace(task))
+            return "Error: task is required. Establish the requested prose change and pass a concise standalone contestant instruction.";
+        if (targetBlockIds is null || targetBlockIds.Length == 0)
+            return "Error: targetBlockIds is required. Pass the exact ordered stable IDs for the prose blocks to revise.";
+        if (expectedRevision < 0)
+            return "Error: expectedRevision must be a non-negative manuscript revision.";
 
-        return "Contest started. Candidate status will stream into the Contest Review workspace.";
+        ctx.RequestContest(new EditorContestStartRequest(
+            chapterId,
+            ctx.ContentTarget,
+            task.Trim(),
+            targetBlockIds,
+            expectedRevision));
+
+        return "Contest started. Candidate status will stream in the Editor; open Review when you want to inspect the drafts.";
     }
 
     private async Task<IReadOnlyList<OrderedChapter>> ListOrderedChaptersAsync(Guid projectId)
