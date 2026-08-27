@@ -592,40 +592,38 @@ else
                             {
                                 <div class="chapter-review-toolbar chapter-review-toolbar--applied">
                                     <div class="chapter-review-summary">
-                                        <strong>Manuscript review</strong>
                                         <span>@ReviewComparisonSubtitle</span>
                                     </div>
-                                    <div class="small text-muted">Review includes text, structure, formatting, and visual changes.</div>
                                     <div class="chapter-review-toolbar-actions">
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-secondary"
+                                                disabled="@(_reviewBusy || _reviewProjection.Blocks.Count == 0)"
+                                                @onclick="GoToNextReviewBlockAsync">
+                                            Next change
+                                        </button>
                                         @if (_historicalReview is null)
                                         {
                                             <button type="button"
-                                                    class="btn btn-sm btn-outline-secondary"
-                                                    disabled="@(_reviewBusy || _reviewProjection.Blocks.Count == 0)"
-                                                    @onclick="GoToNextReviewBlockAsync">
-                                                Next change
-                                            </button>
-                                            <button type="button"
                                                     class="btn btn-sm btn-success"
                                                     disabled="@(_reviewBusy || _reviewView?.Comparison?.IsIdentical != false)"
-                                                    title="Keep all pending manuscript and project changes"
+                                                    title="Keep all pending changes for this chapter and content target"
                                                     @onclick="ApproveCurrentReviewAsync">
                                                 Keep All
                                             </button>
+                                            <button type="button"
+                                                    class="btn btn-sm btn-outline-danger"
+                                                    disabled="@(!CanUndoCurrentReview)"
+                                                    title="@HistoricalUndoTitle"
+                                                    @onclick="UndoCurrentReviewAsync">
+                                                Reject All
+                                            </button>
                                         }
-                                        <button type="button"
-                                                class="btn btn-sm btn-outline-danger"
-                                                disabled="@(!CanUndoCurrentReview)"
-                                                title="@HistoricalUndoTitle"
-                                                @onclick="UndoCurrentReviewAsync">
-                                            Reject All
-                                        </button>
                                     </div>
-                                    @if (_historicalReview is not null && HistoricalUndoParentSha is null)
-                                    {
-                                        <div class="small text-muted">This historical checkpoint is the repository root; there is no approved parent snapshot to restore.</div>
-                                    }
                                 </div>
+                                @if (_historicalReview is not null && HistoricalUndoParentSha is null)
+                                {
+                                    <div class="chapter-review-historical-note small text-muted">This is the first approved version; there is no earlier version to restore.</div>
+                                }
                                 @if (_reviewProjection.IsNoDifference)
                                 {
                                     <div class="chapter-review-notice">There are no pending manuscript changes.</div>
@@ -783,7 +781,7 @@ else
                                                     <div class="review-block-summary">@block.Summary</div>
                                                 </div>
                                                 <div class="review-block-actions">
-                                                    @if (!_reviewProjection.IsReadOnly)
+                                                    @if (!_reviewProjection.IsReadOnly || _historicalReview is not null)
                                                     {
                                                         <button type="button"
                                                                 class="btn btn-sm btn-outline-secondary"
@@ -3012,47 +3010,30 @@ else
     {
         if (_historicalReview is not null
             || _reviewView is not { Comparison.IsIdentical: false, Token: { } token }
-            || Project is null)
+            || Project is null
+            || _current is not { } chapter)
             return;
 
+        var target = new ProjectVersionReviewTarget(chapter.Id, _contentTarget);
         await RunReviewActionAsync(
             async () =>
             {
-                await VersionHistory.CreateReviewApprovalCheckpointAsync(
+                await VersionHistory.CreateReviewApprovalForChapterAsync(
                     Project.Id,
+                    target,
                     token,
-                    requestKey: $"review-approval:{token.CurrentContentHash}");
+                    semanticMessage: "Kept all pending changes for this chapter and content target",
+                    requestKey: $"review-chapter-approval:{token.CurrentContentHash}:{target.ChapterId:N}:{target.ContentTarget.StorageKey}");
             },
             clearExpandedBlocks: true);
     }
 
     private async Task UndoCurrentReviewAsync()
     {
-        if (Project is null || _reviewView?.Token is not { } token)
-            return;
-
-        if (_historicalReview is { } historicalReview)
-        {
-            if (HistoricalUndoParentSha is not { } parentCommitSha)
-            {
-                _reviewError = "This historical checkpoint is the repository root; there is no approved parent snapshot to restore.";
-                return;
-            }
-
-            await RunReviewActionAsync(
-                () => VersionHistory.RestoreHistoricalChapterAsync(
-                    Project.Id,
-                    _current!.Id,
-                    _contentTarget,
-                    parentCommitSha,
-                    token,
-                    semanticMessage: "Undo latest affecting checkpoint to approved parent",
-                    requestKey: $"historical-review-undo:{historicalReview.Commit.Sha}:{parentCommitSha}:{token.CurrentContentHash}"),
-                clearExpandedBlocks: true);
-            return;
-        }
-
-        if (_reviewView is not { Comparison.IsIdentical: false }
+        if (Project is null
+            || _historicalReview is not null
+            || _reviewView?.Token is not { } token
+            || _reviewView is not { Comparison.IsIdentical: false }
             || string.IsNullOrWhiteSpace(_reviewView.Repository.HeadCommitSha))
             return;
 
@@ -3071,18 +3052,12 @@ else
 
     private bool CanUndoCurrentReview =>
         !_reviewBusy
+        && _historicalReview is null
         && _reviewView?.Token is not null
-        && (_historicalReview is not null
-            ? _reviewProjection?.HasChanges == true && HistoricalUndoParentSha is not null
-            : _reviewView.Comparison?.IsIdentical == false
-                && !string.IsNullOrWhiteSpace(_reviewView.Repository.HeadCommitSha));
+        && _reviewView.Comparison?.IsIdentical == false
+        && !string.IsNullOrWhiteSpace(_reviewView.Repository.HeadCommitSha);
 
-    private string HistoricalUndoTitle =>
-        _historicalReview is not null && HistoricalUndoParentSha is null
-            ? "No earlier approved version exists for this change"
-            : _historicalReview is not null
-                ? "Restore the earlier value from the latest approved change"
-                : "Restore the previously approved value";
+    private const string HistoricalUndoTitle = "Restore the previously approved value";
 
     private string? HistoricalUndoParentSha => _historicalReview?.Commit.ParentShas.FirstOrDefault();
 

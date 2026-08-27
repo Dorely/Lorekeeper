@@ -143,6 +143,18 @@ pending keeps the preference enabled until Review approves or undoes them.
 The Review service returns affected chapter/target summaries, semantic
 manuscript groups, non-manuscript aggregates, dependency groups, contest state,
 selected candidate draft, compared commit metadata, and concurrency tokens.
+Review loading captures the live project at most once per request and uses the
+snapshot writer's validated artifact directly; it must not reread the emitted
+temporary tree merely to recover its hash or payload. Immutable approved Git
+artifacts may be reused through a small bounded cache keyed by repository and
+commit SHA, while historical scans reuse adjacent commit snapshots locally and
+retain their existing `(HEAD SHA, chapter, target, maxCommits)` result cache.
+These caches never replace an authoritative live snapshot/token check for a
+mutation, and they are naturally replaced when HEAD advances rather than
+becoming a live-state TTL cache. The shared checkpoint control does not refresh
+full project status from hover/focus or same-project chapter/mode/query
+navigation; history events and project changes remain explicit refresh
+boundaries.
 Chapter targets are created for manuscript or chapter-attached visual changes;
 chapter metadata remains in the non-manuscript dependency groups so it can be
 reviewed without pretending it is a text edit. Designed Page changes retain
@@ -156,8 +168,11 @@ Historical Undo restores the parent value into live state and therefore creates
 a normal pending reversal. Chapter-owned Designed Page restores validate and
 repair coupled manuscript references atomically, failing closed when target
 isolation or dependency ownership is ambiguous. Partial approval commits only
-selected live semantic groups through a `ReviewApproval` checkpoint; Approve
-All commits the complete live snapshot.
+selected live semantic groups through a `ReviewApproval` checkpoint. Keep All
+on a chapter Review commits that target's complete semantic manuscript and
+chapter-owned Designed Pages while preserving every other chapter, target, and
+Other change as pending. A project-wide approval checkpoints the complete live
+snapshot.
 
 The History workspace provides the message-bearing checkpoint form. Its timeline
 can compare two checkpoints in chronological order with bounded, readable before/after panes derived
@@ -167,12 +182,14 @@ but the user can acknowledge and clear them from the sidebar without deleting
 their error or recovery data. Opening Restore focuses the controlled-restore card,
 where whole-project, major-area, and selected-chapter scopes are explicit. The shared
 layout also renders `ProjectCheckpointControl` beside the theme control: it
-resolves project routes, ensures the local repository exists, refreshes dirty
-state when approached, and creates a manual checkpoint with the fixed semantic
-message `Checkpoint current work`. It remains visible but disabled outside a
+resolves project routes, ensures the local repository exists, and creates a
+manual checkpoint with the fixed semantic message `Checkpoint current work`.
+It remains visible but disabled outside a
 project, while any project-history operation is active, for a clean initialized
 project, or when repository health is unavailable; an uninitialized project can
-create its first checkpoint. Process-local, project-scoped operation leases keep
+create its first checkpoint. It refreshes from explicit history events and
+project-route changes rather than pointer hover or same-project chapter/mode
+navigation. Process-local, project-scoped operation leases keep
 the independently rendered workspace and layout control synchronized. Checkpoint
 refreshes that arrive during restore or synchronization run after the owning
 operation becomes idle. Unapproved live work remains local and blocks push or

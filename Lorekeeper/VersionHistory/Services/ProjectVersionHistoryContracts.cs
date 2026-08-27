@@ -401,6 +401,19 @@ public interface IProjectVersionHistoryService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Approves the complete semantic manuscript and all Designed Pages owned
+    /// by one chapter/content target. Other chapter targets and non-manuscript
+    /// changes remain pending against the new approved Git head.
+    /// </summary>
+    Task<ProjectVersionCheckpointView> CreateReviewApprovalForChapterAsync(
+        Guid projectId,
+        ProjectVersionReviewTarget target,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        string semanticMessage = "Approved chapter review changes",
+        string? requestKey = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Approves only non-manuscript snapshot changes. The synthesized Git
     /// checkpoint keeps approved Core chapters and edition chapter overrides,
     /// so pending manuscript targets remain pending while project metadata and

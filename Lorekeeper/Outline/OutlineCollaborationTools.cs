@@ -226,7 +226,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             AIFunctionFactory.Create(
                 method: () => ListOutlineAsync(context),
                 name: "list_outline",
-                description: "Read the outline as structured JSON with ids, ordering, projectFacts, chapter beat counts, and staged changes when Review edits is enabled. The outline text is already in the editor Context Feed; use this for mutations, staged-state verification, or missing/insufficient feed context."),
+                description: "Read the outline as structured JSON with ids, ordering, projectFacts, chapter beat counts, and current persisted state. The outline text is already in the editor Context Feed; use this for mutations, current-state verification, or missing/insufficient feed context."),
 
             CreateBookBriefUpdateTool(context),
 
@@ -307,7 +307,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             AIFunctionFactory.Create(
                 method: (string query, int topK = 10, string? type = null, string? parentId = null) => SearchEntitiesAsync(context, query, topK, type, parentId),
                 name: "search_entities",
-                description: "Compact entity discovery with full IDs, total/returned counts, completeness, labeled previews, and exact read_entity arguments. Review mode includes staged state."),
+                description: "Compact entity discovery with full IDs, total/returned counts, completeness, labeled previews, and exact read_entity arguments. Results reflect current persisted state."),
 
             AIFunctionFactory.Create(
                 method: (Guid entityId, int? pageNumber = null) => ReadEntityAsync(context, entityId, pageNumber),
@@ -410,11 +410,11 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             BookBriefUpdatePolicy.OutlineMaintainer => AIFunctionFactory.Create(
                 method: (BookBriefPatch patch) => UpdateBookBriefAsync(context, patch, explicitUserRequest: false),
                 name: "update_book_brief",
-                description: "Directly apply a partial Book Brief patch and return the complete persisted brief. Omit null fields to leave them unchanged. For ordinary updates omit clearFields or pass []; clearFields is only for deliberately removing existing values and accepts only the listed field-name enum values. This bypasses Review edits by design."),
+                description: "Directly apply a partial Book Brief patch to live persisted state and return the complete persisted brief. Omit null fields to leave them unchanged. For ordinary updates omit clearFields or pass []; clearFields is only for deliberately removing existing values and accepts only the listed field-name enum values. Review Edits controls whether the completed mutating turn is checkpointed."),
             BookBriefUpdatePolicy.ExplicitUserRequestOnly => AIFunctionFactory.Create(
                 method: (BookBriefPatch patch, bool explicitUserRequest = false) => UpdateBookBriefAsync(context, patch, explicitUserRequest),
                 name: "update_book_brief",
-                description: "Directly apply a partial Book Brief patch only after an explicit user request and return the complete persisted brief. Set explicitUserRequest=true only when the user explicitly requested the change. Omit null fields to leave them unchanged. For ordinary updates omit clearFields or pass []; clearFields only deliberately removes values and accepts the listed field-name enum values. This bypasses Review edits by design."),
+                description: "Directly apply a partial Book Brief patch to live persisted state only after an explicit user request and return the complete persisted brief. Set explicitUserRequest=true only when the user explicitly requested the change. Omit null fields to leave them unchanged. For ordinary updates omit clearFields or pass []; clearFields only deliberately removes values and accepts the listed field-name enum values. Review Edits controls whether the completed mutating turn is checkpointed."),
             _ => AIFunctionFactory.Create(
                 method: () => "Error: this chat is not authorized to change the Book Brief.",
                 name: "update_book_brief",
@@ -441,7 +441,6 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             return JsonSerializer.Serialize(new
             {
                 status = "updated",
-                reviewEditsBypassed = true,
                 removedEquivalentLegacyFacts = removedLegacyFacts,
                 brief = BookBriefPayload(updated),
             });

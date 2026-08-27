@@ -662,6 +662,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: nowrap;
     gap: 0.75rem;
     padding: 0.55rem 2rem 0.55rem 0.75rem;
     border-bottom: 1px solid var(--bs-border-color, #dee2e6);
@@ -675,7 +676,8 @@
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    flex-wrap: wrap;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
     justify-content: flex-end;
 }
 
@@ -684,7 +686,30 @@
 }
 
 .chapter-review-summary {
+    min-width: 0;
     color: var(--bs-secondary-color, #6c757d);
+}
+
+.chapter-review-summary > span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.chapter-review-historical-note {
+    margin: 0.35rem 2rem 0 0.75rem;
+}
+
+@media (max-width: 40rem) {
+    .chapter-review-toolbar {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .chapter-review-toolbar-actions {
+        flex-wrap: wrap;
+    }
 }
 
 .chapter-review-error {

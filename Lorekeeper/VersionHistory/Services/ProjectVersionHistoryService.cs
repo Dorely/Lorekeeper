@@ -28,7 +28,9 @@ public sealed class ProjectVersionHistoryService(
     IManuscriptService manuscripts) : IProjectVersionHistoryService
 {
     private const string TemporaryDirectoryPrefix = "lorekeeper-version-history-";
+    private const int MaxLoadedGitCheckpointCacheEntries = 8;
     private readonly ConcurrentDictionary<HistoricalChapterReviewCacheKey, HistoricalChapterReviewCacheEntry> _historicalChapterReviewCache = new();
+    private readonly ConcurrentDictionary<GitCheckpointCacheKey, LoadedGitCheckpoint> _loadedGitCheckpointCache = new();
 
     public async Task<ProjectVersionRepositoryView?> GetRepositoryAsync(
         Guid projectId,
@@ -99,13 +101,12 @@ public sealed class ProjectVersionHistoryService(
         try
         {
             temporaryDirectory = CreateTemporaryDirectory();
-            _ = await snapshotWriter.WriteAsync(
+            var validated = await snapshotWriter.WriteAsync(
                 repository.Id,
                 projectId,
                 temporaryDirectory,
                 cancellationToken);
             EnsureNoReparsePointsRecursively(temporaryDirectory);
-            var validated = snapshotReader.Read(temporaryDirectory, repository.Id, projectId);
             var files = ReadSnapshotFiles(temporaryDirectory, cancellationToken);
 
             var existingHead = ReadExistingHead(repository);
@@ -326,27 +327,29 @@ public sealed class ProjectVersionHistoryService(
         ValidateProjectId(projectId);
         await using var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
 
+        // Status validates the immutable HEAD. Capture the live project once
+        // below and derive its hash from that validated artifact, avoiding a
+        // second complete export for the review projection.
         var status = await GetStatusUnderLeaseAsync(
             projectId,
-            includeCurrentSnapshotHash: true,
+            includeCurrentSnapshotHash: false,
             cancellationToken);
         if (status is null)
             return null;
 
         EnsureReviewRepositoryUsable(status.Repository);
 
-        var token = new ProjectVersionReviewConcurrencyToken(
-            status.Repository.RepositoryId,
-            status.Repository.HeadCommitSha,
-            status.Repository.HeadContentHash,
-            status.CurrentContentHash ?? string.Empty);
-
         if (string.IsNullOrWhiteSpace(status.Repository.HeadCommitSha))
         {
+            var uninitializedToken = new ProjectVersionReviewConcurrencyToken(
+                status.Repository.RepositoryId,
+                status.Repository.HeadCommitSha,
+                status.Repository.HeadContentHash,
+                string.Empty);
             return new ProjectVersionReviewView(
                 status.Repository,
                 ApprovedCheckpoint: null,
-                token,
+                uninitializedToken,
                 Comparison: null,
                 Chapters: [],
                 DependencyGroups: []);
@@ -356,14 +359,22 @@ public sealed class ProjectVersionHistoryService(
             status.Repository.RepositoryId,
             projectId,
             cancellationToken);
-        if (!string.Equals(
-                current.Manifest.ContentHash,
-                token.CurrentContentHash,
-                StringComparison.Ordinal))
+        var reviewStatus = status with
         {
-            throw new ProjectVersionReviewConcurrencyException(
-                "The project changed while its review snapshot was being loaded. Reload the review before continuing.");
-        }
+            CurrentContentHash = current.Manifest.ContentHash,
+            Repository = status.Repository with
+            {
+                IsDirty = !string.Equals(
+                    current.Manifest.ContentHash,
+                    status.Repository.HeadContentHash,
+                    StringComparison.Ordinal),
+            },
+        };
+        var token = new ProjectVersionReviewConcurrencyToken(
+            reviewStatus.Repository.RepositoryId,
+            reviewStatus.Repository.HeadCommitSha,
+            reviewStatus.Repository.HeadContentHash,
+            current.Manifest.ContentHash);
         var approved = LoadGitCheckpoint(
             status.Repository.RepositoryId,
             status.Repository.HeadCommitSha,
@@ -386,7 +397,7 @@ public sealed class ProjectVersionHistoryService(
             .ToList();
 
         return new ProjectVersionReviewView(
-            status.Repository,
+            reviewStatus.Repository,
             recordedCheckpoint is null ? null : ToCheckpointView(recordedCheckpoint),
             token,
             comparison,
@@ -442,23 +453,37 @@ public sealed class ProjectVersionHistoryService(
             return cached.Review;
 
         ProjectVersionHistoricalChapterReview? result = null;
+        const int maxScanCheckpointEntries = 4;
+        var scanCheckpoints = new Dictionary<string, LoadedGitCheckpoint>(StringComparer.Ordinal);
+        var scanCheckpointOrder = new Queue<string>();
+
+        LoadedGitCheckpoint LoadScanCheckpoint(string commitSha)
+        {
+            if (scanCheckpoints.TryGetValue(commitSha, out var existing))
+                return existing;
+
+            var loaded = LoadGitCheckpoint(
+                status.Repository.RepositoryId,
+                commitSha,
+                recordedCheckpoint: null,
+                projectId,
+                cancellationToken);
+            scanCheckpoints[commitSha] = loaded;
+            scanCheckpointOrder.Enqueue(commitSha);
+            while (scanCheckpointOrder.Count > maxScanCheckpointEntries)
+            {
+                var expiredSha = scanCheckpointOrder.Dequeue();
+                scanCheckpoints.Remove(expiredSha);
+            }
+            return loaded;
+        }
 
         foreach (var commit in git.ListCommits(status.Repository.RepositoryId, maxCommits))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var after = LoadGitCheckpoint(
-                status.Repository.RepositoryId,
-                commit.Sha,
-                recordedCheckpoint: null,
-                projectId,
-                cancellationToken);
+            var after = LoadScanCheckpoint(commit.Sha);
             var before = commit.ParentShas.FirstOrDefault() is { } parentSha
-                ? LoadGitCheckpoint(
-                    status.Repository.RepositoryId,
-                    parentSha,
-                    recordedCheckpoint: null,
-                    projectId,
-                    cancellationToken)
+                ? LoadScanCheckpoint(parentSha)
                 : null;
             var beforeChapter = before is null
                 ? null
@@ -636,6 +661,172 @@ public sealed class ProjectVersionHistoryService(
         return checkpoint;
     }
 
+    public async Task<ProjectVersionCheckpointView> CreateReviewApprovalForChapterAsync(
+        Guid projectId,
+        ProjectVersionReviewTarget target,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        string semanticMessage = "Approved chapter review changes",
+        string? requestKey = null,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateProjectId(projectId);
+        ValidateReviewTarget(target.ContentTarget);
+        if (target.ChapterId == Guid.Empty)
+            throw new ArgumentException("A review target must identify a chapter.", nameof(target));
+        ArgumentNullException.ThrowIfNull(expectedToken);
+        if (string.IsNullOrWhiteSpace(semanticMessage) || semanticMessage.Contains('\0'))
+            throw new ArgumentException("A semantic checkpoint message is required.", nameof(semanticMessage));
+        if (requestKey?.Length > 200)
+            throw new ArgumentException("A review request key is too long.", nameof(requestKey));
+
+        await using var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        // The status call validates the current Git head. The live hash is
+        // derived from the one current artifact captured below so approval
+        // does not export the project twice while still doing a fresh token
+        // check immediately before synthesis.
+        var status = await GetStatusUnderLeaseAsync(
+            projectId,
+            includeCurrentSnapshotHash: false,
+            cancellationToken)
+            ?? throw new InvalidOperationException($"Project {projectId} has no version-history repository.");
+        EnsureReviewRepositoryUsable(status.Repository);
+        if (expectedToken.RepositoryId == Guid.Empty)
+            throw new ArgumentException("A review token must identify a repository.", nameof(expectedToken));
+        if (string.IsNullOrWhiteSpace(expectedToken.CurrentContentHash))
+            throw new ArgumentException("A review token must include the current content hash.", nameof(expectedToken));
+        if (string.IsNullOrWhiteSpace(status.Repository.HeadCommitSha))
+            throw new InvalidOperationException("Chapter review approval requires an approved Git head.");
+
+        var current = await CaptureCurrentSnapshotUnderLeaseAsync(
+            status.Repository.RepositoryId,
+            projectId,
+            cancellationToken);
+        var currentStatus = status with
+        {
+            CurrentContentHash = current.Manifest.ContentHash,
+            Repository = status.Repository with
+            {
+                IsDirty = !string.Equals(
+                    status.Repository.HeadContentHash,
+                    current.Manifest.ContentHash,
+                    StringComparison.Ordinal),
+            },
+        };
+        EnsureReviewTokenMatches(currentStatus, expectedToken);
+
+        var approved = LoadGitCheckpoint(
+            status.Repository.RepositoryId,
+            status.Repository.HeadCommitSha,
+            recordedCheckpoint: null,
+            projectId,
+            cancellationToken);
+        _ = FindEffectiveChapter(approved.Payload, target)
+            ?? throw new InvalidOperationException("The approved review target no longer exists.");
+        var currentChapter = FindEffectiveChapter(current.Payload, target)
+            ?? throw new InvalidOperationException("The live review target no longer exists.");
+        var currentDocument = ManuscriptCodec.Deserialize(
+            currentChapter.ManuscriptJson,
+            target.ChapterId,
+            currentChapter.ManuscriptRevision);
+
+        var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal);
+        foreach (var entry in git.ReadTree(status.Repository.RepositoryId, status.Repository.HeadCommitSha))
+            files.Add(entry.Key, entry.Value);
+
+        // Start from approved HEAD and replace only this target's complete
+        // semantic manuscript. Metadata, styles, publication settings, and
+        // every other chapter/edition stay at their approved values. Edition
+        // targets use the exact live override presence so keeping a removal
+        // does not recreate an override that merely matches Core.
+        if (target.ContentTarget.IsCore)
+        {
+            UpdateSynthesizedReviewTree(files, approved.Payload, current.Payload, target, currentDocument);
+        }
+        else
+        {
+            UpdateSynthesizedEditionTargetReviewTree(files, approved.Payload, current.Payload, target);
+        }
+
+        // Designed Pages are chapter-owned semantic records. Replace the
+        // target's complete set, including additions and deletions, while
+        // retaining every other chapter/edition's approved compositions.
+        var targetCompositionIds = approved.Payload.Composition.PageCompositions
+            .Where(item => CompositionMatchesReviewTarget(item, target))
+            .Select(item => item.Id)
+            .Concat(current.Payload.Composition.PageCompositions
+                .Where(item => CompositionMatchesReviewTarget(item, target))
+                .Select(item => item.Id))
+            .ToHashSet();
+        var currentTargetCompositions = current.Payload.Composition.PageCompositions
+            .Where(item => CompositionMatchesReviewTarget(item, target))
+            .ToList();
+        var synthesizedCompositions = approved.Payload.Composition.PageCompositions
+            .Where(item => !targetCompositionIds.Contains(item.Id))
+            .Concat(currentTargetCompositions)
+            .OrderBy(item => item.Id)
+            .ToList();
+        files["composition/composition.json"] = VersionHistoryCanonicalJson.Serialize(
+            new VersionHistorySnapshotCompositionArea(synthesizedCompositions));
+        RebuildSnapshotManifest(files, status.Repository.RepositoryId, projectId);
+
+        var generatedRoot = CreateTemporaryDirectory();
+        VersionHistorySnapshotManifest generatedManifest;
+        try
+        {
+            WriteTreeToTemporaryDirectory(generatedRoot, files, cancellationToken);
+            EnsureNoReparsePointsRecursively(generatedRoot);
+            generatedManifest = snapshotReader.Read(
+                generatedRoot,
+                status.Repository.RepositoryId,
+                projectId).Manifest;
+        }
+        finally
+        {
+            CleanupTemporaryDirectory(generatedRoot);
+        }
+
+        if (string.Equals(generatedManifest.ContentHash, approved.Manifest.ContentHash, StringComparison.Ordinal))
+            throw new InvalidOperationException("There are no chapter changes to approve.");
+
+        var operationId = await StartOperationAsync(
+            status.Repository.RepositoryId,
+            ProjectVersionOperationKind.Checkpoint,
+            requestKey,
+            cancellationToken);
+        try
+        {
+            var authoredAt = DateTimeOffset.UtcNow;
+            var write = git.WriteSnapshot(
+                status.Repository.RepositoryId,
+                files,
+                semanticMessage,
+                authoredAt);
+            var checkpoint = await PersistCheckpointAndCompleteAsync(
+                status.Repository.RepositoryId,
+                operationId,
+                write.Commit,
+                generatedManifest,
+                ProjectVersionCheckpointKind.ReviewApproval,
+                semanticMessage,
+                authoredAt,
+                write.Created,
+                cancellationToken);
+            historyEvents.PublishCheckpointCreated(projectId);
+            historyEvents.PublishReviewStateChanged(projectId);
+            return checkpoint;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await TryCancelOperationAsync(operationId);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            await TryFailOperationAsync(operationId, exception, CancellationToken.None);
+            throw;
+        }
+    }
+
     public async Task<ProjectVersionCheckpointView> CreateReviewApprovalForOtherAsync(
         Guid projectId,
         ProjectVersionReviewConcurrencyToken expectedToken,
@@ -674,13 +865,12 @@ public sealed class ProjectVersionHistoryService(
         SortedDictionary<string, byte[]> currentFiles;
         try
         {
-            _ = await snapshotWriter.WriteAsync(
+            current = await snapshotWriter.WriteAsync(
                 status.Repository.RepositoryId,
                 projectId,
                 currentRoot,
                 cancellationToken);
             EnsureNoReparsePointsRecursively(currentRoot);
-            current = snapshotReader.Read(currentRoot, status.Repository.RepositoryId, projectId);
             currentFiles = ReadSnapshotFiles(currentRoot, cancellationToken);
         }
         finally
@@ -1287,6 +1477,36 @@ public sealed class ProjectVersionHistoryService(
         files["publication/publication.json"] = VersionHistoryCanonicalJson.Serialize(publication);
     }
 
+    private static void UpdateSynthesizedEditionTargetReviewTree(
+        SortedDictionary<string, byte[]> files,
+        VersionHistorySnapshotPayload approved,
+        VersionHistorySnapshotPayload current,
+        ProjectVersionReviewTarget target)
+    {
+        var editionId = target.ContentTarget.EditionId
+            ?? throw new InvalidOperationException("An edition review target requires an edition ID.");
+        var approvedEdition = approved.Publication.PublicationEditions
+            .Single(item => item.Id == editionId);
+        var currentEdition = current.Publication.PublicationEditions
+            .Single(item => item.Id == editionId);
+        var currentOverride = currentEdition.ChapterOverrides
+            .SingleOrDefault(item => item.ChapterId == target.ChapterId);
+        var overrides = approvedEdition.ChapterOverrides
+            .Where(item => item.ChapterId != target.ChapterId)
+            .Concat(currentOverride is null ? [] : [currentOverride])
+            .OrderBy(item => item.ChapterId)
+            .ThenBy(item => item.Id)
+            .ToList();
+        var edition = approvedEdition with { ChapterOverrides = overrides };
+        var editions = approved.Publication.PublicationEditions
+            .Where(item => item.Id != editionId)
+            .Append(edition)
+            .OrderBy(item => item.Id)
+            .ToList();
+        files["publication/publication.json"] = VersionHistoryCanonicalJson.Serialize(
+            approved.Publication with { PublicationEditions = editions });
+    }
+
     private static void RebuildSnapshotManifest(
         SortedDictionary<string, byte[]> files,
         Guid repositoryId,
@@ -1444,7 +1664,7 @@ public sealed class ProjectVersionHistoryService(
     {
         var status = await GetStatusUnderLeaseAsync(
             projectId,
-            includeCurrentSnapshotHash: true,
+            includeCurrentSnapshotHash: false,
             cancellationToken);
         if (status is null)
             return null;
@@ -1457,12 +1677,17 @@ public sealed class ProjectVersionHistoryService(
             status.Repository.RepositoryId,
             projectId,
             cancellationToken);
-        if (status.CurrentContentHash is not null
-            && !string.Equals(status.CurrentContentHash, current.Manifest.ContentHash, StringComparison.Ordinal))
+        status = status with
         {
-            throw new ProjectVersionReviewConcurrencyException(
-                "The project changed while its review snapshot was being loaded. Reload the review before continuing.");
-        }
+            CurrentContentHash = current.Manifest.ContentHash,
+            Repository = status.Repository with
+            {
+                IsDirty = !string.Equals(
+                    status.Repository.HeadContentHash,
+                    current.Manifest.ContentHash,
+                    StringComparison.Ordinal),
+            },
+        };
 
         var approved = LoadGitCheckpoint(
             status.Repository.RepositoryId,
@@ -1814,13 +2039,12 @@ public sealed class ProjectVersionHistoryService(
         var temporaryDirectory = CreateTemporaryDirectory();
         try
         {
-            _ = await snapshotWriter.WriteAsync(
+            var validated = await snapshotWriter.WriteAsync(
                 repository.Id,
                 projectId,
                 temporaryDirectory,
                 cancellationToken);
             EnsureNoReparsePointsRecursively(temporaryDirectory);
-            var validated = snapshotReader.Read(temporaryDirectory, repository.Id, projectId);
             return validated.Manifest.ContentHash;
         }
         finally
@@ -1837,13 +2061,13 @@ public sealed class ProjectVersionHistoryService(
         var temporaryDirectory = CreateTemporaryDirectory();
         try
         {
-            _ = await snapshotWriter.WriteAsync(
+            var validated = await snapshotWriter.WriteAsync(
                 repositoryId,
                 projectId,
                 temporaryDirectory,
                 cancellationToken);
             EnsureNoReparsePointsRecursively(temporaryDirectory);
-            return snapshotReader.Read(temporaryDirectory, repositoryId, projectId);
+            return validated;
         }
         finally
         {
@@ -2143,28 +2367,47 @@ public sealed class ProjectVersionHistoryService(
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var commit = git.GetCommitMetadata(repositoryId, commitSha);
-        var files = git.ReadTree(repositoryId, commitSha);
-        var temporaryDirectory = CreateTemporaryDirectory();
-        try
+        var cacheKey = new GitCheckpointCacheKey(repositoryId, commitSha);
+        if (!_loadedGitCheckpointCache.TryGetValue(cacheKey, out var loaded))
         {
-            WriteTreeToTemporaryDirectory(temporaryDirectory, files, cancellationToken);
-            EnsureNoReparsePointsRecursively(temporaryDirectory);
-            var artifact = snapshotReader.Read(temporaryDirectory, repositoryId, expectedProjectId);
-            if (recordedCheckpoint is not null
-                && !string.Equals(
-                    recordedCheckpoint.ContentHash,
-                    artifact.Manifest.ContentHash,
-                    StringComparison.Ordinal))
+            var commit = git.GetCommitMetadata(repositoryId, commitSha);
+            var files = git.ReadTree(repositoryId, commitSha);
+            var temporaryDirectory = CreateTemporaryDirectory();
+            try
             {
-                throw new InvalidDataException("The recorded checkpoint content hash does not match its Git payload.");
+                WriteTreeToTemporaryDirectory(temporaryDirectory, files, cancellationToken);
+                EnsureNoReparsePointsRecursively(temporaryDirectory);
+                var artifact = snapshotReader.Read(temporaryDirectory, repositoryId, expectedProjectId);
+                loaded = new LoadedGitCheckpoint(commit, artifact.Manifest, artifact.Payload);
+            }
+            finally
+            {
+                CleanupTemporaryDirectory(temporaryDirectory);
             }
 
-            return new LoadedGitCheckpoint(commit, artifact.Manifest, artifact.Payload);
+            _loadedGitCheckpointCache[cacheKey] = loaded;
+            TrimLoadedGitCheckpointCache();
         }
-        finally
+
+        if (recordedCheckpoint is not null
+            && !string.Equals(
+                recordedCheckpoint.ContentHash,
+                loaded.Manifest.ContentHash,
+                StringComparison.Ordinal))
         {
-            CleanupTemporaryDirectory(temporaryDirectory);
+            throw new InvalidDataException("The recorded checkpoint content hash does not match its Git payload.");
+        }
+
+        return loaded;
+    }
+
+    private void TrimLoadedGitCheckpointCache()
+    {
+        while (_loadedGitCheckpointCache.Count > MaxLoadedGitCheckpointCacheEntries)
+        {
+            var key = _loadedGitCheckpointCache.Keys.FirstOrDefault();
+            if (key == default || !_loadedGitCheckpointCache.TryRemove(key, out _))
+                break;
         }
     }
 
@@ -2367,6 +2610,10 @@ public sealed class ProjectVersionHistoryService(
         Guid ChapterId,
         string ContentTargetKey,
         int MaxCommits);
+
+    private readonly record struct GitCheckpointCacheKey(
+        Guid RepositoryId,
+        string CommitSha);
 
     private sealed record HistoricalChapterReviewCacheEntry(ProjectVersionHistoricalChapterReview? Review);
 
