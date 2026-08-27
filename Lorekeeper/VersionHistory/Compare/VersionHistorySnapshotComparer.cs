@@ -123,7 +123,7 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
             candidate.Narrative.Chapters,
             chapter => GuidKey(chapter.Id),
             chapter => chapter.Title,
-            Hash,
+            ChapterFullHash,
             manuscriptHash: ChapterManuscriptHash,
             metadataHash: ChapterMetadataHash,
             readableText: ChapterReadableText));
@@ -565,8 +565,10 @@ public sealed class VersionHistorySnapshotComparer : IVersionHistorySnapshotComp
         {
             chapter.ManuscriptJson,
             chapter.ManuscriptRevision,
-            chapter.Body,
         });
+
+    private static string ChapterFullHash(ProjectExportChapter chapter) =>
+        HashWithoutProperties(chapter, nameof(ProjectExportChapter.Body));
 
     private static BoundedText ChapterReadableText(ProjectExportChapter chapter) =>
         ReadManuscriptText(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision);

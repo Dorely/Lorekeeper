@@ -144,7 +144,6 @@ public sealed record ProjectVersionReviewChapter(
             && string.Equals(before.Title, after.Title, StringComparison.Ordinal)
             && string.Equals(before.ManuscriptJson, after.ManuscriptJson, StringComparison.Ordinal)
             && before.ManuscriptRevision == after.ManuscriptRevision
-            && string.Equals(before.Body, after.Body, StringComparison.Ordinal)
             && string.Equals(before.Synopsis, after.Synopsis, StringComparison.Ordinal)
             && before.Order == after.Order
             && before.VisualMode == after.VisualMode
@@ -163,8 +162,7 @@ public sealed record ProjectVersionReviewChapter(
 
         return before.Id == after.Id
             && string.Equals(before.ManuscriptJson, after.ManuscriptJson, StringComparison.Ordinal)
-            && before.ManuscriptRevision == after.ManuscriptRevision
-            && string.Equals(before.Body, after.Body, StringComparison.Ordinal);
+            && before.ManuscriptRevision == after.ManuscriptRevision;
     }
 
     public static bool MetadataSemanticallyEquals(ProjectExportChapter? before, ProjectExportChapter? after)

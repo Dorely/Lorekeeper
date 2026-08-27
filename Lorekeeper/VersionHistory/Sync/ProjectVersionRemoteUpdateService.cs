@@ -73,6 +73,15 @@ public sealed class ProjectVersionRemoteUpdateService(
                 ProjectVersionRemoteUpdateErrorCode.DirtyWorkspace,
                 "The project changed while its safety checkpoint was being created. Remote checkout was refused; retry after the workspace is stable.");
         if (!string.Equals(
+                before.CurrentContentHash,
+                afterCheckpoint.CurrentContentHash,
+                StringComparison.Ordinal))
+        {
+            throw new ProjectVersionRemoteUpdateException(
+                ProjectVersionRemoteUpdateErrorCode.DirtyWorkspace,
+                "The project changed while its safety checkpoint was being created. Remote checkout was refused; retry after the workspace is stable.");
+        }
+        if (!string.Equals(
                 before.Repository.HeadCommitSha,
                 afterCheckpoint.Repository.HeadCommitSha,
                 StringComparison.Ordinal))
@@ -83,7 +92,7 @@ public sealed class ProjectVersionRemoteUpdateService(
         }
 
         await using var mutationLease = await projectMutations.AcquireAsync(identity.ProjectId, cancellationToken);
-        await ValidatePreFastForwardStateAsync(identity, before.Repository, cancellationToken);
+        await ValidatePreFastForwardStateAsync(identity, before, cancellationToken);
 
         ProjectVersionSyncStatus status;
         try
@@ -117,6 +126,7 @@ public sealed class ProjectVersionRemoteUpdateService(
                 CancellationToken.None);
 
             if (string.IsNullOrWhiteSpace(before.Repository.HeadContentHash)
+                || string.IsNullOrWhiteSpace(before.CurrentContentHash)
                 || string.IsNullOrWhiteSpace(liveContentHash))
             {
                 await RollbackPreCommitCheckoutAsync(
@@ -131,7 +141,7 @@ public sealed class ProjectVersionRemoteUpdateService(
 
             if (!string.Equals(
                     liveContentHash,
-                    before.Repository.HeadContentHash,
+                    before.CurrentContentHash,
                     StringComparison.Ordinal))
             {
                 await RollbackPreCommitCheckoutAsync(
@@ -216,9 +226,10 @@ public sealed class ProjectVersionRemoteUpdateService(
 
     private async Task ValidatePreFastForwardStateAsync(
         RemoteIdentity identity,
-        ProjectVersionRepositoryView expectedRepository,
+        ProjectVersionStatusView expectedStatus,
         CancellationToken cancellationToken)
     {
+        var expectedRepository = expectedStatus.Repository;
         await using (var operation = await database.OpenReadAsync(cancellationToken))
         {
             var repository = await operation.Db.ProjectVersionRepositories
@@ -249,8 +260,8 @@ public sealed class ProjectVersionRemoteUpdateService(
             identity.ProjectId,
             identity.ProjectVersionRepositoryId,
             cancellationToken);
-        if (string.IsNullOrWhiteSpace(expectedRepository.HeadContentHash)
-            || !string.Equals(liveContentHash, expectedRepository.HeadContentHash, StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(expectedStatus.CurrentContentHash)
+            || !string.Equals(liveContentHash, expectedStatus.CurrentContentHash, StringComparison.Ordinal))
         {
             throw new ProjectVersionRemoteUpdateException(
                 ProjectVersionRemoteUpdateErrorCode.DirtyWorkspace,

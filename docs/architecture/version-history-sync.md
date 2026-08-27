@@ -96,6 +96,15 @@ and byte length. Their bytes are ordinary Git blobs in the same tree: version
 history does not use Git LFS, an external asset store, or a database pointer
 that is unavailable to a clone.
 
+The legacy nullable `ProjectExportChapter.Body` property is compatibility data,
+not canonical manuscript state. The structured `ManuscriptJson` and its
+revision are authoritative; semantic chapter/full-snapshot comparisons and
+dirty-state decisions ignore `Body`. New synthesized chapter checkpoints write
+`Body` as null, and the Other-change synthesis path never carries a historical
+legacy body forward. Raw manifest content hashes still remain in checkpoint
+metadata and review concurrency tokens, so they continue to detect stale
+operations even when the semantic comparison is identical.
+
 The captured canonical areas are:
 
 - `project`: project settings, page setup, contest-mode setting, and outgoing
@@ -244,6 +253,12 @@ ref update, cache advancement, and SQLite checkout share one project mutation
 lease so an editor/checkpoint cannot interleave them. Pushing likewise requires a
 clean project and an existing local checkpoint; it permits only a non-force
 fast-forward refspec when the remote is empty or an ancestor of local `main`.
+Remote checkout preflight retains both the semantic cleanliness result and the
+fresh live raw content hash from its initial status. It uses the raw live hash
+only to detect a stale workspace between those serialized checks, while Git
+head commit/content hashes remain the repository compare-and-swap tokens; a
+legacy `Body`-only difference therefore cannot block a semantically clean
+checkout or weaken mutation protection.
 Empty GitHub repositories use `main` for their first push. Manual and automatic
 pushes share this transport policy, while automatic attempts use their existing
 durable operation row and remain retryable after network or history failures.

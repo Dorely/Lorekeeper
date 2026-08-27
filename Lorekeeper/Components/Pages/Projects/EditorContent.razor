@@ -614,7 +614,7 @@ else
                                                 @onclick="GoToNextReviewBlockAsync">
                                             Next change
                                         </button>
-                                        @if (_historicalReview is null)
+                                        @if (_historicalReview is null && _reviewView?.Comparison?.IsIdentical == false)
                                         {
                                             <button type="button"
                                                     class="btn btn-sm btn-success"
@@ -1243,7 +1243,7 @@ else
             && candidate.Status == ContestCandidateStatus.Completed);
     private string ReviewComparisonSubtitle => _historicalReview is not null
         ? "Reviewing latest approved changes"
-        : _reviewView?.Comparison is not null
+        : _reviewView?.Comparison?.IsIdentical == false
             ? "Reviewing pending changes"
             : "No pending changes";
     private ContestBatch? CurrentChapterContest => _current is null
