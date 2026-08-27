@@ -18,9 +18,9 @@
     {
         <label class="project-review-toggle" title="Review changes before keeping them in the project">
             <input type="checkbox"
-                   checked="@_reviewEditsEnabled"
+                   @bind="_reviewEditsEnabled"
                    disabled="@(_loading || _busy || IsProjectLocked)"
-                   @onchange="OnReviewEditsChangedAsync" />
+                   @bind:after="OnReviewEditsChangedAsync" />
             <span>Review Edits</span>
         </label>
 
@@ -414,14 +414,16 @@
         _refreshRequested = true;
     }
 
-    private async Task OnReviewEditsChangedAsync(ChangeEventArgs args)
+    private async Task OnReviewEditsChangedAsync()
     {
         if (Project is not { } project || IsProjectLocked)
+        {
+            _reviewEditsEnabled = !_reviewEditsEnabled;
             return;
+        }
 
-        var enabled = args.Value is bool value
-            ? value
-            : bool.TryParse(args.Value?.ToString(), out var parsed) && parsed;
+        var enabled = _reviewEditsEnabled;
+        var previousEnabled = !enabled;
         if (!enabled && _review is { Comparison.IsIdentical: false })
         {
             _reviewEditsEnabled = true;
@@ -437,8 +439,13 @@
             await VersionHistory.SetReviewEditsEnabledAsync(project.Id, enabled, _lifetimeCancellation.Token);
             _reviewEditsEnabled = enabled;
         }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            _reviewEditsEnabled = previousEnabled;
+        }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            _reviewEditsEnabled = previousEnabled;
             _error = exception.Message;
         }
         finally
@@ -447,7 +454,11 @@
         }
     }
 
-    private void CancelDisableReviewEdits() => _disableReviewEditsConfirmationOpen = false;
+    private void CancelDisableReviewEdits()
+    {
+        _reviewEditsEnabled = true;
+        _disableReviewEditsConfirmationOpen = false;
+    }
 
     private async Task ConfirmDisableReviewEditsAsync()
     {
