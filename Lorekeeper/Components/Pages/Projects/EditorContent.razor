@@ -1174,6 +1174,7 @@ else
     private ManuscriptLocationIdentity? _pendingLocationIdentity;
     private string? _reviewError;
     private bool _reviewBusy;
+    private bool _reviewRefreshPending;
     private ReviewBlockEdit? _reviewBlockEdit;
     private string? _rejectingReviewBlockId;
     private string _reviewRejectionMessage = string.Empty;
@@ -2538,7 +2539,7 @@ else
         _contextFeedOpen = !_contextFeedOpen;
     }
 
-    private async Task RefreshReviewChangesAsync()
+    private async Task RefreshReviewChangesAsync(bool showLoadingState = true)
     {
         if (Project is null || _current is null)
         {
@@ -2553,7 +2554,8 @@ else
             return;
         }
 
-        _reviewLoading = true;
+        if (showLoadingState)
+            _reviewLoading = true;
         try
         {
             _projectContestLock = await Chat.GetEditorContestLockStateAsync(Project.Id);
@@ -2608,7 +2610,8 @@ else
         }
         finally
         {
-            _reviewLoading = false;
+            if (showLoadingState)
+                _reviewLoading = false;
         }
     }
 
@@ -2959,7 +2962,9 @@ else
                 token,
                 semanticMessage: "Approved all manuscript changes for chapter",
                 requestKey: $"review-chapter-approval:{token.CurrentContentHash}:{target.ContentTarget.StorageKey}:{string.Join(',', blockIds)}"),
-            clearExpandedBlocks: true);
+            clearExpandedBlocks: true,
+            reconcileCurrentChapter: false,
+            publishReviewStateChanged: false);
     }
 
     private async Task RejectAllActiveChapterChangesAsync()
@@ -2978,7 +2983,8 @@ else
                 blockIds,
                 token,
                 semanticMessage: "Undid all manuscript changes for chapter"),
-            clearExpandedBlocks: true);
+            clearExpandedBlocks: true,
+            publishReviewStateChanged: false);
     }
 
     private bool CanResolveAllActiveChapterChanges
@@ -3025,7 +3031,9 @@ else
                     semanticMessage: "Kept all pending changes for this chapter and content target",
                     requestKey: $"review-chapter-approval:{token.CurrentContentHash}:{target.ChapterId:N}:{target.ContentTarget.StorageKey}");
             },
-            clearExpandedBlocks: true);
+            clearExpandedBlocks: true,
+            reconcileCurrentChapter: false,
+            publishReviewStateChanged: false);
     }
 
     private async Task UndoCurrentReviewAsync()
@@ -3047,7 +3055,8 @@ else
                     _reviewView.Repository.HeadCommitSha,
                     token);
             },
-            clearExpandedBlocks: true);
+            clearExpandedBlocks: true,
+            publishReviewStateChanged: false);
     }
 
     private bool CanUndoCurrentReview =>
@@ -3064,7 +3073,8 @@ else
     private async Task KeepContestCandidateAsync(Guid candidateId) =>
         await RunReviewActionAsync(
             () => Chat.KeepContestCandidateAsync(Project!.Id, candidateId),
-            clearExpandedBlocks: true);
+            clearExpandedBlocks: true,
+            reconcileCurrentChapter: false);
 
     private async Task SelectContestCandidateAsync(Guid candidateId)
     {
@@ -3079,7 +3089,8 @@ else
 
         await RunReviewActionAsync(
             () => Chat.SelectContestCandidateAsync(Project.Id, projection.Batch.Id, candidateId),
-            clearExpandedBlocks: true);
+            clearExpandedBlocks: true,
+            reconcileCurrentChapter: false);
     }
 
     private async Task ResetContestCandidateAsync(Guid candidateId)
@@ -3089,7 +3100,8 @@ else
 
         await RunReviewActionAsync(
             () => Chat.ResetContestCandidateAsync(Project.Id, candidateId),
-            clearExpandedBlocks: true);
+            clearExpandedBlocks: true,
+            reconcileCurrentChapter: false);
     }
 
     private void RequestDiscardContestAsync() =>
@@ -3112,7 +3124,8 @@ else
             action == ContestConfirmationAction.Discard
                 ? () => Chat.DiscardContestAsync(Project.Id, projection.Batch.Id)
                 : () => Chat.CancelContestAsync(Project.Id, projection.Batch.Id),
-            clearExpandedBlocks: true);
+            clearExpandedBlocks: true,
+            reconcileCurrentChapter: false);
     }
 
     private async Task FinishContestReviewAsync()
@@ -3213,7 +3226,8 @@ else
 
             await RunReviewActionAsync(
                 () => Chat.ResolveContestCandidateLineAsync(Project!.Id, _current!.Id, contestRequest),
-                clearExpandedBlocks: false);
+                clearExpandedBlocks: false,
+                reconcileCurrentChapter: false);
             return;
         }
 
@@ -3247,7 +3261,8 @@ else
                     blockIds.Single(),
                     editedText,
                     token),
-                clearExpandedBlocks: true);
+                clearExpandedBlocks: true,
+                publishReviewStateChanged: false);
             return;
         }
 
@@ -3271,7 +3286,9 @@ else
                     blockIds,
                     token,
                     message),
-            clearExpandedBlocks: true);
+            clearExpandedBlocks: action != ChapterBodyReviewLineAction.Keep,
+            reconcileCurrentChapter: action != ChapterBodyReviewLineAction.Keep,
+            publishReviewStateChanged: false);
     }
 
     private bool CanResolveCurrentReviewBlock(ReviewBlock block) =>
@@ -3367,7 +3384,11 @@ else
         }
     }
 
-    private async Task RunReviewActionAsync(Func<Task> action, bool clearExpandedBlocks)
+    private async Task RunReviewActionAsync(
+        Func<Task> action,
+        bool clearExpandedBlocks,
+        bool reconcileCurrentChapter = true,
+        bool publishReviewStateChanged = true)
     {
         var locationIdentity = CurrentManuscriptLocationIdentity();
         var location = await CaptureCurrentLocationAsync();
@@ -3379,7 +3400,7 @@ else
         try
         {
             await action();
-            if (Project is { } project)
+            if (publishReviewStateChanged && Project is { } project)
                 HistoryEvents.PublishReviewStateChanged(project.Id);
             ClearInlineReviewEditors();
             if (clearExpandedBlocks)
@@ -3391,8 +3412,13 @@ else
         }
         try
         {
-            await ReconcileCurrentChapterAsync(refreshContextSurfaces: true);
-            await RefreshReviewChangesAsync();
+            if (reconcileCurrentChapter)
+                await ReconcileCurrentChapterAsync(refreshContextSurfaces: true);
+            // Events raised before this point are represented by the refresh
+            // that follows. An event arriving during the refresh is retained
+            // for one coalesced follow-up after the local action completes.
+            _reviewRefreshPending = false;
+            await RefreshReviewChangesAsync(showLoadingState: false);
             _reviewRefreshSignal++;
             if (location is not null)
                 QueueManuscriptLocationRestore();
@@ -3406,6 +3432,13 @@ else
         finally
         {
             _reviewBusy = false;
+            StateHasChanged();
+        }
+
+        if (_reviewRefreshPending && !_disposed)
+        {
+            _reviewRefreshPending = false;
+            await RefreshReviewChangesAsync(showLoadingState: false);
             StateHasChanged();
         }
     }
@@ -3715,7 +3748,9 @@ else
                 token,
                 semanticMessage: $"Approved Designed Page: {CompositionLabel(composition)}",
                 requestKey: $"review-composition-approval:{token.CurrentContentHash}:{target.ContentTarget.StorageKey}:{composition.CompositionId:N}"),
-            clearExpandedBlocks: true);
+            clearExpandedBlocks: true,
+            reconcileCurrentChapter: false,
+            publishReviewStateChanged: false);
     }
 
     private bool CanUndoReviewComposition(ProjectVersionReviewComposition composition)
@@ -3784,7 +3819,8 @@ else
                     composition.CompositionId,
                     parentCommitSha,
                     token),
-                clearExpandedBlocks: true);
+                clearExpandedBlocks: true,
+                publishReviewStateChanged: false);
             return;
         }
 
@@ -3794,7 +3830,8 @@ else
                 target,
                 composition.CompositionId,
                 token),
-            clearExpandedBlocks: true);
+            clearExpandedBlocks: true,
+            publishReviewStateChanged: false);
     }
 
     private static bool CompositionMatchesReviewTarget(
@@ -4416,9 +4453,6 @@ else
         if (row.Segments.Any(segment => segment.Kind != DiffSegmentKind.Unchanged))
             return row.Segments;
 
-        if (row.PairId is not null)
-            return row.Segments;
-
         var counterpart = FindReviewCounterpart(row, hunkRows, rowIndex);
         if (counterpart is not null && ReviewLineSimilarity(counterpart.Text, row.Text) >= 0.2)
         {
@@ -4473,7 +4507,9 @@ else
         var oldTokens = TokenizeReviewDisplayText(oldText);
         var newTokens = TokenizeReviewDisplayText(newText);
         if (oldTokens.Count == 0 || newTokens.Count == 0 || (long)oldTokens.Count * newTokens.Count > 10_000)
-            return SegmentWholeText(renderNew ? newText : oldText, DiffSegmentKind.Unchanged);
+            return SegmentWholeText(
+                renderNew ? newText : oldText,
+                renderNew ? DiffSegmentKind.Added : DiffSegmentKind.Removed);
 
         var table = new int[oldTokens.Count + 1, newTokens.Count + 1];
         for (var oldIndex = oldTokens.Count - 1; oldIndex >= 0; oldIndex--)
@@ -5120,6 +5156,11 @@ else
     {
         if (_disposed || Project?.Id != projectId)
             return;
+        if (_reviewBusy)
+        {
+            _reviewRefreshPending = true;
+            return;
+        }
 
         try
         {
