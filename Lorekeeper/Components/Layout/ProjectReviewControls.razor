@@ -13,10 +13,10 @@
 @inject IProjectVersionRestoreService Restore
 @inject ProjectVersionHistoryUiEvents HistoryEvents
 
-<div class="project-review-controls" @onmouseenter="RefreshAsync" @onfocusin="RefreshAsync">
+<div class="project-review-controls">
     @if (Project is not null)
     {
-        <label class="project-review-toggle" title="Keep the approved Git checkpoint as the review baseline">
+        <label class="project-review-toggle" title="Review changes before keeping them in the project">
             <input type="checkbox"
                    checked="@_reviewEditsEnabled"
                    disabled="@(_loading || _busy || IsProjectLocked)"
@@ -118,18 +118,18 @@
                         </section>
                     }
         </div>
-        <p class="project-review-other-note">Approval and undo are scoped to non-manuscript areas. Pending Core and edition manuscript targets stay available for review.</p>
+        <p class="project-review-other-note">Keeping and rejecting are scoped to non-manuscript areas. Pending Core and edition manuscript targets stay available for review.</p>
         <footer>
-            <button type="button" class="btn btn-sm btn-success" disabled="@(_busy || IsProjectLocked)" @onclick="ApproveOtherReviewAsync">Approve other changes</button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || IsProjectLocked)" @onclick="RequestUndoOtherReview">Undo all Other changes</button>
+            <button type="button" class="btn btn-sm btn-success" disabled="@(_busy || IsProjectLocked)" @onclick="ApproveOtherReviewAsync">Keep other changes</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || IsProjectLocked)" @onclick="RequestUndoOtherReview">Reject other changes</button>
         </footer>
     </section>
 }
 
 <ConfirmationDialog IsOpen="_otherUndoConfirmationOpen"
-                    Title="Undo all Other changes?"
-                    Message="This restores non-manuscript project state to approved HEAD. Pending Core and edition manuscript changes remain available for review."
-                    ConfirmLabel="Undo Other changes"
+                    Title="Reject all Other changes?"
+                    Message="This restores non-manuscript project state to its previously approved version. Pending Core and edition manuscript changes remain available for review."
+                    ConfirmLabel="Reject Other changes"
                     Destructive="true"
                     Busy="@_busy"
                     OnConfirm="ConfirmUndoOtherReviewAsync"

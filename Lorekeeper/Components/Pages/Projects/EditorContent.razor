@@ -608,9 +608,9 @@ else
                                             <button type="button"
                                                     class="btn btn-sm btn-success"
                                                     disabled="@(_reviewBusy || _reviewView?.Comparison?.IsIdentical != false)"
-                                                    title="Approve all pending manuscript and project changes"
+                                                    title="Keep all pending manuscript and project changes"
                                                     @onclick="ApproveCurrentReviewAsync">
-                                                Approve all pending changes
+                                                Keep All
                                             </button>
                                         }
                                         <button type="button"
@@ -618,7 +618,7 @@ else
                                                 disabled="@(!CanUndoCurrentReview)"
                                                 title="@HistoricalUndoTitle"
                                                 @onclick="UndoCurrentReviewAsync">
-                                            Undo to approved
+                                            Reject All
                                         </button>
                                     </div>
                                     @if (_historicalReview is not null && HistoricalUndoParentSha is null)
@@ -628,7 +628,7 @@ else
                                 </div>
                                 @if (_reviewProjection.IsNoDifference)
                                 {
-                                    <div class="chapter-review-notice">The live manuscript matches approved HEAD.</div>
+                                    <div class="chapter-review-notice">There are no pending manuscript changes.</div>
                                 }
                                 @if (_reviewCompositionPreviews.Count > 0)
                                 {
@@ -719,16 +719,16 @@ else
                                         <button type="button"
                                                 class="btn btn-sm btn-success"
                                                 disabled="@(!CanResolveAllActiveChapterChanges)"
-                                                title="Approve only this chapter's text and structure changes"
+                                                title="Keep only this chapter's text and structure changes"
                                                 @onclick="KeepAllActiveChapterChangesAsync">
-                                            Approve all chapter manuscript changes
+                                            Keep All
                                         </button>
                                         <button type="button"
                                                 class="btn btn-sm btn-outline-danger"
                                                 disabled="@(!CanResolveAllActiveChapterChanges)"
-                                                title="Undo only this chapter's text and structure changes"
+                                                title="Reject only this chapter's text and structure changes"
                                                 @onclick="RejectAllActiveChapterChangesAsync">
-                                            Undo all chapter manuscript changes
+                                            Reject All
                                         </button>
                                     </div>
                                 </div>
@@ -1221,10 +1221,10 @@ else
             candidate.CandidateId == _selectedContestCandidateId
             && candidate.Status == ContestCandidateStatus.Completed);
     private string ReviewComparisonSubtitle => _historicalReview is not null
-        ? "Latest affecting checkpoint"
+        ? "Reviewing latest approved changes"
         : _reviewView?.Comparison is not null
-            ? "Approved HEAD vs live"
-            : "No approved HEAD checkpoint";
+            ? "Reviewing pending changes"
+            : "No pending changes";
     private ContestBatch? CurrentChapterContest => _current is null
         ? null
         : _contestReviewBatches.FirstOrDefault(batch => batch.ChapterId == _current.Id && batch.Candidates.Count > 0);
@@ -1238,7 +1238,7 @@ else
     {
         ContestBatchStatus.Running => "Open the running Contest Mode review",
         ContestBatchStatus.Completed => "Review Contest Mode candidates",
-        _ => "Review manuscript changes against approved HEAD",
+        _ => "Review manuscript changes",
     };
     private IReadOnlyList<Guid> DesignedPageIds
     {
@@ -3079,10 +3079,10 @@ else
 
     private string HistoricalUndoTitle =>
         _historicalReview is not null && HistoricalUndoParentSha is null
-            ? "No approved parent snapshot exists for the repository root checkpoint"
+            ? "No earlier approved version exists for this change"
             : _historicalReview is not null
-                ? "Restore the parent value from the latest affecting checkpoint"
-                : "Restore the approved HEAD value";
+                ? "Restore the earlier value from the latest approved change"
+                : "Restore the previously approved value";
 
     private string? HistoricalUndoParentSha => _historicalReview?.Commit.ParentShas.FirstOrDefault();
 
