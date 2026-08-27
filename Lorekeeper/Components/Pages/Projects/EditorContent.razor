@@ -781,15 +781,12 @@ else
                                                     <div class="review-block-summary">@block.Summary</div>
                                                 </div>
                                                 <div class="review-block-actions">
-                                                    @if (!_reviewProjection.IsReadOnly || _historicalReview is not null)
-                                                    {
-                                                        <button type="button"
-                                                                class="btn btn-sm btn-outline-secondary"
-                                                                disabled="@_reviewBusy"
-                                                                @onclick="() => ToggleReviewBlockAsync(block.Id)">
-                                                            Hide
-                                                        </button>
-                                                    }
+                                                    <button type="button"
+                                                            class="btn btn-sm btn-outline-secondary"
+                                                            disabled="@_reviewBusy"
+                                                            @onclick="() => ToggleReviewBlockAsync(block.Id)">
+                                                        Hide
+                                                    </button>
                                                     @if (CanResolveCurrentReviewBlock(block))
                                                     {
                                                         <button type="button"
@@ -4504,12 +4501,17 @@ else
 
     private static IReadOnlyList<DiffSegment> BuildTokenDiffSegments(string oldText, string newText, bool renderNew)
     {
+        const long maxTokenDiffCells = 250_000;
         var oldTokens = TokenizeReviewDisplayText(oldText);
         var newTokens = TokenizeReviewDisplayText(newText);
-        if (oldTokens.Count == 0 || newTokens.Count == 0 || (long)oldTokens.Count * newTokens.Count > 10_000)
+        if (oldTokens.Count == 0
+            || newTokens.Count == 0
+            || (long)oldTokens.Count * newTokens.Count > maxTokenDiffCells)
+        {
             return SegmentWholeText(
                 renderNew ? newText : oldText,
                 renderNew ? DiffSegmentKind.Added : DiffSegmentKind.Removed);
+        }
 
         var table = new int[oldTokens.Count + 1, newTokens.Count + 1];
         for (var oldIndex = oldTokens.Count - 1; oldIndex >= 0; oldIndex--)
