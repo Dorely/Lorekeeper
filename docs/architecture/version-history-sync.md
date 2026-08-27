@@ -146,8 +146,10 @@ Pending changes button and count beside it. The toggle is excluded from Git
 snapshots. When enabled, direct manual and assistant mutations remain in live
 SQLite and are compared as `HEAD → live`; when disabled, completed mutating
 assistant turns checkpoint the complete live project. Existing dirty work is
-included when the preference is enabled, and disabling it while differences are
-pending keeps the preference enabled until Review approves or undoes them.
+included when the preference is enabled. Disabling it while differences are
+pending presents an application confirmation; Proceed checkpoints all pending
+live work through one `ReviewApproval` and then disables the preference, while
+Cancel leaves Review Edits enabled.
 
 The Review service returns affected chapter/target summaries, semantic
 manuscript groups, non-manuscript aggregates, dependency groups, contest state,

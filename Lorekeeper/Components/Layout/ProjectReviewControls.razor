@@ -135,6 +135,15 @@
                     OnConfirm="ConfirmUndoOtherReviewAsync"
                     OnCancel="CancelUndoOtherReview" />
 
+<ConfirmationDialog IsOpen="_disableReviewEditsConfirmationOpen"
+                    Title="Disable Review Edits?"
+                    Message="Disabling review edits will auto confirm pending changes"
+                    ConfirmLabel="Proceed"
+                    CancelLabel="Cancel"
+                    Busy="_busy"
+                    OnConfirm="ConfirmDisableReviewEditsAsync"
+                    OnCancel="CancelDisableReviewEdits" />
+
 @code {
     [Parameter] public Project? Project { get; set; }
     [Parameter] public EventCallback<ProjectVersionReviewView?> ReviewLoaded { get; set; }
@@ -149,6 +158,7 @@
     private bool _disposed;
     private bool _contestLocked;
     private bool _otherUndoConfirmationOpen;
+    private bool _disableReviewEditsConfirmationOpen;
     private string? _error;
     private IReadOnlyDictionary<Guid, int> _actOrderById = new Dictionary<Guid, int>();
     private Guid? _loadedProjectId;
@@ -415,7 +425,8 @@
         if (!enabled && _review is { Comparison.IsIdentical: false })
         {
             _reviewEditsEnabled = true;
-            _error = "Review Edits must stay enabled until pending changes are approved or undone.";
+            _error = null;
+            _disableReviewEditsConfirmationOpen = true;
             return;
         }
 
@@ -425,6 +436,42 @@
         {
             await VersionHistory.SetReviewEditsEnabledAsync(project.Id, enabled, _lifetimeCancellation.Token);
             _reviewEditsEnabled = enabled;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void CancelDisableReviewEdits() => _disableReviewEditsConfirmationOpen = false;
+
+    private async Task ConfirmDisableReviewEditsAsync()
+    {
+        if (Project is not { } project
+            || IsProjectLocked
+            || _review is not { Comparison.IsIdentical: false, Token: { } token })
+            return;
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await VersionHistory.CreateReviewApprovalCheckpointAsync(
+                project.Id,
+                token,
+                semanticMessage: "Approved all pending changes before disabling Review Edits",
+                requestKey: $"review-disable-approve:{token.CurrentContentHash}",
+                cancellationToken: _lifetimeCancellation.Token);
+            await VersionHistory.SetReviewEditsEnabledAsync(
+                project.Id,
+                enabled: false,
+                _lifetimeCancellation.Token);
+            _reviewEditsEnabled = false;
+            _disableReviewEditsConfirmationOpen = false;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
