@@ -108,13 +108,17 @@ function paragraphStyle(presentation) {
     if (family) styles.push(`font-family:${family}`);
     if (Number.isFinite(presentation.fontSizePoints)) styles.push(`font-size:${presentation.fontSizePoints}pt`);
     if (Number.isInteger(presentation.fontWeight)) styles.push(`font-weight:${presentation.fontWeight}`);
-    if (presentation.italic === true) styles.push("font-style:italic");
-    if (presentation.smallCaps === true) styles.push("font-variant-caps:small-caps");
+    if (presentation.italic !== null && presentation.italic !== undefined)
+        styles.push(`font-style:${presentation.italic ? "italic" : "normal"}`);
+    if (presentation.smallCaps !== null && presentation.smallCaps !== undefined)
+        styles.push(`font-variant-caps:${presentation.smallCaps ? "small-caps" : "normal"}`);
     if (Number.isFinite(presentation.lineHeight)) styles.push(`line-height:${presentation.lineHeight}`);
     const alignment = {start: "left", center: "center", end: "right", justify: "justify"}[presentation.alignment];
     if (alignment) styles.push(`text-align:${alignment}`);
-    if (Number.isFinite(presentation.leftIndentEm)) styles.push(`margin-left:${presentation.leftIndentEm}em`);
-    if (Number.isFinite(presentation.rightIndentEm)) styles.push(`margin-right:${presentation.rightIndentEm}em`);
+    if (Number.isFinite(presentation.leftIndentEm))
+        styles.push(`margin-left:${presentation.leftIndentEm}em`, `--lk-blockquote-left-indent:${presentation.leftIndentEm}em`, `--lk-caption-left-indent:${presentation.leftIndentEm}em`);
+    if (Number.isFinite(presentation.rightIndentEm))
+        styles.push(`margin-right:${presentation.rightIndentEm}em`, `--lk-caption-right-indent:${presentation.rightIndentEm}em`);
     if (Number.isFinite(presentation.firstLineIndentEm)) styles.push(`text-indent:${presentation.firstLineIndentEm}em`);
     if (Number.isFinite(presentation.spacingBeforePoints)) styles.push(`margin-top:${presentation.spacingBeforePoints}pt`);
     if (Number.isFinite(presentation.spacingAfterPoints)) styles.push(`margin-bottom:${presentation.spacingAfterPoints}pt`);
@@ -297,7 +301,7 @@ const schema = new Schema({
                     draggable: "false",
                     style: `object-fit:${node.attrs.presentation?.fit === "cover" ? "cover" : "contain"};object-position:${node.attrs.presentation?.cropXPercent ?? 50}% ${node.attrs.presentation?.cropYPercent ?? 50}%`
                 }],
-                ["figcaption", 0]
+                ["figcaption", {style: paragraphStyle(node.attrs.paragraphPresentation)}, 0]
             ]
         },
         designed_page: {
@@ -472,7 +476,7 @@ function domainFromDocument(doc, manuscriptId, revision) {
             imageId: node.type.name === "figure" ? node.attrs.imageId : null,
             altText: node.type.name === "figure" ? node.attrs.altText : null,
             language: node.attrs.language || null,
-            paragraphPresentation: ["paragraph", "heading", "blockquote", "list_item"].includes(node.type.name)
+            paragraphPresentation: ["paragraph", "heading", "blockquote", "list_item", "figure"].includes(node.type.name)
                 ? node.attrs.paragraphPresentation || null
                 : null,
             content: inlines
@@ -808,7 +812,7 @@ function resetBlockRole(view) {
     view.focus();
 }
 
-const paragraphStyleNodeNames = new Set(["paragraph", "heading", "blockquote", "list_item"]);
+const paragraphStyleNodeNames = new Set(["paragraph", "heading", "blockquote", "list_item", "figure"]);
 
 function selectedParagraphPositions(view) {
     const {selection, doc} = view.state;
@@ -1997,18 +2001,30 @@ function typographyDeclarations(style, extra = {}, includeSpacing = true) {
     const textAlign = typeof style.textAlign === "string" ? style.textAlign.trim().toLowerCase() : "";
     if (["left", "right", "center", "justify"].includes(textAlign)) declarations.push(`text-align:${textAlign}`);
     if (Number.isFinite(style.lineHeight)) declarations.push(`line-height:${style.lineHeight}`);
+    const textColor = cssRgb(style.textColorRgb);
+    if (textColor) declarations.push(`color:${textColor}`);
     if (includeSpacing) {
         const before = style.spacingBeforePoints ?? style.spaceBeforePoints;
         const after = style.spacingAfterPoints ?? style.spaceAfterPoints;
         if (Number.isFinite(before)) declarations.push(`margin-top:${before}pt`);
         if (Number.isFinite(after)) declarations.push(`margin-bottom:${after}pt`);
     }
-    if (Number.isFinite(style.leftIndentEm)) declarations.push(`margin-left:${style.leftIndentEm}em`);
-    if (Number.isFinite(style.rightIndentEm)) declarations.push(`margin-right:${style.rightIndentEm}em`);
+    if (Number.isFinite(style.leftIndentEm))
+        declarations.push(`margin-left:${style.leftIndentEm}em`, `--lk-blockquote-left-indent:${style.leftIndentEm}em`, `--lk-caption-left-indent:${style.leftIndentEm}em`);
+    if (Number.isFinite(style.rightIndentEm))
+        declarations.push(`margin-right:${style.rightIndentEm}em`, `--lk-caption-right-indent:${style.rightIndentEm}em`);
     if (Number.isFinite(style.firstLineIndentEm)) declarations.push(`text-indent:${style.firstLineIndentEm}em`);
     for (const [property, value] of Object.entries(extra))
         if (value !== null && value !== undefined) declarations.push(`${property}:${value}`);
     return declarations;
+}
+
+function cssRgb(channels, alpha = null) {
+    if (!Array.isArray(channels) || channels.length !== 3 || channels.some(channel => !Number.isFinite(channel)))
+        return null;
+    const bytes = channels.map(channel => Math.round(Math.max(0, Math.min(1, channel)) * 255));
+    const opacity = Number.isFinite(alpha) ? ` / ${Math.max(0, Math.min(1, alpha))}` : "";
+    return `rgb(${bytes.join(" ")}${opacity})`;
 }
 
 function installTypographyRules(root, typography = {}) {
@@ -2022,13 +2038,27 @@ function installTypographyRules(root, typography = {}) {
                 rules.push(`${selector(target)}{${declarations.join(";")}}`);
         };
         const body = current.body || {};
-        add("> *", typographyDeclarations(body));
+        add("> *", typographyDeclarations(body, {}, false));
+        add("p", typographyDeclarations(body));
         add("[data-style-role=body]", typographyDeclarations(body));
-        add("[data-style-role=chapter-heading]", typographyDeclarations(current.chapterHeading));
         const headings = current.headings || {};
         for (let level = 1; level <= 6; level++)
             add(`h${level}`, typographyDeclarations(headings[String(level)]));
+        add("blockquote", typographyDeclarations(current.blockquote));
+        add("[data-style-role=chapter-heading]", typographyDeclarations(current.chapterHeading));
         add("[data-style-role=block-quote]", typographyDeclarations(current.blockquote));
+        const blockquote = current.blockquote || {};
+        const decoration = blockquote.decoration || {};
+        const ruleColor = cssRgb(decoration.ruleColorRgb) || "transparent";
+        const ruleWidth = decoration.ruleWidthEm ?? 0;
+        const ruleGap = decoration.ruleGapEm ?? 0;
+        const blockquoteDecorationDeclarations = [
+            `margin-left:max(0em,calc(var(--lk-blockquote-left-indent,0em) - ${ruleWidth + ruleGap}em))!important`,
+            `padding-left:${ruleGap}em`,
+            `border-left:${ruleWidth}em solid ${ruleColor}`
+        ];
+        add("blockquote", blockquoteDecorationDeclarations);
+        add("[data-style-role=block-quote]", blockquoteDecorationDeclarations);
         add("figure figcaption", typographyDeclarations(current.caption));
         add(".semantic-list-item", [
             ...typographyDeclarations(body, {}, false),
@@ -2057,7 +2087,12 @@ function installTypographyRules(root, typography = {}) {
         add("code", ["font-family:'Lorekeeper-builtin-roboto-mono',monospace", "font-size:1em"]);
         add(".semantic-small-caps", ["font-variant-caps:small-caps"]);
         rules.push(`${selector("figure[data-caption-placement=above]")} > figcaption{order:-1;}`);
-        rules.push(`${selector("figure[data-caption-placement=overlay]")} > figcaption{position:absolute;inset-inline:0;bottom:0;padding:.2em .4em;color:#fff;background:rgb(0 0 0 / 45%);}`);
+        const overlay = current.caption?.overlay || {};
+        const overlayText = cssRgb(overlay.textColorRgb) || "#fff";
+        const overlayBackground = cssRgb(overlay.backgroundColorRgb, overlay.backgroundOpacity ?? 0) || "transparent";
+        const overlayVertical = overlay.paddingVerticalEm ?? 0;
+        const overlayHorizontal = overlay.paddingHorizontalEm ?? 0;
+        rules.push(`${selector("figure[data-caption-placement=overlay]")} > figcaption{position:absolute;inset-inline:0;bottom:0;box-sizing:border-box;margin-left:0!important;margin-right:0!important;padding-block:${overlayVertical}em;padding-inline-start:calc(${overlayHorizontal}em + var(--lk-caption-left-indent,0em));padding-inline-end:calc(${overlayHorizontal}em + var(--lk-caption-right-indent,0em));color:${overlayText};background:${overlayBackground};}`);
         rules.push(`${selector("figure[data-caption-placement=hidden]")} > figcaption{display:block;padding:.25em .5em;border:1px dashed var(--lk-line-strong,#cbd3df);color:var(--lk-text-muted,#647086);background:var(--lk-surface-subtle,transparent);opacity:.9;}`);
         rules.push(`${selector("figure[data-caption-placement=hidden]")} > figcaption::before{content:"Hidden in Read";display:block;margin-bottom:.2em;font-family:'Lorekeeper-builtin-nunito',sans-serif;font-size:.72em;font-style:normal;font-weight:700;letter-spacing:.04em;}`);
         styleElement.textContent = rules.join("\n");
@@ -2076,25 +2111,26 @@ function installNamedStyleRules(root, styles) {
             const definition = style.definition || {};
             const selector = style.kind === "character"
                 ? `.semantic-editor.semantic-editor .semantic-prosemirror span[data-character-style=${JSON.stringify(style.semanticRole)} i]`
-                : style.semanticRole === "figure-caption"
-                    ? `.semantic-editor.semantic-editor .semantic-prosemirror figure[data-style-role=${JSON.stringify(style.semanticRole)} i] > figcaption`
-                    : `.semantic-editor.semantic-editor .semantic-prosemirror [data-style-role=${JSON.stringify(style.semanticRole)} i]`;
+                : `.semantic-editor.semantic-editor .semantic-prosemirror [data-style-role=${JSON.stringify(style.semanticRole)} i]:not(figure),`
+                    + `.semantic-editor.semantic-editor .semantic-prosemirror figure[data-style-role=${JSON.stringify(style.semanticRole)} i] > figcaption`;
             const declarations = [];
             const family = editorFontFamily(definition.fontFamilyKey);
             if (family) declarations.push(`font-family:${family}`);
             if (definition.fontSizePoints) declarations.push(`font-size:${definition.fontSizePoints}pt`);
             if (definition.fontWeight) declarations.push(`font-weight:${definition.fontWeight}`);
-            if (definition.italic === true) declarations.push("font-style:italic");
-            if (definition.smallCaps === true) declarations.push("font-variant-caps:small-caps");
+            if (definition.italic !== null && definition.italic !== undefined)
+                declarations.push(`font-style:${definition.italic ? "italic" : "normal"}`);
+            if (definition.smallCaps !== null && definition.smallCaps !== undefined)
+                declarations.push(`font-variant-caps:${definition.smallCaps ? "small-caps" : "normal"}`);
             if (definition.lineHeight) declarations.push(`line-height:${definition.lineHeight}`);
             if (definition.spaceBeforePoints !== null && definition.spaceBeforePoints !== undefined)
                 declarations.push(`margin-top:${definition.spaceBeforePoints}pt`);
             if (definition.spaceAfterPoints !== null && definition.spaceAfterPoints !== undefined)
                 declarations.push(`margin-bottom:${definition.spaceAfterPoints}pt`);
             if (definition.leftIndentEm !== null && definition.leftIndentEm !== undefined)
-                declarations.push(`margin-left:${definition.leftIndentEm}em`);
+                declarations.push(`margin-left:${definition.leftIndentEm}em`, `--lk-blockquote-left-indent:${definition.leftIndentEm}em`, `--lk-caption-left-indent:${definition.leftIndentEm}em`);
             if (definition.rightIndentEm !== null && definition.rightIndentEm !== undefined)
-                declarations.push(`margin-right:${definition.rightIndentEm}em`);
+                declarations.push(`margin-right:${definition.rightIndentEm}em`, `--lk-caption-right-indent:${definition.rightIndentEm}em`);
             if (definition.firstLineIndentEm !== null && definition.firstLineIndentEm !== undefined)
                 declarations.push(`text-indent:${definition.firstLineIndentEm}em`);
             if (["left", "right", "center", "justify"].includes(definition.textAlign?.toLowerCase()))

@@ -1356,6 +1356,11 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
 
         {{semanticInlineRules}}
 
+        a {
+          color: inherit;
+          text-decoration: underline;
+        }
+
         .chapter-body p,
         .matter-page p {
           margin: 0;
@@ -1504,7 +1509,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         {
             var selector = style.Kind == ManuscriptStyleKind.Character
                 ? $"[data-character-style=\"{CssString(style.SemanticRole)}\" i]"
-                : $"[data-style-role=\"{CssString(style.SemanticRole)}\" i]";
+                : $"[data-style-role=\"{CssString(style.SemanticRole)}\" i]:not(figure), figure[data-style-role=\"{CssString(style.SemanticRole)}\" i] > figcaption, figure[data-style-role=\"{CssString(style.SemanticRole)}\" i] .figure-overlay-caption > span";
             var declarations = StyleDeclarations(style.Definition);
             if (declarations.Count == 0)
                 continue;
@@ -1536,10 +1541,10 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             declarations.Add($"font-size: {fontSize.ToString("0.###", CultureInfo.InvariantCulture)}pt");
         if (definition.FontWeight is int fontWeight)
             declarations.Add($"font-weight: {fontWeight}");
-        if (definition.Italic is true)
-            declarations.Add("font-style: italic");
-        if (definition.SmallCaps is true)
-            declarations.Add("font-variant-caps: small-caps");
+        if (definition.Italic is bool italic)
+            declarations.Add($"font-style: {(italic ? "italic" : "normal")}");
+        if (definition.SmallCaps is bool smallCaps)
+            declarations.Add($"font-variant-caps: {(smallCaps ? "small-caps" : "normal")}");
         if (definition.LineHeight is double styleLineHeight)
             declarations.Add($"line-height: {styleLineHeight.ToString("0.###", CultureInfo.InvariantCulture)}");
         if (definition.SpaceBeforePoints is double before)
@@ -1786,6 +1791,12 @@ internal static class SemanticPublishFormatting
 
     private static string ParagraphPresentationAttribute(ParagraphPresentation? presentation)
     {
+        var declarations = ParagraphPresentationDeclarations(presentation);
+        return string.IsNullOrEmpty(declarations) ? string.Empty : $" style=\"{declarations}\"";
+    }
+
+    private static string ParagraphPresentationDeclarations(ParagraphPresentation? presentation)
+    {
         if (presentation is null) return string.Empty;
         var declarations = new List<string>();
         if (presentation.FontFamilyKey is { } fontFamily)
@@ -1800,8 +1811,8 @@ internal static class SemanticPublishFormatting
         }
         if (presentation.FontSizePoints is { } fontSize) declarations.Add($"font-size:{fontSize:R}pt");
         if (presentation.FontWeight is { } fontWeight) declarations.Add($"font-weight:{fontWeight}");
-        if (presentation.Italic == true) declarations.Add("font-style:italic");
-        if (presentation.SmallCaps == true) declarations.Add("font-variant-caps:small-caps");
+        if (presentation.Italic is bool italic) declarations.Add($"font-style:{(italic ? "italic" : "normal")}");
+        if (presentation.SmallCaps is bool smallCaps) declarations.Add($"font-variant-caps:{(smallCaps ? "small-caps" : "normal")}");
         if (presentation.LineHeight is { } lineHeight) declarations.Add($"line-height:{lineHeight:R}");
         if (presentation.Alignment is { } alignment)
             declarations.Add($"text-align:{alignment switch { ParagraphAlignment.Start => "start", ParagraphAlignment.End => "end", ParagraphAlignment.Center => "center", _ => "justify" }}");
@@ -1812,7 +1823,7 @@ internal static class SemanticPublishFormatting
         if (presentation.SpacingAfterPoints is { } after) declarations.Add($"margin-bottom:{after:R}pt");
         if (presentation.StartOnNewPage == true) declarations.Add("break-before:page");
         if (presentation.KeepWithNext == true) declarations.Add("break-after:avoid");
-        return declarations.Count == 0 ? string.Empty : $" style=\"{string.Join(';', declarations)}\"";
+        return string.Join(';', declarations);
     }
 
     internal static string HtmlInlineContent(ManuscriptBlock block) =>
@@ -1829,10 +1840,14 @@ internal static class SemanticPublishFormatting
             ?? throw new InvalidOperationException(
                 $"Figure image {block.ImageId:N} is missing from the publication.");
         var presentation = block.FigurePresentation ?? new FigurePresentation();
+        var captionPresentation = ParagraphPresentationDeclarations(block.ParagraphPresentation);
+        var captionStyle = string.IsNullOrEmpty(captionPresentation)
+            ? string.Empty
+            : $" style=\"{captionPresentation}\"";
         var caption = string.IsNullOrWhiteSpace(content)
             || presentation.CaptionPlacement == FigureCaptionPlacement.Hidden
             ? string.Empty
-            : $"<figcaption>{content}</figcaption>";
+            : $"<figcaption{captionStyle}>{content}</figcaption>";
         var language = PublicationLanguage.NormalizeOptional(block.Language) is not { } languageTag
             ? string.Empty
             : $" lang=\"{WebUtility.HtmlEncode(languageTag)}\" xml:lang=\"{WebUtility.HtmlEncode(languageTag)}\"";
@@ -1854,8 +1869,16 @@ internal static class SemanticPublishFormatting
             figureStyle.Append("width:100%;max-width:100%;");
         var frameHeight = presentation.Placement is FigurePlacementIntent.DedicatedPage or FigurePlacementIntent.FullBleed ? "75vh" : "40vh";
         var imageStyle = $"display:block;width:100%;height:100%;object-fit:{ImageFitCss(presentation.Fit)};object-position:{presentation.CropXPercent.ToString(CultureInfo.InvariantCulture)}% {presentation.CropYPercent.ToString(CultureInfo.InvariantCulture)}%;";
-        var image = $"<div class=\"figure-media\" style=\"position:relative;width:100%;height:{frameHeight};overflow:hidden\"><img src=\"{WebUtility.HtmlEncode(href)}\" alt=\"{WebUtility.HtmlEncode(block.Decorative ? string.Empty : block.AltText)}\"{decorative} style=\"{imageStyle}\" />{(presentation.CaptionPlacement == FigureCaptionPlacement.Overlay ? $"<div class=\"figure-overlay-caption\" style=\"position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.65);color:white;padding:.5em\">{content}</div>" : string.Empty)}</div>";
-        var contents = presentation.CaptionPlacement == FigureCaptionPlacement.Above ? caption + image : image + (presentation.CaptionPlacement == FigureCaptionPlacement.Overlay ? string.Empty : caption);
+        var overlayCaptionStyle = string.IsNullOrEmpty(captionPresentation)
+            ? "display:block"
+            : $"display:block;{captionPresentation}";
+        var image = $"<div class=\"figure-media\" style=\"position:relative;width:100%;height:{frameHeight};overflow:hidden\"><img src=\"{WebUtility.HtmlEncode(href)}\" alt=\"{WebUtility.HtmlEncode(block.Decorative ? string.Empty : block.AltText)}\"{decorative} style=\"{imageStyle}\" /></div>";
+        var overlayCaption = presentation.CaptionPlacement == FigureCaptionPlacement.Overlay
+            ? $"<figcaption class=\"figure-overlay-caption\" style=\"position:absolute;left:0;right:0;bottom:0;margin:0;background:rgba(0,0,0,.45);color:white;padding:.2em .4em\"><span style=\"{overlayCaptionStyle}\">{content}</span></figcaption>"
+            : string.Empty;
+        var contents = presentation.CaptionPlacement == FigureCaptionPlacement.Above
+            ? caption + image
+            : image + (presentation.CaptionPlacement == FigureCaptionPlacement.Overlay ? overlayCaption : caption);
         return $"<figure id=\"{anchor}\" data-style-role=\"{role}\" data-accessibility-role=\"{(block.AccessibilityRole ?? FigureAccessibilityRole.Figure).ToString().ToLowerInvariant()}\"{language} style=\"{figureStyle}\">{contents}</figure>";
     }
 

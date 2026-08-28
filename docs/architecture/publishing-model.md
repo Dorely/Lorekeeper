@@ -35,7 +35,9 @@ rejects mixed prose/canvas blocks so manual UI, assistant tools, export, and
 rendering share one durable boundary. System sections such as title,
 copyright, and contents retain live metadata bindings; user sections include
 dedications, acknowledgements, author notes, references, image pages, and
-other production material.
+other production material. Every successful durable section mutation publishes
+the shared Review Edits invalidation only after its save or transaction commit;
+read paths and true no-ops do not refresh the top-bar review projection.
 
 `IPublicationEditionService` owns optional paperback, hardcover, EPUB ebook,
 and PDF ebook release aggregates. Releases own destination, exact immutable
@@ -189,6 +191,13 @@ point-sized coordinate space as CSS pixels so canvas text size, wrapping,
 padding, alignment, and object placement remain faithful. Changing this
 serialization contract advances the EPUB exporter version and stales prepared
 EPUB/package artifacts.
+
+Reflowable EPUB preserves the manuscript style cascade used by Edit and Press:
+built-in block defaults, then sparse paragraph/character Book Text Styles, then
+direct presentation, including explicit `false` overrides for italic and small
+caps. Figure paragraph styles apply to captions. Links inherit surrounding
+text color and remain underlined, and overlay captions use the same translucent
+backing opacity and padding as the shared manuscript typography contract.
 
 Artifacts carry source revision/fingerprint, edition settings, assets,
 renderer/profile provenance, validation evidence, and applicable exporter or

@@ -85,7 +85,10 @@ public sealed class ProjectVersionHistoryService(
         string semanticMessage,
         string? requestKey,
         DateTimeOffset? authoredAt,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        VersionHistorySnapshotArtifact? capturedSnapshot = null,
+        bool disableReviewEdits = false,
+        bool publishEvents = true)
     {
         var repository = await EnsureRepositoryUnderLeaseAsync(projectId, cancellationToken);
         var operationId = await StartOperationAsync(
@@ -97,14 +100,25 @@ public sealed class ProjectVersionHistoryService(
 
         try
         {
-            temporaryDirectory = CreateTemporaryDirectory();
-            var validated = await snapshotWriter.WriteAsync(
-                repository.Id,
-                projectId,
-                temporaryDirectory,
-                cancellationToken);
-            EnsureNoReparsePointsRecursively(temporaryDirectory);
-            var files = ReadSnapshotFiles(temporaryDirectory, cancellationToken);
+            VersionHistorySnapshotArtifact validated;
+            SortedDictionary<string, byte[]> files;
+            if (capturedSnapshot is null)
+            {
+                temporaryDirectory = CreateTemporaryDirectory();
+                validated = await snapshotWriter.WriteAsync(
+                    repository.Id,
+                    projectId,
+                    temporaryDirectory,
+                    cancellationToken);
+                EnsureNoReparsePointsRecursively(temporaryDirectory);
+                files = ReadSnapshotFiles(temporaryDirectory, cancellationToken);
+            }
+            else
+            {
+                EnsureNoReparsePointsRecursively(capturedSnapshot.RootDirectory);
+                validated = capturedSnapshot;
+                files = ReadSnapshotFiles(capturedSnapshot.RootDirectory, cancellationToken);
+            }
 
             var existingHead = ReadExistingHead(repository);
             if (existingHead?.Commit is not null)
@@ -126,9 +140,14 @@ public sealed class ProjectVersionHistoryService(
                         semanticMessage,
                         authoredAt ?? DateTimeOffset.UtcNow,
                         createdCommit: false,
-                        cancellationToken);
-                    historyEvents.PublishCheckpointCreated(projectId);
-                    historyEvents.PublishReviewStateChanged(projectId);
+                        cancellationToken,
+                        projectId,
+                        disableReviewEdits);
+                    if (publishEvents)
+                    {
+                        historyEvents.PublishCheckpointCreated(projectId);
+                        historyEvents.PublishReviewStateChanged(projectId);
+                    }
                     return duplicate;
                 }
             }
@@ -147,9 +166,14 @@ public sealed class ProjectVersionHistoryService(
                 semanticMessage,
                 authoredAt ?? DateTimeOffset.UtcNow,
                 write.Created,
-                cancellationToken);
-            historyEvents.PublishCheckpointCreated(projectId);
-            historyEvents.PublishReviewStateChanged(projectId);
+                cancellationToken,
+                projectId,
+                disableReviewEdits);
+            if (publishEvents)
+            {
+                historyEvents.PublishCheckpointCreated(projectId);
+                historyEvents.PublishReviewStateChanged(projectId);
+            }
             return checkpoint;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -295,22 +319,31 @@ public sealed class ProjectVersionHistoryService(
                 throw new InvalidOperationException("Review Edits cannot be disabled because the live project or approved history could not be verified.");
             }
             if (status.Repository.IsDirty)
-                throw new InvalidOperationException("Review Edits must stay enabled until pending changes are approved or undone.");
+                throw new InvalidOperationException(
+                    "Pending changes must be approved before Review Edits can be disabled.");
         }
 
+        await SetReviewEditsPreferenceUnderLeaseAsync(projectId, enabled, cancellationToken);
+
+        historyEvents.PublishReviewStateChanged(projectId);
+    }
+
+    private async Task SetReviewEditsPreferenceUnderLeaseAsync(
+        Guid projectId,
+        bool enabled,
+        CancellationToken cancellationToken)
+    {
         await using var operation = await database.OpenWriteAsync(cancellationToken);
         operation.ShareWithNestedOperations();
         var project = await operation.Repositories.Projects.GetByIdAsync(projectId, cancellationToken)
             ?? throw new InvalidOperationException($"Project {projectId} not found.");
-        if (project.ReviewEditsEnabled != enabled)
-        {
-            project.ReviewEditsEnabled = enabled;
-            project.UpdatedAt = DateTime.UtcNow;
-            operation.Repositories.Projects.Update(project);
-            await operation.SaveChangesAsync(cancellationToken);
-        }
+        if (project.ReviewEditsEnabled == enabled)
+            return;
 
-        historyEvents.PublishReviewStateChanged(projectId);
+        project.ReviewEditsEnabled = enabled;
+        project.UpdatedAt = DateTime.UtcNow;
+        operation.Repositories.Projects.Update(project);
+        await operation.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<ProjectVersionReviewView?> GetReviewAsync(
@@ -655,6 +688,91 @@ public sealed class ProjectVersionHistoryService(
             cancellationToken);
         historyEvents.PublishReviewStateChanged(projectId);
         return checkpoint;
+    }
+
+    public async Task<ProjectVersionCheckpointView> ApproveAllAndDisableReviewEditsAsync(
+        Guid projectId,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        string semanticMessage = "Approved Review Edits before disabling Review Edits",
+        string? requestKey = null,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateProjectId(projectId);
+        ArgumentNullException.ThrowIfNull(expectedToken);
+        if (string.IsNullOrWhiteSpace(semanticMessage))
+            throw new ArgumentException("A semantic checkpoint message is required.", nameof(semanticMessage));
+        if (semanticMessage.Contains('\0'))
+            throw new ArgumentException("A checkpoint message cannot contain a null character.", nameof(semanticMessage));
+        if (requestKey?.Length > 200)
+            throw new ArgumentException("A checkpoint request key is too long.", nameof(requestKey));
+        if (expectedToken.RepositoryId == Guid.Empty)
+            throw new ArgumentException("A review token must identify a repository.", nameof(expectedToken));
+        if (string.IsNullOrWhiteSpace(expectedToken.CurrentContentHash))
+            throw new ArgumentException("A review token must include the current content hash.", nameof(expectedToken));
+
+        await using var projectLease = await projectMutations.AcquireAsync(projectId, cancellationToken);
+        var status = await GetStatusUnderLeaseAsync(
+            projectId,
+            includeCurrentSnapshotHash: false,
+            cancellationToken)
+            ?? throw new InvalidOperationException($"Project {projectId} has no version-history repository.");
+        EnsureReviewRepositoryUsable(status.Repository);
+        if (string.IsNullOrWhiteSpace(status.Repository.HeadCommitSha))
+            throw new InvalidOperationException("Review Edits cannot be disabled until an approved Git baseline exists.");
+
+        var approved = LoadGitCheckpoint(
+            status.Repository.RepositoryId,
+            status.Repository.HeadCommitSha,
+            recordedCheckpoint: null,
+            projectId,
+            cancellationToken);
+        var temporaryDirectory = CreateTemporaryDirectory();
+        try
+        {
+            var current = await snapshotWriter.WriteAsync(
+                status.Repository.RepositoryId,
+                projectId,
+                temporaryDirectory,
+                cancellationToken);
+            EnsureNoReparsePointsRecursively(temporaryDirectory);
+            var comparison = snapshotComparer.Compare(approved.Payload, current.Payload);
+            var currentStatus = status with
+            {
+                CurrentContentHash = current.Manifest.ContentHash,
+                Repository = status.Repository with { IsDirty = !comparison.IsIdentical },
+            };
+            EnsureReviewTokenMatches(currentStatus, expectedToken);
+
+            if (comparison.IsIdentical)
+            {
+                var recordedCheckpoint = await LoadRecordedCheckpointUnderLeaseAsync(
+                    status.Repository.RepositoryId,
+                    approved.Commit.Sha,
+                    cancellationToken)
+                    ?? throw new InvalidOperationException("The approved Git head has no checkpoint record.");
+                await SetReviewEditsPreferenceUnderLeaseAsync(projectId, enabled: false, cancellationToken);
+                historyEvents.PublishReviewStateChanged(projectId);
+                return ToCheckpointView(recordedCheckpoint);
+            }
+
+            var checkpoint = await CreateCheckpointUnderLeaseAsync(
+                projectId,
+                ProjectVersionCheckpointKind.ReviewApproval,
+                semanticMessage,
+                requestKey,
+                authoredAt: null,
+                cancellationToken,
+                capturedSnapshot: current,
+                disableReviewEdits: true,
+                publishEvents: false);
+            historyEvents.PublishCheckpointCreated(projectId);
+            historyEvents.PublishReviewStateChanged(projectId);
+            return checkpoint;
+        }
+        finally
+        {
+            CleanupTemporaryDirectory(temporaryDirectory);
+        }
     }
 
     public async Task<ProjectVersionCheckpointView> CreateReviewApprovalForChapterAsync(
@@ -1831,7 +1949,9 @@ public sealed class ProjectVersionHistoryService(
         string message,
         DateTimeOffset authoredAt,
         bool createdCommit,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? projectId = null,
+        bool disableReviewEdits = false)
     {
         await using var operation = await database.OpenWriteAsync(cancellationToken);
         var db = operation.Db;
@@ -1884,6 +2004,18 @@ public sealed class ProjectVersionHistoryService(
         journal.UpdatedAt = journal.CompletedAt.Value;
         journal.ErrorCode = null;
         journal.ErrorMessage = null;
+
+        if (disableReviewEdits)
+        {
+            if (projectId is not Guid projectIdValue || projectIdValue == Guid.Empty)
+                throw new InvalidOperationException("Disabling Review Edits requires a project identity.");
+
+            var project = await db.Projects
+                .SingleOrDefaultAsync(item => item.Id == projectIdValue, cancellationToken)
+                ?? throw new InvalidOperationException($"Project {projectIdValue} not found.");
+            project.ReviewEditsEnabled = false;
+            project.UpdatedAt = DateTime.UtcNow;
+        }
 
         await AddPendingAutoPushIntentsAsync(
             db,

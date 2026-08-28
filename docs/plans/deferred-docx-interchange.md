@@ -25,7 +25,7 @@ effective Core/release book.
 
 ## 1. Rich manuscript and style support
 
-Advance the manuscript to schema v5 and Press to protocol v8.
+Advance the manuscript to schema v5 and Press to protocol v9.
 
 Add first-class Editor, assistant, search, EPUB, and PDF support for:
 

@@ -211,10 +211,24 @@ Edit and Read share the versioned manuscript typography defaults embedded from
 Press. Edit applies the effective project body size and leading to its
 continuous responsive canvas, while Press remains authoritative for physical
 line breaks and pagination. Explicit heading levels, bundled font aliases,
-inline marks, list and scene-break metrics, and Figure caption placement must
-resolve from the same defaults before sparse named styles and direct
-presentation are applied. Switching back to Edit refreshes page-setup
-typography without remounting or replacing the manuscript document.
+inline marks, block spacing, list and scene-break metrics, inset-quotation
+text/rule color and rule geometry, and Figure caption color/overlay treatment
+must resolve from the same defaults before sparse named styles and direct
+presentation are applied. The quotation's configured left indent is the total
+text inset; its rule and gap are placed within that measure, and a quotation
+continued across pages receives one rule segment on every occupied page. Body
+size and leading from page setup apply to quotation text in both surfaces.
+Heading levels 1-6 retain their distinct semantic levels in Read and tagged
+Digital PDF output.
+
+Paragraph Book Text Styles and direct paragraph presentation on a Figure target
+its caption rather than the image-bearing Figure wrapper. Caption left/right
+and first-line indents constrain and position caption text within the image
+measure. Direct presentation remains the final precedence layer, including
+explicit `false` values that turn off inherited italic or small-caps styling.
+Visible links inherit the surrounding text color and remain underlined.
+Switching back to Edit refreshes page-setup typography without remounting or
+replacing the manuscript document.
 
 On revision conflict, the service returns the latest persisted document and
 revision. The adapter adopts that authoritative snapshot, refreshes history,

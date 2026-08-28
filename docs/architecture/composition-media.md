@@ -143,6 +143,14 @@ guards. Image deletion refuses live Figure, Designed Page, cover, publication,
 or other placement references and repeats the authoritative lookup inside its
 write transaction so stale UI cannot remove a protected asset.
 
+Figure captions share one manuscript typography contract across Edit, Read,
+EPUB, and Press. Non-overlay captions use the shared muted text color. Overlay
+captions use the shared foreground color, translucent backing color/opacity,
+and vertical/horizontal padding; Press emits the backing as vector paint below
+selectable caption text. A paragraph Book Text Style or direct paragraph
+presentation on a Figure styles and indents its caption, not the image-bearing
+wrapper.
+
 Designed Pages contain semantic fragments and a scene, not duplicate prose.
 Text objects bind stable block/range identities; a newly authored text frame
 creates its own semantic block and writes ordinary manuscript inline marks.

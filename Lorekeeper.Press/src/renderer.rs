@@ -2243,15 +2243,36 @@ fn paginate_with_cancellation(
                             } else if caption_placement == "Overlay"
                                 && let Some(image) = page.images.first()
                             {
+                                let first_y = image.y
+                                    + caption_style.size
+                                    + page.lines.len().saturating_sub(1) as f32 * caption_step;
                                 for (index, line) in page.lines.iter_mut().enumerate() {
-                                    line.y =
-                                        image.y + caption_style.size + index as f32 * caption_step;
+                                    line.y = first_y - index as f32 * caption_step;
                                     line.light_text = true;
                                 }
                             }
                             for line in &mut page.lines {
                                 line.language.clone_from(&language);
                                 line.artifact = false;
+                                line.fill_rgb = if caption_placement == "Overlay" {
+                                    Some(
+                                        typography::defaults()
+                                            .caption
+                                            .overlay
+                                            .as_ref()
+                                            .expect("caption overlay defaults")
+                                            .text_color_rgb,
+                                    )
+                                } else {
+                                    typography::defaults().caption.text_color_rgb
+                                };
+                            }
+                            if caption_placement == "Overlay" {
+                                add_overlay_caption_background(
+                                    &mut page,
+                                    &block_id,
+                                    &caption_style,
+                                );
                             }
                             pages.push(page);
                             first_page = pages.len();
@@ -2259,6 +2280,7 @@ fn paginate_with_cancellation(
                             append_inline_illustration(
                                 &mut pages,
                                 trim,
+                                &block_id,
                                 &string(&block, "caption"),
                                 &caption_runs,
                                 &caption_style,
@@ -2355,6 +2377,21 @@ fn paginate_with_cancellation(
                             )
                         }
                     };
+                    if block_type.eq_ignore_ascii_case("blockquote") || is_blockquote_role(&block) {
+                        let defaults = &typography::defaults().blockquote;
+                        set_line_color_since(
+                            &mut pages,
+                            &semantic_snapshot,
+                            defaults.text_color_rgb,
+                        );
+                        append_blockquote_decorations(
+                            &mut pages,
+                            &semantic_snapshot,
+                            trim,
+                            &style,
+                            &semantic_id,
+                        );
+                    }
                     previous_space_after = style.space_after;
                     assign_semantic_order_since(
                         &mut pages,
@@ -2449,6 +2486,7 @@ fn paginate_with_cancellation(
     {
         features.insert(format!("accessibility-role-{}", role.to_ascii_lowercase()));
     }
+    normalize_paint_orders(&mut pages);
     assign_page_labels(&mut pages, body_start_page.unwrap_or(1));
     Ok(LayoutDocument {
         pages,
@@ -2463,6 +2501,7 @@ fn paginate_with_cancellation(
 fn append_inline_illustration(
     pages: &mut Vec<LayoutPage>,
     trim: &crate::model::Trim,
+    semantic_id: &str,
     caption: &str,
     caption_runs: &[LayoutRun],
     caption_style: &BlockStyle,
@@ -2494,11 +2533,20 @@ fn append_inline_illustration(
     let caption_line_height = caption_style.line_height.max(1.0);
     let caption_space_before = caption_style.space_before.max(0.0);
     let caption_space_after = caption_style.space_after.max(0.0);
-    let caption_width = if caption_placement == "Overlay" {
-        (image_width - 12.0).max(0.0)
+    let overlay = typography::defaults()
+        .caption
+        .overlay
+        .as_ref()
+        .expect("caption overlay defaults");
+    let overlay_padding_vertical = overlay.padding_vertical_em * caption_size;
+    let overlay_padding_horizontal = overlay.padding_horizontal_em * caption_size;
+    let overlay_horizontal = if caption_placement == "Overlay" {
+        overlay_padding_horizontal
     } else {
-        image_width
+        0.0
     };
+    let (caption_origin_x, caption_width) =
+        caption_content_geometry(image_x, image_width, caption_style, overlay_horizontal);
     let caption_lines = if caption_placement == "Hidden" {
         Vec::new()
     } else {
@@ -2584,8 +2632,28 @@ fn append_inline_illustration(
     } else {
         first_caption_y
             - caption_lines.len().saturating_sub(1) as f32 * caption_step
-            - caption_size * 0.30
+            - caption_size * (caption_line_height - 0.82)
     };
+    if caption_placement == "Overlay" && !caption_lines.is_empty() {
+        let top = first_caption_y + caption_size * 0.82 + overlay_padding_vertical;
+        let bottom = caption_bottom - overlay_padding_vertical;
+        let shape_index = page.shapes.len();
+        page.shapes.push(LayoutShape {
+            kind: LayoutShapeKind::Rectangle,
+            x: image_x,
+            y: bottom,
+            width: image_width,
+            height: (top - bottom).max(0.0),
+            fill_rgb: Some(overlay.background_color_rgb),
+            stroke_rgb: None,
+            stroke_width: 0.0,
+            opacity: overlay.background_opacity,
+            rotation_degrees: 0.0,
+            semantic_id: Some(format!("{semantic_id}:caption-background")),
+            semantic_parent_id: Some(semantic_id.to_owned()),
+        });
+        page.paint_order.push(LayoutPaint::Shape(shape_index));
+    }
     if text_wrap.is_empty() || text_wrap == "None" {
         let flow_bottom = if caption_placement == "Below" {
             caption_bottom - caption_space_after
@@ -2634,14 +2702,14 @@ fn append_inline_illustration(
         for (index, (text, runs)) in caption_lines.iter().cloned().enumerate() {
             let baseline_offset_points =
                 line_baseline_offset_points(caption_size, caption_style.face, &runs);
+            let first_line_indent = if index == 0 {
+                caption_style.first_line_indent
+            } else {
+                0.0
+            };
             let caption_x = aligned_caption_x(
-                image_x
-                    + if caption_placement == "Overlay" {
-                        6.0
-                    } else {
-                        0.0
-                    },
-                caption_width,
+                caption_origin_x + first_line_indent,
+                (caption_width - first_line_indent.max(0.0)).max(0.0),
                 caption_style,
                 &runs,
             );
@@ -2659,7 +2727,11 @@ fn append_inline_illustration(
                 rotation_origin_y: None,
                 opacity: 1.0,
                 light_text: caption_placement == "Overlay",
-                fill_rgb: None,
+                fill_rgb: if caption_placement == "Overlay" {
+                    Some(overlay.text_color_rgb)
+                } else {
+                    typography::defaults().caption.text_color_rgb
+                },
                 semantic_role: LayoutSemanticRole::Caption,
                 artifact: true,
                 language: None,
@@ -2679,7 +2751,19 @@ fn append_inline_illustration(
         for (index, (text, runs)) in caption_lines.into_iter().enumerate() {
             let baseline_offset_points =
                 line_baseline_offset_points(caption_size, caption_style.face, &runs);
-            let caption_x = aligned_caption_x(margin, available_width, caption_style, &runs);
+            let (caption_origin_x, caption_width) =
+                caption_content_geometry(margin, available_width, caption_style, 0.0);
+            let first_line_indent = if index == 0 {
+                caption_style.first_line_indent
+            } else {
+                0.0
+            };
+            let caption_x = aligned_caption_x(
+                caption_origin_x + first_line_indent,
+                (caption_width - first_line_indent.max(0.0)).max(0.0),
+                caption_style,
+                &runs,
+            );
             caption_page.lines.push(LayoutLine {
                 text,
                 runs,
@@ -2694,7 +2778,7 @@ fn append_inline_illustration(
                 rotation_origin_y: None,
                 opacity: 1.0,
                 light_text: false,
-                fill_rgb: None,
+                fill_rgb: typography::defaults().caption.text_color_rgb,
                 semantic_role: LayoutSemanticRole::Caption,
                 artifact: true,
                 language: None,
@@ -2707,6 +2791,56 @@ fn append_inline_illustration(
             });
         }
     }
+}
+
+fn add_overlay_caption_background(
+    page: &mut LayoutPage,
+    semantic_id: &str,
+    caption_style: &BlockStyle,
+) {
+    let Some(image) = page.images.first() else {
+        return;
+    };
+    let caption_lines = page
+        .lines
+        .iter()
+        .filter(|line| line.semantic_role == LayoutSemanticRole::Caption && !line.artifact)
+        .collect::<Vec<_>>();
+    if caption_lines.is_empty() {
+        return;
+    }
+    let overlay = typography::defaults()
+        .caption
+        .overlay
+        .as_ref()
+        .expect("caption overlay defaults");
+    let padding_vertical = overlay.padding_vertical_em * caption_style.size;
+    let top = caption_lines
+        .iter()
+        .map(|line| line.y + line.size * 0.82)
+        .fold(f32::NEG_INFINITY, f32::max)
+        + padding_vertical;
+    let bottom = caption_lines
+        .iter()
+        .map(|line| line.y - line.size * (caption_style.line_height.max(1.0) - 0.82))
+        .fold(f32::INFINITY, f32::min)
+        - padding_vertical;
+    let shape_index = page.shapes.len();
+    page.shapes.push(LayoutShape {
+        kind: LayoutShapeKind::Rectangle,
+        x: image.x,
+        y: bottom,
+        width: image.width,
+        height: (top - bottom).max(0.0),
+        fill_rgb: Some(overlay.background_color_rgb),
+        stroke_rgb: None,
+        stroke_width: 0.0,
+        opacity: overlay.background_opacity,
+        rotation_degrees: 0.0,
+        semantic_id: Some(format!("{semantic_id}:caption-background")),
+        semantic_parent_id: Some(semantic_id.to_owned()),
+    });
+    page.paint_order.push(LayoutPaint::Shape(shape_index));
 }
 
 fn assign_semantic_order_since(
@@ -3189,6 +3323,8 @@ fn designed_page(
                             .get("rotationDegrees")
                             .and_then(Value::as_f64)
                             .unwrap_or_default() as f32,
+                        semantic_id: None,
+                        semantic_parent_id: None,
                     });
                     page.paint_order.push(LayoutPaint::Shape(shape_index));
                 }
@@ -3214,6 +3350,8 @@ fn designed_page(
                             .get("rotationDegrees")
                             .and_then(Value::as_f64)
                             .unwrap_or_default() as f32,
+                        semantic_id: None,
+                        semantic_parent_id: None,
                     });
                     page.paint_order.push(LayoutPaint::Shape(shape_index));
                 }
@@ -3396,6 +3534,8 @@ fn designed_page(
                         .get("rotationDegrees")
                         .and_then(Value::as_f64)
                         .unwrap_or_default() as f32,
+                    semantic_id: None,
+                    semantic_parent_id: None,
                 });
                 page.paint_order.push(LayoutPaint::Shape(shape_index));
             }
@@ -4388,8 +4528,11 @@ fn append_publication_sections(
                     } else if caption_placement == "Overlay"
                         && let Some(image) = page.images.first()
                     {
+                        let first_y = image.y
+                            + caption_style.size
+                            + page.lines.len().saturating_sub(1) as f32 * caption_step;
                         for (index, line) in page.lines.iter_mut().enumerate() {
-                            line.y = image.y + caption_style.size + index as f32 * caption_step;
+                            line.y = first_y - index as f32 * caption_step;
                             line.light_text = true;
                         }
                     }
@@ -4399,12 +4542,28 @@ fn append_publication_sections(
                             .and_then(Value::as_str)
                             .map(str::to_owned);
                         line.artifact = false;
+                        line.fill_rgb = if caption_placement == "Overlay" {
+                            Some(
+                                typography::defaults()
+                                    .caption
+                                    .overlay
+                                    .as_ref()
+                                    .expect("caption overlay defaults")
+                                    .text_color_rgb,
+                            )
+                        } else {
+                            typography::defaults().caption.text_color_rgb
+                        };
+                    }
+                    if caption_placement == "Overlay" {
+                        add_overlay_caption_background(&mut page, &block_id, &caption_style);
                     }
                     pages.push(page);
                 } else {
                     append_inline_illustration(
                         pages,
                         trim,
+                        &block_id,
                         &string(block, "caption"),
                         &caption_runs,
                         &caption_style,
@@ -4890,6 +5049,20 @@ fn aligned_caption_x(origin_x: f32, width: f32, style: &BlockStyle, runs: &[Layo
         }
 }
 
+fn caption_content_geometry(
+    origin_x: f32,
+    width: f32,
+    style: &BlockStyle,
+    horizontal_padding: f32,
+) -> (f32, f32) {
+    let left = style.indent.max(0.0);
+    let right = style.right_indent.max(0.0);
+    (
+        origin_x + left + horizontal_padding,
+        (width - left - right - horizontal_padding * 2.0).max(0.0),
+    )
+}
+
 fn validate_caption_bounds(
     document: &Value,
     value: &Value,
@@ -4917,9 +5090,15 @@ fn validate_caption_bounds(
                 let image_width = available_width * (width_percent / 100.0).clamp(0.1, 1.0);
                 let caption_style = block_style(document, value, trim);
                 let caption_runs = block_runs(document, value, &caption_style);
-                let lines =
-                    wrapped_caption_with_runs(caption, &caption_runs, &caption_style, image_width)
-                        .len();
+                let (_, caption_width) =
+                    caption_content_geometry(0.0, image_width, &caption_style, 0.0);
+                let lines = wrapped_caption_with_runs(
+                    caption,
+                    &caption_runs,
+                    &caption_style,
+                    caption_width,
+                )
+                .len();
                 let caption_size = caption_style.size;
                 let caption_step = caption_size * caption_style.line_height.max(1.0);
                 let inline = values.contains_key("anchorPosition")
@@ -5591,8 +5770,139 @@ fn empty_body_page() -> LayoutPage {
     }
 }
 
+fn is_blockquote_role(block: &Value) -> bool {
+    string(block, "styleRole").eq_ignore_ascii_case("block-quote")
+}
+
+fn normalize_paint_orders(pages: &mut [LayoutPage]) {
+    for page in pages {
+        let has_manuscript_decoration = page.shapes.iter().any(|shape| shape.semantic_id.is_some());
+        if !page.paint_order.is_empty() && !has_manuscript_decoration {
+            continue;
+        }
+        let overlay_shapes = page
+            .shapes
+            .iter()
+            .enumerate()
+            .filter(|(_, shape)| {
+                shape
+                    .semantic_id
+                    .as_deref()
+                    .is_some_and(|id| id.ends_with(":caption-background"))
+            })
+            .map(|(index, _)| LayoutPaint::Shape(index));
+        let other_shapes = page
+            .shapes
+            .iter()
+            .enumerate()
+            .filter(|(_, shape)| {
+                !shape
+                    .semantic_id
+                    .as_deref()
+                    .is_some_and(|id| id.ends_with(":caption-background"))
+            })
+            .map(|(index, _)| LayoutPaint::Shape(index));
+        let images = page
+            .images
+            .iter()
+            .enumerate()
+            .map(|(index, _)| LayoutPaint::Image(index));
+        let lines = page
+            .lines
+            .iter()
+            .enumerate()
+            .map(|(index, _)| LayoutPaint::Line(index));
+        page.paint_order = if page.shapes.iter().any(|shape| {
+            shape
+                .semantic_id
+                .as_deref()
+                .is_some_and(|id| id.ends_with(":caption-background"))
+        }) {
+            images
+                .chain(overlay_shapes)
+                .chain(other_shapes)
+                .chain(lines)
+                .collect()
+        } else {
+            other_shapes.chain(images).chain(lines).collect()
+        };
+    }
+}
+
+fn set_line_color_since(
+    pages: &mut [LayoutPage],
+    snapshot: &[(usize, usize)],
+    color: Option<[f32; 3]>,
+) {
+    for (page_index, page) in pages.iter_mut().enumerate() {
+        let line_start = snapshot.get(page_index).map_or(0, |entry| entry.0);
+        for line in page.lines.iter_mut().skip(line_start) {
+            if !line.artifact {
+                line.fill_rgb = color;
+            }
+        }
+    }
+}
+
+fn append_blockquote_decorations(
+    pages: &mut [LayoutPage],
+    snapshot: &[(usize, usize)],
+    trim: &crate::model::Trim,
+    style: &BlockStyle,
+    semantic_id: &str,
+) {
+    let defaults = &typography::defaults().blockquote;
+    let decoration = defaults
+        .decoration
+        .as_ref()
+        .expect("blockquote decoration defaults");
+    let rule_width = decoration.rule_width_em * style.size;
+    let rule_gap = decoration.rule_gap_em * style.size;
+    let outer_indent = (style.indent - rule_width - rule_gap).max(0.0);
+    let rule_x = trim.margin_inches * 72.0 + outer_indent;
+    for (page_index, page) in pages.iter_mut().enumerate() {
+        let line_start = snapshot.get(page_index).map_or(0, |entry| entry.0);
+        let quote_lines = page
+            .lines
+            .iter()
+            .skip(line_start)
+            .filter(|line| !line.artifact)
+            .collect::<Vec<_>>();
+        if quote_lines.is_empty() {
+            continue;
+        }
+        let top = quote_lines
+            .iter()
+            .map(|line| line.y + line.size * 0.82)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let bottom = quote_lines
+            .iter()
+            .map(|line| line.y - line.size * (style.line_height.max(1.0) - 0.82))
+            .fold(f32::INFINITY, f32::min);
+        let shape_index = page.shapes.len();
+        page.shapes.push(LayoutShape {
+            kind: LayoutShapeKind::Rectangle,
+            x: rule_x,
+            y: bottom,
+            width: rule_width,
+            height: (top - bottom).max(rule_width),
+            fill_rgb: Some(decoration.rule_color_rgb),
+            stroke_rgb: None,
+            stroke_width: 0.0,
+            opacity: 1.0,
+            rotation_degrees: 0.0,
+            semantic_id: Some(format!("{semantic_id}:rule")),
+            semantic_parent_id: Some(semantic_id.to_owned()),
+        });
+        page.paint_order.push(LayoutPaint::Shape(shape_index));
+    }
+}
+
 fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> BlockStyle {
     let block_type = string(block, "type");
+    let style_role = string(block, "styleRole");
+    let is_blockquote_role = style_role.eq_ignore_ascii_case("block-quote");
+    let mut blockquote_left_indent_em = None;
     let mut style = if block_type.eq_ignore_ascii_case("Figure") {
         BlockStyle::caption(trim)
     } else {
@@ -5622,7 +5932,10 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             {
                 1 => LayoutSemanticRole::Heading1,
                 2 => LayoutSemanticRole::Heading2,
-                _ => LayoutSemanticRole::Heading3,
+                3 => LayoutSemanticRole::Heading3,
+                4 => LayoutSemanticRole::Heading4,
+                5 => LayoutSemanticRole::Heading5,
+                _ => LayoutSemanticRole::Heading6,
             };
         }
         "blockquote" => {
@@ -5632,6 +5945,7 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             style.face = regular_face(font_family(&defaults.font_family_key))
                 .with_weight(defaults.font_weight, defaults.italic);
             style.font_weight = defaults.font_weight;
+            blockquote_left_indent_em = Some(defaults.left_indent_em);
             style.indent = defaults.left_indent_em * style.size;
             style.alignment = normalized_alignment(&defaults.text_align);
             style.space_before = defaults.space_before_points;
@@ -5655,13 +5969,37 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
         }
         _ => {}
     }
-    let semantic_role = string(block, "styleRole");
+    if is_blockquote_role {
+        let defaults = &typography::defaults().blockquote;
+        blockquote_left_indent_em = Some(defaults.left_indent_em);
+        style.size = trim.body_font_size_points;
+        style.line_height = trim.body_line_height;
+        style.face = regular_face(font_family(&defaults.font_family_key))
+            .with_weight(defaults.font_weight, defaults.italic);
+        style.font_weight = defaults.font_weight;
+        style.alignment = normalized_alignment(&defaults.text_align);
+        style.space_before = defaults.space_before_points;
+        style.space_after = defaults.space_after_points;
+        style.indent = defaults.left_indent_em * style.size;
+    }
+    if style_role.eq_ignore_ascii_case("chapter-heading") {
+        let defaults = &typography::defaults().chapter_heading;
+        style.size = defaults.font_size_points;
+        style.line_height = defaults.line_height;
+        style.face = regular_face(font_family(&defaults.font_family_key))
+            .with_weight(defaults.font_weight, defaults.italic);
+        style.font_weight = defaults.font_weight;
+        style.alignment = normalized_alignment(&defaults.text_align);
+        style.space_before = defaults.space_before_points;
+        style.space_after = defaults.space_after_points;
+        style.keep_with_next = true;
+    }
     if let Some(definition) = document
         .get("styles")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .find(|candidate| string(candidate, "semanticRole") == semantic_role)
+        .find(|candidate| string(candidate, "semanticRole") == style_role)
         .and_then(|candidate| candidate.get("definition"))
     {
         if let Some(size) = definition.get("fontSizePoints").and_then(Value::as_f64) {
@@ -5696,10 +6034,13 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
         if let Some(value) = definition.get("spaceAfterPoints").and_then(Value::as_f64) {
             style.space_after = value as f32;
         }
-        style.indent = definition
-            .get("leftIndentEm")
-            .and_then(Value::as_f64)
-            .map_or(style.indent, |value| value as f32 * style.size);
+        if let Some(value) = definition.get("leftIndentEm").and_then(Value::as_f64) {
+            if block_type.eq_ignore_ascii_case("blockquote") || is_blockquote_role {
+                blockquote_left_indent_em = Some(value as f32);
+            } else {
+                style.indent = value as f32 * style.size;
+            }
+        }
         style.right_indent = definition
             .get("rightIndentEm")
             .and_then(Value::as_f64)
@@ -5746,10 +6087,13 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             }
             .to_owned();
         }
-        style.indent = presentation
-            .get("leftIndentEm")
-            .and_then(Value::as_f64)
-            .map_or(style.indent, |value| value as f32 * style.size);
+        if let Some(value) = presentation.get("leftIndentEm").and_then(Value::as_f64) {
+            if block_type.eq_ignore_ascii_case("blockquote") || is_blockquote_role {
+                blockquote_left_indent_em = Some(value as f32);
+            } else {
+                style.indent = value as f32 * style.size;
+            }
+        }
         style.right_indent = presentation
             .get("rightIndentEm")
             .and_then(Value::as_f64)
@@ -5774,6 +6118,15 @@ fn block_style(document: &Value, block: &Value, trim: &crate::model::Trim) -> Bl
             .get("startOnNewPage")
             .and_then(Value::as_bool)
             .unwrap_or(style.page_break_before);
+    }
+    if let Some(left_indent_em) = blockquote_left_indent_em {
+        let decoration = typography::defaults()
+            .blockquote
+            .decoration
+            .as_ref()
+            .expect("blockquote decoration defaults");
+        style.indent =
+            left_indent_em.max(decoration.rule_width_em + decoration.rule_gap_em) * style.size;
     }
     style
 }
@@ -6068,7 +6421,10 @@ fn dedicated_figure_page_with_layout(
         "right" => margin + available_width - image_width,
         _ => margin + (available_width - image_width) / 2.0,
     };
-    let caption_lines = wrapped_caption_with_runs(label, caption_runs, caption_style, image_width);
+    let (caption_origin_x, caption_width) =
+        caption_content_geometry(image_x, image_width, caption_style, 0.0);
+    let caption_lines =
+        wrapped_caption_with_runs(label, caption_runs, caption_style, caption_width);
     let caption_size = caption_style.size;
     let caption_step = caption_size * caption_style.line_height.max(1.0);
     let first_caption_y = margin
@@ -6086,7 +6442,17 @@ fn dedicated_figure_page_with_layout(
             .into_iter()
             .enumerate()
             .map(|(index, (text, runs))| {
-                let x = aligned_caption_x(image_x, image_width, caption_style, &runs);
+                let first_line_indent = if index == 0 {
+                    caption_style.first_line_indent
+                } else {
+                    0.0
+                };
+                let x = aligned_caption_x(
+                    caption_origin_x + first_line_indent,
+                    (caption_width - first_line_indent.max(0.0)).max(0.0),
+                    caption_style,
+                    &runs,
+                );
                 let baseline_offset_points =
                     line_baseline_offset_points(caption_size, caption_style.face, &runs);
                 LayoutLine {
@@ -6975,6 +7341,7 @@ mod tests {
         append_inline_illustration(
             &mut pages,
             &trim,
+            "figure-id",
             "",
             &[],
             &BlockStyle::caption(&trim),
@@ -7221,6 +7588,26 @@ mod tests {
         let style = block_style(&document, &block, &standard_trim());
         assert_eq!(style.face, FontFace::SansBold);
         assert!((style.size - 19.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn direct_false_typography_overrides_named_style_emphasis() {
+        let document = serde_json::json!({
+            "styles": [{
+                "semanticRole": "epigraph",
+                "definition": { "italic": true, "smallCaps": true }
+            }]
+        });
+        let block = serde_json::json!({
+            "type": "Paragraph",
+            "styleRole": "epigraph",
+            "paragraphPresentation": { "italic": false, "smallCaps": false }
+        });
+
+        let style = block_style(&document, &block, &standard_trim());
+
+        assert_eq!(style.face, FontFace::SerifRegular);
+        assert!(!style.small_caps);
     }
 
     #[test]

@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use serde::Deserialize;
 
-const DEFAULTS_JSON: &str = include_str!("../assets/manuscript-typography-v1.json");
+const DEFAULTS_JSON: &str = include_str!("../assets/manuscript-typography-v2.json");
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,6 +40,30 @@ pub struct BlockDefaults {
     pub space_after_points: f32,
     #[serde(default)]
     pub left_indent_em: f32,
+    #[serde(default)]
+    pub text_color_rgb: Option<[f32; 3]>,
+    #[serde(default)]
+    pub decoration: Option<BlockquoteDecoration>,
+    #[serde(default)]
+    pub overlay: Option<CaptionOverlayDefaults>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockquoteDecoration {
+    pub rule_width_em: f32,
+    pub rule_gap_em: f32,
+    pub rule_color_rgb: [f32; 3],
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptionOverlayDefaults {
+    pub background_color_rgb: [f32; 3],
+    pub background_opacity: f32,
+    pub padding_vertical_em: f32,
+    pub padding_horizontal_em: f32,
+    pub text_color_rgb: [f32; 3],
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,7 +114,7 @@ pub fn defaults() -> &'static TypographyDefaults {
     DEFAULTS.get_or_init(|| {
         let defaults: TypographyDefaults =
             serde_json::from_str(DEFAULTS_JSON).expect("valid manuscript typography defaults");
-        assert_eq!(defaults.schema_version, 1);
+        assert_eq!(defaults.schema_version, 2);
         defaults
     })
 }

@@ -12,7 +12,7 @@
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <Title>Lorekeeper</Title>
     <Description>AI-assisted narrative coherence engine.</Description>
-    <Version>0.3.9</Version>
+    <Version>0.3.10</Version>
     <PackageId>Lorekeeper</PackageId>
     <ElectronVersion>43.1.0</ElectronVersion>
     <ElectronBuilderVersion>26.15.3</ElectronBuilderVersion>
@@ -49,7 +49,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Lorekeeper.Tests" />
     <EmbeddedResource Include="..\Lorekeeper.Press\assets\print-products-v1.json" Link="PrintProducts\print-products-v1.json" />
-    <EmbeddedResource Include="..\Lorekeeper.Press\assets\manuscript-typography-v1.json" Link="Typography\manuscript-typography-v1.json" />
+    <EmbeddedResource Include="..\Lorekeeper.Press\assets\manuscript-typography-v2.json" Link="Typography\manuscript-typography-v2.json" />
   </ItemGroup>
 
   <Target Name="BuildLorekeeperPressRuntime" AfterTargets="Build">

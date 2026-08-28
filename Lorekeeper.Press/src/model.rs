@@ -417,6 +417,10 @@ pub struct LayoutShape {
     pub stroke_width: f32,
     pub opacity: f32,
     pub rotation_degrees: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_parent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -497,6 +501,9 @@ pub enum LayoutSemanticRole {
     Heading1,
     Heading2,
     Heading3,
+    Heading4,
+    Heading5,
+    Heading6,
     ListItem,
     Caption,
     Credit,

@@ -422,7 +422,20 @@
         {
             await InvokeAsync(async () =>
             {
-                await LoadCurrentProjectAsync();
+                var refreshedProject = await Projects.GetByIdAsync(
+                    projectId,
+                    _lifetimeCancellation.Token);
+                if (_disposed || _project?.Id != projectId)
+                    return;
+
+                if (refreshedProject is not null)
+                    _project = refreshedProject;
+
+                // Review invalidations can be raised by every successful
+                // manuscript autosave. Keep the current status projection in
+                // place until ProjectReviewControls supplies its refreshed
+                // review; resetting the layout state here makes both controls
+                // flicker disabled and needlessly re-queries the route.
                 if (!_disposed)
                     StateHasChanged();
             });
@@ -432,6 +445,15 @@
         }
         catch (ObjectDisposedException)
         {
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            if (_disposed || _project?.Id != projectId)
+                return;
+
+            _error = $"History status unavailable: {exception.Message}";
+            try { await InvokeAsync(StateHasChanged); }
+            catch (ObjectDisposedException) { }
         }
     }
 

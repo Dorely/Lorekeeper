@@ -6,6 +6,7 @@ using Lorekeeper.Composition;
 using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
+using Lorekeeper.VersionHistory.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Publish;
@@ -82,7 +83,8 @@ public sealed class PublicationSectionService(
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IManuscriptStyleService manuscriptStyles,
     IAuthoringHistoryRuntime authoringHistory,
-    IAuthoringMutationContextAccessor authoringMutationContext) : IPublicationSectionService
+    IAuthoringMutationContextAccessor authoringMutationContext,
+    ProjectVersionHistoryUiEvents historyEvents) : IPublicationSectionService
 {
     public async Task EnsureSystemSectionsAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -102,10 +104,12 @@ public sealed class PublicationSectionService(
             .Select(item => item.SystemRole)
             .ToListAsync(cancellationToken)).ToHashSet();
         var now = DateTime.UtcNow;
+        var added = false;
         foreach (var (role, kind, title, order, startSide) in SystemSectionDefinitions)
         {
             if (roles.Contains(role))
                 continue;
+            added = true;
             var id = Guid.NewGuid();
             db.PublicationSections.Add(new PublicationSection
             {
@@ -123,8 +127,12 @@ public sealed class PublicationSectionService(
                 UpdatedAt = now,
             });
         }
+        if (!added)
+            return;
+
         await TouchBookAsync(projectId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        historyEvents.PublishReviewStateChanged(projectId);
     }
 
     public async Task<IReadOnlyList<PublicationSectionView>> ListAsync(
@@ -256,6 +264,7 @@ public sealed class PublicationSectionService(
             }
         }
         await db.SaveChangesAsync(cancellationToken);
+        historyEvents.PublishReviewStateChanged(target.ProjectId);
         if (beforeHistory is not null && afterHistory is not null)
         {
             var historyTarget = SectionHistoryTarget(target, row.Id);
@@ -311,6 +320,9 @@ public sealed class PublicationSectionService(
                 if (overlay.Revision != expectedRevision)
                     throw new DbUpdateConcurrencyException($"Publication section changed (expected revision {expectedRevision}, current {overlay.Revision}).");
 
+                if (!overlay.IsExcluded && overlay.InclusionMode == inclusionMode)
+                    return await GetStoredAsync(target, overlay.Id, cancellationToken);
+
                 overlay.InclusionMode = inclusionMode;
                 overlay.IsExcluded = false;
                 overlay.UpdatedAt = DateTime.UtcNow;
@@ -318,6 +330,7 @@ public sealed class PublicationSectionService(
 
             await TouchEditionAsync(editionId, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
+            historyEvents.PublishReviewStateChanged(target.ProjectId);
             return await GetStoredAsync(target, overlay.Id, cancellationToken);
         }
 
@@ -325,11 +338,14 @@ public sealed class PublicationSectionService(
             throw new DbUpdateConcurrencyException($"Publication section changed (expected revision {expectedRevision}, current {row.Revision}).");
         if (row.IsExcluded)
             throw new InvalidOperationException("An excluded publication section cannot be included through this operation.");
+        if (row.InclusionMode == inclusionMode)
+            return await GetStoredAsync(target, row.Id, cancellationToken);
 
         row.InclusionMode = inclusionMode;
         row.UpdatedAt = DateTime.UtcNow;
         await TouchTargetAsync(target, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        historyEvents.PublishReviewStateChanged(target.ProjectId);
         return await GetStoredAsync(target, row.Id, cancellationToken);
     }
 
@@ -367,6 +383,7 @@ public sealed class PublicationSectionService(
         var current = await AuthoringSnapshotCodec.CaptureManuscriptAsync(
             db, currentDocument, target.ProjectId, null, row.Id, target.EditionId, cancellationToken);
         var historyTarget = SectionHistoryTarget(target, row.Id);
+        var applied = false;
         async Task Apply(string payload, CancellationToken ct)
         {
             var saved = AuthoringSnapshotCodec.ReadManuscript(payload);
@@ -384,10 +401,13 @@ public sealed class PublicationSectionService(
             row.UpdatedAt = DateTime.UtcNow;
             await TouchTargetAsync(target, ct);
             await db.SaveChangesAsync(ct);
+            applied = true;
         }
         var result = redo
             ? await authoringHistory.RedoAsync(historyTarget, current, Apply, cancellationToken)
             : await authoringHistory.UndoAsync(historyTarget, current, Apply, cancellationToken);
+        if (applied)
+            historyEvents.PublishReviewStateChanged(target.ProjectId);
         return new PublicationSectionHistoryResult(
             await GetStoredAsync(target, row.Id, cancellationToken),
             result.State,
@@ -444,6 +464,7 @@ public sealed class PublicationSectionService(
         db.PublicationSections.Add(clone);
         await TouchEditionAsync(editionId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        historyEvents.PublishReviewStateChanged(projectId);
         return await GetStoredAsync(new(projectId, editionId), clone.Id, cancellationToken);
     }
 
@@ -469,7 +490,10 @@ public sealed class PublicationSectionService(
                 .ToListAsync(cancellationToken);
             var changed = ApplyResolvedBindings(compositions, currentValues) > 0;
             if (changed)
+            {
                 await db.SaveChangesAsync(cancellationToken);
+                historyEvents.PublishReviewStateChanged(target.ProjectId);
+            }
             return await GetStoredAsync(target, section.Id, cancellationToken);
         }
 
@@ -561,6 +585,7 @@ public sealed class PublicationSectionService(
         section.UpdatedAt = DateTime.UtcNow;
         await TouchTargetAsync(target, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        historyEvents.PublishReviewStateChanged(target.ProjectId);
         return await GetStoredAsync(target, section.Id, cancellationToken);
     }
 
@@ -589,6 +614,7 @@ public sealed class PublicationSectionService(
         db.PublicationSections.Remove(row);
         await TouchEditionAsync(editionId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        historyEvents.PublishReviewStateChanged(projectId);
         await ClearHistoryTargetsAsync(historyTargets, CancellationToken.None);
     }
 
@@ -628,6 +654,8 @@ public sealed class PublicationSectionService(
                 };
                 db.PublicationSections.Add(overlay);
             }
+            else if (overlay.IsExcluded)
+                return;
             else
                 overlay.IsExcluded = true;
             await TouchEditionAsync(editionId, cancellationToken);
@@ -643,11 +671,13 @@ public sealed class PublicationSectionService(
             await TouchTargetAsync(target, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+            historyEvents.PublishReviewStateChanged(target.ProjectId);
             await ClearHistoryTargetsAsync(historyTargets, CancellationToken.None);
             return;
         }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        historyEvents.PublishReviewStateChanged(target.ProjectId);
     }
 
     private async Task<IReadOnlyList<AuthoringHistoryTarget>> OwnedHistoryTargetsAsync(
@@ -707,6 +737,9 @@ public sealed class PublicationSectionService(
                 orderOverrides[view.CoreSectionId ?? view.Id] = index;
             }
             var serializedOrder = PublicationSectionOrderCodec.Serialize(orderOverrides);
+            if (string.Equals(edition.PublicationSectionOrderJson, serializedOrder, StringComparison.Ordinal))
+                return;
+
             var updated = await db.PublicationEditions
                 .Where(item => item.Id == edition.Id && item.Revision == edition.Revision)
                 .ExecuteUpdateAsync(setters => setters
@@ -725,6 +758,9 @@ public sealed class PublicationSectionService(
                 .ToListAsync(cancellationToken);
             var requested = orderedSectionIds.Select((id, index) => (id, index))
                 .ToDictionary(item => item.id, item => item.index);
+            if (rows.All(row => row.LocalOrder == requested[row.Id]))
+                return;
+
             foreach (var row in rows)
             {
                 row.LocalOrder = requested[row.Id];
@@ -733,6 +769,7 @@ public sealed class PublicationSectionService(
             await TouchBookAsync(target.ProjectId, cancellationToken);
         }
         await db.SaveChangesAsync(cancellationToken);
+        historyEvents.PublishReviewStateChanged(target.ProjectId);
     }
 
     public async Task<string> ResolveBoundFieldAsync(
@@ -842,6 +879,7 @@ public sealed class PublicationSectionService(
         section.UpdatedAt = DateTime.UtcNow;
         await TouchTargetAsync(target, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        historyEvents.PublishReviewStateChanged(target.ProjectId);
         return new(await GetStoredAsync(target, section.Id, cancellationToken), composition);
     }
 
@@ -1024,6 +1062,7 @@ public sealed class PublicationSectionService(
         db.PublicationSections.Add(clone);
         await TouchEditionAsync(editionId, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+        historyEvents.PublishReviewStateChanged(projectId);
         return await GetStoredAsync(new(projectId, editionId), clone.Id, cancellationToken);
     }
 
