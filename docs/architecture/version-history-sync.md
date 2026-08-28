@@ -147,9 +147,13 @@ snapshots. When enabled, direct manual and assistant mutations remain in live
 SQLite and are compared as `HEAD → live`; when disabled, completed mutating
 assistant turns checkpoint the complete live project. Existing dirty work is
 included when the preference is enabled. Disabling it while differences are
-pending presents an application confirmation; Proceed checkpoints all pending
-live work through one `ReviewApproval` and then disables the preference, while
-Cancel leaves Review Edits enabled.
+pending presents an application confirmation; Proceed validates the displayed
+review token, checkpoints the one captured complete live snapshot through a
+`ReviewApproval`, and disables the preference under the same project operation,
+while Cancel leaves Review Edits enabled. Successful manual manuscript and
+chapter mutations invalidate the top-bar projection; those invalidations retain
+the last controls while a coalesced review refresh runs outside the Blazor
+circuit so autosave never forces an Editor reload or top-bar flicker.
 
 The Review service returns affected chapter/target summaries, semantic
 manuscript groups, non-manuscript aggregates, dependency groups, contest state,

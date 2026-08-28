@@ -138,6 +138,12 @@ the live test project; terminate the browser host after the run.
   top bar places Review Edits beside Checkpoint and Pending changes beside it
   with the current count. Confirm the chooser lists affected chapter/Core or
   edition targets plus Other changes, rather than individual assistant batches.
+- With only a manual manuscript edit pending, confirm the Pending changes badge
+  appears without reloading the Editor or temporarily disabling the top-bar
+  controls. Uncheck Review Edits, cancel the confirmation, and verify the toggle
+  remains checked. Repeat and proceed; verify the complete current project is
+  approved once, the toggle switches off, and no obsolete keep-enabled error is
+  shown.
 - Open a pending chapter and confirm Review compares Git HEAD with live state,
   groups text by stable block ID, allows inline editing, Approve, and Undo, and
   keeps insertions, deletions, moves, formatting, Figures, captions, and

@@ -19,7 +19,7 @@
         <label class="project-review-toggle" title="Review changes before keeping them in the project">
             <input type="checkbox"
                    @bind="_reviewEditsEnabled"
-                   disabled="@(_loading || _busy || IsProjectLocked)"
+                   disabled="@(_loading || _busy || IsProjectLocked || _disableReviewEditsConfirmationOpen)"
                    @bind:after="OnReviewEditsChangedAsync" />
             <span>Review Edits</span>
         </label>
@@ -295,11 +295,15 @@
             return;
 
         var generation = ++_refreshGeneration;
+        var debounceRefresh = _review is not null;
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
         _backgroundRefreshCancellation = cancellation;
         _backgroundRefreshing = true;
         try
         {
+            if (debounceRefresh)
+                await Task.Delay(TimeSpan.FromMilliseconds(300), cancellation.Token);
+
             var result = await Task.Run(
                 () => LoadRefreshResultAsync(projectId, cancellation.Token),
                 cancellation.Token);
@@ -409,7 +413,11 @@
             return;
 
         CancelBackgroundRefresh();
-        _loading = true;
+        // Keep the last projection interactive while the replacement is
+        // captured off the circuit. Initial project loads have no projection
+        // to show, but autosave/history invalidations should not make the
+        // top-bar controls disappear or flicker disabled.
+        _loading = _review is null;
         _error = null;
         _refreshRequested = true;
     }
@@ -424,14 +432,49 @@
 
         var enabled = _reviewEditsEnabled;
         var previousEnabled = !enabled;
-        if (!enabled && _review is { Comparison.IsIdentical: false })
+        if (!enabled)
         {
-            _reviewEditsEnabled = true;
-            _error = null;
-            _disableReviewEditsConfirmationOpen = true;
-            return;
+            _busy = true;
+            try
+            {
+                // The background projection is intentionally retained during
+                // refreshes, so revalidate before presenting the confirmation
+                // instead of trusting a potentially stale dirty-state result.
+                var currentReview = await LoadCurrentReviewAsync(
+                    project.Id,
+                    _lifetimeCancellation.Token);
+                if (currentReview is not null)
+                {
+                    _review = currentReview;
+                    await ReviewLoaded.InvokeAsync(currentReview);
+                }
+
+                if (currentReview is { Comparison.IsIdentical: false })
+                {
+                    _reviewEditsEnabled = true;
+                    _error = null;
+                    _disableReviewEditsConfirmationOpen = true;
+                    return;
+                }
+            }
+            catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+            {
+                _reviewEditsEnabled = previousEnabled;
+                return;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                _reviewEditsEnabled = previousEnabled;
+                _error = exception.Message;
+                return;
+            }
+            finally
+            {
+                _busy = false;
+            }
         }
 
+        using var projectOperation = HistoryEvents.BeginProjectOperation(project.Id);
         _busy = true;
         _error = null;
         try
@@ -454,6 +497,18 @@
         }
     }
 
+    private async Task<ProjectVersionReviewView?> LoadCurrentReviewAsync(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        return await Task.Run(async () =>
+        {
+            using var scope = ScopeFactory.CreateScope();
+            var versionHistory = scope.ServiceProvider.GetRequiredService<IProjectVersionHistoryService>();
+            return await versionHistory.GetReviewAsync(projectId, cancellationToken: cancellationToken);
+        }, cancellationToken);
+    }
+
     private void CancelDisableReviewEdits()
     {
         _reviewEditsEnabled = true;
@@ -467,20 +522,17 @@
             || _review is not { Comparison.IsIdentical: false, Token: { } token })
             return;
 
+        using var projectOperation = HistoryEvents.BeginProjectOperation(project.Id);
         _busy = true;
         _error = null;
         try
         {
-            await VersionHistory.CreateReviewApprovalCheckpointAsync(
+            await VersionHistory.ApproveAllAndDisableReviewEditsAsync(
                 project.Id,
                 token,
                 semanticMessage: "Approved all pending changes before disabling Review Edits",
                 requestKey: $"review-disable-approve:{token.CurrentContentHash}",
                 cancellationToken: _lifetimeCancellation.Token);
-            await VersionHistory.SetReviewEditsEnabledAsync(
-                project.Id,
-                enabled: false,
-                _lifetimeCancellation.Token);
             _reviewEditsEnabled = false;
             _disableReviewEditsConfirmationOpen = false;
         }

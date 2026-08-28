@@ -819,6 +819,8 @@ public sealed class ProjectVersionRestoreTests
 
         public Task<ProjectVersionCheckpointView> CreateReviewApprovalCheckpointAsync(Guid projectId, ProjectVersionReviewConcurrencyToken expectedToken, string semanticMessage = "Approved Review Edits", string? requestKey = null, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionCheckpointView>();
 
+        public Task<ProjectVersionCheckpointView> ApproveAllAndDisableReviewEditsAsync(Guid projectId, ProjectVersionReviewConcurrencyToken expectedToken, string semanticMessage = "Approved Review Edits before disabling Review Edits", string? requestKey = null, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionCheckpointView>();
+
         public Task<ProjectVersionCheckpointView> CreateReviewApprovalForChapterAsync(Guid projectId, ProjectVersionReviewTarget target, ProjectVersionReviewConcurrencyToken expectedToken, string semanticMessage = "Approved chapter review changes", string? requestKey = null, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionCheckpointView>();
 
         public Task<ProjectVersionCheckpointView> CreateReviewApprovalForOtherAsync(Guid projectId, ProjectVersionReviewConcurrencyToken expectedToken, string semanticMessage = "Approved other project changes", string? requestKey = null, CancellationToken cancellationToken = default) => Unsupported<ProjectVersionCheckpointView>();

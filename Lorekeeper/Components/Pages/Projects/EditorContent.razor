@@ -1575,6 +1575,7 @@ else
             _contentStatus = await EditionContent.GetChapterStatusAsync(Project.Id, editionId, chapterId);
             _previewRefreshSignal++;
             _pageWorkspaceRefreshSignal++;
+            HistoryEvents.PublishReviewStateChanged(Project.Id);
             _resetEditionChapterConfirmationOpen = false;
         }
         catch (Exception exception)
@@ -1966,6 +1967,8 @@ else
                     + exception.Message;
             }
             _lastSavedAt = DateTime.Now;
+            if (result.ChangedBlockIds.Count > 0 && Project is { } project)
+                HistoryEvents.PublishReviewStateChanged(project.Id);
             return new ChapterBodyEditor.SemanticEditorSaveResult(true, result.Snapshot.Revision);
         }
         catch (ManuscriptRevisionConflictException)
@@ -4924,6 +4927,8 @@ else
         {
             await Chapters.UpdateAsync(_current.Id, title: newTitle);
             _current.Title = newTitle;
+            if (Project is { } project)
+                HistoryEvents.PublishReviewStateChanged(project.Id);
             await RefreshContextSurfacesAsync();
         }
         catch (Exception ex)
@@ -4938,6 +4943,7 @@ else
         if (Project is null) return;
         if (!await FlushAsync()) return;
         var ch = await Chapters.CreateAsync(Project.Id);
+        HistoryEvents.PublishReviewStateChanged(Project.Id);
         Nav.NavigateTo($"/projects/{Project.Slug}/outline?focus={ch.Id}");
     }
 
@@ -4945,6 +4951,7 @@ else
     {
         if (Project is null) return;
         var ch = await Chapters.CreateAsync(Project.Id);
+        HistoryEvents.PublishReviewStateChanged(Project.Id);
         _chapters = (await Chapters.ListAsync(Project.Id)).ToList();
         Nav.NavigateTo($"/projects/{Project.Slug}/editor/{ch.Id}");
     }

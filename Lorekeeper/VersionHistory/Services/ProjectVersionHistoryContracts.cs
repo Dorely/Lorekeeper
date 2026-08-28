@@ -327,12 +327,24 @@ public interface IProjectVersionHistoryService
     /// <summary>
     /// Changes the Review Edits workflow under the same project lease used for
     /// history. Enabling initializes the first approved HEAD if needed;
-    /// disabling fails closed when the live snapshot is dirty or history is
-    /// unavailable.
+    /// disabling requires an already-clean live snapshot or the dedicated
+    /// approval-and-disable operation below.
     /// </summary>
     Task SetReviewEditsEnabledAsync(
         Guid projectId,
         bool enabled,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Approves the complete live project and disables Review Edits as one
+    /// serialized operation. The live snapshot and approved Git head must
+    /// still match the supplied review token; a stale token fails closed.
+    /// </summary>
+    Task<ProjectVersionCheckpointView> ApproveAllAndDisableReviewEditsAsync(
+        Guid projectId,
+        ProjectVersionReviewConcurrencyToken expectedToken,
+        string semanticMessage = "Approved Review Edits before disabling Review Edits",
+        string? requestKey = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
