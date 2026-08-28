@@ -2052,11 +2052,13 @@ function installTypographyRules(root, typography = {}) {
         const ruleColor = cssRgb(decoration.ruleColorRgb) || "transparent";
         const ruleWidth = decoration.ruleWidthEm ?? 0;
         const ruleGap = decoration.ruleGapEm ?? 0;
-        add("blockquote,[data-style-role=block-quote]", [
+        const blockquoteDecorationDeclarations = [
             `margin-left:max(0em,calc(var(--lk-blockquote-left-indent,0em) - ${ruleWidth + ruleGap}em))!important`,
             `padding-left:${ruleGap}em`,
             `border-left:${ruleWidth}em solid ${ruleColor}`
-        ]);
+        ];
+        add("blockquote", blockquoteDecorationDeclarations);
+        add("[data-style-role=block-quote]", blockquoteDecorationDeclarations);
         add("figure figcaption", typographyDeclarations(current.caption));
         add(".semantic-list-item", [
             ...typographyDeclarations(body, {}, false),

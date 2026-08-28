@@ -150,10 +150,11 @@ included when the preference is enabled. Disabling it while differences are
 pending presents an application confirmation; Proceed validates the displayed
 review token, checkpoints the one captured complete live snapshot through a
 `ReviewApproval`, and disables the preference under the same project operation,
-while Cancel leaves Review Edits enabled. Successful manual manuscript and
-chapter mutations invalidate the top-bar projection; those invalidations retain
-the last controls while a coalesced review refresh runs outside the Blazor
-circuit so autosave never forces an Editor reload or top-bar flicker.
+while Cancel leaves Review Edits enabled. Successful manual manuscript, chapter,
+and publication-section mutations invalidate the top-bar projection after their
+durable save or transaction commit; true no-ops do not. Those invalidations
+retain the last controls while a coalesced review refresh runs outside the
+Blazor circuit so autosave never forces an Editor reload or top-bar flicker.
 
 The Review service returns affected chapter/target summaries, semantic
 manuscript groups, non-manuscript aggregates, dependency groups, contest state,

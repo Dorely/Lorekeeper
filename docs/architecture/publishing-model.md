@@ -35,7 +35,9 @@ rejects mixed prose/canvas blocks so manual UI, assistant tools, export, and
 rendering share one durable boundary. System sections such as title,
 copyright, and contents retain live metadata bindings; user sections include
 dedications, acknowledgements, author notes, references, image pages, and
-other production material.
+other production material. Every successful durable section mutation publishes
+the shared Review Edits invalidation only after its save or transaction commit;
+read paths and true no-ops do not refresh the top-bar review projection.
 
 `IPublicationEditionService` owns optional paperback, hardcover, EPUB ebook,
 and PDF ebook release aggregates. Releases own destination, exact immutable

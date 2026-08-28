@@ -1872,8 +1872,13 @@ internal static class SemanticPublishFormatting
         var overlayCaptionStyle = string.IsNullOrEmpty(captionPresentation)
             ? "display:block"
             : $"display:block;{captionPresentation}";
-        var image = $"<div class=\"figure-media\" style=\"position:relative;width:100%;height:{frameHeight};overflow:hidden\"><img src=\"{WebUtility.HtmlEncode(href)}\" alt=\"{WebUtility.HtmlEncode(block.Decorative ? string.Empty : block.AltText)}\"{decorative} style=\"{imageStyle}\" />{(presentation.CaptionPlacement == FigureCaptionPlacement.Overlay ? $"<figcaption class=\"figure-overlay-caption\" style=\"position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.45);color:white;padding:.2em .4em\"><span style=\"{overlayCaptionStyle}\">{content}</span></figcaption>" : string.Empty)}</div>";
-        var contents = presentation.CaptionPlacement == FigureCaptionPlacement.Above ? caption + image : image + (presentation.CaptionPlacement == FigureCaptionPlacement.Overlay ? string.Empty : caption);
+        var image = $"<div class=\"figure-media\" style=\"position:relative;width:100%;height:{frameHeight};overflow:hidden\"><img src=\"{WebUtility.HtmlEncode(href)}\" alt=\"{WebUtility.HtmlEncode(block.Decorative ? string.Empty : block.AltText)}\"{decorative} style=\"{imageStyle}\" /></div>";
+        var overlayCaption = presentation.CaptionPlacement == FigureCaptionPlacement.Overlay
+            ? $"<figcaption class=\"figure-overlay-caption\" style=\"position:absolute;left:0;right:0;bottom:0;margin:0;background:rgba(0,0,0,.45);color:white;padding:.2em .4em\"><span style=\"{overlayCaptionStyle}\">{content}</span></figcaption>"
+            : string.Empty;
+        var contents = presentation.CaptionPlacement == FigureCaptionPlacement.Above
+            ? caption + image
+            : image + (presentation.CaptionPlacement == FigureCaptionPlacement.Overlay ? overlayCaption : caption);
         return $"<figure id=\"{anchor}\" data-style-role=\"{role}\" data-accessibility-role=\"{(block.AccessibilityRole ?? FigureAccessibilityRole.Figure).ToString().ToLowerInvariant()}\"{language} style=\"{figureStyle}\">{contents}</figure>";
     }
 
