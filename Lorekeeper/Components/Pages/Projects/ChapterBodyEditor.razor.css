@@ -460,19 +460,6 @@
     margin: 0;
 }
 
-.semantic-editor ::deep .semantic-prosemirror p[data-style-role="body"]:not([style*="margin-bottom"]) {
-    margin-bottom: 8pt;
-}
-
-.semantic-editor ::deep .semantic-prosemirror p[data-style-role="body"][style*="margin-bottom:0"] + p[data-style-role="body"]:not([style*="margin-top"]) {
-    margin-top: 0;
-}
-
-.semantic-editor ::deep .semantic-prosemirror blockquote + p,
-.semantic-editor ::deep .semantic-prosemirror .semantic-list-item + .semantic-list-item {
-    margin-top: 8pt;
-}
-
 .semantic-editor ::deep .semantic-prosemirror figure img {
     display: block;
     max-width: 100%;
@@ -484,10 +471,6 @@
     user-select: none;
     -webkit-user-drag: none;
     cursor: pointer;
-}
-
-.semantic-editor ::deep .semantic-prosemirror figure figcaption {
-    color: var(--text-secondary);
 }
 
 .semantic-editor ::deep .semantic-prosemirror figure.ProseMirror-selectednode {
@@ -572,29 +555,22 @@
     }
 }
 
-.semantic-editor ::deep .semantic-prosemirror blockquote {
-    padding-left: 1rem;
-    border-left: 0.25rem solid var(--bs-border-color, #ced4da);
-    color: var(--bs-secondary-color, #6c757d);
-}
-
 .semantic-editor ::deep .semantic-prosemirror .semantic-list-item {
     display: block;
     list-style: none;
-    margin-left: 1em;
     padding-left: 0;
     position: relative;
+}
+
+.semantic-editor ::deep .semantic-prosemirror a {
+    color: inherit;
+    text-decoration: underline;
 }
 
 .semantic-editor ::deep .semantic-prosemirror hr[data-scene-break] {
     width: 6rem;
     margin: 0 auto;
     border: 0;
-}
-
-.semantic-editor ::deep .semantic-prosemirror hr[data-scene-break]::after {
-    content: "* * *";
-    color: var(--bs-body-color, #212529);
 }
 
 .semantic-editor ::deep .semantic-small-caps {

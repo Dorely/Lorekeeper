@@ -105,14 +105,29 @@ bleed, captions, structured Designed Pages and cover scenes, reusable styles,
 vector shapes, reading order, page-size overrides for eligible Digital PDFs,
 full-wrap geometry, EAN-13 bars, and PDF serialization. Structured text
 remains selectable text rather than a rasterized page image.
-The versioned `assets/manuscript-typography-v1.json` contract is embedded by
+The versioned `assets/manuscript-typography-v2.json` contract is embedded by
 both Press and the application. It owns bundled family aliases and default
-metrics for body text, headings, captions, lists, scene breaks, and inline
-marks. Page setup supplies the effective body size and leading; named and
-direct manuscript styles remain sparse overrides. Browser-preview traces carry
-the Press-resolved face, run language, line language, artifact/light-text
-state, and a face-metric baseline offset so Read reproduces the authoritative
-layout without reconstructing typography from browser defaults.
+metrics for body text, heading levels 1-6, captions, lists, scene breaks, and
+inline marks. Version 2 also owns inset-quotation text/rule colors and rule/gap
+geometry plus ordinary and overlay-caption paint. Page setup supplies the
+effective body size and leading for body and quotation text; named styles and
+direct manuscript presentation remain sparse overrides, with direct explicit
+`false` values able to disable inherited italic and small caps. Figure-caption
+paragraph indents constrain the caption measure without moving its image. A role selector
+such as `chapter-heading` or `block-quote` receives the same built-in visual
+defaults regardless of its semantic block type. Paragraph styles on Figures
+apply to their captions.
+
+Inset-quotation left indent is the total text inset. Press places the rule and
+gap within that measure, emits a rule segment on each occupied page, retains
+selectable quotation text, and exposes both authored colors in the layout
+trace. Overlay captions paint their shared translucent backing above the image
+and below selectable caption text; wrapped overlay lines retain top-to-bottom
+reading order on flowing and dedicated Figures. Browser-preview traces carry the
+Press-resolved face, color, run language, line language,
+artifact/light-text state, semantic decoration IDs, paint order, and a
+face-metric baseline offset so Read reproduces the authoritative layout without
+reconstructing typography from browser defaults.
 Block spacing collapses across adjacent semantic blocks. A flowing Figure's
 declared after-spacing participates in that same baseline calculation so the
 following prose enters and remains within the active float exclusion region.
@@ -126,6 +141,9 @@ transparent PDF objects, embedded fonts, no encryption/annotations/actions,
 and a 240% total-ink ceiling. The separate production `lopdf` pass reparses
 completed bytes before atomic promotion. An independent black-box harness
 parses raw PDF objects without calling the production validator.
+Text, manuscript-decoration vectors, and images follow the selected interior
+color space; a black-and-white job converts quotation-rule and caption tones to
+gray while preserving color-cover independence.
 
 Composition opacity rules preserve Digital PDF appearance with bounded
 graphics states. KDP PDF 1.7 omits fully transparent backing paint and
@@ -138,7 +156,7 @@ owned image normalization.
 
 Digital PDF jobs produce one immutable Book PDF whose front cover is page one,
 followed by publication sections and manuscript content. Tagged structure,
-bookmarks, links, document language, logical reading order, headings,
+bookmarks, links, document language, logical reading order, heading levels 1-6,
 paragraphs, lists, Figures/Captions, alt text, and decorative artifacts are
 mandatory output. Lorekeeper reports implemented tagged output within its
 declared boundary; it does not claim formal PDF/UA certification. Digital

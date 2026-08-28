@@ -680,7 +680,9 @@ where
                     ]);
                 }
                 if let Some(rgb) = shape.fill_rgb {
-                    if options.pdf_x {
+                    if options.expected_image_color_space == ImageColorSpace::Gray {
+                        content.set_fill_gray(rgb_luminance(rgb));
+                    } else if options.pdf_x {
                         let [c, m, y, k] = rgb_to_bounded_cmyk(rgb);
                         content.set_fill_cmyk(c, m, y, k);
                     } else {
@@ -688,7 +690,9 @@ where
                     }
                 }
                 if let Some(rgb) = shape.stroke_rgb {
-                    if options.pdf_x {
+                    if options.expected_image_color_space == ImageColorSpace::Gray {
+                        content.set_stroke_gray(rgb_luminance(rgb));
+                    } else if options.pdf_x {
                         let [c, m, y, k] = rgb_to_bounded_cmyk(rgb);
                         content.set_stroke_cmyk(c, m, y, k);
                     } else {
@@ -1440,6 +1444,9 @@ fn struct_role(role: LayoutSemanticRole) -> StructRole {
         LayoutSemanticRole::Heading1 => StructRole::H1,
         LayoutSemanticRole::Heading2 => StructRole::H2,
         LayoutSemanticRole::Heading3 => StructRole::H3,
+        LayoutSemanticRole::Heading4 => StructRole::H4,
+        LayoutSemanticRole::Heading5 => StructRole::H5,
+        LayoutSemanticRole::Heading6 => StructRole::H6,
         LayoutSemanticRole::ListItem => StructRole::LI,
         LayoutSemanticRole::Caption => StructRole::Caption,
         LayoutSemanticRole::Toc => StructRole::TOCI,
@@ -2270,6 +2277,10 @@ fn rgb_to_bounded_cmyk([red, green, blue]: [f32; 3]) -> [f32; 4] {
         }
     }
     values
+}
+
+fn rgb_luminance([red, green, blue]: [f32; 3]) -> f32 {
+    red * 0.2126 + green * 0.7152 + blue * 0.0722
 }
 
 pub fn cover_background_total_ink_percent(value: &str) -> f32 {

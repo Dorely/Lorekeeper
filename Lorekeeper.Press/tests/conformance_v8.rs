@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 8);
-    assert_eq!(value["rendererVersion"], "2.1.3");
+    assert_eq!(value["rendererVersion"], "2.1.4");
     assert_eq!(
         value["profiles"],
         json!([
@@ -63,7 +63,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 8);
-    assert_eq!(response["rendererVersion"], "2.1.3");
+    assert_eq!(response["rendererVersion"], "2.1.4");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -1602,6 +1602,480 @@ fn overlay_figure_caption_is_rendered_inside_the_image_frame() {
         caption["lightText"], true,
         "overlay copy must remain legible over artwork"
     );
+
+    let background = page["shapes"]
+        .as_array()
+        .expect("overlay shapes")
+        .iter()
+        .find(|shape| shape["semanticId"] == "overlay-figure:caption-background")
+        .expect("overlay caption background");
+    assert_eq!(background["kind"], "Rectangle");
+    assert_eq!(background["fillRgb"], json!([0.0, 0.0, 0.0]));
+    assert!((background["opacity"].as_f64().unwrap() - 0.45).abs() < 0.001);
+    assert!((background["x"].as_f64().unwrap() - image["x"].as_f64().unwrap()).abs() < 0.01);
+    assert!(
+        (background["width"].as_f64().unwrap() - image["width"].as_f64().unwrap()).abs() < 0.01
+    );
+    assert!(background["y"].as_f64().unwrap() < caption["y"].as_f64().unwrap());
+    assert!(
+        background["y"].as_f64().unwrap() + background["height"].as_f64().unwrap()
+            > caption["y"].as_f64().unwrap()
+    );
+
+    let paint_order = page["paintOrder"].as_array().expect("overlay paint order");
+    let image_index = paint_order
+        .iter()
+        .position(|paint| paint["kind"] == "image")
+        .expect("image paint");
+    let shape_index = paint_order
+        .iter()
+        .position(|paint| paint["kind"] == "shape")
+        .expect("caption background paint");
+    let line_index = paint_order
+        .iter()
+        .position(|paint| paint["kind"] == "line")
+        .expect("caption text paint");
+    assert!(image_index < shape_index && shape_index < line_index);
+
+    let output = job.render();
+    assert!(output.status.success(), "{}", stderr(&output));
+    let rendered = response(&output);
+    let book = job.artifact(&rendered, "book-pdf");
+    assert!(inspect(&book).transparency);
+    let pdf = Document::load(book).expect("Digital PDF");
+    let pages = pdf.get_pages().keys().copied().collect::<Vec<_>>();
+    assert!(
+        pdf.extract_text(&pages)
+            .expect("selectable overlay caption")
+            .contains("Overlay caption")
+    );
+    assert!(pdf.get_pages().values().any(|page_id| {
+        lopdf::content::Content::decode(&pdf.get_page_content(*page_id))
+            .expect("page content")
+            .operations
+            .iter()
+            .any(|operation| operation.operator == "gs")
+    }));
+}
+
+#[test]
+fn dedicated_overlay_caption_keeps_wrapped_lines_in_reading_order() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["layoutTraceMode"] = json!("browser-preview");
+    job.request["document"]["sections"][0]["chapters"][0]["blocks"] = json!([{
+        "id": "dedicated-overlay", "type": "Figure", "styleRole": "figure-caption",
+        "assetId": "90000000-0000-0000-0000-000000000001",
+        "caption": "First words continue through a deliberately wrapped overlay caption for reading order.",
+        "altText": "A dedicated overlay illustration", "decorative": false,
+        "presentation": { "placement": "DedicatedPage", "widthPercent": 35,
+            "alignment": "Center", "textWrap": "None", "fit": "Cover",
+            "captionPlacement": "Overlay" },
+        "content": [{ "type": "Text", "text": "First words continue through a deliberately wrapped overlay caption for reading order.", "marks": [] }]
+    }]);
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let page = trace["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|page| {
+            page["lines"].as_array().is_some_and(|lines| {
+                lines.iter().any(|line| {
+                    line["text"]
+                        .as_str()
+                        .is_some_and(|text| text.starts_with("First words"))
+                })
+            })
+        })
+        .expect("dedicated overlay page");
+    let lines = page["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|line| line["semanticRole"] == "Caption")
+        .collect::<Vec<_>>();
+    assert!(lines.len() > 1, "fixture must wrap");
+    assert!(
+        lines
+            .windows(2)
+            .all(|pair| { pair[0]["y"].as_f64().unwrap() > pair[1]["y"].as_f64().unwrap() })
+    );
+}
+
+#[test]
+fn print_profiles_flatten_overlay_backing_and_keep_caption_selectable() {
+    for profile in ["kdp-paperback-v1", "ingram-paperback-pdfx1a-v1"] {
+        let mut job = PreparedJob::new(profile);
+        let artwork = rgb_png(256, 256, &vec![192; 256 * 256 * 3]);
+        fs::write(job.root.path().join("input/assets/pixel.png"), &artwork)
+            .expect("print overlay artwork");
+        job.request["assets"][0]["byteLength"] = json!(artwork.len());
+        job.request["assets"][0]["sha256"] = json!(hex_hash(&artwork));
+        job.request["assets"][0]["widthPixels"] = json!(256);
+        job.request["assets"][0]["heightPixels"] = json!(256);
+        job.request["document"]["sections"][0]["chapters"][0]["blocks"] = json!([{
+            "id": "print-overlay-figure", "type": "Figure", "styleRole": "figure-caption",
+            "assetId": "90000000-0000-0000-0000-000000000001",
+            "caption": "Selectable print overlay caption",
+            "altText": "A print overlay illustration", "decorative": false,
+            "presentation": { "placement": "Centered", "widthPercent": 70,
+                "alignment": "Center", "textWrap": "None", "fit": "Cover",
+                "captionPlacement": "Overlay" },
+            "content": [{ "type": "Text", "text": "Selectable print overlay caption", "marks": [] }]
+        }]);
+        job.write_request();
+
+        let output = job.render();
+        assert!(
+            output.status.success(),
+            "{profile}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            stderr(&output)
+        );
+        let rendered = response(&output);
+        let interior = job.artifact(&rendered, "interior-pdf");
+        assert!(!inspect(&interior).transparency, "{profile}");
+        let pdf = Document::load(interior).expect("print interior");
+        let pages = pdf.get_pages().keys().copied().collect::<Vec<_>>();
+        assert!(
+            pdf.extract_text(&pages)
+                .expect("selectable print caption")
+                .contains("Selectable print overlay caption"),
+            "{profile}"
+        );
+    }
+}
+
+#[test]
+fn ordinary_figure_caption_uses_shared_muted_text_color_in_trace_and_pdf() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["document"]["sections"][0]["chapters"][0]["blocks"] = json!([{
+        "id": "muted-caption", "type": "Figure", "styleRole": "figure-caption",
+        "assetId": "90000000-0000-0000-0000-000000000001", "caption": "Muted caption",
+        "altText": "A caption color illustration", "decorative": false,
+        "presentation": { "placement": "Centered", "widthPercent": 70, "alignment": "Center",
+            "textWrap": "None", "fit": "Contain", "captionPlacement": "Below" },
+        "content": [{ "type": "Text", "text": "Muted caption", "marks": [] }]
+    }]);
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let caption = trace["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|page| page["lines"].as_array().into_iter().flatten())
+        .find(|line| line["text"] == "Muted caption")
+        .expect("muted caption line");
+    assert_rgb(&caption["fillRgb"], [0.278431, 0.329412, 0.403922]);
+
+    let output = job.render();
+    assert!(output.status.success(), "{}", stderr(&output));
+    let rendered = response(&output);
+    let pdf = Document::load(job.artifact(&rendered, "book-pdf")).expect("Digital PDF");
+    let has_caption_color = pdf.get_pages().values().any(|page_id| {
+        let content = pdf.get_page_content(*page_id);
+        let text = String::from_utf8_lossy(&content);
+        text.contains("0.3239531 g") || text.contains("0.3239 g")
+    });
+    assert!(
+        has_caption_color,
+        "PDF must retain the muted caption fill color"
+    );
+}
+
+#[test]
+fn figure_caption_uses_paragraph_style_indents_and_direct_precedence() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["layoutTraceMode"] = json!("browser-preview");
+    job.request["document"]["styles"] = json!([{
+        "semanticRole": "figure-caption", "kind": "Paragraph",
+        "definition": {
+            "fontSizePoints": 10.0, "lineHeight": 1.3, "textAlign": "left",
+            "leftIndentEm": 1.0, "rightIndentEm": 0.5,
+            "italic": true, "smallCaps": true
+        }
+    }]);
+    job.request["document"]["sections"][0]["chapters"][0]["blocks"] = json!([{
+        "id": "styled-caption", "type": "Figure", "styleRole": "figure-caption",
+        "assetId": "90000000-0000-0000-0000-000000000001",
+        "caption": "Styled caption remains ordinary text.",
+        "altText": "A styled-caption illustration", "decorative": false,
+        "paragraphPresentation": {
+            "leftIndentEm": 1.5, "firstLineIndentEm": 0.25,
+            "italic": false, "smallCaps": false
+        },
+        "presentation": { "placement": "Centered", "widthPercent": 70,
+            "alignment": "Center", "textWrap": "None", "fit": "Contain",
+            "captionPlacement": "Below" },
+        "content": [{ "type": "Text", "text": "Styled caption remains ordinary text.", "marks": [] }]
+    }]);
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let page = trace["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|page| {
+            page["lines"].as_array().is_some_and(|lines| {
+                lines.iter().any(|line| {
+                    line["text"]
+                        .as_str()
+                        .is_some_and(|text| text.starts_with("Styled caption"))
+                })
+            })
+        })
+        .expect("figure page");
+    let image = &page["images"][0];
+    let caption = page["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|line| {
+            line["text"]
+                .as_str()
+                .is_some_and(|text| text.starts_with("Styled caption"))
+        })
+        .expect("styled caption line");
+    let expected_x = image["x"].as_f64().unwrap() + 10.0 * 1.75;
+    assert!((caption["x"].as_f64().unwrap() - expected_x).abs() < 0.1);
+    assert_eq!(caption["size"], 10.0);
+    assert_eq!(caption["runs"][0]["face"], "SerifRegular");
+    assert_eq!(caption["runs"][0]["sizeScale"], 1.0);
+}
+
+#[test]
+fn browser_preview_blockquote_preserves_rule_gap_color_and_each_page_segment() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["layoutTraceMode"] = json!("browser-preview");
+    job.request["trim"]["widthInches"] = json!(4.0);
+    job.request["trim"]["heightInches"] = json!(5.0);
+    job.request["trim"]["marginInches"] = json!(0.6);
+    job.request["trim"]["bodyFontSizePoints"] = json!(10.0);
+    job.request["trim"]["bodyLineHeight"] = json!(1.2);
+    job.request["document"]["includeActHeadings"] = json!(false);
+    job.request["document"]["includeChapterHeadings"] = json!(false);
+    job.request["document"]["publicationSections"] = json!([]);
+    let quote = (0..260)
+        .map(|index| format!("Inset quotation phrase {index}."))
+        .collect::<Vec<_>>()
+        .join(" ");
+    job.request["document"]["sections"] = json!([{
+        "id": "quote-act", "title": "", "includePage": false, "includeHeading": false,
+        "chapters": [{
+            "id": "quote-chapter", "title": "", "includeHeading": false,
+            "blocks": [
+                { "id": "before-quote", "type": "Paragraph", "styleRole": "body",
+                  "content": [{ "type": "Text", "text": "Before quote.", "marks": [] }] },
+                { "id": "quote-block", "type": "BlockQuote", "styleRole": "block-quote",
+                  "content": [{ "type": "Text", "text": quote, "marks": [] }] },
+                { "id": "after-quote", "type": "Paragraph", "styleRole": "body",
+                  "content": [{ "type": "Text", "text": "After quote.", "marks": [] }] }
+            ]
+        }]
+    }]);
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let pages = trace["pages"].as_array().expect("pages");
+    let body_size = job.request["trim"]["bodyFontSizePoints"].as_f64().unwrap();
+    let margin = job.request["trim"]["marginInches"].as_f64().unwrap() * 72.0;
+    let quote_pages = pages
+        .iter()
+        .filter_map(|page| {
+            let lines = page["lines"].as_array()?;
+            lines
+                .iter()
+                .any(|line| line["semanticId"] == "quote-block")
+                .then_some(page)
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        quote_pages.len() > 1,
+        "quote fixture must cross a page boundary"
+    );
+    for page in quote_pages {
+        let lines = page["lines"].as_array().unwrap();
+        let quote_lines = lines
+            .iter()
+            .filter(|line| line["semanticId"] == "quote-block")
+            .collect::<Vec<_>>();
+        assert!(!quote_lines.is_empty());
+        for line in &quote_lines {
+            assert_rgb(&line["fillRgb"], [0.423529, 0.458824, 0.490196]);
+            assert!((line["size"].as_f64().unwrap() - body_size).abs() < 0.01);
+            assert!((line["x"].as_f64().unwrap() - margin - body_size * 2.0).abs() < 0.1);
+        }
+        assert!(quote_lines.windows(2).all(|pair| {
+            (pair[0]["y"].as_f64().unwrap() - pair[1]["y"].as_f64().unwrap() - 12.0).abs() < 0.1
+        }));
+        let rule = page["shapes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|shape| shape["semanticId"] == "quote-block:rule")
+            .expect("one quote rule segment per page");
+        assert_eq!(rule["kind"], "Rectangle");
+        assert_rgb(&rule["fillRgb"], [0.807843, 0.831373, 0.854902]);
+        assert!((rule["x"].as_f64().unwrap() - margin - body_size * 0.75).abs() < 0.1);
+        assert!((rule["width"].as_f64().unwrap() - body_size * 0.25).abs() < 0.1);
+        let first_y = quote_lines
+            .iter()
+            .map(|line| line["y"].as_f64().unwrap())
+            .fold(f64::NEG_INFINITY, f64::max);
+        let last_y = quote_lines
+            .iter()
+            .map(|line| line["y"].as_f64().unwrap())
+            .fold(f64::INFINITY, f64::min);
+        assert!(rule["y"].as_f64().unwrap() <= last_y - body_size * 0.38 + 0.1);
+        assert!(
+            rule["y"].as_f64().unwrap() + rule["height"].as_f64().unwrap()
+                >= first_y + body_size * 0.82 - 0.1
+        );
+        let paint_order = page["paintOrder"].as_array().expect("quote paint order");
+        let rule_index = paint_order
+            .iter()
+            .position(|paint| paint["kind"] == "shape")
+            .expect("rule paint");
+        let line_index = paint_order
+            .iter()
+            .position(|paint| paint["kind"] == "line")
+            .expect("quote text paint");
+        assert!(rule_index < line_index);
+    }
+
+    let output = job.render();
+    assert!(output.status.success(), "{}", stderr(&output));
+    let rendered = response(&output);
+    let pdf = Document::load(job.artifact(&rendered, "book-pdf")).expect("Digital PDF");
+    let operations = pdf
+        .get_pages()
+        .values()
+        .flat_map(|page_id| {
+            lopdf::content::Content::decode(&pdf.get_page_content(*page_id))
+                .expect("page content")
+                .operations
+        })
+        .collect::<Vec<_>>();
+    let has_gray_fill = |expected: f64| {
+        operations.iter().any(|operation| {
+            operation.operator == "g"
+                && operation.operands.len() == 1
+                && (number(&operation.operands[0]) - expected).abs() < 0.001
+        })
+    };
+    assert!(
+        has_gray_fill(0.8280),
+        "raw grayscale PDF must preserve the inset rule tone"
+    );
+    assert!(
+        has_gray_fill(0.4534),
+        "raw grayscale PDF must preserve the inset text tone"
+    );
+    let page_numbers = pdf.get_pages().keys().copied().collect::<Vec<_>>();
+    assert!(
+        pdf.extract_text(&page_numbers)
+            .expect("selectable quote text")
+            .contains("Inset quotation phrase 0"),
+        "the decorated quotation must remain selectable text"
+    );
+}
+
+#[test]
+fn browser_preview_builtin_role_defaults_match_editor_role_selectors() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["layoutTraceMode"] = json!("browser-preview");
+    job.request["document"]["includeActHeadings"] = json!(false);
+    job.request["document"]["includeChapterHeadings"] = json!(false);
+    job.request["document"]["publicationSections"] = json!([]);
+    job.request["document"]["sections"] = json!([{
+        "id": "role-act", "title": "", "includePage": false, "includeHeading": false,
+        "chapters": [{
+            "id": "role-chapter", "title": "", "includeHeading": false,
+            "blocks": [
+                { "id": "role-chapter-heading", "type": "Paragraph", "styleRole": "chapter-heading",
+                  "content": [{ "type": "Text", "text": "Role chapter heading.", "marks": [] }] },
+                { "id": "role-blockquote", "type": "Paragraph", "styleRole": "block-quote",
+                  "content": [{ "type": "Text", "text": "Role quote paragraph.", "marks": [] }] }
+            ]
+        }]
+    }]);
+    job.write_request();
+
+    let trace = job.layout_trace();
+    let lines = trace["pages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|page| page["lines"].as_array().into_iter().flatten())
+        .filter(|line| !line["artifact"].as_bool().unwrap_or(false))
+        .collect::<Vec<_>>();
+    let chapter_heading = lines
+        .iter()
+        .find(|line| line["semanticId"] == "role-chapter-heading")
+        .expect("role heading line");
+    assert_eq!(chapter_heading["size"], 22.0);
+    assert_eq!(chapter_heading["runs"][0]["face"], "SansBold");
+    let quote = lines
+        .iter()
+        .find(|line| line["semanticId"] == "role-blockquote")
+        .expect("role quote line");
+    let margin = job.request["trim"]["marginInches"].as_f64().unwrap() * 72.0;
+    let body_size = job.request["trim"]["bodyFontSizePoints"].as_f64().unwrap();
+    assert!((quote["x"].as_f64().unwrap() - margin - body_size * 2.0).abs() < 0.1);
+    assert_rgb(&quote["fillRgb"], [0.423529, 0.458824, 0.490196]);
+}
+
+#[test]
+fn digital_pdf_preserves_heading_levels_four_through_six() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["document"]["includeActHeadings"] = json!(false);
+    job.request["document"]["includeChapterHeadings"] = json!(false);
+    job.request["document"]["publicationSections"] = json!([]);
+    job.request["document"]["sections"] = json!([{
+        "id": "heading-act", "title": "", "includePage": false, "includeHeading": false,
+        "chapters": [{
+            "id": "heading-chapter", "title": "", "includeHeading": false,
+            "blocks": [
+                { "id": "h4", "type": "Heading", "styleRole": "subheading", "headingLevel": 4,
+                  "content": [{ "type": "Text", "text": "Heading four.", "marks": [] }] },
+                { "id": "h5", "type": "Heading", "styleRole": "subheading", "headingLevel": 5,
+                  "content": [{ "type": "Text", "text": "Heading five.", "marks": [] }] },
+                { "id": "h6", "type": "Heading", "styleRole": "subheading", "headingLevel": 6,
+                  "content": [{ "type": "Text", "text": "Heading six.", "marks": [] }] }
+            ]
+        }]
+    }]);
+    job.write_request();
+
+    let trace = job.layout_trace();
+    for (id, role) in [("h4", "Heading4"), ("h5", "Heading5"), ("h6", "Heading6")] {
+        assert!(
+            trace["pages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|page| page["lines"].as_array().into_iter().flatten())
+                .any(|line| line["semanticId"] == id && line["semanticRole"] == role)
+        );
+    }
+
+    let output = job.render();
+    assert!(output.status.success(), "{}", stderr(&output));
+    let rendered = response(&output);
+    let pdf = Document::load(job.artifact(&rendered, "book-pdf")).expect("Digital PDF");
+    let roles = pdf
+        .objects
+        .values()
+        .filter_map(|object| object.as_dict().ok())
+        .filter_map(|dictionary| dictionary.get(b"S").ok())
+        .filter_map(|value| value.as_name().ok())
+        .collect::<Vec<_>>();
+    for role in [b"H4".as_slice(), b"H5", b"H6"] {
+        assert!(roles.contains(&role));
+    }
 }
 
 #[test]
@@ -3435,6 +3909,14 @@ fn has_diagnostic(response: &Value, code: &str) -> bool {
     response["diagnostics"]
         .as_array()
         .is_some_and(|items| items.iter().any(|item| item["code"] == code))
+}
+
+fn assert_rgb(value: &Value, expected: [f64; 3]) {
+    let actual = value.as_array().expect("RGB array");
+    assert_eq!(actual.len(), 3);
+    for (value, expected) in actual.iter().zip(expected) {
+        assert!((value.as_f64().expect("RGB component") - expected).abs() < 0.00001);
+    }
 }
 
 fn stderr(output: &Output) -> String {

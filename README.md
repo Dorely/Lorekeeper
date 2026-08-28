@@ -106,9 +106,11 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   render artifacts, and other operational state. Images and fonts are ordinary
   Git blobs with the snapshot metadata, hashes, and lengths needed for a clone.
 - Project-owned authoring page setup, Press-backed current-chapter Read preview,
-  and contextual Edit/Read/Pages/Review modes. Read shows actual pagination,
-  line breaks, images, captions, and Designed Pages with single/facing and zoom
-  controls; it does not depend on a publication release. Designed Page text
+  and contextual Edit/Read/Pages/Review modes. Read shows actual pagination and
+  line breaks while preserving the editor's Book Text Styles, heading levels,
+  inset-quotation rules/colors, inline marks, links, Figure captions, caption
+  overlays, images, and Designed Pages with single/facing and zoom controls; it
+  does not depend on a publication release. Designed Page text
   lines are fitted from the selected font's real metrics; the Pages editor
   measures its rendered text frames before showing an overflow warning, and
   genuine output overflow is clipped to its authored frame and reported
