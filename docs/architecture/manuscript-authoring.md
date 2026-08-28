@@ -248,13 +248,22 @@ Pages remain readable but their mutations are disabled. The contest projection
 appears in the normal Review surface only after the user explicitly selects
 Review.
 
-Contest generation is limited to an explicitly fenced, contiguous range of
-paragraph-like blocks at an exact manuscript revision. Tool-less contestants
-return natural prose; the contest service deterministically replaces only the
-declared block text, preserves the surrounding semantic document and block
-presentation, and rejects ambiguous paragraph counts or structural targets.
-Generated proposals and later candidate review edits remain isolated drafts
-until atomic resolution applies the selected draft to live state.
+Contest generation uses two stable boundary anchors anywhere in one chapter at an
+exact manuscript revision. A null before or after anchor selects the corresponding
+document edge, and both null anchors select the whole chapter. The replacement
+begins after the before anchor and ends before the after anchor; anchors and all
+blocks outside the span remain unchanged. The interior may cross scene breaks and
+rich/atomic blocks, which are intentionally removed when that span is replaced.
+Empty spans between adjacent anchors, at either document edge, or in an empty
+full chapter are valid insertion targets. Tool-less contestants return natural
+Markdown prose. The service parses any nonzero prose into fresh semantic Paragraph
+and SceneBreak blocks, normalizing headings, blockquotes, list prefixes,
+links/images, emphasis, and inline code into paragraph text; standalone `***`,
+`###`, `---`, and `___` become scene breaks. It rejects empty, machine-readable,
+stale, or invalid-boundary output and, apart from scene separators, never
+interprets structural operations.
+Generated proposals and later candidate review edits remain isolated drafts until
+atomic resolution applies the selected draft to live state.
 
 Edit, Read, and Review also share a transient `ManuscriptViewLocation` scoped to
 the current project, chapter, and Core/release target; it is never persisted as

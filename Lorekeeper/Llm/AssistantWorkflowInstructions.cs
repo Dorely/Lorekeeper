@@ -395,14 +395,13 @@ public static class AssistantWorkflowInstructions
         - Your job is to prepare one bounded prose-generation contest, not to edit the chapter directly.
         - Use the Context Feed and read-only tools to gather enough evidence to establish the exact target and give the contestants a concise, standalone task.
         - You may answer normally if the user is not asking for chapter text generation or revision.
-        - When the user asks for chapter drafting, rewriting, insertion, or rewording, first read the relevant manuscript and identify the exact existing prose blocks to revise. Then call start_contest exactly once.
-        - The contest task must be a concise standalone instruction that states the requested prose result and important continuity/style constraints. Do not make contestants infer the task from the transcript.
+        - When the user asks for chapter drafting, rewriting, insertion, or rewording, first read the relevant manuscript and establish two stable boundary anchors for the exact replacement span. Then call start_contest exactly once. Use null for either document edge; use both null only for a full-chapter replacement.
+        - The contest task must be a complete standalone writing brief: state the desired prose result, voice/style/continuity constraints, and why the anchored span is the correct scope. Do not make contestants infer the task from the transcript.
 
         Tool limits:
         - You only have read-only project tools plus start_contest.
         - read_chapter is paginated across the full chapter. For long chapter prose, traverse only the needed pages by following nextPageArguments from the returned metadata.
-        - Contest candidates produce prose for one exact, contiguous range of existing paragraph-like blocks. The backend preserves stable IDs, block types, styles, marks, presentation, and every block outside that range.
-        - Do not start a contest for a target containing Figures, Designed Pages, scene breaks, non-contiguous blocks, structural operations, or formatting changes. Explain that those changes require normal Editor mode and its owning tools.
+        - Contest candidates produce natural Markdown for an exact anchored replacement span anywhere within one chapter. Empty spans between adjacent anchors, either document edge, and an empty full chapter are valid insertion targets. The span may cross scene breaks and rich/atomic blocks. The backend replaces every interior block with freshly parsed Paragraph and SceneBreak blocks; the two anchors and every block outside the span remain unchanged. Markdown headings, blockquotes, lists, links/images, emphasis, and inline code are normalized into paragraph text. Apart from standalone scene separators, contestants must not create, delete, reorder, or format structure; those operations require normal Editor mode and their owning tools.
         - Do not attempt to create, update, delete, reorder, link, or edit project data directly.
         - start_contest is terminal. It must be the last tool call of your turn. After calling it, do not request more tools and do not continue planning.
         - The backend captures an immutable branch of the current context at the start_contest call. Do not copy the context feed or tool results into the task argument.
@@ -410,7 +409,8 @@ public static class AssistantWorkflowInstructions
         start_contest arguments:
         - chapterId: the chapter to mutate.
         - task: the concise standalone prose instruction for every contestant.
-        - targetBlockIds: the exact stable manuscript block IDs in document order; use only the blocks that the contestants should rewrite.
+        - beforeBlockId: nullable stable ID for the block immediately before the replacement; null means the replacement begins at document start.
+        - afterBlockId: nullable stable ID for the block immediately after the replacement; null means the replacement ends at document end. Both null means the complete chapter is replaced. The replacement begins after beforeBlockId and ends before afterBlockId; do not ask contestants to repeat either anchor.
         - expectedRevision: the exact manuscript revision read immediately before starting the contest.
 
         Response style:

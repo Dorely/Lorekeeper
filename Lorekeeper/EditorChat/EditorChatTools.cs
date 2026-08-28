@@ -234,7 +234,7 @@ IActService acts,
                 name: "read_manuscript",
                 description:
                     "Read bounded agent-manuscript-v1 semantic rows with stable block IDs, exact text, sparse structure, UTF-16 inline marks, interned paragraph formatting, Figure/Designed Page metadata, source hash, and the current revision token. " +
-                    "The active Context Feed normally already includes the complete current manuscript snapshot for direct edits. Use this tool when that snapshot is missing, incomplete, stale, non-active, or insufficient. In Contest Mode, use the returned stable IDs and revision to choose one contiguous paragraph-like target, then pass them to start_contest; do not attempt to mutate the manuscript from Contest Mode. In normal Editor Mode, pass the returned revision and operations once to apply_manuscript_operations. After a mutation returns requiresReadback=true, call this tool for every exact readbackRanges entry and require the returned revision and sourceHash to match before continuing. For reusable formatting, use the focused Book Text Style tools instead of emitting one operation per block."),
+                    "The active Context Feed normally already includes the complete current manuscript snapshot for direct edits. Use this tool when that snapshot is missing, incomplete, stale, non-active, or insufficient. In Contest Mode, use the returned stable IDs and revision to choose two boundary anchors anywhere in the chapter, or null for either document edge, then pass them to start_contest; both null anchors select the whole chapter. Empty spans between adjacent anchors and empty chapters are valid insertion targets. Do not attempt to mutate the manuscript from Contest Mode. The anchored interior may cross scene breaks and rich/atomic blocks; it is replaced wholesale while the anchors and all outside blocks remain unchanged. In normal Editor Mode, pass the returned revision and operations once to apply_manuscript_operations. After a mutation returns requiresReadback=true, call this tool for every exact readbackRanges entry and require the returned revision and sourceHash to match before continuing. For reusable formatting, use the focused Book Text Style tools instead of emitting one operation per block."),
 
             AIFunctionFactory.Create(
                 method: (Guid chapterId, string? query = null, string? blockType = null, string? styleRole = null, int start = 0, int count = 40) =>
@@ -301,14 +301,13 @@ IActService acts,
         if (mode == EditorChatToolMode.ContestPreparation)
         {
             tools.Add(AIFunctionFactory.Create(
-                method: (Guid chapterId, string task, string[] targetBlockIds, long expectedRevision) =>
-                    StartContestAsync(context, chapterId, task, targetBlockIds, expectedRevision),
+                method: (Guid chapterId, string task, long expectedRevision, string? beforeBlockId = null, string? afterBlockId = null) =>
+                    StartContestAsync(context, chapterId, task, expectedRevision, beforeBlockId, afterBlockId),
                 name: "start_contest",
                 description:
-                    "Start a Contest Mode prose-generation job for one exact, contiguous range of existing paragraph-like manuscript blocks. " +
-                    "Before calling, gather context, identify the precise target block IDs in document order, and pass the current manuscript revision. " +
-                    "The task must be a concise standalone instruction for contestants, not merely the user's unscoped request. " +
-                    "Figures, Designed Pages, scene breaks, non-contiguous targets, structural edits, and formatting changes are not supported. " +
+                    "Start a Contest Mode prose-generation job for an anchored replacement span within one chapter. " +
+                    "Before calling, gather context and establish a complete standalone writing brief: desired prose result, voice/style/continuity constraints, and why the selected span is the right scope. " +
+                    "Pass the current manuscript revision and two stable boundary IDs in document order. beforeBlockId and afterBlockId are nullable document-edge anchors: null before means document start, null after means document end, and both null means full-chapter replacement. Adjacent anchors, either document edge, and an empty full chapter are valid empty insertion spans. The replacement starts after the before anchor and ends before the after anchor; anchors and blocks outside the span remain unchanged, while every interior block (including Figures, Designed Pages, scene breaks, and other structure) is intentionally replaced by the candidate's parsed prose. Contestants return natural Markdown; headings, blockquotes, lists, links/images, emphasis, and inline code are normalized into paragraph text, while standalone scene separators become semantic SceneBreak blocks. Apart from those scene separators, contestants cannot perform structural or formatting operations. " +
                     "Call this exactly once and make it the final tool call of the turn. "));
             return tools;
         }
@@ -2733,8 +2732,9 @@ IActService acts,
         EditorChatContext ctx,
         Guid chapterId,
         string task,
-        string[] targetBlockIds,
-        long expectedRevision)
+        long expectedRevision,
+        string? beforeBlockId,
+        string? afterBlockId)
     {
         if (chapterId == Guid.Empty)
             return "Error: chapterId is required.";
@@ -2745,8 +2745,6 @@ IActService acts,
 
         if (string.IsNullOrWhiteSpace(task))
             return "Error: task is required. Establish the requested prose change and pass a concise standalone contestant instruction.";
-        if (targetBlockIds is null || targetBlockIds.Length == 0)
-            return "Error: targetBlockIds is required. Pass the exact ordered stable IDs for the prose blocks to revise.";
         if (expectedRevision < 0)
             return "Error: expectedRevision must be a non-negative manuscript revision.";
 
@@ -2754,8 +2752,10 @@ IActService acts,
             chapterId,
             ctx.ContentTarget,
             task.Trim(),
-            targetBlockIds,
-            expectedRevision));
+            TargetBlockIds: null,
+            ExpectedRevision: expectedRevision,
+            BeforeBlockId: string.IsNullOrWhiteSpace(beforeBlockId) ? null : beforeBlockId.Trim(),
+            AfterBlockId: string.IsNullOrWhiteSpace(afterBlockId) ? null : afterBlockId.Trim()));
 
         return "Contest started. Candidate status will stream in the Editor; open Review when you want to inspect the drafts.";
     }

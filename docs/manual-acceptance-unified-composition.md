@@ -154,21 +154,30 @@ the live test project; terminate the browser host after the run.
   slots, persists selection, shows progress for running candidates, disables
   failed candidates with their error, and enables completed candidates.
 - Before starting, confirm the coordinator uses read-only context tools to name
-  an explicit task and contiguous paragraph-like block target at the current
-  manuscript revision. Confirm starting and streaming the contest preserve the
+  a complete standalone writing brief (desired result, voice/style/continuity
+  constraints, and scope rationale), two boundary anchors, and the current
+  manuscript revision. Confirm a span crossing scene breaks and rich/atomic
+  blocks, document-edge anchors, adjacent-anchor insertion, and both-null
+  full-chapter scope including an empty chapter. Confirm starting and
+  streaming the contest preserve the
   current chapter, Core/edition target, pane visibility, route, and mode. When
   the initiating turn completes, confirm only the mounted Editor mode changes
   to read-only Edit; Review opens only through an explicit Review or contest
   action and routes to the contested chapter/target when necessary.
 - Inspect completed candidates and confirm the runner responses are natural
-  prose produced without tools or a JSON/operation schema. Confirm a single
-  target block preserves its stable ID, type, style, and presentation; a
-  multi-block target is accepted only when its paragraph sequence maps
-  unambiguously one-to-one to the declared contiguous blocks. Confirm empty,
-  ambiguous, noncontiguous, or structural targets fail closed and every block
-  outside the declared target remains unchanged. Confirm a harmless fenced prose
-  response or `Revised text` label is normalized without exposing that wrapper in
-  the candidate draft, while machine-readable or structural output fails closed.
+  prose produced without tools or a JSON/operation schema. Confirm the response
+  replaces exactly the blocks between the anchors with fresh semantic paragraphs
+  and scene breaks, accepts any nonzero paragraph count including insertion into an
+  empty span, and never repeats the
+  anchors. Confirm the anchors and every block outside the span remain unchanged,
+  while Figures, Designed Pages, scene breaks, and other structure inside the
+  selected span are intentionally replaced. Confirm empty candidate output or
+  complete machine-readable JSON object/array output fails closed. Confirm ATX headings,
+  blockquotes, list prefixes, links/images, emphasis, and inline code are
+  normalized to paragraph text, while standalone `***`, `###`, `---`, and `___`
+  become semantic scene breaks. Confirm a harmless fenced prose response or
+  `Revised text` label is normalized without exposing that wrapper in the
+  candidate draft, while a complete JSON object/array is rejected.
 - Edit text inline, reject a text row, edit a Figure caption, and reset each
   candidate. Switch candidates repeatedly and confirm every candidate preserves
   its own draft, no accepted lines are mixed into another candidate, and the

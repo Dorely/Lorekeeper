@@ -355,19 +355,29 @@ and use owning mutation/readback or visual-verification tools for any change.
 
 ### Contest Mode and revision workers
 
-Contest Mode is a one-chapter, exact-target prose review context with one durable
+Contest Mode is a one-chapter, exact-scope prose review context with one durable
 candidate draft per configured provider/model. The coordinating Editor assistant
 first uses its read-only context tools to establish a concise standalone task,
-the current manuscript revision, and one ordered contiguous range of existing
-paragraph-like stable block IDs. The contest service validates that source fence
-before launch. Each candidate receives an immutable context branch plus the
-explicit task and exact source manuscript, runs with tool use explicitly disabled,
-and returns natural prose rather than JSON or semantic operations. The service
-maps a single prose paragraph to a single target block, or maps an unambiguous
-one-to-one paragraph sequence to a multi-block target, while preserving block
-identity, type, style, inline-mark structure, presentation, and every block
-outside the target. Empty, machine-readable, structural, noncontiguous, stale, or
-paragraph-count-mismatched results fail closed.
+the current manuscript revision, and two stable boundary anchors for an exact
+replacement span anywhere in the chapter. A null before anchor means document
+start, a null after anchor means document end, and both null means the full
+chapter. The replacement begins after the before anchor and ends before the after
+anchor, so the anchors and every block outside the span remain immutable. The
+interior may cross scene breaks and include Figures, Designed Pages, headings,
+lists, or other semantic structure; all such interior blocks are intentionally
+replaced because the coordinator selected that span. The contest service validates
+the source fence and boundary order before launch; empty spans at either document
+edge, between adjacent anchors, or in an empty full chapter are valid insertion
+targets. Each candidate receives an
+immutable context branch plus the explicit standalone writing brief and exact
+source manuscript, runs with tool use explicitly disabled, and returns natural
+Markdown prose rather than JSON or semantic operations. The service parses any
+nonzero prose into fresh semantic Paragraph and SceneBreak blocks, normalizing
+ATX headings, blockquotes, list prefixes, links/images, emphasis, and inline code
+into paragraph text. Standalone `***`, `###`, `---`, and `___` become scene
+breaks. Empty, machine-readable, stale, or invalid-boundary results fail closed;
+apart from those scene separators, structural output is never interpreted as a
+manuscript operation.
 
 The Review page shows an
 equal-width, keyboard-accessible selector containing only configured slots

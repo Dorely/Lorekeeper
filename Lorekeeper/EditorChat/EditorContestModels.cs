@@ -15,8 +15,12 @@ public sealed record EditorContestStartRequest(
     Guid ChapterId,
     EditorContentTarget ContentTarget,
     string Task,
-    IReadOnlyList<string> TargetBlockIds,
-    long ExpectedRevision);
+    // Retained for deserializing schema-v1 contest envelopes; new contests use
+    // nullable boundary anchors instead of a selected block-ID list.
+    IReadOnlyList<string>? TargetBlockIds,
+    long ExpectedRevision,
+    string? BeforeBlockId = null,
+    string? AfterBlockId = null);
 
 public sealed record ContestTurnSnapshot(
     IReadOnlyList<ContestChatMessageSnapshot> Messages,
@@ -35,7 +39,10 @@ public sealed record ContestChatMessageSnapshot(
 public sealed record ContestContextEnvelope(
     int SchemaVersion,
     EditorContestStartRequest Request,
-    ContestTurnSnapshot Snapshot);
+    ContestTurnSnapshot Snapshot)
+{
+    public const int CurrentSchemaVersion = 2;
+}
 
 public abstract record EditorContestRunUpdate;
 
