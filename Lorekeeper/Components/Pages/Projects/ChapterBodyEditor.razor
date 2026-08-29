@@ -17,9 +17,17 @@
 @inject ITypographyDefaultsService TypographyDefaults
 @inject Lorekeeper.Composition.ICompositionService Compositions
 @inject IAuthoringHistoryRuntime AuthoringHistory
+@inject ILogger<ChapterBodyEditor> Logger
 
 <div class="@RootClass()">
     <div @ref="_root"></div>
+    @if (!string.IsNullOrWhiteSpace(_initializationError))
+    {
+        <div class="semantic-editor-warning" role="alert">
+            <span>@_initializationError</span>
+            <button type="button" class="btn btn-sm btn-outline-warning" @onclick="RetryInitialization" disabled="@(_disposed || _disposing)">Retry</button>
+        </div>
+    }
     @if (!string.IsNullOrWhiteSpace(_pasteWarning))
     {
         <div class="semantic-editor-warning" role="status">
@@ -36,6 +44,7 @@
     [Parameter, EditorRequired] public string InitialManuscriptJson { get; set; } = string.Empty;
     [Parameter] public bool IsVisible { get; set; } = true;
     [Parameter] public bool IsReadOnly { get; set; }
+    [Parameter] public bool AllowAnnotations { get; set; } = true;
     [Parameter] public bool AllowDesignedPages { get; set; } = true;
     [Parameter] public EventCallback<Guid> OpenDesignedPage { get; set; }
     [Parameter] public EventCallback OpenProjectImagePicker { get; set; }
@@ -62,6 +71,7 @@
     private bool _initializing;
     private bool _disposed;
     private bool _disposing;
+    private string? _initializationError;
     private string? _pasteWarning;
     private ManuscriptViewLocation? _pendingLocation;
 
@@ -70,7 +80,7 @@
         if (_disposed || _disposing)
             return;
 
-        if (_handle is null && !_initializing)
+        if (_handle is null && !_initializing && _initializationError is null)
         {
             _initializing = true;
             try
@@ -91,9 +101,11 @@
                 var typographyJson = JsonSerializer.Serialize(
                     TypographyDefaults.CreateEditorConfiguration(pageSetup),
                     ManuscriptCodec.JsonOptions);
-                var annotationsJson = JsonSerializer.Serialize(
-                    await Annotations.ListChapterAsync(ProjectId, ContentTarget, ChapterId),
-                    ManuscriptCodec.JsonOptions);
+                var annotationsJson = AllowAnnotations
+                    ? JsonSerializer.Serialize(
+                        await Annotations.ListChapterAsync(ProjectId, ContentTarget, ChapterId),
+                        ManuscriptCodec.JsonOptions)
+                    : "[]";
                 if (_disposed || _disposing)
                     return;
 
@@ -124,7 +136,8 @@
                     fontFamiliesJson,
                     AllowDesignedPages,
                     annotationsJson,
-                    typographyJson);
+                    typographyJson,
+                    AllowAnnotations);
                 if (_disposed || _disposing)
                 {
                     if (handle is not null)
@@ -141,6 +154,22 @@
             catch (JSDisconnectedException) { }
             catch (OperationCanceledException) { }
             catch (ObjectDisposedException) when (_disposing || _disposed) { }
+            catch (KeyNotFoundException exception)
+            {
+                await DisposeFailedInitializationAsync();
+                await SetInitializationErrorAsync(
+                    "The selected chapter or content target is no longer available. Retry or reload the editor.",
+                    exception,
+                    LogLevel.Warning);
+            }
+            catch (Exception exception)
+            {
+                await DisposeFailedInitializationAsync();
+                await SetInitializationErrorAsync(
+                    "The manuscript editor could not be initialized. Retry or reload the page.",
+                    exception,
+                    LogLevel.Error);
+            }
             finally
             {
                 _initializing = false;
@@ -209,6 +238,8 @@
         ManuscriptAnnotationRange range,
         long expectedManuscriptRevision)
     {
+        if (!AllowAnnotations)
+            throw new InvalidOperationException("Review annotations are not available in this editor.");
         var parsedKind = Enum.TryParse<ManuscriptAnnotationKind>(kind, ignoreCase: true, out var value)
             ? value
             : throw new InvalidDataException("Choose a supported review annotation kind.");
@@ -225,15 +256,18 @@
     }
 
     [JSInvokable]
-    public Task OnAnnotationSelected(Guid annotationId) => AnnotationSelected.InvokeAsync(annotationId);
+    public Task OnAnnotationSelected(Guid annotationId) =>
+        AllowAnnotations ? AnnotationSelected.InvokeAsync(annotationId) : Task.CompletedTask;
 
     [JSInvokable]
     public Task<IReadOnlyList<ManuscriptAnnotationView>> GetReviewAnnotations() =>
-        Annotations.ListChapterAsync(ProjectId, ContentTarget, ChapterId);
+        AllowAnnotations
+            ? Annotations.ListChapterAsync(ProjectId, ContentTarget, ChapterId)
+            : Task.FromResult<IReadOnlyList<ManuscriptAnnotationView>>([]);
 
     public async Task<ManuscriptAnnotationRange?> GetAnnotationRangeAsync()
     {
-        if (_disposed || _handle is null)
+        if (!AllowAnnotations || _disposed || _handle is null)
             return null;
         try { return await _handle.InvokeAsync<ManuscriptAnnotationRange>("getAnnotationRange"); }
         catch (JSException) { return null; }
@@ -242,7 +276,7 @@
 
     public async Task SelectAnnotationAsync(Guid annotationId)
     {
-        if (_disposed || _handle is null)
+        if (!AllowAnnotations || _disposed || _handle is null)
             return;
         try { await _handle.InvokeVoidAsync("selectAnnotation", annotationId); }
         catch (JSException) { }
@@ -251,7 +285,7 @@
 
     public async Task SetAnnotationsAsync(IReadOnlyList<ManuscriptAnnotationView> annotations)
     {
-        if (_disposed || _handle is null)
+        if (!AllowAnnotations || _disposed || _handle is null)
             return;
         try
         {
@@ -416,14 +450,15 @@
         if (UndoOverrideAsync is not null)
         {
             var overridden = await UndoOverrideAsync();
-            if (overridden.Applied)
+            if (AllowAnnotations && overridden.Applied)
                 await AnnotationsChanged.InvokeAsync();
             return overridden;
         }
         try
         {
             var result = await Manuscripts.UndoAsync(ContentTarget, ChapterId);
-            await AnnotationsChanged.InvokeAsync();
+            if (AllowAnnotations)
+                await AnnotationsChanged.InvokeAsync();
             var applied = !string.IsNullOrEmpty(result.ActionLabel);
             return new(applied, applied ? ManuscriptCodec.Serialize(result.Snapshot.Document) : null, result.Snapshot.Revision,
                 result.History.CanUndo, result.History.CanRedo, result.History.UndoLabel, result.History.RedoLabel,
@@ -441,14 +476,15 @@
         if (RedoOverrideAsync is not null)
         {
             var overridden = await RedoOverrideAsync();
-            if (overridden.Applied)
+            if (AllowAnnotations && overridden.Applied)
                 await AnnotationsChanged.InvokeAsync();
             return overridden;
         }
         try
         {
             var result = await Manuscripts.RedoAsync(ContentTarget, ChapterId);
-            await AnnotationsChanged.InvokeAsync();
+            if (AllowAnnotations)
+                await AnnotationsChanged.InvokeAsync();
             var applied = !string.IsNullOrEmpty(result.ActionLabel);
             return new(applied, applied ? ManuscriptCodec.Serialize(result.Snapshot.Document) : null, result.Snapshot.Revision,
                 result.History.CanUndo, result.History.CanRedo, result.History.UndoLabel, result.History.RedoLabel,
@@ -605,6 +641,67 @@
         catch (JSDisconnectedException) { }
         catch (OperationCanceledException) { }
         catch (JSException) { }
+    }
+
+    private void RetryInitialization()
+    {
+        if (_disposed || _disposing)
+            return;
+        _initializationError = null;
+    }
+
+    private async Task SetInitializationErrorAsync(string message, Exception exception, LogLevel level)
+    {
+        if (level == LogLevel.Warning)
+        {
+            Logger.LogWarning(
+                exception,
+                "Chapter editor target was unavailable during initialization. ProjectId={ProjectId}, ChapterId={ChapterId}, ContentTarget={ContentTarget}",
+                ProjectId,
+                ChapterId,
+                ContentTarget.StorageKey);
+        }
+        else
+        {
+            Logger.LogError(
+                exception,
+                "Chapter editor initialization failed. ProjectId={ProjectId}, ChapterId={ChapterId}, ContentTarget={ContentTarget}",
+                ProjectId,
+                ChapterId,
+                ContentTarget.StorageKey);
+        }
+
+        if (!_disposed && !_disposing)
+        {
+            _initializationError = message;
+            try
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) when (_disposed || _disposing) { }
+        }
+    }
+
+    private async Task DisposeFailedInitializationAsync()
+    {
+        var handle = _handle;
+        _handle = null;
+        if (handle is not null)
+        {
+            try { await handle.InvokeVoidAsync("dispose"); } catch { }
+            try { await handle.DisposeAsync(); } catch { }
+        }
+
+        var module = _module;
+        _module = null;
+        if (module is not null)
+        {
+            try { await module.DisposeAsync(); } catch { }
+        }
+
+        _selfRef?.Dispose();
+        _selfRef = null;
     }
 
     private string RootClass()

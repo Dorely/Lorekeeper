@@ -2185,7 +2185,7 @@ function hydrateDesignedPageSummaries(document, compositionById) {
     return document;
 }
 
-export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]", fontFamiliesJson = "[]", allowDesignedPages = true, annotationsJson = "[]", typographyJson = "{}") {
+export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[]", imagesJson = "[]", editionsJson = "[]", compositionsJson = "[]", fontFamiliesJson = "[]", allowDesignedPages = true, annotationsJson = "[]", typographyJson = "{}", allowAnnotations = true) {
     if (!root || typeof root.replaceChildren !== "function" || root.isConnected === false)
         return null;
 
@@ -2195,7 +2195,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     JSON.parse(editionsJson);
     const pageCompositions = JSON.parse(compositionsJson);
     const fontFamilies = JSON.parse(fontFamiliesJson);
-    let reviewAnnotations = JSON.parse(annotationsJson);
+    let reviewAnnotations = allowAnnotations ? JSON.parse(annotationsJson) : [];
     let typography = JSON.parse(typographyJson);
     const imageById = new Map(projectImages.map(image => [String(image.id).toLowerCase(), image]));
     const compositionById = new Map(pageCompositions.map(composition => [String(composition.id).toLowerCase(), composition]));
@@ -2283,6 +2283,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         caretFrame = requestAnimationFrame(updatePersistentCaret);
     };
     const refreshReviewAnnotations = async () => {
+        if (!allowAnnotations) return;
         try {
             reviewAnnotations = await dotNetRef.invokeMethodAsync("GetReviewAnnotations");
             view.dispatch(view.state.tr.setMeta(annotationsKey, true));
@@ -2587,6 +2588,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
         : [];
 
     const createAnnotation = async kind => {
+        if (!allowAnnotations) return;
         let range;
         try {
             range = annotationRangeFromSelection(view);
@@ -2620,8 +2622,12 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
     };
 
     toolbar.append(
-        button("Highlight", "Highlight the selected text for review", () => void createAnnotation("highlight")),
-        button("Note", "Add a review note to the selected text", () => void createAnnotation("note")),
+        ...(allowAnnotations
+            ? [
+                button("Highlight", "Highlight the selected text for review", () => void createAnnotation("highlight")),
+                button("Note", "Add a review note to the selected text", () => void createAnnotation("note")),
+            ]
+            : []),
         selectControl("Block style", [
             ["", "Book text"],
             ["paragraph|body|2", "Body text"],
@@ -2726,10 +2732,12 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             controlByTitle("Find and replace"),
             controlByTitle("Toggle document outline"),
         ]),
-        toolGroup("Review", [
-            controlByTitle("Highlight the selected text for review"),
-            controlByTitle("Add a review note to the selected text"),
-        ]),
+        ...(allowAnnotations
+            ? [toolGroup("Review", [
+                controlByTitle("Highlight the selected text for review"),
+                controlByTitle("Add a review note to the selected text"),
+            ])]
+            : []),
         toolGroup("Text and typography", [
             controlBySelect("Block style"),
             controlBySelect("Heading level"),
@@ -2905,6 +2913,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             }).catch(() => {});
         },
         setAnnotations(json) {
+            if (!allowAnnotations) return;
             reviewAnnotations = typeof json === "string" ? JSON.parse(json) : json;
             view.dispatch(view.state.tr.setMeta(annotationsKey, true));
         },
@@ -2913,6 +2922,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             typographyRules.update(typography || {});
         },
         getAnnotationRange() {
+            if (!allowAnnotations) return null;
             return annotationRangeFromSelection(view);
         },
         getLocation() {
@@ -2922,6 +2932,7 @@ export function attach(root, dotNetRef, debounceMs, initialJson, stylesJson = "[
             return restoreLocation(view, location);
         },
         selectAnnotation(annotationId) {
+            if (!allowAnnotations) return false;
             const annotation = reviewAnnotations.find(item => item.id === annotationId);
             if (!annotation || String(annotation.anchorState).toLowerCase() !== "current") return false;
             const start = blockPositionById(view.state.doc, annotation.range.startBlockId);

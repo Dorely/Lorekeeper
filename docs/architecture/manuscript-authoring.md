@@ -197,8 +197,14 @@ ProseMirror local-history plugin are not persistence mechanisms.
 component/JavaScript bridge, visible-mode focus, stable selection restoration,
 the persistent caret while focus is elsewhere, gap selection around non-text
 blocks, revision-aware save/flush, annotation selection, Figure controls, and
-caller-controlled Designed Page insertion. The editor surface fills its row and
-only the owning surface scrolls when content exceeds available space.
+caller-controlled Designed Page insertion. Publish section prose passes
+`AllowAnnotations=false` because a publication-section ID is not a chapter ID;
+the shared editor must not call chapter-scoped annotation APIs for that surface.
+Chapter/editor initialization failures are logged with their project, chapter,
+and target identity and remain visible with explicit retry state; cancellation,
+disconnect, and disposal remain non-errors, while user-action and save failures
+retain their existing error handling. The editor surface fills its row and only
+the owning surface scrolls when content exceeds available space.
 
 The primary toolbar loads the project font catalog and provides direct font,
 size, line-spacing, emphasis, alignment, indentation, list, link, paragraph,
