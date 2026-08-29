@@ -46,7 +46,7 @@ finally {
     Pop-Location
 }
 
-$lockText = [IO.File]::ReadAllText((Join-Path $pressRoot 'Cargo.lock'))
+$lockText = [IO.File]::ReadAllText((Join-Path $pressRoot 'Cargo.lock')) -replace '\r\n?', "`n"
 $lockedChecksums = @{}
 foreach ($packageMatch in [regex]::Matches(
     $lockText,
