@@ -445,6 +445,9 @@ public sealed class PublicationCoreMigrationService(
                     new PublicationBook(), stored, new HashSet<PublicationEditionOverrideField>(),
                     await db.PublicationEditionOutlineItems.AsNoTracking().Where(item => item.EditionId == stored.Id).ToListAsync(cancellationToken),
                     []);
+            var outline = useCoreInheritance
+                ? await ResolveLegacyOutlineAsync(db, stored.ProjectId, stored.Id, cancellationToken)
+                : resolved.OutlineItems;
             var matter = useCoreInheritance
                 ? await ResolveLegacyMatterAsync(db, stored.ProjectId, stored.Id, cancellationToken)
                 : await db.PublicationMatter.AsNoTracking().Where(item => item.EditionId == stored.Id).ToListAsync(cancellationToken);
@@ -493,7 +496,7 @@ public sealed class PublicationCoreMigrationService(
                 edition.BodyLineHeight,
                 edition.SelectedCoverImageId,
                 edition.AllowDesignedPageOverrides,
-                Outline = resolved.OutlineItems.Where(item => item.IsIncluded).OrderBy(item => item.SortOrder)
+                Outline = outline.Where(item => item.IsIncluded).OrderBy(item => item.SortOrder)
                     .Select(item => new { item.TargetKind, item.TargetId, item.IsIncluded, item.SortOrder }),
                 Matter = matter.OrderBy(item => item.Location).ThenBy(item => item.SortOrder)
                     .Select(item => new { item.Location, item.Kind, item.Title, item.ManuscriptJson, item.Revision, item.IsIncluded, item.SortOrder }),
@@ -530,6 +533,33 @@ public sealed class PublicationCoreMigrationService(
         }
         var json = JsonSerializer.Serialize(projections, ManuscriptCodec.JsonOptions);
         return Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json)));
+    }
+
+    private static async Task<IReadOnlyList<PublicationEditionOutlineItem>> ResolveLegacyOutlineAsync(
+        AppDbContext db,
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken)
+    {
+        var core = await db.PublicationBookOutlineItems.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .ToListAsync(cancellationToken);
+        var overrides = await db.PublicationEditionOutlineItems.AsNoTracking()
+            .Where(item => item.EditionId == editionId)
+            .ToDictionaryAsync(item => (item.TargetKind, item.TargetId), cancellationToken);
+        return core.Select(item => overrides.TryGetValue((item.TargetKind, item.TargetId), out var value)
+            ? value
+            : new PublicationEditionOutlineItem
+            {
+                Id = item.Id,
+                EditionId = editionId,
+                TargetKind = item.TargetKind,
+                TargetId = item.TargetId,
+                ActId = item.ActId,
+                ChapterId = item.ChapterId,
+                IsIncluded = item.IsIncluded,
+                SortOrder = item.SortOrder,
+            }).OrderBy(item => item.SortOrder).ToList();
     }
 
     private static async Task<IReadOnlyList<PublicationMatter>> ResolveLegacyMatterAsync(

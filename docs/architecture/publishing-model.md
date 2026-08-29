@@ -65,9 +65,17 @@ profile implementations.
 
 ## Current architecture and invariants
 
-Core Book follows the project outline. Acts remain structural groups; heading
-and synopsis settings determine whether act presentation is emitted. Chapter
-rows are selectable publication content. Core owns shared title/author/language
+Core Book follows the project outline: acts sort by `Act.Order` and stable ID,
+then each act's chapters sort by their act-local `Chapter.Order` and stable ID,
+followed by unassigned chapters with the same chapter ordering. The persisted
+Core outline is reconciled to that canonical sequence on read while preserving
+inclusion for surviving targets; additions, removals, and reorders advance the
+Core revision once, so source/artifact freshness changes only for a real
+effective-outline change. Release outline rows are sparse inclusion overlays,
+not independent ordering: effective Core and release reads always inherit that
+canonical sequence. Acts remain structural groups; heading and synopsis
+settings determine whether act presentation is emitted. Chapter rows are
+selectable publication content. Core owns shared title/author/language
 metadata, chapter inclusion, publication sections, page setup and Book Text
 Styles through their respective services, and the reusable front cover.
 Release creation is explicit: no release or ISBN is created automatically.

@@ -95,6 +95,10 @@ public sealed record PublicationCoverHistoryResult(
     string ActionLabel,
     string SelectionJson);
 
+internal readonly record struct PublicationOutlineTarget(
+    PublishOutlineTargetKind TargetKind,
+    Guid TargetId);
+
 public sealed class PublicationBookService(
     IAppDatabaseOperationFactory database,
     IAuthoringHistoryRuntime? authoringHistory = null,
@@ -306,32 +310,46 @@ public sealed class PublicationBookService(
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        var targetCount = await db.Acts.AsNoTracking().CountAsync(item => item.ProjectId == projectId, cancellationToken)
-            + await db.Chapters.AsNoTracking().CountAsync(item => item.ProjectId == projectId, cancellationToken);
-        if (await db.PublicationBookOutlineItems.AsNoTracking().CountAsync(item => item.ProjectId == projectId, cancellationToken) == targetCount)
-            return existing;
-        var currentRows = await db.PublicationBookOutlineItems.AsNoTracking()
+        var targets = await ListCanonicalOutlineTargetsAsync(db, projectId, cancellationToken);
+        var currentRows = await db.PublicationBookOutlineItems
             .Where(item => item.ProjectId == projectId).ToListAsync(cancellationToken);
-        var known = currentRows.Select(item => (item.TargetKind, item.TargetId)).ToHashSet();
-        var nextOrder = currentRows.Select(item => item.SortOrder).DefaultIfEmpty(-1).Max() + 1;
-        var additions = new List<PublicationBookOutlineItem>();
-        foreach (var actId in await db.Acts.AsNoTracking().Where(item => item.ProjectId == projectId)
-            .OrderBy(item => item.Order).Select(item => item.Id).ToListAsync(cancellationToken))
-            if (known.Add((PublishOutlineTargetKind.Act, actId)))
-                additions.Add(NewOutline(projectId, PublishOutlineTargetKind.Act, actId, nextOrder++));
-        foreach (var chapterId in await db.Chapters.AsNoTracking().Where(item => item.ProjectId == projectId)
-            .OrderBy(item => item.Order).Select(item => item.Id).ToListAsync(cancellationToken))
-            if (known.Add((PublishOutlineTargetKind.Chapter, chapterId)))
-                additions.Add(NewOutline(projectId, PublishOutlineTargetKind.Chapter, chapterId, nextOrder++));
-        if (additions.Count == 0)
-            return (await ReadViewAsync(projectId, cancellationToken))!;
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        db.PublicationBookOutlineItems.AddRange(additions);
+        var currentByTarget = currentRows.ToDictionary(item => (item.TargetKind, item.TargetId));
+        var canonicalTargetKeys = targets.Select(item => (item.TargetKind, item.TargetId)).ToHashSet();
+        var now = DateTime.UtcNow;
+        var changed = false;
+
+        for (var sortOrder = 0; sortOrder < targets.Count; sortOrder++)
+        {
+            var target = targets[sortOrder];
+            if (!currentByTarget.TryGetValue((target.TargetKind, target.TargetId), out var row))
+            {
+                db.PublicationBookOutlineItems.Add(NewOutline(
+                    projectId, target.TargetKind, target.TargetId, sortOrder));
+                changed = true;
+                continue;
+            }
+
+            if (row.SortOrder == sortOrder)
+                continue;
+
+            row.SortOrder = sortOrder;
+            row.UpdatedAt = now;
+            changed = true;
+        }
+
+        var removed = currentRows.Where(item => !canonicalTargetKeys.Contains((item.TargetKind, item.TargetId))).ToList();
+        if (removed.Count > 0)
+        {
+            db.PublicationBookOutlineItems.RemoveRange(removed);
+            changed = true;
+        }
+
+        if (!changed)
+            return existing;
+
+        var book = await db.PublicationBooks.SingleAsync(item => item.ProjectId == projectId, cancellationToken);
+        Touch(book);
         await db.SaveChangesAsync(cancellationToken);
-        await db.PublicationBooks.Where(item => item.ProjectId == projectId).ExecuteUpdateAsync(setters => setters
-            .SetProperty(item => item.Revision, item => item.Revision + 1)
-            .SetProperty(item => item.UpdatedAt, DateTime.UtcNow), cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
         return (await ReadViewAsync(projectId, cancellationToken))!;
     }
 
@@ -434,17 +452,21 @@ public sealed class PublicationBookService(
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var db = databaseOperation.Db;
+        var targets = await ListCanonicalOutlineTargetsAsync(db, projectId, cancellationToken);
+        var rows = await db.PublicationBookOutlineItems.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .ToDictionaryAsync(item => (item.TargetKind, item.TargetId), cancellationToken);
         var chapters = await db.Chapters.AsNoTracking().Where(item => item.ProjectId == projectId)
             .ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
-        return (await db.PublicationBookOutlineItems.AsNoTracking()
-            .Where(item => item.ProjectId == projectId && item.TargetKind == PublishOutlineTargetKind.Chapter)
-            .OrderBy(item => item.SortOrder).ToListAsync(cancellationToken))
+        return targets.Select((target, sortOrder) => new { target, sortOrder })
+            .Where(item => item.target.TargetKind == PublishOutlineTargetKind.Chapter)
             .Select(item => new PublicationBookOutlineView(
-                item.TargetKind,
-                item.TargetId,
-                chapters.GetValueOrDefault(item.TargetId, "Missing chapter"),
-                item.IsIncluded,
-                item.SortOrder)).ToList();
+                item.target.TargetKind,
+                item.target.TargetId,
+                chapters.GetValueOrDefault(item.target.TargetId, "Missing chapter"),
+                rows.GetValueOrDefault((item.target.TargetKind, item.target.TargetId))?.IsIncluded ?? true,
+                item.sortOrder))
+            .ToList();
     }
 
     public async Task<PublicationBookView> SetOutlineSelectionsAsync(
@@ -880,11 +902,45 @@ public sealed class PublicationBookService(
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
-        var order = 0;
-        foreach (var act in await db.Acts.Where(item => item.ProjectId == book.ProjectId).OrderBy(item => item.Order).ToListAsync(cancellationToken))
-            book.OutlineItems.Add(NewOutline(book.ProjectId, PublishOutlineTargetKind.Act, act.Id, order++));
-        foreach (var chapter in await db.Chapters.Where(item => item.ProjectId == book.ProjectId).OrderBy(item => item.Order).ToListAsync(cancellationToken))
-            book.OutlineItems.Add(NewOutline(book.ProjectId, PublishOutlineTargetKind.Chapter, chapter.Id, order++));
+        var targets = await ListCanonicalOutlineTargetsAsync(db, book.ProjectId, cancellationToken);
+        for (var sortOrder = 0; sortOrder < targets.Count; sortOrder++)
+        {
+            var target = targets[sortOrder];
+            book.OutlineItems.Add(NewOutline(book.ProjectId, target.TargetKind, target.TargetId, sortOrder));
+        }
+    }
+
+    internal static async Task<IReadOnlyList<PublicationOutlineTarget>> ListCanonicalOutlineTargetsAsync(
+        AppDbContext db,
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        var acts = await db.Acts.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .OrderBy(item => item.Order)
+            .ThenBy(item => item.Id)
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+        var chapters = await db.Chapters.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .Select(item => new { item.Id, item.ActId, item.Order })
+            .ToListAsync(cancellationToken);
+        var targets = new List<PublicationOutlineTarget>(acts.Count + chapters.Count);
+        foreach (var actId in acts)
+        {
+            targets.Add(new PublicationOutlineTarget(PublishOutlineTargetKind.Act, actId));
+            targets.AddRange(chapters
+                .Where(item => item.ActId == actId)
+                .OrderBy(item => item.Order)
+                .ThenBy(item => item.Id)
+                .Select(item => new PublicationOutlineTarget(PublishOutlineTargetKind.Chapter, item.Id)));
+        }
+        targets.AddRange(chapters
+            .Where(item => item.ActId is null)
+            .OrderBy(item => item.Order)
+            .ThenBy(item => item.Id)
+            .Select(item => new PublicationOutlineTarget(PublishOutlineTargetKind.Chapter, item.Id)));
+        return targets;
     }
 
     private static PublicationBookOutlineItem NewOutline(
@@ -1113,21 +1169,27 @@ public sealed class PublicationEffectiveConfigurationResolver(
         Guid editionId,
         CancellationToken cancellationToken)
     {
-        var core = await db.PublicationBookOutlineItems.AsNoTracking().Where(item => item.ProjectId == projectId).ToListAsync(cancellationToken);
+        var targets = await PublicationBookService.ListCanonicalOutlineTargetsAsync(db, projectId, cancellationToken);
+        var core = await db.PublicationBookOutlineItems.AsNoTracking()
+            .Where(item => item.ProjectId == projectId)
+            .ToDictionaryAsync(item => (item.TargetKind, item.TargetId), cancellationToken);
         var overrides = await db.PublicationEditionOutlineItems.AsNoTracking().Where(item => item.EditionId == editionId).ToDictionaryAsync(item => (item.TargetKind, item.TargetId), cancellationToken);
-        return core.Select(item => overrides.TryGetValue((item.TargetKind, item.TargetId), out var value)
-            ? value
-            : new PublicationEditionOutlineItem
+        return targets.Select((target, sortOrder) =>
+        {
+            core.TryGetValue((target.TargetKind, target.TargetId), out var inherited);
+            overrides.TryGetValue((target.TargetKind, target.TargetId), out var overlay);
+            return new PublicationEditionOutlineItem
             {
-                Id = item.Id,
+                Id = overlay?.Id ?? inherited?.Id ?? Guid.Empty,
                 EditionId = editionId,
-                TargetKind = item.TargetKind,
-                TargetId = item.TargetId,
-                ActId = item.ActId,
-                ChapterId = item.ChapterId,
-                IsIncluded = item.IsIncluded,
-                SortOrder = item.SortOrder,
-            }).OrderBy(item => item.SortOrder).ToList();
+                TargetKind = target.TargetKind,
+                TargetId = target.TargetId,
+                ActId = target.TargetKind == PublishOutlineTargetKind.Act ? target.TargetId : null,
+                ChapterId = target.TargetKind == PublishOutlineTargetKind.Chapter ? target.TargetId : null,
+                IsIncluded = overlay?.IsIncluded ?? inherited?.IsIncluded ?? true,
+                SortOrder = sortOrder,
+            };
+        }).ToList();
     }
 
     private static T Pick<T>(IReadOnlySet<PublicationEditionOverrideField> fields, PublicationEditionOverrideField field, T stored, T inherited) =>
