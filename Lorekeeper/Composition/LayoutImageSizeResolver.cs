@@ -26,6 +26,57 @@ public static class LayoutImageSizeResolver
         return ResolveAspect(width / height);
     }
 
+    public static LayoutImageSize ResolveNearest(double desiredWidthPixels, double desiredHeightPixels)
+    {
+        if (!double.IsFinite(desiredWidthPixels)
+            || !double.IsFinite(desiredHeightPixels)
+            || desiredWidthPixels <= 0
+            || desiredHeightPixels <= 0)
+            throw new ArgumentException("Desired image pixels must be finite positive values.");
+
+        var aspect = desiredWidthPixels / desiredHeightPixels;
+        if (aspect is < (1d / MaximumAspectRatio) or > MaximumAspectRatio)
+            throw new ArgumentException("Image aspect ratio must be between 1:3 and 3:1.", nameof(desiredWidthPixels));
+
+        var candidates = new List<Candidate>();
+        for (var width = SizeMultiple; width <= MaximumEdge; width += SizeMultiple)
+        {
+            var idealHeight = width / aspect;
+            var nearestHeight = (int)Math.Round(idealHeight / SizeMultiple) * SizeMultiple;
+            for (var offset = -1; offset <= 1; offset++)
+            {
+                var height = nearestHeight + offset * SizeMultiple;
+                if (height is <= 0 or > MaximumEdge)
+                    continue;
+
+                var pixels = (long)width * height;
+                if (pixels is < MinimumPixels or > MaximumPixels)
+                    continue;
+
+                var actualAspect = (double)width / height;
+                var aspectError = Math.Abs(Math.Log(actualAspect / aspect));
+                if (aspectError > PreferredAspectError)
+                    continue;
+
+                var distance = (long)Math.Round(
+                    Math.Pow(width - desiredWidthPixels, 2)
+                    + Math.Pow(height - desiredHeightPixels, 2));
+                candidates.Add(new Candidate(width, height, aspectError, distance));
+            }
+        }
+
+        if (candidates.Count == 0)
+            throw new ArgumentException("Could not derive a provider-valid raster near the requested pixel dimensions.");
+
+        var selected = candidates
+            .OrderBy(candidate => candidate.AreaDistance)
+            .ThenBy(candidate => candidate.AspectError)
+            .ThenBy(candidate => candidate.Width)
+            .ThenBy(candidate => candidate.Height)
+            .First();
+        return new LayoutImageSize(selected.Width, selected.Height);
+    }
+
     public static bool AspectMatches(double actualAspect, double targetAspect) =>
         double.IsFinite(actualAspect)
         && double.IsFinite(targetAspect)

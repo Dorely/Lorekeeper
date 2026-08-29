@@ -93,6 +93,7 @@ public sealed class PublishAssistantTools(
     IProjectFontService projectFonts,
     IProjectPageSetupService pageSetups,
     IProjectImageService projectImages,
+    IProjectImageOutpaintService imageOutpaint,
     IPrintProductRegistry printProducts,
     IPrintGeometryService printGeometry,
     IAppDatabaseOperationFactory database,
@@ -345,7 +346,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (string targetKind, Guid targetId, Guid? variantId = null, Guid? releaseId = null) => ReadLayoutGenerationTargetAsync(context, targetKind, targetId, variantId, releaseId),
                 name: "read_publication_generation_target",
-                description: "Resolve optional composition guidance for a concrete Figure placement, page surface/frame, or cover surface/frame. Page targets require the exact selected composition variantId. Use it when artwork must honor protected physical regions; it does not restrict later placement of other source-image shapes."),
+                description: "Resolve composition geometry, provider-valid final-DPI recommendation, moderate default raster, physical dimensions, protected regions, and provider raster constraints for a concrete Figure placement, page surface/frame, or cover surface/frame. Use CoreCoverSurface/CoreCoverFrame with no releaseId for the Core front cover; use CoverSurface/CoverFrame only with a releaseId for a release cover. For an explicit user-requested DPI, calculate WIDTHxHEIGHT from the returned physical inches and requested DPI, round dimensions to provider-valid multiples while preserving the server-owned aspect, and pass that size override to generate_project_image or edit_project_image. Omit size or use auto otherwise; inspect actualRaster and effectiveDpi in the completed result. Page targets require the exact selected composition variantId. Use it when artwork must honor protected physical regions; it does not restrict later placement of other source-image shapes."),
             AIFunctionFactory.Create(
                 method: (Guid variantId) => ValidateCompositionAsync(context, context.SelectedEditionId, variantId),
                 name: "validate_publication_page_composition",
@@ -354,12 +355,22 @@ public sealed class PublishAssistantTools(
                 method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
                     GenerateProjectImageAsync(context, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression),
                 name: "generate_project_image",
-                description: "Generate one unattached project image and wait for a terminal result. Optional page, Figure, frame, or cover geometry guides composition only and never places output. Inspect the returned image, then apply its project-image ID with a focused cover tool or edit the relevant publication section during this turn."),
+                description: "Generate one unattached project image and wait for a terminal result. Optional page, Figure, frame, or cover geometry guides composition only and never places output. For a layout-bound target, omit target.size or use auto for Lorekeeper's default raster; set an explicit WIDTHxHEIGHT target.size only when the user explicitly requests a different DPI, after reading physical dimensions and provider constraints and calculating the dimensions yourself. Keep the server-owned aspect and protected regions; inspect actualRaster and effectiveDpi before reporting whether the requested DPI was achieved. Inspect the returned image, then apply its project-image ID with a focused cover tool or edit the relevant publication section during this turn."),
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
                     EditProjectImageAsync(context, sourceImageId, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression),
                 name: "edit_project_image",
-                description: "Edit one project image and wait for a terminal result. The output remains an unattached project image; inspect it and place its ID with a separate publication tool."),
+                description: "Edit one project image and wait for a terminal result. For a layout-bound target, omit target.size or use auto for Lorekeeper's default raster; set an explicit WIDTHxHEIGHT target.size only when the user explicitly requests a different DPI, after reading physical dimensions and provider constraints and calculating the dimensions yourself. Keep the server-owned aspect and protected regions; inspect actualRaster and effectiveDpi before reporting whether the requested DPI was achieved. The output remains an unattached project image; inspect it and place its ID with a separate publication tool."),
+            AIFunctionFactory.Create(
+                method: (Guid sourceImageId, int width, int height, string prompt, string? fileName = null, string? altText = null) =>
+                    OutpaintProjectImageAsync(context, sourceImageId, width, height, prompt, fileName, altText),
+                name: "outpaint_project_image",
+                description: "Extend an approved project image onto a larger, exact provider-valid WIDTHxHEIGHT canvas using only the added border as the editable area. The original source rectangle is restored pixel-for-pixel after the provider returns. This is a generative outpaint of the new border only; it never redraws, scales, or reinterprets the approved source, creates one unattached project image, reports any provider raster resize and interpolation, and adds no new detail through deterministic resizing. Do not use a materially different fallback image without the user's approval."),
+            AIFunctionFactory.Create(
+                method: (Guid sourceImageId, int width, int height, string? fileName = null, string? altText = null) =>
+                    ResizeProjectImageAsync(context, sourceImageId, width, height, fileName, altText),
+                name: "resize_project_image",
+                description: "Deterministically resize an existing project image to an exact provider-valid WIDTHxHEIGHT raster while preserving its aspect ratio. This is a local pixel transform, not outpaint: it creates a new unattached source-linked image, uses SkiaSharp sampling, and adds no visual detail. Use outpaint_project_image when the user's intent is to generate new border content around approved art."),
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: false),
                 name: "read_project_image_job",
@@ -1330,6 +1341,129 @@ public sealed class PublishAssistantTools(
         }
     }
 
+    private async Task<string> OutpaintProjectImageAsync(
+        PublishAssistantContext context,
+        Guid sourceImageId,
+        int width,
+        int height,
+        string prompt,
+        string? fileName,
+        string? altText)
+    {
+        try
+        {
+            var result = await imageOutpaint.OutpaintAsync(
+                context.ProjectId,
+                sourceImageId,
+                new ProjectImageOutpaintRequest(width, height, prompt, fileName?.Trim() ?? string.Empty, altText?.Trim() ?? string.Empty),
+                context.TurnCancellationToken);
+            var image = result.Image;
+            context.AddVisual(new EntityVisualContextReference(
+                image.Id,
+                null,
+                "ProjectImage",
+                image.FileName,
+                "strict source-preserving outpaint",
+                0,
+                image.FileName,
+                image.AltText,
+                image.Prompt,
+                IsExplicitImage: true,
+                ImageSource: image.Source));
+            return Serialize(new
+            {
+                ok = true,
+                status = "outpainted",
+                sourceImageId = result.SourceImageId,
+                targetRaster = result.TargetRaster,
+                providerRaster = result.ProviderRaster,
+                providerRasterResized = result.ProviderRasterResized,
+                sourceRegionRestored = result.SourceRegionRestored,
+                interpolation = result.Interpolation,
+                addsGeneratedBorderContent = result.AddsGeneratedBorderContent,
+                preservesSourcePixels = result.PreservesSourcePixels,
+                deterministicResizeAddsNewDetail = result.DeterministicResizeAddsNewDetail,
+                outputImageIds = new[] { image.Id },
+                image = new
+                {
+                    image.Id,
+                    image.FileName,
+                    image.ContentType,
+                    image.PreviewUrl,
+                    image.AltText,
+                    image.Source,
+                    image.SourceMetadataJson,
+                },
+                attached = false,
+                summary = result.Summary,
+                nextAction = "Inspect the returned project image, then place its ID with a separate publication tool if the user approves it.",
+            });
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            return Serialize(new { ok = false, code = "OUTPAINT_REJECTED", summary = ex.Message });
+        }
+    }
+
+    private async Task<string> ResizeProjectImageAsync(
+        PublishAssistantContext context,
+        Guid sourceImageId,
+        int width,
+        int height,
+        string? fileName,
+        string? altText)
+    {
+        try
+        {
+            var image = await projectImages.ResizeAsync(
+                context.ProjectId,
+                sourceImageId,
+                new ProjectImageResizeRequest(width, height, fileName?.Trim() ?? string.Empty, altText?.Trim() ?? string.Empty),
+                context.TurnCancellationToken);
+            context.AddVisual(new EntityVisualContextReference(
+                image.Id,
+                null,
+                "ProjectImage",
+                image.FileName,
+                "deterministically resized project image",
+                0,
+                image.FileName,
+                image.AltText,
+                image.Prompt,
+                IsExplicitImage: true,
+                ImageSource: image.Source));
+            return Serialize(new
+            {
+                ok = true,
+                status = "resized",
+                sourceImageId,
+                targetRaster = $"{width}x{height}",
+                actualRaster = $"{width}x{height}",
+                sourceLinked = true,
+                attached = false,
+                interpolation = ProjectImageResize.DeterministicInterpolation,
+                addsNewDetail = false,
+                outputImageIds = new[] { image.Id },
+                image = new
+                {
+                    image.Id,
+                    image.FileName,
+                    image.ContentType,
+                    image.PreviewUrl,
+                    image.AltText,
+                    image.Source,
+                    image.SourceMetadataJson,
+                },
+                summary = $"Created an unattached source-linked image at exactly {width}x{height} using {ProjectImageResize.DeterministicInterpolation}. This local resize adds no visual detail; use outpaint_project_image for generated border content.",
+                nextAction = "Inspect the returned project image, then place its ID with a separate publication tool if the user approves it.",
+            });
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            return Serialize(new { ok = false, code = "RESIZE_REJECTED", summary = ex.Message });
+        }
+    }
+
     private async Task<string> ReadProjectImageJobAsync(PublishAssistantContext context, Guid jobId, bool wait)
     {
         if (imageWorkflow is null)
@@ -1377,11 +1511,15 @@ public sealed class PublishAssistantTools(
             outputImageIds = result.Images.Select(image => image.Id),
             images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.RasterMatched, output.AspectMatched, effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null, output.Image.PreviewUrl }),
             attached = false,
-            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.LayoutBound ? result.Outputs.Count(output => !output.AspectMatched) : 0 },
+            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.Outputs.Count(output => !output.RasterMatched || !output.AspectMatched) },
             diagnostics = result.Diagnostics.Take(3),
-            aspectWarnings = result.LayoutBound
-                ? result.Outputs.Where(output => !output.AspectMatched).Select(output => new { code = "LAYOUT_IMAGE_ASPECT_MISMATCH", message = $"Provider output {output.ActualRaster} does not match target aspect {result.TargetAspect}. Inspect before placement or regeneration." })
-                : [],
+            warnings = result.Outputs.Where(output => !output.RasterMatched || !output.AspectMatched).Select(output => new
+            {
+                code = !output.RasterMatched && !output.AspectMatched
+                    ? "PROVIDER_IMAGE_RASTER_AND_ASPECT_MISMATCH"
+                    : !output.RasterMatched ? "PROVIDER_IMAGE_RASTER_MISMATCH" : "LAYOUT_IMAGE_ASPECT_MISMATCH",
+                message = $"Provider output {output.ActualRaster} did not satisfy {(output.RasterMatched ? string.Empty : $"requested raster {result.RequestedRaster}")}{(!output.RasterMatched && !output.AspectMatched ? " and " : string.Empty)}{(output.AspectMatched ? string.Empty : $"target aspect {result.TargetAspect}")}. Inspect before placement or reporting the requested dimensions as achieved.",
+            }),
             summary = result.Summary,
             nextAction = result.Succeeded
                 ? "Inspect the returned project image, then place its ID with a separate cover or publication tool before completing the request."

@@ -41,6 +41,7 @@ IActService acts,
     IEditorRevisionAgentService revisionAgents,
     OutlineCollaborationTools outlineTools,
     IProjectImageService projectImages,
+    IProjectImageOutpaintService imageOutpaint,
     IEntityVisualExampleService entityVisualExamples,
     IProjectImageJobService imageJobs,
     IAgentProjectImageWorkflow imageWorkflow,
@@ -419,7 +420,7 @@ IActService acts,
                 GenerateProjectImageAsync(context, brief, references, target, altText, quality, outputFormat, outputCompression),
             name: "generate_project_image",
             description:
-                $"Generate one unattached project image and wait for a terminal result. intendedUse and scene are required. A target supplies geometry guidance only and never places the output. Inspect the returned image, then use its project-image ID in a separate Figure or Designed Page placement tool during this turn. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
+                $"Generate one unattached project image and wait for a terminal result. intendedUse and scene are required. A target supplies geometry guidance only and never places the output. For a layout-bound target, omit target.size or use auto for Lorekeeper's default raster; set an explicit WIDTHxHEIGHT target.size only when the user explicitly requests a different DPI, after reading the target's physical dimensions and provider constraints and calculating the dimensions yourself. Keep the server-owned aspect and reserved regions; inspect the returned actualRaster and effectiveDpi before reporting whether the requested DPI was achieved. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid imageId, string label, ProjectImageMaskShape[] shapes) =>
@@ -432,7 +433,19 @@ IActService acts,
                 EditProjectImageAsync(context, sourceImageId, brief, maskId, maskShapes, maskLabel, references, target, altText, quality, outputFormat, outputCompression),
             name: "edit_project_image",
             description:
-                $"Edit one project image and wait for a terminal result. The result is always a new unattached project image. Geometry guidance never places it. Inspect the returned image, then apply its ID with a separate placement tool when requested. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
+                $"Edit one project image and wait for a terminal result. The result is always a new unattached project image. Geometry guidance never places it. For a layout-bound target, omit target.size or use auto for Lorekeeper's default raster; set an explicit WIDTHxHEIGHT target.size only when the user explicitly requests a different DPI, after reading the target's physical dimensions and provider constraints and calculating the dimensions yourself. Keep the server-owned aspect and reserved regions; inspect the returned actualRaster and effectiveDpi before reporting whether the requested DPI was achieved. Inspect the returned image, then apply its ID with a separate placement tool when requested. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (Guid sourceImageId, int width, int height, string prompt, string? fileName = null, string? altText = null) =>
+                OutpaintProjectImageAsync(context, sourceImageId, width, height, prompt, fileName, altText),
+            name: "outpaint_project_image",
+            description: "Extend an approved project image onto a larger, exact provider-valid WIDTHxHEIGHT canvas using only the added border as the editable area. The original source rectangle is restored pixel-for-pixel after the provider returns. This is a generative outpaint of the new border only; it never redraws, scales, or reinterprets the approved source, creates one unattached project image, reports any provider raster resize and interpolation, and adds no new detail through deterministic resizing."));
+
+        tools.Add(AIFunctionFactory.Create(
+            method: (Guid sourceImageId, int width, int height, string? fileName = null, string? altText = null) =>
+                ResizeProjectImageAsync(context, sourceImageId, width, height, fileName, altText),
+            name: "resize_project_image",
+            description: "Deterministically resize an existing project image to an exact provider-valid WIDTHxHEIGHT raster while preserving its aspect ratio. This is a local pixel transform, not outpaint: it creates a new unattached source-linked image, uses SkiaSharp sampling, and adds no visual detail. Use outpaint_project_image when the user's intent is to generate new border content around approved art."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: false),
@@ -452,7 +465,7 @@ IActService acts,
                 method: (string targetKind, Guid targetId, Guid? variantId = null) =>
                     ReadLayoutGenerationTargetAsync(context, targetKind, targetId, variantId),
                 name: "read_layout_generation_target",
-                description: "Read exact project-authoring geometry, moderate requested raster, print-DPI recommendation, and protected regions for a project page, Figure placement, or Designed Page frame/surface. Use the project ID for project-page; composition targets require the active variantId."),
+                description: "Read exact project-authoring geometry, provider-valid final-DPI recommendation, moderate default requested raster, protected regions, and provider raster constraints for a project page, Figure placement, or Designed Page frame/surface. For an explicit user-requested DPI, calculate WIDTHxHEIGHT from physical inches and the requested DPI, round dimensions to provider-valid multiples while preserving the server-owned aspect, and pass that size override to generate_project_image or edit_project_image. Omit size or use auto otherwise; inspect actualRaster and effectiveDpi in the result. Use the project ID for project-page; composition targets require the active variantId."),
             AIFunctionFactory.Create(
                 method: (Guid compositionId) =>
                     GetOrCreateCompositionVariantAsync(context, compositionId),
@@ -2267,7 +2280,24 @@ IActService acts,
             var descriptor = ctx.ContentTarget.EditionId is Guid editionId
                 ? await compositions.DescribeGenerationTargetAsync(ctx.ProjectId, editionId, targetKind, targetId, variantId, ctx.TurnCancellationToken)
                 : await compositions.DescribeAuthoringGenerationTargetAsync(ctx.ProjectId, targetKind, targetId, variantId, ctx.TurnCancellationToken);
-            return JsonSerializer.Serialize(new { ok = true, targetId, summary = $"{descriptor.TargetKind} target {descriptor.AspectRatio}, {descriptor.RecommendedWidthPixels}x{descriptor.RecommendedHeightPixels}px.", descriptor }, ManuscriptCodec.JsonOptions);
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                targetId,
+                summary = $"{descriptor.TargetKind} target {descriptor.AspectRatio}, {descriptor.RecommendedWidthPixels}x{descriptor.RecommendedHeightPixels}px recommended, {descriptor.RequestedRaster} default requested raster.",
+                descriptor,
+                providerConstraints = new
+                {
+                    rasterFormat = "WIDTHxHEIGHT",
+                    sizeMultiple = LayoutImageSizeResolver.SizeMultiple,
+                    minimumPixels = LayoutImageSizeResolver.MinimumPixels,
+                    maximumPixels = LayoutImageSizeResolver.MaximumPixels,
+                    maximumEdgePixels = LayoutImageSizeResolver.MaximumEdge,
+                    minimumAspectRatio = 1d / LayoutImageSizeResolver.MaximumAspectRatio,
+                    maximumAspectRatio = LayoutImageSizeResolver.MaximumAspectRatio,
+                    overrideRule = "Only on an explicit user request for a different DPI: multiply physical width and height in inches by the requested DPI, round each dimension to a provider-valid multiple, preserve the server-owned aspect, and pass the resulting Size. Omit Size or use auto for the default. Verify actualRaster and effectiveDpi from the completed result.",
+                },
+            }, ManuscriptCodec.JsonOptions);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
@@ -2508,6 +2538,108 @@ IActService acts,
         }
     }
 
+    private async Task<string> OutpaintProjectImageAsync(
+        EditorChatContext ctx,
+        Guid sourceImageId,
+        int width,
+        int height,
+        string prompt,
+        string? fileName,
+        string? altText)
+    {
+        try
+        {
+            var result = await imageOutpaint.OutpaintAsync(
+                ctx.ProjectId,
+                sourceImageId,
+                new ProjectImageOutpaintRequest(width, height, prompt, fileName?.Trim() ?? string.Empty, altText?.Trim() ?? string.Empty),
+                ctx.TurnCancellationToken);
+            var image = result.Image;
+            var visual = await BuildVisualAsync(ctx, image, image.FileName, "Strict source-preserving outpaint saved to the image library.");
+            ctx.AddVisual(visual);
+            ctx.AddModelOnlyImage(image);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                status = "outpainted",
+                sourceImageId = result.SourceImageId,
+                targetRaster = result.TargetRaster,
+                providerRaster = result.ProviderRaster,
+                providerRasterResized = result.ProviderRasterResized,
+                sourceRegionRestored = result.SourceRegionRestored,
+                interpolation = result.Interpolation,
+                addsGeneratedBorderContent = result.AddsGeneratedBorderContent,
+                preservesSourcePixels = result.PreservesSourcePixels,
+                deterministicResizeAddsNewDetail = result.DeterministicResizeAddsNewDetail,
+                image = new
+                {
+                    image.Id,
+                    image.FileName,
+                    image.ContentType,
+                    image.PreviewUrl,
+                    image.AltText,
+                    image.Source,
+                    image.SourceMetadataJson,
+                },
+                attached = false,
+                summary = result.Summary,
+            });
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    private async Task<string> ResizeProjectImageAsync(
+        EditorChatContext ctx,
+        Guid sourceImageId,
+        int width,
+        int height,
+        string? fileName,
+        string? altText)
+    {
+        try
+        {
+            var image = await projectImages.ResizeAsync(
+                ctx.ProjectId,
+                sourceImageId,
+                new ProjectImageResizeRequest(width, height, fileName?.Trim() ?? string.Empty, altText?.Trim() ?? string.Empty),
+                ctx.TurnCancellationToken);
+            ctx.AddVisual(await BuildVisualAsync(ctx, image, image.FileName, "Deterministically resized project image saved to the library."));
+            ctx.AddModelOnlyImage(image);
+            ctx.OnMutated();
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                status = "resized",
+                sourceImageId,
+                targetRaster = $"{width}x{height}",
+                actualRaster = $"{width}x{height}",
+                sourceLinked = true,
+                attached = false,
+                interpolation = ProjectImageResize.DeterministicInterpolation,
+                addsNewDetail = false,
+                image = new
+                {
+                    image.Id,
+                    image.FileName,
+                    image.ContentType,
+                    image.PreviewUrl,
+                    image.AltText,
+                    image.Source,
+                    image.SourceMetadataJson,
+                },
+                summary = $"Created an unattached source-linked image at exactly {width}x{height} using {ProjectImageResize.DeterministicInterpolation}. This local resize adds no visual detail; use outpaint_project_image for generated border content.",
+            });
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
     private async Task<string> BuildImageResultAsync(
         EditorChatContext ctx,
         AgentProjectImageResult result,
@@ -2545,16 +2677,16 @@ IActService acts,
             diagnosticCounts = new
             {
                 errors = result.Diagnostics.Count,
-                warnings = result.LayoutBound ? result.Outputs.Count(output => !output.AspectMatched) : 0,
+                warnings = result.Outputs.Count(output => !output.RasterMatched || !output.AspectMatched),
             },
             diagnostics = result.Diagnostics.Take(3),
-            aspectWarnings = result.LayoutBound
-                ? result.Outputs.Where(output => !output.AspectMatched).Select(output => new
-                {
-                    code = "LAYOUT_IMAGE_ASPECT_MISMATCH",
-                    message = $"Provider output {output.ActualRaster} does not match the target aspect {result.TargetAspect}. Inspect the image before deciding whether to place or regenerate it.",
-                })
-                : [],
+            warnings = result.Outputs.Where(output => !output.RasterMatched || !output.AspectMatched).Select(output => new
+            {
+                code = !output.RasterMatched && !output.AspectMatched
+                    ? "PROVIDER_IMAGE_RASTER_AND_ASPECT_MISMATCH"
+                    : !output.RasterMatched ? "PROVIDER_IMAGE_RASTER_MISMATCH" : "LAYOUT_IMAGE_ASPECT_MISMATCH",
+                message = $"Provider output {output.ActualRaster} did not satisfy {(output.RasterMatched ? string.Empty : $"requested raster {result.RequestedRaster}")}{(!output.RasterMatched && !output.AspectMatched ? " and " : string.Empty)}{(output.AspectMatched ? string.Empty : $"target aspect {result.TargetAspect}")}. Inspect before placement or reporting the requested dimensions as achieved.",
+            }),
             summary = result.Summary,
             nextAction = result.Succeeded
                 ? "Inspect a returned image, then place its project-image ID with a separate Figure or Designed Page tool before completing an authoring request."

@@ -63,13 +63,14 @@ public sealed class ImageGenerationTarget
 {
     [Description("Publication edition ID. Supply only for CoverFrame or CoverSurface targets; manuscript and Designed Page targets use project authoring geometry.")]
     public Guid? EditionId { get; init; }
-    [Description("ProjectPage, Figure, PageFrame, PageSurface, CoverFrame, or CoverSurface for layout-bound generation.")]
+    [Description("ProjectPage, Figure, PageFrame, PageSurface, CoreCoverFrame, CoreCoverSurface, CoverFrame, or CoverSurface for layout-bound generation. Use CoreCoverSurface/CoreCoverFrame for the Core front cover; use CoverSurface/CoverFrame only with an editionId for a release cover.")]
     public string TargetKind { get; init; } = string.Empty;
     [Description("Project ID for ProjectPage, otherwise the stable Figure block, composition object/surface, or cover object/surface ID.")]
     public Guid? TargetId { get; init; }
     [Description("Exact page-composition variant ID. Required for PageFrame and PageSurface targets; omit for Figure and cover targets.")]
     public Guid? VariantId { get; init; }
     public string AspectRatio { get; init; } = string.Empty;
+    [Description("Optional explicit WIDTHxHEIGHT provider raster override for a layout-bound target. Use only when the user explicitly requests a different DPI; both dimensions must satisfy the provider constraints and preserve the server-owned target aspect. Omit or use auto for the default raster.")]
     public string Size { get; init; } = string.Empty;
     [Description("Only for free-standing library generation. Layout-bound targets derive every reserved region from Lorekeeper.")]
     public IReadOnlyList<ImageReservedRegion>? ReservedTextRegions { get; init; }
@@ -282,9 +283,9 @@ public sealed class ImagePromptComposer(
             if (target?.TargetId is not { } boundTargetId || boundTargetId == Guid.Empty
                 || string.IsNullOrWhiteSpace(target.TargetKind))
                 throw new ArgumentException("Layout-bound targets require targetKind and targetId together.", nameof(target));
-            if (!string.IsNullOrWhiteSpace(target.Size) || !string.IsNullOrWhiteSpace(target.AspectRatio)
+            if (!string.IsNullOrWhiteSpace(target.AspectRatio)
                 || target.ReservedTextRegions is { Count: > 0 })
-                throw new ArgumentException("Layout-bound targets derive size, aspect ratio, and reserved regions from Lorekeeper; omit manual values.", nameof(target));
+                throw new ArgumentException("Layout-bound targets derive aspect ratio and reserved regions from Lorekeeper; omit manual values. An explicit provider-valid Size is allowed only for a user-requested raster override.", nameof(target));
             var coverTarget = target.TargetKind.Trim().StartsWith("cover", StringComparison.OrdinalIgnoreCase);
             LayoutGenerationTargetDescriptor descriptor;
             if (coverTarget)
@@ -301,6 +302,7 @@ public sealed class ImagePromptComposer(
                 descriptor = await compositions.DescribeAuthoringGenerationTargetAsync(
                     projectId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken);
             }
+            descriptor = ApplyLayoutRasterOverride(descriptor, target.Size);
             var appendix = BuildLayoutTargetAppendix(descriptor);
             return new(
                 descriptor.RequestedRaster,
@@ -333,6 +335,32 @@ public sealed class ImagePromptComposer(
                 AspectRatio = aspectLabel,
                 target?.ReservedTextRegions,
             }, JsonOptions));
+    }
+
+    private static LayoutGenerationTargetDescriptor ApplyLayoutRasterOverride(
+        LayoutGenerationTargetDescriptor descriptor,
+        string? requestedSize)
+    {
+        var normalizedSize = Clean(requestedSize);
+        if (normalizedSize.Length == 0 || normalizedSize.Equals("auto", StringComparison.OrdinalIgnoreCase))
+            return descriptor;
+
+        var (width, height) = ParseAndValidateSize(normalizedSize);
+        var requestedAspect = (double)width / height;
+        var targetAspect = descriptor.WidthInches / descriptor.HeightInches;
+        if (!LayoutImageSizeResolver.AspectMatches(requestedAspect, targetAspect))
+        {
+            throw new ArgumentException(
+                $"Layout-bound Size {width}x{height} does not match the physical target aspect {descriptor.AspectRatio}. Keep the server-owned aspect ratio and choose a provider-valid raster.",
+                nameof(requestedSize));
+        }
+
+        return descriptor with
+        {
+            RequestedWidthPixels = width,
+            RequestedHeightPixels = height,
+            RequestedRaster = $"{width}x{height}",
+        };
     }
 
     private static string BuildLayoutTargetAppendix(LayoutGenerationTargetDescriptor descriptor)

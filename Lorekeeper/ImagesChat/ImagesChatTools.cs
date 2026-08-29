@@ -22,6 +22,7 @@ public sealed class ImagesChatTools(
     IProjectSearchService projectSearch,
     IReferenceVisualService referenceVisuals,
     IProjectImageService projectImages,
+    IProjectImageOutpaintService imageOutpaint,
     IEntityVisualExampleService entityVisualExamples,
     IEntityService entities,
     IProjectImageJobService imageJobs,
@@ -137,6 +138,12 @@ public sealed class ImagesChatTools(
                 description: "Create a non-destructive project-library crop from an existing image using 0-100 percentage coordinates. Inspect the source first or use user-supplied coordinates and describe only the cropped subject in altText. Optionally attach the tight subject-only crop to one entity as its canonical reference; make separate crops for separate entities. Source associations are never inherited."),
 
             AIFunctionFactory.Create(
+                method: (Guid sourceImageId, int width, int height, string? fileName = null, string? altText = null) =>
+                    ResizeImageAsync(context, sourceImageId, width, height, fileName, altText),
+                name: "resize_project_image",
+                description: "Deterministically resize an existing project image to an exact provider-valid WIDTHxHEIGHT raster while preserving its aspect ratio. This is a local pixel transform, not outpaint: it creates a new unattached source-linked image, uses SkiaSharp sampling, and adds no visual detail. Use outpaint_project_image when the user's intent is to generate new border content around approved art."),
+
+            AIFunctionFactory.Create(
                 method: (Guid imageId, string label, ProjectImageMaskShape[] shapes) =>
                     CreateShapeMaskAsync(context, imageId, label, shapes),
                 name: "create_shape_mask",
@@ -153,6 +160,12 @@ public sealed class ImagesChatTools(
                     EditImageAsync(context, sourceImageId, brief, maskId, maskShapes, maskLabel, references, altText, quality, outputFormat, outputCompression, label),
                 name: "edit_project_image",
                 description: $"Edit one project image and wait for a terminal result. The output is a new free-standing, unattached library image; inspect it before promoting it to canon. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
+
+            AIFunctionFactory.Create(
+                method: (Guid sourceImageId, int width, int height, string prompt, string? fileName = null, string? altText = null) =>
+                    OutpaintImageAsync(context, sourceImageId, width, height, prompt, fileName, altText),
+                name: "outpaint_project_image",
+                description: "Extend an approved project image onto a larger, exact provider-valid WIDTHxHEIGHT canvas using only the added border as the editable area. The original source rectangle is restored pixel-for-pixel after the provider returns. This is a generative outpaint of the new border only; it never redraws the approved source, creates one unattached project image, reports any provider raster resize and interpolation, and adds no new detail through deterministic resizing."),
 
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadImageJobAsync(context, jobId, wait: false),
@@ -621,6 +634,89 @@ public sealed class ImagesChatTools(
         }
     }
 
+    private async Task<string> OutpaintImageAsync(
+        ImagesChatToolContext ctx,
+        Guid sourceImageId,
+        int width,
+        int height,
+        string prompt,
+        string? fileName,
+        string? altText)
+    {
+        try
+        {
+            var result = await imageOutpaint.OutpaintAsync(
+                ctx.ProjectId,
+                sourceImageId,
+                new ProjectImageOutpaintRequest(width, height, prompt, fileName?.Trim() ?? string.Empty, altText?.Trim() ?? string.Empty),
+                ctx.TurnCancellationToken);
+            var visual = await BuildVisualAsync(ctx, result.Image, result.Image.FileName, "Strict source-preserving outpaint saved to the image library.");
+            ctx.AddVisual(visual);
+            ctx.AddModelOnlyImage(result.Image);
+            ctx.MarkMutated();
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                status = "outpainted",
+                sourceImageId = result.SourceImageId,
+                targetRaster = result.TargetRaster,
+                providerRaster = result.ProviderRaster,
+                providerRasterResized = result.ProviderRasterResized,
+                sourceRegionRestored = result.SourceRegionRestored,
+                interpolation = result.Interpolation,
+                addsGeneratedBorderContent = result.AddsGeneratedBorderContent,
+                preservesSourcePixels = result.PreservesSourcePixels,
+                deterministicResizeAddsNewDetail = result.DeterministicResizeAddsNewDetail,
+                image = ImagePayload(result.Image),
+                attached = false,
+                summary = result.Summary,
+            }, JsonOptions);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    private async Task<string> ResizeImageAsync(
+        ImagesChatToolContext ctx,
+        Guid sourceImageId,
+        int width,
+        int height,
+        string? fileName,
+        string? altText)
+    {
+        try
+        {
+            var image = await projectImages.ResizeAsync(
+                ctx.ProjectId,
+                sourceImageId,
+                new ProjectImageResizeRequest(width, height, fileName?.Trim() ?? string.Empty, altText?.Trim() ?? string.Empty),
+                ctx.TurnCancellationToken);
+            ctx.AddVisual(await BuildVisualAsync(ctx, image, image.FileName, "Deterministically resized project image saved to the library."));
+            ctx.AddModelOnlyImage(image);
+            ctx.MarkMutated();
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                status = "resized",
+                sourceImageId,
+                targetRaster = $"{width}x{height}",
+                actualRaster = $"{width}x{height}",
+                sourceLinked = true,
+                attached = false,
+                interpolation = ProjectImageResize.DeterministicInterpolation,
+                addsNewDetail = false,
+                image = ImagePayload(image),
+                summary = $"Created an unattached source-linked image at exactly {width}x{height} using {ProjectImageResize.DeterministicInterpolation}. This local resize adds no visual detail; use outpaint_project_image for generated border content.",
+            }, JsonOptions);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
     private async Task<string> BuildImageResultAsync(
         ImagesChatToolContext ctx,
         AgentProjectImageResult result,
@@ -642,11 +738,20 @@ public sealed class ImagesChatTools(
             ok = result.Succeeded,
             jobId = result.JobId,
             status = result.Status,
+            targetAspect = result.TargetAspect,
+            requestedRaster = result.RequestedRaster,
             outputImageIds = result.Images.Select(image => image.Id),
             images = outputs,
             attached = false,
-            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = 0 },
+            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.Outputs.Count(output => !output.RasterMatched || !output.AspectMatched) },
             diagnostics = result.Diagnostics.Take(3),
+            warnings = result.Outputs.Where(output => !output.RasterMatched || !output.AspectMatched).Select(output => new
+            {
+                code = !output.RasterMatched && !output.AspectMatched
+                    ? "PROVIDER_IMAGE_RASTER_AND_ASPECT_MISMATCH"
+                    : !output.RasterMatched ? "PROVIDER_IMAGE_RASTER_MISMATCH" : "IMAGE_ASPECT_MISMATCH",
+                message = $"Provider output {output.ActualRaster} did not satisfy {(output.RasterMatched ? string.Empty : $"requested raster {result.RequestedRaster}")}{(!output.RasterMatched && !output.AspectMatched ? " and " : string.Empty)}{(output.AspectMatched ? string.Empty : $"target aspect {result.TargetAspect}")}. Inspect before placement or reporting the requested dimensions as achieved.",
+            }),
             summary = result.Summary,
         }, JsonOptions);
     }

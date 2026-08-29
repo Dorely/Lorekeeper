@@ -85,21 +85,34 @@ The image generation boundary distinguishes a free-standing library request
 from a layout-bound request. Outline and Images requests omit geometry. A
 concrete `LayoutGenerationTargetDescriptor` is used only when art must honor
 physical regions such as a page, frame, or cover. It carries exact aspect,
-moderate authoring raster guidance, final-output raster recommendation,
-effective-DPI expectation, geometry fingerprint, and named trim, bleed, safe,
-gutter, barcode, cover, or reserved-text regions. It is guidance and prompt
-context, not an acceptance rule imposed on provider pixels.
+provider-valid final-DPI recommendation plus moderate provider-valid default
+raster guidance, effective-DPI expectation, geometry fingerprint, and named trim, bleed, safe, gutter, barcode, cover, or
+reserved-text regions. An explicit provider size override is accepted only
+when it is provider-valid and preserves the server-owned aspect. It is
+guidance and prompt context, not an acceptance rule imposed on provider
+pixels.
 
-Provider output is stored without layout cropping, resizing, or mismatch
-rejection, apart from supported-format normalization such as WebP to lossless
-PNG. Geometry-bound generation uses a deterministic moderate raster target of
-about 1.57 MP within the provider's flexible-size limits. The result reports
-`rasterMatched` separately from `aspectMatched`. A proportional raster with
-different pixel dimensions remains compatible. Only an aspect error beyond
-the shared 0.001 log-ratio tolerance produces
-`LAYOUT_IMAGE_ASPECT_MISMATCH`. Generation does not infer publication DPI
-readiness; placed-image validation owns DPI diagnostics. The provider-output
-byte boundary is separately configurable and defaults to 64 MiB.
+Provider output is stored without layout cropping or resizing, apart from
+supported-format normalization such as WebP to lossless PNG. The result
+reports `rasterMatched` separately from `aspectMatched`; any explicit
+requested raster is compared with actual decoded pixels even for a
+free-standing request, and mismatches are surfaced as warnings. Generation
+does not infer publication DPI readiness; placed-image validation owns DPI
+diagnostics. The provider-output byte boundary is separately configurable and
+defaults to 64 MiB.
+
+`IProjectImageService.ResizeAsync` creates a new unattached, source-linked
+`Resized` asset at an exact provider-valid raster using deterministic
+SkiaSharp sampling. It does not invent visual detail and records the source,
+target, interpolation, and raster storage in provenance. The shared
+`IProjectImageOutpaintService` provides the stricter source-preserving path:
+it builds a larger centered canvas, masks only its added border, calls the
+provider for that border, rejects an incompatible aspect, deterministically
+normalizes a proportional provider raster when necessary, and restores the
+original source rectangle before saving an unattached `Outpainted` asset.
+The final asset provenance records provider output versus final raster and
+whether any intermediate was persisted; no materially different fallback is
+selected implicitly.
 
 Every valid streamed partial is retained as exact job-owned PNG, JPEG, or WebP
 bytes, identified by output, request attempt, and provider partial index. A
@@ -242,9 +255,10 @@ composition, Core/release fingerprints, and artifact freshness.
 
 | Path or family | Primary responsibility |
 |---|---|
-| `Lorekeeper/Images/IProjectImageService.cs` / `ProjectImageService.cs` | Reusable image-library reads, uploads, crops, metadata, usage projections, and deletion guards. |
+| `Lorekeeper/Images/IProjectImageService.cs` / `ProjectImageService.cs` | Reusable image-library reads, uploads, crops, deterministic exact resizing, metadata, usage projections, and deletion guards. |
 | `Lorekeeper/Images/IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Durable generation/edit job records, streamed partial artifacts, explicit promotion, structured briefs, provider audit fields, output validation, and diagnostics. |
 | `Lorekeeper/Images/AgentProjectImageWorkflow.cs` | Assistant generation/edit boundary, terminal-state waiting, reconnectable jobs, target diagnostics, and unattached output semantics. |
+| `Lorekeeper/Images/ProjectImageOutpaintService.cs` | Strict source-preserving outpaint orchestration, added-border masking, provider-raster normalization, source-region restoration, and transform provenance. |
 | `Lorekeeper/Images/ImagePromptComposer.cs` | Structured generation/edit briefs, reference labels, reserved regions, spatial guidance, and rendered-text policy. |
 | `Lorekeeper/EntityVisuals/` | Canonical entity-image associations, visual context, bounded reference reads, and provenance. |
 | `Lorekeeper/Composition/CompositionService.cs` | Revision-aware Designed Page aggregates, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |

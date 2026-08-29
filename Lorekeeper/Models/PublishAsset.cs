@@ -42,5 +42,7 @@ public enum PublishAssetSource
     Generated,
     Edited,
     Cropped,
+    Resized,
+    Outpainted,
     Imported,
 }

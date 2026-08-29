@@ -1656,6 +1656,7 @@ public sealed class CompositionService(
         var pixelsPerInch = edition.Format == PublicationEditionFormat.Paperback ? 300 : 180;
         var aspect = $"{(int)Math.Round(width * 1000) / gcd}:{(int)Math.Round(height * 1000) / gcd}";
         var requestedRaster = LayoutImageSizeResolver.Resolve(width, height);
+        var recommendedRaster = LayoutImageSizeResolver.ResolveNearest(width * pixelsPerInch, height * pixelsPerInch);
         var geometryFingerprint = TargetGeometryFingerprint(
             edition,
             normalizedKind,
@@ -1674,8 +1675,8 @@ public sealed class CompositionService(
             width,
             height,
             aspect,
-            (int)Math.Ceiling(width * pixelsPerInch),
-            (int)Math.Ceiling(height * pixelsPerInch),
+            recommendedRaster.Width,
+            recommendedRaster.Height,
             requestedRaster.Width,
             requestedRaster.Height,
             requestedRaster.Size,
@@ -1716,6 +1717,7 @@ public sealed class CompositionService(
         var gcd = GreatestCommonDivisor((int)Math.Round(width * 1000), (int)Math.Round(height * 1000));
         var aspect = $"{(int)Math.Round(width * 1000) / gcd}:{(int)Math.Round(height * 1000) / gcd}";
         var requestedRaster = LayoutImageSizeResolver.Resolve(width, height);
+        var recommendedRaster = LayoutImageSizeResolver.ResolveNearest(width * 300, height * 300);
         var fingerprint = TargetGeometryFingerprint(
             $"project:{setup.Revision}:{setup.PageWidthInches:F4}:{setup.PageHeightInches:F4}:{setup.PageMarginInches:F4}",
             normalizedKind,
@@ -1734,8 +1736,8 @@ public sealed class CompositionService(
             width,
             height,
             aspect,
-            (int)Math.Ceiling(width * 300),
-            (int)Math.Ceiling(height * 300),
+            recommendedRaster.Width,
+            recommendedRaster.Height,
             requestedRaster.Width,
             requestedRaster.Height,
             requestedRaster.Size,

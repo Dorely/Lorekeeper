@@ -217,13 +217,17 @@ shared structured prompt contract. Feature-specific use of generated images,
 geometry targets, assets, and deletion guards belongs to
 [Composition and media](composition-media.md).
 
-Provider output is stored without layout cropping, resizing, or rejection merely
-because returned dimensions differ from a request. Supported WebP output may be
-normalized losslessly to PNG. A proportional result remains usable; geometry and
-DPI diagnostics are evaluated by the placing/rendering boundary. Provider output
-has its own configurable 64 MiB byte cap rather than inheriting the smaller upload
-limit. Image options also bound request attempts, timeout, partials, references,
-output count, and one parallel provider request by default.
+Provider output is stored without layout cropping or resizing, apart from
+supported-format normalization such as WebP to lossless PNG. Explicit requested
+rasters are compared with decoded output dimensions even for free-standing jobs,
+and mismatches remain visible in persisted provenance and assistant results;
+aspect compatibility does not make a raster mismatch exact. A proportional
+result remains usable for ordinary layout placement, while strict source-
+preserving expansion uses the dedicated outpaint boundary, which restores the
+source rectangle after provider completion. Provider output has its own
+configurable 64 MiB byte cap rather than inheriting the smaller upload limit.
+Image options also bound request attempts, timeout, partials, references, output
+count, and one parallel provider request by default.
 
 `IProjectImageJobService` persists request/audit state, every valid streamed
 partial, and provider output. Partial writes are serialized per output and

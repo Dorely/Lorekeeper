@@ -233,12 +233,16 @@ public sealed class AgentProjectImageWorkflow(
                 var data = await images.GetDataAsync(projectId, imageId, cancellationToken: cancellationToken)
                     ?? throw new InvalidOperationException($"Completed project image {imageId:N} has no readable data.");
                 var normalized = ProjectImageBinary.Normalize(data.Data, data.ContentType, data.FileName, int.MaxValue);
-                var rasterMatched = geometry is null
-                    || hasRequestedRaster && normalized.Width == requested.Width && normalized.Height == requested.Height;
-                var aspectMatched = geometry is null
-                    || LayoutImageSizeResolver.AspectMatches(
+                var rasterMatched = !hasRequestedRaster
+                    || normalized.Width == requested.Width && normalized.Height == requested.Height;
+                var aspectMatched = geometry is { WidthInches: > 0, HeightInches: > 0 }
+                    ? LayoutImageSizeResolver.AspectMatches(
                         (double)normalized.Width / normalized.Height,
-                        geometry.WidthInches / geometry.HeightInches);
+                        geometry.WidthInches / geometry.HeightInches)
+                    : !hasRequestedRaster
+                        || LayoutImageSizeResolver.AspectMatches(
+                            (double)normalized.Width / normalized.Height,
+                            (double)requested.Width / requested.Height);
                 double? effectiveDpi = geometry is { WidthInches: > 0, HeightInches: > 0 }
                     ? Math.Min(normalized.Width / geometry.WidthInches, normalized.Height / geometry.HeightInches)
                     : null;

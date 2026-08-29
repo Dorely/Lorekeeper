@@ -543,11 +543,12 @@ public sealed class ProjectImageJobService(
         var hasRequestedRaster = LayoutImageSizeResolver.TryParse(job.Size, out var requestedRaster);
         if (layoutBound && !hasRequestedRaster)
             throw new InvalidDataException("Layout-bound image jobs require an explicit requested raster.");
-        var rasterMatched = !layoutBound
+        var rasterMatched = !hasRequestedRaster
             || storedImage.Width == requestedRaster.Width && storedImage.Height == requestedRaster.Height;
-        var aspectMatched = !layoutBound
-            || TryReadTargetAspect(job.TargetGeometryJson, out var targetAspect)
-                && LayoutImageSizeResolver.AspectMatches((double)storedImage.Width / storedImage.Height, targetAspect);
+        var aspectMatched = TryReadTargetAspect(job.TargetGeometryJson, out var targetAspect)
+            ? LayoutImageSizeResolver.AspectMatches((double)storedImage.Width / storedImage.Height, targetAspect)
+            : !hasRequestedRaster
+                || LayoutImageSizeResolver.AspectMatches((double)storedImage.Width / storedImage.Height, (double)requestedRaster.Width / requestedRaster.Height);
         var now = DateTime.UtcNow;
         var asset = new PublishAsset
         {
@@ -589,7 +590,9 @@ public sealed class ProjectImageJobService(
                     ActualRaster = $"{storedImage.Width}x{storedImage.Height}",
                     RasterMatched = rasterMatched,
                     AspectMatched = aspectMatched,
-                    WarningCode = layoutBound && !aspectMatched ? "LAYOUT_IMAGE_ASPECT_MISMATCH" : null,
+                    WarningCode = !rasterMatched
+                        ? "PROVIDER_IMAGE_RASTER_MISMATCH"
+                        : !aspectMatched ? "LAYOUT_IMAGE_ASPECT_MISMATCH" : null,
                 },
                 SourceImage = source is null ? null : new { source.Id, source.FileName, source.ContentType },
                 Mask = mask is null ? null : new { mask.Id, mask.Label, mask.ContentType, mask.Width, mask.Height },

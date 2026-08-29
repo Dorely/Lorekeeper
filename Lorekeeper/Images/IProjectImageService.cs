@@ -14,6 +14,7 @@ public interface IProjectImageService
     Task<ProjectImageData?> GetDataAsync(Guid projectId, Guid imageId, int? maxEdge = null, CancellationToken cancellationToken = default);
     Task<ProjectImageView> UploadAsync(Guid projectId, ProjectImageUpload upload, CancellationToken cancellationToken = default);
     Task<ProjectImageView> CropAsync(Guid projectId, Guid sourceImageId, ProjectImageCropRequest request, CancellationToken cancellationToken = default);
+    Task<ProjectImageView> ResizeAsync(Guid projectId, Guid sourceImageId, ProjectImageResizeRequest request, CancellationToken cancellationToken = default);
     Task<ProjectImageView> GenerateAsync(Guid projectId, ProjectImageGenerationRequest request, CancellationToken cancellationToken = default);
     Task<ProjectImageView> UpdateAsync(Guid projectId, Guid imageId, ProjectImageUpdate update, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid projectId, Guid imageId, bool clearAffectedHistory = false, CancellationToken cancellationToken = default);
