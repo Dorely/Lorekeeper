@@ -7,8 +7,15 @@ using Lorekeeper.Manuscripts;
 using Lorekeeper.Models;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
+using SkiaSharp;
 
 namespace Lorekeeper.Publish;
+
+public sealed record PublicationCoverDiagnostic(
+    string Severity,
+    string Code,
+    string Message,
+    Guid? ObjectId = null);
 
 public sealed record PublicationCoverDesignView(
     Guid Id,
@@ -29,6 +36,7 @@ public sealed record PublicationCoverDesignView(
 {
     public long? CoreBookRevision { get; init; }
     public IReadOnlyDictionary<string, string> SurfaceScenes { get; init; } = new Dictionary<string, string>();
+    public IReadOnlyList<PublicationCoverDiagnostic> DiagnosticDetails { get; init; } = [];
 }
 
 public sealed record PublicationCoverTemplate(
@@ -755,22 +763,22 @@ public sealed class PublicationCoverService(
     {
         surfaceRole = NormalizeSurfaceRole(edition, surfaceRole);
         var template = await TemplateAsync(edition, design, cancellationToken, surfaceRole);
-        var diagnostics = new List<string>();
+        var diagnosticDetails = new List<PublicationCoverDiagnostic>();
         if (edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover && template.PageCount <= 0)
-            diagnostics.Add("The full-wrap spine geometry will be finalized from the interior page count during preparation.");
+            AddDiagnostic(diagnosticDetails, "warning", "COVER_GEOMETRY_PENDING", "The full-wrap spine geometry will be finalized from the interior page count during preparation.");
         if (design.BarcodeMode == PublicationBarcodeMode.LorekeeperBarcode
             && !PublicationIsbn.IsValidIsbn13(edition.Isbn))
-            diagnostics.Add("Lorekeeper barcode output requires a valid ISBN-13.");
+            AddDiagnostic(diagnosticDetails, "error", "COVER_BARCODE_ISBN_REQUIRED", "Lorekeeper barcode output requires a valid ISBN-13.");
         if (edition.Vendor == PublicationVendor.IngramSpark
             && !PublicationIsbn.IsValidIsbn13(edition.Isbn))
-            diagnostics.Add("Ingram cover output requires a valid ISBN-13 barcode.");
+            AddDiagnostic(diagnosticDetails, "error", "COVER_BARCODE_ISBN_REQUIRED", "Ingram cover output requires a valid ISBN-13 barcode.");
         if (edition.Vendor == PublicationVendor.IngramSpark
             && design.BarcodeMode == PublicationBarcodeMode.VendorOverlay)
-            diagnostics.Add("Ingram covers must contain Lorekeeper's ISBN-13 barcode.");
+            AddDiagnostic(diagnosticDetails, "error", "COVER_BARCODE_REQUIRED", "Ingram covers must contain Lorekeeper's ISBN-13 barcode.");
         if (template.SpineWidthInches < 0.24 && !string.IsNullOrWhiteSpace(design.SpineText))
-            diagnostics.Add("Spine text is disabled below the initial 0.24-inch safety threshold.");
+            AddDiagnostic(diagnosticDetails, "warning", "COVER_SPINE_TEXT_DISABLED", "Spine text is disabled below the initial 0.24-inch safety threshold.");
         if (!template.IsAcknowledged)
-            diagnostics.Add("Cover geometry changed; review and acknowledge the current template before preparing files.");
+            AddDiagnostic(diagnosticDetails, "warning", "COVER_TEMPLATE_REVIEW_REQUIRED", "Cover geometry changed; review and acknowledge the current template before preparing files.");
         var storedSurfaceScenes = ReadSurfaceScenes(design.SurfaceScenesJson);
         var selectedSceneJson = storedSurfaceScenes.GetValueOrDefault(surfaceRole,
             surfaceRole == "perfect-bound-inside" ? string.Empty : design.CompositionSceneJson);
@@ -784,10 +792,12 @@ public sealed class PublicationCoverService(
         scene = ReflowToCurrentGeometry(edition, design, template, scene, out var geometryChanged, surfaceRole);
         if (geometryChanged)
         {
-            diagnostics.Add("Cover geometry was recalculated. Review constraint-bound objects and save the composition.");
+            AddDiagnostic(diagnosticDetails, "warning", "COVER_GEOMETRY_RECALCULATED", "Cover geometry was recalculated. Review constraint-bound objects and save the composition.");
         }
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
-        AddSceneDiagnostics(edition, expectedGeometry, scene, diagnostics);
+        AddSceneDiagnostics(edition, expectedGeometry, scene, diagnosticDetails);
+        await AddImageDpiDiagnosticsAsync(database, edition.ProjectId, edition, scene, diagnosticDetails, cancellationToken);
+        var diagnostics = diagnosticDetails.Select(item => item.Message).ToList();
         return new(
             design.Id,
             edition.Id,
@@ -806,6 +816,7 @@ public sealed class PublicationCoverService(
             diagnostics)
         {
             SurfaceScenes = storedSurfaceScenes,
+            DiagnosticDetails = diagnosticDetails,
         };
     }
 
@@ -842,43 +853,118 @@ public sealed class PublicationCoverService(
         return available.FirstOrDefault() ?? "front";
     }
 
+    internal static async Task AddImageDpiDiagnosticsAsync(
+        IAppDatabaseOperationFactory database,
+        Guid projectId,
+        PublicationEdition edition,
+        CompositionScene scene,
+        ICollection<PublicationCoverDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        var imageObjects = CompositionSceneResolver.Flatten(scene)
+            .Where(item => item.Visible && item.Kind == CompositionObjectKind.Image && item.ImageId is not null)
+            .ToList();
+        if (imageObjects.Count == 0)
+            return;
+
+        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
+        var db = databaseOperation.Db;
+        var imageIds = imageObjects.Select(item => item.ImageId!.Value).Distinct().ToList();
+        var assets = await db.PublishAssets.AsNoTracking()
+            .Where(item => item.ProjectId == projectId
+                && imageIds.Contains(item.Id)
+                && (item.ContentType == "image/png" || item.ContentType == "image/jpeg"))
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+        var requiredDpi = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
+            ? 300d
+            : 180d;
+        foreach (var item in imageObjects)
+        {
+            if (!assets.TryGetValue(item.ImageId!.Value, out var asset))
+                continue;
+            using var bitmap = SKBitmap.Decode(asset.Data);
+            if (bitmap is null)
+                continue;
+            var widthInches = scene.Surface.WidthPoints / 72 * item.Bounds.WidthPercent / 100;
+            var heightInches = scene.Surface.HeightPoints / 72 * item.Bounds.HeightPercent / 100;
+            var effectiveDpi = Math.Min(
+                bitmap.Width / Math.Max(.01, widthInches),
+                bitmap.Height / Math.Max(.01, heightInches));
+            if (effectiveDpi < requiredDpi)
+            {
+                AddDiagnostic(
+                    diagnostics,
+                    "warning",
+                    "IMAGE_DPI_LOW",
+                    $"Image resolves to approximately {effectiveDpi:0} DPI; this edition expects {requiredDpi:0} DPI.",
+                    item.Id);
+            }
+        }
+    }
+
     internal static void AddSceneDiagnostics(
         PublicationEdition edition,
         CoverGeometry geometry,
         CompositionScene scene,
         List<string> diagnostics)
     {
+        var structured = new List<PublicationCoverDiagnostic>();
+        AddSceneDiagnostics(edition, geometry, scene, structured);
+        diagnostics.AddRange(structured.Select(item => item.Message));
+    }
+
+    internal static void AddSceneDiagnostics(
+        PublicationEdition edition,
+        CoverGeometry geometry,
+        CompositionScene scene,
+        List<PublicationCoverDiagnostic> diagnostics)
+    {
         if (edition.Vendor == PublicationVendor.IngramSpark
             && CompositionSceneResolver.FindPdfxTransparencyOverlap(scene) is { } opacityOverlap)
         {
-            diagnostics.Add($"Object {opacityOverlap.TransparentObjectId:N} uses opacity over lower object {opacityOverlap.LowerObjectId:N} in a form that cannot be precomposed for PDF/X-1a. Make it opaque or combine the visual artwork into one image.");
+            AddDiagnostic(
+                diagnostics,
+                "error",
+                "COVER_TRANSPARENCY_UNSUPPORTED",
+                $"Object {opacityOverlap.TransparentObjectId:N} uses opacity over lower object {opacityOverlap.LowerObjectId:N} in a form that cannot be precomposed for PDF/X-1a. Make it opaque or combine the visual artwork into one image.",
+                opacityOverlap.TransparentObjectId);
         }
         var barcode = CoverCompositionFactory.RegionBoundsPercent(CompositionRegionConstraint.BarcodeReserve, geometry);
         foreach (var item in CompositionSceneResolver.Flatten(scene).Where(item => item.Visible))
         {
+            if (!Contains(new CompositionBounds(), item.Bounds))
+            {
+                AddDiagnostic(
+                    diagnostics,
+                    "error",
+                    "COVER_OBJECT_OUTSIDE_SURFACE",
+                    $"Object {item.Id:N} extends outside the physical cover surface.",
+                    item.Id);
+            }
             if (item.Kind == CompositionObjectKind.Text
                 && item.TextBinding is not "title" and not "subtitle" and not "author" and not "spineText" and not "backCopy")
-                diagnostics.Add($"Text object {item.Id:N} requires a canonical cover-copy binding.");
+                AddDiagnostic(diagnostics, "error", "COVER_TEXT_BINDING_REQUIRED", $"Text object {item.Id:N} requires a canonical cover-copy binding.", item.Id);
             if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
                 && item.Kind == CompositionObjectKind.Text
                 && item.TextBinding is ("spineText" or "backCopy"))
-                diagnostics.Add($"Digital cover text object {item.Id:N} requires a front-cover copy binding before publishing.");
+                AddDiagnostic(diagnostics, "error", "COVER_TEXT_BINDING_INVALID", $"Digital cover text object {item.Id:N} requires a front-cover copy binding before publishing.", item.Id);
             if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
                 && item.RegionConstraint is not CompositionRegionConstraint.Page
                     and not CompositionRegionConstraint.SafeArea
                     and not CompositionRegionConstraint.Front)
-                diagnostics.Add($"Digital cover object {item.Id:N} requires a front-cover region before publishing.");
+                AddDiagnostic(diagnostics, "error", "COVER_REGION_INVALID", $"Digital cover object {item.Id:N} requires a front-cover region before publishing.", item.Id);
             if (item.Kind == CompositionObjectKind.Image && item.ImageId is null)
-                diagnostics.Add($"Image object {item.Id:N} requires project artwork before publishing.");
+                AddDiagnostic(diagnostics, "error", "COVER_IMAGE_REQUIRED", $"Image object {item.Id:N} requires project artwork before publishing.", item.Id);
             if (item.Kind == CompositionObjectKind.Image && !item.Decorative
                 && (item.AccessibilityDecisionPending || string.IsNullOrWhiteSpace(item.AltText)))
-                diagnostics.Add($"Image object {item.Id:N} requires alternative text or an explicit decorative decision.");
+                AddDiagnostic(diagnostics, "error", "COVER_IMAGE_ALT_TEXT_REQUIRED", $"Image object {item.Id:N} requires alternative text or an explicit decorative decision.", item.Id);
             if (!item.Decorative && item.SemanticRole != CompositionSemanticRole.Artifact
                 && item.RegionConstraint != CompositionRegionConstraint.BarcodeReserve
                 && edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
                 && Intersects(item.Bounds, barcode))
-                diagnostics.Add($"Object {item.Id:N} overlaps the barcode reserve.");
+                AddDiagnostic(diagnostics, "error", "COVER_BARCODE_OVERLAP", $"Object {item.Id:N} overlaps the barcode reserve.", item.Id);
             if (item.Decorative || item.SemanticRole == CompositionSemanticRole.Artifact) continue;
+            if (IsFullSurfaceArtwork(item, geometry)) continue;
             var region = CoverCompositionFactory.RegionBoundsPercent(item.RegionConstraint, geometry);
             var insetX = item.RegionConstraint == CompositionRegionConstraint.Spine
                 ? region.WidthPercent * .05
@@ -892,7 +978,7 @@ public sealed class PublicationCoverService(
                 HeightPercent = Math.Max(0, region.HeightPercent - insetY * 2),
             };
             if (!Contains(safe, item.Bounds))
-                diagnostics.Add($"Object {item.Id:N} extends outside the safe area for its {item.RegionConstraint} region.");
+                AddDiagnostic(diagnostics, "error", "COVER_SAFE_AREA_OVERFLOW", $"Object {item.Id:N} extends outside the safe area for its {item.RegionConstraint} region.", item.Id);
         }
         var semanticObjects = CompositionSceneResolver.Flatten(scene)
             .Where(item => item.Visible && !item.Decorative && item.SemanticRole != CompositionSemanticRole.Artifact)
@@ -905,8 +991,32 @@ public sealed class PublicationCoverService(
         foreach (var item in semanticObjects.Where(item => item.ReadingOrder is null
             || duplicateReadingOrders.Contains(item.ReadingOrder.Value)))
         {
-            diagnostics.Add($"Object {item.Id:N} requires a unique logical reading order before publishing.");
+            AddDiagnostic(diagnostics, "error", "COVER_READING_ORDER_REQUIRED", $"Object {item.Id:N} requires a unique logical reading order before publishing.", item.Id);
         }
+    }
+
+    private static void AddDiagnostic(
+        ICollection<PublicationCoverDiagnostic> diagnostics,
+        string severity,
+        string code,
+        string message,
+        Guid? objectId = null) => diagnostics.Add(new(severity, code, message, objectId));
+
+    private static bool IsFullSurfaceArtwork(CompositionObject item, CoverGeometry geometry)
+    {
+        if (item.Kind != CompositionObjectKind.Image
+            || item.RegionConstraint is not (CompositionRegionConstraint.Page or CompositionRegionConstraint.Front))
+            return false;
+        var surface = new CompositionBounds();
+        if (item.RegionConstraint == CompositionRegionConstraint.Page
+            && Contains(surface, item.Bounds)
+            && Contains(item.Bounds, surface))
+            return true;
+        var region = CoverCompositionFactory.RegionBoundsPercent(item.RegionConstraint, geometry);
+        return region.WidthPercent > .001
+            && region.HeightPercent > .001
+            && Contains(region, item.Bounds)
+            && Contains(item.Bounds, region);
     }
 
     private static bool Intersects(CompositionBounds left, CompositionBounds right) =>

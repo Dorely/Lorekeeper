@@ -48,6 +48,10 @@ Cover reads and mutations normalize a valid current-schema scene to effective
 trim/bleed/page-count geometry before validation. Incomplete copy bindings,
 accessibility choices, reading order, and layout placement remain editable
 draft state and visible readiness blockers; autosave must not discard them.
+Intentional full-surface Page/Front artwork may cross the inset safe area while
+remaining bounded by the physical surface; barcode reserve, accessibility,
+reading order, and image-resolution rules still apply. Text and ordinary
+figure placement remain inside their safe regions.
 
 `PublicationPressRuntime` owns packaged executable discovery, exact manifest
 validation, platform/architecture checks, file hashes, environment isolation,
@@ -172,7 +176,14 @@ reading-copy and publication renders retain strict overflow validation.
 Publication renders reject meaningful images until alternative text or an
 explicit decorative decision is present. Core reading copies may retain an
 unresolved image as a warning-bearing private artifact so tagged reading order
-remains structurally valid.
+remains structurally valid. Cover scene text retains canonical bindings until
+Press materializes the resolved title, subtitle, author, spine, and back copy;
+an optional binding or valid semantic content reference that resolves to empty
+is omitted without creating a text frame, while a frame with neither binding
+nor reference remains a hard layout error. Application-side cover validation
+also decodes placed image assets before rendering and reports effective-DPI
+warnings using the selected profile threshold; final Press evidence remains
+authoritative.
 
 Press owns immutable artifact evidence. `PublicationRenderService` persists
 edition/Core target, status, bytes, length, SHA-256, source fingerprint,

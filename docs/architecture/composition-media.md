@@ -234,12 +234,15 @@ into a later operation.
 as one transient PNG surface. Clean mode returns the composed artwork;
 annotated mode adds safe/trim/gutter/center/bleed/object indicators plus
 overflow and clipping diagnostics. Cache keys include semantic and scene
-revisions and referenced image/font bytes. Editor and Publish persist the
-preview through their transcript visual boundary so the exact image inspected
-by a model is visible in the tool chip and survives transcript reload. A
-preview is an inspection gate, never a new project image. Assistants inspect
-the same current revision before another visual mutation, then validate and
-inspect a clean preview for final verification.
+revisions, referenced image/font bytes, and any resolved cover-copy bindings.
+Cover previews resolve canonical title, subtitle, author, spine, and back-copy
+bindings at render time without changing the persisted scene; page previews
+retain their existing semantic-manuscript resolution. Editor and Publish
+persist the preview through their transcript visual boundary so the exact image
+inspected by a model is visible in the tool chip and survives transcript
+reload. A preview is an inspection gate, never a new project image. Assistants
+inspect the same current revision before another visual mutation, then validate
+and inspect a clean preview for final verification.
 
 Project fonts include bundled OFL families and imported static TTF/OTF faces.
 The project font catalog owns validation, face resolution, browser URLs, and

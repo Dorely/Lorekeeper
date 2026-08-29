@@ -136,7 +136,12 @@ override. Core metadata updates linked system-page copy transactionally while
 preserving canonical field bindings. Every Publish page read, preview,
 validation, and preparation refreshes the active target before returning state,
 so the UI, assistant, canvas preview, validator, and renderer inspect the same
-resolved copy. An empty required bound frame is not a successful preview.
+resolved copy. Cover validation returns structured severity/code diagnostics as
+well as legacy messages; low placed-image DPI is a warning (180 DPI for Core
+and digital PDF, 300 DPI for paperback and hardcover) and does not by itself
+block a Core reading copy. An empty optional bound frame is omitted from
+output when its canonical cover binding or semantic content reference is
+valid; a frame with neither valid binding nor reference remains an error.
 
 Publish route initialization is progressive. Core metadata and the release
 navigator form the blocking shell. Outline/publication-section details,

@@ -827,9 +827,12 @@ public sealed class PublicationRenderProcessor(
         var coverDesign = coreTarget
             ? CoreCoverView(document)
             : await covers.GetAsync(job.ProjectId, edition!.Id, cancellationToken);
-        if (coverDesign.Diagnostics.Any(diagnostic => diagnostic.Contains("requires", StringComparison.OrdinalIgnoreCase)
-            || diagnostic.Contains("must contain", StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException(string.Join(" ", coverDesign.Diagnostics));
+        var coverDiagnostics = StructuredCoverDiagnostics(coverDesign);
+        var coverErrors = coverDiagnostics
+            .Where(diagnostic => string.Equals(diagnostic.Severity, "error", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (coverErrors.Count > 0)
+            throw new InvalidOperationException(string.Join(" ", coverErrors.Select(diagnostic => diagnostic.Message)));
         var request = await BuildRequestAsync(job, document, coverDesign, cancellationToken);
         job.ProgressPercent = 30;
         job.ProgressMessage = "Typesetting interior and cover";
@@ -1101,6 +1104,16 @@ public sealed class PublicationRenderProcessor(
                 document.Profile.PageWidthInches, document.Profile.PageHeightInches, 0.25, 0, 0, string.Empty, true),
             []);
     }
+
+    private static IReadOnlyList<PublicationCoverDiagnostic> StructuredCoverDiagnostics(
+        PublicationCoverDesignView coverDesign) =>
+        coverDesign.DiagnosticDetails.Count > 0
+            ? coverDesign.DiagnosticDetails
+            : coverDesign.Diagnostics
+                .Where(message => message.Contains("requires", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("must contain", StringComparison.OrdinalIgnoreCase))
+                .Select(message => new PublicationCoverDiagnostic("error", "COVER_DESIGN_LEGACY", message))
+                .ToList();
 
     private static bool IsSupportedProfile(string profile) => profile is
         "generic-print-v2" or

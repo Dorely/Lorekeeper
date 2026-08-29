@@ -241,14 +241,11 @@ public sealed class PublicationPackageService(
                     "Legacy PDFs remain downloadable but cannot satisfy current validation or package readiness."));
             }
             coverDesign = await covers.GetAsync(projectId, editionId, cancellationToken);
-            items.AddRange(coverDesign.Diagnostics.Select(message =>
+            items.AddRange(StructuredCoverDiagnostics(coverDesign).Select(diagnostic =>
                 new PublicationPreflightItem(
-                    message.Contains("requires", StringComparison.OrdinalIgnoreCase)
-                        || message.Contains("must contain", StringComparison.OrdinalIgnoreCase)
-                        ? "error"
-                        : "warning",
-                    "COVER_DESIGN",
-                    message,
+                    diagnostic.Severity,
+                    diagnostic.Code,
+                    diagnostic.Message,
                     PublicationArtifactKind.PerfectBoundCoverPdf)));
             if (!coverDesign.Template.IsAcknowledged)
             {
@@ -290,13 +287,10 @@ public sealed class PublicationPackageService(
             if (bookArtifact?.IsLegacy == true)
                 items.Add(Error("PRESS_RENDERER_LEGACY", "A legacy book PDF cannot satisfy current validation or package readiness."));
             coverDesign = await covers.GetAsync(projectId, editionId, cancellationToken);
-            items.AddRange(coverDesign.Diagnostics.Select(message => new PublicationPreflightItem(
-                message.Contains("requires", StringComparison.OrdinalIgnoreCase)
-                    || message.Contains("must contain", StringComparison.OrdinalIgnoreCase)
-                    ? "error"
-                    : "warning",
-                "COVER_DESIGN",
-                message,
+            items.AddRange(StructuredCoverDiagnostics(coverDesign).Select(diagnostic => new PublicationPreflightItem(
+                diagnostic.Severity,
+                diagnostic.Code,
+                diagnostic.Message,
                 PublicationArtifactKind.BookPdf)));
             await AddDigitalPressEvidenceAsync(edition, bookArtifact, currentRendererVersion, items, cancellationToken);
         }
@@ -1688,6 +1682,20 @@ public sealed class PublicationPackageService(
         string code,
         string message,
         PublicationArtifactKind? kind = null) => new("error", code, message, kind);
+
+    private static IReadOnlyList<PublicationCoverDiagnostic> StructuredCoverDiagnostics(
+        PublicationCoverDesignView coverDesign) =>
+        coverDesign.DiagnosticDetails.Count > 0
+            ? coverDesign.DiagnosticDetails
+            : coverDesign.Diagnostics
+                .Select(message => new PublicationCoverDiagnostic(
+                    message.Contains("requires", StringComparison.OrdinalIgnoreCase)
+                        || message.Contains("must contain", StringComparison.OrdinalIgnoreCase)
+                        ? "error"
+                        : "warning",
+                    "COVER_DESIGN_LEGACY",
+                    message))
+                .ToList();
 
     private PublicationPreflightProfile ResolveProfile(PublicationEdition edition)
     {

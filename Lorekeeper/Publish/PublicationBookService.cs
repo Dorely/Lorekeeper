@@ -538,7 +538,7 @@ public sealed class PublicationBookService(
             }
         }
 
-        return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design);
+        return await CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design, cancellationToken);
     }
 
     public async Task<PublicationCoverDesignView> SaveCoverAsync(
@@ -608,7 +608,7 @@ public sealed class PublicationBookService(
         {
             db.ChangeTracker.Clear();
             design.Revision = update.ExpectedRevision;
-            return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design);
+            return await CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design, cancellationToken);
         }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -620,7 +620,7 @@ public sealed class PublicationBookService(
             else
                 await authoringHistory.RecordManualActionAsync(CoreCoverHistoryTarget(projectId), beforeHistory, afterHistory, "Edit Core cover", cancellationToken: CancellationToken.None);
         }
-        return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design);
+        return await CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, design, cancellationToken);
     }
 
     private async Task<PublicationCoverHistoryResult> MoveCoverHistoryAsync(
@@ -759,7 +759,7 @@ public sealed class PublicationBookService(
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             cover.Revision = expectedCoverRevision;
-            return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, cover);
+            return await CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, cover, cancellationToken);
         }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -771,7 +771,7 @@ public sealed class PublicationBookService(
             else
                 await authoringHistory.RecordManualActionAsync(CoreCoverHistoryTarget(projectId), beforeHistory, afterHistory, "Edit Core cover", cancellationToken: CancellationToken.None);
         }
-        return CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, cover);
+        return await CoreCoverView((await ReadViewAsync(projectId, cancellationToken))!, cover, cancellationToken);
     }
 
     private async Task<CompositionScene> ValidateCoreSceneAsync(Guid projectId, CompositionScene scene, CancellationToken cancellationToken)
@@ -800,9 +800,10 @@ public sealed class PublicationBookService(
 
     private sealed record CoreCoverStagePayload(long ExpectedBookRevision, CompositionScene Scene);
 
-    private static PublicationCoverDesignView CoreCoverView(
+    private async Task<PublicationCoverDesignView> CoreCoverView(
         PublicationBookView book,
-        PublicationBookCoverDesign design)
+        PublicationBookCoverDesign design,
+        CancellationToken cancellationToken)
     {
         var scene = JsonSerializer.Deserialize<CompositionScene>(design.CompositionSceneJson, ManuscriptCodec.JsonOptions)
             ?? throw new InvalidDataException("The Core cover composition is empty.");
@@ -815,12 +816,20 @@ public sealed class PublicationBookService(
             scene,
             out _);
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
-        var diagnostics = new List<string>();
+        var diagnosticDetails = new List<PublicationCoverDiagnostic>();
         PublicationCoverService.AddSceneDiagnostics(
             edition,
             CoverCompositionFactory.Geometry(edition, 0),
             scene,
-            diagnostics);
+            diagnosticDetails);
+        await PublicationCoverService.AddImageDpiDiagnosticsAsync(
+            database,
+            book.ProjectId,
+            edition,
+            scene,
+            diagnosticDetails,
+            cancellationToken);
+        var diagnostics = diagnosticDetails.Select(item => item.Message).ToList();
         return new PublicationCoverDesignView(
             design.Id,
             Guid.Empty,
@@ -839,6 +848,7 @@ public sealed class PublicationBookService(
             diagnostics)
         {
             CoreBookRevision = book.Revision,
+            DiagnosticDetails = diagnosticDetails,
         };
     }
 

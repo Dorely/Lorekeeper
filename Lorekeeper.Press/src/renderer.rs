@@ -3031,7 +3031,7 @@ fn designed_page(
             string(item, "id"),
         )
     });
-    for item in objects {
+    for mut item in objects {
         if !item.get("visible").and_then(Value::as_bool).unwrap_or(true)
             || !visible_layers.contains(&string(&item, "layerId"))
         {
@@ -3256,14 +3256,22 @@ fn designed_page(
                 } else {
                     single_run(&text, face)
                 };
-                if text.trim().is_empty() && string(composition, "id") != "cover" {
-                    return Err(Diagnostic::error(
-                        "PRESS_COMPOSITION_TEXT_UNBOUND",
-                        format!(
-                            "Text frame '{}' is not bound to semantic content.",
-                            string(&item, "id")
-                        ),
-                    ));
+                let has_content_references = item
+                    .get("contentReferences")
+                    .and_then(Value::as_array)
+                    .is_some_and(|references| !references.is_empty());
+                if text.trim().is_empty() {
+                    if !has_content_references {
+                        return Err(Diagnostic::error(
+                            "PRESS_COMPOSITION_TEXT_UNBOUND",
+                            format!(
+                                "Text frame '{}' is not bound to semantic content.",
+                                string(&item, "id")
+                            ),
+                        ));
+                    }
+                    item["visible"] = Value::Bool(false);
+                    continue;
                 }
                 let wrapped = wrap_layout_runs(&text, &source_runs, size, width * scene_width);
                 let line_height = size
@@ -6853,14 +6861,20 @@ fn cover_scene_layout(
         if string(item, "kind") == "Text" {
             let binding = string(item, "textBinding");
             let resolved = match binding.as_str() {
-                "title" => &cover.title,
-                "subtitle" => &cover.subtitle,
-                "author" => &cover.author,
-                "spineText" => &cover.spine_text,
-                "backCopy" => &cover.back_copy,
-                _ => &binding,
+                "title" => Some(&cover.title),
+                "subtitle" => Some(&cover.subtitle),
+                "author" => Some(&cover.author),
+                "spineText" => Some(&cover.spine_text),
+                "backCopy" => Some(&cover.back_copy),
+                _ => None,
             };
-            item["textBinding"] = Value::String(resolved.clone());
+            if let Some(resolved) = resolved {
+                if resolved.trim().is_empty() {
+                    item["visible"] = Value::Bool(false);
+                    continue;
+                }
+                item["textBinding"] = Value::String(resolved.clone());
+            }
         }
         // Group children are stored in parent-local percentages. Their group is
         // the surface-space object that participates in cover-region reflow.
@@ -8009,6 +8023,100 @@ mod tests {
             expanded.lines[0].x > unchanged.lines[0].x,
             "front-bound group must move with an expanded spine"
         );
+    }
+
+    #[test]
+    fn empty_bound_text_frames_are_skipped_but_unbound_frames_are_rejected() {
+        let composition = serde_json::json!({
+            "id": "composition",
+            "name": "Empty optional copy",
+            "semanticBlocks": [{ "id": "empty", "type": "Paragraph", "content": [] }],
+            "variants": [{ "scene": {
+                "surface": { "kind": "SinglePage", "widthPoints": 432, "heightPoints": 648 },
+                "layers": [{ "id": "layer", "order": 0, "visible": true }],
+                "objects": [{
+                    "id": "bound-empty",
+                    "layerId": "layer",
+                    "kind": "Text",
+                    "bounds": { "xPercent": 10, "yPercent": 10, "widthPercent": 80, "heightPercent": 12 },
+                    "contentReferences": [{ "blockId": "empty" }],
+                    "fontFamilyKey": "sans",
+                    "fontSizePoints": 12,
+                    "semanticRole": "Paragraph",
+                    "readingOrder": 1
+                }]
+            }}]
+        });
+        let page = designed_page(
+            &composition,
+            &serde_json::json!({}),
+            &standard_trim(),
+            LayoutTolerance::default(),
+            &mut Vec::new(),
+        )
+        .expect("a valid empty semantic reference should be skipped");
+        assert!(page.lines.is_empty());
+
+        let mut unbound = composition.clone();
+        unbound["variants"][0]["scene"]["objects"][0]["contentReferences"] = serde_json::json!([]);
+        let error = designed_page(
+            &unbound,
+            &serde_json::json!({}),
+            &standard_trim(),
+            LayoutTolerance::default(),
+            &mut Vec::new(),
+        )
+        .expect_err("a text frame with neither binding nor reference must be rejected");
+        assert_eq!(error.code.as_ref(), "PRESS_COMPOSITION_TEXT_UNBOUND");
+    }
+
+    #[test]
+    fn empty_optional_cover_binding_is_not_rendered_or_rejected() {
+        let mut request = request_with_document(serde_json::json!({
+            "title": "Cover",
+            "author": "Author",
+            "language": "en",
+            "sections": []
+        }));
+        request.cover = Some(crate::model::Cover {
+            bleed_inches: 0.0,
+            back_copy: String::new(),
+            title: "Cover".to_owned(),
+            subtitle: String::new(),
+            author: "Author".to_owned(),
+            spine_text: String::new(),
+            background_color: "#ffffff".to_owned(),
+            isbn: None,
+            barcode_mode: "None".to_owned(),
+            asset_id: None,
+            image_crop_x_percent: 50.0,
+            image_crop_y_percent: 50.0,
+            scene: Some(serde_json::json!({
+                "surface": { "kind": "SinglePage", "widthPoints": 432, "heightPoints": 648 },
+                "layers": [{ "id": "layer", "order": 0, "visible": true }],
+                "objects": [{
+                    "id": "optional-subtitle",
+                    "layerId": "layer",
+                    "kind": "Text",
+                    "bounds": { "xPercent": 10, "yPercent": 10, "widthPercent": 80, "heightPercent": 12 },
+                    "textBinding": "subtitle",
+                    "fontFamilyKey": "sans",
+                    "fontSizePoints": 12,
+                    "semanticRole": "Heading2",
+                    "readingOrder": 1
+                }]
+            })),
+            scenes: Default::default(),
+            surfaces: Vec::new(),
+        });
+        let page = cover_layout(
+            &request,
+            request.trim.width_inches * 72.0,
+            request.trim.height_inches * 72.0,
+            None,
+        )
+        .expect("empty optional cover binding should be omitted");
+        assert!(page.lines.is_empty());
     }
 
     #[test]

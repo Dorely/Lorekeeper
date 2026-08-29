@@ -1916,7 +1916,9 @@ public sealed class CompositionService(
             .Select(item => item.ImageId!.Value).Distinct().ToList();
         var assets = await db.PublishAssets.AsNoTracking().Where(item => item.ProjectId == projectId && imageIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, cancellationToken);
-        var requiredDpi = edition?.Format == PublicationEditionFormat.Paperback ? 300d : 180d;
+        var requiredDpi = edition?.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
+            ? 300d
+            : 180d;
         foreach (var item in flattened.Where(item => edition is not null
             && item.Kind == CompositionObjectKind.Image
             && item.ImageId is not null

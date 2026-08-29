@@ -56,7 +56,8 @@ public interface ICompositionCanvasPreviewService
         long revision,
         CompositionScene scene,
         CompositionCanvasPreviewMode mode,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string>? textBindings = null);
 
     Task<CompositionCanvasPreviewResult> RenderSceneAsync(
         Guid projectId,
@@ -65,7 +66,8 @@ public interface ICompositionCanvasPreviewService
         CompositionScene scene,
         ManuscriptDocument semantic,
         CompositionCanvasPreviewMode mode,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string>? textBindings = null);
 }
 
 public sealed partial class CompositionCanvasPreviewService(
@@ -116,11 +118,11 @@ public sealed partial class CompositionCanvasPreviewService(
             .Where(item => item.Family.ProjectId == projectId)
             .Select(item => new { item.Id, item.FamilyId, item.Weight, item.Italic, item.Data })
             .ToListAsync(cancellationToken);
-        var cacheKey = CacheKey(variant, mode, assets, fontFaces.Select(item => (item.Id, item.FamilyId, item.Weight, item.Italic, item.Data)));
+        var cacheKey = CacheKey(variant, mode, assets, fontFaces.Select(item => (item.Id, item.FamilyId, item.Weight, item.Italic, item.Data)), null);
         if (Cache.TryGetValue(cacheKey, out var cached))
             return cached;
 
-        var result = await RasterizeAsync(projectId, variant, scene, semantic, assets, mode, cancellationToken);
+        var result = await RasterizeAsync(projectId, variant, scene, semantic, assets, mode, null, cancellationToken);
         Cache[cacheKey] = result;
         CacheOrder.Enqueue(cacheKey);
         while (Cache.Count > MaximumCachedPreviews && CacheOrder.TryDequeue(out var expired))
@@ -134,7 +136,8 @@ public sealed partial class CompositionCanvasPreviewService(
         long revision,
         CompositionScene scene,
         CompositionCanvasPreviewMode mode,
-        CancellationToken cancellationToken = default) =>
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string>? textBindings = null) =>
         await RenderSceneAsync(
             projectId,
             targetId,
@@ -142,7 +145,8 @@ public sealed partial class CompositionCanvasPreviewService(
             scene,
             ManuscriptCodec.CreateEmpty(targetId),
             mode,
-            cancellationToken);
+            cancellationToken,
+            textBindings);
 
     public async Task<CompositionCanvasPreviewResult> RenderSceneAsync(
         Guid projectId,
@@ -151,7 +155,8 @@ public sealed partial class CompositionCanvasPreviewService(
         CompositionScene scene,
         ManuscriptDocument semantic,
         CompositionCanvasPreviewMode mode,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string>? textBindings = null)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
         var db = databaseOperation.Db;
@@ -190,11 +195,12 @@ public sealed partial class CompositionCanvasPreviewService(
             syntheticVariant,
             mode,
             assets,
-            fontFaces.Select(item => (item.Id, item.FamilyId, item.Weight, item.Italic, item.Data)));
+            fontFaces.Select(item => (item.Id, item.FamilyId, item.Weight, item.Italic, item.Data)),
+            textBindings);
         if (Cache.TryGetValue(cacheKey, out var cached))
             return cached;
 
-        var result = await RasterizeAsync(projectId, syntheticVariant, scene, semantic, assets, mode, cancellationToken);
+        var result = await RasterizeAsync(projectId, syntheticVariant, scene, semantic, assets, mode, textBindings, cancellationToken);
         Cache[cacheKey] = result;
         CacheOrder.Enqueue(cacheKey);
         while (Cache.Count > MaximumCachedPreviews && CacheOrder.TryDequeue(out var expired))
@@ -209,6 +215,7 @@ public sealed partial class CompositionCanvasPreviewService(
         ManuscriptDocument semantic,
         IReadOnlyList<PublishAsset> assets,
         CompositionCanvasPreviewMode mode,
+        IReadOnlyDictionary<string, string>? textBindings,
         CancellationToken cancellationToken)
     {
         var surfaceWidth = Math.Max(1, scene.Surface.WidthPoints);
@@ -226,13 +233,16 @@ public sealed partial class CompositionCanvasPreviewService(
             .ThenBy(item => item.ZIndex)
             .ThenBy(item => item.Id)
             .ToList();
-        var hiddenCount = flattened.Count - visibleObjects.Count;
         var styles = scene.Styles.ToDictionary(item => item.Id);
-        var resolvedObjects = visibleObjects.Select(item => ResolveStyle(item, styles)).ToList();
+        var styledObjects = visibleObjects.Select(item => ResolveStyle(item, styles)).ToList();
+        var resolvedObjects = styledObjects
+            .Where(item => !HasEmptyResolvedBinding(item, textBindings))
+            .ToList();
+        var hiddenCount = flattened.Count - resolvedObjects.Count;
         var diagnostics = new List<CompositionCanvasPreviewDiagnostic>();
         var assetsById = assets.ToDictionary(item => item.Id);
         var bitmaps = new Dictionary<Guid, SKBitmap>();
-        var typefaces = await LoadTypefacesAsync(projectId, resolvedObjects, semantic, cancellationToken);
+        var typefaces = await LoadTypefacesAsync(projectId, resolvedObjects, semantic, textBindings, cancellationToken);
         try
         {
             foreach (var item in resolvedObjects.Where(item => item.Kind == CompositionObjectKind.Image && item.ImageId is not null))
@@ -262,7 +272,7 @@ public sealed partial class CompositionCanvasPreviewService(
                 cancellationToken.ThrowIfCancellationRequested();
                 if (OutsideSurface(item.Bounds))
                     diagnostics.Add(new("warning", "OBJECT_CLIPPED", "Part of this object extends beyond the page and is clipped in output.", item.Id));
-                DrawObject(canvas, scene, semantic, item, bitmaps, typefaces, diagnostics);
+                DrawObject(canvas, scene, semantic, item, textBindings, bitmaps, typefaces, diagnostics);
             }
             if (mode == CompositionCanvasPreviewMode.Annotated)
                 DrawAnnotations(canvas, scene, resolvedObjects, diagnostics);
@@ -280,7 +290,7 @@ public sealed partial class CompositionCanvasPreviewService(
                 surfaceHeight,
                 pixelWidth,
                 pixelHeight,
-                visibleObjects.Count,
+                resolvedObjects.Count,
                 hiddenCount,
                 encoded.ToArray(),
                 diagnostics
@@ -302,13 +312,14 @@ public sealed partial class CompositionCanvasPreviewService(
         Guid projectId,
         IReadOnlyList<CompositionObject> objects,
         ManuscriptDocument semantic,
+        IReadOnlyDictionary<string, string>? textBindings,
         CancellationToken cancellationToken)
     {
         var keys = new HashSet<FontKey>();
         foreach (var item in objects.Where(item => item.Kind == CompositionObjectKind.Text))
         {
             keys.Add(new(item.FontFamilyKey, item.FontWeight, item.Italic));
-            foreach (var inline in ResolveInlines(semantic, item))
+            foreach (var inline in ResolveInlines(semantic, item, textBindings))
             {
                 keys.Add(FontForInline(item, inline.Marks));
             }
@@ -346,6 +357,7 @@ public sealed partial class CompositionCanvasPreviewService(
         CompositionScene scene,
         ManuscriptDocument semantic,
         CompositionObject item,
+        IReadOnlyDictionary<string, string>? textBindings,
         IReadOnlyDictionary<Guid, SKBitmap> bitmaps,
         IReadOnlyDictionary<FontKey, SKTypeface> typefaces,
         List<CompositionCanvasPreviewDiagnostic> diagnostics)
@@ -359,7 +371,7 @@ public sealed partial class CompositionCanvasPreviewService(
                 DrawImage(canvas, rect, item, bitmap);
                 break;
             case CompositionObjectKind.Text:
-                DrawText(canvas, rect, semantic, item, typefaces, diagnostics);
+                DrawText(canvas, rect, semantic, item, textBindings, typefaces, diagnostics);
                 break;
             case CompositionObjectKind.Rectangle:
             case CompositionObjectKind.Ellipse:
@@ -428,9 +440,11 @@ public sealed partial class CompositionCanvasPreviewService(
         SKRect frame,
         ManuscriptDocument semantic,
         CompositionObject item,
+        IReadOnlyDictionary<string, string>? textBindings,
         IReadOnlyDictionary<FontKey, SKTypeface> typefaces,
         List<CompositionCanvasPreviewDiagnostic> diagnostics)
     {
+        var inlines = ResolveInlines(semantic, item, textBindings);
         if (TryColor(item.BackgroundColor, item.BackgroundOpacity * item.Opacity, out var background))
         {
             using var backgroundPaint = new SKPaint { Color = background, Style = SKPaintStyle.Fill };
@@ -442,7 +456,6 @@ public sealed partial class CompositionCanvasPreviewService(
             canvas.DrawRect(frame, border);
         }
 
-        var inlines = ResolveInlines(semantic, item);
         var lines = LayoutLines(item, inlines, typefaces, frame.Width);
         var lineHeight = Math.Max(1, item.FontSizePoints * item.LineHeight);
         var totalHeight = lines.Count * lineHeight;
@@ -628,10 +641,20 @@ public sealed partial class CompositionCanvasPreviewService(
         }
     }
 
-    private static IReadOnlyList<ManuscriptInline> ResolveInlines(ManuscriptDocument semantic, CompositionObject item)
+    private static IReadOnlyList<ManuscriptInline> ResolveInlines(
+        ManuscriptDocument semantic,
+        CompositionObject item,
+        IReadOnlyDictionary<string, string>? textBindings = null)
     {
         if (!string.IsNullOrWhiteSpace(item.TextBinding))
-            return [new ManuscriptInline { Text = item.TextBinding }];
+        {
+            var text = textBindings?.TryGetValue(item.TextBinding, out var resolved) == true
+                ? resolved
+                : item.TextBinding;
+            return string.IsNullOrWhiteSpace(text)
+                ? []
+                : [new ManuscriptInline { Text = text }];
+        }
         if (item.ContentReferences.Count == 0)
             return [];
         try
@@ -656,6 +679,14 @@ public sealed partial class CompositionCanvasPreviewService(
         marks.Any(mark => mark.Type == ManuscriptMarkType.Code) ? "builtin:roboto-mono" : item.FontFamilyKey,
         marks.Any(mark => mark.Type == ManuscriptMarkType.Strong) ? Math.Max(700, item.FontWeight) : item.FontWeight,
         item.Italic || marks.Any(mark => mark.Type == ManuscriptMarkType.Emphasis));
+
+    private static bool HasEmptyResolvedBinding(
+        CompositionObject item,
+        IReadOnlyDictionary<string, string>? textBindings) =>
+        item.Kind == CompositionObjectKind.Text
+        && !string.IsNullOrWhiteSpace(item.TextBinding)
+        && textBindings?.TryGetValue(item.TextBinding, out var text) == true
+        && string.IsNullOrWhiteSpace(text);
 
     private static CompositionObject ResolveStyle(
         CompositionObject item,
@@ -718,16 +749,28 @@ public sealed partial class CompositionCanvasPreviewService(
         PageCompositionVariant variant,
         CompositionCanvasPreviewMode mode,
         IReadOnlyList<PublishAsset> assets,
-        IEnumerable<(Guid Id, Guid FamilyId, int Weight, bool Italic, byte[] Data)> fontFaces)
+        IEnumerable<(Guid Id, Guid FamilyId, int Weight, bool Italic, byte[] Data)> fontFaces,
+        IReadOnlyDictionary<string, string>? textBindings)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        Append(hash, "composition-canvas-preview-v1");
+        Append(hash, "composition-canvas-preview-v2");
         Append(hash, variant.CompositionId.ToString("N"));
         Append(hash, variant.Composition.Revision.ToString());
         Append(hash, variant.Revision.ToString());
         Append(hash, mode.ToString());
         Append(hash, variant.SceneJson);
         Append(hash, variant.Composition.SemanticManuscriptJson);
+        if (textBindings is null)
+            Append(hash, "text-bindings:none");
+        else
+        {
+            Append(hash, "text-bindings:v1");
+            foreach (var binding in textBindings.OrderBy(item => item.Key, StringComparer.Ordinal))
+            {
+                Append(hash, binding.Key);
+                Append(hash, binding.Value);
+            }
+        }
         foreach (var asset in assets.OrderBy(item => item.Id))
         {
             Append(hash, asset.Id.ToString("N"));

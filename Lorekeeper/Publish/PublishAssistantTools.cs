@@ -1099,6 +1099,16 @@ public sealed class PublishAssistantTools(
     {
         var kind = releaseId is null ? PublicationTargetKind.CoreBook : PublicationTargetKind.Release;
         var jobs = await preparation.ListAsync(context.ProjectId, kind, releaseId);
+        var cover = releaseId is Guid editionId
+            ? await covers.GetAsync(context.ProjectId, editionId, context.TurnCancellationToken)
+            : await books.GetCoverAsync(context.ProjectId, context.TurnCancellationToken);
+        var coverDiagnostics = StructuredCoverDiagnostics(cover);
+        var preparationDiagnostics = jobs.FirstOrDefault()?.Diagnostics ?? [];
+        var currentDiagnostics = preparationDiagnostics
+            .Select(item => (item.Severity, item.Code, item.Message))
+            .Concat(coverDiagnostics.Select(item => (item.Severity, item.Code, item.Message)))
+            .Distinct()
+            .ToList();
         var artifacts = releaseId is Guid id
             ? await renders.ListArtifactsAsync(context.ProjectId, id)
             : (await renders.ListCoreAsync(context.ProjectId)).SelectMany(item => item.Artifacts).OrderByDescending(item => item.CreatedAt).ToList();
@@ -1106,7 +1116,14 @@ public sealed class PublishAssistantTools(
             current = jobs.Take(3).Select(job => new { job.Id, releaseId = job.EditionId, job.Status, job.Step,
                 job.ProgressPercent, job.Message, job.CreatedAt, job.CompletedAt,
                 diagnostics = job.Diagnostics.Take(5) }),
-            diagnosticCounts = jobs.FirstOrDefault()?.Diagnostics.GroupBy(item => item.Severity).ToDictionary(group => group.Key, group => group.Count()),
+            diagnosticCounts = new
+            {
+                errors = currentDiagnostics.Count(item => item.Severity == "error"),
+                warnings = currentDiagnostics.Count(item => item.Severity == "warning"),
+            },
+            coverDiagnostics = coverDiagnostics.Take(12),
+            coverLegacyDiagnostics = cover.Diagnostics.Take(12),
+            hasMoreCoverDiagnostics = coverDiagnostics.Count > 12,
             artifacts = artifacts.Where(item => !item.IsLegacy).Take(12).Select(item => DownloadView(context, item)), hasMoreArtifacts = artifacts.Count > 12 });
     }
 
@@ -2594,7 +2611,15 @@ public sealed class PublishAssistantTools(
                 cover.Revision,
                 scene,
                 previewMode.Value,
-                context.TurnCancellationToken);
+                context.TurnCancellationToken,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["title"] = cover.Title,
+                    ["subtitle"] = cover.Subtitle,
+                    ["author"] = cover.Author,
+                    ["spineText"] = cover.SpineText,
+                    ["backCopy"] = cover.BackCopy,
+                });
             var visualId = Guid.NewGuid();
             var fileName = $"cover-{targetId:N}-{previewMode.Value.ToString().ToLowerInvariant()}.png";
             context.AddTransientVisual(new(
@@ -2613,6 +2638,8 @@ public sealed class PublishAssistantTools(
                 "publicationCoverCanvasPreview",
                 targetId));
             var diagnostics = preview.Diagnostics.Take(10).ToList();
+            var allCoverDiagnostics = StructuredCoverDiagnostics(cover);
+            var coverDiagnostics = allCoverDiagnostics.Take(10).ToList();
             return Serialize(new
             {
                 ok = true,
@@ -2633,12 +2660,16 @@ public sealed class PublishAssistantTools(
                 objects = new { visible = preview.VisibleObjectCount, hidden = preview.HiddenObjectCount },
                 diagnosticCounts = new
                 {
-                    total = preview.Diagnostics.Count,
-                    errors = preview.Diagnostics.Count(item => item.Severity == "error"),
-                    warnings = preview.Diagnostics.Count(item => item.Severity == "warning"),
+                    total = preview.Diagnostics.Count + allCoverDiagnostics.Count,
+                    errors = preview.Diagnostics.Count(item => item.Severity == "error")
+                        + allCoverDiagnostics.Count(item => item.Severity == "error"),
+                    warnings = preview.Diagnostics.Count(item => item.Severity == "warning")
+                        + allCoverDiagnostics.Count(item => item.Severity == "warning"),
                 },
                 diagnostics,
                 hasMoreDiagnostics = preview.Diagnostics.Count > diagnostics.Count,
+                coverDiagnostics,
+                hasMoreCoverDiagnostics = allCoverDiagnostics.Count > coverDiagnostics.Count,
                 delivery = context.VisionReady
                     ? "The complete cover image is visible in chat and attached as model visual context for the next reasoning iteration."
                     : "The complete cover image is visible in chat, but the active provider is not vision-ready; do not claim visual verification.",
@@ -3056,6 +3087,14 @@ public sealed class PublishAssistantTools(
         PublicationCoverDesignUpdate update) =>
         Serialize(await covers.UpdateAsync(context.ProjectId, editionId, update));
 
+    private static IReadOnlyList<PublicationCoverDiagnostic> StructuredCoverDiagnostics(
+        PublicationCoverDesignView cover) =>
+        cover.DiagnosticDetails.Count > 0
+            ? cover.DiagnosticDetails
+            : cover.Diagnostics
+                .Select(message => new PublicationCoverDiagnostic("error", "COVER_DESIGN_LEGACY", message))
+                .ToList();
+
     private async Task<string> ValidateCoverAsync(PublishAssistantContext context, Guid? releaseId)
     {
         try
@@ -3063,7 +3102,23 @@ public sealed class PublishAssistantTools(
             var cover = releaseId is Guid editionId
                 ? await covers.GetAsync(context.ProjectId, editionId, context.TurnCancellationToken)
                 : await books.GetCoverAsync(context.ProjectId, context.TurnCancellationToken);
-            return Serialize(new { ok = cover.Diagnostics.Count == 0, target = releaseId is null ? "core" : "release", targetId = releaseId ?? context.ProjectId, revision = cover.Revision, summary = cover.Diagnostics.Count == 0 ? "Cover validation passed." : $"Cover validation found {cover.Diagnostics.Count} diagnostic(s).", diagnosticCounts = new { errors = cover.Diagnostics.Count, warnings = 0 }, diagnostics = cover.Diagnostics.Take(12) });
+            var diagnostics = StructuredCoverDiagnostics(cover);
+            var errors = diagnostics.Count(item => item.Severity == "error");
+            var warnings = diagnostics.Count(item => item.Severity == "warning");
+            return Serialize(new
+            {
+                ok = errors == 0,
+                target = releaseId is null ? "core" : "release",
+                targetId = releaseId ?? context.ProjectId,
+                revision = cover.Revision,
+                summary = errors == 0
+                    ? warnings == 0 ? "Cover validation passed." : $"Cover validation passed with {warnings} warning(s)."
+                    : $"Cover validation found {errors} error(s) and {warnings} warning(s).",
+                diagnosticCounts = new { total = diagnostics.Count, errors, warnings },
+                diagnostics = diagnostics.Take(12),
+                legacyDiagnostics = cover.Diagnostics.Take(12),
+                hasMoreDiagnostics = diagnostics.Count > 12,
+            });
         }
         catch (Exception ex) { return Serialize(new { ok = false, code = "VALIDATION_FAILED", targetId = releaseId ?? context.ProjectId, summary = ex.Message }); }
     }
