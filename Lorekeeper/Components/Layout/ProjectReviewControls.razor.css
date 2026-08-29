@@ -140,7 +140,7 @@
 .project-review-other-list article:last-child { border-bottom: 0; }
 .project-review-other-list article > span { color: var(--lk-muted); display: block; font-size: 0.72rem; }
 .project-review-other-before-after { display: grid; gap: 0.6rem; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 0.5rem; }
-.project-review-other-before-after > div { background: var(--lk-bg, #f6f6f6); border-radius: 0.35rem; padding: 0.45rem; }
+.project-review-other-before-after > div { background: var(--lk-surface-subtle); border: 1px solid var(--lk-line); border-radius: 0.35rem; color: var(--lk-ink); padding: 0.45rem; }
 .project-review-other-before-after small { color: var(--lk-muted); font-weight: 700; }
 .project-review-other-before-after p { font-size: 0.78rem; margin: 0.25rem 0 0; white-space: pre-wrap; }
 

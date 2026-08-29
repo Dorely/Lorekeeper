@@ -1335,8 +1335,9 @@
 }
 
 .chapter-review-composition-preview-panes > div {
-    background: var(--lk-bg, #f6f6f6);
+    background: var(--lk-surface-subtle);
     border-radius: 0.4rem;
+    color: var(--lk-ink);
     min-width: 0;
     padding: 0.45rem;
 }
