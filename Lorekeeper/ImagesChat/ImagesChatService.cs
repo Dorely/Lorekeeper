@@ -358,7 +358,7 @@ public sealed class ImagesChatService(
                         projectId,
                         persistedMessage.Content,
                         allTurnImageIds,
-                        "Current-turn attached images follow. Treat them as user-provided visual context. When generating or editing a continuity-related image, pass only relevant attached image ids in referenceImageIds.",
+                        "Current-turn attached images follow. Treat them as user-provided visual context. When generating or editing a continuity-related image, pass only relevant attached image IDs with explicit roles in references.",
                         cancellationToken));
                 }
                 else
@@ -631,7 +631,7 @@ public sealed class ImagesChatService(
         var contents = new List<AIContent>
         {
             new TextContent(userText),
-            new TextContent("\nCurrent-turn attached images follow. Treat them as user-provided visual context. When generating or editing a continuity-related image, pass only relevant attached image ids in referenceImageIds."),
+            new TextContent("\nCurrent-turn attached images follow. Treat them as user-provided visual context. When generating or editing a continuity-related image, pass only relevant attached image IDs with explicit roles in references."),
         };
 
         foreach (var attachment in attachments)
@@ -660,7 +660,7 @@ public sealed class ImagesChatService(
     {
         var contents = new List<AIContent>
         {
-            new TextContent("Project images returned by the previous tool call are attached as model-only visual context. Inspect them when deciding on further concept-art edits, canonical promotion, or future referenceImageIds for visual continuity."),
+            new TextContent("Project images returned by the previous tool call are attached as model-only visual context. Inspect them when deciding on further concept-art edits, canonical promotion, or future references for visual continuity."),
         };
 
         foreach (var image in images.DistinctBy(image => image.Id))

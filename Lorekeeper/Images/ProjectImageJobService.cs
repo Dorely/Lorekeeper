@@ -15,6 +15,7 @@ namespace Lorekeeper.Images;
 public sealed class ProjectImageJobService(
     IAppDatabaseOperationFactory database,
     IEntityVisualExampleService entityVisualExamples,
+    IProjectImageDefaultRasterResolver defaultRasters,
     IOptions<ProjectImageGenerationOptions> options) : IProjectImageJobService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -259,6 +260,7 @@ public sealed class ProjectImageJobService(
         ProjectImageGenerateJobRequest request,
         CancellationToken cancellationToken = default)
     {
+        var size = await ResolveSizeAsync(projectId, request.Size, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
@@ -279,7 +281,7 @@ public sealed class ProjectImageJobService(
             BriefJson = CleanJson(request.BriefJson, "{}"),
             ReferenceManifestJson = CleanJson(request.ReferenceManifestJson, "[]"),
             TargetGeometryJson = CleanJson(request.TargetGeometryJson, "{}"),
-            Size = NormalizeSize(request.Size),
+            Size = size,
             Quality = NormalizeQuality(request.Quality),
             OutputFormat = layoutBound ? "png" : NormalizeOutputFormat(request.OutputFormat),
             OutputCompression = layoutBound ? null : request.OutputCompression,
@@ -307,6 +309,7 @@ public sealed class ProjectImageJobService(
         ProjectImageEditJobRequest request,
         CancellationToken cancellationToken = default)
     {
+        var size = await ResolveSizeAsync(projectId, request.Size, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
@@ -353,7 +356,7 @@ public sealed class ProjectImageJobService(
             BriefJson = CleanJson(request.BriefJson, "{}"),
             ReferenceManifestJson = CleanJson(request.ReferenceManifestJson, "[]"),
             TargetGeometryJson = CleanJson(request.TargetGeometryJson, "{}"),
-            Size = NormalizeSize(request.Size),
+            Size = size,
             Quality = NormalizeQuality(request.Quality),
             OutputFormat = layoutBound ? "png" : NormalizeOutputFormat(request.OutputFormat),
             OutputCompression = layoutBound ? null : request.OutputCompression,
@@ -965,8 +968,17 @@ public sealed class ProjectImageJobService(
 
     private static string Clean(string? value) => value?.Trim() ?? string.Empty;
 
-    private static string NormalizeSize(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? "auto" : value.Trim();
+    private async Task<string> ResolveSizeAsync(
+        Guid projectId,
+        string? value,
+        CancellationToken cancellationToken)
+    {
+        var normalized = Clean(value);
+        if (normalized.Length > 0 && !normalized.Equals("auto", StringComparison.OrdinalIgnoreCase))
+            return normalized;
+
+        return (await defaultRasters.ResolveAsync(projectId, cancellationToken)).Size;
+    }
 
     private static string CleanJson(string? value, string fallback)
     {

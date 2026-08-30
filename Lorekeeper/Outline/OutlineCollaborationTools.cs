@@ -133,13 +133,13 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
                     GenerateProjectImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression, cancellationToken),
                 name: "generate_project_image",
-                description: "Generate one unattached project image only when the user explicitly asks to establish or revise an entity's canonical appearance. Geometry targets and manuscript placement are unavailable in Outline. Inspect the result, then attach its project-image ID with attach_entity_canonical_reference."),
+                description: "Generate one unattached project image at the configured Core Book page raster only when the user explicitly asks to establish or revise an entity's canonical appearance. Geometry targets and manuscript placement are unavailable in Outline. Inspect the result, then attach its project-image ID with attach_entity_canonical_reference."),
 
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
                     EditProjectImageAsync(context, sourceImageId, brief, references, altText, quality, outputFormat, outputCompression, cancellationToken),
                 name: "edit_project_image",
-                description: "Edit one project image only when the user explicitly asks to refine an entity's canonical appearance. The output is a new unattached project image; inspect it and attach it separately."),
+                description: "Edit one project image at the configured Core Book page raster only when the user explicitly asks to refine an entity's canonical appearance. The output is a new unattached project image; inspect it and attach it separately."),
 
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: false, cancellationToken),

@@ -8,7 +8,6 @@ public sealed class ProjectImageGenerationOptions
 
     public string DefaultMainlineModel { get; set; } = LlmProviderCatalog.OpenAiDefaultMainlineModel;
     public string DefaultImageModel { get; set; } = "gpt-image-2";
-    public string DefaultSize { get; set; } = "auto";
     public string DefaultQuality { get; set; } = "auto";
     public string DefaultOutputFormat { get; set; } = "png";
     public int MaxOutputs { get; set; } = 4;

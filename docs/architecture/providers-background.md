@@ -223,7 +223,10 @@ supported-format normalization such as WebP to lossless PNG. Explicit requested
 rasters are compared with decoded output dimensions even for free-standing jobs,
 and mismatches remain visible in persisted provenance and assistant results;
 aspect compatibility does not make a raster mismatch exact. A proportional
-result remains usable for ordinary layout placement. Expansion is a normal
+result remains usable for ordinary layout placement. Free-standing callers send
+a concrete provider-valid raster derived from the configured Core Book page by
+default; layout-bound callers replace it with their server-owned target raster,
+and explicit valid overrides remain possible. Expansion is a normal
 source-driven edit whose prompt describes the desired larger framing and
 direction; the provider owns how the existing scene is reinterpreted to make
 the result coherent. Provider output has its own

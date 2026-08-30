@@ -236,6 +236,7 @@ builder.Services.AddOptions<ProjectImageGenerationOptions>()
     .Validate(options => options.MaxProviderOutputBytes > 0, "Images:MaxProviderOutputBytes must be greater than zero.")
     .ValidateOnStart();
 builder.Services.AddScoped<IProjectImageProvider, CodexProjectImageProvider>();
+builder.Services.AddScoped<IProjectImageDefaultRasterResolver, ProjectImageDefaultRasterResolver>();
 builder.Services.AddScoped<IProjectImageJobService, ProjectImageJobService>();
 builder.Services.AddScoped<IImagePromptComposer, ImagePromptComposer>();
 builder.Services.AddScoped<IAgentProjectImageWorkflow, AgentProjectImageWorkflow>();

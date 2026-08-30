@@ -161,6 +161,73 @@
     gap: 0.5rem;
 }
 
+.generation-references {
+    display: grid;
+    gap: 0.45rem;
+}
+
+.generation-reference-head,
+.generation-reference-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.generation-reference-head {
+    justify-content: space-between;
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.generation-reference-actions {
+    flex-wrap: wrap;
+}
+
+.generation-reference-upload {
+    min-width: 10rem;
+    flex: 1;
+}
+
+.generation-references > small {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.72rem;
+}
+
+.generation-reference-list {
+    display: grid;
+    gap: 0.4rem;
+}
+
+.generation-reference-item {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 2.75rem minmax(0, 1fr) auto;
+    gap: 0.4rem;
+    align-items: center;
+    padding: 0.4rem;
+    border: 1px solid var(--lk-line);
+    border-radius: var(--lk-radius-md);
+    background: var(--lk-soft);
+}
+
+.generation-reference-item img {
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: var(--lk-radius-sm);
+    object-fit: cover;
+}
+
+.generation-reference-item label {
+    min-width: 0;
+}
+
+.generation-reference-item label > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .images-empty {
     margin-top: 0.75rem;
     padding: 1rem;

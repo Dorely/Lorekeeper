@@ -2,15 +2,19 @@
 @using Lorekeeper.ImagesChat
 @using Lorekeeper.Llm
 @using Lorekeeper.Models
+@using Lorekeeper.Composition
+@using Microsoft.Extensions.Options
 @implements IAsyncDisposable
 @inject IProjectImageService Images
 @inject IProjectImageJobService ImageJobs
 @inject IProjectImageGenerationRuntime ImageRuntime
 @inject IImagePromptComposer ImagePrompts
-@inject Lorekeeper.Composition.ICompositionService Compositions
+@inject ICompositionService Compositions
+@inject IProjectImageDefaultRasterResolver DefaultImageRasters
 @inject IImagesChatService ImagesChat
 @inject IEntityVisualExampleService EntityVisuals
 @inject ILlmProviderService Providers
+@inject IOptions<ProjectImageGenerationOptions> ImageOptions
 @inject IJSRuntime JS
 
 @if (Project is null)
@@ -84,6 +88,12 @@ else
                                 {
                                     <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenImagePartials(image)">Partials (@imagePartials.Count)</button>
                                 }
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-secondary"
+                                        disabled="@(IsGenerationReference(image.Id) || _generationReferences.Count >= MaxReferenceImages)"
+                                        @onclick="() => AddGenerationReference(image)">
+                                    @(IsGenerationReference(image.Id) ? "Reference selected" : "Use as reference")
+                                </button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AttachToChatAsync(image)">Attach to Chat</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenCropModal(image)">Crop</button>
                                 <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenMaskModal(image)">Edit</button>
@@ -141,7 +151,7 @@ else
                             <label>
                                 <span>Size</span>
                                 <select class="form-select form-select-sm" @bind="_imageSize">
-                                    <option value="auto">Auto</option>
+                                    <option value="auto">Core Book page (@_defaultImageRaster)</option>
                                     <option value="1024x1024">Square</option>
                                     <option value="1024x1536">Portrait</option>
                                     <option value="1536x1024">Landscape</option>
@@ -178,6 +188,46 @@ else
                         <span>Generated alt text</span>
                         <input class="form-control form-control-sm" @bind="_generatedAltText" />
                     </label>
+                    <div class="generation-references">
+                        <div class="generation-reference-head">
+                            <span>Reference images</span>
+                            <small>@_generationReferences.Count / @MaxReferenceImages</small>
+                        </div>
+                        <div class="generation-reference-actions">
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    disabled="@(_generationReferences.Count >= MaxReferenceImages)"
+                                    @onclick="OpenGenerationReferencePicker">Choose from library</button>
+                            <InputFile OnChange="UploadGenerationReferencesAsync"
+                                       multiple
+                                       accept="image/png,image/jpeg,image/webp"
+                                       disabled="@(_generationReferences.Count >= MaxReferenceImages)"
+                                       class="form-control form-control-sm generation-reference-upload" />
+                        </div>
+                        <small>References are sent to the image model in the order shown. Describe what each image should contribute.</small>
+                        @if (_generationReferences.Count > 0)
+                        {
+                            <div class="generation-reference-list">
+                                @foreach (var reference in _generationReferences)
+                                {
+                                    <div class="generation-reference-item" @key="reference.Image.Id">
+                                        <img src="@reference.Image.PreviewUrl" alt="@ImageAlt(reference.Image)" />
+                                        <label>
+                                            <span title="@reference.Image.FileName">@reference.Image.FileName</span>
+                                            <input class="form-control form-control-sm"
+                                                   placeholder="Character identity, art style, setting..."
+                                                   @bind="reference.Role" />
+                                        </label>
+                                        <button type="button"
+                                                class="btn btn-sm btn-outline-danger"
+                                                title="Remove reference"
+                                                aria-label="Remove reference"
+                                                @onclick="() => RemoveGenerationReference(reference.Image.Id)">x</button>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
                     <label><span>Represented entities</span></label>
                     <EntityVisualTargetPicker ProjectId="@Project.Id" @bind-Targets="_generationEntityTargets" />
                     <button type="button" class="btn btn-sm btn-primary" disabled="@_queueingGenerate" @onclick="GenerateAsync">
@@ -188,6 +238,18 @@ else
 
         </aside>
     </div>
+}
+
+@if (Project is not null)
+{
+    <ProjectImageLibraryPickerModal ProjectId="@Project.Id"
+                                    IsOpen="@_generationReferencePickerOpen"
+                                    Title="Add generation reference"
+                                    PrimaryActionLabel="Use as reference"
+                                    PrimaryActionEnabled="@(_generationReferences.Count < MaxReferenceImages)"
+                                    ExcludedImageIds="@GenerationReferenceImageIds"
+                                    OnPrimaryAction="AddGenerationReference"
+                                    OnClose="CloseGenerationReferencePicker" />
 }
 
 @if (_croppingImage is not null && Project is not null)
@@ -346,6 +408,7 @@ else
     private string _uploadAltText = string.Empty;
     private string _imagePrompt = string.Empty;
     private string _imageSize = "auto";
+    private string _defaultImageRaster = string.Empty;
     private string _imageQuality = "auto";
     private string _imageFormat = "png";
     private int? _imageCompression;
@@ -363,11 +426,18 @@ else
     private bool _sendingMaskEdit;
     private Guid? _loadedProjectId;
     private int _attachmentRefreshKey;
+    private readonly List<ManualGenerationReference> _generationReferences = [];
+    private bool _generationReferencePickerOpen;
     [Parameter] public Guid? LayoutEditionId { get; set; }
     [Parameter] public string? LayoutTargetKind { get; set; }
     [Parameter] public Guid? LayoutTargetId { get; set; }
     [Parameter] public Guid? LayoutVariantId { get; set; }
     private LayoutGenerationTargetDescriptor? _layoutTarget;
+
+    private int MaxReferenceImages => Math.Max(0, ImageOptions.Value.MaxReferenceImages);
+
+    private IReadOnlyCollection<Guid> GenerationReferenceImageIds =>
+        _generationReferences.Select(reference => reference.Image.Id).ToList();
 
     private IReadOnlyList<ProjectImageView> FilteredImages =>
         string.IsNullOrWhiteSpace(_query)
@@ -425,6 +495,9 @@ else
         }
         else _layoutTarget = null;
         if (_loadedProjectId == Project.Id) return;
+        _generationReferences.Clear();
+        _generationReferencePickerOpen = false;
+        _imageSize = "auto";
         _loadedProjectId = Project.Id;
         await ReloadAsync();
     }
@@ -457,6 +530,14 @@ else
         try
         {
             _codexConnected = await Providers.IsCodexConnectedAsync();
+            try
+            {
+                _defaultImageRaster = (await DefaultImageRasters.ResolveAsync(Project.Id)).Size;
+            }
+            catch (ArgumentException)
+            {
+                _defaultImageRaster = "unsupported page aspect";
+            }
             await ReloadImageLibraryAsync();
             await ReloadJobsAndPartialsAsync();
             _runtimeSnapshot = ImageRuntime.GetSnapshot();
@@ -525,6 +606,13 @@ else
         _status = null;
         try
         {
+            var references = _generationReferences
+                .Select(reference => new ImageReferenceUse
+                {
+                    ImageId = reference.Image.Id,
+                    Role = reference.Role,
+                })
+                .ToArray();
             var compiled = await ImagePrompts.CompileGenerationAsync(
                 Project.Id,
                 new ImageGenerationBrief
@@ -533,7 +621,7 @@ else
                     Scene = _imagePrompt,
                     AllowRenderedText = false,
                 },
-                references: null,
+                references,
                 target: _layoutTarget is null
                     ? new ImageGenerationTarget { Size = _imageSize }
                     : new ImageGenerationTarget { EditionId = _layoutTarget.EditionId, TargetKind = _layoutTarget.TargetKind, TargetId = _layoutTarget.TargetId, VariantId = _layoutTarget.VariantId });
@@ -545,7 +633,7 @@ else
                 _imageFormat == "jpeg" ? _imageCompression : null,
                 _generatedAltText,
                 1,
-                [],
+                compiled.ReferenceImageIds,
                 Label: "Manual generation",
                 EntityTargets: _generationEntityTargets,
                 BriefJson: compiled.BriefJson,
@@ -562,6 +650,76 @@ else
         finally
         {
             _queueingGenerate = false;
+        }
+    }
+
+    private void OpenGenerationReferencePicker()
+    {
+        if (_generationReferences.Count >= MaxReferenceImages)
+        {
+            _error = $"Select no more than {MaxReferenceImages} reference images.";
+            return;
+        }
+
+        _error = null;
+        _generationReferencePickerOpen = true;
+    }
+
+    private void CloseGenerationReferencePicker() => _generationReferencePickerOpen = false;
+
+    private void AddGenerationReference(ProjectImageView image)
+    {
+        if (IsGenerationReference(image.Id)) return;
+        if (_generationReferences.Count >= MaxReferenceImages)
+        {
+            _error = $"Select no more than {MaxReferenceImages} reference images.";
+            return;
+        }
+
+        _generationReferences.Add(new ManualGenerationReference(image, $"Visual reference from {image.FileName}"));
+        _error = null;
+    }
+
+    private void RemoveGenerationReference(Guid imageId) =>
+        _generationReferences.RemoveAll(reference => reference.Image.Id == imageId);
+
+    private bool IsGenerationReference(Guid imageId) =>
+        _generationReferences.Any(reference => reference.Image.Id == imageId);
+
+    private async Task UploadGenerationReferencesAsync(InputFileChangeEventArgs e)
+    {
+        if (Project is null) return;
+        _error = null;
+        _status = null;
+        try
+        {
+            var files = e.GetMultipleFiles(Math.Max(1, MaxReferenceImages));
+            if (_generationReferences.Count + files.Count > MaxReferenceImages)
+            {
+                _error = $"Select no more than {MaxReferenceImages} reference images.";
+                return;
+            }
+
+            foreach (var file in files)
+            {
+                await using var stream = file.OpenReadStream(MaxImageBytes);
+                using var memory = new MemoryStream();
+                await stream.CopyToAsync(memory);
+                var uploaded = await Images.UploadAsync(
+                    Project.Id,
+                    new ProjectImageUpload(file.Name, file.ContentType, memory.ToArray(), file.Name));
+                AddGenerationReference(uploaded);
+            }
+
+            _status = files.Count == 1
+                ? "Reference image uploaded and selected."
+                : $"{files.Count} reference images uploaded and selected.";
+            await ReloadImageLibraryAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            await ReloadImageLibraryAsync();
         }
     }
 
@@ -725,6 +883,10 @@ else
     {
         if (Project is null) return;
         _images = await Images.ListAsync(Project.Id);
+        var currentImages = _images.ToDictionary(image => image.Id);
+        _generationReferences.RemoveAll(reference => !currentImages.ContainsKey(reference.Image.Id));
+        foreach (var reference in _generationReferences)
+            reference.Image = currentImages[reference.Image.Id];
         _chapterUsage = (await Images.ListChapterUsageAsync(Project.Id))
             .ToDictionary(usage => usage.ImageId);
     }
@@ -1038,5 +1200,11 @@ else
         {
             try { await _maskModule.DisposeAsync(); } catch (JSDisconnectedException) { }
         }
+    }
+
+    private sealed class ManualGenerationReference(ProjectImageView image, string role)
+    {
+        public ProjectImageView Image { get; set; } = image;
+        public string Role { get; set; } = role;
     }
 }

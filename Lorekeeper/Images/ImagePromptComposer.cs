@@ -6,7 +6,6 @@ using System.Text.Json.Serialization;
 using Lorekeeper.Composition;
 using Lorekeeper.Models;
 using Lorekeeper.Publish;
-using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Images;
 
@@ -70,7 +69,7 @@ public sealed class ImageGenerationTarget
     [Description("Exact page-composition variant ID. Required for PageFrame and PageSurface targets; omit for Figure and cover targets.")]
     public Guid? VariantId { get; init; }
     public string AspectRatio { get; init; } = string.Empty;
-    [Description("Optional explicit WIDTHxHEIGHT provider raster for free-standing generation or editing, or for a layout-bound target when a larger proportional raster is warranted. Both dimensions must satisfy provider constraints; layout-bound targets must preserve the server-owned aspect. Omit or use auto to retain the moderate default raster.")]
+    [Description("Optional explicit WIDTHxHEIGHT provider raster for free-standing generation or editing, or for a layout-bound target when a larger proportional raster is warranted. Both dimensions must satisfy provider constraints; layout-bound targets must preserve the server-owned aspect. Omit or use auto to use the configured Core Book page raster for free-standing work or the server-owned moderate raster for a layout-bound target.")]
     public string Size { get; init; } = string.Empty;
     [Description("Only for free-standing library generation. Layout-bound targets derive every reserved region from Lorekeeper.")]
     public IReadOnlyList<ImageReservedRegion>? ReservedTextRegions { get; init; }
@@ -129,7 +128,7 @@ public interface IImagePromptComposer
 public sealed class ImagePromptComposer(
     ICompositionService compositions,
     IProjectImageService images,
-    IOptions<ProjectImageGenerationOptions> options) : IImagePromptComposer
+    IProjectImageDefaultRasterResolver defaultRasters) : IImagePromptComposer
 {
     private const double AspectTolerance = 0.025d;
     private const string PurposefulSpaceInstruction = "Unless the brief explicitly calls for a sparse, minimalist, isolated-study, or open-field composition, concentrate quiet negative space only in explicit text-reservation regions. Everywhere else, make each area contribute to subject, setting, atmosphere, depth, scale, motion, focus, or visual flow without adding clutter. Atmospheric open space is purposeful when it clearly establishes mood or scale; avoid large unmotivated blank areas and do not invent a text landing zone where none was requested.";
@@ -313,7 +312,11 @@ public sealed class ImagePromptComposer(
 
         var requestedSize = Clean(target?.Size);
         var requestedAspect = Clean(target?.AspectRatio);
-        var resolvedSize = ResolveExplicitSize(requestedSize, requestedAspect);
+        var resolvedSize = await ResolveExplicitSizeAsync(
+            projectId,
+            requestedSize,
+            requestedAspect,
+            cancellationToken);
         var (width, height) = ParseAndValidateSize(resolvedSize);
         var actualAspect = (double)width / height;
         if (requestedAspect.Length > 0)
@@ -385,7 +388,11 @@ public sealed class ImagePromptComposer(
         return prompt.ToString().Trim();
     }
 
-    private string ResolveExplicitSize(string requestedSize, string requestedAspect)
+    private async Task<string> ResolveExplicitSizeAsync(
+        Guid projectId,
+        string requestedSize,
+        string requestedAspect,
+        CancellationToken cancellationToken)
     {
         if (requestedSize.Length > 0 && !requestedSize.Equals("auto", StringComparison.OrdinalIgnoreCase))
         {
@@ -395,13 +402,7 @@ public sealed class ImagePromptComposer(
         if (requestedAspect.Length > 0)
             return DeriveSize(ParseAspectRatio(requestedAspect));
 
-        var configured = Clean(options.Value.DefaultSize);
-        if (configured.Length > 0 && !configured.Equals("auto", StringComparison.OrdinalIgnoreCase))
-        {
-            _ = ParseAndValidateSize(configured);
-            return configured.ToLowerInvariant();
-        }
-        return "1024x1024";
+        return (await defaultRasters.ResolveAsync(projectId, cancellationToken)).Size;
     }
 
     private static string DeriveSize(double aspect)

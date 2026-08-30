@@ -246,7 +246,10 @@ non-empty manuscript remains legal but returns the non-blocking
 Page and cover scenes use persisted, hashed, expiring, project/conversation-
 scoped stages that cannot be replayed. Image generation creates an unattached
 durable image job; another explicit mutation places or associates the completed
-asset. Expansion of an existing image uses the ordinary source-driven edit
+asset. Free-standing generation and editing default to a provider-valid raster
+with the configured Core Book page aspect; a concrete layout target replaces
+that default when the composition must honor a Figure, page, frame, or cover.
+Expansion of an existing image uses the ordinary source-driven edit
 operation: the original image is supplied directly and the complete larger
 framing is described in the prompt, including left-and-right, above-and-below,
 or all-sides extension as appropriate. Regional guides are reserved for

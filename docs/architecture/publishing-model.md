@@ -78,6 +78,9 @@ settings determine whether act presentation is emitted. Chapter rows are
 selectable publication content. Core owns shared title/author/language
 metadata, chapter inclusion, publication sections, page setup and Book Text
 Styles through their respective services, and the reusable front cover.
+The current Core page aspect also supplies the default provider-valid raster for
+free-standing image generation and editing throughout the application; concrete
+Figure, page, frame, and cover targets retain their own exact geometry.
 Release creation is explicit: no release or ISBN is created automatically.
 
 Publication sections have an anchor before, after, or around the Core outline,

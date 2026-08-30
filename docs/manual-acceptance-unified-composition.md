@@ -125,12 +125,17 @@ the live test project; terminate the browser host after the run.
   follow-up instead of claiming to store or submit them.
 - Apply a large scene through its owning service and verify the mutation is
   revision-checked, applied once, and represented in Git-backed pending review.
-- Confirm Images and Outline expose only free-standing generation. Confirm
+- Confirm Images and Outline expose only free-standing generation whose default
+  raster follows the configured Core Book page aspect. Confirm
   Editor and Publish default reusable art and ordinary flowing Figures to
   free-standing generation, and use a geometry-bound target only when artwork
   must honor a concrete page, frame, Figure placement, or cover region. Verify
   bound guidance does not crop or resize the stored raster, and confirm no
   assistant claims vendor acceptance or that a URL was downloaded.
+- In the manual Images Generate panel, select an existing library image and
+  upload a second reference. Give each a distinct role, queue generation, and
+  confirm the job's reference manifest and provider inputs preserve the visible
+  order and exact image identities.
 
 ## Review Edits and Contest review
 

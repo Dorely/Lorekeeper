@@ -82,12 +82,18 @@ using the completed image ID. Generation never embeds a destination, creates a
 partial placement, or silently crops an output to satisfy a target.
 
 The image generation boundary distinguishes a free-standing library request
-from a layout-bound request. Outline and Images requests omit geometry. A
-concrete `LayoutGenerationTargetDescriptor` is used only when art must honor
-physical regions such as a page, frame, or cover. It carries exact aspect,
-provider-valid final-DPI recommendation plus moderate provider-valid default
-raster guidance, effective-DPI expectation, geometry fingerprint, and named trim, bleed, safe, gutter, barcode, cover, or
-reserved-text regions. An assistant may select a proportional larger provider
+from a layout-bound request. Every free-standing generation or edit defaults to
+a moderate provider-valid raster with the current Core Book page aspect; this
+page-shaped default is included in the compiled prompt and provider request but
+does not make the asset layout-bound. Outline and Images requests omit concrete
+placement geometry. `IProjectImageDefaultRasterResolver` owns the shared Core
+Book page-to-provider-raster default used by prompt compilation, direct job
+creation, and the manual Images UI. A `LayoutGenerationTargetDescriptor` is
+used only when art must honor physical regions such as a page, frame, or cover.
+It carries exact aspect, provider-valid final-DPI recommendation plus moderate
+provider-valid default raster guidance, effective-DPI expectation, geometry
+fingerprint, and named trim, bleed, safe, gutter, barcode, cover, or reserved-text
+regions. An assistant may select a proportional larger provider
 size when the requested quality or effective DPI warrants it; explicit
 overrides are accepted only when provider-valid and, for layout-bound targets,
 when they preserve the server-owned aspect. It is guidance and prompt context,
@@ -101,6 +107,14 @@ free-standing request, and mismatches are surfaced as warnings. Generation
 does not infer publication DPI readiness; placed-image validation owns DPI
 diagnostics. The provider-output byte boundary is separately configurable and
 defaults to 64 MiB.
+
+The manual Images Generate panel uses that Core Book page raster by default and
+still offers explicit provider-valid raster overrides. Authors can select
+existing project images or upload new project-library images as ordered
+generation references, give each reference a visible role, and remove it before
+queueing. The compiled reference manifest and the exact ordered image IDs are
+persisted on the job and sent to the provider; merely uploading or selecting a
+reference does not create a generation job or an entity association.
 
 `IProjectImageService.ResizeAsync` creates a new unattached, source-linked
 `Resized` asset at an exact provider-valid raster using deterministic
@@ -264,7 +278,7 @@ composition, Core/release fingerprints, and artifact freshness.
 | `Lorekeeper/Images/IProjectImageService.cs` / `ProjectImageService.cs` | Reusable image-library reads, uploads, crops, deterministic exact resizing, metadata, usage projections, and deletion guards. |
 | `Lorekeeper/Images/IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Durable generation/edit job records, streamed partial artifacts, explicit promotion, structured briefs, provider audit fields, output validation, and diagnostics. |
 | `Lorekeeper/Images/AgentProjectImageWorkflow.cs` | Assistant generation/edit boundary, terminal-state waiting, reconnectable jobs, target diagnostics, and unattached output semantics. |
-| `Lorekeeper/Images/ImagePromptComposer.cs` | Structured generation/edit briefs, reference labels, reserved regions, spatial guidance, and rendered-text policy. |
+| `Lorekeeper/Images/ImagePromptComposer.cs` / `ProjectImageDefaultRasterResolver.cs` | Structured generation/edit briefs, reference labels, reserved regions, spatial guidance, rendered-text policy, and the shared Core Book page raster default. |
 | `Lorekeeper/EntityVisuals/` | Canonical entity-image associations, visual context, bounded reference reads, and provenance. |
 | `Lorekeeper/Composition/CompositionService.cs` | Revision-aware Designed Page aggregates, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |
 | `Lorekeeper/Composition/CompositionSceneResolver.cs` | Group flattening, object visibility/z-order semantics, and shared overlap validation. |
