@@ -101,7 +101,7 @@
     private const string ConversationTokenTitleLabel = "model input token count";
 
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
-    [Parameter] public EventCallback OnImagesChanged { get; set; }
+    [Parameter] public EventCallback OnImageLibraryChanged { get; set; }
     [Parameter] public int AttachmentRefreshKey { get; set; }
 
     private int _forceScrollKey;
@@ -359,7 +359,6 @@
                     completed.DurationMs,
                     completed.Visuals.Select(ToChatImageVisual).ToList());
                 UpdateConversationTokenCount();
-                await OnImagesChanged.InvokeAsync();
                 RequestScroll();
                 StateHasChanged();
                 break;
@@ -371,12 +370,11 @@
                 StateHasChanged();
                 break;
             case ImagesChatMutated:
-                await OnImagesChanged.InvokeAsync();
+                await OnImageLibraryChanged.InvokeAsync();
                 break;
             case ImagesChatAssistantMessageCompleted:
                 ReleaseRunningUi();
                 await ReloadFromDbAsync();
-                await OnImagesChanged.InvokeAsync();
                 RequestScroll();
                 StateHasChanged();
                 break;
@@ -384,7 +382,6 @@
                 _error = error.Cancelled ? null : error.Message;
                 ReleaseRunningUi();
                 await ReloadFromDbAsync();
-                await OnImagesChanged.InvokeAsync();
                 RequestScroll();
                 StateHasChanged();
                 break;
@@ -645,7 +642,7 @@
         return parts;
     }
 
-    private Task NotifyLibraryImagesChangedAsync() => OnImagesChanged.InvokeAsync();
+    private Task NotifyLibraryImagesChangedAsync() => OnImageLibraryChanged.InvokeAsync();
 
     private static ChatImageVisual ToChatImageVisual(ProjectImageChatAttachmentView attachment) =>
         new(

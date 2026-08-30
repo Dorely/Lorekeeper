@@ -249,6 +249,9 @@ durable image job; another explicit mutation places or associates the completed
 asset. Free-standing generation and editing default to a provider-valid raster
 with the configured Core Book page aspect; a concrete layout target replaces
 that default when the composition must honor a Figure, page, frame, or cover.
+The Images workspace refreshes its library and job projections only for an
+explicit image-mutation update; ordinary tool completion, assistant completion,
+and turn errors remain local chat updates and must not reload the workspace.
 Expansion of an existing image uses the ordinary source-driven edit
 operation: the original image is supplied directly and the complete larger
 framing is described in the prompt, including left-and-right, above-and-below,

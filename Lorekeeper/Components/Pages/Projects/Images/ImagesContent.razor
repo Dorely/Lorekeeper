@@ -29,7 +29,7 @@ else
 {
     <div class="images-workspace">
         <section class="images-chat-pane">
-            <ImagesChatPanel ProjectId="Project.Id" OnImagesChanged="ReloadAsync" AttachmentRefreshKey="_attachmentRefreshKey" />
+            <ImagesChatPanel ProjectId="Project.Id" OnImageLibraryChanged="RefreshImageStateAsync" AttachmentRefreshKey="_attachmentRefreshKey" />
         </section>
 
         <section class="images-main">
@@ -554,20 +554,30 @@ else
         }
     }
 
+    private async Task RefreshImageStateAsync()
+    {
+        if (Project is null) return;
+        try
+        {
+            await ReloadImageLibraryAsync();
+            await ReloadJobsAndPartialsAsync();
+            _runtimeSnapshot = ImageRuntime.GetSnapshot();
+            RefreshOpenImages();
+            CloseEmptyPartialsModal();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
     private async void OnRuntimeStateChanged(object? sender, EventArgs args)
     {
         try
         {
             await InvokeAsync(async () =>
             {
-                _runtimeSnapshot = ImageRuntime.GetSnapshot();
-                if (Project is not null)
-                {
-                    await ReloadJobsAndPartialsAsync();
-                    await ReloadImageLibraryAsync();
-                    RefreshOpenImages();
-                    CloseEmptyPartialsModal();
-                }
+                await RefreshImageStateAsync();
                 StateHasChanged();
             });
         }
