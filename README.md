@@ -92,11 +92,11 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   canon extraction, graph synchronization, and combined lexical/semantic
   retrieval. File ingest accepts up to 50 files together, creates one durable
   job per file sequentially, and keeps per-file success or failure visible.
-- Full project export format v25 preserves manuscript review annotations and only the Book Brief's selected
+- Full project export format v26 preserves manuscript review annotations and only the Book Brief's selected
   canonical ingest sources (source text, chunks, pages, blocks, metadata, and
   selection mapping), remaps their provenance on import, and rebuilds retrieval
   indexes without rerunning extraction. Project-reference links are intentionally
-  omitted from v25 exports; exports with outgoing links warn that imports never infer
+  omitted from v26 exports; exports with outgoing links warn that imports never infer
   links. Non-structural exports omit source bodies, selections, and evidence and
   report that omission.
 - Local version history captures deterministic checkpoints of the creative
@@ -205,7 +205,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   on the private Core copy, while publication releases require those choices to
   be resolved. Paperback and hardcover output use a checked-in, versioned
   physical-product registry with configurable Generic templates plus built-in
-  Specific products for Amazon KDP and IngramSpark;
+  Specific products for Amazon KDP, IngramSpark, and Barnes & Noble Press.
+  B&N paperback, printed-case hardcover, and dust-jacket hardcover releases use
+  imported exact template evidence and an artifact-focused Personal/For sale
+  option that selects SKU/ISBN and barcode preparation behavior;
   EPUB and PDF ebook workspaces expose only relevant controls. The full-height
   conversational Publish assistant acts as a publication editor and production
   expert, with compact Core/release tools, persistent streaming history, image
@@ -248,6 +251,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   outside, inside, case, jacket, or cloth setup surfaces, safe regions, and
   ISBN-13/EAN-13 barcode behavior. Ingram duplex paperback produces outside
   then inside cover pages with the required no-ink spine region.
+  B&N covers remain one connected Back/Spine/Front composition with region-local
+  focus, fill, crop, generation guidance, and spine direction. They can prepare
+  either one measured full-wrap PDF or derived front/back PDFs when B&N supplies
+  the spine in its wizard.
 - Versioned Lorekeeper validation with independent post-write inspection,
   deterministic EPUB 3/package assembly, downloadable manifests and reports,
   and matching assistant preflight/package controls. The owned KDP
@@ -256,7 +263,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   content, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded subset fonts, ToUnicode maps, and a
   240% total-ink ceiling. These checks establish only the exact named
   Lorekeeper profile; they do not claim that a vendor accepted an upload.
-- Versioned project import/export (current v25 manuscript-v4/page-setup/
+  The owned B&N profile emits inspected PDF 1.4 with PDF/A-1b identification,
+  embedded fonts, output intent, flattened transparency, and exact imported
+  template geometry.
+- Versioned project import/export (current v26 manuscript-v4/page-setup/
   composition model, Core Book, sparse release overlays, edition chapter
   snapshots/compositions, exact-target review annotations, selected canonical source bodies/evidence, covers, custom-font binaries,
   and isolated older structured/text adapters) plus TXT, Markdown,

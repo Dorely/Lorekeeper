@@ -336,6 +336,15 @@ mutate Core/release metadata and settings, publication sections, covers, page
 setup/styles where allowed, and preparation workflows. It cannot mutate chapter
 manuscript or reorder the project outline. Low-level renderer invocation, raw
 profile versions, ISBN invention, and vendor-acceptance claims are unavailable.
+For a full-wrap cover it uses the exact region tools to read and preview Back,
+Spine, or Front before editing, then fills only the selected region or changes
+the persisted spine direction with an expected revision. A narrow spine
+generation target reports the closest supported raster, crop loss, effective
+DPI, safety geometry, and fingerprint; generation remains unattached and never
+stretches to fit. Spine art contains no baked-in words, title/author remain real
+text above the art, US/English defaults to top-to-bottom unless the user asks
+otherwise, and successful mutations are followed by annotated spine and
+whole-wrap inspection plus clean final previews.
 
 ### Review Edits and approval
 

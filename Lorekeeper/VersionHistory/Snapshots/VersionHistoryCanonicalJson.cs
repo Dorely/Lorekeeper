@@ -75,7 +75,7 @@ internal static class VersionHistoryCanonicalJson
 
         var canonicalBytes = SerializeDirectManuscript(node);
         if (!bytes.SequenceEqual(canonicalBytes))
-            throw new InvalidDataException("Snapshot chapter manuscript JSON is not in canonical schema-v1 form.");
+            throw new InvalidDataException("Snapshot chapter manuscript JSON is not in canonical form.");
 
         return Encoding.UTF8.GetString(canonicalBytes);
     }

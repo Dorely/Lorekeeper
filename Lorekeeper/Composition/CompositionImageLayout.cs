@@ -22,6 +22,24 @@ public static class CompositionImageLayout
         };
     }
 
+    public static CompositionObject FillRegion(
+        CompositionObject item,
+        CompositionRegionConstraint region,
+        CompositionBounds regionBounds,
+        bool retainAspectRatio = true)
+    {
+        if (item.Kind != CompositionObjectKind.Image)
+            throw new ArgumentException("Only an image object can fill a composition region.", nameof(item));
+        if (region is not (CompositionRegionConstraint.Back or CompositionRegionConstraint.Spine or CompositionRegionConstraint.Front))
+            throw new ArgumentException("Cover region fill supports Back, Spine, or Front.", nameof(region));
+        return item with
+        {
+            Bounds = regionBounds,
+            RegionConstraint = region,
+            ImageFit = retainAspectRatio ? FigureImageFit.Cover : FigureImageFit.Stretch,
+        };
+    }
+
     public static bool FrameCoversCanvas(CompositionObject item)
     {
         if (item.Kind != CompositionObjectKind.Image

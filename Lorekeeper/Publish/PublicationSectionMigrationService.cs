@@ -44,6 +44,7 @@ public sealed class PublicationSectionMigrationService(
         await DatabaseStartupMigrationService.EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsurePublicationSectionStartSideCompatibilityColumnAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
+        await DatabaseStartupMigrationService.EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureAuthoringTriggersAsync(db, cancellationToken);
         if (await db.ManuscriptMigrationJournals.AsNoTracking().AnyAsync(
             item => item.MigrationName == MigrationName && item.Status == ManuscriptMigrationStatus.Completed,

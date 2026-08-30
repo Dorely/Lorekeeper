@@ -20,6 +20,8 @@ public enum PublicationArtifactKind
     PerfectBoundCoverPdf,
     CaseCoverPdf,
     DustJacketPdf,
+    FrontCoverPdf,
+    BackCoverPdf,
     PrintSetupManifest,
     BookPdf,
     Epub,

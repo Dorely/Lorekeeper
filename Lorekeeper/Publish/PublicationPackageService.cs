@@ -160,6 +160,8 @@ public sealed class PublicationPackageService(
                     || artifact.Kind == PublicationArtifactKind.PerfectBoundCoverPdf
                     || artifact.Kind == PublicationArtifactKind.CaseCoverPdf
                     || artifact.Kind == PublicationArtifactKind.DustJacketPdf
+                    || artifact.Kind == PublicationArtifactKind.FrontCoverPdf
+                    || artifact.Kind == PublicationArtifactKind.BackCoverPdf
                     || artifact.Kind == PublicationArtifactKind.PrintSetupManifest
                     || artifact.Kind == PublicationArtifactKind.BookPdf))
             .OrderByDescending(artifact => artifact.CreatedAt)
@@ -213,7 +215,7 @@ public sealed class PublicationPackageService(
             }
             if (product is not null)
             {
-                var requiredKinds = RequiredArtifactKinds(product, edition.PrintCoverMode);
+                var requiredKinds = RequiredArtifactKinds(product, edition);
                 physicalArtifacts = requiredKinds
                     .Select(kind => artifacts.FirstOrDefault(item => item.Kind == kind))
                     .Where(item => item is not null)
@@ -264,6 +266,13 @@ public sealed class PublicationPackageService(
                 && !PublicationIsbn.IsValidIsbn13(edition.Isbn))
             {
                 items.Add(Error("META_ISBN13_BARCODE_REQUIRED", "Lorekeeper barcode output requires a valid ISBN-13."));
+            }
+            if (edition.Vendor == PublicationVendor.BarnesAndNoblePress)
+            {
+                if (coverDesign.BarcodeMode != PublicationBarcodeMode.VendorOverlay)
+                    items.Add(Error("COVER_BARCODE_VENDOR_OVERLAY_REQUIRED", "B&N Press generates the SKU or ISBN barcode; remove uploaded barcode artwork and keep the reserved area clear."));
+                if (edition.PrintIdentifierMode == PrintIdentifierMode.VendorAssignedIsbn)
+                    items.Add(new PublicationPreflightItem("warning", "BN_ISBN_ASSIGNED_AT_HANDOFF", "B&N Press assigns its free ISBN in the external wizard; file preparation can complete before assignment."));
             }
             await AddPressEvidenceAsync(edition, interior, physicalArtifacts, coverDesign.Template, currentRendererVersion, items, cancellationToken);
         }
@@ -407,7 +416,8 @@ public sealed class PublicationPackageService(
         var interiorArtifact = sourceArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.InteriorPdf);
         var physicalArtifacts = sourceArtifacts.Where(artifact => artifact.Kind is
             PublicationArtifactKind.PerfectBoundCoverPdf or PublicationArtifactKind.CaseCoverPdf
-            or PublicationArtifactKind.DustJacketPdf or PublicationArtifactKind.PrintSetupManifest).ToList();
+            or PublicationArtifactKind.DustJacketPdf or PublicationArtifactKind.FrontCoverPdf
+            or PublicationArtifactKind.BackCoverPdf or PublicationArtifactKind.PrintSetupManifest).ToList();
         var bookArtifact = sourceArtifacts.FirstOrDefault(artifact => artifact.Kind == PublicationArtifactKind.BookPdf);
         var profile = ResolveProfile(edition);
         var primaryPdf = edition.Format == PublicationEditionFormat.DigitalPdf ? bookArtifact : interiorArtifact;
@@ -426,7 +436,9 @@ public sealed class PublicationPackageService(
                     PublicationArtifactKind.PerfectBoundCoverPdf => edition.PrintCoverMode == PrintCoverMode.Duplex ? "duplex-cover.pdf" : "outside-cover.pdf",
                     PublicationArtifactKind.CaseCoverPdf => "case-wrap.pdf",
                     PublicationArtifactKind.DustJacketPdf => "dust-jacket.pdf",
-                    PublicationArtifactKind.PrintSetupManifest => "cloth-setup.json",
+                    PublicationArtifactKind.FrontCoverPdf => "front-cover.pdf",
+                    PublicationArtifactKind.BackCoverPdf => "back-cover.pdf",
+                    PublicationArtifactKind.PrintSetupManifest => edition.Vendor == PublicationVendor.BarnesAndNoblePress ? "print-setup.json" : "cloth-setup.json",
                     _ => throw new InvalidOperationException("Unexpected physical-product artifact."),
                 };
                 files[fileName] = (artifact.Kind, artifact.MediaType, artifact.Data);
@@ -439,6 +451,8 @@ public sealed class PublicationPackageService(
                         or PublicationArtifactKind.PerfectBoundCoverPdf
                         or PublicationArtifactKind.CaseCoverPdf
                         or PublicationArtifactKind.DustJacketPdf
+                        or PublicationArtifactKind.FrontCoverPdf
+                        or PublicationArtifactKind.BackCoverPdf
                         or PublicationArtifactKind.PrintSetupManifest)
                     .OrderBy(item => item.Key, StringComparer.Ordinal)
                     .Select(item => new
@@ -450,7 +464,9 @@ public sealed class PublicationPackageService(
                             PublicationArtifactKind.PerfectBoundCoverPdf => edition.PrintCoverMode == PrintCoverMode.Duplex ? "two-page cover: outside then inside" : "outside cover",
                             PublicationArtifactKind.CaseCoverPdf => "case wrap",
                             PublicationArtifactKind.DustJacketPdf => "dust jacket",
-                            PublicationArtifactKind.PrintSetupManifest => "Digital Cloth setup reference",
+                            PublicationArtifactKind.FrontCoverPdf => "front cover",
+                            PublicationArtifactKind.BackCoverPdf => "back cover",
+                            PublicationArtifactKind.PrintSetupManifest => edition.Vendor == PublicationVendor.BarnesAndNoblePress ? "B&N setup reference" : "Digital Cloth setup reference",
                             _ => string.Empty,
                         },
                     }),
@@ -534,6 +550,8 @@ public sealed class PublicationPackageService(
                     || artifact.Kind == PublicationArtifactKind.PerfectBoundCoverPdf
                     || artifact.Kind == PublicationArtifactKind.CaseCoverPdf
                     || artifact.Kind == PublicationArtifactKind.DustJacketPdf
+                    || artifact.Kind == PublicationArtifactKind.FrontCoverPdf
+                    || artifact.Kind == PublicationArtifactKind.BackCoverPdf
                     || artifact.Kind == PublicationArtifactKind.PrintSetupManifest
                     || artifact.Kind == PublicationArtifactKind.BookPdf))
             .OrderByDescending(artifact => artifact.CreatedAt)
@@ -547,6 +565,7 @@ public sealed class PublicationPackageService(
                     : PublicationArtifactKind.InteriorPdf)),
             latestArtifacts.Where(artifact => artifact.Kind is PublicationArtifactKind.PerfectBoundCoverPdf
                 or PublicationArtifactKind.CaseCoverPdf or PublicationArtifactKind.DustJacketPdf
+                or PublicationArtifactKind.FrontCoverPdf or PublicationArtifactKind.BackCoverPdf
                 or PublicationArtifactKind.PrintSetupManifest).ToList());
         if (!string.Equals(finalPackageIdentity, packageIdentity, StringComparison.Ordinal))
             throw new InvalidOperationException("The press artifacts changed while the publication package was being built.");
@@ -555,6 +574,8 @@ public sealed class PublicationPackageService(
             and not PublicationArtifactKind.PerfectBoundCoverPdf
             and not PublicationArtifactKind.CaseCoverPdf
             and not PublicationArtifactKind.DustJacketPdf
+            and not PublicationArtifactKind.FrontCoverPdf
+            and not PublicationArtifactKind.BackCoverPdf
             and not PublicationArtifactKind.PrintSetupManifest
             and not PublicationArtifactKind.BookPdf))
             generated.Add(Artifact(
@@ -655,16 +676,27 @@ public sealed class PublicationPackageService(
 
     private static IReadOnlyList<PublicationArtifactKind> RequiredArtifactKinds(
         PrintProductDefinition product,
-        PrintCoverMode coverMode)
+        PublicationEdition edition)
     {
         var result = new List<PublicationArtifactKind>();
-        if (product.RequiresPerfectBoundCover)
-            result.Add(PublicationArtifactKind.PerfectBoundCoverPdf);
-        if (product.RequiresCaseCover)
-            result.Add(PublicationArtifactKind.CaseCoverPdf);
-        if (product.RequiresDustJacket)
-            result.Add(PublicationArtifactKind.DustJacketPdf);
+        if (edition.Vendor == PublicationVendor.BarnesAndNoblePress
+            && edition.PrintCoverSubmissionMode == PrintCoverSubmissionMode.SeparatePanelsVendorSpine)
+        {
+            result.Add(PublicationArtifactKind.FrontCoverPdf);
+            result.Add(PublicationArtifactKind.BackCoverPdf);
+        }
+        else
+        {
+            if (product.RequiresPerfectBoundCover)
+                result.Add(PublicationArtifactKind.PerfectBoundCoverPdf);
+            if (product.RequiresCaseCover)
+                result.Add(PublicationArtifactKind.CaseCoverPdf);
+            if (product.RequiresDustJacket)
+                result.Add(PublicationArtifactKind.DustJacketPdf);
+        }
         if (product.RequiresClothManifest)
+            result.Add(PublicationArtifactKind.PrintSetupManifest);
+        if (edition.Vendor == PublicationVendor.BarnesAndNoblePress)
             result.Add(PublicationArtifactKind.PrintSetupManifest);
         return result;
     }
@@ -1367,6 +1399,8 @@ public sealed class PublicationPackageService(
                     "cover-pdf" or "perfect-bound-cover-pdf" => PublicationArtifactKind.PerfectBoundCoverPdf,
                     "case-cover-pdf" => PublicationArtifactKind.CaseCoverPdf,
                     "dust-jacket-pdf" => PublicationArtifactKind.DustJacketPdf,
+                    "front-cover-pdf" => PublicationArtifactKind.FrontCoverPdf,
+                    "back-cover-pdf" => PublicationArtifactKind.BackCoverPdf,
                     "interior-pdf" => PublicationArtifactKind.InteriorPdf,
                     _ => null,
                 },
@@ -1384,7 +1418,12 @@ public sealed class PublicationPackageService(
             RequireDimension(root, "interiorWidthPoints", edition.PageWidthInches * 72, "INTERIOR_WIDTH", items);
             RequireDimension(root, "interiorHeightPoints", edition.PageHeightInches * 72, "INTERIOR_HEIGHT", items);
             ValidateCoverSurfaceEvidence(edition, interior.PageCount ?? 0, physicalArtifacts, root, items);
-            var expectedPdfVersion = edition.Vendor == PublicationVendor.IngramSpark ? "1.3" : "1.7";
+            var expectedPdfVersion = edition.Vendor switch
+            {
+                PublicationVendor.IngramSpark => "1.3",
+                PublicationVendor.BarnesAndNoblePress => "1.4",
+                _ => "1.7",
+            };
             if (!root.TryGetProperty("pdfVersion", out var pdfVersion)
                 || pdfVersion.GetString() != expectedPdfVersion)
             {

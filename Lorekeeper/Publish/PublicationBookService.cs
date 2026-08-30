@@ -1245,7 +1245,7 @@ public sealed class PublicationEffectiveConfigurationResolver(
         PrintProductKey = source.PrintProductKey,
         PrintFinish = source.PrintFinish,
         PrintCoverMode = source.PrintCoverMode,
-        GenericPrintTemplateJson = source.GenericPrintTemplateJson,
+        PrintTemplateEvidenceJson = source.PrintTemplateEvidenceJson,
         Bleed = source.Bleed,
         PageWidthInches = source.PageWidthInches,
         PageHeightInches = source.PageHeightInches,

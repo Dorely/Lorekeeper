@@ -89,6 +89,14 @@ fn validate_registry_product(
                 .iter()
                 .any(|item| item.as_str() == Some(&product.cover_mode))
         })
+        && catalog["supportedProjectUses"].as_array().map_or(
+            product.project_use == "ForSale",
+            |items| {
+                items
+                    .iter()
+                    .any(|item| item.as_str() == Some(&product.project_use))
+            },
+        )
         && catalog["pdfProfile"].as_str() == Some(&request.profile);
     let trim_matches = catalog["trimSizes"].as_array().is_some_and(|items| {
         items.iter().any(|item| {
@@ -135,7 +143,7 @@ fn validate_registry_product(
             && catalog_spine["kind"].as_str() == Some("TemplateRequired")
             && product.spine_model.kind == "Caliper"
             && product.spine_model.inches_per_page.is_some()
-            && product.generic_template.is_some());
+            && product.print_template_evidence.is_some());
     let expected_surfaces: Vec<&str> = match product.cover_material.as_str() {
         "PrintedCover" if product.cover_mode == "Duplex" => {
             vec!["perfect-bound-outside", "perfect-bound-inside"]
@@ -145,6 +153,9 @@ fn validate_registry_product(
         "DigitalClothBlue" | "DigitalClothGray" => vec!["digital-cloth-setup"],
         "DigitalClothBlueWithJacket" | "DigitalClothGrayWithJacket" => {
             vec!["dust-jacket", "digital-cloth-setup"]
+        }
+        "JacketedCaseLaminate" if product.vendor == "BarnesAndNoblePress" => {
+            vec!["dust-jacket"]
         }
         "JacketedCaseLaminate" => vec!["case-wrap", "dust-jacket"],
         "Declared" if product.binding == "PerfectBound" => vec!["perfect-bound-outside"],
@@ -158,42 +169,93 @@ fn validate_registry_product(
                 .iter()
                 .any(|actual| actual == surface)
         });
-    let generic_template_valid = product.vendor != "Generic"
-        || product.generic_template.as_ref().is_some_and(|template| {
-            let dimensions_valid = [
-                template.trim_width_inches,
-                template.trim_height_inches,
-                template.bleed_inches,
-                template.safe_inches,
-                template.wrap_inches,
-                template.hinge_inches,
-                template.gutter_inches,
-                template.flap_inches,
-                template.barcode_width_inches,
-                template.barcode_height_inches,
-            ]
-            .iter()
-            .all(|value| value.is_finite() && *value >= 0.0);
-            dimensions_valid
-                && (template.trim_width_inches - request.trim.width_inches).abs() < 0.000_1
-                && (template.trim_height_inches - request.trim.height_inches).abs() < 0.000_1
-                && template.minimum_pages > 0
-                && template.maximum_pages >= template.minimum_pages
-                && !template.pdf_standard.trim().is_empty()
-                && template
-                    .inches_per_page
-                    .is_some_and(|value| value.is_finite() && value > 0.0)
-        });
+    let print_template_evidence_valid =
+        !matches!(product.vendor.as_str(), "Generic" | "BarnesAndNoblePress")
+            || product
+                .print_template_evidence
+                .as_ref()
+                .is_some_and(|template| {
+                    let dimensions_valid = [
+                        template.trim_width_inches,
+                        template.trim_height_inches,
+                        template.bleed_inches,
+                        template.safe_inches,
+                        template.wrap_inches,
+                        template.hinge_inches,
+                        template.gutter_inches,
+                        template.flap_inches,
+                        template.barcode_width_inches,
+                        template.barcode_height_inches,
+                    ]
+                    .iter()
+                    .all(|value| value.is_finite() && *value >= 0.0);
+                    let common_valid = dimensions_valid
+                        && (template.trim_width_inches - request.trim.width_inches).abs() < 0.000_1
+                        && (template.trim_height_inches - request.trim.height_inches).abs()
+                            < 0.000_1
+                        && template.minimum_pages > 0
+                        && template.maximum_pages >= template.minimum_pages
+                        && !template.pdf_standard.trim().is_empty();
+                    common_valid
+                        && if product.vendor == "BarnesAndNoblePress" {
+                            template.provider == "BarnesAndNoblePress"
+                                && template.product_key == product.product_key
+                                && template.page_count > 0
+                                && !template.geometry_fingerprint.trim().is_empty()
+                                && template
+                                    .spine_width_inches
+                                    .is_some_and(|value| value.is_finite() && value > 0.0)
+                                && template
+                                    .full_cover_width_inches
+                                    .is_some_and(|value| value.is_finite() && value > 0.0)
+                                && template
+                                    .full_cover_height_inches
+                                    .is_some_and(|value| value.is_finite() && value > 0.0)
+                                && template
+                                    .front_cover_width_inches
+                                    .is_some_and(|value| value.is_finite() && value > 0.0)
+                                && template
+                                    .front_cover_height_inches
+                                    .is_some_and(|value| value.is_finite() && value > 0.0)
+                                && template
+                                    .back_cover_width_inches
+                                    .is_some_and(|value| value.is_finite() && value > 0.0)
+                                && template
+                                    .back_cover_height_inches
+                                    .is_some_and(|value| value.is_finite() && value > 0.0)
+                                && !template.full_cover_template_sha256.trim().is_empty()
+                                && !template.front_cover_template_sha256.trim().is_empty()
+                                && !template.back_cover_template_sha256.trim().is_empty()
+                                && (template.full_cover_width_inches.unwrap_or_default()
+                                    - template.front_cover_width_inches.unwrap_or_default()
+                                    - template.back_cover_width_inches.unwrap_or_default()
+                                    - template.spine_width_inches.unwrap_or_default())
+                                .abs()
+                                    < 0.02
+                                && (template.full_cover_height_inches.unwrap_or_default()
+                                    - template.front_cover_height_inches.unwrap_or_default())
+                                .abs()
+                                    < 0.02
+                                && (template.full_cover_height_inches.unwrap_or_default()
+                                    - template.back_cover_height_inches.unwrap_or_default())
+                                .abs()
+                                    < 0.02
+                        } else {
+                            template
+                                .inches_per_page
+                                .is_some_and(|value| value.is_finite() && value > 0.0)
+                        }
+                });
     if !matches_scalar
         || !trim_matches
         || !spine_matches
         || !surfaces_match
-        || !generic_template_valid
+        || !print_template_evidence_valid
     {
         return Err(Diagnostic::error(
             "PRESS_PRINT_PRODUCT_MISMATCH",
             format!(
-                "The resolved physical-product descriptor differs from the bundled registry entry (identity={matches_scalar}, trim={trim_matches}, spine={spine_matches}, surfaces={surfaces_match}, genericTemplate={generic_template_valid})."
+                "The resolved physical-product descriptor differs from the bundled registry entry (identity={matches_scalar}, trim={trim_matches}, spine={spine_matches}, surfaces={surfaces_match}, printTemplateEvidence={print_template_evidence_valid})."
             ),
         ));
     }
@@ -256,16 +318,30 @@ fn product_spine_inches(request: &RenderRequest, pages: usize) -> Result<f32, Di
             ),
         ));
     }
-    if let Some(template) = product.generic_template.as_ref()
+    if let Some(template) = product.print_template_evidence.as_ref()
         && (pages < template.minimum_pages || pages > template.maximum_pages)
     {
         return Err(Diagnostic::error(
-            "PRESS_GENERIC_TEMPLATE_PAGE_COUNT",
+            "PRESS_TEMPLATE_PAGE_COUNT",
             format!(
-                "The generic printer template supports {}-{} pages; the normalized interior has {pages}.",
+                "The imported printer template supports {}-{} pages; the normalized interior has {pages}.",
                 template.minimum_pages, template.maximum_pages
             ),
         ));
+    }
+    if product.spine_model.kind == "TemplateRequired" && product.vendor == "BarnesAndNoblePress" {
+        return product
+            .print_template_evidence
+            .as_ref()
+            .filter(|template| template.page_count == pages)
+            .and_then(|template| template.spine_width_inches)
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .ok_or_else(|| {
+                Diagnostic::error(
+                    "PRESS_SPINE_MEASUREMENT_MISSING",
+                    "The B&N Press template evidence does not match this page count or lacks a measured spine.",
+                )
+            });
     }
     if product.spine_model.kind == "Caliper" {
         return product
@@ -318,7 +394,7 @@ fn physical_cover_surfaces(
         .filter_map(|role| {
             let geometry = match role.as_str() {
                 "perfect-bound-outside" | "perfect-bound-inside" if product.vendor == "Generic" => {
-                    let template = product.generic_template.as_ref().ok_or_else(|| {
+                    let template = product.print_template_evidence.as_ref().ok_or_else(|| {
                         Diagnostic::error(
                             "PRESS_GENERIC_TEMPLATE_REQUIRED",
                             "Generic print products require a complete printer geometry template.",
@@ -338,11 +414,28 @@ fn physical_cover_surfaces(
                         Err(diagnostic) => return Some(Err(diagnostic)),
                     }
                 }
+                "perfect-bound-outside" | "perfect-bound-inside"
+                    if product.vendor == "BarnesAndNoblePress" =>
+                {
+                    let template = product.print_template_evidence.as_ref().ok_or_else(|| {
+                        Diagnostic::error(
+                            "PRESS_TEMPLATE_REQUIRED",
+                            "B&N Press products require imported measured template evidence.",
+                        )
+                    });
+                    match template {
+                        Ok(template) => (
+                            template.full_cover_width_inches.unwrap_or_default(),
+                            template.full_cover_height_inches.unwrap_or_default(),
+                        ),
+                        Err(diagnostic) => return Some(Err(diagnostic)),
+                    }
+                }
                 "perfect-bound-outside" | "perfect-bound-inside" => {
                     (2.0 * trim_width + spine + 0.25, trim_height + 0.25)
                 }
                 "case-wrap" if product.vendor == "Generic" => {
-                    let template = product.generic_template.as_ref().ok_or_else(|| {
+                    let template = product.print_template_evidence.as_ref().ok_or_else(|| {
                         Diagnostic::error(
                             "PRESS_GENERIC_TEMPLATE_REQUIRED",
                             "Generic print products require a complete printer geometry template.",
@@ -358,6 +451,21 @@ fn physical_cover_surfaces(
                                         + template.gutter_inches
                                         + template.flap_inches),
                             trim_height + 2.0 * (template.bleed_inches + template.wrap_inches),
+                        ),
+                        Err(diagnostic) => return Some(Err(diagnostic)),
+                    }
+                }
+                "case-wrap" | "dust-jacket" if product.vendor == "BarnesAndNoblePress" => {
+                    let template = product.print_template_evidence.as_ref().ok_or_else(|| {
+                        Diagnostic::error(
+                            "PRESS_TEMPLATE_REQUIRED",
+                            "B&N Press products require imported measured template evidence.",
+                        )
+                    });
+                    match template {
+                        Ok(template) => (
+                            template.full_cover_width_inches.unwrap_or_default(),
+                            template.full_cover_height_inches.unwrap_or_default(),
                         ),
                         Err(diagnostic) => return Some(Err(diagnostic)),
                     }
@@ -393,6 +501,35 @@ fn physical_cover_surfaces(
             }))
         })
         .collect()
+}
+
+fn crop_cover_panel(
+    page: &LayoutPage,
+    left_points: f32,
+    top_points: f32,
+    width_points: f32,
+    height_points: f32,
+) -> LayoutPage {
+    let mut panel = page.clone();
+    panel.width_points = Some(width_points);
+    panel.height_points = Some(height_points);
+    panel.page_label = None;
+    panel.bookmark = None;
+    for line in &mut panel.lines {
+        line.x -= left_points;
+        line.y -= top_points;
+        line.rotation_origin_x = line.rotation_origin_x.map(|value| value - left_points);
+        line.rotation_origin_y = line.rotation_origin_y.map(|value| value - top_points);
+    }
+    for image in &mut panel.images {
+        image.x -= left_points;
+        image.y -= top_points;
+    }
+    for shape in &mut panel.shapes {
+        shape.x -= left_points;
+        shape.y -= top_points;
+    }
+    panel
 }
 
 impl LayoutTolerance {
@@ -570,6 +707,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     report_progress(job_root, request, 48, "Preparing publication images");
 
     let is_pdfx = request.profile == "ingram-print-pdfx1a-v2";
+    let is_pdfa = request.profile == "bn-print-pdfa1b-v1";
     let interior_image_ids = layout
         .pages
         .iter()
@@ -660,7 +798,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         maximum_total_ink_percent = maximum_total_ink_percent
             .max(cover_background_total_ink_percent(&cover.background_color));
     }
-    let interior_options = PdfOptions::interior(request, is_pdfx);
+    let interior_options = PdfOptions::interior(request, is_pdfx, is_pdfa);
     let (mut artifacts, interior_inspection) = if is_digital_pdf {
         let cover = cover_page.as_ref().ok_or_else(|| {
             Box::new(RenderResponse::failed(
@@ -754,6 +892,68 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             if surface.role == "perfect-bound-inside" {
                 continue;
             }
+            if request.physical_product.as_ref().is_some_and(|product| {
+                product.vendor == "BarnesAndNoblePress"
+                    && product.cover_submission_mode == "SeparatePanelsVendorSpine"
+            }) {
+                let product = request.physical_product.as_ref().expect("physical product");
+                let template = product
+                    .print_template_evidence
+                    .as_ref()
+                    .expect("validated B&N template evidence");
+                let front_width = template.front_cover_width_inches.unwrap_or_default() * 72.0;
+                let front_height = template.front_cover_height_inches.unwrap_or_default() * 72.0;
+                let back_width = template.back_cover_width_inches.unwrap_or_default() * 72.0;
+                let back_height = template.back_cover_height_inches.unwrap_or_default() * 72.0;
+                let front_top = ((surface.height_points - front_height) / 2.0).max(0.0);
+                let back_top = ((surface.height_points - back_height) / 2.0).max(0.0);
+                let panels = [
+                    (
+                        "back-cover-pdf",
+                        "back-cover.pdf",
+                        crop_cover_panel(rendered_cover, 0.0, back_top, back_width, back_height),
+                    ),
+                    (
+                        "front-cover-pdf",
+                        "front-cover.pdf",
+                        crop_cover_panel(
+                            rendered_cover,
+                            surface.width_points - front_width,
+                            front_top,
+                            front_width,
+                            front_height,
+                        ),
+                    ),
+                ];
+                for (kind, filename, panel) in panels {
+                    let options = PdfOptions::cover(
+                        request,
+                        is_pdfx,
+                        is_pdfa,
+                        panel.width_points.unwrap_or_default(),
+                        panel.height_points.unwrap_or_default(),
+                        0.0,
+                    );
+                    let bytes = write_pdf_cancellable_with_progress(
+                        &[panel],
+                        &fonts,
+                        &cover_images,
+                        &options,
+                        || job_root.join("cancel.requested").exists(),
+                        |_, _| {},
+                    )
+                    .map_err(pdf_failure)?;
+                    let path = staging.path().join(filename);
+                    fs::write(&path, &bytes).map_err(io_failure)?;
+                    cover_inspections.push(inspect::validate(&path, &options).map_err(
+                        |diagnostic| Box::new(RenderResponse::failed("failed", diagnostic)),
+                    )?);
+                    artifacts.push(artifact(kind, &format!("output/{filename}"), &bytes, 1));
+                }
+                cover_width = surface.width_points;
+                spine_width = surface.spine_points;
+                continue;
+            }
             let (kind, filename, pages) = match surface.role.as_str() {
                 "perfect-bound-outside" => {
                     let mut pages = vec![rendered_cover.clone()];
@@ -780,6 +980,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             let cover_options = PdfOptions::cover(
                 request,
                 is_pdfx,
+                is_pdfa,
                 surface.width_points,
                 surface.height_points,
                 surface.spine_points,
@@ -846,6 +1047,104 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                 0,
             ));
         }
+        if request
+            .physical_product
+            .as_ref()
+            .is_some_and(|product| product.vendor == "BarnesAndNoblePress")
+        {
+            let product = request.physical_product.as_ref().expect("physical product");
+            let template = product
+                .print_template_evidence
+                .as_ref()
+                .expect("validated B&N template evidence");
+            let cover = request.cover.as_ref().expect("validated cover");
+            let identifier = match product.identifier_mode.as_str() {
+                "VendorSku" => serde_json::json!({ "mode": "VendorSku", "value": null }),
+                "VendorAssignedIsbn" => {
+                    serde_json::json!({ "mode": "VendorAssignedIsbn", "value": null })
+                }
+                _ => serde_json::json!({ "mode": "UserSuppliedIsbn", "value": cover.isbn }),
+            };
+            let artifact_mapping = if product.cover_submission_mode == "SeparatePanelsVendorSpine" {
+                serde_json::json!({
+                    "interior": "interior-pdf",
+                    "frontCover": "front-cover-pdf",
+                    "backCover": "back-cover-pdf",
+                    "spine": "B&N-generated in the upload wizard"
+                })
+            } else {
+                serde_json::json!({
+                    "interior": "interior-pdf",
+                    "fullCover": if product.binding == "JacketedCaseLaminate" { "dust-jacket-pdf" } else if product.binding == "CaseLaminate" { "case-cover-pdf" } else { "perfect-bound-cover-pdf" },
+                    "spine": "included in measured full-wrap PDF"
+                })
+            };
+            let handoff_actions = if product.project_use == "PersonalUse" {
+                serde_json::json!([
+                    "Choose Print for Personal Use in B&N Press.",
+                    "Allow B&N Press to assign its vendor SKU and overlay a no-price barcode."
+                ])
+            } else {
+                let identifier_action = if product.identifier_mode == "VendorAssignedIsbn" {
+                    "Request B&N Press's free ISBN in the vendor wizard."
+                } else {
+                    "Enter the supplied ISBN in the vendor wizard and confirm it matches the publication metadata."
+                };
+                serde_json::json!([
+                    "Choose Print for Sale in B&N Press.",
+                    identifier_action,
+                    "Allow B&N Press to overlay the ISBN barcode and price."
+                ])
+            };
+            let manifest = serde_json::to_vec_pretty(&serde_json::json!({
+                "schemaVersion": 1,
+                "provider": "BarnesAndNoblePress",
+                "registryVersion": product.registry_version,
+                "productKey": product.product_key,
+                "profile": request.profile,
+                "projectUse": product.project_use,
+                "identifier": identifier,
+                "coverSubmissionMode": product.cover_submission_mode,
+                "spineReadingDirection": cover.spine_reading_direction,
+                "template": {
+                    "geometryFingerprint": template.geometry_fingerprint,
+                    "pageCount": template.page_count,
+                    "fullCoverTemplateSha256": template.full_cover_template_sha256,
+                    "frontCoverTemplateSha256": template.front_cover_template_sha256,
+                    "backCoverTemplateSha256": template.back_cover_template_sha256
+                },
+                "geometry": {
+                    "trimWidthInches": template.trim_width_inches,
+                    "trimHeightInches": template.trim_height_inches,
+                    "bleedInches": template.bleed_inches,
+                    "safeInches": template.safe_inches,
+                    "spineWidthInches": template.spine_width_inches,
+                    "fullCoverWidthInches": template.full_cover_width_inches,
+                    "fullCoverHeightInches": template.full_cover_height_inches,
+                    "frontCoverWidthInches": template.front_cover_width_inches,
+                    "frontCoverHeightInches": template.front_cover_height_inches,
+                    "backCoverWidthInches": template.back_cover_width_inches,
+                    "backCoverHeightInches": template.back_cover_height_inches,
+                    "renderedCoverWidthPoints": cover_width,
+                    "renderedSpineWidthPoints": spine_width
+                },
+                "barcode": {
+                    "mode": "VendorOverlay",
+                    "reserve": "bottom-right back-cover safe region",
+                    "instruction": "Do not upload a baked-in barcode; B&N Press generates the SKU or ISBN barcode."
+                },
+                "artifactToUpload": artifact_mapping,
+                "externalActions": handoff_actions
+            }))
+            .map_err(|error| io_failure(std::io::Error::other(error)))?;
+            fs::write(staging.path().join("print-setup.json"), &manifest).map_err(io_failure)?;
+            artifacts.push(artifact(
+                "print-setup-manifest",
+                "output/print-setup.json",
+                &manifest,
+                0,
+            ));
+        }
     }
     ensure_not_cancelled(job_root)?;
     report_progress(job_root, request, 95, "Inspecting finished PDFs");
@@ -894,7 +1193,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     report_progress(job_root, request, 98, "Promoting validated artifacts");
     staging.promote(&output)?;
     let response = RenderResponse {
-        protocol_version: 8,
+        protocol_version: 9,
         renderer_version: env!("CARGO_PKG_VERSION"),
         job_id: Some(request.job_id.clone()),
         status: "completed".to_owned(),
@@ -903,9 +1202,28 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
         diagnostics,
         evidence: Some(ValidationEvidence {
             validation_status: "validated".to_owned(),
-            claimed_standard: is_pdfx.then(|| "PDF/X-1a:2001".to_owned()),
-            declared_standard: is_pdfx.then(|| "PDF/X-1a:2001".to_owned()),
-            pdf_version: if is_pdfx { "1.3" } else { "1.7" }.to_owned(),
+            claimed_standard: if is_pdfx {
+                Some("PDF/X-1a:2001".to_owned())
+            } else if is_pdfa {
+                Some("PDF/A-1b".to_owned())
+            } else {
+                None
+            },
+            declared_standard: if is_pdfx {
+                Some("PDF/X-1a:2001".to_owned())
+            } else if is_pdfa {
+                Some("PDF/A-1b".to_owned())
+            } else {
+                None
+            },
+            pdf_version: if is_pdfx {
+                "1.3"
+            } else if is_pdfa {
+                "1.4"
+            } else {
+                "1.7"
+            }
+            .to_owned(),
             toc_converged: layout.toc_converged,
             has_encryption: false,
             has_transparency: interior_inspection.has_transparency
@@ -920,7 +1238,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                     .sum::<usize>(),
             fonts_embedded: interior_inspection.fonts_embedded,
             to_unicode_maps_present: interior_inspection.to_unicode,
-            output_intent_count: if is_pdfx {
+            output_intent_count: if is_pdfx || is_pdfa {
                 1 + cover_inspections.len()
             } else {
                 0
@@ -1175,7 +1493,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
-            "protocolVersion": 8,
+            "protocolVersion": 9,
             "rendererVersion": env!("CARGO_PKG_VERSION"),
             "jobId": request.job_id,
             "pages": pages,
@@ -1291,10 +1609,10 @@ fn validate_request(
     job_root: &Path,
     progress: &mut dyn FnMut(usize, usize),
 ) -> RenderResult<std::collections::BTreeMap<String, DecodedImage>> {
-    if request.protocol_version != 8 {
+    if request.protocol_version != 9 {
         return reject(
             "PRESS_PROTOCOL_INVALID",
-            "Lorekeeper Press requires protocol version 8.",
+            "Lorekeeper Press requires protocol version 9.",
         );
     }
     if request.job_id.len() != 32 || !request.job_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -1310,6 +1628,7 @@ fn validate_request(
             | "kdp-paperback-v2"
             | "kdp-hardcover-v1"
             | "ingram-print-pdfx1a-v2"
+            | "bn-print-pdfa1b-v1"
     ) {
         return reject(
             "PRESS_PROFILE_UNSUPPORTED",
@@ -1396,6 +1715,40 @@ fn validate_request(
         );
     }
     if let Some(cover) = &request.cover {
+        if !matches!(
+            cover.spine_reading_direction.as_str(),
+            "TopToBottom" | "BottomToTop" | "Horizontal"
+        ) {
+            return reject(
+                "PRESS_SPINE_DIRECTION_INVALID",
+                "Spine reading direction must be TopToBottom, BottomToTop, or Horizontal.",
+            );
+        }
+        if request.physical_product.as_ref().is_some_and(|product| {
+            product.vendor == "BarnesAndNoblePress"
+                && (cover.barcode_mode != "VendorOverlay"
+                    || product.project_use == "PersonalUse"
+                        && product.identifier_mode != "VendorSku"
+                    || product.project_use == "ForSale" && product.identifier_mode == "VendorSku")
+        }) {
+            return reject(
+                "PRESS_BN_IDENTIFIER_BARCODE_INVALID",
+                "B&N project use, identifier mode, and vendor-overlay barcode behavior are inconsistent.",
+            );
+        }
+        if request.physical_product.as_ref().is_some_and(|product| {
+            product.vendor == "BarnesAndNoblePress"
+                && product
+                    .print_template_evidence
+                    .as_ref()
+                    .is_some_and(|template| template.page_count <= 50)
+                && !cover.spine_text.trim().is_empty()
+        }) {
+            return reject(
+                "PRESS_BN_SPINE_TEXT_INELIGIBLE",
+                "B&N covers cannot contain spine text at 50 pages or fewer.",
+            );
+        }
         let barcode_mode_is_valid = if request.profile == "generic-digital-pdf-v1" {
             cover.barcode_mode == "None"
         } else {
@@ -6835,18 +7188,79 @@ fn cover_scene_layout(
         cover.bleed_inches * 72.0
     };
     let panel = request.trim.width_inches * 72.0;
-    let spine = if digital {
-        0.0
+    let measured_template = request.physical_product.as_ref().and_then(|product| {
+        (product.vendor == "BarnesAndNoblePress")
+            .then_some(product.print_template_evidence.as_ref())
+            .flatten()
+    });
+    let new_regions = if let Some(template) = measured_template {
+        let back_width = template.back_cover_width_inches.unwrap_or_default() * 72.0;
+        let front_width = template.front_cover_width_inches.unwrap_or_default() * 72.0;
+        let region_height = template.front_cover_height_inches.unwrap_or_default() * 72.0;
+        CoverRegionGeometry {
+            back_x: 0.0,
+            back_width,
+            front_width,
+            spine_width: template.spine_width_inches.unwrap_or_default() * 72.0,
+            y: ((height - region_height) / 2.0).max(0.0),
+            height: region_height,
+            bleed,
+        }
     } else {
-        (width - bleed * 2.0 - panel * 2.0).max(0.0)
+        CoverRegionGeometry {
+            back_x: if digital { 0.0 } else { bleed },
+            back_width: panel,
+            front_width: panel,
+            spine_width: if digital {
+                0.0
+            } else {
+                (width - bleed * 2.0 - panel * 2.0).max(0.0)
+            },
+            y: bleed,
+            height: if digital {
+                height
+            } else {
+                height - bleed * 2.0
+            },
+            bleed,
+        }
     };
-    let old_spine = if digital {
-        0.0
-    } else {
-        (old_width - bleed * 2.0 - panel * 2.0).max(0.0)
+    let surface = &scene["surface"];
+    let old_regions = CoverRegionGeometry {
+        back_x: if surface["backRegionWidthPoints"]
+            .as_f64()
+            .unwrap_or_default()
+            > 0.0
+        {
+            0.0
+        } else {
+            bleed
+        },
+        back_width: surface["backRegionWidthPoints"]
+            .as_f64()
+            .unwrap_or(new_regions.back_width as f64) as f32,
+        front_width: surface["frontRegionWidthPoints"]
+            .as_f64()
+            .unwrap_or(new_regions.front_width as f64) as f32,
+        spine_width: surface["spineWidthPoints"]
+            .as_f64()
+            .unwrap_or(new_regions.spine_width as f64) as f32,
+        y: surface["coverRegionYPoints"]
+            .as_f64()
+            .unwrap_or(new_regions.y as f64) as f32,
+        height: surface["coverRegionHeightPoints"]
+            .as_f64()
+            .filter(|value| *value > 0.0)
+            .unwrap_or(new_regions.height as f64) as f32,
+        bleed,
     };
     scene["surface"]["widthPoints"] = Value::from(width);
     scene["surface"]["heightPoints"] = Value::from(height);
+    scene["surface"]["backRegionWidthPoints"] = Value::from(new_regions.back_width);
+    scene["surface"]["frontRegionWidthPoints"] = Value::from(new_regions.front_width);
+    scene["surface"]["spineWidthPoints"] = Value::from(new_regions.spine_width);
+    scene["surface"]["coverRegionYPoints"] = Value::from(new_regions.y);
+    scene["surface"]["coverRegionHeightPoints"] = Value::from(new_regions.height);
     let objects = scene
         .get_mut("objects")
         .and_then(Value::as_array_mut)
@@ -6884,10 +7298,8 @@ fn cover_scene_layout(
             continue;
         }
         let region = string(item, "regionConstraint");
-        let old_region = cover_region(
-            &region, old_width, old_height, bleed, panel, old_spine, digital,
-        );
-        let new_region = cover_region(&region, width, height, bleed, panel, spine, digital);
+        let old_region = cover_region(&region, old_width, old_height, &old_regions, digital);
+        let new_region = cover_region(&region, width, height, &new_regions, digital);
         let bounds = item.get("bounds").cloned().unwrap_or(Value::Null);
         let surface_x = bounds
             .get("xPercent")
@@ -6960,29 +7372,58 @@ fn cover_scene_layout(
     Ok(page)
 }
 
+#[derive(Clone, Copy)]
+struct CoverRegionGeometry {
+    back_x: f32,
+    back_width: f32,
+    front_width: f32,
+    spine_width: f32,
+    y: f32,
+    height: f32,
+    bleed: f32,
+}
+
 fn cover_region(
     region: &str,
     width: f32,
     height: f32,
-    bleed: f32,
-    panel: f32,
-    spine: f32,
+    geometry: &CoverRegionGeometry,
     digital: bool,
 ) -> (f32, f32, f32, f32) {
     if digital {
         return (0.0, 0.0, width, height);
     }
     match region {
-        "Back" => (bleed, bleed, panel, height - bleed * 2.0),
-        "Spine" | "Gutter" => (bleed + panel, bleed, spine.max(0.01), height - bleed * 2.0),
-        "Front" => (bleed + panel + spine, bleed, panel, height - bleed * 2.0),
-        "SafeArea" => (
-            bleed + 18.0,
-            bleed + 18.0,
-            width - bleed * 2.0 - 36.0,
-            height - bleed * 2.0 - 36.0,
+        "Back" => (
+            geometry.back_x,
+            geometry.y,
+            geometry.back_width,
+            geometry.height,
         ),
-        "BarcodeReserve" => (bleed + 18.0, height - bleed - 104.4, 144.0, 86.4),
+        "Spine" | "Gutter" => (
+            geometry.back_x + geometry.back_width,
+            geometry.y,
+            geometry.spine_width.max(0.01),
+            geometry.height,
+        ),
+        "Front" => (
+            width - geometry.front_width,
+            geometry.y,
+            geometry.front_width,
+            geometry.height,
+        ),
+        "SafeArea" => (
+            geometry.bleed + 18.0,
+            geometry.bleed + 18.0,
+            width - geometry.bleed * 2.0 - 36.0,
+            height - geometry.bleed * 2.0 - 36.0,
+        ),
+        "BarcodeReserve" => (
+            geometry.bleed + 18.0,
+            height - geometry.bleed - 104.4,
+            144.0,
+            86.4,
+        ),
         _ => (0.0, 0.0, width, height),
     }
 }
@@ -7449,7 +7890,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let request = RenderRequest {
-            protocol_version: 8,
+            protocol_version: 9,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v2".to_owned(),
             ink: "BlackAndWhite".to_owned(),
@@ -7977,6 +8418,7 @@ mod tests {
             subtitle: String::new(),
             author: String::new(),
             spine_text: String::new(),
+            spine_reading_direction: "TopToBottom".to_owned(),
             background_color: "#ffffff".to_owned(),
             isbn: None,
             barcode_mode: "None".to_owned(),
@@ -8087,6 +8529,7 @@ mod tests {
             subtitle: String::new(),
             author: "Author".to_owned(),
             spine_text: String::new(),
+            spine_reading_direction: "TopToBottom".to_owned(),
             background_color: "#ffffff".to_owned(),
             isbn: None,
             barcode_mode: "None".to_owned(),
@@ -8421,6 +8864,7 @@ mod tests {
             subtitle: "Subtitle".to_owned(),
             author: "Author".to_owned(),
             spine_text: "Spine title".to_owned(),
+            spine_reading_direction: "TopToBottom".to_owned(),
             background_color: "#16324f".to_owned(),
             isbn: Some("9780306406157".to_owned()),
             barcode_mode: "LorekeeperBarcode".to_owned(),
@@ -8472,7 +8916,7 @@ mod tests {
 
     fn request_with_document(document: Value) -> RenderRequest {
         RenderRequest {
-            protocol_version: 8,
+            protocol_version: 9,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v2".to_owned(),
             ink: "BlackAndWhite".to_owned(),

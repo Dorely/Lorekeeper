@@ -632,13 +632,17 @@ public sealed class ProjectImportExportService(
                 profile.CoverDesign.Revision)
             {
                 SurfaceScenesJson = profile.CoverDesign.SurfaceScenesJson,
+                SpineReadingDirection = profile.CoverDesign.SpineReadingDirection,
             })
         {
             PrintRegistryVersion = profile.PrintRegistryVersion,
             PrintProductKey = profile.PrintProductKey,
             PrintFinish = profile.PrintFinish,
             PrintCoverMode = profile.PrintCoverMode,
-            GenericPrintTemplateJson = profile.GenericPrintTemplateJson,
+            PrintProjectUse = profile.PrintProjectUse,
+            PrintIdentifierMode = profile.PrintIdentifierMode,
+            PrintCoverSubmissionMode = profile.PrintCoverSubmissionMode,
+            PrintTemplateEvidenceJson = profile.PrintTemplateEvidenceJson,
             RectoChapterStarts = profile.RectoChapterStarts,
             OverrideFields = ParseOverrideFields(profile.OverrideFieldsJson),
             InheritsCoreCover = profile.InheritsCoreCover,

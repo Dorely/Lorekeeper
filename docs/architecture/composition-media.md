@@ -261,6 +261,19 @@ request's guessed aspect. Press clips valid out-of-surface paint to the page;
 the authoring editor reports overflow and clipping without silently resizing
 art.
 
+Physical covers additionally expose exact Back, Spine, and Front regions.
+`FillRegion` constrains a selected image to one region, defaults to proportional
+crop-to-fill, and retains focal positioning when page-count-driven spine reflow
+changes the connected wrap. The cover workspace can focus each region, reports
+its physical dimensions/aspect and output participation, and preserves the full
+connected scene even when a provider package derives separate front/back pages.
+Spine copy remains real text above artwork. Persisted direction supports
+top-to-bottom (the US/English default), bottom-to-top, and horizontal layouts;
+the user can override the default. The assistant must inspect annotated spine
+and whole-wrap previews after mutation and clean previews after validation.
+Generated spine art stays word-free with typography quiet zones and is placed
+through the same focal crop controls rather than stretched.
+
 The visual editor uses `CompositionVisualEditorShell`: a one-line view
 toolbar, largest practical canvas, fixed contextual bottom controls, and an
 on-demand details drawer for accessibility, reading order, exact geometry,
@@ -311,6 +324,7 @@ composition, Core/release fingerprints, and artifact freshness.
 | `Lorekeeper/Composition/CompositionService.cs` | Revision-aware Designed Page aggregates, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |
 | `Lorekeeper/Composition/CompositionSceneResolver.cs` | Group flattening, object visibility/z-order semantics, and shared overlap validation. |
 | `Lorekeeper/Composition/CompositionCanvasPreviewService.cs` | Exact transient clean/annotated page and cover canvas rasterization. |
+| `Lorekeeper/Composition/CompositionImageLayout.cs` / `CoverCompositionFactory.cs` | Region-local fill, connected-wrap reflow, exact region bounds, and persisted spine-text orientation. |
 | `Lorekeeper/Composition/ProjectPageSetupService.cs` | Project authoring geometry, typography, setup revisions, and transactional reflow. |
 | `Lorekeeper/Composition/CompositionAgentPayloads.cs` | Bounded assistant reads and revision-safe scene/object/style patch envelopes. |
 | `Lorekeeper/Fonts/` and `ProjectFont*` models | Bundled/imported font catalogs, static-face validation, bytes, URLs, and live/in-process-history use guards. |

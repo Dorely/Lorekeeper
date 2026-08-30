@@ -34,7 +34,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         var manifestBytes = File.ReadAllBytes(manifestPath);
         var manifest = VersionHistoryCanonicalJson.Deserialize<VersionHistorySnapshotManifest>(manifestBytes);
         if (!manifestBytes.AsSpan().SequenceEqual(VersionHistoryCanonicalJson.Serialize(manifest)))
-            throw new InvalidDataException("Snapshot manifest.json is not in canonical schema-v1 form.");
+            throw new InvalidDataException("Snapshot manifest.json is not in canonical form.");
         ValidateManifest(manifest, expectedRepositoryId, expectedProjectId);
 
         var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
@@ -74,7 +74,10 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         var assets = ReadRequired<VersionHistorySnapshotAssetsArea>(files, "assets/assets.json");
         var manuscript = ReadRequired<VersionHistorySnapshotManuscriptArea>(files, "manuscript/styles.json");
         var composition = ReadRequired<VersionHistorySnapshotCompositionArea>(files, "composition/composition.json");
-        var publication = ReadRequired<VersionHistorySnapshotPublicationArea>(files, "publication/publication.json");
+        var publication = ReadRequired<VersionHistorySnapshotPublicationArea>(
+            files,
+            "publication/publication.json",
+            requireCanonicalRoundTrip: manifest.SchemaVersion == VersionHistorySnapshotContract.SchemaVersion);
         ValidateSchemaFileSet(files.Keys, assets, chapterPaths);
         var payload = new VersionHistorySnapshotPayload(
             manifest.RepositoryId,
@@ -103,7 +106,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
     {
         if (!string.Equals(manifest.FormatId, VersionHistorySnapshotContract.FormatId, StringComparison.Ordinal))
             throw new InvalidDataException($"Unsupported snapshot format '{manifest.FormatId}'.");
-        if (manifest.SchemaVersion != VersionHistorySnapshotContract.SchemaVersion)
+        if (!VersionHistorySnapshotContract.CanReadSchema(manifest.SchemaVersion))
             throw new InvalidDataException($"Unsupported snapshot schema version {manifest.SchemaVersion}.");
         if (manifest.RepositoryId == Guid.Empty || manifest.ProjectId == Guid.Empty)
             throw new InvalidDataException("Snapshot repository and project IDs are required.");
@@ -112,7 +115,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         if (expectedProjectId is Guid projectId && projectId != manifest.ProjectId)
             throw new InvalidDataException("Snapshot project ID does not match the expected project.");
         if (!manifest.IncludedAreas.SequenceEqual(VersionHistorySnapshotContract.IncludedAreas, StringComparer.Ordinal))
-            throw new InvalidDataException("Snapshot included areas do not match schema version 1.");
+            throw new InvalidDataException($"Snapshot included areas do not match schema version {manifest.SchemaVersion}.");
         if (manifest.Files.Count == 0)
             throw new InvalidDataException("Snapshot contains no payload files.");
         if (manifest.Files.Any(file => string.IsNullOrWhiteSpace(file.Path) || file.Path.Equals(VersionHistorySnapshotContract.ManifestFileName, StringComparison.OrdinalIgnoreCase)))
@@ -138,13 +141,17 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         }
     }
 
-    private static T ReadRequired<T>(IReadOnlyDictionary<string, byte[]> files, string path)
+    private static T ReadRequired<T>(
+        IReadOnlyDictionary<string, byte[]> files,
+        string path,
+        bool requireCanonicalRoundTrip = true)
     {
         if (!files.TryGetValue(path, out var bytes))
             throw new InvalidDataException($"Snapshot payload file '{path}' is missing.");
         var value = VersionHistoryCanonicalJson.Deserialize<T>(bytes);
-        if (!bytes.AsSpan().SequenceEqual(VersionHistoryCanonicalJson.Serialize(value!)))
-            throw new InvalidDataException($"Snapshot payload file '{path}' is not in canonical schema-v1 form.");
+        if (requireCanonicalRoundTrip
+            && !bytes.AsSpan().SequenceEqual(VersionHistoryCanonicalJson.Serialize(value!)))
+            throw new InvalidDataException($"Snapshot payload file '{path}' is not in canonical form.");
         return value;
     }
 
@@ -193,7 +200,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
                 || !string.Equals(segments[2], chapterId.ToString("N"), StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
-                    $"Snapshot chapter path '{path}' is not in the canonical schema-v1 chapter layout.");
+                    $"Snapshot chapter path '{path}' is not in the canonical chapter layout.");
             }
 
             var current = entries.GetValueOrDefault(chapterId);
@@ -324,7 +331,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
 
         if (!expected.SetEquals(actualFiles))
             throw new InvalidDataException(
-                "Snapshot payload files do not exactly match the schema-v1 area, chapter, style, and asset paths.");
+                "Snapshot payload files do not exactly match the canonical area, chapter, style, and asset paths.");
     }
 
     private static byte[] ReadBlob(string root, string relativePath, string expectedHash, long expectedLength)

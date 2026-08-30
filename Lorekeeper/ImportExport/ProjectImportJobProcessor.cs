@@ -903,6 +903,12 @@ public sealed class ProjectImportJobProcessor(
                 || (document.FormatVersion >= 18 && edition.OverrideFields.Any(field => !Enum.IsDefined(field)))
                 || (document.FormatVersion < 18 && edition.OverrideFields.Any(field => (int)field is < 0 or > 21)))
                 throw new InvalidOperationException($"Publication release {edition.Id:N} contains invalid override markers.");
+            if (document.FormatVersion >= 26
+                && (!Enum.IsDefined(edition.PrintProjectUse)
+                    || !Enum.IsDefined(edition.PrintIdentifierMode)
+                    || !Enum.IsDefined(edition.PrintCoverSubmissionMode)
+                    || edition.CoverDesign is { } coverDesign && !Enum.IsDefined(coverDesign.SpineReadingDirection)))
+                throw new InvalidOperationException($"Publication edition {edition.Id:N} contains invalid print-use or cover-orientation values.");
             if (edition.OutlineItems.Any(item => item.SortOrder < 0)
                 || edition.OutlineItems.GroupBy(item => item.SortOrder).Any(group => group.Count() > 1))
             {
@@ -2189,7 +2195,15 @@ public sealed class ProjectImportJobProcessor(
                 : LegacyPrintProduct(importedEdition.Format, importedEdition.Vendor, importedEdition.Paper, importedEdition.Ink),
             PrintFinish = formatVersion >= 20 ? importedEdition.PrintFinish : PrintFinish.Matte,
             PrintCoverMode = formatVersion >= 20 ? importedEdition.PrintCoverMode : PrintCoverMode.Simplex,
-            GenericPrintTemplateJson = formatVersion >= 20 ? importedEdition.GenericPrintTemplateJson : string.Empty,
+            PrintProjectUse = formatVersion >= 26 ? importedEdition.PrintProjectUse : PrintProjectUse.ForSale,
+            PrintIdentifierMode = formatVersion >= 26 ? importedEdition.PrintIdentifierMode : PrintIdentifierMode.UserSuppliedIsbn,
+            PrintCoverSubmissionMode = formatVersion >= 26 ? importedEdition.PrintCoverSubmissionMode : PrintCoverSubmissionMode.FullWrapMeasured,
+            PrintTemplateEvidenceJson = formatVersion switch
+            {
+                >= 26 => importedEdition.PrintTemplateEvidenceJson,
+                >= 20 => importedEdition.LegacyGenericPrintTemplateJson ?? string.Empty,
+                _ => string.Empty,
+            },
             Bleed = importedEdition.Bleed,
             AllowDesignedPageOverrides = importedEdition.AllowDesignedPageOverrides,
             RectoChapterStarts = importedEdition.RectoChapterStarts,
@@ -2250,6 +2264,9 @@ public sealed class ProjectImportJobProcessor(
                     cover.SurfaceScenesJson,
                     imageMap,
                     fontFamilyMap),
+                SpineReadingDirection = formatVersion >= 26
+                    ? cover.SpineReadingDirection
+                    : SpineReadingDirection.TopToBottom,
                 Revision = cover.Revision,
             };
         foreach (var imported in importedEdition.OutlineItems)
@@ -3577,7 +3594,7 @@ public sealed class ProjectImportJobProcessor(
             edition.PrintProductKey,
             edition.PrintFinish,
             edition.PrintCoverMode,
-            edition.GenericPrintTemplateJson,
+            edition.PrintTemplateEvidenceJson,
             edition.Bleed,
             edition.RectoChapterStarts,
             edition.PageWidthInches,

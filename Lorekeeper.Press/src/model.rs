@@ -104,6 +104,8 @@ pub struct Cover {
     pub author: String,
     #[serde(default)]
     pub spine_text: String,
+    #[serde(default = "default_spine_reading_direction")]
+    pub spine_reading_direction: String,
     #[serde(default)]
     pub background_color: String,
     pub isbn: Option<String>,
@@ -137,6 +139,12 @@ pub struct PhysicalProduct {
     pub cover_material: String,
     pub finish: String,
     pub cover_mode: String,
+    #[serde(default = "default_project_use")]
+    pub project_use: String,
+    #[serde(default = "default_identifier_mode")]
+    pub identifier_mode: String,
+    #[serde(default = "default_cover_submission_mode")]
+    pub cover_submission_mode: String,
     pub minimum_pages: usize,
     pub maximum_pages: usize,
     #[serde(default)]
@@ -144,14 +152,14 @@ pub struct PhysicalProduct {
     #[serde(default)]
     pub maximum_submitted_pages: Option<usize>,
     pub spine_model: PhysicalSpineModel,
-    pub generic_template: Option<GenericPrintTemplate>,
+    pub print_template_evidence: Option<PrintTemplateEvidence>,
     #[serde(default)]
     pub required_cover_surfaces: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GenericPrintTemplate {
+pub struct PrintTemplateEvidence {
     pub trim_width_inches: f32,
     pub trim_height_inches: f32,
     pub bleed_inches: f32,
@@ -166,6 +174,26 @@ pub struct GenericPrintTemplate {
     pub minimum_pages: usize,
     pub maximum_pages: usize,
     pub pdf_standard: String,
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub product_key: String,
+    #[serde(default)]
+    pub page_count: usize,
+    pub geometry_fingerprint: String,
+    pub spine_width_inches: Option<f32>,
+    pub full_cover_width_inches: Option<f32>,
+    pub full_cover_height_inches: Option<f32>,
+    pub front_cover_width_inches: Option<f32>,
+    pub front_cover_height_inches: Option<f32>,
+    pub back_cover_width_inches: Option<f32>,
+    pub back_cover_height_inches: Option<f32>,
+    #[serde(default)]
+    pub full_cover_template_sha256: String,
+    #[serde(default)]
+    pub front_cover_template_sha256: String,
+    #[serde(default)]
+    pub back_cover_template_sha256: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -186,6 +214,22 @@ pub struct PhysicalSpineAnchor {
 
 fn default_focal() -> f32 {
     50.0
+}
+
+fn default_project_use() -> String {
+    "ForSale".to_owned()
+}
+
+fn default_identifier_mode() -> String {
+    "UserSuppliedIsbn".to_owned()
+}
+
+fn default_cover_submission_mode() -> String {
+    "FullWrapMeasured".to_owned()
+}
+
+fn default_spine_reading_direction() -> String {
+    "TopToBottom".to_owned()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -232,7 +276,7 @@ pub struct RenderResponse {
 impl RenderResponse {
     pub fn failed(status: &str, diagnostic: Diagnostic) -> Self {
         Self {
-            protocol_version: 8,
+            protocol_version: 9,
             renderer_version: env!("CARGO_PKG_VERSION"),
             job_id: None,
             status: status.to_owned(),

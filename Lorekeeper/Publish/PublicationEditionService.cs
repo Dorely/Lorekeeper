@@ -67,6 +67,9 @@ public sealed class PublicationEditionService(
             PrintProductKey = preset.ProductKey ?? string.Empty,
             PrintFinish = preset.Finish,
             PrintCoverMode = preset.CoverMode,
+            PrintProjectUse = preset.ProjectUse,
+            PrintIdentifierMode = preset.IdentifierMode,
+            PrintCoverSubmissionMode = preset.CoverSubmissionMode,
             PageWidthInches = core.PageSetup.PageWidthInches,
             PageHeightInches = core.PageSetup.PageHeightInches,
             PageMarginInches = core.PageSetup.PageMarginInches,
@@ -157,6 +160,7 @@ public sealed class PublicationEditionService(
                 Author = source.CoverDesign.Author,
                 SpineText = source.CoverDesign.SpineText,
                 BackCopy = source.CoverDesign.BackCopy,
+                SpineReadingDirection = source.CoverDesign.SpineReadingDirection,
                 BackgroundColor = source.CoverDesign.BackgroundColor,
                 BarcodeMode = source.CoverDesign.BarcodeMode,
                 ImageCropXPercent = source.CoverDesign.ImageCropXPercent,
@@ -205,6 +209,11 @@ public sealed class PublicationEditionService(
                 edition.VendorProfileVersion = product.PdfProfile;
                 edition.PrintFinish = PrintFinish.Matte;
                 edition.PrintCoverMode = PrintCoverMode.Simplex;
+                edition.PrintProjectUse = product.DefaultProjectUse;
+                edition.PrintIdentifierMode = destination == PublicationVendor.BarnesAndNoblePress
+                    ? PrintIdentifierMode.VendorSku
+                    : PrintIdentifierMode.UserSuppliedIsbn;
+                edition.PrintCoverSubmissionMode = PrintCoverSubmissionMode.FullWrapMeasured;
             }
             else
             {
@@ -225,7 +234,17 @@ public sealed class PublicationEditionService(
         }
         if (patch.PrintFinish is { } finish) edition.PrintFinish = finish;
         if (patch.PrintCoverMode is { } coverMode) edition.PrintCoverMode = coverMode;
-        if (patch.GenericPrintTemplateJson is not null) edition.GenericPrintTemplateJson = patch.GenericPrintTemplateJson;
+        if (patch.PrintProjectUse is { } projectUse)
+        {
+            edition.PrintProjectUse = projectUse;
+            if (edition.Vendor == PublicationVendor.BarnesAndNoblePress)
+                edition.PrintIdentifierMode = projectUse == PrintProjectUse.PersonalUse
+                    ? PrintIdentifierMode.VendorSku
+                    : PrintIdentifierMode.VendorAssignedIsbn;
+        }
+        if (patch.PrintIdentifierMode is { } identifierMode) edition.PrintIdentifierMode = identifierMode;
+        if (patch.PrintCoverSubmissionMode is { } submissionMode) edition.PrintCoverSubmissionMode = submissionMode;
+        if (patch.PrintTemplateEvidenceJson is not null) edition.PrintTemplateEvidenceJson = patch.PrintTemplateEvidenceJson;
         if (edition.Format == PublicationEditionFormat.DigitalPdf)
             Override(fields, PublicationEditionOverrideField.AllowDesignedPageOverrides, patch.AllowDesignedPageOverrides, value => edition.AllowDesignedPageOverrides = value);
         if (edition.Format == PublicationEditionFormat.Epub)
@@ -638,6 +657,7 @@ public sealed class PublicationEditionService(
                 design.BarcodeMode,
                 design.ImageCropXPercent,
                 design.ImageCropYPercent,
+                design.SpineReadingDirection,
                 design.CompositionSceneJson,
                 design.SurfaceScenesJson,
             })
@@ -693,6 +713,7 @@ public sealed class PublicationEditionService(
                 coverDesign.BarcodeMode,
                 coverDesign.ImageCropXPercent,
                 coverDesign.ImageCropYPercent,
+                coverDesign.SpineReadingDirection,
                 CompositionSceneJson = normalizedReleaseCoverScene,
                 SurfaceScenesJson = normalizedReleaseSurfaceScenes,
             };
@@ -764,7 +785,10 @@ public sealed class PublicationEditionService(
                 edition.PrintProductKey,
                 edition.PrintFinish,
                 edition.PrintCoverMode,
-                edition.GenericPrintTemplateJson,
+                edition.PrintProjectUse,
+                edition.PrintIdentifierMode,
+                edition.PrintCoverSubmissionMode,
+                edition.PrintTemplateEvidenceJson,
                 edition.Bleed,
                 edition.AllowDesignedPageOverrides,
                 edition.PageWidthInches,
@@ -942,6 +966,8 @@ public sealed class PublicationEditionService(
     {
         ValidateIdentity(edition.Name, edition.Format, edition.Vendor);
         if (!Enum.IsDefined(edition.PrintFinish) || !Enum.IsDefined(edition.PrintCoverMode)
+            || !Enum.IsDefined(edition.PrintProjectUse) || !Enum.IsDefined(edition.PrintIdentifierMode)
+            || !Enum.IsDefined(edition.PrintCoverSubmissionMode)
             || !Enum.IsDefined(edition.TitlePageMode))
             throw new InvalidOperationException("One or more release settings are invalid.");
         if (edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
@@ -953,6 +979,24 @@ public sealed class PublicationEditionService(
                 throw new InvalidOperationException("The selected print product does not belong to this release type and destination.");
             if (!product.Finishes.Contains(edition.PrintFinish) || !product.CoverModes.Contains(edition.PrintCoverMode))
                 throw new InvalidOperationException("The selected finish or cover mode is unavailable for this exact print product.");
+            if (!product.EffectiveSupportedProjectUses.Contains(edition.PrintProjectUse))
+                throw new InvalidOperationException("The selected project use is unavailable for this exact print product.");
+            if (edition.Vendor == PublicationVendor.BarnesAndNoblePress)
+            {
+                if (edition.PrintProjectUse == PrintProjectUse.PersonalUse
+                    && edition.PrintIdentifierMode != PrintIdentifierMode.VendorSku)
+                    throw new InvalidOperationException("B&N Press personal-use projects use a vendor SKU.");
+                if (edition.PrintProjectUse == PrintProjectUse.ForSale
+                    && edition.PrintIdentifierMode == PrintIdentifierMode.VendorSku)
+                    throw new InvalidOperationException("B&N Press for-sale projects require a user-supplied or vendor-assigned ISBN.");
+                if (edition.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn
+                    && string.IsNullOrWhiteSpace(edition.Isbn))
+                    throw new InvalidOperationException("A valid ISBN-13 is required when user-supplied ISBN is selected.");
+            }
+            else if (edition.PrintCoverSubmissionMode != PrintCoverSubmissionMode.FullWrapMeasured)
+            {
+                throw new InvalidOperationException("Separate vendor-spine submission is currently supported only for B&N Press.");
+            }
             var trimMatches = product.TrimSizes.Any(trim =>
             {
                 var parts = trim.Split('x', StringSplitOptions.TrimEntries);
@@ -1040,6 +1084,7 @@ public sealed class PublicationEditionService(
         {
             PrintProductKey = edition.PrintProductKey,
             PrintCoverMode = edition.PrintCoverMode,
+            PrintProjectUse = edition.PrintProjectUse,
         };
 
     internal static PublicationEditionView View(Project project, PublicationEdition edition) =>
@@ -1080,13 +1125,16 @@ public sealed class PublicationEditionService(
             edition.PrintProductKey,
             edition.PrintFinish,
             edition.PrintCoverMode,
-            edition.GenericPrintTemplateJson,
+            edition.PrintTemplateEvidenceJson,
             edition.Bleed,
             edition.AllowDesignedPageOverrides,
             edition.RectoChapterStarts)
         {
             InheritsCoreCover = edition.InheritsCoreCover,
             EditionSpecificContentEnabled = edition.EditionSpecificContentEnabled,
+            PrintProjectUse = edition.PrintProjectUse,
+            PrintIdentifierMode = edition.PrintIdentifierMode,
+            PrintCoverSubmissionMode = edition.PrintCoverSubmissionMode,
         };
 
     private static PublicationEditionOutlineItem NewOutlineItem(
@@ -1217,9 +1265,12 @@ public sealed class PublicationEditionService(
             RectoChapterStarts = source.RectoChapterStarts,
             PrintRegistryVersion = source.PrintRegistryVersion,
             PrintProductKey = source.PrintProductKey,
+            PrintProjectUse = source.PrintProjectUse,
+            PrintIdentifierMode = source.PrintIdentifierMode,
             PrintFinish = source.PrintFinish,
             PrintCoverMode = source.PrintCoverMode,
-            GenericPrintTemplateJson = source.GenericPrintTemplateJson,
+            PrintCoverSubmissionMode = source.PrintCoverSubmissionMode,
+            PrintTemplateEvidenceJson = source.PrintTemplateEvidenceJson,
             Bleed = source.Bleed,
             PageWidthInches = source.PageWidthInches,
             PageHeightInches = source.PageHeightInches,

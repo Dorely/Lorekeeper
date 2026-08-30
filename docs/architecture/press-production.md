@@ -2,7 +2,7 @@
 
 ## When to read
 
-Read this chapter when a change touches the owned native renderer, protocol v8,
+Read this chapter when a change touches the owned native renderer, protocol v9,
 render requests, deterministic pagination or shaping, Press runtime packaging,
 physical-product registry entries, stock/spine/cover geometry, cover surfaces,
 PDF versions/output intent/color/ink/transparency, tagged Digital PDF,
@@ -63,7 +63,7 @@ maps. `PublicationRenderWorker` owns recovery/cancellation and
 owns final product-form preflight and deterministic package assembly, consuming
 validated evidence rather than silently rerunning a different validation path.
 
-The native `Lorekeeper.Press` project owns protocol v8, shaping, pagination,
+The native `Lorekeeper.Press` project owns protocol v9, shaping, pagination,
 PDF serialization, color/asset normalization, and post-write inspection.
 The application may request a compact browser layout trace and rasterize it for
 preview, but Press remains the pagination and typesetting authority. App-owned
@@ -79,8 +79,10 @@ submitted/normalized/reported page counts, and explicit cover-surface scenes.
 Press rejects descriptors that differ from the packaged registry. Generic
 products require complete printer geometry. KDP paperback uses the published
 stock formula; KDP hardcover and Ingram products require an exact frozen
-calculator measurement for normalized even page count. Interpolation or a
-generic caliper fallback is not permitted.
+calculator measurement for normalized even page count. B&N products require
+imported `PrintTemplateEvidence` whose product, construction, trim, page count,
+source hashes, and exact full/front/back dimensions match the release.
+Interpolation or a generic caliper fallback is not permitted.
 
 Requests explicitly identify `outputPurpose` as `publication` or
 `reading-copy`. Reading-copy output is accepted only by the generic Digital
@@ -101,7 +103,7 @@ rasters are decoded and structurally validated once; validated pixels are
 reused only by interior or cover surfaces that reference them. Shared color
 transforms are reused when interior and cover intent match.
 
-Press protocol v8 owns deterministic layout, English/Latin shaping and glyph
+Press protocol v9 owns deterministic layout, English/Latin shaping and glyph
 diagnostics, custom TTF/OTF staging and embedding, subsetting and ToUnicode
 maps, bounded pagination, headings/TOC, stable block/page maps, inline
 typography, sparse paragraph presentation, flowing Figures, crop positioning,
@@ -148,6 +150,21 @@ parses raw PDF objects without calling the production validator.
 Text, manuscript-decoration vectors, and images follow the selected interior
 color space; a black-and-white job converts quotation-rule and caption tones to
 gray while preserving color-cover independence.
+
+B&N `bn-print-pdfa1b-v1` emits PDF 1.4 with PDF/A-1b identification, embedded
+fonts, output intent, flattened transparency, and exact imported-template page
+boxes. Authoring always remains one connected `[BACK][SPINE][FRONT]` scene.
+`FullWrapMeasured` produces one measured cover PDF including the spine.
+`SeparatePanelsVendorSpine` crops that connected scene into front and back PDFs
+and records the spine as vendor-generated; it never creates a separate spine
+artifact. This matches B&N's documented template ZIP topology: the separate
+front/back templates omit a spine, while the full template includes the
+precisely measured spine ([B&N Cover Template Tool FAQs](https://help-press.barnesandnoble.com/hc/en-us/articles/5358927293211-Cover-Template-Tool-FAQs)).
+B&N requires exact dimensions and embedded fonts and recommends PDF/A-1b
+([B&N cover/interior acceptance guidance](https://help-press.barnesandnoble.com/hc/en-us/articles/5359031189787-Cover-Interior-Not-Accepted)).
+Uploaded covers reserve the bottom-right barcode area and use `VendorOverlay`,
+because B&N adds the applicable SKU or ISBN barcode
+([B&N ISBN FAQs](https://help-press.barnesandnoble.com/hc/en-us/articles/5358254743963-ISBN-FAQs)).
 
 Composition opacity rules preserve Digital PDF appearance with bounded
 graphics states. KDP PDF 1.7 omits fully transparent backing paint and
@@ -219,6 +236,12 @@ packages contain normalized EPUB plus separately downloadable front cover;
 paperback packages contain validated interior and required cover PDFs; Digital
 PDF packages contain one validated Book PDF; hardcover and complex Ingram
 products contain exact case/jacket/cloth/duplex roles from the registry.
+B&N packages additionally contain `print-setup.json`; separate-panel packages
+contain front and back PDFs, while full-wrap packages retain the construction's
+ordinary full-cover role. The manifest records only artifact-relevant product,
+template, geometry, project-use identifier/barcode behavior, region
+participation, and upload mapping. Account, rights, tax, pricing, and other
+external business workflow are outside this boundary.
 Package identity includes profile/rule/assembler versions, applicable input
 hashes, deterministic ZIP metadata, and correlated validated render evidence.
 Changing construction cannot pull an older surface artifact into a new
@@ -237,17 +260,18 @@ same boundary; Rust is not compiled at application runtime.
 
 | Path or family | Primary responsibility |
 |---|---|
-| `Lorekeeper.Press/src/model.rs` | Protocol-v8 request/response, product/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
+| `Lorekeeper.Press/src/model.rs` | Protocol-v9 request/response, product/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
 | `Lorekeeper.Press/src/renderer.rs` | Containment, validation, deterministic pagination, composition, cover rendering, atomic promotion, progress, and evidence. |
 | `Lorekeeper.Press/src/pdf.rs` | Owned PDF 1.7/1.3 writer, tagged structure, color/bleed/compositing, fonts, images, and barcodes. |
 | `Lorekeeper.Press/src/font.rs` | TTF/OTF validation, shaping, subsetting, widths, embedding, ToUnicode, and glyph outlines. |
 | `Lorekeeper.Press/src/image.rs` | Bounded raster decoding, alpha/color conversion, crop positioning, and total-ink enforcement. |
 | `Lorekeeper.Press/src/inspect.rs` | Independent post-write geometry, font, color, output-intent, transparency, security, annotation, and tagged-PDF inspection. |
-| `Lorekeeper.Press/src/main.rs` / `src/lib.rs` | `describe`, layout traces, bounded protocol-v8 render CLI, and testable library surface. |
-| `Lorekeeper.Press/tests/conformance_v8.rs` | Protocol, containment, atomicity, determinism, layout, publication, product, cover, typography, color, PDF, and negative evidence harness. |
+| `Lorekeeper.Press/src/main.rs` / `src/lib.rs` | `describe`, layout traces, bounded protocol-v9 render CLI, and testable library surface. |
+| `Lorekeeper.Press/tests/conformance_v9.rs` | Protocol, containment, atomicity, determinism, layout, publication, product, cover, typography, color, PDF, and negative evidence harness. |
 | `Lorekeeper.Press/fixtures/` | Frozen full-model, negative protocol, malformed raw-PDF, and test asset fixtures. |
 | `Lorekeeper.Press/assets/` | Approved fonts/notices, registered ICC profile, canonical product registry, and shared manuscript typography defaults. |
 | `Lorekeeper/Publish/PrintProductRegistry.cs` | Application loader/validator for registry version/hash and products plus submitted/normalized/reported page counts, spine, stock, surfaces, cover regions, barcode, duplex, case, jacket, and cloth geometry. |
+| `Lorekeeper/Publish/PrintTemplateEvidenceService.cs` | Bounded B&N ZIP/PDF template import, one-page geometry measurement, source hashing, topology checks, and evidence serialization. |
 | `Lorekeeper/Publish/PublicationCoverService.cs` | Revisioned Core/release cover aggregate, independent product surfaces, canonical bindings, geometry reflow, diagnostics, and acknowledgement invalidation. |
 | `Lorekeeper/Publish/PublicationPressRuntime.cs` | Exact packaged runtime manifest, integrity, `describe`, controlled child environment, and readiness. |
 | `Lorekeeper/Publish/PublicationRenderService.cs` | Queue, canonical staging, protocol requests, progress, hash-verified artifacts, page maps and staleness plus interrupted-job recovery, cancellation, bounded child process, and output verification. |

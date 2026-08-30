@@ -11,6 +11,7 @@ using Lorekeeper.Composition;
 using Lorekeeper.Search;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
+using SkiaSharp;
 
 namespace Lorekeeper.Publish;
 
@@ -343,9 +344,9 @@ public sealed class PublishAssistantTools(
                 name: "apply_publication_section_page_workspace_stage",
                 description: "Apply a staged publication-section page workspace using only its one-use stage ID and current composition revision."),
             AIFunctionFactory.Create(
-                method: (string targetKind, Guid targetId, Guid? variantId = null, Guid? releaseId = null) => ReadLayoutGenerationTargetAsync(context, targetKind, targetId, variantId, releaseId),
+                method: (string targetKind, Guid targetId, Guid? variantId = null, Guid? releaseId = null, string? surfaceRole = null, string? regionRole = null) => ReadLayoutGenerationTargetAsync(context, targetKind, targetId, variantId, releaseId, surfaceRole, regionRole),
                 name: "read_publication_generation_target",
-                description: "Resolve composition geometry, provider-valid final-DPI recommendation, moderate default raster, physical dimensions, protected regions, and provider raster constraints for a concrete Figure placement, page surface/frame, or cover surface/frame. Use CoreCoverSurface/CoreCoverFrame with no releaseId for the Core front cover; use CoverSurface/CoverFrame only with a releaseId for a release cover. When a larger proportional raster is warranted, calculate WIDTHxHEIGHT from the returned physical inches and desired DPI, round dimensions to provider-valid multiples while preserving the server-owned aspect, and pass that size override to generate_project_image or edit_project_image. Omit size or use auto to retain the moderate default; inspect actualRaster and effectiveDpi in the completed result. Page targets require the exact selected composition variantId. Use it when artwork must honor protected physical regions; it does not restrict later placement of other source-image shapes."),
+                description: "Resolve composition geometry, provider-valid final-DPI recommendation, moderate default raster, physical dimensions, protected regions, and provider raster constraints for a Figure, page, cover surface/frame, or exact cover region. CoverRegion requires releaseId and regionRole Back, Spine, or Front; it returns exact physical aspect, closest supported generation raster, aspect error, expected crop, effective DPI, safe regions, orientation, and geometry fingerprint. Use CoreCoverSurface/CoreCoverFrame with no releaseId for the Core front cover; use CoverSurface/CoverFrame only with a releaseId for a release cover. Generate outputs unattached and inspect actualRaster/effectiveDpi before placement."),
             AIFunctionFactory.Create(
                 method: (Guid variantId) => ValidateCompositionAsync(context, context.SelectedEditionId, variantId),
                 name: "validate_publication_page_composition",
@@ -390,6 +391,22 @@ public sealed class PublishAssistantTools(
                 method: (Guid? releaseId = null, string? surfaceRole = null, string mode = "annotated") => PreviewCoverCanvasAsync(context, releaseId, surfaceRole, mode),
                 name: "preview_publication_cover_canvas",
                 description: "Render the complete Core or exact release cover surface as a visible chat image and model-visible canvas when vision is available. Supply surfaceRole for outside, inside, case, or jacket work. Use annotated immediately after every mutation and clean after final validation. The preview never creates a project-image asset."),
+            AIFunctionFactory.Create(
+                method: (Guid releaseId, string regionRole, string? surfaceRole = null) => ReadCoverRegionAsync(context, releaseId, regionRole, surfaceRole),
+                name: "read_publication_cover_region",
+                description: "Read one exact Back, Spine, or Front region including physical dimensions, aspect, safe inset, guides, output participation, orientation, and geometry fingerprint. Inspect the spine region before editing or generating spine artwork."),
+            AIFunctionFactory.Create(
+                method: (Guid releaseId, string regionRole, string? surfaceRole = null, string mode = "annotated") => PreviewCoverRegionAsync(context, releaseId, regionRole, surfaceRole, mode),
+                name: "preview_publication_cover_region",
+                description: "Render and crop one Back, Spine, or Front region from the connected cover canvas. Use annotated after mutation and clean after validation; also inspect the complete wrap."),
+            AIFunctionFactory.Create(
+                method: (Guid releaseId, long expectedRevision, Guid imageId, string regionRole, string? altText = null, bool decorative = false, string? surfaceRole = null) => FillCoverRegionAsync(context, releaseId, expectedRevision, imageId, regionRole, altText, decorative, surfaceRole),
+                name: "fill_project_image_on_publication_cover_region",
+                description: "Add an existing project image and crop-to-fill only the selected Back, Spine, or Front region without stretching or filling the whole wrap. The focal crop remains editable and region-constrained during spine reflow."),
+            AIFunctionFactory.Create(
+                method: (Guid releaseId, long expectedRevision, SpineReadingDirection direction) => SetCoverSpineDirectionAsync(context, releaseId, expectedRevision, direction),
+                name: "set_publication_cover_spine_direction",
+                description: "Set spine copy to TopToBottom (US/English default), BottomToTop, or Horizontal and rotate the real text object without baking words into artwork."),
             AIFunctionFactory.Create(
                 method: (Guid? releaseId = null) => ValidateCoverAsync(context, releaseId),
                 name: "validate_publication_cover_composition",
@@ -487,6 +504,7 @@ public sealed class PublishAssistantTools(
             "generate_project_image", "edit_project_image", "read_project_image_job", "wait_project_image_job", "cancel_project_image_job",
             "patch_publication_release_content",
             "read_publication_cover_design", "preview_publication_cover_canvas", "validate_publication_cover_composition", "update_publication_cover_design",
+            "read_publication_cover_region", "preview_publication_cover_region", "fill_project_image_on_publication_cover_region", "set_publication_cover_spine_direction",
             "patch_publication_core_cover_element", "place_project_image_on_core_cover", "add_project_image_to_core_cover", "customize_publication_release_cover", "use_core_publication_cover",
             "stage_publication_core_cover_composition", "apply_publication_core_cover_composition_stage",
             "patch_publication_cover_element", "patch_publication_cover_surface_element", "place_project_image_on_release_cover_surface", "add_project_image_to_release_cover_surface", "place_project_image_on_release_cover", "add_project_image_to_release_cover", "stage_publication_cover_composition", "apply_publication_cover_composition_stage",
@@ -964,7 +982,7 @@ public sealed class PublishAssistantTools(
             PrintProductKey = workspace.Edition.PrintProductKey,
             PrintFinish = workspace.Edition.PrintFinish,
             PrintCoverMode = workspace.Edition.PrintCoverMode,
-            GenericPrintTemplateJson = workspace.Edition.GenericPrintTemplateJson,
+            PrintTemplateEvidenceJson = workspace.Edition.PrintTemplateEvidenceJson,
             PageWidthInches = workspace.Edition.PageWidthInches,
             PageHeightInches = workspace.Edition.PageHeightInches,
             Bleed = workspace.Edition.Bleed,
@@ -2398,10 +2416,48 @@ public sealed class PublishAssistantTools(
     private static EditorContentTarget SectionContentTarget(Guid? releaseId) =>
         releaseId is Guid id ? EditorContentTarget.ForEdition(id) : EditorContentTarget.Core;
 
-    private async Task<string> ReadLayoutGenerationTargetAsync(PublishAssistantContext context, string targetKind, Guid targetId, Guid? variantId, Guid? editionId)
+    private async Task<string> ReadLayoutGenerationTargetAsync(PublishAssistantContext context, string targetKind, Guid targetId, Guid? variantId, Guid? editionId, string? surfaceRole, string? regionRole)
     {
         try
         {
+            if (targetKind.Trim().Equals("CoverRegion", StringComparison.OrdinalIgnoreCase))
+            {
+                if (editionId is not Guid regionReleaseId)
+                    throw new ArgumentException("CoverRegion requires releaseId.");
+                var role = ParseCoverRegion(regionRole ?? string.Empty);
+                var cover = string.IsNullOrWhiteSpace(surfaceRole)
+                    ? await covers.GetAsync(context.ProjectId, regionReleaseId, context.TurnCancellationToken)
+                    : await covers.GetSurfaceAsync(context.ProjectId, regionReleaseId, surfaceRole, context.TurnCancellationToken);
+                var region = cover.Regions.Single(item => item.Role == role);
+                var raster = LayoutImageSizeResolver.Resolve(region.WidthInches, region.HeightInches);
+                var rasterAspect = (double)raster.Width / raster.Height;
+                var aspectErrorPercent = Math.Abs(rasterAspect / region.AspectRatio - 1) * 100;
+                var expectedCropPercent = (1 - Math.Min(rasterAspect / region.AspectRatio, region.AspectRatio / rasterAspect)) * 100;
+                var effectiveDpi = Math.Min(raster.Width / region.WidthInches, raster.Height / region.HeightInches);
+                return Serialize(new
+                {
+                    ok = true,
+                    descriptor = new
+                    {
+                        releaseId = regionReleaseId,
+                        surfaceRole,
+                        targetKind = "cover-region",
+                        targetId,
+                        regionRole = role,
+                        widthInches = region.WidthInches,
+                        heightInches = region.HeightInches,
+                        physicalAspect = region.AspectRatio,
+                        closestSupportedGenerationRaster = raster.Size,
+                        aspectErrorPercent = Math.Round(aspectErrorPercent, 3),
+                        expectedCropPercent = Math.Round(expectedCropPercent, 3),
+                        effectiveDpi = Math.Round(effectiveDpi, 1),
+                        safeRegions = new { insetInches = region.SafeInsetInches, region.Guides },
+                        orientation = role == CompositionRegionConstraint.Spine ? cover.SpineReadingDirection.ToString() : "upright",
+                        geometryFingerprint = region.GeometryFingerprint,
+                        placement = "Generate unattached, then crop-to-fill without stretching and adjust focal position.",
+                    },
+                });
+            }
             var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable.");
             var descriptor = editionId is Guid releaseId
                 ? await service.DescribeGenerationTargetAsync(context.ProjectId, releaseId, targetKind, targetId, variantId, context.TurnCancellationToken)
@@ -2618,6 +2674,189 @@ public sealed class PublishAssistantTools(
             });
         }
     }
+
+    private async Task<string> ReadCoverRegionAsync(
+        PublishAssistantContext context,
+        Guid releaseId,
+        string regionRole,
+        string? surfaceRole)
+    {
+        try
+        {
+            var role = ParseCoverRegion(regionRole);
+            var cover = string.IsNullOrWhiteSpace(surfaceRole)
+                ? await covers.GetAsync(context.ProjectId, releaseId, context.TurnCancellationToken)
+                : await covers.GetSurfaceAsync(context.ProjectId, releaseId, surfaceRole, context.TurnCancellationToken);
+            var region = cover.Regions.Single(item => item.Role == role);
+            return Serialize(new
+            {
+                ok = true,
+                targetId = releaseId,
+                surfaceRole,
+                revision = cover.Revision,
+                region,
+                spineReadingDirection = cover.SpineReadingDirection,
+                generationGuidance = role == CompositionRegionConstraint.Spine
+                    ? "Use the closest supported raster without stretching. Generate art without baked-in words and keep a quiet center lane for real title/author text; inspect and adjust the focal crop after placement."
+                    : "Generate without baked-in copy and preserve quiet zones for real cover typography.",
+            });
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            return Serialize(new { ok = false, code = "COVER_REGION_INVALID", targetId = releaseId, surfaceRole, summary = exception.Message });
+        }
+    }
+
+    private async Task<string> PreviewCoverRegionAsync(
+        PublishAssistantContext context,
+        Guid releaseId,
+        string regionRole,
+        string? surfaceRole,
+        string mode)
+    {
+        if (canvasPreviews is null)
+            return Serialize(new { ok = false, code = "CANVAS_PREVIEW_UNAVAILABLE", summary = "Cover canvas preview is unavailable." });
+        try
+        {
+            var role = ParseCoverRegion(regionRole);
+            var previewMode = mode.Trim().ToLowerInvariant() switch
+            {
+                "annotated" => CompositionCanvasPreviewMode.Annotated,
+                "clean" => CompositionCanvasPreviewMode.Clean,
+                _ => throw new ArgumentException("mode must be annotated or clean."),
+            };
+            var cover = string.IsNullOrWhiteSpace(surfaceRole)
+                ? await covers.GetAsync(context.ProjectId, releaseId, context.TurnCancellationToken)
+                : await covers.GetSurfaceAsync(context.ProjectId, releaseId, surfaceRole, context.TurnCancellationToken);
+            var region = cover.Regions.Single(item => item.Role == role);
+            var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
+                ?? throw new InvalidDataException("The cover composition is empty.");
+            var preview = await canvasPreviews.RenderSceneAsync(
+                context.ProjectId,
+                releaseId,
+                cover.Revision,
+                scene,
+                previewMode,
+                context.TurnCancellationToken,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["title"] = cover.Title,
+                    ["subtitle"] = cover.Subtitle,
+                    ["author"] = cover.Author,
+                    ["spineText"] = cover.SpineText,
+                    ["backCopy"] = cover.BackCopy,
+                });
+            using var source = SKBitmap.Decode(preview.Data) ?? throw new InvalidDataException("The cover preview could not be decoded.");
+            var bounds = region.Bounds;
+            var left = Math.Clamp((int)Math.Floor(bounds.XPercent / 100 * source.Width), 0, source.Width - 1);
+            var top = Math.Clamp((int)Math.Floor(bounds.YPercent / 100 * source.Height), 0, source.Height - 1);
+            var width = Math.Clamp((int)Math.Ceiling(bounds.WidthPercent / 100 * source.Width), 1, source.Width - left);
+            var height = Math.Clamp((int)Math.Ceiling(bounds.HeightPercent / 100 * source.Height), 1, source.Height - top);
+            using var cropped = new SKBitmap(width, height);
+            using (var canvas = new SKCanvas(cropped))
+                canvas.DrawBitmap(source, new SKRectI(left, top, left + width, top + height), new SKRect(0, 0, width, height));
+            using var image = SKImage.FromBitmap(cropped);
+            using var encoded = image.Encode(SKEncodedImageFormat.Png, 100);
+            var data = encoded.ToArray();
+            var visualId = Guid.NewGuid();
+            context.AddTransientVisual(new(
+                visualId,
+                $"Publication cover — {role} ({previewMode.ToString().ToLowerInvariant()})",
+                $"cover-{releaseId:N}-{role.ToString().ToLowerInvariant()}-{previewMode.ToString().ToLowerInvariant()}.png",
+                "image/png",
+                data,
+                $"{previewMode} rendered inspection of the exact {role} region.",
+                width,
+                height,
+                "publicationCoverRegionPreview",
+                releaseId));
+            return Serialize(new { ok = true, targetId = releaseId, visualId, surfaceRole, revision = cover.Revision, region, pixelWidth = width, pixelHeight = height, diagnostics = preview.Diagnostics.Take(10), inspectWholeWrapNext = true });
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException or InvalidOperationException)
+        {
+            return Serialize(new { ok = false, code = "COVER_REGION_PREVIEW_FAILED", targetId = releaseId, surfaceRole, summary = exception.Message });
+        }
+    }
+
+    private async Task<string> FillCoverRegionAsync(
+        PublishAssistantContext context,
+        Guid releaseId,
+        long expectedRevision,
+        Guid imageId,
+        string regionRole,
+        string? altText,
+        bool decorative,
+        string? surfaceRole)
+    {
+        try
+        {
+            if (!decorative && string.IsNullOrWhiteSpace(altText))
+                throw new ArgumentException("Provide alternative text or explicitly mark the artwork decorative.");
+            if (await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken) is null)
+                throw new KeyNotFoundException("Project image was not found.");
+            var role = ParseCoverRegion(regionRole);
+            var cover = string.IsNullOrWhiteSpace(surfaceRole)
+                ? await covers.GetAsync(context.ProjectId, releaseId, context.TurnCancellationToken)
+                : await covers.GetSurfaceAsync(context.ProjectId, releaseId, surfaceRole, context.TurnCancellationToken);
+            if (cover.Revision != expectedRevision)
+                throw new DbUpdateConcurrencyException("The cover changed; reread it before retrying.");
+            var region = cover.Regions.Single(item => item.Role == role);
+            var scene = JsonSerializer.Deserialize<CompositionScene>(cover.CompositionSceneJson, ManuscriptCodec.JsonOptions)
+                ?? throw new InvalidDataException("The cover composition is empty.");
+            var mutation = CompositionService.AddImageObjectToScene(
+                scene,
+                imageId,
+                FigureImageFit.Cover,
+                altText,
+                decorative,
+                region.Bounds,
+                decorative ? null : scene.Objects.Where(item => item.ReadingOrder is not null).Select(item => item.ReadingOrder!.Value).DefaultIfEmpty().Max() + 1);
+            var filledScene = mutation.Scene with
+            {
+                Objects = mutation.Scene.Objects.Select(item => item.Id == mutation.ObjectId
+                    ? CompositionImageLayout.FillRegion(item, role, region.Bounds)
+                    : item).ToList(),
+            };
+            var update = new PublicationCoverDesignUpdate(
+                cover.Title, cover.Subtitle, cover.Author, cover.SpineText, cover.BackCopy,
+                cover.BackgroundColor, cover.BarcodeMode, cover.ImageCropXPercent, cover.ImageCropYPercent,
+                expectedRevision, true, cover.SpineReadingDirection);
+            var saved = string.IsNullOrWhiteSpace(surfaceRole)
+                ? await covers.SaveWorkspaceAsync(context.ProjectId, releaseId, update, filledScene, context.TurnCancellationToken)
+                : await covers.SaveSurfaceWorkspaceAsync(context.ProjectId, releaseId, surfaceRole, update, filledScene, context.TurnCancellationToken);
+            return Serialize(new { ok = true, targetId = releaseId, surfaceRole, revision = saved.Revision, regionRole = role, changedIds = new[] { mutation.ObjectId }, selectId = mutation.ObjectId, fit = "crop-to-fill", stretched = false, summary = $"Project image filled only the {role} region. Inspect the annotated region and full wrap next." });
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException or InvalidOperationException or KeyNotFoundException or DbUpdateConcurrencyException)
+        {
+            return Serialize(new { ok = false, code = exception is DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "REGION_FILL_REJECTED", targetId = releaseId, surfaceRole, imageId, summary = exception.Message });
+        }
+    }
+
+    private async Task<string> SetCoverSpineDirectionAsync(
+        PublishAssistantContext context,
+        Guid releaseId,
+        long expectedRevision,
+        SpineReadingDirection direction)
+    {
+        var cover = await covers.GetAsync(context.ProjectId, releaseId, context.TurnCancellationToken);
+        if (cover.Revision != expectedRevision)
+            return Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = releaseId, summary = "The cover changed; reread it before retrying." });
+        var saved = await covers.UpdateAsync(
+            context.ProjectId,
+            releaseId,
+            new PublicationCoverDesignUpdate(
+                cover.Title, cover.Subtitle, cover.Author, cover.SpineText, cover.BackCopy,
+                cover.BackgroundColor, cover.BarcodeMode, cover.ImageCropXPercent, cover.ImageCropYPercent,
+                expectedRevision, true, direction),
+            context.TurnCancellationToken);
+        return Serialize(new { ok = true, targetId = releaseId, revision = saved.Revision, spineReadingDirection = saved.SpineReadingDirection, summary = "Spine direction updated. Inspect the annotated spine and complete wrap next." });
+    }
+
+    private static CompositionRegionConstraint ParseCoverRegion(string value) =>
+        Enum.TryParse<CompositionRegionConstraint>(value, true, out var role)
+        && role is CompositionRegionConstraint.Back or CompositionRegionConstraint.Spine or CompositionRegionConstraint.Front
+            ? role
+            : throw new ArgumentException("regionRole must be Back, Spine, or Front.");
 
     private async Task<string> PatchCoreCoverElementAsync(
         PublishAssistantContext context,

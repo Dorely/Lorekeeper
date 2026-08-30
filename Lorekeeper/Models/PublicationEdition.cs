@@ -27,6 +27,29 @@ public enum PublicationVendor
     Generic,
     AmazonKdp,
     IngramSpark,
+    BarnesAndNoblePress,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<PrintProjectUse>))]
+public enum PrintProjectUse
+{
+    PersonalUse,
+    ForSale,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<PrintIdentifierMode>))]
+public enum PrintIdentifierMode
+{
+    VendorSku,
+    VendorAssignedIsbn,
+    UserSuppliedIsbn,
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<PrintCoverSubmissionMode>))]
+public enum PrintCoverSubmissionMode
+{
+    FullWrapMeasured,
+    SeparatePanelsVendorSpine,
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<PublicationEditionStatus>))]
@@ -87,9 +110,12 @@ public class PublicationEdition
     public bool RectoChapterStarts { get; set; }
     public string PrintRegistryVersion { get; set; } = string.Empty;
     public string PrintProductKey { get; set; } = string.Empty;
+    public PrintProjectUse PrintProjectUse { get; set; } = PrintProjectUse.ForSale;
+    public PrintIdentifierMode PrintIdentifierMode { get; set; } = PrintIdentifierMode.UserSuppliedIsbn;
     public PrintFinish PrintFinish { get; set; } = PrintFinish.Matte;
     public PrintCoverMode PrintCoverMode { get; set; } = PrintCoverMode.Simplex;
-    public string GenericPrintTemplateJson { get; set; } = string.Empty;
+    public PrintCoverSubmissionMode PrintCoverSubmissionMode { get; set; } = PrintCoverSubmissionMode.FullWrapMeasured;
+    public string PrintTemplateEvidenceJson { get; set; } = string.Empty;
     public bool Bleed { get; set; }
     public bool AllowDesignedPageOverrides { get; set; }
     public bool InheritsCoreCover { get; set; } = true;

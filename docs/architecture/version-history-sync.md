@@ -86,8 +86,11 @@ canonical JSON strings; malformed non-empty values and embedded credential,
 token, secret, password, API-key, or authorization-code properties fail closed.
 Operational timestamps, warnings, diagnostics, provider IDs, fetch metadata,
 and other operational fields are omitted. GUID path components use lowercase
-`N` format. Readers require the exact canonical JSON bytes and exact schema-v1
-file set; undeclared files and noncanonical paths or encodings fail closed.
+`N` format. Writers emit the exact canonical schema-v2 file set; undeclared
+files and noncanonical paths or encodings fail closed. Readers retain a bounded
+schema-v1 adapter for historical publication payloads, applying the same
+for-sale, user-supplied ISBN, measured full-wrap, and top-to-bottom defaults as
+pre-v26 project import.
 
 The manifest records repository/project identity, schema and included areas,
 the sorted path/length/SHA-256 list, a content hash over path/length/bytes, and
@@ -119,7 +122,9 @@ The captured canonical areas are:
 - `assets`: project images, entity visual examples, and imported font families;
 - `manuscript`: project Book Text Styles in `manuscript/styles.json`;
 - `composition`: page compositions, variants, and scene data; and
-- `publication`: Core Book, editions, and publication sections.
+- `publication`: Core Book, editions, publication sections, print project use,
+  identifier and cover-submission modes, provider-neutral template evidence,
+  and cover spine direction.
 
 Chats, conversations, messages and composer drafts; provider connections,
 OAuth tokens and credentials; the Review Edits workflow toggle, contests,
@@ -129,7 +134,7 @@ auto-link and other projections; visual candidates; render artifacts, page
 maps, packages, audits and migration journals; process-lifetime Undo/Redo; and
 other operational or derived state are deliberately excluded. Restore rebuilds
 the derived projections through their owning services and leaves render
-artifacts absent. Portable export v25 remains a separate boundary with its own
+artifacts absent. Portable export v26 remains a separate boundary with its own
 scope and warnings.
 
 ### Checkpoints and restore

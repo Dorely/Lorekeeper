@@ -45,6 +45,15 @@
                             }
                         </div>
                     }
+                    @if (IsPrint)
+                    {
+                        <div class="cover-surface-tabs" role="tablist" aria-label="Cover regions">
+                            @foreach (var region in CoverRegions)
+                            {
+                                <button type="button" role="tab" aria-selected="@(region.Role == _focusedRegion)" class="@(region.Role == _focusedRegion ? "selected" : null)" title="Focus @region.Role — @region.WidthInches.ToString("0.###") × @region.HeightInches.ToString("0.###") in" @onclick="() => _focusedRegion = region.Role">@region.Role</button>
+                            }
+                        </div>
+                    }
                     <div class="cover-view-toggles" role="group" aria-label="Cover canvas aids">
                         <label title="Snap objects to the cover regions while moving or resizing"><input type="checkbox" @bind="_snap" /><span aria-hidden="true">&#8982;</span><span>Snap</span></label>
                         <label title="Show or hide safe-area and panel guides"><input type="checkbox" @bind="_guides" /><span aria-hidden="true">&#9638;</span><span>Guides</span></label>
@@ -57,9 +66,9 @@
                     <div class="cover-safe"></div>
                     @if (IsPrint)
                     {
-                        <div class="cover-panel cover-panel-back" style="@BackStyle">Back</div>
-                        <div class="cover-panel cover-panel-spine" style="@SpineStyle">Spine</div>
-                        <div class="cover-panel cover-panel-front" style="@FrontStyle">Front</div>
+                        <div class="cover-panel cover-panel-back @(_focusedRegion == CompositionRegionConstraint.Back ? "selected" : null)" style="@BackStyle">Back</div>
+                        <div class="cover-panel cover-panel-spine @(_focusedRegion == CompositionRegionConstraint.Spine ? "selected" : null)" style="@SpineStyle">Spine</div>
+                        <div class="cover-panel cover-panel-front @(_focusedRegion == CompositionRegionConstraint.Front ? "selected" : null)" style="@FrontStyle">Front</div>
                         <div class="cover-barcode" style="@BarcodeStyle">@(_surfaceRole == "perfect-bound-inside" ? "No-ink spine area" : "Barcode reserve")</div>
                     }
                     @foreach (var item in _objects.Where(IsVisible))
@@ -106,6 +115,7 @@
                             <button type="button" title="Choose different artwork for this image" @onclick="() => OpenReplaceArtworkPicker(primarySelection.Id)">Replace</button>
                             <label class="cover-retain-aspect" title="Keep the artwork's original proportions while resizing"><input type="checkbox" checked="@RetainsAspectRatio(primarySelection)" @onchange="e => SetRetainAspectRatioAsync(primarySelection, (bool)e.Value!)" /> Ratio</label>
                             <button type="button" title="Fill the entire cover; proportional artwork is cropped rather than stretched" @onclick="() => FillCanvasAsync(primarySelection)">Fill canvas</button>
+                            @if (IsPrint) { <button type="button" title="Crop-to-fill only the focused Back, Spine, or Front region" @onclick="() => FillSelectedRegionAsync(primarySelection)">Fill selected region</button> }
                             @if (primarySelection.ImageFit == FigureImageFit.Cover) { <button type="button" class="@(IsCropRepositioning(primarySelection) ? "selected" : null)" title="Drag the artwork within its fixed frame" @onclick="() => ToggleCropReposition(primarySelection)">@(IsCropRepositioning(primarySelection) ? "Finish crop" : "Reposition crop")</button> }
                         }
                         else if (primarySelection.Kind == CompositionObjectKind.Text)
@@ -136,6 +146,8 @@
                         @if (IsPrint)
                         {
                             <label>Spine text<input @bind="_spineText" @bind:after="MarkDirty" /></label>
+                            <label>Spine direction<select @bind="_spineDirection" @bind:after="SpineDirectionChanged"><option value="@SpineReadingDirection.TopToBottom">Top to bottom (US/English default)</option><option value="@SpineReadingDirection.BottomToTop">Bottom to top</option><option value="@SpineReadingDirection.Horizontal">Horizontal</option></select></label>
+                            @if (FocusedRegion is { } focused) { <div class="cover-current-artwork"><span><small>Focused @focused.Role region</small><strong>@focused.WidthInches.ToString("0.###") × @focused.HeightInches.ToString("0.###") in · aspect @focused.AspectRatio.ToString("0.####")</strong><small>@(focused.ParticipatesInOutput ? $"Output: {focused.OutputRole}" : "B&N-generated; excluded from separate-panel package")</small></span></div> }
                             <label>Back copy<textarea rows="5" @bind="_backCopy" @bind:after="MarkDirty"></textarea></label>
                             <label>Barcode behavior<select @bind="_barcodeMode" @bind:after="MarkDirty"><option value="@PublicationBarcodeMode.LorekeeperBarcode">Generate ISBN-13 barcode</option><option value="@PublicationBarcodeMode.VendorOverlay">Reserve vendor overlay area</option></select></label>
                         }
@@ -171,6 +183,7 @@
                                 </div>
                                 <label><input type="checkbox" checked="@RetainsAspectRatio(selected)" @onchange="e => SetRetainAspectRatioAsync(selected, (bool)e.Value!)" /> Retain aspect ratio</label>
                                 <button type="button" title="Fill the entire cover; proportional artwork is cropped rather than stretched" @onclick="() => FillCanvasAsync(selected)">Fill canvas</button>
+                                @if (IsPrint) { <button type="button" title="Crop-to-fill only the focused Back, Spine, or Front region" @onclick="() => FillSelectedRegionAsync(selected)">Fill selected region</button> }
                                 @if (selected.ImageFit == FigureImageFit.Cover)
                                 {
                                     <button type="button" class="@(IsCropRepositioning(selected) ? "selected" : null)" @onclick="() => ToggleCropReposition(selected)">@(IsCropRepositioning(selected) ? "Finish repositioning" : "Reposition crop")</button>
@@ -248,13 +261,15 @@
     private long _changeVersion;
     private Guid _loadedProjectId; private Guid _loadedEditionId; private bool _loadedCoreBook; private long _loadedRefreshSignal = -1;
     private string _surfaceRole = "front"; private IReadOnlyList<string> _surfaceRoles = ["front"];
-    private string _title = "", _subtitle = "", _author = "", _spineText = "", _backCopy = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private string? _error; private bool _dirty, _snap = true, _guides = true, _cropReposition; private double _zoom = .95;
+    private string _title = "", _subtitle = "", _author = "", _spineText = "", _backCopy = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private SpineReadingDirection _spineDirection = SpineReadingDirection.TopToBottom; private CompositionRegionConstraint _focusedRegion = CompositionRegionConstraint.Front; private string? _error; private bool _dirty, _snap = true, _guides = true, _cropReposition; private double _zoom = .95;
     private bool _newRetainAspectRatio = true;
     private ArtworkPickerMode? _artworkPickerMode;
     private Guid? _artworkPickerTargetId;
     private ElementReference _stageElement; private IJSObjectReference? _workspaceModule; private CoverTransformState? _transform;
     private CompositionObject? Selected => _objects.FirstOrDefault(item => item.Id == _selectedId);
     private bool IsPrint => _edition?.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover;
+    private IReadOnlyList<CoverRegionDescriptor> CoverRegions => _cover?.Regions ?? [];
+    private CoverRegionDescriptor? FocusedRegion => CoverRegions.FirstOrDefault(item => item.Role == _focusedRegion);
     private string ModeSummary => CoreBook ? "Reusable front cover" : IsPrint ? "Print full wrap: back, spine, and front" : "Digital front cover";
     private IReadOnlyList<CompositionRegionConstraint> AvailableRegions => IsPrint ? Enum.GetValues<CompositionRegionConstraint>() : [CompositionRegionConstraint.Page, CompositionRegionConstraint.SafeArea, CompositionRegionConstraint.Front];
     private static readonly string[] Bindings = ["title", "subtitle", "author", "spineText", "backCopy"];
@@ -310,6 +325,7 @@
             _backCopy = _cover.BackCopy;
             _background = _cover.BackgroundColor;
             _barcodeMode = _cover.BarcodeMode;
+            _spineDirection = _cover.SpineReadingDirection;
             _history = CoreBook
                 ? await Books.GetCoverHistoryStateAsync(ProjectId)
                 : await Covers.GetHistoryStateAsync(ProjectId, EditionId);
@@ -440,6 +456,20 @@
     {
         Patch(CompositionImageLayout.FillCanvas(item, RetainsAspectRatio(item)));
         return Task.CompletedTask;
+    }
+    private Task FillSelectedRegionAsync(CompositionObject item)
+    {
+        if (FocusedRegion is not { } region)
+            return Task.CompletedTask;
+        Patch(CompositionImageLayout.FillRegion(item, region.Role, region.Bounds));
+        return Task.CompletedTask;
+    }
+    private void SpineDirectionChanged()
+    {
+        _objects = CoverCompositionFactory.ApplySpineReadingDirection(
+            _scene! with { Objects = _objects },
+            _spineDirection).Objects.ToList();
+        MarkDirty();
     }
     private async Task<double> ImageAspectRatioAsync(CompositionObject item)
     {
@@ -599,7 +629,7 @@
             _error = null;
             var changeVersion = _changeVersion;
             var scene = CoverCompositionFactory.KeepArtworkBehindCopy(_scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Objects = _objects.ToList() });
-            var update = new PublicationCoverDesignUpdate(_title, _subtitle, _author, IsPrint ? _spineText : "", IsPrint ? _backCopy : "", _background, IsPrint ? _barcodeMode : PublicationBarcodeMode.None, 50, 50, _cover.Revision, true);
+            var update = new PublicationCoverDesignUpdate(_title, _subtitle, _author, IsPrint ? _spineText : "", IsPrint ? _backCopy : "", _background, IsPrint ? _barcodeMode : PublicationBarcodeMode.None, 50, 50, _cover.Revision, true, _spineDirection);
             var saveProjectId = _loadedProjectId == Guid.Empty ? ProjectId : _loadedProjectId;
             _cover = _loadedCoreBook
                 ? await Books.SaveCoverAsync(saveProjectId, _cover.CoreBookRevision ?? throw new InvalidOperationException("Core Book revision is unavailable."), update, scene)
@@ -655,6 +685,7 @@
             _backCopy = _cover.BackCopy;
             _background = _cover.BackgroundColor;
             _barcodeMode = _cover.BarcodeMode;
+            _spineDirection = _cover.SpineReadingDirection;
             _dirty = false;
             _error = null;
         }

@@ -16,6 +16,7 @@
 @inject IProjectPageSetupService PageSetups
 @inject IPrintProductRegistry PrintProducts
 @inject IPrintGeometryService PrintGeometry
+@inject IPrintTemplateEvidenceService PrintTemplateEvidence
 @inject IJSRuntime JS
 
 @if (Project is null || _loading)
@@ -115,7 +116,7 @@ else
             <label class="field"><span>Release name</span><input class="form-control" value="@_newReleaseName" @oninput="HandleNewReleaseNameInput" /><small>Defaults to the selected publishing profile. Matching names are numbered automatically.</small></label>
             @if (_newFormat is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
             {
-                <label class="field"><span>Printer or service</span><select class="form-select" @bind="_newVendor" @bind:after="HandleNewReleaseProfileChanged"><option value="@PublicationVendor.AmazonKdp">Amazon KDP</option><option value="@PublicationVendor.IngramSpark">IngramSpark</option><option value="@PublicationVendor.Generic">Other printer</option></select></label>
+                <label class="field"><span>Printer or service</span><select class="form-select" @bind="_newVendor" @bind:after="HandleNewReleaseProfileChanged"><option value="@PublicationVendor.AmazonKdp">Amazon KDP</option><option value="@PublicationVendor.IngramSpark">IngramSpark</option><option value="@PublicationVendor.BarnesAndNoblePress">Barnes &amp; Noble Press</option><option value="@PublicationVendor.Generic">Other printer</option></select></label>
                 <label class="field"><span>Print product</span><select @key="(_newFormat, _newVendor)" class="form-select" @bind="_newPrintProductKey" @bind:after="NewPrintProductChanged">@foreach (var product in CompatiblePrintProducts(_newFormat, _newVendor)){<option value="@product.Key">@product.DisplayName</option>}</select><small>@NewPrintProductDescription()</small></label>
                 @if (NewPrintProduct() is { TrimSizes.Count: > 0 } trimProduct)
                 {
@@ -128,6 +129,10 @@ else
                     {
                         <label class="field"><span>Cover printing</span><select class="form-select" @bind="_newPrintCoverMode">@foreach (var mode in configuredProduct.CoverModes){<option value="@mode">@(mode == PrintCoverMode.Duplex ? "Outside and inside" : "Outside only")</option>}</select></label>
                     }
+                }
+                @if (_newVendor == PublicationVendor.BarnesAndNoblePress)
+                {
+                    <div class="field field-wide"><span>Project use</span><div class="btn-group" role="group" aria-label="Project use"><button type="button" class="btn @(_newPrintProjectUse == PrintProjectUse.PersonalUse ? "btn-primary" : "btn-outline-primary")" @onclick="() => _newPrintProjectUse = PrintProjectUse.PersonalUse">Personal / non-commercial</button><button type="button" class="btn @(_newPrintProjectUse == PrintProjectUse.ForSale ? "btn-primary" : "btn-outline-primary")" @onclick="() => _newPrintProjectUse = PrintProjectUse.ForSale">For sale / commercial</button></div><small>This selects the B&amp;N identifier and barcode behavior recorded in the prepared setup file.</small></div>
                 }
             }
             @if (!string.IsNullOrWhiteSpace(_addReleaseError))
@@ -290,6 +295,8 @@ else
     private string _newPrintTrim = "6x9";
     private PrintFinish _newPrintFinish = PrintFinish.Matte;
     private PrintCoverMode _newPrintCoverMode = PrintCoverMode.Simplex;
+    private PrintProjectUse _newPrintProjectUse = PrintProjectUse.ForSale;
+    private int _bnTemplatePageCount = 100;
     private string _newReleaseName = PublicationReleaseNaming.DefaultName(
         PublicationEditionFormat.Paperback,
         PublicationVendor.AmazonKdp);
@@ -596,7 +603,7 @@ else
                 <label class="field"><span>Release name</span><input class="form-control" @bind="_releaseDraft.Name" @bind:event="oninput" @bind:after="MarkReleaseDirty" /></label>
                 @if (_workspace.Edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
                 {
-                    <label class="field"><span>Printer or service</span><select class="form-select" @bind="_releaseDraft.Vendor" @bind:after="ReleaseVendorChanged"><option value="@PublicationVendor.AmazonKdp">Amazon KDP</option><option value="@PublicationVendor.IngramSpark">IngramSpark</option><option value="@PublicationVendor.Generic">Other printer</option></select></label>
+                    <label class="field"><span>Printer or service</span><select class="form-select" @bind="_releaseDraft.Vendor" @bind:after="ReleaseVendorChanged"><option value="@PublicationVendor.AmazonKdp">Amazon KDP</option><option value="@PublicationVendor.IngramSpark">IngramSpark</option><option value="@PublicationVendor.BarnesAndNoblePress">Barnes &amp; Noble Press</option><option value="@PublicationVendor.Generic">Other printer</option></select></label>
                     <label class="field product-field"><span>Print product</span><select @key="(_workspace.Edition.Format, _releaseDraft.Vendor)" class="form-select" @bind="_releaseDraft.PrintProductKey" @bind:after="ReleaseProductChanged">@foreach (var product in CompatiblePrintProducts(_workspace.Edition.Format, _releaseDraft.Vendor)){<option value="@product.Key">@product.DisplayName</option>}</select><small>@SelectedProductDescription() @CurrentSpineDescription()</small></label>
                     @if (SelectedProduct() is { } selectedPrintProduct && selectedPrintProduct.TrimSizes.Count > 0)
                     {
@@ -607,10 +614,21 @@ else
                     {
                         <label class="field"><span>Cover printing</span><select class="form-select" @bind="_releaseDraft.PrintCoverMode" @bind:after="MarkReleaseDirty">@foreach (var mode in SelectedProduct()!.CoverModes){<option value="@mode">@(mode == PrintCoverMode.Duplex ? "Outside and inside" : "Outside only")</option>}</select></label>
                     }
-                    <label class="field"><span>ISBN <small>@(_releaseDraft.Vendor == PublicationVendor.IngramSpark ? "required" : "optional")</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleaseDirty" /></label>
-                    @if (_releaseDraft.Vendor == PublicationVendor.Generic)
+                    @if (_releaseDraft.Vendor == PublicationVendor.BarnesAndNoblePress)
                     {
-                        <label class="field field-wide"><span>Printer geometry manifest</span><textarea class="form-control font-monospace" rows="7" placeholder="Paste or import a Lorekeeper print-template manifest." @bind="_releaseDraft.GenericPrintTemplateJson" @bind:event="oninput" @bind:after="MarkReleaseDirty"></textarea><small>Generic output is Template validated. This manifest supplies the printer-specific spine and cover geometry.</small></label>
+                        <div class="field field-wide"><span>Project use</span><div class="btn-group" role="group" aria-label="Project use"><button type="button" class="btn @(_releaseDraft.PrintProjectUse == PrintProjectUse.PersonalUse ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetReleaseProjectUse(PrintProjectUse.PersonalUse)">Personal / non-commercial</button><button type="button" class="btn @(_releaseDraft.PrintProjectUse == PrintProjectUse.ForSale ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetReleaseProjectUse(PrintProjectUse.ForSale)">For sale / commercial</button></div><small>Changing use invalidates prepared files and setup manifest, while keeping any entered ISBN available if you switch back.</small></div>
+                        <label class="field"><span>Identifier</span><select class="form-select" @bind="_releaseDraft.PrintIdentifierMode" @bind:after="MarkReleaseDirty">@if (_releaseDraft.PrintProjectUse == PrintProjectUse.PersonalUse){<option value="@PrintIdentifierMode.VendorSku">B&amp;N vendor SKU</option>}else{<option value="@PrintIdentifierMode.VendorAssignedIsbn">B&amp;N-assigned ISBN</option><option value="@PrintIdentifierMode.UserSuppliedIsbn">My ISBN</option>}</select><small>@(_releaseDraft.PrintIdentifierMode == PrintIdentifierMode.VendorAssignedIsbn ? "B&N assigns the free ISBN in its wizard; this does not block file preparation." : null)</small></label>
+                        <label class="field"><span>Cover upload</span><select class="form-select" @bind="_releaseDraft.PrintCoverSubmissionMode" @bind:after="MarkReleaseDirty"><option value="@PrintCoverSubmissionMode.FullWrapMeasured">Measured full wrap (includes spine)</option><option value="@PrintCoverSubmissionMode.SeparatePanelsVendorSpine">Separate front/back; B&amp;N spine</option></select></label>
+                    }
+                    <label class="field"><span>ISBN <small>@(_releaseDraft.Vendor == PublicationVendor.IngramSpark || _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn ? "required" : "optional")</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleaseDirty" /></label>
+                    @if (_releaseDraft.Vendor is PublicationVendor.Generic or PublicationVendor.BarnesAndNoblePress)
+                    {
+                        @if (_releaseDraft.Vendor == PublicationVendor.BarnesAndNoblePress)
+                        {
+                            <label class="field"><span>B&amp;N template page count</span><input class="form-control" type="number" min="18" max="800" @bind="_bnTemplatePageCount" /></label>
+                            <label class="field"><span>Import B&amp;N template</span><InputFile OnChange="ImportBnTemplateAsync" multiple accept=".zip,.pdf,application/zip,application/pdf" class="form-control" /><small>Choose the ZIP from B&amp;N's template tool or its full/front/back PDFs. Lorekeeper measures and fingerprints the exact geometry.</small></label>
+                        }
+                        <label class="field field-wide"><span>Printer template evidence</span><textarea class="form-control font-monospace" rows="7" placeholder="Import or paste a Lorekeeper print-template evidence record." @bind="_releaseDraft.PrintTemplateEvidenceJson" @bind:event="oninput" @bind:after="MarkReleaseDirty"></textarea><small>@(_releaseDraft.Vendor == PublicationVendor.BarnesAndNoblePress ? "B&N output is bound to the imported product, page count, exact cover dimensions, and source hashes." : "Generic output uses this printer-specific spine and cover geometry.")</small></label>
                     }
                 }
                 else if (_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf)
@@ -1655,7 +1673,7 @@ else
                 var reset = _loadedOverrides.Except(_releaseOverrides).ToList();
                 var patch = new PublicationReleaseOverridePatch(
                     revision, _releaseDraft.Name, _releaseDraft.Vendor, _releaseDraft.Isbn,
-                    _releaseDraft.PrintProductKey, _releaseDraft.PrintFinish, _releaseDraft.PrintCoverMode, _releaseDraft.GenericPrintTemplateJson,
+                    _releaseDraft.PrintProductKey, _releaseDraft.PrintFinish, _releaseDraft.PrintCoverMode, _releaseDraft.PrintTemplateEvidenceJson,
                     BoolValue(PublicationEditionOverrideField.AllowDesignedPageOverrides, _releaseDraft.AllowDesignedPageOverrides),
                     BoolValue(PublicationEditionOverrideField.RectoChapterStarts, _releaseDraft.RectoChapterStarts),
                     Value(PublicationEditionOverrideField.Title, _releaseDraft.Title), Value(PublicationEditionOverrideField.Subtitle, _releaseDraft.Subtitle),
@@ -1673,7 +1691,10 @@ else
                     PageWidthInches: DesignValue(PublicationEditionOverrideField.PageWidthInches, _releaseDraft.PageWidthInches),
                     PageHeightInches: DesignValue(PublicationEditionOverrideField.PageHeightInches, _releaseDraft.PageHeightInches),
                     PageMarginInches: DesignValue(PublicationEditionOverrideField.PageMarginInches, _releaseDraft.PageMarginInches),
-                    ResetFields: reset);
+                    ResetFields: reset,
+                    PrintProjectUse: _releaseDraft.PrintProjectUse,
+                    PrintIdentifierMode: _releaseDraft.PrintIdentifierMode,
+                    PrintCoverSubmissionMode: _releaseDraft.PrintCoverSubmissionMode);
                 revision = (await Releases.PatchOverridesAsync(Project.Id, id, patch)).Revision;
             }
             if (_releaseContentDirty)
@@ -2050,6 +2071,11 @@ else
                     PrintProductKey: product.Key,
                     PrintFinish: _newPrintFinish,
                     PrintCoverMode: _newPrintCoverMode,
+                    PrintProjectUse: _newPrintProjectUse,
+                    PrintIdentifierMode: _newVendor == PublicationVendor.BarnesAndNoblePress
+                        ? _newPrintProjectUse == PrintProjectUse.PersonalUse ? PrintIdentifierMode.VendorSku : PrintIdentifierMode.VendorAssignedIsbn
+                        : PrintIdentifierMode.UserSuppliedIsbn,
+                    PrintCoverSubmissionMode: PrintCoverSubmissionMode.FullWrapMeasured,
                     PageWidthInches: trim?.Width,
                     PageHeightInches: trim?.Height));
             }
@@ -2369,6 +2395,7 @@ else
             ?? string.Empty;
         _newPrintFinish = product.Finishes.FirstOrDefault();
         _newPrintCoverMode = product.CoverModes.FirstOrDefault();
+        _newPrintProjectUse = product.DefaultProjectUse;
     }
 
     private void NewPrintProductChanged()
@@ -2380,6 +2407,9 @@ else
             : product.TrimSizes.FirstOrDefault(trim => trim == "6x9") ?? product.TrimSizes.FirstOrDefault() ?? string.Empty;
         _newPrintFinish = product.Finishes.Contains(_newPrintFinish) ? _newPrintFinish : product.Finishes.FirstOrDefault();
         _newPrintCoverMode = product.CoverModes.Contains(_newPrintCoverMode) ? _newPrintCoverMode : product.CoverModes.FirstOrDefault();
+        _newPrintProjectUse = product.EffectiveSupportedProjectUses.Contains(_newPrintProjectUse)
+            ? _newPrintProjectUse
+            : product.DefaultProjectUse;
     }
 
     private PrintProductDefinition? NewPrintProduct() =>
@@ -2426,9 +2456,9 @@ else
     private void ClosePdfPreview() => _previewArtifact = null;
     private string ViewUrl(Guid artifactId) => $"/projects/{Project!.Id:N}/publish/artifacts/{artifactId:N}";
     private string DownloadUrl(Guid artifactId) => $"/projects/{Project!.Id:N}/publish/artifacts/{artifactId:N}/download";
-    private static string DownloadLabel(PublicationArtifactKind kind) => kind switch { PublicationArtifactKind.ReadingPdf => "Save reading PDF", PublicationArtifactKind.InteriorPdf => "Save interior PDF", PublicationArtifactKind.PerfectBoundCoverPdf => "Save cover PDF", PublicationArtifactKind.CaseCoverPdf => "Save case cover PDF", PublicationArtifactKind.DustJacketPdf => "Save dust jacket PDF", PublicationArtifactKind.PrintSetupManifest => "Save cloth setup", PublicationArtifactKind.BookPdf => "Save book PDF", PublicationArtifactKind.Epub => "Save EPUB", PublicationArtifactKind.FrontCoverImage => "Save front cover", PublicationArtifactKind.PublicationPackage => "Save package", _ => $"Save {kind}" };
+    private static string DownloadLabel(PublicationArtifactKind kind) => kind switch { PublicationArtifactKind.ReadingPdf => "Save reading PDF", PublicationArtifactKind.InteriorPdf => "Save interior PDF", PublicationArtifactKind.PerfectBoundCoverPdf => "Save cover PDF", PublicationArtifactKind.CaseCoverPdf => "Save case cover PDF", PublicationArtifactKind.DustJacketPdf => "Save dust jacket PDF", PublicationArtifactKind.FrontCoverPdf => "Save front cover PDF", PublicationArtifactKind.BackCoverPdf => "Save back cover PDF", PublicationArtifactKind.PrintSetupManifest => "Save print setup", PublicationArtifactKind.BookPdf => "Save book PDF", PublicationArtifactKind.Epub => "Save EPUB", PublicationArtifactKind.FrontCoverImage => "Save front cover", PublicationArtifactKind.PublicationPackage => "Save package", _ => $"Save {kind}" };
     private static bool CanPreview(PublicationArtifactView artifact) => artifact.Kind == PublicationArtifactKind.Epub || artifact.MediaType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase) || artifact.MediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase);
-    private static string PreviewLabel(PublicationArtifactKind kind) => kind switch { PublicationArtifactKind.ReadingPdf => "Preview reading PDF", PublicationArtifactKind.InteriorPdf => "Preview interior PDF", PublicationArtifactKind.PerfectBoundCoverPdf => "Preview cover PDF", PublicationArtifactKind.CaseCoverPdf => "Preview case cover PDF", PublicationArtifactKind.DustJacketPdf => "Preview dust jacket PDF", PublicationArtifactKind.BookPdf => "Preview book PDF", PublicationArtifactKind.Epub => "Preview EPUB", PublicationArtifactKind.FrontCoverImage => "Preview front cover", _ => $"Preview {kind}" };
+    private static string PreviewLabel(PublicationArtifactKind kind) => kind switch { PublicationArtifactKind.ReadingPdf => "Preview reading PDF", PublicationArtifactKind.InteriorPdf => "Preview interior PDF", PublicationArtifactKind.PerfectBoundCoverPdf => "Preview cover PDF", PublicationArtifactKind.CaseCoverPdf => "Preview case cover PDF", PublicationArtifactKind.DustJacketPdf => "Preview dust jacket PDF", PublicationArtifactKind.FrontCoverPdf => "Preview front cover PDF", PublicationArtifactKind.BackCoverPdf => "Preview back cover PDF", PublicationArtifactKind.BookPdf => "Preview book PDF", PublicationArtifactKind.Epub => "Preview EPUB", PublicationArtifactKind.FrontCoverImage => "Preview front cover", _ => $"Preview {kind}" };
     private static string FormatBytes(long bytes) => bytes >= 1024 * 1024 ? $"{bytes / 1024d / 1024d:0.0} MB" : $"{Math.Max(1, bytes / 1024d):0} KB";
     private IReadOnlyList<PrintProductDefinition> CompatiblePrintProducts(PublicationEditionFormat format, PublicationVendor vendor) => PrintProducts.List(format, vendor);
     private PrintProductDefinition? SelectedProduct() => string.IsNullOrWhiteSpace(_releaseDraft.PrintProductKey) ? null : PrintProducts.List().FirstOrDefault(item => item.Key == _releaseDraft.PrintProductKey);
@@ -2438,6 +2468,11 @@ else
         _releaseDraft.PrintProductKey = product.Key;
         _releaseDraft.PrintFinish = product.Finishes[0];
         _releaseDraft.PrintCoverMode = product.CoverModes[0];
+        _releaseDraft.PrintProjectUse = product.DefaultProjectUse;
+        _releaseDraft.PrintIdentifierMode = _releaseDraft.Vendor == PublicationVendor.BarnesAndNoblePress
+            ? _releaseDraft.PrintProjectUse == PrintProjectUse.PersonalUse ? PrintIdentifierMode.VendorSku : PrintIdentifierMode.VendorAssignedIsbn
+            : PrintIdentifierMode.UserSuppliedIsbn;
+        _releaseDraft.PrintCoverSubmissionMode = PrintCoverSubmissionMode.FullWrapMeasured;
         EnsureProductTrim(product);
         MarkReleaseDirty();
     }
@@ -2448,8 +2483,45 @@ else
             if (!product.Finishes.Contains(_releaseDraft.PrintFinish)) _releaseDraft.PrintFinish = product.Finishes[0];
             if (!product.CoverModes.Contains(_releaseDraft.PrintCoverMode)) _releaseDraft.PrintCoverMode = product.CoverModes[0];
             EnsureProductTrim(product);
+            if (!product.EffectiveSupportedProjectUses.Contains(_releaseDraft.PrintProjectUse))
+                _releaseDraft.PrintProjectUse = product.DefaultProjectUse;
         }
         MarkReleaseDirty();
+    }
+    private void SetReleaseProjectUse(PrintProjectUse use)
+    {
+        _releaseDraft.PrintProjectUse = use;
+        _releaseDraft.PrintIdentifierMode = use == PrintProjectUse.PersonalUse
+            ? PrintIdentifierMode.VendorSku
+            : PrintIdentifierMode.VendorAssignedIsbn;
+        MarkReleaseDirty();
+    }
+
+    private async Task ImportBnTemplateAsync(InputFileChangeEventArgs args)
+    {
+        try
+        {
+            var product = SelectedProduct() ?? throw new InvalidOperationException("Choose a B&N print product first.");
+            var files = new List<PrintTemplateImportFile>();
+            foreach (var file in args.GetMultipleFiles(8))
+            {
+                await using var stream = file.OpenReadStream(64L * 1024 * 1024);
+                using var memory = new MemoryStream();
+                await stream.CopyToAsync(memory, _dispose.Token);
+                files.Add(new(file.Name, memory.ToArray()));
+            }
+            _releaseDraft.PrintTemplateEvidenceJson = PrintTemplateEvidence.ImportBarnesAndNoble(
+                product,
+                CurrentTrimKey(),
+                _bnTemplatePageCount,
+                files);
+            MarkReleaseDirty();
+            _notice = "B&N template geometry measured and fingerprinted. Save completes automatically.";
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
     }
     private string CurrentTrimKey() => SelectedProduct()?.TrimSizes.FirstOrDefault(TrimMatches)
         ?? (SelectedProduct()?.AllowsCustomTrim == true ? "custom" : string.Empty);
@@ -2495,7 +2567,7 @@ else
                 PrintProductKey = _releaseDraft.PrintProductKey,
                 PrintFinish = _releaseDraft.PrintFinish,
                 PrintCoverMode = _releaseDraft.PrintCoverMode,
-                GenericPrintTemplateJson = _releaseDraft.GenericPrintTemplateJson,
+                PrintTemplateEvidenceJson = _releaseDraft.PrintTemplateEvidenceJson,
                 PageWidthInches = _releaseDraft.PageWidthInches,
                 PageHeightInches = _releaseDraft.PageHeightInches,
             };
@@ -2513,15 +2585,15 @@ else
         if (format == PublicationEditionFormat.DigitalPdf) return [PublicationArtifactKind.BookPdf, PublicationArtifactKind.PublicationPackage];
         var product = SelectedProduct();
         var kinds = new List<PublicationArtifactKind> { PublicationArtifactKind.InteriorPdf };
-        if (product?.RequiresPerfectBoundCover == true) kinds.Add(PublicationArtifactKind.PerfectBoundCoverPdf);
-        if (product?.RequiresCaseCover == true) kinds.Add(PublicationArtifactKind.CaseCoverPdf);
-        if (product?.RequiresDustJacket == true) kinds.Add(PublicationArtifactKind.DustJacketPdf);
+        if (_releaseDraft.Vendor == PublicationVendor.BarnesAndNoblePress && _releaseDraft.PrintCoverSubmissionMode == PrintCoverSubmissionMode.SeparatePanelsVendorSpine) { kinds.Add(PublicationArtifactKind.FrontCoverPdf); kinds.Add(PublicationArtifactKind.BackCoverPdf); }
+        else { if (product?.RequiresPerfectBoundCover == true) kinds.Add(PublicationArtifactKind.PerfectBoundCoverPdf); if (product?.RequiresCaseCover == true) kinds.Add(PublicationArtifactKind.CaseCoverPdf); if (product?.RequiresDustJacket == true) kinds.Add(PublicationArtifactKind.DustJacketPdf); }
         if (product?.RequiresClothManifest == true) kinds.Add(PublicationArtifactKind.PrintSetupManifest);
+        if (_releaseDraft.Vendor == PublicationVendor.BarnesAndNoblePress) kinds.Add(PublicationArtifactKind.PrintSetupManifest);
         kinds.Add(PublicationArtifactKind.PublicationPackage);
         return kinds;
     }
     private static string ReleaseTypeLabel(PublicationEditionFormat format) => format switch { PublicationEditionFormat.Paperback => "Paperback", PublicationEditionFormat.Hardcover => "Hardcover", PublicationEditionFormat.Epub => "EPUB ebook", _ => "PDF ebook" };
-    private static string ReleaseSummary(PublicationEditionView edition) => edition.Format switch { PublicationEditionFormat.Paperback => $"{edition.Vendor switch { PublicationVendor.AmazonKdp => "Amazon KDP", PublicationVendor.IngramSpark => "IngramSpark", _ => "Other printer" }} paperback with printer-ready interior and cover files.", PublicationEditionFormat.Hardcover => $"{edition.Vendor switch { PublicationVendor.AmazonKdp => "Amazon KDP", PublicationVendor.IngramSpark => "IngramSpark", _ => "Other printer" }} hardcover with product-specific case or jacket files.", PublicationEditionFormat.Epub => "Accessible EPUB 3 ebook with reflowable text and navigation.", _ => "Tagged single-file PDF ebook with the front cover as page one." };
+    private static string ReleaseSummary(PublicationEditionView edition) => edition.Format switch { PublicationEditionFormat.Paperback => $"{edition.Vendor switch { PublicationVendor.AmazonKdp => "Amazon KDP", PublicationVendor.IngramSpark => "IngramSpark", PublicationVendor.BarnesAndNoblePress => "Barnes & Noble Press", _ => "Other printer" }} paperback with printer-ready interior and cover files.", PublicationEditionFormat.Hardcover => $"{edition.Vendor switch { PublicationVendor.AmazonKdp => "Amazon KDP", PublicationVendor.IngramSpark => "IngramSpark", PublicationVendor.BarnesAndNoblePress => "Barnes & Noble Press", _ => "Other printer" }} hardcover with product-specific case or jacket files.", PublicationEditionFormat.Epub => "Accessible EPUB 3 ebook with reflowable text and navigation.", _ => "Tagged single-file PDF ebook with the front cover as page one." };
     private static string CoverEyebrow(PublicationEditionFormat format) => format switch { PublicationEditionFormat.Paperback => "Full-wrap cover", PublicationEditionFormat.Hardcover => "Production cover", _ => "Digital cover" };
     private static string CoverHelp(PublicationEditionFormat format) => format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? "Core artwork supplies the front; this product adds its required back, spine, wrap, jacket, and barcode regions." : "Uses the reusable Core front cover until you customize this release.";
 
@@ -2536,10 +2608,10 @@ else
 
     private sealed class ReleaseDraft
     {
-        public string Name { get; set; } = ""; public PublicationVendor Vendor { get; set; } public string Isbn { get; set; } = ""; public string PrintProductKey { get; set; } = ""; public PrintFinish PrintFinish { get; set; } public PrintCoverMode PrintCoverMode { get; set; } public string GenericPrintTemplateJson { get; set; } = ""; public bool AllowDesignedPageOverrides { get; set; } public bool RectoChapterStarts { get; set; }
+        public string Name { get; set; } = ""; public PublicationVendor Vendor { get; set; } public string Isbn { get; set; } = ""; public string PrintProductKey { get; set; } = ""; public PrintFinish PrintFinish { get; set; } public PrintCoverMode PrintCoverMode { get; set; } public PrintProjectUse PrintProjectUse { get; set; } public PrintIdentifierMode PrintIdentifierMode { get; set; } public PrintCoverSubmissionMode PrintCoverSubmissionMode { get; set; } public string PrintTemplateEvidenceJson { get; set; } = ""; public bool AllowDesignedPageOverrides { get; set; } public bool RectoChapterStarts { get; set; }
         public string Title { get; set; } = ""; public string Subtitle { get; set; } = ""; public string Author { get; set; } = ""; public string Language { get; set; } = ""; public string Publisher { get; set; } = ""; public string Copyright { get; set; } = ""; public string Description { get; set; } = "";
         public bool IncludeTableOfContents { get; set; } public bool IncludeVisibleTableOfContents { get; set; } public bool IncludeActSynopses { get; set; } public bool IncludeChapterSynopses { get; set; } public bool IncludeActHeadings { get; set; } public bool IncludeChapterHeadings { get; set; } public bool NumberActs { get; set; } public bool NumberChapters { get; set; }
         public double PageWidthInches { get; set; } public double PageHeightInches { get; set; } public double PageMarginInches { get; set; }
-        public static ReleaseDraft From(PublicationEditionView item) => new() { Name = item.Name, Vendor = item.Vendor, Isbn = item.Isbn, PrintProductKey = item.PrintProductKey, PrintFinish = item.PrintFinish, PrintCoverMode = item.PrintCoverMode, GenericPrintTemplateJson = item.GenericPrintTemplateJson, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, RectoChapterStarts = item.RectoChapterStarts, Title = item.TitleOverride, Subtitle = item.Subtitle, Author = item.Author, Language = PublicationLanguage.Normalize(item.Language), Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, PageWidthInches = item.PageWidthInches, PageHeightInches = item.PageHeightInches, PageMarginInches = item.PageMarginInches };
+        public static ReleaseDraft From(PublicationEditionView item) => new() { Name = item.Name, Vendor = item.Vendor, Isbn = item.Isbn, PrintProductKey = item.PrintProductKey, PrintFinish = item.PrintFinish, PrintCoverMode = item.PrintCoverMode, PrintProjectUse = item.PrintProjectUse, PrintIdentifierMode = item.PrintIdentifierMode, PrintCoverSubmissionMode = item.PrintCoverSubmissionMode, PrintTemplateEvidenceJson = item.PrintTemplateEvidenceJson, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, RectoChapterStarts = item.RectoChapterStarts, Title = item.TitleOverride, Subtitle = item.Subtitle, Author = item.Author, Language = PublicationLanguage.Normalize(item.Language), Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, PageWidthInches = item.PageWidthInches, PageHeightInches = item.PageHeightInches, PageMarginInches = item.PageMarginInches };
     }
 }

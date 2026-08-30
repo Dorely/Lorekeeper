@@ -28,13 +28,13 @@ public sealed record ProjectExportFile(
 public static class ProjectExportWarningText
 {
     public static string OutgoingReferencesOmitted(int referenceCount, string referencedProjectNames) =>
-        $"This format v25 export omits {referenceCount} direct project reference link(s) ({referencedProjectNames}). Imports never infer project links; recreate them manually after import.";
+        $"This format v26 export omits {referenceCount} direct project reference link(s) ({referencedProjectNames}). Imports never infer project links; recreate them manually after import.";
 }
 
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 25;
+    public const int CurrentFormatVersion = 26;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -314,7 +314,13 @@ public sealed record ProjectExportPublicationEdition(
     public string PrintProductKey { get; init; } = string.Empty;
     public PrintFinish PrintFinish { get; init; } = PrintFinish.Matte;
     public PrintCoverMode PrintCoverMode { get; init; } = PrintCoverMode.Simplex;
-    public string GenericPrintTemplateJson { get; init; } = string.Empty;
+    public PrintProjectUse PrintProjectUse { get; init; } = PrintProjectUse.ForSale;
+    public PrintIdentifierMode PrintIdentifierMode { get; init; } = PrintIdentifierMode.UserSuppliedIsbn;
+    public PrintCoverSubmissionMode PrintCoverSubmissionMode { get; init; } = PrintCoverSubmissionMode.FullWrapMeasured;
+    public string PrintTemplateEvidenceJson { get; init; } = string.Empty;
+    [JsonPropertyName("genericPrintTemplateJson")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacyGenericPrintTemplateJson { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? BodyFontSizePoints { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -408,6 +414,7 @@ public sealed record ProjectExportCoverDesign(
     long Revision)
 {
     public string SurfaceScenesJson { get; init; } = "{}";
+    public SpineReadingDirection SpineReadingDirection { get; init; } = SpineReadingDirection.TopToBottom;
 }
 
 public sealed record ProjectExportEditionOutlineItem(

@@ -171,7 +171,7 @@ dotnet test Lorekeeper.Tests\Lorekeeper.Tests.csproj
 
 Focused filters are appropriate during an edit loop, but final verification must
 cover the affected preservation boundary. For example, project-reference
-compatibility uses populated pre-reference migration fixtures and the real v25
+compatibility uses populated pre-reference migration fixtures and the real v26
 export/queued-import path:
 
 ```powershell

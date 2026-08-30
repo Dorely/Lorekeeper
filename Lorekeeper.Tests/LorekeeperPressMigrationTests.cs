@@ -426,7 +426,7 @@ public sealed class LorekeeperPressMigrationTests
                 var artifact = await db.PublicationArtifacts.AsNoTracking().SingleAsync();
 
                 Assert.Equal("kdp-paperback-v2", edition.VendorProfileVersion);
-                Assert.Equal("2026.08.1", edition.PrintRegistryVersion);
+                Assert.Equal("2026.08.2", edition.PrintRegistryVersion);
                 Assert.Equal("kdp-pb-bw-white", edition.PrintProductKey);
                 Assert.Equal(PrintFinish.Matte, edition.PrintFinish);
                 Assert.Equal(PrintCoverMode.Simplex, edition.PrintCoverMode);

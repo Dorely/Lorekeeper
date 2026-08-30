@@ -22,7 +22,13 @@ pub fn validate(path: &Path, expected: &PdfOptions) -> Result<InspectionEvidence
             format!("The written PDF cannot be parsed: {error}"),
         )
     })?;
-    let expected_version = if expected.pdf_x { "1.3" } else { "1.7" };
+    let expected_version = if expected.pdf_x {
+        "1.3"
+    } else if expected.pdf_a {
+        "1.4"
+    } else {
+        "1.7"
+    };
     if document.version != expected_version {
         return Err(Diagnostic::error(
             "PRESS_PDF_VERSION_INVALID",
@@ -278,6 +284,9 @@ pub fn validate(path: &Path, expected: &PdfOptions) -> Result<InspectionEvidence
             ));
         }
     }
+    if expected.pdf_a {
+        validate_pdfa(&document, catalog)?;
+    }
     Ok(InspectionEvidence {
         fonts_embedded,
         to_unicode,
@@ -285,6 +294,49 @@ pub fn validate(path: &Path, expected: &PdfOptions) -> Result<InspectionEvidence
         annotation_count,
         tagged: expected.tagged,
     })
+}
+
+fn validate_pdfa(document: &Document, catalog: &Dictionary) -> Result<(), Diagnostic> {
+    let metadata = catalog
+        .get(b"Metadata")
+        .ok()
+        .and_then(|value| dereference(document, value))
+        .and_then(|value| value.as_stream().ok())
+        .map(|stream| String::from_utf8_lossy(&stream.content));
+    if metadata.as_ref().is_none_or(|value| {
+        !value.contains("pdfaid:part=\"1\"") || !value.contains("pdfaid:conformance=\"B\"")
+    }) {
+        return Err(Diagnostic::error(
+            "PRESS_PDFA_METADATA_INVALID",
+            "PDF/A-1b identification metadata is missing.",
+        ));
+    }
+    let valid_intent = catalog
+        .get(b"OutputIntents")
+        .ok()
+        .and_then(|value| dereference(document, value))
+        .and_then(|value| value.as_array().ok())
+        .is_some_and(|intents| {
+            intents.iter().any(|value| {
+                dereference(document, value)
+                    .and_then(|value| value.as_dict().ok())
+                    .filter(|intent| {
+                        intent.get(b"S").ok().and_then(|value| value.as_name().ok())
+                            == Some(b"GTS_PDFA1")
+                    })
+                    .and_then(|intent| intent.get(b"DestOutputProfile").ok())
+                    .and_then(|value| dereference(document, value))
+                    .and_then(|value| value.as_stream().ok())
+                    .is_some_and(|profile| !profile.content.is_empty())
+            })
+        });
+    if !valid_intent {
+        return Err(Diagnostic::error(
+            "PRESS_PDFA_OUTPUT_INTENT_INVALID",
+            "PDF/A-1b requires an embedded output intent.",
+        ));
+    }
+    Ok(())
 }
 
 fn valid_internal_links(document: &Document, page: &Dictionary) -> bool {
@@ -834,6 +886,7 @@ mod tests {
         let path = root.path().join("candidate.pdf");
         let options = PdfOptions {
             pdf_x,
+            pdf_a: false,
             flatten_transparency: pdf_x,
             width: 432.0,
             height: 648.0,

@@ -611,10 +611,18 @@ public sealed partial class CompositionCanvasPreviewService(
             canvas.DrawLine(page.MidX, page.Top, page.MidX, page.Bottom, gutter);
         if (scene.Surface.TrimWidthPoints > 0 && scene.Surface.SpineWidthPoints > 0)
         {
-            var backEdge = bleed + (float)scene.Surface.TrimWidthPoints;
+            var backEdge = scene.Surface.BackRegionWidthPoints > 0
+                ? (float)scene.Surface.BackRegionWidthPoints
+                : bleed + (float)scene.Surface.TrimWidthPoints;
             var frontEdge = backEdge + (float)scene.Surface.SpineWidthPoints;
-            canvas.DrawLine(backEdge, page.Top, backEdge, page.Bottom, gutter);
-            canvas.DrawLine(frontEdge, page.Top, frontEdge, page.Bottom, gutter);
+            var regionTop = scene.Surface.CoverRegionHeightPoints > 0
+                ? (float)scene.Surface.CoverRegionYPoints
+                : page.Top;
+            var regionBottom = scene.Surface.CoverRegionHeightPoints > 0
+                ? regionTop + (float)scene.Surface.CoverRegionHeightPoints
+                : page.Bottom;
+            canvas.DrawLine(backEdge, regionTop, backEdge, regionBottom, gutter);
+            canvas.DrawLine(frontEdge, regionTop, frontEdge, regionBottom, gutter);
         }
 
         using var labelFont = new SKFont(SKTypeface.Default, 8);

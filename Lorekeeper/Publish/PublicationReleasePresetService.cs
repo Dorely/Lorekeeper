@@ -12,6 +12,9 @@ public sealed record PublicationReleasePreset(
     string? ProductKey,
     PrintFinish Finish,
     PrintCoverMode CoverMode,
+    PrintProjectUse ProjectUse,
+    PrintIdentifierMode IdentifierMode,
+    PrintCoverSubmissionMode CoverSubmissionMode,
     bool Bleed,
     bool AllowDesignedPageOverrides);
 
@@ -50,6 +53,11 @@ public sealed class PublicationReleasePresetService(IAppDatabaseOperationFactory
             product?.Key,
             PrintFinish.Matte,
             PrintCoverMode.Simplex,
+            product?.DefaultProjectUse ?? PrintProjectUse.ForSale,
+            destination == PublicationVendor.BarnesAndNoblePress
+                ? PrintIdentifierMode.VendorSku
+                : PrintIdentifierMode.UserSuppliedIsbn,
+            PrintCoverSubmissionMode.FullWrapMeasured,
             // Print cover profiles require bleed even when the interior has no
             // edge-to-edge artwork. Keeping the release bleed-enabled also lets
             // future full-bleed figures flow into the release without rebuilding

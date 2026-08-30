@@ -80,7 +80,13 @@ public static class CoverCompositionFactory
             sourceScene.Surface.TrimWidthPoints > 0 ? sourceScene.Surface.TrimWidthPoints : sourceEdition.PageWidthInches * 72,
             sourceScene.Surface.TrimHeightPoints > 0 ? sourceScene.Surface.TrimHeightPoints : sourceEdition.PageHeightInches * 72,
             sourceScene.Surface.BleedPoints,
-            sourceScene.Surface.SpineWidthPoints);
+            sourceScene.Surface.SpineWidthPoints)
+        {
+            BackRegionWidthPoints = sourceScene.Surface.BackRegionWidthPoints,
+            FrontRegionWidthPoints = sourceScene.Surface.FrontRegionWidthPoints,
+            CoverRegionYPoints = sourceScene.Surface.CoverRegionYPoints,
+            CoverRegionHeightPoints = sourceScene.Surface.CoverRegionHeightPoints,
+        };
         var front = Region(CompositionRegionConstraint.Front, sourceGeometry);
         var frontPercent = RegionBoundsPercent(CompositionRegionConstraint.Front, sourceGeometry);
         var selectedTopLevel = sourceScene.Objects.Where(item => item.GroupId is null
@@ -187,6 +193,7 @@ public static class CoverCompositionFactory
                 FillColor = "#ffffff", FontFamilyKey = "builtin:nunito",
                 FontWeight = role == CompositionSemanticRole.Heading1 ? 700 : 400,
                 FontSizePoints = role == CompositionSemanticRole.Heading1 ? 28 : 13,
+                RotationDegrees = binding == "spineText" ? SpineRotation(cover.SpineReadingDirection) : 0,
             });
         }
         AddText("title", CompositionRegionConstraint.Front, 12, CompositionSemanticRole.Heading1);
@@ -224,6 +231,10 @@ public static class CoverCompositionFactory
                 TrimWidthPoints = geometry.TrimWidthPoints,
                 TrimHeightPoints = geometry.TrimHeightPoints,
                 SpineWidthPoints = geometry.SpineWidthPoints,
+                BackRegionWidthPoints = geometry.BackRegionWidthPoints,
+                FrontRegionWidthPoints = geometry.FrontRegionWidthPoints,
+                CoverRegionYPoints = geometry.CoverRegionYPoints,
+                CoverRegionHeightPoints = geometry.CoverRegionHeightPoints,
             },
             Layers = [new CompositionLayer(layerId, "Cover", 0)], Objects = objects,
         });
@@ -245,6 +256,12 @@ public static class CoverCompositionFactory
                 scene.Surface.TrimHeightPoints,
                 scene.Surface.BleedPoints,
                 scene.Surface.SpineWidthPoints)
+            {
+                BackRegionWidthPoints = scene.Surface.BackRegionWidthPoints,
+                FrontRegionWidthPoints = scene.Surface.FrontRegionWidthPoints,
+                CoverRegionYPoints = scene.Surface.CoverRegionYPoints,
+                CoverRegionHeightPoints = scene.Surface.CoverRegionHeightPoints,
+            }
             : Geometry(edition, oldPageCount, surfaceRole);
         var newGeometry = Geometry(edition, newPageCount, surfaceRole);
         var objects = scene.Objects.Select(item =>
@@ -285,6 +302,10 @@ public static class CoverCompositionFactory
                 TrimWidthPoints = newGeometry.TrimWidthPoints,
                 TrimHeightPoints = newGeometry.TrimHeightPoints,
                 SpineWidthPoints = newGeometry.SpineWidthPoints,
+                BackRegionWidthPoints = newGeometry.BackRegionWidthPoints,
+                FrontRegionWidthPoints = newGeometry.FrontRegionWidthPoints,
+                CoverRegionYPoints = newGeometry.CoverRegionYPoints,
+                CoverRegionHeightPoints = newGeometry.CoverRegionHeightPoints,
             },
             Objects = objects,
         });
@@ -307,11 +328,20 @@ public static class CoverCompositionFactory
             trimWidth,
             trimHeight,
             (double)physical.BleedInches * 72,
-            (double)physical.SpineWidthInches * 72);
+            (double)physical.SpineWidthInches * 72)
+        {
+            BackRegionWidthPoints = (double)physical.BackRegionWidthInches * 72,
+            FrontRegionWidthPoints = (double)physical.FrontRegionWidthInches * 72,
+            CoverRegionYPoints = (double)physical.CoverRegionYInches * 72,
+            CoverRegionHeightPoints = (double)physical.CoverRegionHeightInches * 72,
+        };
     }
 
     private static CoverRegion Region(CompositionRegionConstraint region, CoverGeometry geometry) => region switch
     {
+        CompositionRegionConstraint.Back when geometry.HasMeasuredRegions => new(0, geometry.CoverRegionYPoints, geometry.BackRegionWidthPoints, geometry.CoverRegionHeightPoints),
+        CompositionRegionConstraint.Spine when geometry.HasMeasuredRegions => new(geometry.BackRegionWidthPoints, geometry.CoverRegionYPoints, Math.Max(geometry.SpineWidthPoints, .01), geometry.CoverRegionHeightPoints),
+        CompositionRegionConstraint.Front when geometry.HasMeasuredRegions => new(geometry.BackRegionWidthPoints + geometry.SpineWidthPoints, geometry.CoverRegionYPoints, geometry.FrontRegionWidthPoints, geometry.CoverRegionHeightPoints),
         CompositionRegionConstraint.Back => new(geometry.BleedPoints, geometry.BleedPoints, geometry.TrimWidthPoints, geometry.TrimHeightPoints),
         CompositionRegionConstraint.Spine => new(geometry.BleedPoints + geometry.TrimWidthPoints, geometry.BleedPoints, Math.Max(geometry.SpineWidthPoints, .01), geometry.TrimHeightPoints),
         CompositionRegionConstraint.Front => new(geometry.WidthPoints - geometry.BleedPoints - geometry.TrimWidthPoints, geometry.BleedPoints, geometry.TrimWidthPoints, geometry.TrimHeightPoints),
@@ -331,6 +361,38 @@ public static class CoverCompositionFactory
             HeightPercent = value.Height / geometry.HeightPoints * 100,
         };
     }
+
+    public static CompositionBounds RegionBoundsPercent(CompositionRegionConstraint region, CompositionSurface surface) =>
+        RegionBoundsPercent(region, new CoverGeometry(
+            surface.WidthPoints,
+            surface.HeightPoints,
+            surface.TrimWidthPoints,
+            surface.TrimHeightPoints,
+            surface.BleedPoints,
+            surface.SpineWidthPoints)
+        {
+            BackRegionWidthPoints = surface.BackRegionWidthPoints,
+            FrontRegionWidthPoints = surface.FrontRegionWidthPoints,
+            CoverRegionYPoints = surface.CoverRegionYPoints,
+            CoverRegionHeightPoints = surface.CoverRegionHeightPoints,
+        });
+
+    public static CompositionScene ApplySpineReadingDirection(
+        CompositionScene scene,
+        SpineReadingDirection direction) => scene with
+        {
+            Objects = scene.Objects.Select(item => item.TextBinding == "spineText"
+                ? item with { RotationDegrees = SpineRotation(direction) }
+                : item).ToList(),
+        };
+
+    public static double SpineRotation(SpineReadingDirection direction) => direction switch
+    {
+        SpineReadingDirection.TopToBottom => 90,
+        SpineReadingDirection.BottomToTop => -90,
+        SpineReadingDirection.Horizontal => 0,
+        _ => throw new ArgumentOutOfRangeException(nameof(direction)),
+    };
 
     private static CompositionBounds ToSurfaceBounds(CompositionBounds local, CoverRegion region, CoverGeometry surface) => new()
     {
@@ -378,4 +440,13 @@ public sealed record CoverGeometry(
     double TrimWidthPoints,
     double TrimHeightPoints,
     double BleedPoints,
-    double SpineWidthPoints);
+    double SpineWidthPoints)
+{
+    public double BackRegionWidthPoints { get; init; }
+    public double FrontRegionWidthPoints { get; init; }
+    public double CoverRegionYPoints { get; init; }
+    public double CoverRegionHeightPoints { get; init; }
+    public bool HasMeasuredRegions => BackRegionWidthPoints > 0
+        && FrontRegionWidthPoints > 0
+        && CoverRegionHeightPoints > 0;
+}

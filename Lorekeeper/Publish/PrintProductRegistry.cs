@@ -62,9 +62,13 @@ public sealed record PrintProductDefinition(
     string PdfProfile,
     PrintSpineModel SpineModel,
     int? MinimumSubmittedPages = null,
-    int? MaximumSubmittedPages = null)
+    int? MaximumSubmittedPages = null,
+    IReadOnlyList<PrintProjectUse>? SupportedProjectUses = null,
+    PrintProjectUse DefaultProjectUse = PrintProjectUse.ForSale)
 {
-    public bool RequiresCaseCover => CoverMaterial is PrintCoverMaterial.CaseLaminate or PrintCoverMaterial.JacketedCaseLaminate
+    public IReadOnlyList<PrintProjectUse> EffectiveSupportedProjectUses => SupportedProjectUses ?? [PrintProjectUse.ForSale];
+    public bool RequiresCaseCover => CoverMaterial == PrintCoverMaterial.CaseLaminate
+        || (CoverMaterial == PrintCoverMaterial.JacketedCaseLaminate && Vendor != PublicationVendor.BarnesAndNoblePress)
         || (Vendor == PublicationVendor.Generic && Binding == PrintBindingConstruction.CaseBound);
     public bool RequiresDustJacket => CoverMaterial is PrintCoverMaterial.DigitalClothBlueWithJacket
         or PrintCoverMaterial.DigitalClothGrayWithJacket
@@ -122,9 +126,13 @@ public sealed class PrintProductRegistry : IPrintProductRegistry
                 || (product.MinimumSubmittedPages ?? product.MinimumPages) <= 0
                 || (product.MaximumSubmittedPages ?? product.MaximumPages) < (product.MinimumSubmittedPages ?? product.MinimumPages)
                 || product.Finishes.Count == 0
-                || product.CoverModes.Count == 0)
+                || product.CoverModes.Count == 0
+                || product.EffectiveSupportedProjectUses.Count == 0
+                || !product.EffectiveSupportedProjectUses.Contains(product.DefaultProjectUse)
+                || product.EffectiveSupportedProjectUses.Distinct().Count() != product.EffectiveSupportedProjectUses.Count)
                 throw new InvalidDataException($"Print product '{product.Key}' has an incomplete identity or availability range.");
-            if (product.Vendor != PublicationVendor.Generic && product.SpineModel.Kind == "TemplateRequired")
+            if (product.Vendor is not (PublicationVendor.Generic or PublicationVendor.BarnesAndNoblePress)
+                && product.SpineModel.Kind == "TemplateRequired")
                 throw new InvalidDataException($"Specific print product '{product.Key}' cannot use generic printer geometry.");
             if (product.SpineModel.Kind == "FrozenLookup")
             {
@@ -160,9 +168,11 @@ public sealed class PrintProductRegistry : IPrintProductRegistry
         {
             (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp) => "kdp-pb-bw-white",
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark) => "ingram-pb-bw-white50",
+            (PublicationEditionFormat.Paperback, PublicationVendor.BarnesAndNoblePress) => "bn-pb-bw-cream50-6x9",
             (PublicationEditionFormat.Paperback, _) => "generic-perfectbound-template",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp) => "kdp-hc-bw-white",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark) => "ingram-hc-case-bw-white50",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.BarnesAndNoblePress) => "bn-hc-case-bw-cream50-6x9",
             (PublicationEditionFormat.Hardcover, _) => "generic-casebound-template",
             _ => throw new InvalidOperationException("Digital releases do not use a physical print product."),
         };
@@ -176,7 +186,7 @@ public sealed class PrintProductRegistry : IPrintProductRegistry
     };
 }
 
-public sealed record GenericPrintTemplate(
+public sealed record PrintTemplateEvidence(
     decimal TrimWidthInches,
     decimal TrimHeightInches,
     decimal BleedInches,
@@ -191,7 +201,21 @@ public sealed record GenericPrintTemplate(
     int MinimumPages,
     int MaximumPages,
     string PdfStandard,
-    string? UnderlayAssetId = null);
+    string? UnderlayAssetId = null,
+    string Provider = "",
+    string ProductKey = "",
+    int PageCount = 0,
+    string GeometryFingerprint = "",
+    decimal? SpineWidthInches = null,
+    decimal? FullCoverWidthInches = null,
+    decimal? FullCoverHeightInches = null,
+    decimal? FrontCoverWidthInches = null,
+    decimal? FrontCoverHeightInches = null,
+    decimal? BackCoverWidthInches = null,
+    decimal? BackCoverHeightInches = null,
+    string FullCoverTemplateSha256 = "",
+    string FrontCoverTemplateSha256 = "",
+    string BackCoverTemplateSha256 = "");
 
 public sealed record PrintCoverGeometry(
     int SubmittedPageCount,
@@ -208,7 +232,13 @@ public sealed record PrintCoverGeometry(
     decimal GutterInches,
     decimal FlapInches,
     decimal InsideSpineNoInkInches,
-    string GeometryFingerprint);
+    string GeometryFingerprint)
+{
+    public decimal BackRegionWidthInches { get; init; }
+    public decimal FrontRegionWidthInches { get; init; }
+    public decimal CoverRegionYInches { get; init; }
+    public decimal CoverRegionHeightInches { get; init; }
+}
 
 public interface IPrintGeometryService
 {
@@ -224,6 +254,7 @@ public sealed class PrintGeometryService(IPrintProductRegistry registry) : IPrin
         {
             PublicationVendor.AmazonKdp => submittedPageCount + (submittedPageCount % 2),
             PublicationVendor.IngramSpark => submittedPageCount + (submittedPageCount % 2),
+            PublicationVendor.BarnesAndNoblePress => submittedPageCount + (submittedPageCount % 2),
             _ => submittedPageCount,
         };
         if (submittedPageCount < (product.MinimumSubmittedPages ?? product.MinimumPages)
@@ -232,16 +263,26 @@ public sealed class PrintGeometryService(IPrintProductRegistry registry) : IPrin
         if (normalizedPages < product.MinimumPages || normalizedPages > product.MaximumPages)
             throw new InvalidOperationException($"{product.DisplayName} supports {product.MinimumPages}–{product.MaximumPages} pages; this interior has {normalizedPages}.");
 
-        var template = ReadGenericTemplate(edition, product);
+        var template = ReadTemplateEvidence(edition, product);
         if (template is not null)
         {
             if (Math.Abs(template.TrimWidthInches - (decimal)edition.PageWidthInches) > 0.0001m
                 || Math.Abs(template.TrimHeightInches - (decimal)edition.PageHeightInches) > 0.0001m)
-                throw new InvalidOperationException("The generic printer template trim does not match this release.");
+                throw new InvalidOperationException("The imported print template trim does not match this release.");
             if (normalizedPages < template.MinimumPages || normalizedPages > template.MaximumPages)
-                throw new InvalidOperationException($"The generic printer template supports {template.MinimumPages}-{template.MaximumPages} pages; this interior has {normalizedPages}.");
+                throw new InvalidOperationException($"The imported print template supports {template.MinimumPages}-{template.MaximumPages} pages; this interior has {normalizedPages}.");
             if (string.IsNullOrWhiteSpace(template.PdfStandard))
-                throw new InvalidOperationException("The generic printer template must declare its required PDF standard.");
+                throw new InvalidOperationException("The imported print template must declare its required PDF standard.");
+            if (product.Vendor == PublicationVendor.BarnesAndNoblePress
+                && (template.PageCount != normalizedPages
+                    || template.SpineWidthInches is null or <= 0
+                    || template.FullCoverWidthInches is null or <= 0
+                    || template.FullCoverHeightInches is null or <= 0
+                    || template.FrontCoverWidthInches is null or <= 0
+                    || template.FrontCoverHeightInches is null or <= 0
+                    || template.BackCoverWidthInches is null or <= 0
+                    || template.BackCoverHeightInches is null or <= 0))
+                throw new InvalidOperationException("The B&N Press template evidence must exactly match this interior page count and declare measured full, front, and back geometry.");
         }
         var spine = CalculateSpine(product, template, normalizedPages);
         var trimWidth = (decimal)edition.PageWidthInches;
@@ -270,6 +311,10 @@ public sealed class PrintGeometryService(IPrintProductRegistry registry) : IPrin
                 (0.125m, 0m, 0m, 0m, 0m, edition.PrintCoverMode == PrintCoverMode.Duplex ? spine + 0.125m : 0m,
                     2 * trimWidth + spine + 0.25m,
                     trimHeight + 0.25m),
+            PublicationVendor.BarnesAndNoblePress when template is not null =>
+                (template.BleedInches, template.WrapInches, template.HingeInches, template.GutterInches, template.FlapInches, 0m,
+                    template.FullCoverWidthInches!.Value,
+                    template.FullCoverHeightInches!.Value),
             _ when template is not null =>
                 (template.BleedInches, template.WrapInches, template.HingeInches, template.GutterInches, template.FlapInches, 0m,
                     2 * trimWidth + spine + 2 * template.BleedInches + 2 * template.WrapInches + 2 * template.GutterInches + 2 * template.FlapInches,
@@ -280,15 +325,35 @@ public sealed class PrintGeometryService(IPrintProductRegistry registry) : IPrin
         var fingerprintSource = FormattableString.Invariant($"{registry.Version}|{product.Key}|{edition.PrintFinish}|{edition.PrintCoverMode}|{trimWidth:0.####}|{trimHeight:0.####}|{normalizedPages}|{spine:0.#####}|{surfaceWidth:0.#####}|{surfaceHeight:0.#####}");
         var fingerprint = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(fingerprintSource))).ToLowerInvariant();
         return new(submittedPageCount, normalizedPages, normalizedPages, spine, surfaceWidth, surfaceHeight,
-            trimWidth, trimHeight, bleed, wrap, hinge, gutter, flap, insideNoInk, fingerprint);
+            trimWidth, trimHeight, bleed, wrap, hinge, gutter, flap, insideNoInk, fingerprint)
+        {
+            BackRegionWidthInches = product.Vendor == PublicationVendor.BarnesAndNoblePress
+                ? template?.BackCoverWidthInches ?? 0
+                : 0,
+            FrontRegionWidthInches = product.Vendor == PublicationVendor.BarnesAndNoblePress
+                ? template?.FrontCoverWidthInches ?? 0
+                : 0,
+            CoverRegionYInches = product.Vendor == PublicationVendor.BarnesAndNoblePress
+                ? Math.Max(0, (surfaceHeight - (template?.FrontCoverHeightInches ?? surfaceHeight)) / 2)
+                : 0,
+            CoverRegionHeightInches = product.Vendor == PublicationVendor.BarnesAndNoblePress
+                ? template?.FrontCoverHeightInches ?? 0
+                : 0,
+        };
     }
 
-    private static decimal CalculateSpine(PrintProductDefinition product, GenericPrintTemplate? template, int pages)
+    private static decimal CalculateSpine(PrintProductDefinition product, PrintTemplateEvidence? template, int pages)
     {
         if (product.SpineModel.Kind == "TemplateRequired")
         {
+            if (product.Vendor == PublicationVendor.BarnesAndNoblePress)
+            {
+                if (template?.PageCount != pages || template.SpineWidthInches is not decimal measuredSpine || measuredSpine <= 0)
+                    throw new InvalidOperationException("The B&N Press template evidence does not contain an exact spine measurement for this page count.");
+                return measuredSpine;
+            }
             if (template?.InchesPerPage is not decimal caliper)
-                throw new InvalidOperationException("The generic print template must declare its spine model.");
+                throw new InvalidOperationException("The imported print template must declare its spine model.");
             return decimal.Round(caliper * pages, 5, MidpointRounding.AwayFromZero);
         }
         if (product.SpineModel.Kind == "Caliper" && product.SpineModel.InchesPerPage is decimal inchesPerPage)
@@ -302,19 +367,24 @@ public sealed class PrintGeometryService(IPrintProductRegistry registry) : IPrin
         throw new InvalidOperationException($"Print product '{product.Key}' has no verified spine measurement for {pages} normalized pages.");
     }
 
-    private static GenericPrintTemplate? ReadGenericTemplate(PublicationEdition edition, PrintProductDefinition product)
+    private static PrintTemplateEvidence? ReadTemplateEvidence(PublicationEdition edition, PrintProductDefinition product)
     {
-        if (product.Vendor != PublicationVendor.Generic)
+        if (product.SpineModel.Kind != "TemplateRequired")
             return null;
-        if (string.IsNullOrWhiteSpace(edition.GenericPrintTemplateJson))
+        if (string.IsNullOrWhiteSpace(edition.PrintTemplateEvidenceJson))
             return null;
         try
         {
-            return JsonSerializer.Deserialize<GenericPrintTemplate>(edition.GenericPrintTemplateJson);
+            var evidence = JsonSerializer.Deserialize<PrintTemplateEvidence>(edition.PrintTemplateEvidenceJson)
+                ?? throw new InvalidOperationException("The imported print template evidence is empty.");
+            if (!string.IsNullOrWhiteSpace(evidence.ProductKey)
+                && !string.Equals(evidence.ProductKey, product.Key, StringComparison.Ordinal))
+                throw new InvalidOperationException("The imported print template belongs to a different print product.");
+            return evidence;
         }
         catch (JsonException exception)
         {
-            throw new InvalidOperationException("The generic printer template is invalid.", exception);
+            throw new InvalidOperationException("The imported print template evidence is invalid.", exception);
         }
     }
 }

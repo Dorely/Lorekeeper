@@ -80,6 +80,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         - Cover artwork always remains beneath canonical title, subtitle, author, spine, and back-cover copy. Adjust the artwork crop, opacity, and framing instead of trying to raise it above cover text.
         - For existing cover design work, call preview_publication_cover_canvas in annotated mode before mutating. After placing or arranging artwork, inspect another annotated whole-cover preview and correct clipping, hierarchy, protected regions, copy legibility, and collisions. Call the clean mode before reporting completion. You may skip only the initial preview for a genuinely empty cover.
         - Cover generation targets provide an exact target aspect, a provider-valid final-DPI recommendation, and a moderate provider-valid default raster for the selected cover surface or frame. Core front-cover targets use CoreCoverSurface/CoreCoverFrame without releaseId; release cover targets use CoverSurface/CoverFrame with releaseId. A different provider raster must be reported as a raster mismatch even when aspectMatched=true. For cover expansion, edit the approved source with a larger-framing brief that names the desired direction—left and right for a wider target, above and below for a taller target, or outward on all sides for an effectively unchanged aspect. Do not silently regenerate a materially different image or claim publication DPI from a proportional but smaller output.
+        - Full-wrap covers are one connected [BACK][SPINE][FRONT] composition even when a vendor package derives separate front/back PDFs. Before spine work, read and preview the exact Spine region. Default US/English spine copy to TopToBottom, honor an explicit BottomToTop or Horizontal request, and keep title/author as real text above generated art. Generate narrow spine artwork without baked-in words, preserve typography quiet zones, choose the closest supported raster without stretching, disclose expected crop loss, and place the unattached result with focal crop controls. After mutation inspect the annotated Spine and whole wrap, then clean versions after validation. When B&N separate-panel submission is selected, preserve the authored spine but treat it as vendor-generated and excluded from the upload package.
         - Treat perfect-bound outside and inside, case wrap, dust jacket, and Digital Cloth setup as distinct product surfaces. Read, mutate, and visually preview the exact surface being edited; never overwrite a reviewed surface while working on another. For duplex paperbacks, page one is outside and page two is inside, with the inside-spine no-ink region kept clear. For jacketed case products, case and jacket are independent required designs.
         - A cover-canvas preview is a visible chat attachment and model visual context when vision is available; it is not an image-library asset. If model visual delivery is unavailable, leave the preview visible for the user and report that you could not visually verify the cover instead of inferring appearance from scene JSON.
         - Require alt text or an explicit decorative decision for publication releases and preserve logical reading order. A Core reading PDF may complete with unresolved image accessibility decisions as explicit warnings; report those warnings and do not describe the copy as publication-ready.
@@ -133,6 +134,8 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         "patch_publication_cover_element",
         "place_project_image_on_release_cover",
         "add_project_image_to_release_cover",
+        "fill_project_image_on_publication_cover_region",
+        "set_publication_cover_spine_direction",
         "generate_project_image",
         "edit_project_image",
         "resize_project_image",
@@ -793,7 +796,7 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                     : null);
         var selectedObjectId = toolName is "patch_publication_cover_element" or "place_project_image_on_release_cover"
             ? ReadGuid(argumentsJson, "targetId")
-            : toolName == "add_project_image_to_release_cover"
+            : toolName is "add_project_image_to_release_cover" or "fill_project_image_on_publication_cover_region"
                 ? ReadGuid(resultJson, "selectId")
                 : null;
         return editionId is { } id

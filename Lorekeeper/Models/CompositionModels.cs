@@ -92,6 +92,10 @@ public sealed record CompositionSurface
     public double TrimWidthPoints { get; init; }
     public double TrimHeightPoints { get; init; }
     public double SpineWidthPoints { get; init; }
+    public double BackRegionWidthPoints { get; init; }
+    public double FrontRegionWidthPoints { get; init; }
+    public double CoverRegionYPoints { get; init; }
+    public double CoverRegionHeightPoints { get; init; }
 }
 
 public sealed record CompositionLayer(

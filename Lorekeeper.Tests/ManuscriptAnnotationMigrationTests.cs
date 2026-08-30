@@ -101,6 +101,9 @@ public sealed class ManuscriptAnnotationMigrationTests
                 await DatabaseStartupMigrationService.EnsureRectoChapterStartsCompatibilityColumnsAsync(
                     db,
                     CancellationToken.None);
+                await DatabaseStartupMigrationService.EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(
+                    db,
+                    CancellationToken.None);
                 await LegacyProjectSeed.InsertAsync(
                     db,
                     projectId,
@@ -138,6 +141,9 @@ public sealed class ManuscriptAnnotationMigrationTests
                 });
                 await db.SaveChangesAsync();
                 await DatabaseStartupMigrationService.RemoveRectoChapterStartsCompatibilityColumnsAsync(
+                    db,
+                    CancellationToken.None);
+                await DatabaseStartupMigrationService.RemoveBarnesAndNoblePrintCompatibilityColumnsAsync(
                     db,
                     CancellationToken.None);
             }
@@ -255,6 +261,9 @@ public sealed class ManuscriptAnnotationMigrationTests
             {
                 await db.GetService<IMigrator>().MigrateAsync(AuthoringHistoryPreviousMigration);
                 await DatabaseStartupMigrationService.EnsureRectoChapterStartsCompatibilityColumnsAsync(
+                    db,
+                    CancellationToken.None);
+                await DatabaseStartupMigrationService.EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(
                     db,
                     CancellationToken.None);
                 await LegacyProjectSeed.InsertAsync(

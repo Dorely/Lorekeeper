@@ -17,7 +17,7 @@ fn main() {
             println!(
                 "{}",
                 serde_json::to_string(&json!({
-                    "protocolVersion": 8,
+                    "protocolVersion": 9,
                     "rendererVersion": env!("CARGO_PKG_VERSION"),
                     "printProductRegistryVersion": "2026.08.1",
                     "printProductRegistrySha256": registry_hash,
@@ -26,7 +26,8 @@ fn main() {
                         "generic-digital-pdf-v1",
                         "ingram-print-pdfx1a-v2",
                         "kdp-paperback-v2",
-                        "kdp-hardcover-v1"
+                        "kdp-hardcover-v1",
+                        "bn-print-pdfa1b-v1"
                     ],
                     "machineRuntimeDependencies": [],
                     "limits": {

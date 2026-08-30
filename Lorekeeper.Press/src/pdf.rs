@@ -49,6 +49,7 @@ const ANNOTATION_OFFSET: i32 = 3_000;
 #[derive(Debug, Clone)]
 pub struct PdfOptions {
     pub pdf_x: bool,
+    pub pdf_a: bool,
     pub flatten_transparency: bool,
     pub width: f32,
     pub height: f32,
@@ -74,7 +75,7 @@ pub enum ImageColorSpace {
 }
 
 impl PdfOptions {
-    pub fn interior(request: &RenderRequest, pdf_x: bool) -> Self {
+    pub fn interior(request: &RenderRequest, pdf_x: bool, pdf_a: bool) -> Self {
         let trim_width = request.trim.width_inches * 72.0;
         let trim_height = request.trim.height_inches * 72.0;
         let interior_bleed = request.trim.bleed_inches * 72.0;
@@ -82,7 +83,8 @@ impl PdfOptions {
         let height = trim_height + interior_bleed * 2.0;
         Self {
             pdf_x,
-            flatten_transparency: pdf_x || request.profile.starts_with("kdp-"),
+            pdf_a,
+            flatten_transparency: pdf_x || pdf_a || request.profile.starts_with("kdp-"),
             width,
             height,
             trim: Rect::new(0.0, 0.0, width, height),
@@ -132,6 +134,7 @@ impl PdfOptions {
     pub fn cover(
         request: &RenderRequest,
         pdf_x: bool,
+        pdf_a: bool,
         width: f32,
         height: f32,
         _spine_width: f32,
@@ -142,7 +145,8 @@ impl PdfOptions {
             .map_or(0.0, |cover| cover.bleed_inches * 72.0);
         Self {
             pdf_x,
-            flatten_transparency: pdf_x || request.profile.starts_with("kdp-"),
+            pdf_a,
+            flatten_transparency: pdf_x || pdf_a || request.profile.starts_with("kdp-"),
             width,
             height,
             trim: Rect::new(
@@ -244,11 +248,21 @@ where
         ));
     }
     let mut pdf = Pdf::new();
-    pdf.set_version(1, if options.pdf_x { 3 } else { 7 });
+    pdf.set_version(
+        1,
+        if options.pdf_x {
+            3
+        } else if options.pdf_a {
+            4
+        } else {
+            7
+        },
+    );
     let catalog_id = Ref::new(1);
     let pages_id = Ref::new(2);
     let info_id = Ref::new(3);
     let icc_id = Ref::new(4);
+    let metadata_id = Ref::new(5);
     let struct_root_id = Ref::new(90);
     let document_struct_id = Ref::new(91);
     let outline_id = Ref::new(92);
@@ -266,6 +280,9 @@ where
             catalog.mark_info().marked(true).suspects(false);
             catalog.lang(TextStr(&options.language));
         }
+        if options.pdf_a {
+            catalog.metadata(metadata_id);
+        }
         if !bookmarks.is_empty() {
             catalog.outlines(outline_id);
         }
@@ -279,7 +296,37 @@ where
                 .registry_name(TextStr("https://registry.color.org"))
                 .info(TextStr("CGATS21 CRPC1 CMYK 240% total area coverage"))
                 .dest_output_profile(icc_id);
+        } else if options.pdf_a {
+            catalog
+                .output_intents()
+                .push()
+                .subtype(OutputIntentSubtype::PDFA)
+                .output_condition(TextStr("CGATS TR 006 / CRPC1 240% TAC"))
+                .output_condition_identifier(TextStr("CGATS21_CRPC1"))
+                .registry_name(TextStr("https://registry.color.org"))
+                .info(TextStr("CGATS21 CRPC1 CMYK 240% total area coverage"))
+                .dest_output_profile(icc_id);
         }
+    }
+
+    if options.pdf_a {
+        let title = xml_escape(&options.title);
+        let author = xml_escape(&options.author);
+        let xmp = format!(
+            r#"<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/" pdfaid:part="1" pdfaid:conformance="B"/>
+  <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">
+   <dc:title><rdf:Alt><rdf:li xml:lang="x-default">{title}</rdf:li></rdf:Alt></dc:title>
+   <dc:creator><rdf:Seq><rdf:li>{author}</rdf:li></rdf:Seq></dc:creator>
+  </rdf:Description>
+  <rdf:Description rdf:about="" xmlns:pdf="http://ns.adobe.com/pdf/1.3/" pdf:Producer="Lorekeeper Press"/>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>"#
+        );
+        pdf.metadata(metadata_id, xmp.as_bytes());
     }
     {
         let mut info = pdf.document_info(info_id);
@@ -1202,7 +1249,7 @@ where
         let unicode_bytes = unicode.finish();
         pdf.cmap(to_unicode_id, unicode_bytes.as_slice());
     }
-    if options.pdf_x {
+    if options.pdf_x || options.pdf_a {
         let compressed_icc = compress(ICC_PROFILE)?;
         let mut profile = pdf.icc_profile(icc_id, &compressed_icc);
         profile.n(4);
@@ -1210,6 +1257,15 @@ where
         profile.filter(Filter::FlateDecode);
     }
     Ok(pdf.finish())
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 fn font_resource_name(face: FontFace) -> String {

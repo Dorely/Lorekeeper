@@ -556,7 +556,7 @@ public sealed class ProjectVersionRestoreService(
         var manifest = import.Artifact.Manifest;
         var payload = import.Artifact.Payload;
         if (!string.Equals(manifest.FormatId, VersionHistorySnapshotContract.FormatId, StringComparison.Ordinal)
-            || manifest.SchemaVersion != VersionHistorySnapshotContract.SchemaVersion
+            || !VersionHistorySnapshotContract.CanReadSchema(manifest.SchemaVersion)
             || !manifest.IncludedAreas.SequenceEqual(VersionHistorySnapshotContract.IncludedAreas, StringComparer.Ordinal)
             || !IsSha256(manifest.ContentHash)
             || !IsSha256(manifest.ManifestHash)
@@ -1772,7 +1772,12 @@ public sealed class ProjectVersionRestoreService(
                 PrintProductKey = editionData.PrintProductKey,
                 PrintFinish = editionData.PrintFinish,
                 PrintCoverMode = editionData.PrintCoverMode,
-                GenericPrintTemplateJson = editionData.GenericPrintTemplateJson,
+                PrintProjectUse = editionData.PrintProjectUse,
+                PrintIdentifierMode = editionData.PrintIdentifierMode,
+                PrintCoverSubmissionMode = editionData.PrintCoverSubmissionMode,
+                PrintTemplateEvidenceJson = string.IsNullOrWhiteSpace(editionData.PrintTemplateEvidenceJson)
+                    ? editionData.LegacyGenericPrintTemplateJson ?? string.Empty
+                    : editionData.PrintTemplateEvidenceJson,
                 Bleed = editionData.Bleed,
                 AllowDesignedPageOverrides = editionData.AllowDesignedPageOverrides,
                 RectoChapterStarts = editionData.RectoChapterStarts,

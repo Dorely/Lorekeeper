@@ -37,6 +37,8 @@ public sealed record PublicationCoverDesignView(
     public long? CoreBookRevision { get; init; }
     public IReadOnlyDictionary<string, string> SurfaceScenes { get; init; } = new Dictionary<string, string>();
     public IReadOnlyList<PublicationCoverDiagnostic> DiagnosticDetails { get; init; } = [];
+    public SpineReadingDirection SpineReadingDirection { get; init; } = SpineReadingDirection.TopToBottom;
+    public IReadOnlyList<CoverRegionDescriptor> Regions { get; init; } = [];
 }
 
 public sealed record PublicationCoverTemplate(
@@ -51,7 +53,25 @@ public sealed record PublicationCoverTemplate(
     double BarcodeWidthInches,
     double BarcodeHeightInches,
     string Fingerprint,
-    bool IsAcknowledged);
+    bool IsAcknowledged)
+{
+    public double BackRegionWidthInches { get; init; }
+    public double FrontRegionWidthInches { get; init; }
+    public double CoverRegionYInches { get; init; }
+    public double CoverRegionHeightInches { get; init; }
+}
+
+public sealed record CoverRegionDescriptor(
+    CompositionRegionConstraint Role,
+    CompositionBounds Bounds,
+    double WidthInches,
+    double HeightInches,
+    double AspectRatio,
+    double SafeInsetInches,
+    IReadOnlyList<string> Guides,
+    string GeometryFingerprint,
+    bool ParticipatesInOutput,
+    string OutputRole);
 
 public sealed record PublicationCoverDesignUpdate(
     string Title,
@@ -64,7 +84,8 @@ public sealed record PublicationCoverDesignUpdate(
     double ImageCropXPercent,
     double ImageCropYPercent,
     long ExpectedRevision,
-    bool AcknowledgeTemplate);
+    bool AcknowledgeTemplate,
+    SpineReadingDirection? SpineReadingDirection = null);
 
 public interface IPublicationCoverService
 {
@@ -262,7 +283,18 @@ public sealed class PublicationCoverService(
         design.SpineText = update.SpineText.Trim();
         design.BackCopy = update.BackCopy.Trim();
         design.BackgroundColor = update.BackgroundColor.Trim().ToLowerInvariant();
-        design.BarcodeMode = update.BarcodeMode;
+        design.BarcodeMode = edition.Vendor == PublicationVendor.BarnesAndNoblePress
+            ? PublicationBarcodeMode.VendorOverlay
+            : update.BarcodeMode;
+        if (update.SpineReadingDirection is { } spineReadingDirection)
+        {
+            design.SpineReadingDirection = spineReadingDirection;
+            var storedScene = JsonSerializer.Deserialize<CompositionScene>(design.CompositionSceneJson, ManuscriptCodec.JsonOptions);
+            if (storedScene is not null)
+                design.CompositionSceneJson = JsonSerializer.Serialize(
+                    CoverCompositionFactory.ApplySpineReadingDirection(storedScene, spineReadingDirection),
+                    ManuscriptCodec.JsonOptions);
+        }
         design.ImageCropXPercent = update.ImageCropXPercent;
         design.ImageCropYPercent = update.ImageCropYPercent;
         design.AcknowledgedTemplateFingerprint = update.AcknowledgeTemplate
@@ -382,6 +414,9 @@ public sealed class PublicationCoverService(
         surfaceRole = NormalizeSurfaceRole(edition, surfaceRole);
         var template = await TemplateAsync(edition, design, cancellationToken, surfaceRole);
         scene = ReflowToCurrentGeometry(edition, design, template, scene, out _, surfaceRole);
+        scene = CoverCompositionFactory.ApplySpineReadingDirection(
+            scene,
+            update.SpineReadingDirection ?? design.SpineReadingDirection);
         ValidateAuthoringScene(scene, edition, template);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         design.Title = update.Title.Trim();
@@ -390,7 +425,11 @@ public sealed class PublicationCoverService(
         design.SpineText = update.SpineText.Trim();
         design.BackCopy = update.BackCopy.Trim();
         design.BackgroundColor = update.BackgroundColor.Trim().ToLowerInvariant();
-        design.BarcodeMode = update.BarcodeMode;
+        design.BarcodeMode = edition.Vendor == PublicationVendor.BarnesAndNoblePress
+            ? PublicationBarcodeMode.VendorOverlay
+            : update.BarcodeMode;
+        if (update.SpineReadingDirection is { } spineReadingDirection)
+            design.SpineReadingDirection = spineReadingDirection;
         design.ImageCropXPercent = update.ImageCropXPercent;
         design.ImageCropYPercent = update.ImageCropYPercent;
         design.AcknowledgedTemplateFingerprint = update.AcknowledgeTemplate
@@ -480,6 +519,7 @@ public sealed class PublicationCoverService(
                 design.Author = saved.Author;
                 design.SpineText = saved.SpineText;
                 design.BackCopy = saved.BackCopy;
+                design.SpineReadingDirection = saved.SpineReadingDirection;
                 design.BackgroundColor = saved.BackgroundColor;
                 design.BarcodeMode = saved.BarcodeMode;
                 design.ImageCropXPercent = saved.ImageCropXPercent;
@@ -521,6 +561,7 @@ public sealed class PublicationCoverService(
             design.Author,
             design.SpineText,
             design.BackCopy,
+            design.SpineReadingDirection,
             design.BackgroundColor,
             design.BarcodeMode,
             design.ImageCropXPercent,
@@ -775,7 +816,11 @@ public sealed class PublicationCoverService(
         if (edition.Vendor == PublicationVendor.IngramSpark
             && design.BarcodeMode == PublicationBarcodeMode.VendorOverlay)
             AddDiagnostic(diagnosticDetails, "error", "COVER_BARCODE_REQUIRED", "Ingram covers must contain Lorekeeper's ISBN-13 barcode.");
-        if (template.SpineWidthInches < 0.24 && !string.IsNullOrWhiteSpace(design.SpineText))
+        if (edition.Vendor == PublicationVendor.BarnesAndNoblePress
+            && template.PageCount is > 0 and <= 50
+            && !string.IsNullOrWhiteSpace(design.SpineText))
+            AddDiagnostic(diagnosticDetails, "error", "COVER_SPINE_TEXT_DISABLED", "B&N Press does not allow spine text for books with 50 pages or fewer.");
+        else if (template.SpineWidthInches < 0.24 && !string.IsNullOrWhiteSpace(design.SpineText))
             AddDiagnostic(diagnosticDetails, "warning", "COVER_SPINE_TEXT_DISABLED", "Spine text is disabled below the initial 0.24-inch safety threshold.");
         if (!template.IsAcknowledged)
             AddDiagnostic(diagnosticDetails, "warning", "COVER_TEMPLATE_REVIEW_REQUIRED", "Cover geometry changed; review and acknowledge the current template before preparing files.");
@@ -817,7 +862,42 @@ public sealed class PublicationCoverService(
         {
             SurfaceScenes = storedSurfaceScenes,
             DiagnosticDetails = diagnosticDetails,
+            SpineReadingDirection = design.SpineReadingDirection,
+            Regions = DescribeRegions(edition, template, expectedGeometry),
         };
+    }
+
+    private static IReadOnlyList<CoverRegionDescriptor> DescribeRegions(
+        PublicationEdition edition,
+        PublicationCoverTemplate template,
+        CoverGeometry geometry)
+    {
+        return new[]
+        {
+            (CompositionRegionConstraint.Back, geometry.HasMeasuredRegions ? geometry.BackRegionWidthPoints / 72 : template.TrimWidthInches, geometry.HasMeasuredRegions ? geometry.CoverRegionHeightPoints / 72 : template.TrimHeightInches, "back-cover"),
+            (CompositionRegionConstraint.Spine, Math.Max(template.SpineWidthInches, .0001), geometry.HasMeasuredRegions ? geometry.CoverRegionHeightPoints / 72 : template.TrimHeightInches, "spine"),
+            (CompositionRegionConstraint.Front, geometry.HasMeasuredRegions ? geometry.FrontRegionWidthPoints / 72 : template.TrimWidthInches, geometry.HasMeasuredRegions ? geometry.CoverRegionHeightPoints / 72 : template.TrimHeightInches, "front-cover"),
+        }.Select(item =>
+        {
+            var participates = item.Item1 != CompositionRegionConstraint.Spine
+                || edition.PrintCoverSubmissionMode == PrintCoverSubmissionMode.FullWrapMeasured;
+            var fingerprintSource = $"{template.Fingerprint}|{item.Item1}|{item.Item2:0.#####}|{item.Item3:0.#####}|{participates}";
+            return new CoverRegionDescriptor(
+                item.Item1,
+                CoverCompositionFactory.RegionBoundsPercent(item.Item1, geometry),
+                item.Item2,
+                item.Item3,
+                item.Item2 / item.Item3,
+                template.SafetyInches,
+                item.Item1 == CompositionRegionConstraint.Spine
+                    ? ["bleed", "trim", "spine-safe-area", "fold"]
+                    : item.Item1 == CompositionRegionConstraint.Back
+                        ? ["bleed", "trim", "safe-area", "barcode-reserve"]
+                        : ["bleed", "trim", "safe-area"],
+                Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprintSource))),
+                participates,
+                participates ? item.Item4 : "vendor-generated");
+        }).ToArray();
     }
 
     private static IReadOnlyDictionary<string, string> ReadSurfaceScenes(string json)
@@ -1063,10 +1143,20 @@ public sealed class PublicationCoverService(
             ? pages
             : printProducts.GetRequired(edition.PrintProductKey).MinimumPages;
         var geometry = printGeometry.Calculate(edition, provisionalPages, surfaceRole);
+        var evidence = edition.Vendor == PublicationVendor.BarnesAndNoblePress
+            && !string.IsNullOrWhiteSpace(edition.PrintTemplateEvidenceJson)
+                ? JsonSerializer.Deserialize<PrintTemplateEvidence>(edition.PrintTemplateEvidenceJson)
+                : null;
         return new(pages, edition.PageWidthInches, edition.PageHeightInches, (double)geometry.BleedInches,
             (double)geometry.SpineWidthInches, (double)geometry.SurfaceWidthInches, (double)geometry.SurfaceHeightInches,
-            0.25, 2, 1.2, geometry.GeometryFingerprint,
-            string.Equals(geometry.GeometryFingerprint, design.AcknowledgedTemplateFingerprint, StringComparison.Ordinal));
+            evidence is null ? 0.25 : (double)evidence.SafeInches, 2, 1.2, geometry.GeometryFingerprint,
+            string.Equals(geometry.GeometryFingerprint, design.AcknowledgedTemplateFingerprint, StringComparison.Ordinal))
+        {
+            BackRegionWidthInches = (double)geometry.BackRegionWidthInches,
+            FrontRegionWidthInches = (double)geometry.FrontRegionWidthInches,
+            CoverRegionYInches = (double)geometry.CoverRegionYInches,
+            CoverRegionHeightInches = (double)geometry.CoverRegionHeightInches,
+        };
     }
 
     private async Task<PublicationEdition> GetEditionAsync(
@@ -1102,6 +1192,7 @@ public sealed class PublicationCoverService(
             // calculated template proves that it fits.
             SpineText = string.Empty,
             BackCopy = edition.Description,
+            SpineReadingDirection = SpineReadingDirection.TopToBottom,
             BarcodeMode = edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
                 ? PublicationBarcodeMode.None
                 : edition.Vendor == PublicationVendor.IngramSpark
@@ -1223,6 +1314,8 @@ public sealed class PublicationCoverService(
     {
         if (!Enum.IsDefined(update.BarcodeMode))
             throw new ArgumentException("Barcode mode is invalid.");
+        if (update.SpineReadingDirection is { } direction && !Enum.IsDefined(direction))
+            throw new ArgumentException("Spine reading direction is invalid.");
         if (update.Title.Trim().Length > 160
             || update.Subtitle.Trim().Length > 240
             || update.Author.Trim().Length > 160

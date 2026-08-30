@@ -173,7 +173,7 @@ Assistant parity remains compact:
 Use a protected startup migration to advance manuscript-v4 documents to v5
 while preserving IDs, text, styles, Figures, Designed Pages, edition snapshots,
 compositions, sidecar review annotations, and artifacts. Project export/import
-is already v25 for the paginated chapter-start policy; advance it again only if
+is already v26 for the B&N print-preparation contract; advance it again only if
 the schema-v5 payload requires another boundary version.
 
 Only approved Lorekeeper migration/import fixtures are added or changed. Press

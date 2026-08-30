@@ -104,6 +104,7 @@ public sealed record PublicationEditionSummary(
 {
     public string PrintProductKey { get; init; } = string.Empty;
     public PrintCoverMode PrintCoverMode { get; init; }
+    public PrintProjectUse PrintProjectUse { get; init; } = PrintProjectUse.ForSale;
 }
 
 public sealed record PublicationEditionView(
@@ -143,13 +144,16 @@ public sealed record PublicationEditionView(
     string PrintProductKey,
     PrintFinish PrintFinish,
     PrintCoverMode PrintCoverMode,
-    string GenericPrintTemplateJson,
+    string PrintTemplateEvidenceJson,
     bool Bleed,
     bool AllowDesignedPageOverrides,
     bool RectoChapterStarts)
 {
     public bool InheritsCoreCover { get; init; }
     public bool EditionSpecificContentEnabled { get; init; }
+    public PrintProjectUse PrintProjectUse { get; init; } = PrintProjectUse.ForSale;
+    public PrintIdentifierMode PrintIdentifierMode { get; init; } = PrintIdentifierMode.UserSuppliedIsbn;
+    public PrintCoverSubmissionMode PrintCoverSubmissionMode { get; init; } = PrintCoverSubmissionMode.FullWrapMeasured;
 }
 
 public sealed record PublicationEditionCreate(
@@ -165,7 +169,7 @@ public sealed record PublicationReleaseOverridePatch(
     string? PrintProductKey = null,
     PrintFinish? PrintFinish = null,
     PrintCoverMode? PrintCoverMode = null,
-    string? GenericPrintTemplateJson = null,
+    string? PrintTemplateEvidenceJson = null,
     bool? AllowDesignedPageOverrides = null,
     bool? RectoChapterStarts = null,
     string? Title = null,
@@ -187,7 +191,10 @@ public sealed record PublicationReleaseOverridePatch(
     double? PageWidthInches = null,
     double? PageHeightInches = null,
     double? PageMarginInches = null,
-    IReadOnlyList<PublicationEditionOverrideField>? ResetFields = null);
+    IReadOnlyList<PublicationEditionOverrideField>? ResetFields = null,
+    PrintProjectUse? PrintProjectUse = null,
+    PrintIdentifierMode? PrintIdentifierMode = null,
+    PrintCoverSubmissionMode? PrintCoverSubmissionMode = null);
 
 public sealed record PublicationEditionCompareView(
     PublicationEditionSummary Left,

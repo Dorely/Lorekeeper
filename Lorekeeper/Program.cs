@@ -306,6 +306,7 @@ builder.Services.AddScoped<IPublicationSectionService, PublicationSectionService
 builder.Services.AddScoped<IPublicationReleasePresetService, PublicationReleasePresetService>();
 builder.Services.AddSingleton<IPrintProductRegistry, PrintProductRegistry>();
 builder.Services.AddScoped<IPrintGeometryService, PrintGeometryService>();
+builder.Services.AddScoped<IPrintTemplateEvidenceService, PrintTemplateEvidenceService>();
 builder.Services.AddScoped<IPrintProductMigrationService, PrintProductMigrationService>();
 builder.Services.AddScoped<IPublicationEffectiveConfigurationResolver, PublicationEffectiveConfigurationResolver>();
 builder.Services.AddScoped<IPublicationEditionService, PublicationEditionService>();

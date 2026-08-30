@@ -6,7 +6,8 @@ namespace Lorekeeper.VersionHistory.Snapshots;
 public static class VersionHistorySnapshotContract
 {
     public const string FormatId = "lorekeeper.version-history-snapshot";
-    public const int SchemaVersion = 1;
+    public const int MinimumReadableSchemaVersion = 1;
+    public const int SchemaVersion = 2;
     public const string ManifestFileName = "manifest.json";
 
     public static readonly IReadOnlyList<string> IncludedAreas =
@@ -20,6 +21,9 @@ public static class VersionHistorySnapshotContract
         "composition",
         "publication",
     ];
+
+    public static bool CanReadSchema(int schemaVersion) =>
+        schemaVersion is >= MinimumReadableSchemaVersion and <= SchemaVersion;
 }
 
 public sealed record VersionHistorySnapshotFile(

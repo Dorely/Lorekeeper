@@ -53,6 +53,7 @@ public sealed class DatabaseStartupMigrationService(
     internal const string ReviewWorkflowAdditiveMigrationId = "20260826200707_PrepareReviewWorkflowTransition";
     internal const string ReviewWorkflowCleanupMigrationId = "20260826200708_FinalizeReviewWorkflowTransition";
     private const string RectoChapterStartsMigrationId = "20260830174820_AddConfigurableRectoChapterStarts";
+    private const string BarnesAndNoblePrintMigrationId = "20260830201715_BarnesAndNoblePrintPublishingV31";
 
     public async Task<bool> ApplyAsync(
         CancellationToken cancellationToken = default,
@@ -67,6 +68,7 @@ public sealed class DatabaseStartupMigrationService(
         await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
+        await EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureReviewPreferenceCompatibilityColumnAsync(db, cancellationToken);
         await EnsureAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
@@ -136,6 +138,7 @@ public sealed class DatabaseStartupMigrationService(
         Report(progress, "Checking authoring pages", "Preparing active page layouts and project page setup.", 6, totalSteps);
         await EnsurePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
         await authoringPageMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
@@ -153,6 +156,7 @@ public sealed class DatabaseStartupMigrationService(
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
+        await EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
         await RemovePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         Report(progress, "Checking publication sections", "Validating front matter, body order, and back matter.", 9, totalSteps);
         await publicationSectionMigration.ApplyPendingAsync(db, cancellationToken);
@@ -166,10 +170,12 @@ public sealed class DatabaseStartupMigrationService(
         {
             if (!migrationsBeforePrintProducts.Contains(PrintProductMigrationService.AdditiveMigrationId))
             {
+                await RemoveBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
                 await RemovePrintProductCompatibilityColumnsAsync(db, cancellationToken);
                 await db.GetService<IMigrator>().MigrateAsync(
                     PrintProductMigrationService.AdditiveMigrationId,
                     cancellationToken);
+                await EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
                 await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
                 await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
             }
@@ -196,6 +202,7 @@ public sealed class DatabaseStartupMigrationService(
             await db.GetService<IMigrator>().MigrateAsync(
                 PrintProductMigrationService.CleanupMigrationId,
                 cancellationToken);
+        await EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
         // Historical cleanup migrations rebuild PublicationEditions from their
         // own immutable models. Restore the compatibility column, remove it at
         // the current boundary, then let the additive migration own it.
@@ -214,6 +221,7 @@ public sealed class DatabaseStartupMigrationService(
         if (await recovery.IsRecoveryRequiredAsync(cancellationToken))
             return false;
         await RemoveRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
+        await RemoveBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
         await db.GetService<IMigrator>().MigrateAsync(cancellationToken: cancellationToken);
         await CleanupDetachedCompositionsAsync(db, cancellationToken);
         await publicationSectionMigration.RepairSemanticRevisionDriftAsync(db, cancellationToken);
@@ -1969,6 +1977,70 @@ public sealed class DatabaseStartupMigrationService(
             await db.Database.ExecuteSqlRawAsync(
                 "ALTER TABLE \"PublicationCoverDesigns\" DROP COLUMN \"SurfaceScenesJson\";",
                 cancellationToken);
+        db.ChangeTracker.Clear();
+    }
+
+    internal static async Task EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(BarnesAndNoblePrintMigrationId)) return;
+        if (await HasTableAsync(db, "PublicationEditions", cancellationToken)
+            && !await HasColumnAsync(db, "PublicationEditions", "PrintTemplateEvidenceJson", cancellationToken))
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"PublicationEditions\" ADD COLUMN \"PrintTemplateEvidenceJson\" TEXT NOT NULL DEFAULT '';",
+                cancellationToken);
+        if (await HasTableAsync(db, "PublicationEditions", cancellationToken)
+            && await HasColumnAsync(db, "PublicationEditions", "GenericPrintTemplateJson", cancellationToken))
+            await db.Database.ExecuteSqlRawAsync(
+                "UPDATE \"PublicationEditions\" SET \"PrintTemplateEvidenceJson\" = \"GenericPrintTemplateJson\" WHERE \"PrintTemplateEvidenceJson\" = '';",
+                cancellationToken);
+        foreach (var (name, defaultValue) in new[]
+                 {
+                     ("PrintCoverSubmissionMode", 0),
+                     ("PrintIdentifierMode", 2),
+                     ("PrintProjectUse", 1),
+                 })
+        {
+            if (!await HasTableAsync(db, "PublicationEditions", cancellationToken)) break;
+            if (await HasColumnAsync(db, "PublicationEditions", name, cancellationToken)) continue;
+#pragma warning disable EF1002
+            await db.Database.ExecuteSqlRawAsync(
+                $"ALTER TABLE \"PublicationEditions\" ADD COLUMN \"{name}\" INTEGER NOT NULL DEFAULT {defaultValue};",
+                cancellationToken);
+#pragma warning restore EF1002
+        }
+        if (await HasTableAsync(db, "PublicationCoverDesigns", cancellationToken)
+            && !await HasColumnAsync(db, "PublicationCoverDesigns", "SpineReadingDirection", cancellationToken))
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"PublicationCoverDesigns\" ADD COLUMN \"SpineReadingDirection\" INTEGER NOT NULL DEFAULT 0;",
+                cancellationToken);
+        db.ChangeTracker.Clear();
+    }
+
+    internal static async Task RemoveBarnesAndNoblePrintCompatibilityColumnsAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(BarnesAndNoblePrintMigrationId)) return;
+        foreach (var (table, name) in new[]
+                 {
+                     ("PublicationEditions", "PrintTemplateEvidenceJson"),
+                     ("PublicationEditions", "PrintCoverSubmissionMode"),
+                     ("PublicationEditions", "PrintIdentifierMode"),
+                     ("PublicationEditions", "PrintProjectUse"),
+                     ("PublicationCoverDesigns", "SpineReadingDirection"),
+                 })
+        {
+            if (!await HasColumnAsync(db, table, name, cancellationToken)) continue;
+#pragma warning disable EF1002
+            await db.Database.ExecuteSqlRawAsync(
+                $"ALTER TABLE \"{table}\" DROP COLUMN \"{name}\";",
+                cancellationToken);
+#pragma warning restore EF1002
+        }
         db.ChangeTracker.Clear();
     }
 }

@@ -190,6 +190,26 @@ target. The assistant cannot reorder chapters or mutate chapter manuscript
 content from Publish. Physical-product selection, exact geometry, and cover
 surface rules belong to the Press production boundary.
 
+Print releases carry provider-neutral `PrintProjectUse`, `PrintIdentifierMode`,
+and `PrintCoverSubmissionMode` settings. B&N supports personal-use and for-sale
+projects and defaults new releases to personal use; existing releases migrate
+to for-sale semantics. Switching use keeps entered ISBN text but changes the
+applicable vendor-SKU/vendor-assigned/user-supplied identifier behavior and
+therefore stales prepared artifacts and `print-setup.json`. A user-supplied mode
+requires ISBN-13; B&N-assigned ISBN mode remains preparable because assignment
+occurs during upload. These settings exist only to prepare and map artifacts;
+external account, rights, tax, pricing, listing, and order workflows are not
+modeled here. B&N documents the identifier distinction between its project
+choices ([B&N personal-use versus for-sale guidance](https://help-press.barnesandnoble.com/hc/en-us/articles/5358880235547-Print-Books-for-Sale-vs-Print-for-Personal-Use)).
+
+Release cover reads expose exact Back, Spine, and Front region descriptors with
+bounds, physical aspect, safety/guides, participation, and geometry fingerprints.
+The assistant can read or preview one region, fill it with a project image, set
+spine direction, and request an exact region generation target. Region-targeted
+generation remains unattached, selects the closest supported raster without
+stretching, and reports aspect error, expected crop, effective DPI, and focal
+placement guidance before any revision-checked mutation.
+
 `read_publication_section` returns section metadata, canvas summaries, and the
 shared `agent-manuscript-v1` projection for its bounded prose blocks. Core or
 customized section reads retain the persisted source label; live release

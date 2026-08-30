@@ -487,7 +487,7 @@ public sealed class PublicationCoreMigrationService(
                 edition.PrintProductKey,
                 edition.PrintFinish,
                 edition.PrintCoverMode,
-                edition.GenericPrintTemplateJson,
+                edition.PrintTemplateEvidenceJson,
                 edition.Bleed,
                 edition.PageWidthInches,
                 edition.PageHeightInches,

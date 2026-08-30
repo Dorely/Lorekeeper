@@ -8,7 +8,19 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
-    public void V25WritesCanonicalSourceContainersCurrentPublicationStateAndAnnotations()
+    public void V25TemplateEvidenceAdapterPreservesTheHistoricalField()
+    {
+        var edition = JsonSerializer.Deserialize<ProjectExportPublicationEdition>(
+            """{"genericPrintTemplateJson":"{\"source\":\"preserved\"}"}""",
+            ManuscriptCodec.JsonOptions);
+
+        Assert.NotNull(edition);
+        Assert.Equal("{\"source\":\"preserved\"}", edition.LegacyGenericPrintTemplateJson);
+        Assert.Equal(string.Empty, edition.PrintTemplateEvidenceJson);
+    }
+
+    [Fact]
+    public void V26WritesCanonicalSourceContainersCurrentPublicationStateAndAnnotations()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
@@ -30,7 +42,7 @@ public sealed class ProjectExportCompatibilityTests
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(25, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(26, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"ingestSources\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"bookBriefCanonSourceIds\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
@@ -43,6 +55,7 @@ public sealed class ProjectExportCompatibilityTests
         Assert.Contains("\"publicationSectionOrder\":", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationSections\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"manuscriptAnnotations\":[]", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("genericPrintTemplateJson", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"isDefault\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("selectedCoverChapterId", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"publishProfiles\"", json, StringComparison.Ordinal);

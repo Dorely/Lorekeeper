@@ -407,6 +407,9 @@ public sealed class PublicationPreparationWorker(
         if (string.IsNullOrWhiteSpace(language)) result.Add(new("error", "LANGUAGE_REQUIRED", "Choose the book language in Core Book."));
         if (job.Edition?.Vendor == PublicationVendor.IngramSpark && string.IsNullOrWhiteSpace(job.Edition.Isbn))
             result.Add(new("error", "ISBN_REQUIRED", "Add the ISBN assigned to this IngramSpark release."));
+        if (job.Edition?.Vendor == PublicationVendor.BarnesAndNoblePress
+            && job.Edition.PrintIdentifierMode == PrintIdentifierMode.VendorAssignedIsbn)
+            result.Add(new("warning", "BN_ISBN_ASSIGNED_AT_HANDOFF", "B&N Press assigns the free ISBN in its external wizard; preparation may continue."));
         return result;
     }
 

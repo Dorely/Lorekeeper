@@ -29,7 +29,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
-    assert_eq!(value["protocolVersion"], 8);
+    assert_eq!(value["protocolVersion"], 9);
     assert_eq!(value["rendererVersion"], "2.1.4");
     assert_eq!(
         value["profiles"],
@@ -38,7 +38,8 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
             "generic-digital-pdf-v1",
             "ingram-print-pdfx1a-v2",
             "kdp-paperback-v2",
-            "kdp-hardcover-v1"
+            "kdp-hardcover-v1",
+            "bn-print-pdfa1b-v1"
         ])
     );
     assert_eq!(value["machineRuntimeDependencies"], json!([]));
@@ -62,7 +63,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
         stderr(&output)
     );
     let response = response(&output);
-    assert_eq!(response["protocolVersion"], 8);
+    assert_eq!(response["protocolVersion"], 9);
     assert_eq!(response["rendererVersion"], "2.1.4");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
@@ -1050,7 +1051,7 @@ fn declared_cff_otf_uses_cidfont_type0_and_an_opentype_fontfile3_stream() {
 }
 
 #[test]
-fn protocol_v8_renders_paragraph_presentation_and_structured_page_preview_data() {
+fn protocol_v9_renders_paragraph_presentation_and_structured_page_preview_data() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
     let chapter_id = "50000000-0000-0000-0000-000000000001";
     let figure_id = "60000000-0000-0000-0000-000000000001";
@@ -3539,7 +3540,7 @@ fn generic_print_requires_and_honors_complete_printer_declared_geometry() {
     ));
     job.request["physicalProduct"]["spineModel"] =
         json!({ "kind": "Caliper", "inchesPerPage": 0.0023, "anchors": [] });
-    job.request["physicalProduct"]["genericTemplate"] = json!({
+    job.request["physicalProduct"]["printTemplateEvidence"] = json!({
         "trimWidthInches": 6.0,
         "trimHeightInches": 9.0,
         "bleedInches": 0.125,
@@ -3553,7 +3554,8 @@ fn generic_print_requires_and_honors_complete_printer_declared_geometry() {
         "inchesPerPage": 0.0023,
         "minimumPages": 2,
         "maximumPages": 10000,
-        "pdfStandard": "Printer-declared PDF 1.7"
+        "pdfStandard": "Printer-declared PDF 1.7",
+        "geometryFingerprint": "generic-test-geometry"
     });
     job.write_request();
     let output = job.render();
@@ -3565,7 +3567,7 @@ fn generic_print_requires_and_honors_complete_printer_declared_geometry() {
     );
 
     let mut mismatched = job.request.clone();
-    mismatched["physicalProduct"]["genericTemplate"]["trimWidthInches"] = json!(5.5);
+    mismatched["physicalProduct"]["printTemplateEvidence"]["trimWidthInches"] = json!(5.5);
     fs::write(
         job.root.path().join("input/request.json"),
         serde_json::to_vec_pretty(&mismatched).expect("request JSON"),
@@ -3765,6 +3767,161 @@ fn ingram_digital_cloth_without_jacket_emits_setup_manifest_not_cover_pdf() {
     );
 }
 
+#[test]
+fn barnes_and_noble_personal_and_for_sale_modes_emit_pdfa_and_mode_specific_packages() {
+    for (project_use, identifier_mode, submission, direction) in [
+        (
+            "PersonalUse",
+            "VendorSku",
+            "FullWrapMeasured",
+            "TopToBottom",
+        ),
+        (
+            "ForSale",
+            "VendorAssignedIsbn",
+            "SeparatePanelsVendorSpine",
+            "BottomToTop",
+        ),
+        (
+            "PersonalUse",
+            "VendorSku",
+            "SeparatePanelsVendorSpine",
+            "Horizontal",
+        ),
+    ] {
+        let mut job = PreparedJob::new("bn-print-pdfa1b-v1");
+        configure_bn_job(
+            &mut job,
+            project_use,
+            identifier_mode,
+            submission,
+            direction,
+        );
+        job.write_request();
+        let output = job.render();
+        assert!(
+            output.status.success(),
+            "mode={project_use} stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            stderr(&output)
+        );
+        let response = response(&output);
+        assert_eq!(response["evidence"]["declaredStandard"], "PDF/A-1b");
+        assert_eq!(response["evidence"]["pdfVersion"], "1.4");
+        let artifacts = response["artifacts"].as_array().expect("artifacts");
+        assert!(
+            artifacts
+                .iter()
+                .any(|item| item["kind"] == "print-setup-manifest")
+        );
+        if submission == "FullWrapMeasured" {
+            assert!(
+                artifacts
+                    .iter()
+                    .any(|item| item["kind"] == "perfect-bound-cover-pdf")
+            );
+        } else {
+            assert!(
+                artifacts
+                    .iter()
+                    .any(|item| item["kind"] == "front-cover-pdf")
+            );
+            assert!(
+                artifacts
+                    .iter()
+                    .any(|item| item["kind"] == "back-cover-pdf")
+            );
+            assert!(
+                !artifacts
+                    .iter()
+                    .any(|item| item["kind"] == "perfect-bound-cover-pdf")
+            );
+        }
+        let manifest: Value = serde_json::from_slice(
+            &fs::read(job.artifact(&response, "print-setup-manifest")).expect("manifest"),
+        )
+        .expect("manifest JSON");
+        assert_eq!(manifest["projectUse"], project_use);
+        assert_eq!(manifest["identifier"]["mode"], identifier_mode);
+        assert_eq!(manifest["coverSubmissionMode"], submission);
+        assert_eq!(manifest["spineReadingDirection"], direction);
+        assert_eq!(manifest["barcode"]["mode"], "VendorOverlay");
+    }
+}
+
+#[test]
+fn barnes_and_noble_rejects_stale_template_evidence_and_ineligible_spine_text() {
+    let mut spine = PreparedJob::new("bn-print-pdfa1b-v1");
+    configure_bn_job(
+        &mut spine,
+        "PersonalUse",
+        "VendorSku",
+        "FullWrapMeasured",
+        "TopToBottom",
+    );
+    spine.request["cover"]["spineText"] = json!("Too narrow");
+    spine.write_request();
+    let output = spine.render();
+    assert!(!output.status.success());
+    assert!(has_diagnostic(
+        &response(&output),
+        "PRESS_BN_SPINE_TEXT_INELIGIBLE"
+    ));
+
+    let mut stale = PreparedJob::new("bn-print-pdfa1b-v1");
+    configure_bn_job(
+        &mut stale,
+        "ForSale",
+        "VendorAssignedIsbn",
+        "FullWrapMeasured",
+        "TopToBottom",
+    );
+    stale.request["physicalProduct"]["printTemplateEvidence"]["productKey"] =
+        json!("stale-product");
+    stale.write_request();
+    let output = stale.render();
+    assert!(!output.status.success());
+    assert!(has_diagnostic(
+        &response(&output),
+        "PRESS_PRINT_PRODUCT_MISMATCH"
+    ));
+}
+
+fn configure_bn_job(
+    job: &mut PreparedJob,
+    project_use: &str,
+    identifier_mode: &str,
+    submission: &str,
+    direction: &str,
+) {
+    job.configure_physical((
+        "bn-pb-bw-cream50-6x9",
+        "BarnesAndNoblePress",
+        "Paperback",
+        "PrintedCover",
+        &["perfect-bound-outside"],
+    ));
+    job.request["physicalProduct"]["projectUse"] = json!(project_use);
+    job.request["physicalProduct"]["identifierMode"] = json!(identifier_mode);
+    job.request["physicalProduct"]["coverSubmissionMode"] = json!(submission);
+    job.request["physicalProduct"]["printTemplateEvidence"] = json!({
+        "trimWidthInches": 6.0, "trimHeightInches": 9.0, "bleedInches": 0.125,
+        "safeInches": 0.125, "wrapInches": 0.0, "hingeInches": 0.0,
+        "gutterInches": 0.0, "flapInches": 0.0, "barcodeWidthInches": 2.0,
+        "barcodeHeightInches": 1.2, "inchesPerPage": null, "minimumPages": 18,
+        "maximumPages": 800, "pdfStandard": "PDF/A-1b", "provider": "BarnesAndNoblePress",
+        "productKey": "bn-pb-bw-cream50-6x9", "pageCount": 18,
+        "geometryFingerprint": "bn-test-18-6x9", "spineWidthInches": 0.18,
+        "fullCoverWidthInches": 12.43, "fullCoverHeightInches": 9.25,
+        "frontCoverWidthInches": 6.125, "frontCoverHeightInches": 9.25,
+        "backCoverWidthInches": 6.125, "backCoverHeightInches": 9.25,
+        "fullCoverTemplateSha256": "full", "frontCoverTemplateSha256": "front",
+        "backCoverTemplateSha256": "back"
+    });
+    job.request["cover"]["barcodeMode"] = json!("VendorOverlay");
+    job.request["cover"]["spineReadingDirection"] = json!(direction);
+}
+
 struct PreparedJob {
     root: TempDir,
     request: Value,
@@ -3776,9 +3933,9 @@ impl PreparedJob {
         fs::create_dir_all(root.path().join("input/assets")).expect("input assets");
         fs::write(root.path().join("input/assets/pixel.png"), PIXEL_PNG).expect("pixel PNG");
         let mut request: Value =
-            serde_json::from_slice(include_bytes!("../fixtures/full-model-v8.json"))
+            serde_json::from_slice(include_bytes!("../fixtures/full-model-v9.json"))
                 .expect("canonical request");
-        request["protocolVersion"] = json!(8);
+        request["protocolVersion"] = json!(9);
         let profile = match profile {
             "generic-paperback-v1" => "generic-print-v2",
             "kdp-paperback-v1" => "kdp-paperback-v2",
@@ -3807,7 +3964,7 @@ impl PreparedJob {
                 .expect("catalog product");
             request["cover"]["surfaces"] = json!(["perfect-bound-outside"]);
             request["physicalProduct"] = json!({
-                "registryVersion": "2026.08.1",
+                "registryVersion": "2026.08.2",
                 "registrySha256": hex_hash(include_bytes!("../assets/print-products-v1.json")),
                 "productKey": product_key,
                 "vendor": catalog["vendor"],
@@ -3856,7 +4013,7 @@ impl PreparedJob {
             .find(|item| item["key"] == product_key)
             .expect("catalog product");
         self.request["physicalProduct"] = json!({
-            "registryVersion": "2026.08.1",
+            "registryVersion": "2026.08.2",
             "registrySha256": hex_hash(include_bytes!("../assets/print-products-v1.json")),
             "productKey": product_key,
             "vendor": vendor,

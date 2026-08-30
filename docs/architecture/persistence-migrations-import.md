@@ -213,13 +213,17 @@ through immutable models, startup supplies temporary compatibility columns at
 each such boundary, removes them immediately before the current EF boundary,
 and then lets the forward migration own the durable columns.
 
-Project export v25 is a portable, versioned boundary. Full exports include the
+Project export v26 is a portable, versioned boundary. Full exports include the
 current v4 manuscript model, Core/release annotations, selected canonical
 ingest-source bodies/evidence and mappings, page setup, composition variants,
 Core Book including its paginated chapter-start policy, sparse release overlays
 including an explicit policy override when present, edition snapshots,
 publication sections, cover surfaces, Book Text Styles, visual references, and
-project-owned font families/faces with binary hashes. Non-structural exports omit source bodies,
+project-owned font families/faces with binary hashes. Version 26 adds print
+project use, identifier mode, cover submission mode, provider-neutral template
+evidence, and spine direction. Pre-v26 imports preserve existing behavior with
+for-sale, user-supplied ISBN, measured full-wrap, and top-to-bottom defaults.
+Non-structural exports omit source bodies,
 selections, and evidence and include a warning. Jobs, operational review rows, temporary
 visual candidates, unselected source bodies/provenance, assistant transcripts,
 model selections, unpromoted image partials, and other operational review state
@@ -262,7 +266,7 @@ and OAuth redirect configuration remain local-host-only unless an explicit
 security architecture change expands exposure. Version-history repositories use
 the separate development `History/` root (ignored by the source repository) or
 packaged `%LocalAppData%/Lorekeeper/History/<repository-id>.git`; they are not a
-SQLite backup or a portable v25 export.
+SQLite backup or a portable v26 export.
 
 ## Key files and file families
 
@@ -280,14 +284,14 @@ SQLite backup or a portable v25 export.
 | `Lorekeeper/Manuscripts/ManuscriptMigrationService.cs` | WAL-safe structured-manuscript migration, recovery, validation, journaling, and current v4 upgrade. |
 | `Lorekeeper/Manuscripts/VisualCompositionMigrationService.cs` / `AuthoringPageMigrationService.cs` | Guarded visual/composition and authoring-page cutovers with protected invariants. |
 | `Lorekeeper/Publish/Publication*MigrationService.cs` | Core, edition, Press, section, print-product, and edition-content transformations. |
-| `Lorekeeper/ImportExport/ProjectExportModels.cs` | Current v25 portable DTOs and isolated older input adapters. |
+| `Lorekeeper/ImportExport/ProjectExportModels.cs` | Current v26 portable DTOs and isolated older input adapters. |
 | `Lorekeeper/ImportExport/ProjectImportExportService.cs` | UI-facing Full/Non-structural export, warnings, queueing, and import job lifecycle. |
-| `Lorekeeper/ImportExport/ProjectImportJobProcessor.cs` | Transactional v25 import, ID remapping, rollback/report behavior, legacy conversion, and post-commit indexing. |
+| `Lorekeeper/ImportExport/ProjectImportJobProcessor.cs` | Transactional v26 import, ID remapping, rollback/report behavior, legacy conversion, and post-commit indexing. |
 | `Lorekeeper/ImportExport/ProjectImportJobQueue.cs` / `ProjectImportJobNotifier.cs` | Import job dispatch and ephemeral live UI updates; the provider/background chapter owns hosted worker execution. |
 | `Lorekeeper/VersionHistory/Snapshots/`, `Git/`, `Services/`, `Restore/`, and `Sync/` | Deterministic creative snapshot trees, bare Git/checkpoint metadata, guarded restore/import, explicit remote attachment, and durable automatic transport; detailed ownership is in `version-history-sync.md`. |
 | `Lorekeeper.Tests/DatabaseMigrationRecoveryTests.cs` | Recovery markers, protected backup retention, and fail-closed startup behavior. |
 | `Lorekeeper.Tests/ManuscriptMigrationIntegrationTests.cs` | Real legacy WAL migration, backup/journal/hash validation, restore, and audit compatibility. |
-| `Lorekeeper.Tests/ProjectExportCompatibilityTests.cs` / `ProjectImportJobIntegrationTests.cs` | v25 export/import preservation, warnings, remapping, rollback, and legacy adapters. |
+| `Lorekeeper.Tests/ProjectExportCompatibilityTests.cs` / `ProjectImportJobIntegrationTests.cs` | v26 export/import preservation, warnings, remapping, rollback, and legacy adapters. |
 | `Lorekeeper.Tests/LorekeeperPressMigrationTests.cs` | Installed-schema Press/Core projection, migration preservation, recovery, and byte/hash invariants. |
 | `Lorekeeper/Models/OAuthToken.cs`, `LlmProvider.cs`, `SearchProvider.cs` | Credential/configuration persistence; secrets remain in provider-owned rows. |
 | `.gitignore` | Ignored local databases, migration backups, verification databases, temporary output, and repository-root publish artifacts. |

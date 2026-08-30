@@ -121,3 +121,8 @@
 .cover-current-artwork button { grid-column: 2; justify-self: start; border: 1px solid var(--lk-line-strong); border-radius: .3rem; background: var(--lk-surface); }
 
 @container (max-width: 45rem) { .cover-identity,.cover-toolbar-spacer { display:none; } .cover-details-panel { bottom:7rem; } }
+.cover-panel.selected {
+    outline: 3px solid var(--bs-primary, #3b6fb6);
+    outline-offset: -3px;
+    background-color: rgb(59 111 182 / 10%);
+}

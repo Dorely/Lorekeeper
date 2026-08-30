@@ -754,6 +754,8 @@ public sealed class PublicationRenderProcessor(
     public static string ProfileFor(PublicationEditionFormat format, PublicationVendor vendor) =>
         format == PublicationEditionFormat.DigitalPdf
             ? "generic-digital-pdf-v1"
+            : vendor == PublicationVendor.BarnesAndNoblePress
+                ? "bn-print-pdfa1b-v1"
             : format == PublicationEditionFormat.Hardcover && vendor == PublicationVendor.AmazonKdp
                 ? "kdp-hardcover-v1"
             : format == PublicationEditionFormat.Hardcover && vendor == PublicationVendor.IngramSpark
@@ -852,8 +854,8 @@ public sealed class PublicationRenderProcessor(
                 await db.SaveChangesAsync(cancellationToken);
             },
             cancellationToken);
-        if (result.ProtocolVersion != 8)
-            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 8 is required.");
+        if (result.ProtocolVersion != 9)
+            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 9 is required.");
         if (result.JobId is not null
             && !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a response for a different job.");
@@ -1337,16 +1339,16 @@ public sealed class PublicationRenderProcessor(
         var printProduct = release?.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
             ? printProducts.GetRequired(release.PrintProductKey)
             : null;
-        var genericPrintTemplate = printProduct?.Vendor == PublicationVendor.Generic
-            && !string.IsNullOrWhiteSpace(release!.GenericPrintTemplateJson)
-                ? JsonSerializer.Deserialize<GenericPrintTemplate>(release.GenericPrintTemplateJson)
+        var printTemplateEvidence = printProduct?.SpineModel.Kind == "TemplateRequired"
+            && !string.IsNullOrWhiteSpace(release!.PrintTemplateEvidenceJson)
+                ? JsonSerializer.Deserialize<PrintTemplateEvidence>(release.PrintTemplateEvidenceJson)
                 : null;
-        if (printProduct?.Vendor == PublicationVendor.Generic && genericPrintTemplate is null)
-            throw new InvalidOperationException("Generic print releases require a complete printer geometry template before rendering.");
+        if (printProduct?.SpineModel.Kind == "TemplateRequired" && printTemplateEvidence is null)
+            throw new InvalidOperationException("This print release requires imported printer template evidence before rendering.");
         var requiredCoverSurfaces = printProduct is null ? Array.Empty<string>() : RequiredCoverSurfaces(printProduct, release!.PrintCoverMode);
         var payload = new
         {
-            protocolVersion = 8,
+            protocolVersion = 9,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
             outputPurpose = job.TargetKind == PublicationTargetKind.CoreBook
@@ -1368,14 +1370,18 @@ public sealed class PublicationRenderProcessor(
                 coverMaterial = printProduct.CoverMaterial.ToString(),
                 finish = release!.PrintFinish.ToString(),
                 coverMode = release.PrintCoverMode.ToString(),
+                projectUse = release.PrintProjectUse.ToString(),
+                identifierMode = release.PrintIdentifierMode.ToString(),
+                coverSubmissionMode = release.PrintCoverSubmissionMode.ToString(),
                 printProduct.MinimumPages,
                 printProduct.MaximumPages,
                 printProduct.MinimumSubmittedPages,
                 printProduct.MaximumSubmittedPages,
-                spineModel = ToPressSpineModel(genericPrintTemplate?.InchesPerPage is decimal genericCaliper
+                spineModel = ToPressSpineModel(printProduct.Vendor == PublicationVendor.Generic
+                    && printTemplateEvidence?.InchesPerPage is decimal genericCaliper
                     ? new PrintSpineModel("Caliper", genericCaliper)
                     : printProduct.SpineModel),
-                genericTemplate = genericPrintTemplate,
+                printTemplateEvidence,
                 requiredCoverSurfaces,
             },
             document = new
@@ -1429,6 +1435,7 @@ public sealed class PublicationRenderProcessor(
                 subtitle = coverDesign.Subtitle,
                 author = coverDesign.Author,
                 spineText = coverDesign.SpineText,
+                spineReadingDirection = coverDesign.SpineReadingDirection.ToString(),
                 backgroundColor = coverDesign.BackgroundColor,
                 isbn = release?.Isbn ?? string.Empty,
                 barcodeMode = coverDesign.BarcodeMode.ToString(),
@@ -1740,10 +1747,20 @@ public sealed class PublicationRenderProcessor(
     {
         var product = printProducts.GetRequired(edition.PrintProductKey);
         var kinds = new List<string> { "interior-pdf" };
-        if (product.RequiresPerfectBoundCover) kinds.Add("perfect-bound-cover-pdf");
-        if (product.RequiresCaseCover) kinds.Add("case-cover-pdf");
-        if (product.RequiresDustJacket) kinds.Add("dust-jacket-pdf");
+        if (edition.Vendor == PublicationVendor.BarnesAndNoblePress
+            && edition.PrintCoverSubmissionMode == PrintCoverSubmissionMode.SeparatePanelsVendorSpine)
+        {
+            kinds.Add("front-cover-pdf");
+            kinds.Add("back-cover-pdf");
+        }
+        else
+        {
+            if (product.RequiresPerfectBoundCover) kinds.Add("perfect-bound-cover-pdf");
+            if (product.RequiresCaseCover) kinds.Add("case-cover-pdf");
+            if (product.RequiresDustJacket) kinds.Add("dust-jacket-pdf");
+        }
         if (product.RequiresClothManifest) kinds.Add("print-setup-manifest");
+        if (edition.Vendor == PublicationVendor.BarnesAndNoblePress) kinds.Add("print-setup-manifest");
         return [.. kinds.OrderBy(kind => kind, StringComparer.Ordinal)];
     }
 
@@ -1753,6 +1770,8 @@ public sealed class PublicationRenderProcessor(
         "cover-pdf" or "perfect-bound-cover-pdf" => PublicationArtifactKind.PerfectBoundCoverPdf,
         "case-cover-pdf" => PublicationArtifactKind.CaseCoverPdf,
         "dust-jacket-pdf" => PublicationArtifactKind.DustJacketPdf,
+        "front-cover-pdf" => PublicationArtifactKind.FrontCoverPdf,
+        "back-cover-pdf" => PublicationArtifactKind.BackCoverPdf,
         "print-setup-manifest" => PublicationArtifactKind.PrintSetupManifest,
         "book-pdf" => PublicationArtifactKind.BookPdf,
         _ => throw new InvalidOperationException($"Unsupported renderer artifact kind '{kind}'."),
