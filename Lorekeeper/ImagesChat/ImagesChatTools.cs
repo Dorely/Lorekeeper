@@ -22,7 +22,6 @@ public sealed class ImagesChatTools(
     IProjectSearchService projectSearch,
     IReferenceVisualService referenceVisuals,
     IProjectImageService projectImages,
-    IProjectImageOutpaintService imageOutpaint,
     IEntityVisualExampleService entityVisualExamples,
     IEntityService entities,
     IProjectImageJobService imageJobs,
@@ -141,13 +140,13 @@ public sealed class ImagesChatTools(
                 method: (Guid sourceImageId, int width, int height, string? fileName = null, string? altText = null) =>
                     ResizeImageAsync(context, sourceImageId, width, height, fileName, altText),
                 name: "resize_project_image",
-                description: "Deterministically resize an existing project image to an exact provider-valid WIDTHxHEIGHT raster while preserving its aspect ratio. This is a local pixel transform, not outpaint: it creates a new unattached source-linked image, uses SkiaSharp sampling, and adds no visual detail. Use outpaint_project_image when the user's intent is to generate new border content around approved art."),
+                description: "Deterministically resize an existing project image to an exact provider-valid WIDTHxHEIGHT raster while preserving its aspect ratio. This is a local pixel transform, not generative editing: it creates a new unattached source-linked image, uses SkiaSharp sampling, and adds no visual detail. Use edit_project_image with the source image and a larger-framing brief when the user's intent is to generate surrounding content."),
 
             AIFunctionFactory.Create(
                 method: (Guid imageId, string label, ProjectImageMaskShape[] shapes) =>
                     CreateShapeMaskAsync(context, imageId, label, shapes),
                 name: "create_shape_mask",
-                description: "Create a PNG edit mask for an existing image from percentage-based rect/ellipse/polygon shapes. Transparent pixels are the editable regions."),
+                description: "Create a PNG edit mask for an existing image only when the change is tightly localized or the affected region is hard to describe reliably in words. Supply percentage-based rect/ellipse/polygon shapes; transparent pixels are the editable regions."),
 
             AIFunctionFactory.Create(
                 method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? label = null) =>
@@ -159,13 +158,7 @@ public sealed class ImagesChatTools(
                 method: (Guid sourceImageId, ImageEditBrief brief, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? label = null) =>
                     EditImageAsync(context, sourceImageId, brief, maskId, maskShapes, maskLabel, references, altText, quality, outputFormat, outputCompression, label),
                 name: "edit_project_image",
-                description: $"Edit one project image and wait for a terminal result. The output is a new free-standing, unattached library image; inspect it before promoting it to canon. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
-
-            AIFunctionFactory.Create(
-                method: (Guid sourceImageId, int width, int height, string prompt, string? fileName = null, string? altText = null) =>
-                    OutpaintImageAsync(context, sourceImageId, width, height, prompt, fileName, altText),
-                name: "outpaint_project_image",
-                description: "Extend an approved project image onto a larger, exact provider-valid WIDTHxHEIGHT canvas using only the added border as the editable area. The original source rectangle is restored pixel-for-pixel after the provider returns. This is a generative outpaint of the new border only; it never redraws the approved source, creates one unattached project image, reports any provider raster resize and interpolation, and adds no new detail through deterministic resizing."),
+                description: $"Edit one project image and wait for a terminal result. Default to an unmasked source-driven edit: use the original image directly and describe the complete desired result. For larger framing, describe the surrounding scene and direction in the existing desired-result and composition fields: left and right for a wider result, above and below for a taller result, or outward on all sides when the aspect is effectively unchanged. Supply a regional guide only for a genuinely localized change or when the changed portion cannot be described reliably in words. The output is a new free-standing, unattached library image; inspect it before promoting it to canon. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
 
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadImageJobAsync(context, jobId, wait: false),
@@ -634,50 +627,6 @@ public sealed class ImagesChatTools(
         }
     }
 
-    private async Task<string> OutpaintImageAsync(
-        ImagesChatToolContext ctx,
-        Guid sourceImageId,
-        int width,
-        int height,
-        string prompt,
-        string? fileName,
-        string? altText)
-    {
-        try
-        {
-            var result = await imageOutpaint.OutpaintAsync(
-                ctx.ProjectId,
-                sourceImageId,
-                new ProjectImageOutpaintRequest(width, height, prompt, fileName?.Trim() ?? string.Empty, altText?.Trim() ?? string.Empty),
-                ctx.TurnCancellationToken);
-            var visual = await BuildVisualAsync(ctx, result.Image, result.Image.FileName, "Strict source-preserving outpaint saved to the image library.");
-            ctx.AddVisual(visual);
-            ctx.AddModelOnlyImage(result.Image);
-            ctx.MarkMutated();
-            return JsonSerializer.Serialize(new
-            {
-                ok = true,
-                status = "outpainted",
-                sourceImageId = result.SourceImageId,
-                targetRaster = result.TargetRaster,
-                providerRaster = result.ProviderRaster,
-                providerRasterResized = result.ProviderRasterResized,
-                sourceRegionRestored = result.SourceRegionRestored,
-                interpolation = result.Interpolation,
-                addsGeneratedBorderContent = result.AddsGeneratedBorderContent,
-                preservesSourcePixels = result.PreservesSourcePixels,
-                deterministicResizeAddsNewDetail = result.DeterministicResizeAddsNewDetail,
-                image = ImagePayload(result.Image),
-                attached = false,
-                summary = result.Summary,
-            }, JsonOptions);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
-        {
-            return $"Error: {ex.Message}";
-        }
-    }
-
     private async Task<string> ResizeImageAsync(
         ImagesChatToolContext ctx,
         Guid sourceImageId,
@@ -708,7 +657,7 @@ public sealed class ImagesChatTools(
                 interpolation = ProjectImageResize.DeterministicInterpolation,
                 addsNewDetail = false,
                 image = ImagePayload(image),
-                summary = $"Created an unattached source-linked image at exactly {width}x{height} using {ProjectImageResize.DeterministicInterpolation}. This local resize adds no visual detail; use outpaint_project_image for generated border content.",
+                summary = $"Created an unattached source-linked image at exactly {width}x{height} using {ProjectImageResize.DeterministicInterpolation}. This local resize adds no visual detail; use edit_project_image with the source image and a larger-framing brief for generative expansion.",
             }, JsonOptions);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)

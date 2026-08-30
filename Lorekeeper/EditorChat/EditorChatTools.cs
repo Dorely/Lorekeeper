@@ -41,7 +41,6 @@ IActService acts,
     IEditorRevisionAgentService revisionAgents,
     OutlineCollaborationTools outlineTools,
     IProjectImageService projectImages,
-    IProjectImageOutpaintService imageOutpaint,
     IEntityVisualExampleService entityVisualExamples,
     IProjectImageJobService imageJobs,
     IAgentProjectImageWorkflow imageWorkflow,
@@ -420,32 +419,26 @@ IActService acts,
                 GenerateProjectImageAsync(context, brief, references, target, altText, quality, outputFormat, outputCompression),
             name: "generate_project_image",
             description:
-                $"Generate one unattached project image and wait for a terminal result. intendedUse and scene are required. A target supplies geometry guidance only and never places the output. For a layout-bound target, omit target.size or use auto for Lorekeeper's default raster; set an explicit WIDTHxHEIGHT target.size only when the user explicitly requests a different DPI, after reading the target's physical dimensions and provider constraints and calculating the dimensions yourself. Keep the server-owned aspect and reserved regions; inspect the returned actualRaster and effectiveDpi before reporting whether the requested DPI was achieved. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
+                $"Generate one unattached project image and wait for a terminal result. intendedUse and scene are required. A target supplies geometry guidance only and never places the output. target.size may select an explicit provider-valid raster when a larger proportional raster is warranted; for a layout-bound target, preserve the server-owned aspect and reserved regions. Omit target.size or use auto to retain Lorekeeper's moderate default; inspect the returned actualRaster and effectiveDpi before reporting whether the requested raster or DPI was achieved. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid imageId, string label, ProjectImageMaskShape[] shapes) =>
                 CreateShapeMaskAsync(context, imageId, label, shapes),
             name: "create_shape_mask",
-            description: "Create a reusable PNG edit mask for an existing project image from percentage-based rect, ellipse, or polygon shapes. Transparent pixels are editable regions."));
+            description: "Create a reusable PNG edit mask for an existing project image only when the change is tightly localized or the affected region is hard to describe reliably in words. Supply percentage-based rect, ellipse, or polygon shapes; transparent pixels are editable regions."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid sourceImageId, ImageEditBrief brief, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
                 EditProjectImageAsync(context, sourceImageId, brief, maskId, maskShapes, maskLabel, references, target, altText, quality, outputFormat, outputCompression),
             name: "edit_project_image",
             description:
-                $"Edit one project image and wait for a terminal result. The result is always a new unattached project image. Geometry guidance never places it. For a layout-bound target, omit target.size or use auto for Lorekeeper's default raster; set an explicit WIDTHxHEIGHT target.size only when the user explicitly requests a different DPI, after reading the target's physical dimensions and provider constraints and calculating the dimensions yourself. Keep the server-owned aspect and reserved regions; inspect the returned actualRaster and effectiveDpi before reporting whether the requested DPI was achieved. Inspect the returned image, then apply its ID with a separate placement tool when requested. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
-
-        tools.Add(AIFunctionFactory.Create(
-            method: (Guid sourceImageId, int width, int height, string prompt, string? fileName = null, string? altText = null) =>
-                OutpaintProjectImageAsync(context, sourceImageId, width, height, prompt, fileName, altText),
-            name: "outpaint_project_image",
-            description: "Extend an approved project image onto a larger, exact provider-valid WIDTHxHEIGHT canvas using only the added border as the editable area. The original source rectangle is restored pixel-for-pixel after the provider returns. This is a generative outpaint of the new border only; it never redraws, scales, or reinterprets the approved source, creates one unattached project image, reports any provider raster resize and interpolation, and adds no new detail through deterministic resizing."));
+                $"Edit one project image and wait for a terminal result. Default to an unmasked source-driven edit: use the original image directly and describe the complete desired result. For larger framing, describe the surrounding scene and direction in the existing desired-result and composition fields: left and right for a wider result, above and below for a taller result, or outward on all sides when the aspect is effectively unchanged. Supply a regional guide only for a genuinely localized change or when the changed portion cannot be described reliably in words. target.size may select an explicit provider-valid raster when a larger proportional result is warranted; for a layout-bound target, preserve the server-owned aspect and reserved regions. Omit target.size or use auto to retain Lorekeeper's moderate default; inspect the returned actualRaster and effectiveDpi before reporting whether the requested raster or DPI was achieved. The result is always a new unattached project image. Geometry guidance never places it. Inspect the returned image, then apply its ID with a separate placement tool when requested. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid sourceImageId, int width, int height, string? fileName = null, string? altText = null) =>
                 ResizeProjectImageAsync(context, sourceImageId, width, height, fileName, altText),
             name: "resize_project_image",
-            description: "Deterministically resize an existing project image to an exact provider-valid WIDTHxHEIGHT raster while preserving its aspect ratio. This is a local pixel transform, not outpaint: it creates a new unattached source-linked image, uses SkiaSharp sampling, and adds no visual detail. Use outpaint_project_image when the user's intent is to generate new border content around approved art."));
+            description: "Deterministically resize an existing project image to an exact provider-valid WIDTHxHEIGHT raster while preserving its aspect ratio. This is a local pixel transform, not generative editing: it creates a new unattached source-linked image, uses SkiaSharp sampling, and adds no visual detail. Use edit_project_image with the source image and a larger-framing brief when the user's intent is to generate surrounding content."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: false),
@@ -465,7 +458,7 @@ IActService acts,
                 method: (string targetKind, Guid targetId, Guid? variantId = null) =>
                     ReadLayoutGenerationTargetAsync(context, targetKind, targetId, variantId),
                 name: "read_layout_generation_target",
-                description: "Read exact project-authoring geometry, provider-valid final-DPI recommendation, moderate default requested raster, protected regions, and provider raster constraints for a project page, Figure placement, or Designed Page frame/surface. For an explicit user-requested DPI, calculate WIDTHxHEIGHT from physical inches and the requested DPI, round dimensions to provider-valid multiples while preserving the server-owned aspect, and pass that size override to generate_project_image or edit_project_image. Omit size or use auto otherwise; inspect actualRaster and effectiveDpi in the result. Use the project ID for project-page; composition targets require the active variantId."),
+                description: "Read exact project-authoring geometry, provider-valid final-DPI recommendation, moderate default requested raster, protected regions, and provider raster constraints for a project page, Figure placement, or Designed Page frame/surface. When a larger proportional raster is warranted, calculate WIDTHxHEIGHT from physical inches and desired DPI, round dimensions to provider-valid multiples while preserving the server-owned aspect, and pass that size override to generate_project_image or edit_project_image. Omit size or use auto to retain the moderate default; inspect actualRaster and effectiveDpi in the result. Use the project ID for project-page; composition targets require the active variantId."),
             AIFunctionFactory.Create(
                 method: (Guid compositionId) =>
                     GetOrCreateCompositionVariantAsync(context, compositionId),
@@ -2295,7 +2288,7 @@ IActService acts,
                     maximumEdgePixels = LayoutImageSizeResolver.MaximumEdge,
                     minimumAspectRatio = 1d / LayoutImageSizeResolver.MaximumAspectRatio,
                     maximumAspectRatio = LayoutImageSizeResolver.MaximumAspectRatio,
-                    overrideRule = "Only on an explicit user request for a different DPI: multiply physical width and height in inches by the requested DPI, round each dimension to a provider-valid multiple, preserve the server-owned aspect, and pass the resulting Size. Omit Size or use auto for the default. Verify actualRaster and effectiveDpi from the completed result.",
+                    overrideRule = "When a larger proportional raster is warranted, multiply physical width and height in inches by the desired DPI, round each dimension to a provider-valid multiple, preserve the server-owned aspect, and pass the resulting Size. Omit Size or use auto to retain the moderate default. Verify actualRaster and effectiveDpi from the completed result.",
                 },
             }, ManuscriptCodec.JsonOptions);
         }
@@ -2538,60 +2531,6 @@ IActService acts,
         }
     }
 
-    private async Task<string> OutpaintProjectImageAsync(
-        EditorChatContext ctx,
-        Guid sourceImageId,
-        int width,
-        int height,
-        string prompt,
-        string? fileName,
-        string? altText)
-    {
-        try
-        {
-            var result = await imageOutpaint.OutpaintAsync(
-                ctx.ProjectId,
-                sourceImageId,
-                new ProjectImageOutpaintRequest(width, height, prompt, fileName?.Trim() ?? string.Empty, altText?.Trim() ?? string.Empty),
-                ctx.TurnCancellationToken);
-            var image = result.Image;
-            var visual = await BuildVisualAsync(ctx, image, image.FileName, "Strict source-preserving outpaint saved to the image library.");
-            ctx.AddVisual(visual);
-            ctx.AddModelOnlyImage(image);
-            ctx.OnMutated();
-            return JsonSerializer.Serialize(new
-            {
-                ok = true,
-                status = "outpainted",
-                sourceImageId = result.SourceImageId,
-                targetRaster = result.TargetRaster,
-                providerRaster = result.ProviderRaster,
-                providerRasterResized = result.ProviderRasterResized,
-                sourceRegionRestored = result.SourceRegionRestored,
-                interpolation = result.Interpolation,
-                addsGeneratedBorderContent = result.AddsGeneratedBorderContent,
-                preservesSourcePixels = result.PreservesSourcePixels,
-                deterministicResizeAddsNewDetail = result.DeterministicResizeAddsNewDetail,
-                image = new
-                {
-                    image.Id,
-                    image.FileName,
-                    image.ContentType,
-                    image.PreviewUrl,
-                    image.AltText,
-                    image.Source,
-                    image.SourceMetadataJson,
-                },
-                attached = false,
-                summary = result.Summary,
-            });
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
-        {
-            return $"Error: {ex.Message}";
-        }
-    }
-
     private async Task<string> ResizeProjectImageAsync(
         EditorChatContext ctx,
         Guid sourceImageId,
@@ -2631,7 +2570,7 @@ IActService acts,
                     image.Source,
                     image.SourceMetadataJson,
                 },
-                summary = $"Created an unattached source-linked image at exactly {width}x{height} using {ProjectImageResize.DeterministicInterpolation}. This local resize adds no visual detail; use outpaint_project_image for generated border content.",
+                summary = $"Created an unattached source-linked image at exactly {width}x{height} using {ProjectImageResize.DeterministicInterpolation}. This local resize adds no visual detail; use edit_project_image with the source image and a larger-framing brief for generative expansion.",
             });
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)

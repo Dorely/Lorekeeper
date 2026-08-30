@@ -246,10 +246,12 @@ non-empty manuscript remains legal but returns the non-blocking
 Page and cover scenes use persisted, hashed, expiring, project/conversation-
 scoped stages that cannot be replayed. Image generation creates an unattached
 durable image job; another explicit mutation places or associates the completed
-asset. Exact source-preserving expansion uses the dedicated outpaint operation,
-which masks only added canvas, restores the source rectangle, and saves a new
-unattached asset with provider-versus-final raster provenance. Deterministic
-resize creates a new unattached source-linked asset and adds no visual detail.
+asset. Expansion of an existing image uses the ordinary source-driven edit
+operation: the original image is supplied directly and the complete larger
+framing is described in the prompt, including left-and-right, above-and-below,
+or all-sides extension as appropriate. Regional guides are reserved for
+genuinely localized or otherwise hard-to-describe edits. Deterministic resize
+creates a new unattached source-linked asset and adds no visual detail.
 Failed, cancelled, or stale calls must not create partial destination state. A completed assistant mutation may be captured by the separate
 version-history checkpoint service; that durable Git snapshot history is not
 the process-lifetime Undo/Redo history described by the manuscript chapter.

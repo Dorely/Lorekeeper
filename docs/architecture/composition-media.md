@@ -87,10 +87,11 @@ concrete `LayoutGenerationTargetDescriptor` is used only when art must honor
 physical regions such as a page, frame, or cover. It carries exact aspect,
 provider-valid final-DPI recommendation plus moderate provider-valid default
 raster guidance, effective-DPI expectation, geometry fingerprint, and named trim, bleed, safe, gutter, barcode, cover, or
-reserved-text regions. An explicit provider size override is accepted only
-when it is provider-valid and preserves the server-owned aspect. It is
-guidance and prompt context, not an acceptance rule imposed on provider
-pixels.
+reserved-text regions. An assistant may select a proportional larger provider
+size when the requested quality or effective DPI warrants it; explicit
+overrides are accepted only when provider-valid and, for layout-bound targets,
+when they preserve the server-owned aspect. It is guidance and prompt context,
+not an acceptance rule imposed on provider pixels.
 
 Provider output is stored without layout cropping or resizing, apart from
 supported-format normalization such as WebP to lossless PNG. The result
@@ -104,15 +105,17 @@ defaults to 64 MiB.
 `IProjectImageService.ResizeAsync` creates a new unattached, source-linked
 `Resized` asset at an exact provider-valid raster using deterministic
 SkiaSharp sampling. It does not invent visual detail and records the source,
-target, interpolation, and raster storage in provenance. The shared
-`IProjectImageOutpaintService` provides the stricter source-preserving path:
-it builds a larger centered canvas, masks only its added border, calls the
-provider for that border, rejects an incompatible aspect, deterministically
-normalizes a proportional provider raster when necessary, and restores the
-original source rectangle before saving an unattached `Outpainted` asset.
-The final asset provenance records provider output versus final raster and
-whether any intermediate was persisted; no materially different fallback is
-selected implicitly.
+target, interpolation, and raster storage in provenance. A larger version of
+an existing image uses the ordinary source-driven edit workflow: the original
+image is supplied directly to the provider and the prompt describes the
+complete larger framing. Wider targets ask for natural extension to the left
+and right, taller targets above and below, and effectively unchanged aspects
+outward on all sides. This is model-driven editing and does not guarantee
+exact preservation of existing image detail. A regional guide remains an
+exception for genuinely localized changes or changes that cannot be described
+reliably in words. The resulting `Edited` asset remains unattached and linked
+to its source, while provider-versus-final raster details are recorded without
+selecting a materially different fallback implicitly.
 
 Every valid streamed partial is retained as exact job-owned PNG, JPEG, or WebP
 bytes, identified by output, request attempt, and provider partial index. A
@@ -261,7 +264,6 @@ composition, Core/release fingerprints, and artifact freshness.
 | `Lorekeeper/Images/IProjectImageService.cs` / `ProjectImageService.cs` | Reusable image-library reads, uploads, crops, deterministic exact resizing, metadata, usage projections, and deletion guards. |
 | `Lorekeeper/Images/IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Durable generation/edit job records, streamed partial artifacts, explicit promotion, structured briefs, provider audit fields, output validation, and diagnostics. |
 | `Lorekeeper/Images/AgentProjectImageWorkflow.cs` | Assistant generation/edit boundary, terminal-state waiting, reconnectable jobs, target diagnostics, and unattached output semantics. |
-| `Lorekeeper/Images/ProjectImageOutpaintService.cs` | Strict source-preserving outpaint orchestration, added-border masking, provider-raster normalization, source-region restoration, and transform provenance. |
 | `Lorekeeper/Images/ImagePromptComposer.cs` | Structured generation/edit briefs, reference labels, reserved regions, spatial guidance, and rendered-text policy. |
 | `Lorekeeper/EntityVisuals/` | Canonical entity-image associations, visual context, bounded reference reads, and provenance. |
 | `Lorekeeper/Composition/CompositionService.cs` | Revision-aware Designed Page aggregates, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |

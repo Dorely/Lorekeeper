@@ -220,7 +220,6 @@ builder.Services.AddScoped<IPublicationCoreMigrationService, PublicationCoreMigr
 builder.Services.AddScoped<IEditionContentMigrationService, EditionContentMigrationService>();
 builder.Services.AddScoped<IPublicationSectionMigrationService, PublicationSectionMigrationService>();
 builder.Services.AddScoped<IProjectImageService, ProjectImageService>();
-builder.Services.AddScoped<IProjectImageOutpaintService, ProjectImageOutpaintService>();
 builder.Services.AddScoped<IProjectFontService, ProjectFontService>();
 builder.Services.AddSingleton<ITypographyDefaultsService, TypographyDefaultsService>();
 builder.Services.AddScoped<IManuscriptStyleService, ManuscriptStyleService>();

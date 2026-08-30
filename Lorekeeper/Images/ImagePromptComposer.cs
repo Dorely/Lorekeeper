@@ -36,9 +36,9 @@ public sealed class ImageGenerationBrief
 public sealed class ImageEditBrief
 {
     public string IntendedUse { get; init; } = string.Empty;
-    [Description("Describe the coherent desired result, not a brittle command such as 'move the character but change nothing else'. Prefer regeneration for spatial or compositional changes.")]
+    [Description("Describe the coherent desired result, not a brittle command such as 'move the character but change nothing else'. For a larger version, describe the new framing and whether the surrounding scene should extend left and right, above and below, or outward on all sides. Prefer a complete source-driven edit for spatial or compositional changes.")]
     public string Change { get; init; } = string.Empty;
-    [Description("Only the identity, story, style, or composition anchors that materially require continuity. Do not require every unmentioned pixel or secondary detail to remain exact.")]
+    [Description("Only the identity, story, style, or composition anchors that materially require continuity. Do not require every unmentioned detail to remain exact; let the image model adapt nearby details so the result remains coherent.")]
     public string Preserve { get; init; } = string.Empty;
     public string Composition { get; init; } = string.Empty;
     public string LightingMood { get; init; } = string.Empty;
@@ -70,7 +70,7 @@ public sealed class ImageGenerationTarget
     [Description("Exact page-composition variant ID. Required for PageFrame and PageSurface targets; omit for Figure and cover targets.")]
     public Guid? VariantId { get; init; }
     public string AspectRatio { get; init; } = string.Empty;
-    [Description("Optional explicit WIDTHxHEIGHT provider raster override for a layout-bound target. Use only when the user explicitly requests a different DPI; both dimensions must satisfy the provider constraints and preserve the server-owned target aspect. Omit or use auto for the default raster.")]
+    [Description("Optional explicit WIDTHxHEIGHT provider raster for free-standing generation or editing, or for a layout-bound target when a larger proportional raster is warranted. Both dimensions must satisfy provider constraints; layout-bound targets must preserve the server-owned aspect. Omit or use auto to retain the moderate default raster.")]
     public string Size { get; init; } = string.Empty;
     [Description("Only for free-standing library generation. Layout-bound targets derive every reserved region from Lorekeeper.")]
     public IReadOnlyList<ImageReservedRegion>? ReservedTextRegions { get; init; }
@@ -220,7 +220,7 @@ public sealed class ImagePromptComposer(
         AppendSection(
             builder,
             "Edit discipline",
-            "Make the requested revision as one coherent image. Preserve the explicitly listed continuity priorities, but do not freeze every unmentioned pixel or secondary detail. Allow nearby pose, framing, lighting, background, texture, and geometry to adapt naturally when needed to integrate the edit. Keep unrelated major subjects and story facts recognizable without duplicating, deforming, or partially reconstructing them.");
+            "Render the requested revision as one coherent complete image using the supplied image as its visual starting point. Preserve the explicitly listed identity, story, style, and composition priorities, while allowing nearby pose, framing, lighting, background, texture, and geometry to adapt naturally when needed. Keep unrelated major subjects and story facts recognizable without duplicating, deforming, or partially reconstructing them.");
 
         return BuildResult(
             builder,
@@ -285,7 +285,7 @@ public sealed class ImagePromptComposer(
                 throw new ArgumentException("Layout-bound targets require targetKind and targetId together.", nameof(target));
             if (!string.IsNullOrWhiteSpace(target.AspectRatio)
                 || target.ReservedTextRegions is { Count: > 0 })
-                throw new ArgumentException("Layout-bound targets derive aspect ratio and reserved regions from Lorekeeper; omit manual values. An explicit provider-valid Size is allowed only for a user-requested raster override.", nameof(target));
+                throw new ArgumentException("Layout-bound targets derive aspect ratio and reserved regions from Lorekeeper; omit manual values. An explicit provider-valid Size may select a larger proportional raster when warranted, but it must preserve the server-owned aspect.", nameof(target));
             var coverTarget = target.TargetKind.Trim().StartsWith("cover", StringComparison.OrdinalIgnoreCase);
             LayoutGenerationTargetDescriptor descriptor;
             if (coverTarget)

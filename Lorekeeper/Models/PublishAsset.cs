@@ -38,11 +38,11 @@ public class PublishAsset
 
 public enum PublishAssetSource
 {
-    Uploaded,
-    Generated,
-    Edited,
-    Cropped,
-    Resized,
-    Outpainted,
-    Imported,
+    // Explicit values are persisted; do not renumber.
+    Uploaded = 0,
+    Generated = 1,
+    Edited = 2,
+    Cropped = 3,
+    Resized = 4,
+    Imported = 6,
 }
