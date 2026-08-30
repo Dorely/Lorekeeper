@@ -13,7 +13,7 @@
 @inject IProjectImageService Images
 @inject IProjectFontService ProjectFonts
 @inject IAuthoringHistoryRuntime AuthoringHistory
-@inject IPrintProductRegistry PrintProducts
+@inject IPrintArtifactProfileRegistry PrintArtifactProfiles
 @inject IJSRuntime JS
 
 <div class="cover-composer @(InteractionLocked ? "cover-composer--locked" : null)" aria-label="Cover composition editor" aria-disabled="@InteractionLocked" inert="@(InteractionLocked ? string.Empty : null)" tabindex="0" @onkeydown="HandleKeyDown">
@@ -345,8 +345,8 @@
     private void DismissError() => _error = null;
     private IReadOnlyList<string> CoverSurfaceRoles()
     {
-        if (CoreBook || _edition is null || string.IsNullOrWhiteSpace(_edition.PrintProductKey)) return ["front"];
-        var product = PrintProducts.GetRequired(_edition.PrintProductKey);
+        if (CoreBook || _edition is null || string.IsNullOrWhiteSpace(_edition.PrintArtifactProfileKey)) return ["front"];
+        var product = PrintArtifactProfiles.GetRequired(_edition.PrintArtifactProfileKey);
         var result = new List<string>();
         if (product.RequiresPerfectBoundCover)
         {

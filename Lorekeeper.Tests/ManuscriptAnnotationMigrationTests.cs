@@ -104,6 +104,9 @@ public sealed class ManuscriptAnnotationMigrationTests
                 await DatabaseStartupMigrationService.EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(
                     db,
                     CancellationToken.None);
+                await DatabaseStartupMigrationService.EnsurePrintProductCompatibilityColumnsAsync(
+                    db,
+                    CancellationToken.None);
                 await LegacyProjectSeed.InsertAsync(
                     db,
                     projectId,
@@ -144,6 +147,9 @@ public sealed class ManuscriptAnnotationMigrationTests
                     db,
                     CancellationToken.None);
                 await DatabaseStartupMigrationService.RemoveBarnesAndNoblePrintCompatibilityColumnsAsync(
+                    db,
+                    CancellationToken.None);
+                await DatabaseStartupMigrationService.RemovePrintArtifactProfileCompatibilityColumnsAsync(
                     db,
                     CancellationToken.None);
             }
@@ -266,6 +272,9 @@ public sealed class ManuscriptAnnotationMigrationTests
                 await DatabaseStartupMigrationService.EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(
                     db,
                     CancellationToken.None);
+                await DatabaseStartupMigrationService.EnsurePrintProductCompatibilityColumnsAsync(
+                    db,
+                    CancellationToken.None);
                 await LegacyProjectSeed.InsertAsync(
                     db,
                     projectId,
@@ -319,7 +328,7 @@ public sealed class ManuscriptAnnotationMigrationTests
                     {
                         PublicationEditionMigrationService.MigrationName,
                         PublicationPressMigrationService.MigrationName,
-                        PrintProductMigrationService.MigrationName,
+                        PrintArtifactProfileMigrationService.MigrationName,
                     }.Select(name => new PublicationEditionMigrationJournal
                     {
                         MigrationName = name,
@@ -437,10 +446,10 @@ public sealed class ManuscriptAnnotationMigrationTests
                     new PublicationSectionMigrationService(
                         recovery,
                         NullLogger<PublicationSectionMigrationService>.Instance),
-                    new PrintProductMigrationService(
+                    new PrintArtifactProfileMigrationService(
                         recovery,
-                        new PrintProductRegistry(),
-                        NullLogger<PrintProductMigrationService>.Instance),
+                        new PrintArtifactProfileRegistry(),
+                        NullLogger<PrintArtifactProfileMigrationService>.Instance),
                     recovery);
                 Assert.True(await startupMigration.ApplyAsync(), (await recovery.GetStateAsync()).Error);
 

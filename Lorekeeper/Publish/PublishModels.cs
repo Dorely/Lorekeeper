@@ -102,7 +102,7 @@ public sealed record PublicationEditionSummary(
     bool AllowDesignedPageOverrides,
     bool RectoChapterStarts)
 {
-    public string PrintProductKey { get; init; } = string.Empty;
+    public string PrintArtifactProfileKey { get; init; } = string.Empty;
     public PrintCoverMode PrintCoverMode { get; init; }
     public PrintProjectUse PrintProjectUse { get; init; } = PrintProjectUse.ForSale;
 }
@@ -140,9 +140,8 @@ public sealed record PublicationEditionView(
     double BodyFontSizePoints,
     double BodyLineHeight,
     Guid? SelectedCoverImageId,
-    string PrintRegistryVersion,
-    string PrintProductKey,
-    PrintFinish PrintFinish,
+    string PrintArtifactRegistryVersion,
+    string PrintArtifactProfileKey,
     PrintCoverMode PrintCoverMode,
     string PrintTemplateEvidenceJson,
     bool Bleed,
@@ -166,8 +165,7 @@ public sealed record PublicationReleaseOverridePatch(
     string? Name = null,
     PublicationVendor? Destination = null,
     string? Isbn = null,
-    string? PrintProductKey = null,
-    PrintFinish? PrintFinish = null,
+    string? PrintArtifactProfileKey = null,
     PrintCoverMode? PrintCoverMode = null,
     string? PrintTemplateEvidenceJson = null,
     bool? AllowDesignedPageOverrides = null,

@@ -14,7 +14,7 @@ public sealed class PublicationEditionService(
     IPublicationBookService books,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IPublicationReleasePresetService releasePresets,
-    IPrintProductRegistry printProducts,
+    IPrintArtifactProfileRegistry printArtifactProfiles,
     IPublicationActorContext actorContext) : IPublicationEditionService
 {
     public PublicationEditionService(
@@ -22,8 +22,8 @@ public sealed class PublicationEditionService(
         IPublicationActorContext actorContext)
         : this(database, new PublicationBookService(database),
             new PublicationEffectiveConfigurationResolver(database),
-            new PublicationReleasePresetService(database, new PrintProductRegistry()),
-            new PrintProductRegistry(), actorContext)
+            new PublicationReleasePresetService(database, new PrintArtifactProfileRegistry()),
+            new PrintArtifactProfileRegistry(), actorContext)
     {
     }
 
@@ -63,9 +63,8 @@ public sealed class PublicationEditionService(
             VendorProfileVersion = preset.ProfileId,
             OverrideFieldsJson = "[]",
             InheritsCoreCover = true,
-            PrintRegistryVersion = preset.RegistryVersion,
-            PrintProductKey = preset.ProductKey ?? string.Empty,
-            PrintFinish = preset.Finish,
+            PrintArtifactRegistryVersion = preset.RegistryVersion,
+            PrintArtifactProfileKey = preset.ArtifactProfileKey ?? string.Empty,
             PrintCoverMode = preset.CoverMode,
             PrintProjectUse = preset.ProjectUse,
             PrintIdentifierMode = preset.IdentifierMode,
@@ -203,11 +202,10 @@ public sealed class PublicationEditionService(
             edition.Vendor = destination;
             if (edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
             {
-                var product = printProducts.GetDefault(edition.Format, destination);
-                edition.PrintRegistryVersion = printProducts.Version;
-                edition.PrintProductKey = product.Key;
+                var product = printArtifactProfiles.GetDefault(edition.Format, destination);
+                edition.PrintArtifactRegistryVersion = printArtifactProfiles.Version;
+                edition.PrintArtifactProfileKey = product.Key;
                 edition.VendorProfileVersion = product.PdfProfile;
-                edition.PrintFinish = PrintFinish.Matte;
                 edition.PrintCoverMode = PrintCoverMode.Simplex;
                 edition.PrintProjectUse = product.DefaultProjectUse;
                 edition.PrintIdentifierMode = destination == PublicationVendor.BarnesAndNoblePress
@@ -221,18 +219,16 @@ public sealed class PublicationEditionService(
             }
         }
         if (patch.Isbn is not null) edition.Isbn = PublicationIsbn.NormalizeValidOrEmpty(patch.Isbn);
-        if (patch.PrintProductKey is { } productKey)
+        if (patch.PrintArtifactProfileKey is { } artifactProfileKey)
         {
-            var product = printProducts.GetRequired(productKey);
+            var product = printArtifactProfiles.GetRequired(artifactProfileKey);
             if (product.Format != edition.Format || product.Vendor != edition.Vendor)
-                throw new InvalidOperationException("The selected print product is not available for this release type and destination.");
-            edition.PrintRegistryVersion = printProducts.Version;
-            edition.PrintProductKey = product.Key;
+                throw new InvalidOperationException("The selected print artifact settings are not available for this release type and destination.");
+            edition.PrintArtifactRegistryVersion = printArtifactProfiles.Version;
+            edition.PrintArtifactProfileKey = product.Key;
             edition.VendorProfileVersion = product.PdfProfile;
-            if (!product.Finishes.Contains(edition.PrintFinish)) edition.PrintFinish = product.Finishes[0];
             if (!product.CoverModes.Contains(edition.PrintCoverMode)) edition.PrintCoverMode = product.CoverModes[0];
         }
-        if (patch.PrintFinish is { } finish) edition.PrintFinish = finish;
         if (patch.PrintCoverMode is { } coverMode) edition.PrintCoverMode = coverMode;
         if (patch.PrintProjectUse is { } projectUse)
         {
@@ -389,8 +385,7 @@ public sealed class PublicationEditionService(
         AddDifference(differences, "Vendor", left.Vendor, right.Vendor);
         AddDifference(differences, "ISBN", left.Isbn, right.Isbn);
         AddDifference(differences, "Trim", $"{left.PageWidthInches}x{left.PageHeightInches}", $"{right.PageWidthInches}x{right.PageHeightInches}");
-        AddDifference(differences, "Print product", left.PrintProductKey, right.PrintProductKey);
-        AddDifference(differences, "Finish", left.PrintFinish, right.PrintFinish);
+        AddDifference(differences, "Print artifact settings", left.PrintArtifactProfileKey, right.PrintArtifactProfileKey);
         AddDifference(differences, "Cover mode", left.PrintCoverMode, right.PrintCoverMode);
         var leftEffective = await effectiveConfigurations.ResolveReleaseAsync(projectId, leftEditionId, cancellationToken);
         var rightEffective = await effectiveConfigurations.ResolveReleaseAsync(projectId, rightEditionId, cancellationToken);
@@ -781,9 +776,8 @@ public sealed class PublicationEditionService(
                 edition.NumberChapters,
                 edition.TitlePageMode,
                 edition.RectoChapterStarts,
-                edition.PrintRegistryVersion,
-                edition.PrintProductKey,
-                edition.PrintFinish,
+                edition.PrintArtifactRegistryVersion,
+                edition.PrintArtifactProfileKey,
                 edition.PrintCoverMode,
                 edition.PrintProjectUse,
                 edition.PrintIdentifierMode,
@@ -965,22 +959,22 @@ public sealed class PublicationEditionService(
     private void ValidateReleaseState(PublicationEdition edition)
     {
         ValidateIdentity(edition.Name, edition.Format, edition.Vendor);
-        if (!Enum.IsDefined(edition.PrintFinish) || !Enum.IsDefined(edition.PrintCoverMode)
+        if (!Enum.IsDefined(edition.PrintCoverMode)
             || !Enum.IsDefined(edition.PrintProjectUse) || !Enum.IsDefined(edition.PrintIdentifierMode)
             || !Enum.IsDefined(edition.PrintCoverSubmissionMode)
             || !Enum.IsDefined(edition.TitlePageMode))
             throw new InvalidOperationException("One or more release settings are invalid.");
         if (edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
         {
-            if (string.IsNullOrWhiteSpace(edition.PrintProductKey))
-                throw new InvalidOperationException("Print releases require an exact print product.");
-            var product = printProducts.GetRequired(edition.PrintProductKey);
+            if (string.IsNullOrWhiteSpace(edition.PrintArtifactProfileKey))
+                throw new InvalidOperationException("Print releases require exact artifact settings.");
+            var product = printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey);
             if (product.Format != edition.Format || product.Vendor != edition.Vendor)
-                throw new InvalidOperationException("The selected print product does not belong to this release type and destination.");
-            if (!product.Finishes.Contains(edition.PrintFinish) || !product.CoverModes.Contains(edition.PrintCoverMode))
-                throw new InvalidOperationException("The selected finish or cover mode is unavailable for this exact print product.");
+                throw new InvalidOperationException("The selected print artifact settings do not belong to this release type and destination.");
+            if (!product.CoverModes.Contains(edition.PrintCoverMode))
+                throw new InvalidOperationException("The selected cover mode is unavailable for these print artifact settings.");
             if (!product.EffectiveSupportedProjectUses.Contains(edition.PrintProjectUse))
-                throw new InvalidOperationException("The selected project use is unavailable for this exact print product.");
+                throw new InvalidOperationException("The selected project use is unavailable for these print artifact settings.");
             if (edition.Vendor == PublicationVendor.BarnesAndNoblePress)
             {
                 if (edition.PrintProjectUse == PrintProjectUse.PersonalUse
@@ -1007,11 +1001,11 @@ public sealed class PublicationEditionService(
                     && Math.Abs(height - edition.PageHeightInches) < .0001;
             });
             if (!trimMatches && !product.AllowsCustomTrim)
-                throw new InvalidOperationException($"{product.DisplayName} is unavailable at {edition.PageWidthInches:0.###} x {edition.PageHeightInches:0.###} inches.");
+                throw new InvalidOperationException($"The selected print artifact settings are unavailable at {edition.PageWidthInches:0.###} x {edition.PageHeightInches:0.###} inches.");
         }
         else if (edition.Vendor != PublicationVendor.Generic || edition.Bleed)
         {
-            throw new InvalidOperationException("Digital releases use application-managed digital product settings.");
+            throw new InvalidOperationException("Digital releases use application-managed artifact settings.");
         }
         if (!double.IsFinite(edition.PageWidthInches) || edition.PageWidthInches is < 3 or > 24
             || !double.IsFinite(edition.PageHeightInches) || edition.PageHeightInches is < 3 or > 24
@@ -1082,7 +1076,7 @@ public sealed class PublicationEditionService(
             edition.AllowDesignedPageOverrides,
             edition.RectoChapterStarts)
         {
-            PrintProductKey = edition.PrintProductKey,
+            PrintArtifactProfileKey = edition.PrintArtifactProfileKey,
             PrintCoverMode = edition.PrintCoverMode,
             PrintProjectUse = edition.PrintProjectUse,
         };
@@ -1121,9 +1115,8 @@ public sealed class PublicationEditionService(
             edition.BodyFontSizePoints,
             edition.BodyLineHeight,
             edition.SelectedCoverImageId,
-            edition.PrintRegistryVersion,
-            edition.PrintProductKey,
-            edition.PrintFinish,
+            edition.PrintArtifactRegistryVersion,
+            edition.PrintArtifactProfileKey,
             edition.PrintCoverMode,
             edition.PrintTemplateEvidenceJson,
             edition.Bleed,
@@ -1263,11 +1256,10 @@ public sealed class PublicationEditionService(
             NumberChapters = source.NumberChapters,
             TitlePageMode = source.TitlePageMode,
             RectoChapterStarts = source.RectoChapterStarts,
-            PrintRegistryVersion = source.PrintRegistryVersion,
-            PrintProductKey = source.PrintProductKey,
+            PrintArtifactRegistryVersion = source.PrintArtifactRegistryVersion,
+            PrintArtifactProfileKey = source.PrintArtifactProfileKey,
             PrintProjectUse = source.PrintProjectUse,
             PrintIdentifierMode = source.PrintIdentifierMode,
-            PrintFinish = source.PrintFinish,
             PrintCoverMode = source.PrintCoverMode,
             PrintCoverSubmissionMode = source.PrintCoverSubmissionMode,
             PrintTemplateEvidenceJson = source.PrintTemplateEvidenceJson,

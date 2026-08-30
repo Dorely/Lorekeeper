@@ -733,7 +733,7 @@ public sealed class PublicationRenderProcessor(
     IPublicationCoverService covers,
     IProjectFontService projectFonts,
     IPublicationPressRuntime pressRuntime,
-    IPrintProductRegistry printProducts,
+    IPrintArtifactProfileRegistry printArtifactProfiles,
     IOptions<PublicationPressOptions> options)
 {
     public PublicationRenderProcessor(
@@ -745,7 +745,7 @@ public sealed class PublicationRenderProcessor(
         IPublicationPressRuntime pressRuntime,
         IOptions<PublicationPressOptions> options)
         : this(database, publishing, editions, null!, covers, projectFonts, pressRuntime,
-            new PrintProductRegistry(), options)
+            new PrintArtifactProfileRegistry(), options)
     {
     }
 
@@ -788,9 +788,9 @@ public sealed class PublicationRenderProcessor(
                 "The edition's publication profile is unsupported by Lorekeeper Press.");
         }
         var runtime = pressRuntime.GetDescription();
-        if (!string.Equals(runtime.PrintProductRegistryVersion, printProducts.Version, StringComparison.Ordinal)
-            || !string.Equals(runtime.PrintProductRegistrySha256, printProducts.Sha256, StringComparison.Ordinal))
-            throw new InvalidOperationException("The installed Press renderer has a different print-product registry.");
+        if (!string.Equals(runtime.PrintArtifactProfileRegistryVersion, printArtifactProfiles.Version, StringComparison.Ordinal)
+            || !string.Equals(runtime.PrintArtifactProfileRegistrySha256, printArtifactProfiles.Sha256, StringComparison.Ordinal))
+            throw new InvalidOperationException("The installed Press renderer has a different print-artifact profile registry.");
         if (!runtime.Profiles.Contains(job.ProfileId, StringComparer.Ordinal))
             throw new InvalidOperationException("The queued publication profile is unsupported by the installed Lorekeeper Press runtime.");
         if (string.IsNullOrWhiteSpace(job.RendererVersion))
@@ -854,8 +854,8 @@ public sealed class PublicationRenderProcessor(
                 await db.SaveChangesAsync(cancellationToken);
             },
             cancellationToken);
-        if (result.ProtocolVersion != 9)
-            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 9 is required.");
+        if (result.ProtocolVersion != 10)
+            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 10 is required.");
         if (result.JobId is not null
             && !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a response for a different job.");
@@ -878,11 +878,11 @@ public sealed class PublicationRenderProcessor(
             ?? throw new InvalidOperationException("The press renderer omitted its artifact list.");
         var resultKinds = resultArtifacts.Select(artifact => artifact.Kind).Order().ToArray();
         var digitalOutput = coreTarget || edition!.Format == PublicationEditionFormat.DigitalPdf;
-        var expectedKinds = digitalOutput ? ["book-pdf"] : ExpectedPhysicalArtifactKinds(edition!, printProducts);
+        var expectedKinds = digitalOutput ? ["book-pdf"] : ExpectedPhysicalArtifactKinds(edition!, printArtifactProfiles);
         if (!resultKinds.SequenceEqual(expectedKinds, StringComparer.Ordinal))
             throw new InvalidOperationException(digitalOutput
                 ? "The press renderer must return exactly one Digital PDF book artifact."
-                : "The press renderer returned an artifact set that does not match the selected physical product.");
+                : "The press renderer returned an artifact set that does not match the selected print artifact settings.");
         var interiorResult = resultArtifacts.Single(artifact => artifact.Kind is "interior-pdf" or "book-pdf");
         if (interiorResult.PageCount is not > 0 or > 100_000)
             throw new InvalidOperationException("The renderer returned an invalid interior page count.");
@@ -1124,7 +1124,7 @@ public sealed class PublicationRenderProcessor(
         "kdp-hardcover-v1" or
         "ingram-print-pdfx1a-v2";
 
-    private static string[] RequiredCoverSurfaces(PrintProductDefinition product, PrintCoverMode coverMode)
+    private static string[] RequiredCoverSurfaces(PrintArtifactProfile product, PrintCoverMode coverMode)
     {
         if (product.RequiresPerfectBoundCover)
             return coverMode == PrintCoverMode.Duplex ? ["perfect-bound-outside", "perfect-bound-inside"] : ["perfect-bound-outside"];
@@ -1337,7 +1337,7 @@ public sealed class PublicationRenderProcessor(
         if (missingVariants.Count > 0)
             throw new InvalidOperationException($"Create and review an exact layout variant for this edition geometry: {string.Join(", ", missingVariants)}.");
         var printProduct = release?.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
-            ? printProducts.GetRequired(release.PrintProductKey)
+            ? printArtifactProfiles.GetRequired(release.PrintArtifactProfileKey)
             : null;
         var printTemplateEvidence = printProduct?.SpineModel.Kind == "TemplateRequired"
             && !string.IsNullOrWhiteSpace(release!.PrintTemplateEvidenceJson)
@@ -1348,28 +1348,26 @@ public sealed class PublicationRenderProcessor(
         var requiredCoverSurfaces = printProduct is null ? Array.Empty<string>() : RequiredCoverSurfaces(printProduct, release!.PrintCoverMode);
         var payload = new
         {
-            protocolVersion = 9,
+            protocolVersion = 10,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
             outputPurpose = job.TargetKind == PublicationTargetKind.CoreBook
                 ? "reading-copy"
                 : "publication",
             ink = printProduct?.InteriorProcess.ToString() ?? PrintInteriorProcess.PremiumColor.ToString(),
-            physicalProduct = printProduct is null ? null : new
+            printArtifactProfile = printProduct is null ? null : new
             {
-                registryVersion = printProducts.Version,
-                registrySha256 = printProducts.Sha256,
-                productKey = printProduct.Key,
+                registryVersion = printArtifactProfiles.Version,
+                registrySha256 = printArtifactProfiles.Sha256,
+                artifactProfileKey = printProduct.Key,
                 vendor = printProduct.Vendor.ToString(),
                 format = printProduct.Format.ToString(),
                 binding = printProduct.Binding.ToString(),
                 interiorProcess = printProduct.InteriorProcess.ToString(),
-                printProduct.PaperName,
                 printProduct.BasisWeightPounds,
                 printProduct.Gsm,
                 coverMaterial = printProduct.CoverMaterial.ToString(),
-                finish = release!.PrintFinish.ToString(),
-                coverMode = release.PrintCoverMode.ToString(),
+                coverMode = release!.PrintCoverMode.ToString(),
                 projectUse = release.PrintProjectUse.ToString(),
                 identifierMode = release.PrintIdentifierMode.ToString(),
                 coverSubmissionMode = release.PrintCoverSubmissionMode.ToString(),
@@ -1743,9 +1741,9 @@ public sealed class PublicationRenderProcessor(
 
     private static string[] ExpectedPhysicalArtifactKinds(
         PublicationEdition edition,
-        IPrintProductRegistry printProducts)
+        IPrintArtifactProfileRegistry printArtifactProfiles)
     {
-        var product = printProducts.GetRequired(edition.PrintProductKey);
+        var product = printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey);
         var kinds = new List<string> { "interior-pdf" };
         if (edition.Vendor == PublicationVendor.BarnesAndNoblePress
             && edition.PrintCoverSubmissionMode == PrintCoverSubmissionMode.SeparatePanelsVendorSpine)

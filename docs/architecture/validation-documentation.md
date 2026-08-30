@@ -232,7 +232,7 @@ Build current Windows artifacts on Windows with:
 The builder validates tool versions and SemVer, audits managed and shipped
 npm/Electron dependencies, rebuilds isolated staging/output, rebuilds and checks
 the semantic editor, builds the locked Press runtime, probes packaged renderer and
-physical-product registry identity, and verifies installer/updater artifacts and
+print-artifact profile registry identity, and verifies installer/updater artifacts and
 checksums. The shared dependency policy permits only the two exact known
 `image-size@1.2.1` parser advisories while Electron.NET's generated call remains
 provably confined to an unconfigured splash-image path. A package version, call

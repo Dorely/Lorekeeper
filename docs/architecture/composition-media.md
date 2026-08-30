@@ -11,7 +11,7 @@ browser canvas/runtime that presents those capabilities. Read it with
 `publishing-model.md` when the change concerns publication sections, Core or
 release cover materialization, or edition-specific geometry. Read it with
 `press-production.md` when the change affects output rendering, physical
-product geometry, PDF/EPUB artifacts, or production validation. Read it with
+artifact geometry, PDF/EPUB artifacts, or production validation. Read it with
 `persistence-migrations-import.md` when a new composition/image/font field,
 asset relationship, history dependency, or migration boundary is involved.
 
@@ -338,7 +338,7 @@ composition, Core/release fingerprints, and artifact freshness.
   writes, styles, annotations, authoring history, and Editor/revision behavior.
 - [`publishing-model.md`](./publishing-model.md) owns Core Book, releases,
   publication sections, edition content, Publish UI, and effective projections.
-- [`press-production.md`](./press-production.md) owns physical products,
+- [`press-production.md`](./press-production.md) owns print-artifact profiles,
   covers, native rendering, PDF/EPUB validation, artifacts, and packages.
 - [`persistence-migrations-import.md`](./persistence-migrations-import.md)
   owns SQLite/EF persistence, migrations, recovery, import/export, and durable

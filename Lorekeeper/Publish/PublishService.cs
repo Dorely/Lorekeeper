@@ -100,7 +100,7 @@ public sealed class PublishService(
                 .SingleOrDefaultAsync(cancellationToken) != PublicationEditionFormat.Epub)
         {
             throw new InvalidOperationException(
-                "EPUB export is available only from an EPUB release so print ISBN and product metadata cannot leak into a digital product.");
+                "EPUB export is available only from an EPUB release so print ISBN and artifact metadata cannot leak into a digital release.");
         }
         var document = await GetDocumentAsync(projectId, editionId, cancellationToken);
 

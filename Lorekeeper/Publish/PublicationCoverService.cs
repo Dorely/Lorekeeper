@@ -112,7 +112,7 @@ public sealed class PublicationCoverService(
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
     IPublicationPressRuntime pressRuntime,
     IPrintGeometryService printGeometry,
-    IPrintProductRegistry printProducts,
+    IPrintArtifactProfileRegistry printArtifactProfiles,
     IAuthoringHistoryRuntime? authoringHistory = null,
     IAuthoringMutationContextAccessor? authoringMutationContext = null) : IPublicationCoverService
 {
@@ -121,7 +121,7 @@ public sealed class PublicationCoverService(
         IPublicationEditionService editions,
         IPublicationPressRuntime pressRuntime)
         : this(database, editions, new PublicationEffectiveConfigurationResolver(database), pressRuntime,
-            new PrintGeometryService(new PrintProductRegistry()), new PrintProductRegistry(), null, null)
+            new PrintGeometryService(new PrintArtifactProfileRegistry()), new PrintArtifactProfileRegistry(), null, null)
     {
     }
 
@@ -918,7 +918,7 @@ public sealed class PublicationCoverService(
     {
         if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover))
             return "front";
-        var product = printProducts.GetRequired(edition.PrintProductKey);
+        var product = printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey);
         var available = new List<string>();
         if (product.RequiresPerfectBoundCover)
         {
@@ -1141,7 +1141,7 @@ public sealed class PublicationCoverService(
             .FirstOrDefaultAsync(cancellationToken) ?? 0;
         var provisionalPages = pages > 0
             ? pages
-            : printProducts.GetRequired(edition.PrintProductKey).MinimumPages;
+            : printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey).MinimumPages;
         var geometry = printGeometry.Calculate(edition, provisionalPages, surfaceRole);
         var evidence = edition.Vendor == PublicationVendor.BarnesAndNoblePress
             && !string.IsNullOrWhiteSpace(edition.PrintTemplateEvidenceJson)

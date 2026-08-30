@@ -12,7 +12,7 @@ public sealed record PrintTemplateImportFile(string FileName, byte[] Data);
 public interface IPrintTemplateEvidenceService
 {
     string ImportBarnesAndNoble(
-        PrintProductDefinition product,
+        PrintArtifactProfile product,
         string trim,
         int pageCount,
         IReadOnlyList<PrintTemplateImportFile> files);
@@ -23,20 +23,20 @@ public sealed class PrintTemplateEvidenceService : IPrintTemplateEvidenceService
     private const int MaximumTemplateBytes = 64 * 1024 * 1024;
 
     public string ImportBarnesAndNoble(
-        PrintProductDefinition product,
+        PrintArtifactProfile product,
         string trim,
         int pageCount,
         IReadOnlyList<PrintTemplateImportFile> files)
     {
         if (product.Vendor != Models.PublicationVendor.BarnesAndNoblePress)
-            throw new InvalidOperationException("B&N template import requires a B&N Press print product.");
+            throw new InvalidOperationException("B&N template import requires B&N Press artifact settings.");
         if (!product.TrimSizes.Contains(trim, StringComparer.Ordinal))
-            throw new InvalidOperationException("The selected trim is not supported by this B&N Press product.");
+            throw new InvalidOperationException("The selected trim is not supported by these B&N Press artifact settings.");
         if (pageCount <= 0)
             throw new InvalidOperationException("Enter the page count used to generate the B&N Press template.");
         if (!pageCount.IsEven()) pageCount++;
         if (pageCount < product.MinimumPages || pageCount > product.MaximumPages)
-            throw new InvalidOperationException($"This product supports {product.MinimumPages}-{product.MaximumPages} pages.");
+            throw new InvalidOperationException($"These artifact settings support {product.MinimumPages}-{product.MaximumPages} pages.");
 
         var pdfs = Expand(files);
         if (pdfs.Count == 0)
@@ -108,7 +108,7 @@ public sealed class PrintTemplateEvidenceService : IPrintTemplateEvidenceService
             "PDF/A-1b")
         {
             Provider = "BarnesAndNoblePress",
-            ProductKey = product.Key,
+            ArtifactProfileKey = product.Key,
             PageCount = pageCount,
             GeometryFingerprint = fingerprint,
             SpineWidthInches = spineWidth,

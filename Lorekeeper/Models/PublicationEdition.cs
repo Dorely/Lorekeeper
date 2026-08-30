@@ -59,14 +59,6 @@ public enum PublicationEditionStatus
     Archived,
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<PrintFinish>))]
-public enum PrintFinish
-{
-    Matte,
-    Gloss,
-    Textured,
-}
-
 [JsonConverter(typeof(JsonStringEnumConverter<PrintCoverMode>))]
 public enum PrintCoverMode
 {
@@ -108,11 +100,10 @@ public class PublicationEdition
     public bool NumberChapters { get; set; }
     public PublishTitlePageMode TitlePageMode { get; set; } = PublishTitlePageMode.Automatic;
     public bool RectoChapterStarts { get; set; }
-    public string PrintRegistryVersion { get; set; } = string.Empty;
-    public string PrintProductKey { get; set; } = string.Empty;
+    public string PrintArtifactRegistryVersion { get; set; } = string.Empty;
+    public string PrintArtifactProfileKey { get; set; } = string.Empty;
     public PrintProjectUse PrintProjectUse { get; set; } = PrintProjectUse.ForSale;
     public PrintIdentifierMode PrintIdentifierMode { get; set; } = PrintIdentifierMode.UserSuppliedIsbn;
-    public PrintFinish PrintFinish { get; set; } = PrintFinish.Matte;
     public PrintCoverMode PrintCoverMode { get; set; } = PrintCoverMode.Simplex;
     public PrintCoverSubmissionMode PrintCoverSubmissionMode { get; set; } = PrintCoverSubmissionMode.FullWrapMeasured;
     public string PrintTemplateEvidenceJson { get; set; } = string.Empty;

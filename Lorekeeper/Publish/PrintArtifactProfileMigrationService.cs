@@ -7,15 +7,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Lorekeeper.Publish;
 
-public interface IPrintProductMigrationService
+public interface IPrintArtifactProfileMigrationService
 {
     Task ApplyPendingAsync(AppDbContext db, CancellationToken cancellationToken = default);
 }
 
-public sealed class PrintProductMigrationService(
+public sealed class PrintArtifactProfileMigrationService(
     IDatabaseMigrationRecoveryService recovery,
-    IPrintProductRegistry registry,
-    ILogger<PrintProductMigrationService> logger) : IPrintProductMigrationService
+    IPrintArtifactProfileRegistry registry,
+    ILogger<PrintArtifactProfileMigrationService> logger) : IPrintArtifactProfileMigrationService
 {
     public const string MigrationName = "vendor-print-products-v1";
     public const string AdditiveMigrationId = "20260813004817_VendorPrintProductsV27";
@@ -36,20 +36,20 @@ public sealed class PrintProductMigrationService(
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $"""
                 UPDATE PublicationEditions
-                SET PrintRegistryVersion = CASE
+                SET PrintArtifactRegistryVersion = CASE
                         WHEN Format IN ('Paperback','Hardcover') THEN {registry.Version}
                         ELSE ''
                     END,
-                    PrintProductKey = CASE
+                    PrintArtifactProfileKey = CASE
                         WHEN Format = 'Paperback' AND Vendor = 'AmazonKdp' AND Ink = 'Color' THEN 'kdp-pb-premium-color'
-                        WHEN Format = 'Paperback' AND Vendor = 'AmazonKdp' AND Paper = 'Cream' THEN 'kdp-pb-bw-cream'
-                        WHEN Format = 'Paperback' AND Vendor = 'AmazonKdp' THEN 'kdp-pb-bw-white'
+                        WHEN Format = 'Paperback' AND Vendor = 'AmazonKdp' AND Paper = 'Cream' THEN 'kdp-pb-bw-50-2500'
+                        WHEN Format = 'Paperback' AND Vendor = 'AmazonKdp' THEN 'kdp-pb-bw-50-2252'
                         WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' AND Ink = 'Color' THEN 'ingram-pb-premium70'
-                        WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' AND Paper = 'Cream' THEN 'ingram-pb-bw-cream50'
-                        WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' THEN 'ingram-pb-bw-white50'
+                        WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' AND Paper = 'Cream' THEN 'ingram-pb-bw-50-2225'
+                        WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' THEN 'ingram-pb-bw-50-2009'
                         WHEN Format = 'Paperback' THEN 'generic-perfectbound-template'
-                        WHEN Format = 'Hardcover' AND Vendor = 'AmazonKdp' THEN 'kdp-hc-bw-white'
-                        WHEN Format = 'Hardcover' AND Vendor = 'IngramSpark' THEN 'ingram-hc-case-bw-white50'
+                        WHEN Format = 'Hardcover' AND Vendor = 'AmazonKdp' THEN 'kdp-hc-bw-50-2252'
+                        WHEN Format = 'Hardcover' AND Vendor = 'IngramSpark' THEN 'ingram-hc-case-bw-50-2009'
                         WHEN Format = 'Hardcover' THEN 'generic-casebound-template'
                         ELSE ''
                     END,
@@ -101,7 +101,7 @@ public sealed class PrintProductMigrationService(
                 item.Edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
                 && !string.IsNullOrWhiteSpace(item.CompositionSceneJson)))
             {
-                var role = PrimarySurface(registry.GetRequired(cover.Edition.PrintProductKey));
+                var role = PrimarySurface(registry.GetRequired(cover.Edition.PrintArtifactProfileKey));
                 cover.SurfaceScenesJson = JsonSerializer.Serialize(
                     new Dictionary<string, string>(StringComparer.Ordinal) { [role] = cover.CompositionSceneJson });
             }
@@ -110,7 +110,7 @@ public sealed class PrintProductMigrationService(
             if (source.EditionCount != target.EditionCount
                 || source.ArtifactCount != target.ArtifactCount
                 || !string.Equals(source.ArtifactBytesHash, target.ArtifactBytesHash, StringComparison.Ordinal))
-                throw new InvalidDataException("Print-product migration changed release counts or immutable artifact bytes/hashes.");
+                throw new InvalidDataException("Print artifact-profile migration changed release counts or immutable artifact bytes/hashes.");
 
             db.PublicationEditionMigrationJournals.Add(new PublicationEditionMigrationJournal
             {
@@ -138,18 +138,18 @@ public sealed class PrintProductMigrationService(
         }
         catch (Exception exception)
         {
-            logger.LogError(exception, "Print-product migration failed; protected backup {BackupPath} remains available.", backupPath);
+            logger.LogError(exception, "Print artifact-profile migration failed; protected backup {BackupPath} remains available.", backupPath);
             db.ChangeTracker.Clear();
             await recovery.EnterRecoveryModeAsync(db, backupPath, MigrationName, 19, 20, exception, cancellationToken);
         }
     }
 
-    private static string PrimarySurface(PrintProductDefinition product) =>
-        product.RequiresPerfectBoundCover ? "perfect-bound-outside"
-        : product.RequiresCaseCover ? "case-wrap"
-        : product.RequiresDustJacket ? "dust-jacket"
-        : product.RequiresClothManifest ? "digital-cloth-setup"
-        : throw new InvalidDataException($"Print product '{product.Key}' has no cover surface.");
+    private static string PrimarySurface(PrintArtifactProfile profile) =>
+        profile.RequiresPerfectBoundCover ? "perfect-bound-outside"
+        : profile.RequiresCaseCover ? "case-wrap"
+        : profile.RequiresDustJacket ? "dust-jacket"
+        : profile.RequiresClothManifest ? "digital-cloth-setup"
+        : throw new InvalidDataException($"Print artifact profile '{profile.Key}' has no cover surface.");
 
     private static async Task<MigrationSnapshot> SnapshotAsync(
         AppDbContext db,

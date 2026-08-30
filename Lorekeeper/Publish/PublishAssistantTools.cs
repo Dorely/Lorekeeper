@@ -94,7 +94,7 @@ public sealed class PublishAssistantTools(
     IProjectFontService projectFonts,
     IProjectPageSetupService pageSetups,
     IProjectImageService projectImages,
-    IPrintProductRegistry printProducts,
+    IPrintArtifactProfileRegistry printArtifactProfiles,
     IPrintGeometryService printGeometry,
     IAppDatabaseOperationFactory database,
     IEditionContentService? editionContent = null,
@@ -150,15 +150,15 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: () => ReadEditionsAsync(context),
                 name: "list_publication_releases",
-                description: "List the optional Paperback, Hardcover, EPUB ebook, and PDF ebook releases with stable IDs, product type, destination, status, and revision."),
+                description: "List the optional Paperback, Hardcover, EPUB ebook, and PDF ebook releases with stable IDs, release format, destination, status, and revision."),
             AIFunctionFactory.Create(
-                method: (PublicationEditionFormat format, PublicationVendor destination) => ListPrintProducts(format, destination),
-                name: "list_compatible_print_products",
-                description: "List exact offline-registry print products for a Paperback or Hardcover destination. Results include stable product keys, paper weight, process, construction, finishes, cover modes, trims, and page limits."),
+                method: (PublicationEditionFormat format, PublicationVendor destination) => ListPrintArtifactOptions(format, destination),
+                name: "list_print_artifact_options",
+                description: "List only inputs that change Paperback or Hardcover artifacts: interior process, paper weight/thickness, cover construction, cover modes, trims, and page limits. Paper color and finish are intentionally excluded."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, int pageCount, string? surfaceRole = null) => ReadPrintGeometryAsync(context, releaseId, pageCount, surfaceRole),
-                name: "read_print_product_geometry",
-                description: "Calculate submitted, normalized, and reported page counts, exact spine width, and the requested outside, inside, case, or jacket surface geometry for the selected release product. Use the actual interior page count when available."),
+                name: "read_print_artifact_geometry",
+                description: "Calculate submitted, normalized, and reported page counts, exact spine width, and the requested outside, inside, case, or jacket surface geometry for the selected release artifact settings. Use the actual interior page count when available."),
             AIFunctionFactory.Create(
                 method: (string name, PublicationEditionFormat format, PublicationVendor destination) => CreateReleaseAsync(context, name, format, destination),
                 name: "create_publication_release",
@@ -170,7 +170,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid releaseId, PublicationReleaseOverridePatch patch) => PatchReleaseAsync(context, releaseId, patch),
                 name: "patch_publication_release_overrides",
-                description: "Revision-check sparse release product settings and field overrides. ResetFields restores live Core inheritance. Language accepts en, en-US, or en-GB. Vendor profile versions are application-managed and cannot be supplied."),
+                description: "Revision-check sparse release artifact settings and field overrides. ResetFields restores live Core inheritance. Language accepts en, en-US, or en-GB. Vendor profile versions are application-managed and cannot be supplied."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, bool enabled, long expectedRevision, bool confirmDiscard = false) =>
                     SetEditionContentEnabledAsync(context, releaseId, enabled, expectedRevision, confirmDiscard),
@@ -386,7 +386,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid? releaseId = null, string? surfaceRole = null, int objectStart = 0, int objectCount = 30, int structureStart = 0, int structureCount = 30) => ReadCoverAsync(context, releaseId, surfaceRole, objectStart, objectCount, structureStart, structureCount),
                 name: "read_publication_cover_design",
-                description: "Read the Core front cover when releaseId is omitted, or a release's exact outside, inside, case, jacket, or cloth surface when releaseId and surfaceRole are supplied. Returns compact copy, product geometry, diagnostics, layers, and one bounded page of scene objects."),
+                description: "Read the Core front cover when releaseId is omitted, or a release's exact outside, inside, case, jacket, or cloth surface when releaseId and surfaceRole are supplied. Returns compact copy, artifact geometry, diagnostics, layers, and one bounded page of scene objects."),
             AIFunctionFactory.Create(
                 method: (Guid? releaseId = null, string? surfaceRole = null, string mode = "annotated") => PreviewCoverCanvasAsync(context, releaseId, surfaceRole, mode),
                 name: "preview_publication_cover_canvas",
@@ -410,7 +410,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid? releaseId = null) => ValidateCoverAsync(context, releaseId),
                 name: "validate_publication_cover_composition",
-                description: "Validate the Core front cover or a supplied release cover for geometry, accessibility, reading order, images, and product-specific regions. Returns compact prioritized diagnostics."),
+                description: "Validate the Core front cover or a supplied release cover for geometry, accessibility, reading order, images, and construction-specific regions. Returns compact prioritized diagnostics."),
             AIFunctionFactory.Create(
                 method: (long expectedBookRevision, long expectedCoverRevision, string targetKind, Guid targetId, CompositionElementPatch patch) => PatchCoreCoverElementAsync(context, expectedBookRevision, expectedCoverRevision, targetKind, targetId, patch),
                 name: "patch_publication_core_cover_element",
@@ -434,7 +434,7 @@ public sealed class PublishAssistantTools(
             AIFunctionFactory.Create(
                 method: (Guid releaseId, long expectedReleaseRevision) => CustomizeReleaseCoverAsync(context, releaseId, expectedReleaseRevision),
                 name: "customize_publication_release_cover",
-                description: "Materialize the inherited Core front into an editable release cover while preserving product-specific paperback spine/back/barcode regions."),
+                description: "Materialize the inherited Core front into an editable release cover while preserving the release's paperback spine, back, and barcode regions."),
             AIFunctionFactory.Create(
                 method: (Guid releaseId, long expectedReleaseRevision) => UseCoreCoverAsync(context, releaseId, expectedReleaseRevision),
                 name: "use_core_publication_cover",
@@ -488,7 +488,7 @@ public sealed class PublishAssistantTools(
         {
             "list_search_sources", "read_project_source", "search_project", "list_project_images", "read_project_image",
             "read_publication_book", "patch_publication_book", "list_publication_releases",
-            "list_compatible_print_products", "read_print_product_geometry",
+            "list_print_artifact_options", "read_print_artifact_geometry",
             "create_publication_release", "read_publication_release", "patch_publication_release_overrides",
             "set_edition_specific_content", "read_edition_content_differences",
             "prepare_publication_files", "cancel_publication_preparation", "read_publication_readiness",
@@ -941,20 +941,18 @@ public sealed class PublishAssistantTools(
         CreateReleaseCoreAsync(context, name, format,
             format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? destination : PublicationVendor.Generic);
 
-    private string ListPrintProducts(PublicationEditionFormat format, PublicationVendor destination)
+    private string ListPrintArtifactOptions(PublicationEditionFormat format, PublicationVendor destination)
     {
         if (format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover))
             return Serialize(new { ok = false, code = "PRINT_FORMAT_REQUIRED", summary = "Choose Paperback or Hardcover." });
-        var products = printProducts.List(format, destination).Select(item => new
+        var options = printArtifactProfiles.List(format, destination).Select(item => new
         {
-            item.Key,
-            item.DisplayName,
+            artifactProfileKey = item.Key,
             process = item.InteriorProcess.ToString(),
-            item.PaperName,
             item.BasisWeightPounds,
             item.Gsm,
+            paperThicknessInchesPerPage = EffectiveCaliper(item),
             construction = item.CoverMaterial.ToString(),
-            finishes = item.Finishes,
             coverModes = item.CoverModes,
             trims = item.TrimSizes.Take(20),
             item.AllowsCustomTrim,
@@ -965,7 +963,16 @@ public sealed class PublishAssistantTools(
             },
             normalizedCoverPageRange = new { minimum = item.MinimumPages, maximum = item.MaximumPages },
         }).ToArray();
-        return Serialize(new { ok = true, registryVersion = printProducts.Version, registrySha256 = printProducts.Sha256, count = products.Length, products });
+        return Serialize(new { ok = true, registryVersion = printArtifactProfiles.Version, registrySha256 = printArtifactProfiles.Sha256, count = options.Length, options });
+    }
+
+    private static decimal? EffectiveCaliper(PrintArtifactProfile profile)
+    {
+        if (profile.SpineModel.InchesPerPage is { } exact) return exact;
+        var anchors = profile.SpineModel.Anchors?.OrderBy(item => item.Pages).ToArray() ?? [];
+        return anchors.Length > 1
+            ? (anchors[^1].Inches - anchors[0].Inches) / (anchors[^1].Pages - anchors[0].Pages)
+            : null;
     }
 
     private async Task<string> ReadPrintGeometryAsync(PublishAssistantContext context, Guid releaseId, int pageCount, string? surfaceRole)
@@ -978,9 +985,8 @@ public sealed class PublishAssistantTools(
             Name = workspace.Edition.Name,
             Format = workspace.Edition.Format,
             Vendor = workspace.Edition.Vendor,
-            PrintRegistryVersion = workspace.Edition.PrintRegistryVersion,
-            PrintProductKey = workspace.Edition.PrintProductKey,
-            PrintFinish = workspace.Edition.PrintFinish,
+            PrintArtifactRegistryVersion = workspace.Edition.PrintArtifactRegistryVersion,
+            PrintArtifactProfileKey = workspace.Edition.PrintArtifactProfileKey,
             PrintCoverMode = workspace.Edition.PrintCoverMode,
             PrintTemplateEvidenceJson = workspace.Edition.PrintTemplateEvidenceJson,
             PageWidthInches = workspace.Edition.PageWidthInches,
@@ -1252,9 +1258,8 @@ public sealed class PublishAssistantTools(
                 Destination = workspace.Edition.Vendor,
                 workspace.Edition.Status,
                 workspace.Edition.Isbn,
-                workspace.Edition.PrintRegistryVersion,
-                workspace.Edition.PrintProductKey,
-                workspace.Edition.PrintFinish,
+                workspace.Edition.PrintArtifactRegistryVersion,
+                workspace.Edition.PrintArtifactProfileKey,
                 workspace.Edition.PrintCoverMode,
                 PrintBleedManaged = workspace.Edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover,
                 workspace.Edition.AllowDesignedPageOverrides,

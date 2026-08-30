@@ -396,10 +396,10 @@ public sealed class LorekeeperPressMigrationTests
                     new PublicationSectionMigrationService(
                         recovery,
                         NullLogger<PublicationSectionMigrationService>.Instance),
-                    new PrintProductMigrationService(
+                    new PrintArtifactProfileMigrationService(
                         recovery,
-                        new PrintProductRegistry(),
-                        NullLogger<PrintProductMigrationService>.Instance),
+                        new PrintArtifactProfileRegistry(),
+                        NullLogger<PrintArtifactProfileMigrationService>.Instance),
                     recovery);
                 Assert.True(await startupMigration.ApplyAsync(), (await recovery.GetStateAsync()).Error);
                 var picturePdfPresentation = await db.PublicationBookPdfPresentations.AsTracking()
@@ -426,10 +426,23 @@ public sealed class LorekeeperPressMigrationTests
                 var artifact = await db.PublicationArtifacts.AsNoTracking().SingleAsync();
 
                 Assert.Equal("kdp-paperback-v2", edition.VendorProfileVersion);
-                Assert.Equal("2026.08.2", edition.PrintRegistryVersion);
-                Assert.Equal("kdp-pb-bw-white", edition.PrintProductKey);
-                Assert.Equal(PrintFinish.Matte, edition.PrintFinish);
+                Assert.Equal("2026.08.3", edition.PrintArtifactRegistryVersion);
+                Assert.Equal("kdp-pb-bw-50-2252", edition.PrintArtifactProfileKey);
                 Assert.Equal(PrintCoverMode.Simplex, edition.PrintCoverMode);
+                var publicationEditionColumns = new HashSet<string>(StringComparer.Ordinal);
+                var connection = db.Database.GetDbConnection();
+                await connection.OpenAsync();
+                await using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "PRAGMA table_info('PublicationEditions');";
+                    await using var reader = await command.ExecuteReaderAsync();
+                    while (await reader.ReadAsync()) publicationEditionColumns.Add(reader.GetString(1));
+                }
+                Assert.Contains("PrintArtifactRegistryVersion", publicationEditionColumns);
+                Assert.Contains("PrintArtifactProfileKey", publicationEditionColumns);
+                Assert.DoesNotContain("PrintRegistryVersion", publicationEditionColumns);
+                Assert.DoesNotContain("PrintProductKey", publicationEditionColumns);
+                Assert.DoesNotContain("PrintFinish", publicationEditionColumns);
                 Assert.Equal("{}", edition.PublicationSectionOrderJson);
                 Assert.False(edition.RectoChapterStarts);
                 Assert.Equal(10, edition.Revision);

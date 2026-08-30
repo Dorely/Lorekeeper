@@ -67,7 +67,7 @@ public sealed class PublicationPackageService(
     IPublicationEditionService editions,
     IPublicationCoverService covers,
     IPublicationEffectiveConfigurationResolver effectiveConfigurations,
-    IPrintProductRegistry printProducts,
+    IPrintArtifactProfileRegistry printArtifactProfiles,
     IPrintGeometryService printGeometry,
     IPublicationPressRuntime? pressRuntime = null) : IPublicationPackageService
 {
@@ -203,10 +203,10 @@ public sealed class PublicationPackageService(
                 }
             }
             ValidatePdf(interior, fingerprint, currentRendererVersion, edition.VendorProfileVersion, PublicationArtifactKind.InteriorPdf, "INTERIOR", items);
-            PrintProductDefinition product;
+            PrintArtifactProfile product;
             try
             {
-                product = printProducts.GetRequired(edition.PrintProductKey);
+                product = printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey);
             }
             catch (InvalidOperationException exception)
             {
@@ -439,13 +439,13 @@ public sealed class PublicationPackageService(
                     PublicationArtifactKind.FrontCoverPdf => "front-cover.pdf",
                     PublicationArtifactKind.BackCoverPdf => "back-cover.pdf",
                     PublicationArtifactKind.PrintSetupManifest => edition.Vendor == PublicationVendor.BarnesAndNoblePress ? "print-setup.json" : "cloth-setup.json",
-                    _ => throw new InvalidOperationException("Unexpected physical-product artifact."),
+                    _ => throw new InvalidOperationException("Unexpected print artifact."),
                 };
                 files[fileName] = (artifact.Kind, artifact.MediaType, artifact.Data);
             }
             var uploadMap = JsonSerializer.SerializeToUtf8Bytes(new
             {
-                product = edition.PrintProductKey,
+                artifactProfile = edition.PrintArtifactProfileKey,
                 files = files
                     .Where(item => item.Value.Kind is PublicationArtifactKind.InteriorPdf
                         or PublicationArtifactKind.PerfectBoundCoverPdf
@@ -512,13 +512,12 @@ public sealed class PublicationPackageService(
             editionId,
             sourceFingerprint = report.SourceFingerprint,
             profile = new { report.ProfileId, report.ProfileVersion, report.ProfileReviewedAtUtc },
-            physicalProduct = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
+            printArtifactSettings = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
                 ? new
                 {
-                    registryVersion = edition.PrintRegistryVersion,
-                    registrySha256 = printProducts.Sha256,
-                    edition.PrintProductKey,
-                    edition.PrintFinish,
+                    registryVersion = edition.PrintArtifactRegistryVersion,
+                    registrySha256 = printArtifactProfiles.Sha256,
+                    edition.PrintArtifactProfileKey,
                     edition.PrintCoverMode,
                 }
                 : null,
@@ -675,7 +674,7 @@ public sealed class PublicationPackageService(
     }
 
     private static IReadOnlyList<PublicationArtifactKind> RequiredArtifactKinds(
-        PrintProductDefinition product,
+        PrintArtifactProfile product,
         PublicationEdition edition)
     {
         var result = new List<PublicationArtifactKind>();
@@ -1109,22 +1108,22 @@ public sealed class PublicationPackageService(
             return;
         }
 
-        PrintProductDefinition product;
+        PrintArtifactProfile product;
         try
         {
-            product = printProducts.GetRequired(edition.PrintProductKey);
+            product = printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey);
             if (product.Format != edition.Format || product.Vendor != edition.Vendor)
-                items.Add(Error("PRINT_PRODUCT_UNAVAILABLE", "The selected physical product is not available for this format and destination."));
-            if (!product.Finishes.Contains(edition.PrintFinish) || !product.CoverModes.Contains(edition.PrintCoverMode))
-                items.Add(Error("PRINT_PRODUCT_OPTION_UNAVAILABLE", "The selected finish or cover-printing mode is not available for this product."));
+                items.Add(Error("PRINT_ARTIFACT_SETTINGS_UNAVAILABLE", "The selected print artifact settings are not available for this format and destination."));
+            if (!product.CoverModes.Contains(edition.PrintCoverMode))
+                items.Add(Error("PRINT_ARTIFACT_OPTION_UNAVAILABLE", "The selected cover-printing mode is not available for these artifact settings."));
             if (!product.AllowsCustomTrim && !product.TrimSizes.Contains($"{edition.PageWidthInches:0.##}x{edition.PageHeightInches:0.##}", StringComparer.Ordinal))
-                items.Add(Error("PRINT_TRIM_UNSUPPORTED", "The selected trim is not available for this exact print product."));
+                items.Add(Error("PRINT_TRIM_UNSUPPORTED", "The selected trim is not available for these print artifact settings."));
             if (interior?.PageCount is int productPages)
                 _ = printGeometry.Calculate(edition, productPages);
         }
         catch (InvalidOperationException exception)
         {
-            items.Add(Error("PRINT_PRODUCT_UNAVAILABLE", exception.Message));
+            items.Add(Error("PRINT_ARTIFACT_SETTINGS_UNAVAILABLE", exception.Message));
             return;
         }
         if (edition.PageWidthInches is < 3.5 or > 12
@@ -1458,7 +1457,7 @@ public sealed class PublicationPackageService(
                 RequireFalse(root, "hasTransparency", "PDF_TRANSPARENCY", "The KDP PDFs contain transparency.", items);
             }
             if (currentRendererVersion is not null
-                && printProducts.GetRequired(edition.PrintProductKey).InteriorProcess == PrintInteriorProcess.BlackAndWhite)
+                && printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey).InteriorProcess == PrintInteriorProcess.BlackAndWhite)
             {
                 if (!root.TryGetProperty("interiorImageCount", out var interiorImageCount)
                     || interiorImageCount.ValueKind != JsonValueKind.Number
@@ -1499,7 +1498,7 @@ public sealed class PublicationPackageService(
     {
         if (!evidence.TryGetProperty("coverSurfaces", out var surfaces) || surfaces.ValueKind != JsonValueKind.Array)
         {
-            items.Add(Error("COVER_SURFACE_EVIDENCE", "The render does not contain product-specific cover-surface evidence."));
+            items.Add(Error("COVER_SURFACE_EVIDENCE", "The render does not contain construction-specific cover-surface evidence."));
             return;
         }
         foreach (var artifact in physicalArtifacts.Where(item => item.MediaType == "application/pdf"))
@@ -1740,7 +1739,7 @@ public sealed class PublicationPackageService(
     {
         if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover))
             return Profiles.Single(candidate => candidate.Format == edition.Format && candidate.Vendor == edition.Vendor);
-        var product = printProducts.GetRequired(edition.PrintProductKey);
+        var product = printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey);
         return new(
             edition.Format,
             edition.Vendor,
@@ -1749,7 +1748,7 @@ public sealed class PublicationPackageService(
             new DateTime(2026, 8, 12, 0, 0, 0, DateTimeKind.Utc),
             product.MinimumSubmittedPages ?? product.MinimumPages,
             product.MaximumSubmittedPages ?? product.MaximumPages,
-            ["Bundled Lorekeeper print-product registry " + printProducts.Version]);
+            ["Bundled Lorekeeper print-artifact profile registry " + printArtifactProfiles.Version]);
     }
 
     private static string ExtensionFor(string contentType) => contentType switch

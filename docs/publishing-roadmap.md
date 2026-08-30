@@ -111,7 +111,7 @@ and artifact inspection belong to Publish and the Publish assistant.
 
 ## Current foundation
 
-Status: `Implemented physical-product foundation; completion work remains`
+Status: `Implemented print-artifact foundation; completion work remains`
 
 The current application provides:
 
@@ -124,8 +124,8 @@ The current application provides:
   Text Styles, reset-to-Core, and Publish difference/diagnostic links;
 - a Lorekeeper-owned Rust renderer with contained assets, deterministic PDF
   output, embedded fonts, page maps, and independent post-write inspection;
-- a checked-in, versioned physical-product registry shared by Lorekeeper and
-  Press, with exact paper stock/weight, process, trim, page-range, finish,
+- a checked-in, versioned print-artifact profile registry shared by Lorekeeper and
+  Press, with exact paper weight/thickness, process, trim, page-range,
   cover-mode, artifact, and geometry rules;
 - Generic, Amazon KDP paperback/case-laminate hardcover, and Ingram paperback,
   duplex-cover, case-laminate, Digital Cloth, dust-jacket, and jacketed-case
@@ -218,14 +218,14 @@ diagnosis, but they are not prerequisites for producing an uploadable file.
 Gate: a user can visually inspect and download every required constituent file
 without unpacking a package or opening another production application.
 
-### 4. Versioned physical-product registry and broader rules
+### 4. Versioned print-artifact profile registry and broader rules
 
-Status: `Implemented for current KDP and Ingram physical products`
+Status: `Implemented for current KDP, Ingram, and B&N artifact profiles`
 
 - Generic versus Specific is the durable profile taxonomy.
-- The checked-in offline registry encodes the reviewed KDP and Ingram physical
-  products, exact stock/process identity, submitted and manufacturing page
-  counts, permitted trims and finishes, cover modes, artifact sets, and
+- The checked-in offline registry encodes reviewed vendor artifact profiles,
+  exact process and paper-thickness identity, submitted and manufacturing page
+  counts, permitted trims, cover modes, artifact sets, and
   material-dependent spine/cover geometry.
 - KDP paperback spines use published stock formulas. KDP hardcover and Ingram
   products use frozen calculator-derived measurements; a Specific product never
@@ -294,14 +294,14 @@ is preserved in
 Word paste, one DOCX imported directly into one empty chapter, and manuscript or
 full-book DOCX export without a multi-chapter import workflow.
 
-### Additional physical products
+### Additional print constructions and vendors
 
 Status: `Current hardcover scope implemented; more vendors deferred`
 
-Hardcover is a first-class product form backed by Generic and Specific
-products, not a paperback flag. Current coverage includes KDP case laminate and
+Hardcover is a first-class artifact form backed by Generic and named-vendor
+profiles, not a paperback flag. Current coverage includes KDP case laminate and
 Ingram case laminate, Digital Cloth with or without a jacket, and jacketed case
-laminate. Product records describe required case-wrap, dust-jacket, cloth setup,
+laminate. Artifact profiles describe required case-wrap, dust-jacket, cloth setup,
 spine, hinge, board, bleed, safety, and interior files. Page-count and
 material-dependent geometry derives from the exact paper stock and construction.
 

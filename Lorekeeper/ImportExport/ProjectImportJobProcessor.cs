@@ -2189,18 +2189,19 @@ public sealed class ProjectImportJobProcessor(
             PageMarginInches = importedEdition.PageMarginInches,
             BodyFontSizePoints = importedEdition.ImportedBodyFontSizePoints,
             BodyLineHeight = importedEdition.ImportedBodyLineHeight,
-            PrintRegistryVersion = formatVersion >= 20 ? importedEdition.PrintRegistryVersion : "2026.08.1",
-            PrintProductKey = formatVersion >= 20 && !string.IsNullOrWhiteSpace(importedEdition.PrintProductKey)
-                ? importedEdition.PrintProductKey
-                : LegacyPrintProduct(importedEdition.Format, importedEdition.Vendor, importedEdition.Paper, importedEdition.Ink),
-            PrintFinish = formatVersion >= 20 ? importedEdition.PrintFinish : PrintFinish.Matte,
+            PrintArtifactRegistryVersion = importedEdition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
+                ? PrintArtifactProfileRegistry.CurrentVersion
+                : string.Empty,
+            PrintArtifactProfileKey = formatVersion >= 20 && !string.IsNullOrWhiteSpace(importedEdition.ImportedPrintArtifactProfileKey)
+                ? NormalizePrintArtifactProfileKey(importedEdition.ImportedPrintArtifactProfileKey)
+                : LegacyPrintArtifactProfile(importedEdition.Format, importedEdition.Vendor, importedEdition.Paper, importedEdition.Ink),
             PrintCoverMode = formatVersion >= 20 ? importedEdition.PrintCoverMode : PrintCoverMode.Simplex,
             PrintProjectUse = formatVersion >= 26 ? importedEdition.PrintProjectUse : PrintProjectUse.ForSale,
             PrintIdentifierMode = formatVersion >= 26 ? importedEdition.PrintIdentifierMode : PrintIdentifierMode.UserSuppliedIsbn,
             PrintCoverSubmissionMode = formatVersion >= 26 ? importedEdition.PrintCoverSubmissionMode : PrintCoverSubmissionMode.FullWrapMeasured,
             PrintTemplateEvidenceJson = formatVersion switch
             {
-                >= 26 => importedEdition.PrintTemplateEvidenceJson,
+                >= 26 => NormalizePrintTemplateEvidenceJson(importedEdition.PrintTemplateEvidenceJson),
                 >= 20 => importedEdition.LegacyGenericPrintTemplateJson ?? string.Empty,
                 _ => string.Empty,
             },
@@ -3590,9 +3591,8 @@ public sealed class ProjectImportJobProcessor(
             edition.TitlePageMode,
             edition.PrintPicturePageSpreadMode,
             edition.EpubPicturePageSpreadMode,
-            edition.PrintRegistryVersion,
-            edition.PrintProductKey,
-            edition.PrintFinish,
+            edition.PrintArtifactRegistryVersion,
+            edition.PrintArtifactProfileKey,
             edition.PrintCoverMode,
             edition.PrintTemplateEvidenceJson,
             edition.Bleed,
@@ -3655,10 +3655,10 @@ public sealed class ProjectImportJobProcessor(
         && existing.NumberActs == imported.NumberActs
         && existing.NumberChapters == imported.NumberChapters
         && existing.TitlePageMode == imported.TitlePageMode
-        && string.Equals(existing.PrintProductKey,
-            string.IsNullOrWhiteSpace(imported.PrintProductKey)
-                ? LegacyPrintProduct(imported.Format, imported.Vendor, imported.Paper, imported.Ink)
-                : imported.PrintProductKey,
+        && string.Equals(existing.PrintArtifactProfileKey,
+            string.IsNullOrWhiteSpace(imported.ImportedPrintArtifactProfileKey)
+                ? LegacyPrintArtifactProfile(imported.Format, imported.Vendor, imported.Paper, imported.Ink)
+                : NormalizePrintArtifactProfileKey(imported.ImportedPrintArtifactProfileKey),
             StringComparison.Ordinal)
         && existing.Bleed == imported.Bleed
         && existing.AllowDesignedPageOverrides == imported.AllowDesignedPageOverrides
@@ -3669,28 +3669,69 @@ public sealed class ProjectImportJobProcessor(
         && existing.BodyFontSizePoints.Equals(imported.ImportedBodyFontSizePoints)
         && existing.BodyLineHeight.Equals(imported.ImportedBodyLineHeight);
 
-    private static string LegacyPrintProduct(
+    private static string LegacyPrintArtifactProfile(
         PublicationEditionFormat format,
         PublicationVendor vendor,
         LegacyPublicationPaper paper,
         LegacyPublicationInk ink) => (format, vendor, paper, ink) switch
         {
-            (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp, LegacyPublicationPaper.Cream, _) => "kdp-pb-bw-cream",
+            (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp, LegacyPublicationPaper.Cream, _) => "kdp-pb-bw-50-2500",
             (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp, _, LegacyPublicationInk.Color) => "kdp-pb-premium-color",
-            (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp, _, _) => "kdp-pb-bw-white",
-            (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-pb-bw-cream50",
+            (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp, _, _) => "kdp-pb-bw-50-2252",
+            (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-pb-bw-50-2225",
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-pb-premium70",
-            (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, _) => "ingram-pb-bw-white50",
+            (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, _) => "ingram-pb-bw-50-2009",
             (PublicationEditionFormat.Paperback, _, _, _) => "generic-perfectbound-template",
-            (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, LegacyPublicationPaper.Cream, _) => "kdp-hc-bw-cream",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, LegacyPublicationPaper.Cream, _) => "kdp-hc-bw-50-2500",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, LegacyPublicationInk.Color) => "kdp-hc-premium-color",
-            (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, _) => "kdp-hc-bw-white",
-            (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-hc-case-bw-cream50",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, _) => "kdp-hc-bw-50-2252",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-hc-case-bw-50-2224",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-hc-case-premium70",
-            (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, _) => "ingram-hc-case-bw-white50",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, _) => "ingram-hc-case-bw-50-2009",
             (PublicationEditionFormat.Hardcover, _, _, _) => "generic-casebound-template",
             _ => string.Empty,
         };
+
+    private static string NormalizePrintArtifactProfileKey(string key) => key switch
+    {
+        "kdp-pb-bw-white" => "kdp-pb-bw-50-2252",
+        "kdp-pb-bw-cream" => "kdp-pb-bw-50-2500",
+        "kdp-pb-bw-groundwood" => "kdp-pb-bw-45-2350",
+        "kdp-hc-bw-white" => "kdp-hc-bw-50-2252",
+        "kdp-hc-bw-cream" => "kdp-hc-bw-50-2500",
+        "ingram-pb-bw-white50" => "ingram-pb-bw-50-2009",
+        "ingram-pb-bw-cream50" => "ingram-pb-bw-50-2225",
+        "ingram-pb-bw-groundwood38" => "ingram-pb-bw-38-2550",
+        "ingram-hc-case-bw-white50" => "ingram-hc-case-bw-50-2009",
+        "ingram-hc-case-bw-cream50" => "ingram-hc-case-bw-50-2224",
+        "ingram-hc-cloth-blue" or "ingram-hc-cloth-gray" => "ingram-hc-cloth-bw-50-2009",
+        "ingram-hc-cloth-blue-jacket" or "ingram-hc-cloth-gray-jacket" => "ingram-hc-cloth-jacket-bw-50-2009",
+        "bn-pb-bw-cream50-6x9" => "bn-pb-bw-50-6x9",
+        "bn-hc-case-bw-cream50-6x9" => "bn-hc-case-bw-50-6x9",
+        "bn-hc-jacket-bw-cream50-6x9" => "bn-hc-jacket-bw-50-6x9",
+        _ => key,
+    };
+
+    private static string NormalizePrintTemplateEvidenceJson(string json) => string.IsNullOrWhiteSpace(json)
+        ? string.Empty
+        : json.Replace("\"productKey\":", "\"artifactProfileKey\":", StringComparison.Ordinal)
+            .Replace("kdp-pb-bw-white", "kdp-pb-bw-50-2252", StringComparison.Ordinal)
+            .Replace("kdp-pb-bw-cream", "kdp-pb-bw-50-2500", StringComparison.Ordinal)
+            .Replace("kdp-pb-bw-groundwood", "kdp-pb-bw-45-2350", StringComparison.Ordinal)
+            .Replace("kdp-hc-bw-white", "kdp-hc-bw-50-2252", StringComparison.Ordinal)
+            .Replace("kdp-hc-bw-cream", "kdp-hc-bw-50-2500", StringComparison.Ordinal)
+            .Replace("ingram-pb-bw-white50", "ingram-pb-bw-50-2009", StringComparison.Ordinal)
+            .Replace("ingram-pb-bw-cream50", "ingram-pb-bw-50-2225", StringComparison.Ordinal)
+            .Replace("ingram-pb-bw-groundwood38", "ingram-pb-bw-38-2550", StringComparison.Ordinal)
+            .Replace("ingram-hc-case-bw-white50", "ingram-hc-case-bw-50-2009", StringComparison.Ordinal)
+            .Replace("ingram-hc-case-bw-cream50", "ingram-hc-case-bw-50-2224", StringComparison.Ordinal)
+            .Replace("ingram-hc-cloth-blue-jacket", "ingram-hc-cloth-jacket-bw-50-2009", StringComparison.Ordinal)
+            .Replace("ingram-hc-cloth-gray-jacket", "ingram-hc-cloth-jacket-bw-50-2009", StringComparison.Ordinal)
+            .Replace("ingram-hc-cloth-blue", "ingram-hc-cloth-bw-50-2009", StringComparison.Ordinal)
+            .Replace("ingram-hc-cloth-gray", "ingram-hc-cloth-bw-50-2009", StringComparison.Ordinal)
+            .Replace("bn-pb-bw-cream50-6x9", "bn-pb-bw-50-6x9", StringComparison.Ordinal)
+            .Replace("bn-hc-case-bw-cream50-6x9", "bn-hc-case-bw-50-6x9", StringComparison.Ordinal)
+            .Replace("bn-hc-jacket-bw-cream50-6x9", "bn-hc-jacket-bw-50-6x9", StringComparison.Ordinal);
 
     private async Task<bool> ImportedBibliographicContentMatchesAsync(
         Guid existingEditionId,

@@ -92,11 +92,11 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   canon extraction, graph synchronization, and combined lexical/semantic
   retrieval. File ingest accepts up to 50 files together, creates one durable
   job per file sequentially, and keeps per-file success or failure visible.
-- Full project export format v26 preserves manuscript review annotations and only the Book Brief's selected
+- Full project export format v27 preserves artifact-only print settings, manuscript review annotations, and only the Book Brief's selected
   canonical ingest sources (source text, chunks, pages, blocks, metadata, and
   selection mapping), remaps their provenance on import, and rebuilds retrieval
   indexes without rerunning extraction. Project-reference links are intentionally
-  omitted from v26 exports; exports with outgoing links warn that imports never infer
+  omitted from v27 exports; exports with outgoing links warn that imports never infer
   links. Non-structural exports omit source bodies, selections, and evidence and
   report that omission.
 - Local version history captures deterministic checkpoints of the creative
@@ -192,7 +192,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   chapter controls and correctly scoped prose or Designed Page creation.
   Optional paperback, EPUB ebook, and PDF ebook
   releases inherit Core values live and store only explicit field or collection
-  overrides; ISBN, destination, package, and product settings remain
+  overrides; ISBN, destination, package, and artifact settings remain
   release-specific. No release or ISBN is created automatically.
 - Opt-in edition-specific manuscript editing in Editor. Untouched chapters
   inherit Core live; the first release edit freezes a chapter snapshot and its
@@ -204,8 +204,13 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   release target. Unresolved image accessibility choices remain visible warnings
   on the private Core copy, while publication releases require those choices to
   be resolved. Paperback and hardcover output use a checked-in, versioned
-  physical-product registry with configurable Generic templates plus built-in
-  Specific products for Amazon KDP, IngramSpark, and Barnes & Noble Press.
+  print-artifact profile registry with configurable Generic templates plus built-in
+  profiles for Amazon KDP, IngramSpark, and Barnes & Noble Press.
+  Print-release creation chooses the destination and creates the release first;
+  trim, interior color process, paper weight/thickness, cover construction, and
+  cover-upload topology are configured afterward in that release's setup. Paper
+  color, finish, pricing, listing, and account choices are intentionally outside
+  Lorekeeper because they do not change the prepared artifacts.
   B&N paperback, printed-case hardcover, and dust-jacket hardcover releases use
   imported exact template evidence and an artifact-focused Personal/For sale
   option that selects SKU/ISBN and barcode preparation behavior;
@@ -231,7 +236,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   chapter starts; Digital PDF parity includes its front cover as page one, and
   EPUB does not expose or apply this physical-page policy.
 - Lorekeeper-owned paperback, hardcover, and Digital PDF press jobs with cancellation/restart recovery,
-  immutable SHA-256-verified interior and product-specific cover PDFs, in-app
+  immutable SHA-256-verified interior and construction-specific cover PDFs, in-app
   single/facing-page PDF viewing with an optional page seam and transparent
   alignment slots, semantic block-to-page
   maps, render comparisons, and matching
@@ -246,8 +251,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Core/release-aware structured cover design with shared image/text/shape/layer/style
   tools: the Core front scene flows into digital releases and the front panel of
   print surfaces until explicitly customized. Print releases select exact
-  paper stock/weight, process, construction, finish, and cover mode. The final
-  interior page count resolves stock-specific spine geometry and the required
+  paper weight/thickness, color process, construction, and cover mode. Paper
+  color and finish stay outside the artifact workflow. The final interior page
+  count resolves profile-specific spine geometry and the required
   outside, inside, case, jacket, or cloth setup surfaces, safe regions, and
   ISBN-13/EAN-13 barcode behavior. Ingram duplex paperback produces outside
   then inside cover pages with the required no-ink spine region.

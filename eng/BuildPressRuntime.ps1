@@ -208,9 +208,9 @@ $sbom = [ordered]@{
 $descriptionText = & (Join-Path $runtimeRoot $executableName) describe --json
 if ($LASTEXITCODE -ne 0) { throw "The built Press renderer did not provide its capability contract." }
 $description = $descriptionText | ConvertFrom-Json
-if ($description.protocolVersion -ne 9 -or [string]::IsNullOrWhiteSpace($description.rendererVersion) -or
-    [string]::IsNullOrWhiteSpace($description.printProductRegistryVersion) -or
-    [string]::IsNullOrWhiteSpace($description.printProductRegistrySha256)) {
+if ($description.protocolVersion -ne 10 -or [string]::IsNullOrWhiteSpace($description.rendererVersion) -or
+    [string]::IsNullOrWhiteSpace($description.printArtifactProfileRegistryVersion) -or
+    [string]::IsNullOrWhiteSpace($description.printArtifactProfileRegistrySha256)) {
     throw "The built Press renderer returned an invalid capability contract."
 }
 

@@ -32,36 +32,35 @@ const MAX_PAGES: usize = 10_000;
 type RenderResult<T> = Result<T, Box<RenderResponse>>;
 
 fn registry_sha256() -> String {
-    Sha256::digest(include_bytes!("../assets/print-products-v1.json"))
+    Sha256::digest(include_bytes!("../assets/print-artifact-profiles-v1.json"))
         .iter()
         .map(|value| format!("{value:02x}"))
         .collect()
 }
 
-fn validate_registry_product(
-    product: &crate::model::PhysicalProduct,
+fn validate_registry_profile(
+    product: &crate::model::PrintArtifactProfile,
     request: &RenderRequest,
 ) -> Result<(), Diagnostic> {
-    let registry: Value = serde_json::from_slice(include_bytes!(
-        "../assets/print-products-v1.json"
-    ))
-    .map_err(|_| {
-        Diagnostic::error(
-            "PRESS_PRINT_REGISTRY_INVALID",
-            "The bundled print-product registry is invalid.",
-        )
-    })?;
-    let catalog = registry["products"]
+    let registry: Value =
+        serde_json::from_slice(include_bytes!("../assets/print-artifact-profiles-v1.json"))
+            .map_err(|_| {
+                Diagnostic::error(
+                    "PRESS_PRINT_REGISTRY_INVALID",
+                    "The bundled print-artifact profile registry is invalid.",
+                )
+            })?;
+    let catalog = registry["profiles"]
         .as_array()
         .and_then(|items| {
             items
                 .iter()
-                .find(|item| item["key"].as_str() == Some(&product.product_key))
+                .find(|item| item["key"].as_str() == Some(&product.artifact_profile_key))
         })
         .ok_or_else(|| {
             Diagnostic::error(
-                "PRESS_PRINT_PRODUCT_UNKNOWN",
-                "The selected product is absent from the bundled registry.",
+                "PRESS_PRINT_ARTIFACT_PROFILE_UNKNOWN",
+                "The selected artifact profile is absent from the bundled registry.",
             )
         })?;
     let matches_scalar = registry["registryVersion"].as_str() == Some(&product.registry_version)
@@ -69,7 +68,6 @@ fn validate_registry_product(
         && catalog["format"].as_str() == Some(&product.format)
         && catalog["binding"].as_str() == Some(&product.binding)
         && catalog["interiorProcess"].as_str() == Some(&product.interior_process)
-        && catalog["paperName"].as_str() == Some(&product.paper_name)
         && catalog["basisWeightPounds"].as_u64() == product.basis_weight_pounds.map(u64::from)
         && catalog["gsm"].as_u64() == product.gsm.map(u64::from)
         && catalog["coverMaterial"].as_str() == Some(&product.cover_material)
@@ -79,11 +77,6 @@ fn validate_registry_product(
             == product.minimum_submitted_pages.map(|value| value as u64)
         && catalog["maximumSubmittedPages"].as_u64()
             == product.maximum_submitted_pages.map(|value| value as u64)
-        && catalog["finishes"].as_array().is_some_and(|items| {
-            items
-                .iter()
-                .any(|item| item.as_str() == Some(&product.finish))
-        })
         && catalog["coverModes"].as_array().is_some_and(|items| {
             items
                 .iter()
@@ -150,8 +143,8 @@ fn validate_registry_product(
         }
         "PrintedCover" => vec!["perfect-bound-outside"],
         "CaseLaminate" => vec!["case-wrap"],
-        "DigitalClothBlue" | "DigitalClothGray" => vec!["digital-cloth-setup"],
-        "DigitalClothBlueWithJacket" | "DigitalClothGrayWithJacket" => {
+        "DigitalCloth" => vec!["digital-cloth-setup"],
+        "DigitalClothWithJacket" => {
             vec!["dust-jacket", "digital-cloth-setup"]
         }
         "JacketedCaseLaminate" if product.vendor == "BarnesAndNoblePress" => {
@@ -199,7 +192,7 @@ fn validate_registry_product(
                     common_valid
                         && if product.vendor == "BarnesAndNoblePress" {
                             template.provider == "BarnesAndNoblePress"
-                                && template.product_key == product.product_key
+                                && template.artifact_profile_key == product.artifact_profile_key
                                 && template.page_count > 0
                                 && !template.geometry_fingerprint.trim().is_empty()
                                 && template
@@ -253,9 +246,9 @@ fn validate_registry_product(
         || !print_template_evidence_valid
     {
         return Err(Diagnostic::error(
-            "PRESS_PRINT_PRODUCT_MISMATCH",
+            "PRESS_PRINT_ARTIFACT_PROFILE_MISMATCH",
             format!(
-                "The resolved physical-product descriptor differs from the bundled registry entry (identity={matches_scalar}, trim={trim_matches}, spine={spine_matches}, surfaces={surfaces_match}, printTemplateEvidence={print_template_evidence_valid})."
+                "The resolved print artifact profile differs from the bundled registry entry (identity={matches_scalar}, trim={trim_matches}, spine={spine_matches}, surfaces={surfaces_match}, printTemplateEvidence={print_template_evidence_valid})."
             ),
         ));
     }
@@ -278,7 +271,7 @@ struct PhysicalCoverSurface {
 }
 
 fn normalized_vendor_pages(request: &RenderRequest, submitted: usize) -> usize {
-    if request.physical_product.is_some() && !submitted.is_multiple_of(2) {
+    if request.print_artifact_profile.is_some() && !submitted.is_multiple_of(2) {
         submitted + 1
     } else {
         submitted
@@ -286,10 +279,10 @@ fn normalized_vendor_pages(request: &RenderRequest, submitted: usize) -> usize {
 }
 
 fn product_spine_inches(request: &RenderRequest, pages: usize) -> Result<f32, Diagnostic> {
-    let product = request.physical_product.as_ref().ok_or_else(|| {
+    let product = request.print_artifact_profile.as_ref().ok_or_else(|| {
         Diagnostic::error(
-            "PRESS_PRINT_PRODUCT_REQUIRED",
-            "A physical-product descriptor is required.",
+            "PRESS_PRINT_ARTIFACT_PROFILE_REQUIRED",
+            "Print artifact settings are required.",
         )
     })?;
     let submitted_pages = pages;
@@ -304,7 +297,7 @@ fn product_spine_inches(request: &RenderRequest, pages: usize) -> Result<f32, Di
             "PRESS_PRODUCT_SUBMITTED_PAGE_COUNT",
             format!(
                 "{} supports {minimum_submitted}-{maximum_submitted} submitted pages; the interior has {submitted_pages}.",
-                product.product_key
+                product.artifact_profile_key
             ),
         ));
     }
@@ -314,7 +307,7 @@ fn product_spine_inches(request: &RenderRequest, pages: usize) -> Result<f32, Di
             "PRESS_PRODUCT_PAGE_COUNT",
             format!(
                 "{} supports {}–{} pages; the normalized interior has {pages}.",
-                product.product_key, product.minimum_pages, product.maximum_pages
+                product.artifact_profile_key, product.minimum_pages, product.maximum_pages
             ),
         ));
     }
@@ -365,7 +358,7 @@ fn product_spine_inches(request: &RenderRequest, pages: usize) -> Result<f32, Di
             "PRESS_SPINE_MEASUREMENT_MISSING",
             format!(
                 "{} has no verified spine measurement for {pages} normalized pages.",
-                product.product_key
+                product.artifact_profile_key
             ),
         ));
     }
@@ -379,10 +372,10 @@ fn physical_cover_surfaces(
     request: &RenderRequest,
     pages: usize,
 ) -> Result<Vec<PhysicalCoverSurface>, Diagnostic> {
-    let product = request.physical_product.as_ref().ok_or_else(|| {
+    let product = request.print_artifact_profile.as_ref().ok_or_else(|| {
         Diagnostic::error(
-            "PRESS_PRINT_PRODUCT_REQUIRED",
-            "A physical-product descriptor is required.",
+            "PRESS_PRINT_ARTIFACT_PROFILE_REQUIRED",
+            "Print artifact settings are required.",
         )
     })?;
     let spine = product_spine_inches(request, pages)?;
@@ -397,7 +390,7 @@ fn physical_cover_surfaces(
                     let template = product.print_template_evidence.as_ref().ok_or_else(|| {
                         Diagnostic::error(
                             "PRESS_GENERIC_TEMPLATE_REQUIRED",
-                            "Generic print products require a complete printer geometry template.",
+                            "Generic print artifact settings require a complete printer geometry template.",
                         )
                     });
                     match template {
@@ -420,7 +413,7 @@ fn physical_cover_surfaces(
                     let template = product.print_template_evidence.as_ref().ok_or_else(|| {
                         Diagnostic::error(
                             "PRESS_TEMPLATE_REQUIRED",
-                            "B&N Press products require imported measured template evidence.",
+                            "B&N Press artifact settings require imported measured template evidence.",
                         )
                     });
                     match template {
@@ -438,7 +431,7 @@ fn physical_cover_surfaces(
                     let template = product.print_template_evidence.as_ref().ok_or_else(|| {
                         Diagnostic::error(
                             "PRESS_GENERIC_TEMPLATE_REQUIRED",
-                            "Generic print products require a complete printer geometry template.",
+                            "Generic print artifact settings require a complete printer geometry template.",
                         )
                     });
                     match template {
@@ -459,7 +452,7 @@ fn physical_cover_surfaces(
                     let template = product.print_template_evidence.as_ref().ok_or_else(|| {
                         Diagnostic::error(
                             "PRESS_TEMPLATE_REQUIRED",
-                            "B&N Press products require imported measured template evidence.",
+                            "B&N Press artifact settings require imported measured template evidence.",
                         )
                     });
                     match template {
@@ -623,7 +616,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     };
     report_progress(job_root, request, 22, "Paginating book");
     let mut layout = paginate_with_cancellation(request, Some(job_root), tolerance)?;
-    if let Some(product) = request.physical_product.as_ref() {
+    if let Some(product) = request.print_artifact_profile.as_ref() {
         while layout.pages.len() < product.minimum_pages {
             let mut manufacturing_page = empty_body_page();
             manufacturing_page.kind = PageKind::Blank;
@@ -892,11 +885,18 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             if surface.role == "perfect-bound-inside" {
                 continue;
             }
-            if request.physical_product.as_ref().is_some_and(|product| {
-                product.vendor == "BarnesAndNoblePress"
-                    && product.cover_submission_mode == "SeparatePanelsVendorSpine"
-            }) {
-                let product = request.physical_product.as_ref().expect("physical product");
+            if request
+                .print_artifact_profile
+                .as_ref()
+                .is_some_and(|product| {
+                    product.vendor == "BarnesAndNoblePress"
+                        && product.cover_submission_mode == "SeparatePanelsVendorSpine"
+                })
+            {
+                let product = request
+                    .print_artifact_profile
+                    .as_ref()
+                    .expect("print artifact profile");
                 let template = product
                     .print_template_evidence
                     .as_ref()
@@ -1023,18 +1023,24 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                 spine_width = surface.spine_points;
             }
         }
-        if request.physical_product.as_ref().is_some_and(|product| {
-            product
-                .required_cover_surfaces
-                .iter()
-                .any(|surface| surface == "digital-cloth-setup")
-        }) {
-            let product = request.physical_product.as_ref().expect("physical product");
+        if request
+            .print_artifact_profile
+            .as_ref()
+            .is_some_and(|product| {
+                product
+                    .required_cover_surfaces
+                    .iter()
+                    .any(|surface| surface == "digital-cloth-setup")
+            })
+        {
+            let product = request
+                .print_artifact_profile
+                .as_ref()
+                .expect("print artifact profile");
             let manifest = serde_json::to_vec_pretty(&serde_json::json!({
                 "registryVersion": product.registry_version,
-                "productKey": product.product_key,
+                "artifactProfileKey": product.artifact_profile_key,
                 "coverMaterial": product.cover_material,
-                "finish": product.finish,
                 "spineWidthPoints": spine_width,
                 "spineCopy": request.cover.as_ref().map(|cover| cover.spine_text.as_str()).unwrap_or(""),
                 "constraint": "Ingram Digital Cloth spine copy uses the vendor constrained gold-stamp treatment."
@@ -1048,11 +1054,14 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
             ));
         }
         if request
-            .physical_product
+            .print_artifact_profile
             .as_ref()
             .is_some_and(|product| product.vendor == "BarnesAndNoblePress")
         {
-            let product = request.physical_product.as_ref().expect("physical product");
+            let product = request
+                .print_artifact_profile
+                .as_ref()
+                .expect("print artifact profile");
             let template = product
                 .print_template_evidence
                 .as_ref()
@@ -1100,7 +1109,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
                 "schemaVersion": 1,
                 "provider": "BarnesAndNoblePress",
                 "registryVersion": product.registry_version,
-                "productKey": product.product_key,
+                "artifactProfileKey": product.artifact_profile_key,
                 "profile": request.profile,
                 "projectUse": product.project_use,
                 "identifier": identifier,
@@ -1193,7 +1202,7 @@ fn run_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     report_progress(job_root, request, 98, "Promoting validated artifacts");
     staging.promote(&output)?;
     let response = RenderResponse {
-        protocol_version: 9,
+        protocol_version: 10,
         renderer_version: env!("CARGO_PKG_VERSION"),
         job_id: Some(request.job_id.clone()),
         status: "completed".to_owned(),
@@ -1493,7 +1502,7 @@ fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     println!(
         "{}",
         serde_json::to_string(&serde_json::json!({
-            "protocolVersion": 9,
+            "protocolVersion": 10,
             "rendererVersion": env!("CARGO_PKG_VERSION"),
             "jobId": request.job_id,
             "pages": pages,
@@ -1609,10 +1618,10 @@ fn validate_request(
     job_root: &Path,
     progress: &mut dyn FnMut(usize, usize),
 ) -> RenderResult<std::collections::BTreeMap<String, DecodedImage>> {
-    if request.protocol_version != 9 {
+    if request.protocol_version != 10 {
         return reject(
             "PRESS_PROTOCOL_INVALID",
-            "Lorekeeper Press requires protocol version 9.",
+            "Lorekeeper Press requires protocol version 10.",
         );
     }
     if request.job_id.len() != 32 || !request.job_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -1653,27 +1662,26 @@ fn validate_request(
         );
     }
     if request.profile != "generic-digital-pdf-v1" {
-        let product = request.physical_product.as_ref().ok_or_else(|| {
+        let product = request.print_artifact_profile.as_ref().ok_or_else(|| {
             Box::new(RenderResponse::failed(
                 "rejected",
                 Diagnostic::error(
-                    "PRESS_PRINT_PRODUCT_REQUIRED",
-                    "Print profiles require a resolved physical-product descriptor.",
+                    "PRESS_PRINT_ARTIFACT_PROFILE_REQUIRED",
+                    "Print profiles require resolved artifact settings.",
                 ),
             ))
         })?;
         if product.registry_sha256 != registry_sha256() {
             return reject(
                 "PRESS_PRINT_REGISTRY_MISMATCH",
-                "The physical-product descriptor does not match the renderer's bundled registry.",
+                "The artifact profile does not match the renderer's bundled registry.",
             );
         }
-        validate_registry_product(product, request)
+        validate_registry_profile(product, request)
             .map_err(|diagnostic| Box::new(RenderResponse::failed("rejected", diagnostic)))?;
         if product.minimum_pages == 0
             || product.maximum_pages < product.minimum_pages
-            || product.product_key.is_empty()
-            || product.paper_name.is_empty()
+            || product.artifact_profile_key.is_empty()
             || request.cover.as_ref().is_some_and(|cover| {
                 product
                     .required_cover_surfaces
@@ -1682,8 +1690,8 @@ fn validate_request(
             })
         {
             return reject(
-                "PRESS_PRINT_PRODUCT_INVALID",
-                "The physical-product descriptor or required cover surfaces are incomplete.",
+                "PRESS_PRINT_ARTIFACT_PROFILE_INVALID",
+                "The artifact profile or required cover surfaces are incomplete.",
             );
         }
     }
@@ -1724,26 +1732,35 @@ fn validate_request(
                 "Spine reading direction must be TopToBottom, BottomToTop, or Horizontal.",
             );
         }
-        if request.physical_product.as_ref().is_some_and(|product| {
-            product.vendor == "BarnesAndNoblePress"
-                && (cover.barcode_mode != "VendorOverlay"
-                    || product.project_use == "PersonalUse"
-                        && product.identifier_mode != "VendorSku"
-                    || product.project_use == "ForSale" && product.identifier_mode == "VendorSku")
-        }) {
+        if request
+            .print_artifact_profile
+            .as_ref()
+            .is_some_and(|product| {
+                product.vendor == "BarnesAndNoblePress"
+                    && (cover.barcode_mode != "VendorOverlay"
+                        || product.project_use == "PersonalUse"
+                            && product.identifier_mode != "VendorSku"
+                        || product.project_use == "ForSale"
+                            && product.identifier_mode == "VendorSku")
+            })
+        {
             return reject(
                 "PRESS_BN_IDENTIFIER_BARCODE_INVALID",
                 "B&N project use, identifier mode, and vendor-overlay barcode behavior are inconsistent.",
             );
         }
-        if request.physical_product.as_ref().is_some_and(|product| {
-            product.vendor == "BarnesAndNoblePress"
-                && product
-                    .print_template_evidence
-                    .as_ref()
-                    .is_some_and(|template| template.page_count <= 50)
-                && !cover.spine_text.trim().is_empty()
-        }) {
+        if request
+            .print_artifact_profile
+            .as_ref()
+            .is_some_and(|product| {
+                product.vendor == "BarnesAndNoblePress"
+                    && product
+                        .print_template_evidence
+                        .as_ref()
+                        .is_some_and(|template| template.page_count <= 50)
+                    && !cover.spine_text.trim().is_empty()
+            })
+        {
             return reject(
                 "PRESS_BN_SPINE_TEXT_INELIGIBLE",
                 "B&N covers cannot contain spine text at 50 pages or fewer.",
@@ -7188,7 +7205,7 @@ fn cover_scene_layout(
         cover.bleed_inches * 72.0
     };
     let panel = request.trim.width_inches * 72.0;
-    let measured_template = request.physical_product.as_ref().and_then(|product| {
+    let measured_template = request.print_artifact_profile.as_ref().and_then(|product| {
         (product.vendor == "BarnesAndNoblePress")
             .then_some(product.print_template_evidence.as_ref())
             .flatten()
@@ -7890,11 +7907,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let request = RenderRequest {
-            protocol_version: 9,
+            protocol_version: 10,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v2".to_owned(),
             ink: "BlackAndWhite".to_owned(),
-            physical_product: None,
+            print_artifact_profile: None,
             output_purpose: OutputPurpose::Publication,
             layout_trace_mode: None,
             document: serde_json::json!({
@@ -8916,11 +8933,11 @@ mod tests {
 
     fn request_with_document(document: Value) -> RenderRequest {
         RenderRequest {
-            protocol_version: 9,
+            protocol_version: 10,
             job_id: "1".repeat(32),
             profile: "kdp-paperback-v2".to_owned(),
             ink: "BlackAndWhite".to_owned(),
-            physical_product: None,
+            print_artifact_profile: None,
             output_purpose: OutputPurpose::Publication,
             layout_trace_mode: None,
             document,

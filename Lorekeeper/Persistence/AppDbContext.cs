@@ -1035,7 +1035,6 @@ public class AppDbContext(
             entity.Property(e => e.Format).HasConversion<string>();
             entity.Property(e => e.Vendor).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
-            entity.Property(e => e.PrintFinish).HasConversion<string>();
             entity.Property(e => e.PrintCoverMode).HasConversion<string>();
             entity.Property(e => e.TitlePageMode).HasConversion<string>();
             entity.Property(e => e.Revision).IsConcurrencyToken();

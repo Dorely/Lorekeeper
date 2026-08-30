@@ -37,7 +37,7 @@ public sealed class DatabaseStartupMigrationService(
     IPublicationCoreMigrationService publicationCoreMigration,
     IEditionContentMigrationService editionContentMigration,
     IPublicationSectionMigrationService publicationSectionMigration,
-    IPrintProductMigrationService printProductMigration,
+    IPrintArtifactProfileMigrationService printArtifactProfileMigration,
     IDatabaseMigrationRecoveryService recovery,
     IServiceProvider? serviceProvider = null) : IDatabaseStartupMigrationService
 {
@@ -54,6 +54,7 @@ public sealed class DatabaseStartupMigrationService(
     internal const string ReviewWorkflowCleanupMigrationId = "20260826200708_FinalizeReviewWorkflowTransition";
     private const string RectoChapterStartsMigrationId = "20260830174820_AddConfigurableRectoChapterStarts";
     private const string BarnesAndNoblePrintMigrationId = "20260830201715_BarnesAndNoblePrintPublishingV31";
+    private const string ArtifactOnlyPrintSettingsMigrationId = "20260830212921_ArtifactOnlyPrintSettingsV32";
 
     public async Task<bool> ApplyAsync(
         CancellationToken cancellationToken = default,
@@ -163,23 +164,24 @@ public sealed class DatabaseStartupMigrationService(
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
 
-        Report(progress, "Checking print products", "Preparing physical-product and cover configuration.", 10, totalSteps);
-        var migrationsBeforePrintProducts = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
+        Report(progress, "Checking print artifacts", "Preparing artifact profiles and cover configuration.", 10, totalSteps);
+        var migrationsBeforeArtifactProfiles = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
             .ToHashSet(StringComparer.Ordinal);
-        if (!migrationsBeforePrintProducts.Contains(PrintProductMigrationService.CleanupMigrationId))
+        if (!migrationsBeforeArtifactProfiles.Contains(PrintArtifactProfileMigrationService.CleanupMigrationId))
         {
-            if (!migrationsBeforePrintProducts.Contains(PrintProductMigrationService.AdditiveMigrationId))
+            if (!migrationsBeforeArtifactProfiles.Contains(PrintArtifactProfileMigrationService.AdditiveMigrationId))
             {
                 await RemoveBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
                 await RemovePrintProductCompatibilityColumnsAsync(db, cancellationToken);
                 await db.GetService<IMigrator>().MigrateAsync(
-                    PrintProductMigrationService.AdditiveMigrationId,
+                    PrintArtifactProfileMigrationService.AdditiveMigrationId,
                     cancellationToken);
+                await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
                 await EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
                 await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
                 await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
             }
-            await printProductMigration.ApplyPendingAsync(db, cancellationToken);
+            await printArtifactProfileMigration.ApplyPendingAsync(db, cancellationToken);
             await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
             await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         }
@@ -198,10 +200,14 @@ public sealed class DatabaseStartupMigrationService(
                 cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
-        if (!migrationsBeforeCleanup.Contains(PrintProductMigrationService.CleanupMigrationId))
+        if (!migrationsBeforeCleanup.Contains(PrintArtifactProfileMigrationService.CleanupMigrationId))
+        {
+            await RemovePrintArtifactProfileCompatibilityColumnsAsync(db, cancellationToken);
             await db.GetService<IMigrator>().MigrateAsync(
-                PrintProductMigrationService.CleanupMigrationId,
+                PrintArtifactProfileMigrationService.CleanupMigrationId,
                 cancellationToken);
+        }
+        await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
         // Historical cleanup migrations rebuild PublicationEditions from their
         // own immutable models. Restore the compatibility column, remove it at
@@ -222,6 +228,7 @@ public sealed class DatabaseStartupMigrationService(
             return false;
         await RemoveRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await RemoveBarnesAndNoblePrintCompatibilityColumnsAsync(db, cancellationToken);
+        await RemovePrintArtifactProfileCompatibilityColumnsAsync(db, cancellationToken);
         await db.GetService<IMigrator>().MigrateAsync(cancellationToken: cancellationToken);
         await CleanupDetachedCompositionsAsync(db, cancellationToken);
         await publicationSectionMigration.RepairSemanticRevisionDriftAsync(db, cancellationToken);
@@ -1920,12 +1927,14 @@ public sealed class DatabaseStartupMigrationService(
     internal static async Task EnsurePrintProductCompatibilityColumnsAsync(AppDbContext db, CancellationToken cancellationToken)
     {
         var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
-        if (applied.Contains(PrintProductMigrationService.AdditiveMigrationId)) return;
+        if (applied.Contains(ArtifactOnlyPrintSettingsMigrationId)) return;
         (string Name, string Definition)[] columns =
         [
             ("GenericPrintTemplateJson", "TEXT NOT NULL DEFAULT ''"),
             ("PrintRegistryVersion", "TEXT NOT NULL DEFAULT ''"),
             ("PrintProductKey", "TEXT NOT NULL DEFAULT ''"),
+            ("PrintArtifactRegistryVersion", "TEXT NOT NULL DEFAULT ''"),
+            ("PrintArtifactProfileKey", "TEXT NOT NULL DEFAULT ''"),
             ("PrintFinish", "TEXT NOT NULL DEFAULT 'Matte'"),
             ("PrintCoverMode", "TEXT NOT NULL DEFAULT 'Simplex'"),
         ];
@@ -1936,6 +1945,19 @@ public sealed class DatabaseStartupMigrationService(
             await db.Database.ExecuteSqlRawAsync($"ALTER TABLE \"PublicationEditions\" ADD COLUMN \"{name}\" {definition};", cancellationToken);
 #pragma warning restore EF1002
         }
+        if (applied.Contains(PrintArtifactProfileMigrationService.AdditiveMigrationId))
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE PublicationEditions
+                SET PrintArtifactRegistryVersion = PrintRegistryVersion,
+                    PrintArtifactProfileKey = PrintProductKey
+                WHERE PrintArtifactRegistryVersion = '' OR PrintArtifactProfileKey = '';
+                """,
+                cancellationToken);
+            db.ChangeTracker.Clear();
+            return;
+        }
         if (!await HasColumnAsync(db, "PublicationCoverDesigns", "SurfaceScenesJson", cancellationToken))
             await db.Database.ExecuteSqlRawAsync(
                 "ALTER TABLE \"PublicationCoverDesigns\" ADD COLUMN \"SurfaceScenesJson\" TEXT NOT NULL DEFAULT '{{}}';",
@@ -1943,20 +1965,25 @@ public sealed class DatabaseStartupMigrationService(
         await db.Database.ExecuteSqlRawAsync(
             """
             UPDATE PublicationEditions
-            SET PrintRegistryVersion = CASE WHEN Format IN ('Paperback','Hardcover') THEN '2026.08.1' ELSE '' END,
-                PrintProductKey = CASE
+            SET PrintArtifactRegistryVersion = CASE WHEN Format IN ('Paperback','Hardcover') THEN '2026.08.1' ELSE '' END,
+                PrintArtifactProfileKey = CASE
                     WHEN Format = 'Paperback' AND Vendor = 'AmazonKdp' AND Ink = 'Color' THEN 'kdp-pb-premium-color'
-                    WHEN Format = 'Paperback' AND Vendor = 'AmazonKdp' AND Paper = 'Cream' THEN 'kdp-pb-bw-cream'
-                    WHEN Format = 'Paperback' AND Vendor = 'AmazonKdp' THEN 'kdp-pb-bw-white'
+                    WHEN Format = 'Paperback' AND Vendor = 'AmazonKdp' AND Paper = 'Cream' THEN 'kdp-pb-bw-50-2500'
+                    WHEN Format = 'Paperback' AND Vendor = 'AmazonKdp' THEN 'kdp-pb-bw-50-2252'
                     WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' AND Ink = 'Color' THEN 'ingram-pb-premium70'
-                    WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' AND Paper = 'Cream' THEN 'ingram-pb-bw-cream50'
-                    WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' THEN 'ingram-pb-bw-white50'
+                    WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' AND Paper = 'Cream' THEN 'ingram-pb-bw-50-2225'
+                    WHEN Format = 'Paperback' AND Vendor = 'IngramSpark' THEN 'ingram-pb-bw-50-2009'
                     WHEN Format = 'Paperback' THEN 'generic-perfectbound-template'
-                    WHEN Format = 'Hardcover' AND Vendor = 'AmazonKdp' THEN 'kdp-hc-bw-white'
-                    WHEN Format = 'Hardcover' AND Vendor = 'IngramSpark' THEN 'ingram-hc-case-bw-white50'
+                    WHEN Format = 'Hardcover' AND Vendor = 'AmazonKdp' THEN 'kdp-hc-bw-50-2252'
+                    WHEN Format = 'Hardcover' AND Vendor = 'IngramSpark' THEN 'ingram-hc-case-bw-50-2009'
                     WHEN Format = 'Hardcover' THEN 'generic-casebound-template'
                     ELSE '' END
-            WHERE PrintProductKey = '';
+            WHERE PrintArtifactProfileKey = '';
+
+            UPDATE PublicationEditions
+            SET PrintRegistryVersion = PrintArtifactRegistryVersion,
+                PrintProductKey = PrintArtifactProfileKey
+            WHERE PrintRegistryVersion = '' OR PrintProductKey = '';
             """,
             cancellationToken);
         db.ChangeTracker.Clear();
@@ -1965,8 +1992,8 @@ public sealed class DatabaseStartupMigrationService(
     internal static async Task RemovePrintProductCompatibilityColumnsAsync(AppDbContext db, CancellationToken cancellationToken)
     {
         var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
-        if (applied.Contains(PrintProductMigrationService.AdditiveMigrationId)) return;
-        foreach (var name in new[] { "GenericPrintTemplateJson", "PrintRegistryVersion", "PrintProductKey", "PrintFinish", "PrintCoverMode" })
+        if (applied.Contains(PrintArtifactProfileMigrationService.AdditiveMigrationId)) return;
+        foreach (var name in new[] { "GenericPrintTemplateJson", "PrintRegistryVersion", "PrintProductKey", "PrintArtifactRegistryVersion", "PrintArtifactProfileKey", "PrintFinish", "PrintCoverMode" })
         {
             if (!await HasColumnAsync(db, "PublicationEditions", name, cancellationToken)) continue;
 #pragma warning disable EF1002
@@ -1978,6 +2005,31 @@ public sealed class DatabaseStartupMigrationService(
                 "ALTER TABLE \"PublicationCoverDesigns\" DROP COLUMN \"SurfaceScenesJson\";",
                 cancellationToken);
         db.ChangeTracker.Clear();
+    }
+
+    internal static async Task RemovePrintArtifactProfileCompatibilityColumnsAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(ArtifactOnlyPrintSettingsMigrationId)
+            || !await HasTableAsync(db, "PublicationEditions", cancellationToken))
+            return;
+
+        if (await HasColumnAsync(db, "PublicationEditions", "PrintRegistryVersion", cancellationToken)
+            && await HasColumnAsync(db, "PublicationEditions", "PrintArtifactRegistryVersion", cancellationToken))
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "UPDATE PublicationEditions SET PrintRegistryVersion = PrintArtifactRegistryVersion, PrintProductKey = PrintArtifactProfileKey;",
+                cancellationToken);
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"PublicationEditions\" DROP COLUMN \"PrintArtifactRegistryVersion\";",
+                cancellationToken);
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE \"PublicationEditions\" DROP COLUMN \"PrintArtifactProfileKey\";",
+                cancellationToken);
+            db.ChangeTracker.Clear();
+        }
     }
 
     internal static async Task EnsureBarnesAndNoblePrintCompatibilityColumnsAsync(

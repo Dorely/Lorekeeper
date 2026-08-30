@@ -44,7 +44,7 @@ pub struct RenderRequest {
     pub job_id: String,
     pub profile: String,
     pub ink: String,
-    pub physical_product: Option<PhysicalProduct>,
+    pub print_artifact_profile: Option<PrintArtifactProfile>,
     #[serde(default)]
     pub output_purpose: OutputPurpose,
     #[serde(default)]
@@ -125,19 +125,17 @@ pub struct Cover {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PhysicalProduct {
+pub struct PrintArtifactProfile {
     pub registry_version: String,
     pub registry_sha256: String,
-    pub product_key: String,
+    pub artifact_profile_key: String,
     pub vendor: String,
     pub format: String,
     pub binding: String,
     pub interior_process: String,
-    pub paper_name: String,
     pub basis_weight_pounds: Option<u32>,
     pub gsm: Option<u32>,
     pub cover_material: String,
-    pub finish: String,
     pub cover_mode: String,
     #[serde(default = "default_project_use")]
     pub project_use: String,
@@ -177,7 +175,7 @@ pub struct PrintTemplateEvidence {
     #[serde(default)]
     pub provider: String,
     #[serde(default)]
-    pub product_key: String,
+    pub artifact_profile_key: String,
     #[serde(default)]
     pub page_count: usize,
     pub geometry_fingerprint: String,
@@ -276,7 +274,7 @@ pub struct RenderResponse {
 impl RenderResponse {
     pub fn failed(status: &str, diagnostic: Diagnostic) -> Self {
         Self {
-            protocol_version: 9,
+            protocol_version: 10,
             renderer_version: env!("CARGO_PKG_VERSION"),
             job_id: None,
             status: status.to_owned(),

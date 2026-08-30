@@ -318,8 +318,8 @@ public static class CoverCompositionFactory
         var print = edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover;
         if (!print)
             return new CoverGeometry(trimWidth, trimHeight, trimWidth, trimHeight, 0, 0);
-        var registry = new PrintProductRegistry();
-        var product = registry.GetRequired(edition.PrintProductKey);
+        var registry = new PrintArtifactProfileRegistry();
+        var product = registry.GetRequired(edition.PrintArtifactProfileKey);
         var effectivePages = Math.Max(pageCount, product.MinimumPages);
         var physical = new PrintGeometryService(registry).Calculate(edition, effectivePages, surfaceRole);
         return new CoverGeometry(

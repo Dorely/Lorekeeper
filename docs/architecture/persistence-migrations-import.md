@@ -58,7 +58,7 @@ EF operations or background workers begin.
 `ManuscriptMigrationService`, `VisualCompositionMigrationService`,
 `AuthoringPageMigrationService`, `PublicationEditionMigrationService`,
 `PublicationCoreMigrationService`, `PublicationPressMigrationService`,
-`PrintProductMigrationService`, `PublicationSectionMigrationService`, and
+`PrintArtifactProfileMigrationService`, `PublicationSectionMigrationService`, and
 other feature migration owners each own their guarded transformation contract.
 They create protected backups, validate pre/post invariants, journal progress,
 and delegate failure to the shared recovery service. Applied EF migration files
@@ -200,7 +200,7 @@ protected backup retained. `DetachedAt` remains current schema; startup removes
 history-only detached composition remnants because process-memory Undo/Redo is
 necessarily empty after launch.
 
-The composition, authoring-page, Core Book, edition-content, physical-product,
+The composition, authoring-page, Core Book, edition-content, print-artifact-profile,
 and publication-section cutovers each preserve semantic IDs, assets, foreign
 keys, artifacts, hashes, packages, audits, and unaffected rows while removing
 obsolete runtime columns/contracts only after validation. Existing artifacts
@@ -213,7 +213,10 @@ through immutable models, startup supplies temporary compatibility columns at
 each such boundary, removes them immediately before the current EF boundary,
 and then lets the forward migration own the durable columns.
 
-Project export v26 is a portable, versioned boundary. Full exports include the
+Project export v27 is a portable, versioned boundary. It renames the durable
+print registry/profile fields, removes finish, and accepts v20-v26 legacy
+`printRegistryVersion`, `printProductKey`, and ignored `printFinish` fields only
+through the import adapter. Full exports include the
 current v4 manuscript model, Core/release annotations, selected canonical
 ingest-source bodies/evidence and mappings, page setup, composition variants,
 Core Book including its paginated chapter-start policy, sparse release overlays
@@ -283,7 +286,7 @@ SQLite backup or a portable v26 export.
 | `Lorekeeper/Persistence/Migrations/` | Immutable EF schema history and current model snapshot; never edit applied files. |
 | `Lorekeeper/Manuscripts/ManuscriptMigrationService.cs` | WAL-safe structured-manuscript migration, recovery, validation, journaling, and current v4 upgrade. |
 | `Lorekeeper/Manuscripts/VisualCompositionMigrationService.cs` / `AuthoringPageMigrationService.cs` | Guarded visual/composition and authoring-page cutovers with protected invariants. |
-| `Lorekeeper/Publish/Publication*MigrationService.cs` | Core, edition, Press, section, print-product, and edition-content transformations. |
+| `Lorekeeper/Publish/Publication*MigrationService.cs` | Core, edition, Press, section, print-artifact-profile, and edition-content transformations. |
 | `Lorekeeper/ImportExport/ProjectExportModels.cs` | Current v26 portable DTOs and isolated older input adapters. |
 | `Lorekeeper/ImportExport/ProjectImportExportService.cs` | UI-facing Full/Non-structural export, warnings, queueing, and import job lifecycle. |
 | `Lorekeeper/ImportExport/ProjectImportJobProcessor.cs` | Transactional v26 import, ID remapping, rollback/report behavior, legacy conversion, and post-commit indexing. |

@@ -173,7 +173,7 @@ Current behavior, confirmed in the repository on 2026-08-13:
 - title, copyright, and contents are system publication sections; contents is
   generated from the effective structure while linked title/copyright copy
   resolves from effective metadata;
-- checked-in, versioned KDP and IngramSpark physical-product definitions own
+- checked-in, versioned KDP and IngramSpark print-artifact profiles own
   supported constructions, paper, trim, page ranges, bleed, cover surfaces,
   required artifacts, and calculated spine/cover geometry;
 - Lorekeeper Press produces cancellable, immutable, hashed PDF, cover, EPUB, and

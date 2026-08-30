@@ -86,11 +86,11 @@ canonical JSON strings; malformed non-empty values and embedded credential,
 token, secret, password, API-key, or authorization-code properties fail closed.
 Operational timestamps, warnings, diagnostics, provider IDs, fetch metadata,
 and other operational fields are omitted. GUID path components use lowercase
-`N` format. Writers emit the exact canonical schema-v2 file set; undeclared
+`N` format. Writers emit the exact canonical schema-v3 file set; undeclared
 files and noncanonical paths or encodings fail closed. Readers retain a bounded
-schema-v1 adapter for historical publication payloads, applying the same
+schema-v1/v2 adapters for historical publication payloads, applying the same
 for-sale, user-supplied ISBN, measured full-wrap, and top-to-bottom defaults as
-pre-v26 project import.
+pre-v27 project import.
 
 The manifest records repository/project identity, schema and included areas,
 the sorted path/length/SHA-256 list, a content hash over path/length/bytes, and

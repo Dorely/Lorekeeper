@@ -2341,7 +2341,7 @@ public sealed class CompositionService(
     }
 
     private static string GeometryCanonical(PublicationEdition edition) => FormattableString.Invariant(
-        $"{edition.Format}|{edition.PageWidthInches:F4}|{edition.PageHeightInches:F4}|{edition.PageMarginInches:F4}|{edition.Bleed}|{edition.PrintProductKey}|{edition.PrintFinish}|{edition.PrintCoverMode}|{edition.VendorProfileVersion}");
+        $"{edition.Format}|{edition.PageWidthInches:F4}|{edition.PageHeightInches:F4}|{edition.PageMarginInches:F4}|{edition.Bleed}|{edition.PrintArtifactProfileKey}|{edition.PrintCoverMode}|{edition.VendorProfileVersion}");
 
     public static CompositionScene CreatePageScene(
         PublicationEdition edition,

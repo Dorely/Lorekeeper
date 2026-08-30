@@ -605,8 +605,8 @@ public sealed class ProjectImportExportService(
             profile.PageMarginInches,
             profile.SelectedCoverImageId,
             profile.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? LegacyPublicationBinding.PerfectBound : LegacyPublicationBinding.Digital,
-            profile.PrintProductKey.Contains("cream", StringComparison.Ordinal) ? LegacyPublicationPaper.Cream : profile.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? LegacyPublicationPaper.White : LegacyPublicationPaper.Digital,
-            profile.PrintProductKey.Contains("color", StringComparison.Ordinal) ? LegacyPublicationInk.Color : profile.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? LegacyPublicationInk.BlackAndWhite : LegacyPublicationInk.Digital,
+            profile.PrintArtifactProfileKey.Contains("cream", StringComparison.Ordinal) ? LegacyPublicationPaper.Cream : profile.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? LegacyPublicationPaper.White : LegacyPublicationPaper.Digital,
+            profile.PrintArtifactProfileKey.Contains("color", StringComparison.Ordinal) ? LegacyPublicationInk.Color : profile.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover ? LegacyPublicationInk.BlackAndWhite : LegacyPublicationInk.Digital,
             profile.Bleed,
             profile.AllowDesignedPageOverrides,
             profile.OutlineItems
@@ -635,9 +635,8 @@ public sealed class ProjectImportExportService(
                 SpineReadingDirection = profile.CoverDesign.SpineReadingDirection,
             })
         {
-            PrintRegistryVersion = profile.PrintRegistryVersion,
-            PrintProductKey = profile.PrintProductKey,
-            PrintFinish = profile.PrintFinish,
+            PrintArtifactRegistryVersion = profile.PrintArtifactRegistryVersion,
+            PrintArtifactProfileKey = profile.PrintArtifactProfileKey,
             PrintCoverMode = profile.PrintCoverMode,
             PrintProjectUse = profile.PrintProjectUse,
             PrintIdentifierMode = profile.PrintIdentifierMode,

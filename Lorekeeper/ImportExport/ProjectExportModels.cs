@@ -34,7 +34,7 @@ public static class ProjectExportWarningText
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 26;
+    public const int CurrentFormatVersion = 27;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -310,9 +310,22 @@ public sealed record ProjectExportPublicationEdition(
     List<ProjectExportEditionOutlineItem> OutlineItems,
     ProjectExportCoverDesign? CoverDesign)
 {
-    public string PrintRegistryVersion { get; init; } = string.Empty;
-    public string PrintProductKey { get; init; } = string.Empty;
-    public PrintFinish PrintFinish { get; init; } = PrintFinish.Matte;
+    public string PrintArtifactRegistryVersion { get; init; } = string.Empty;
+    public string PrintArtifactProfileKey { get; init; } = string.Empty;
+    [JsonPropertyName("printRegistryVersion")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacyPrintRegistryVersion { get; init; }
+    [JsonPropertyName("printProductKey")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacyPrintArtifactProfileKey { get; init; }
+    [JsonIgnore]
+    public string ImportedPrintArtifactRegistryVersion => string.IsNullOrWhiteSpace(PrintArtifactRegistryVersion)
+        ? LegacyPrintRegistryVersion ?? string.Empty
+        : PrintArtifactRegistryVersion;
+    [JsonIgnore]
+    public string ImportedPrintArtifactProfileKey => string.IsNullOrWhiteSpace(PrintArtifactProfileKey)
+        ? LegacyPrintArtifactProfileKey ?? string.Empty
+        : PrintArtifactProfileKey;
     public PrintCoverMode PrintCoverMode { get; init; } = PrintCoverMode.Simplex;
     public PrintProjectUse PrintProjectUse { get; init; } = PrintProjectUse.ForSale;
     public PrintIdentifierMode PrintIdentifierMode { get; init; } = PrintIdentifierMode.UserSuppliedIsbn;

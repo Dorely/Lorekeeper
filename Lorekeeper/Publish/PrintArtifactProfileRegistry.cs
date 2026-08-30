@@ -28,10 +28,8 @@ public enum PrintCoverMaterial
     Declared,
     PrintedCover,
     CaseLaminate,
-    DigitalClothBlue,
-    DigitalClothGray,
-    DigitalClothBlueWithJacket,
-    DigitalClothGrayWithJacket,
+    DigitalCloth,
+    DigitalClothWithJacket,
     JacketedCaseLaminate,
 }
 
@@ -42,18 +40,15 @@ public sealed record PrintSpineModel(
     decimal? InchesPerPage = null,
     IReadOnlyList<PrintSpineAnchor>? Anchors = null);
 
-public sealed record PrintProductDefinition(
+public sealed record PrintArtifactProfile(
     string Key,
     PublicationVendor Vendor,
     PublicationEditionFormat Format,
-    string DisplayName,
     PrintBindingConstruction Binding,
     PrintInteriorProcess InteriorProcess,
-    string PaperName,
     int? BasisWeightPounds,
     int? Gsm,
     PrintCoverMaterial CoverMaterial,
-    IReadOnlyList<PrintFinish> Finishes,
     IReadOnlyList<PrintCoverMode> CoverModes,
     IReadOnlyList<string> TrimSizes,
     bool AllowsCustomTrim,
@@ -70,78 +65,76 @@ public sealed record PrintProductDefinition(
     public bool RequiresCaseCover => CoverMaterial == PrintCoverMaterial.CaseLaminate
         || (CoverMaterial == PrintCoverMaterial.JacketedCaseLaminate && Vendor != PublicationVendor.BarnesAndNoblePress)
         || (Vendor == PublicationVendor.Generic && Binding == PrintBindingConstruction.CaseBound);
-    public bool RequiresDustJacket => CoverMaterial is PrintCoverMaterial.DigitalClothBlueWithJacket
-        or PrintCoverMaterial.DigitalClothGrayWithJacket
+    public bool RequiresDustJacket => CoverMaterial is PrintCoverMaterial.DigitalClothWithJacket
         or PrintCoverMaterial.JacketedCaseLaminate;
-    public bool RequiresClothManifest => CoverMaterial is PrintCoverMaterial.DigitalClothBlue
-        or PrintCoverMaterial.DigitalClothGray
-        or PrintCoverMaterial.DigitalClothBlueWithJacket
-        or PrintCoverMaterial.DigitalClothGrayWithJacket;
+    public bool RequiresClothManifest => CoverMaterial is PrintCoverMaterial.DigitalCloth
+        or PrintCoverMaterial.DigitalClothWithJacket;
     public bool RequiresPerfectBoundCover => Binding == PrintBindingConstruction.PerfectBound;
 }
 
-public sealed record PrintProductRegistrySnapshot(
+public sealed record PrintArtifactProfileRegistrySnapshot(
     string RegistryVersion,
     DateTime ReviewedAtUtc,
     IReadOnlyList<string> Sources,
-    IReadOnlyList<PrintProductDefinition> Products);
+    IReadOnlyList<PrintArtifactProfile> Profiles);
 
-public interface IPrintProductRegistry
+public interface IPrintArtifactProfileRegistry
 {
     string Version { get; }
     string Sha256 { get; }
-    IReadOnlyList<PrintProductDefinition> List(PublicationEditionFormat? format = null, PublicationVendor? vendor = null);
-    PrintProductDefinition GetRequired(string key);
-    PrintProductDefinition GetDefault(PublicationEditionFormat format, PublicationVendor vendor);
+    IReadOnlyList<PrintArtifactProfile> List(PublicationEditionFormat? format = null, PublicationVendor? vendor = null);
+    PrintArtifactProfile GetRequired(string key);
+    PrintArtifactProfile GetDefault(PublicationEditionFormat format, PublicationVendor vendor);
 }
 
-public sealed class PrintProductRegistry : IPrintProductRegistry
+public sealed class PrintArtifactProfileRegistry : IPrintArtifactProfileRegistry
 {
-    private const string ResourceSuffix = "PrintProducts.print-products-v1.json";
-    private readonly PrintProductRegistrySnapshot _snapshot;
-    private readonly IReadOnlyDictionary<string, PrintProductDefinition> _products;
+    public const string CurrentVersion = "2026.08.3";
+    private const string ResourceSuffix = "PrintArtifactProfiles.print-artifact-profiles-v1.json";
+    private readonly PrintArtifactProfileRegistrySnapshot _snapshot;
+    private readonly IReadOnlyDictionary<string, PrintArtifactProfile> _profiles;
 
-    public PrintProductRegistry()
+    public PrintArtifactProfileRegistry()
     {
-        var assembly = typeof(PrintProductRegistry).Assembly;
+        var assembly = typeof(PrintArtifactProfileRegistry).Assembly;
         var resourceName = assembly.GetManifestResourceNames().Single(name => name.EndsWith(ResourceSuffix, StringComparison.Ordinal));
         using var stream = assembly.GetManifestResourceStream(resourceName)
-            ?? throw new InvalidOperationException("The bundled print-product registry is missing.");
+            ?? throw new InvalidOperationException("The bundled print-artifact profile registry is missing.");
         using var buffer = new MemoryStream();
         stream.CopyTo(buffer);
         var data = buffer.ToArray();
         Sha256 = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
-        _snapshot = JsonSerializer.Deserialize<PrintProductRegistrySnapshot>(data, JsonOptions)
-            ?? throw new InvalidDataException("The bundled print-product registry is invalid.");
-        _products = _snapshot.Products.ToDictionary(item => item.Key, StringComparer.Ordinal);
-        if (_products.Count == 0 || _products.Count != _snapshot.Products.Count)
-            throw new InvalidDataException("The bundled print-product registry is empty or contains duplicate keys.");
-        foreach (var product in _snapshot.Products)
+        _snapshot = JsonSerializer.Deserialize<PrintArtifactProfileRegistrySnapshot>(data, JsonOptions)
+            ?? throw new InvalidDataException("The bundled print-artifact profile registry is invalid.");
+        if (!string.Equals(_snapshot.RegistryVersion, CurrentVersion, StringComparison.Ordinal))
+            throw new InvalidDataException($"The bundled print-artifact profile registry must be version {CurrentVersion}.");
+        _profiles = _snapshot.Profiles.ToDictionary(item => item.Key, StringComparer.Ordinal);
+        if (_profiles.Count == 0 || _profiles.Count != _snapshot.Profiles.Count)
+            throw new InvalidDataException("The bundled print-artifact profile registry is empty or contains duplicate keys.");
+        foreach (var profile in _snapshot.Profiles)
         {
-            if (product.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
-                || string.IsNullOrWhiteSpace(product.Key)
-                || string.IsNullOrWhiteSpace(product.PaperName)
-                || product.MinimumPages <= 0
-                || product.MaximumPages < product.MinimumPages
-                || (product.MinimumSubmittedPages ?? product.MinimumPages) <= 0
-                || (product.MaximumSubmittedPages ?? product.MaximumPages) < (product.MinimumSubmittedPages ?? product.MinimumPages)
-                || product.Finishes.Count == 0
-                || product.CoverModes.Count == 0
-                || product.EffectiveSupportedProjectUses.Count == 0
-                || !product.EffectiveSupportedProjectUses.Contains(product.DefaultProjectUse)
-                || product.EffectiveSupportedProjectUses.Distinct().Count() != product.EffectiveSupportedProjectUses.Count)
-                throw new InvalidDataException($"Print product '{product.Key}' has an incomplete identity or availability range.");
-            if (product.Vendor is not (PublicationVendor.Generic or PublicationVendor.BarnesAndNoblePress)
-                && product.SpineModel.Kind == "TemplateRequired")
-                throw new InvalidDataException($"Specific print product '{product.Key}' cannot use generic printer geometry.");
-            if (product.SpineModel.Kind == "FrozenLookup")
+            if (profile.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
+                || string.IsNullOrWhiteSpace(profile.Key)
+                || profile.MinimumPages <= 0
+                || profile.MaximumPages < profile.MinimumPages
+                || (profile.MinimumSubmittedPages ?? profile.MinimumPages) <= 0
+                || (profile.MaximumSubmittedPages ?? profile.MaximumPages) < (profile.MinimumSubmittedPages ?? profile.MinimumPages)
+                || profile.CoverModes.Count == 0
+                || profile.EffectiveSupportedProjectUses.Count == 0
+                || !profile.EffectiveSupportedProjectUses.Contains(profile.DefaultProjectUse)
+                || profile.EffectiveSupportedProjectUses.Distinct().Count() != profile.EffectiveSupportedProjectUses.Count)
+                throw new InvalidDataException($"Print artifact profile '{profile.Key}' has an incomplete identity or availability range.");
+            if (profile.Vendor is not (PublicationVendor.Generic or PublicationVendor.BarnesAndNoblePress)
+                && profile.SpineModel.Kind == "TemplateRequired")
+                throw new InvalidDataException($"Specific print artifact profile '{profile.Key}' cannot use imported geometry.");
+            if (profile.SpineModel.Kind == "FrozenLookup")
             {
-                var expectedPages = Enumerable.Range(product.MinimumPages, product.MaximumPages - product.MinimumPages + 1)
+                var expectedPages = Enumerable.Range(profile.MinimumPages, profile.MaximumPages - profile.MinimumPages + 1)
                     .Where(page => page % 2 == 0).ToArray();
-                var actualPages = (product.SpineModel.Anchors ?? []).Select(anchor => anchor.Pages).Order().ToArray();
+                var actualPages = (profile.SpineModel.Anchors ?? []).Select(anchor => anchor.Pages).Order().ToArray();
                 if (!expectedPages.SequenceEqual(actualPages)
-                    || (product.SpineModel.Anchors ?? []).Any(anchor => anchor.Inches <= 0))
-                    throw new InvalidDataException($"Print product '{product.Key}' does not contain a complete exact spine table.");
+                    || (profile.SpineModel.Anchors ?? []).Any(anchor => anchor.Inches <= 0))
+                    throw new InvalidDataException($"Print artifact profile '{profile.Key}' does not contain a complete exact spine table.");
             }
         }
     }
@@ -149,32 +142,35 @@ public sealed class PrintProductRegistry : IPrintProductRegistry
     public string Version => _snapshot.RegistryVersion;
     public string Sha256 { get; }
 
-    public IReadOnlyList<PrintProductDefinition> List(PublicationEditionFormat? format = null, PublicationVendor? vendor = null) =>
-        _snapshot.Products
+    public IReadOnlyList<PrintArtifactProfile> List(PublicationEditionFormat? format = null, PublicationVendor? vendor = null) =>
+        _snapshot.Profiles
             .Where(item => format is null || item.Format == format)
             .Where(item => vendor is null || item.Vendor == vendor)
             .OrderBy(item => item.Vendor)
-            .ThenBy(item => item.DisplayName, StringComparer.Ordinal)
+            .ThenBy(item => item.CoverMaterial)
+            .ThenBy(item => item.InteriorProcess)
+            .ThenBy(item => item.BasisWeightPounds)
+            .ThenBy(item => item.Key, StringComparer.Ordinal)
             .ToArray();
 
-    public PrintProductDefinition GetRequired(string key) =>
-        _products.TryGetValue(key, out var product)
-            ? product
-            : throw new InvalidOperationException($"Print product '{key}' is not present in registry {Version}.");
+    public PrintArtifactProfile GetRequired(string key) =>
+        _profiles.TryGetValue(key, out var profile)
+            ? profile
+            : throw new InvalidOperationException($"Print artifact profile '{key}' is not present in registry {Version}.");
 
-    public PrintProductDefinition GetDefault(PublicationEditionFormat format, PublicationVendor vendor)
+    public PrintArtifactProfile GetDefault(PublicationEditionFormat format, PublicationVendor vendor)
     {
         var key = (format, vendor) switch
         {
-            (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp) => "kdp-pb-bw-white",
-            (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark) => "ingram-pb-bw-white50",
-            (PublicationEditionFormat.Paperback, PublicationVendor.BarnesAndNoblePress) => "bn-pb-bw-cream50-6x9",
+            (PublicationEditionFormat.Paperback, PublicationVendor.AmazonKdp) => "kdp-pb-bw-50-2252",
+            (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark) => "ingram-pb-bw-50-2009",
+            (PublicationEditionFormat.Paperback, PublicationVendor.BarnesAndNoblePress) => "bn-pb-bw-50-6x9",
             (PublicationEditionFormat.Paperback, _) => "generic-perfectbound-template",
-            (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp) => "kdp-hc-bw-white",
-            (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark) => "ingram-hc-case-bw-white50",
-            (PublicationEditionFormat.Hardcover, PublicationVendor.BarnesAndNoblePress) => "bn-hc-case-bw-cream50-6x9",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp) => "kdp-hc-bw-50-2252",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark) => "ingram-hc-case-bw-50-2009",
+            (PublicationEditionFormat.Hardcover, PublicationVendor.BarnesAndNoblePress) => "bn-hc-case-bw-50-6x9",
             (PublicationEditionFormat.Hardcover, _) => "generic-casebound-template",
-            _ => throw new InvalidOperationException("Digital releases do not use a physical print product."),
+            _ => throw new InvalidOperationException("Digital releases do not use a print artifact profile."),
         };
         return GetRequired(key);
     }
@@ -203,7 +199,7 @@ public sealed record PrintTemplateEvidence(
     string PdfStandard,
     string? UnderlayAssetId = null,
     string Provider = "",
-    string ProductKey = "",
+    string ArtifactProfileKey = "",
     int PageCount = 0,
     string GeometryFingerprint = "",
     decimal? SpineWidthInches = null,
@@ -245,11 +241,11 @@ public interface IPrintGeometryService
     PrintCoverGeometry Calculate(PublicationEdition edition, int submittedPageCount, string? surfaceRole = null);
 }
 
-public sealed class PrintGeometryService(IPrintProductRegistry registry) : IPrintGeometryService
+public sealed class PrintGeometryService(IPrintArtifactProfileRegistry registry) : IPrintGeometryService
 {
     public PrintCoverGeometry Calculate(PublicationEdition edition, int submittedPageCount, string? surfaceRole = null)
     {
-        var product = registry.GetRequired(edition.PrintProductKey);
+        var product = registry.GetRequired(edition.PrintArtifactProfileKey);
         var normalizedPages = product.Vendor switch
         {
             PublicationVendor.AmazonKdp => submittedPageCount + (submittedPageCount % 2),
@@ -259,9 +255,9 @@ public sealed class PrintGeometryService(IPrintProductRegistry registry) : IPrin
         };
         if (submittedPageCount < (product.MinimumSubmittedPages ?? product.MinimumPages)
             || submittedPageCount > (product.MaximumSubmittedPages ?? product.MaximumPages))
-            throw new InvalidOperationException($"{product.DisplayName} supports {product.MinimumSubmittedPages ?? product.MinimumPages}-{product.MaximumSubmittedPages ?? product.MaximumPages} submitted pages; this interior has {submittedPageCount}.");
+            throw new InvalidOperationException($"The selected artifact settings support {product.MinimumSubmittedPages ?? product.MinimumPages}-{product.MaximumSubmittedPages ?? product.MaximumPages} submitted pages; this interior has {submittedPageCount}.");
         if (normalizedPages < product.MinimumPages || normalizedPages > product.MaximumPages)
-            throw new InvalidOperationException($"{product.DisplayName} supports {product.MinimumPages}–{product.MaximumPages} pages; this interior has {normalizedPages}.");
+            throw new InvalidOperationException($"The selected artifact settings support {product.MinimumPages}–{product.MaximumPages} pages; this interior has {normalizedPages}.");
 
         var template = ReadTemplateEvidence(edition, product);
         if (template is not null)
@@ -319,10 +315,10 @@ public sealed class PrintGeometryService(IPrintProductRegistry registry) : IPrin
                 (template.BleedInches, template.WrapInches, template.HingeInches, template.GutterInches, template.FlapInches, 0m,
                     2 * trimWidth + spine + 2 * template.BleedInches + 2 * template.WrapInches + 2 * template.GutterInches + 2 * template.FlapInches,
                     trimHeight + 2 * template.BleedInches + 2 * template.WrapInches),
-            _ => throw new InvalidOperationException("Generic print products require complete printer geometry before preparation."),
+            _ => throw new InvalidOperationException("Generic print artifact settings require complete printer geometry before preparation."),
         };
 
-        var fingerprintSource = FormattableString.Invariant($"{registry.Version}|{product.Key}|{edition.PrintFinish}|{edition.PrintCoverMode}|{trimWidth:0.####}|{trimHeight:0.####}|{normalizedPages}|{spine:0.#####}|{surfaceWidth:0.#####}|{surfaceHeight:0.#####}");
+        var fingerprintSource = FormattableString.Invariant($"{registry.Version}|{product.Key}|{edition.PrintCoverMode}|{trimWidth:0.####}|{trimHeight:0.####}|{normalizedPages}|{spine:0.#####}|{surfaceWidth:0.#####}|{surfaceHeight:0.#####}");
         var fingerprint = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(fingerprintSource))).ToLowerInvariant();
         return new(submittedPageCount, normalizedPages, normalizedPages, spine, surfaceWidth, surfaceHeight,
             trimWidth, trimHeight, bleed, wrap, hinge, gutter, flap, insideNoInk, fingerprint)
@@ -342,7 +338,7 @@ public sealed class PrintGeometryService(IPrintProductRegistry registry) : IPrin
         };
     }
 
-    private static decimal CalculateSpine(PrintProductDefinition product, PrintTemplateEvidence? template, int pages)
+    private static decimal CalculateSpine(PrintArtifactProfile product, PrintTemplateEvidence? template, int pages)
     {
         if (product.SpineModel.Kind == "TemplateRequired")
         {
@@ -360,14 +356,14 @@ public sealed class PrintGeometryService(IPrintProductRegistry registry) : IPrin
             return decimal.Round(inchesPerPage * pages, 5, MidpointRounding.AwayFromZero);
         var anchors = product.SpineModel.Anchors?.OrderBy(item => item.Pages).ToArray() ?? [];
         if (anchors.Length == 0)
-            throw new InvalidOperationException($"Print product '{product.Key}' has no spine evidence.");
+            throw new InvalidOperationException($"Print artifact profile '{product.Key}' has no spine evidence.");
         var exact = anchors.FirstOrDefault(item => item.Pages == pages);
         if (exact is not null)
             return exact.Inches;
-        throw new InvalidOperationException($"Print product '{product.Key}' has no verified spine measurement for {pages} normalized pages.");
+        throw new InvalidOperationException($"Print artifact profile '{product.Key}' has no verified spine measurement for {pages} normalized pages.");
     }
 
-    private static PrintTemplateEvidence? ReadTemplateEvidence(PublicationEdition edition, PrintProductDefinition product)
+    private static PrintTemplateEvidence? ReadTemplateEvidence(PublicationEdition edition, PrintArtifactProfile product)
     {
         if (product.SpineModel.Kind != "TemplateRequired")
             return null;
@@ -377,9 +373,9 @@ public sealed class PrintGeometryService(IPrintProductRegistry registry) : IPrin
         {
             var evidence = JsonSerializer.Deserialize<PrintTemplateEvidence>(edition.PrintTemplateEvidenceJson)
                 ?? throw new InvalidOperationException("The imported print template evidence is empty.");
-            if (!string.IsNullOrWhiteSpace(evidence.ProductKey)
-                && !string.Equals(evidence.ProductKey, product.Key, StringComparison.Ordinal))
-                throw new InvalidOperationException("The imported print template belongs to a different print product.");
+            if (!string.IsNullOrWhiteSpace(evidence.ArtifactProfileKey)
+                && !string.Equals(evidence.ArtifactProfileKey, product.Key, StringComparison.Ordinal))
+                throw new InvalidOperationException("The imported print template belongs to different print artifact settings.");
             return evidence;
         }
         catch (JsonException exception)

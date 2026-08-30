@@ -9,8 +9,7 @@ public sealed record PublicationReleasePreset(
     PublicationVendor Vendor,
     string ProfileId,
     string RegistryVersion,
-    string? ProductKey,
-    PrintFinish Finish,
+    string? ArtifactProfileKey,
     PrintCoverMode CoverMode,
     PrintProjectUse ProjectUse,
     PrintIdentifierMode IdentifierMode,
@@ -27,7 +26,7 @@ public interface IPublicationReleasePresetService
         CancellationToken cancellationToken = default);
 }
 
-public sealed class PublicationReleasePresetService(IAppDatabaseOperationFactory database, IPrintProductRegistry printProducts) : IPublicationReleasePresetService
+public sealed class PublicationReleasePresetService(IAppDatabaseOperationFactory database, IPrintArtifactProfileRegistry printArtifactProfiles) : IPublicationReleasePresetService
 {
     public async Task<PublicationReleasePreset> ResolveAsync(
         Guid projectId,
@@ -44,14 +43,13 @@ public sealed class PublicationReleasePresetService(IAppDatabaseOperationFactory
             destination = PublicationVendor.Generic;
         await db.Projects.AsNoTracking().Where(project => project.Id == projectId)
             .Select(project => project.Id).SingleAsync(cancellationToken);
-        var product = isPrint ? printProducts.GetDefault(format, destination) : null;
+        var product = isPrint ? printArtifactProfiles.GetDefault(format, destination) : null;
         return new PublicationReleasePreset(
             format,
             destination,
             product?.PdfProfile ?? PublicationEditionService.DefaultProfile(format, destination),
-            printProducts.Version,
+            printArtifactProfiles.Version,
             product?.Key,
-            PrintFinish.Matte,
             PrintCoverMode.Simplex,
             product?.DefaultProjectUse ?? PrintProjectUse.ForSale,
             destination == PublicationVendor.BarnesAndNoblePress
@@ -61,7 +59,7 @@ public sealed class PublicationReleasePresetService(IAppDatabaseOperationFactory
             // Print cover profiles require bleed even when the interior has no
             // edge-to-edge artwork. Keeping the release bleed-enabled also lets
             // future full-bleed figures flow into the release without rebuilding
-            // its basic product configuration.
+            // its basic artifact configuration.
             isPrint,
             false);
     }

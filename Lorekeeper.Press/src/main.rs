@@ -7,7 +7,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 fn main() {
-    let registry_hash = Sha256::digest(include_bytes!("../assets/print-products-v1.json"))
+    let registry_hash = Sha256::digest(include_bytes!("../assets/print-artifact-profiles-v1.json"))
         .iter()
         .map(|value| format!("{value:02x}"))
         .collect::<String>();
@@ -17,10 +17,10 @@ fn main() {
             println!(
                 "{}",
                 serde_json::to_string(&json!({
-                    "protocolVersion": 9,
+                    "protocolVersion": 10,
                     "rendererVersion": env!("CARGO_PKG_VERSION"),
-                    "printProductRegistryVersion": "2026.08.1",
-                    "printProductRegistrySha256": registry_hash,
+                    "printArtifactProfileRegistryVersion": "2026.08.3",
+                    "printArtifactProfileRegistrySha256": registry_hash,
                     "profiles": [
                         "generic-print-v2",
                         "generic-digital-pdf-v1",

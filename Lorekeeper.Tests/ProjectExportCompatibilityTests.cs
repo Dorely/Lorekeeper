@@ -20,7 +20,19 @@ public sealed class ProjectExportCompatibilityTests
     }
 
     [Fact]
-    public void V26WritesCanonicalSourceContainersCurrentPublicationStateAndAnnotations()
+    public void V26PrintFieldsReadThroughTheArtifactProfileAdapter()
+    {
+        var edition = JsonSerializer.Deserialize<ProjectExportPublicationEdition>(
+            """{"printRegistryVersion":"2026.08.2","printProductKey":"kdp-pb-bw-white","printFinish":"Gloss"}""",
+            ManuscriptCodec.JsonOptions);
+
+        Assert.NotNull(edition);
+        Assert.Equal("2026.08.2", edition.ImportedPrintArtifactRegistryVersion);
+        Assert.Equal("kdp-pb-bw-white", edition.ImportedPrintArtifactProfileKey);
+    }
+
+    [Fact]
+    public void V27WritesCanonicalSourceContainersCurrentPublicationStateAndAnnotations()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
@@ -42,7 +54,7 @@ public sealed class ProjectExportCompatibilityTests
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(26, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(27, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"ingestSources\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"bookBriefCanonSourceIds\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
@@ -55,6 +67,9 @@ public sealed class ProjectExportCompatibilityTests
         Assert.Contains("\"publicationSectionOrder\":", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationSections\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"manuscriptAnnotations\":[]", json, StringComparison.Ordinal);
+        Assert.Contains("\"printArtifactProfileKey\"", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("printProductKey", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("printFinish", json, StringComparison.Ordinal);
         Assert.DoesNotContain("genericPrintTemplateJson", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"isDefault\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("selectedCoverChapterId", json, StringComparison.Ordinal);

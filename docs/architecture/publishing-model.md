@@ -9,7 +9,7 @@ publication metadata, Publish UI, Publish assistant tools, effective
 configuration/fingerprints, format projections, preparation orchestration, or
 publication-facing cover ownership. Read it with `composition-media.md` for
 Designed Page scenes, shared canvas behavior, images, fonts, and page setup.
-Read it with `press-production.md` for physical products, cover surface
+Read it with `press-production.md` for print-artifact profiles, cover surface
 geometry, native rendering, PDF/EPUB validation, artifacts, and packages.
 Read it with `persistence-migrations-import.md` when changing stored release,
 section, artifact, job, or migration data.
@@ -89,7 +89,14 @@ returning to Core inheritance.
 The current Core page aspect also supplies the default provider-valid raster for
 free-standing image generation and editing throughout the application; concrete
 Figure, page, frame, and cover targets retain their own exact geometry.
-Release creation is explicit: no release or ISBN is created automatically.
+Release creation is explicit: no release or ISBN is created automatically. The
+creation dialog establishes release format, destination, name, and any
+destination-level use mode. Release setup then exposes only artifact-affecting
+choices: trim, interior color process, paper weight/thickness, cover
+construction, cover printing topology, and cover submission. There is no print
+product selector. Paper color, finish, price, listing, account, tax, and
+fulfillment settings remain at the printer because they do not change generated
+bytes or geometry.
 
 Publication sections have an anchor before, after, or around the Core outline,
 an inclusion state, and a start-side choice of next available, right/recto, or
@@ -132,12 +139,12 @@ carry the same protected target. Publish can link to the exact Editor target
 for a difference or diagnostic, but does not become an edition manuscript
 authoring surface.
 
-The Core Book can create a private reading copy with no ISBN, vendor, product,
+The Core Book can create a private reading copy with no ISBN, vendor,
 or publication claim. A Core reading copy may retain visible warnings for
 pending image alternative-text/decorative decisions; unresolved decisions
 remain blockers for publication releases. Paperback and hardcover output use
-physical products, EPUB output uses EPUB releases, and PDF ebook output uses a
-PDF ebook release. Product-form identifiers and metadata never cross formats:
+resolved print-artifact profiles, EPUB output uses EPUB releases, and PDF ebook output uses a
+PDF ebook release. Format-specific identifiers and metadata never cross formats:
 EPUB editions cannot request Press output, and non-EPUB editions cannot export
 EPUB.
 
@@ -187,7 +194,7 @@ bounded `blocks` read as a manuscript payload. Focused tools can fill a canvas,
 replace a single image frame, patch an object, stage semantic-only or
 scene-only changes, stage coupled changes, preview, and validate the active
 target. The assistant cannot reorder chapters or mutate chapter manuscript
-content from Publish. Physical-product selection, exact geometry, and cover
+content from Publish. Artifact-profile resolution, exact geometry, and cover
 surface rules belong to the Press production boundary.
 
 Print releases carry provider-neutral `PrintProjectUse`, `PrintIdentifierMode`,
