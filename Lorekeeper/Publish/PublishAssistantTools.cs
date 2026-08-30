@@ -988,7 +988,6 @@ public sealed class PublishAssistantTools(
             PrintArtifactRegistryVersion = workspace.Edition.PrintArtifactRegistryVersion,
             PrintArtifactProfileKey = workspace.Edition.PrintArtifactProfileKey,
             PrintCoverMode = workspace.Edition.PrintCoverMode,
-            PrintTemplateEvidenceJson = workspace.Edition.PrintTemplateEvidenceJson,
             PageWidthInches = workspace.Edition.PageWidthInches,
             PageHeightInches = workspace.Edition.PageHeightInches,
             Bleed = workspace.Edition.Bleed,

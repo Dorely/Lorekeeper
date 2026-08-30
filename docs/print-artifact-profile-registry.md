@@ -33,11 +33,13 @@ not by paper color.
   cover/case, cloth, jacket, and duplex artifact surfaces with frozen spine
   measurements.
 - Barnes & Noble Press paperback, printed-case hardcover, and dust-jacket
-  hardcover at 6 × 9, with 45 lb or 50 lb paper where applicable and exact
-  imported template evidence.
-- Generic paperback and hardcover: a complete printer-supplied geometry
-  manifest. Generic output is labelled **Template validated** and never claims
-  named-vendor conformance.
+  hardcover at 6 × 9. The 50 lb paperback and hardcover profiles use calibrated
+  rounded page-count formulas; the 45 lb groundwood paperback uses B&N's
+  published 408 PPI value. Full-wrap and panel dimensions are owned by the
+  profile and were checked against the official B&N cover generator.
+- Generic paperback and hardcover remain selectable destinations but fail
+  closed during preparation until an application-owned artifact profile exists
+  for their geometry. They never claim named-vendor conformance.
 
 Submitted, normalized cover-calculation, and reported production page counts
 remain distinct. The final interior layout determines the spine and full-cover
@@ -58,10 +60,9 @@ does not stretch an approved scene.
 
 ## Maintainer refresh workflow
 
-1. Review current official vendor print and cover requirements and template
-   calculators.
+1. Review current official vendor print and cover requirements and calculators.
 2. Capture evidence for every changed boundary: source URL, review date,
-   inputs, returned measurements, and calculator/template output.
+   inputs, returned measurements, and calculator output.
 3. Put the proposed snapshot in a separate file and run:
 
    ```powershell

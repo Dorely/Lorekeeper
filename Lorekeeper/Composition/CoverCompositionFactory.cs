@@ -337,16 +337,37 @@ public static class CoverCompositionFactory
         };
     }
 
+    private static double MeasuredBackRegionX(CoverGeometry geometry) =>
+        Math.Max(0, (geometry.WidthPoints
+            - geometry.BackRegionWidthPoints
+            - geometry.SpineWidthPoints
+            - geometry.FrontRegionWidthPoints) / 2);
+
+    private static CoverRegion BarcodeRegion(CoverGeometry geometry)
+    {
+        const double safeInset = 18;
+        const double barcodeWidth = 144;
+        const double barcodeHeight = 86.4;
+        var back = geometry.HasMeasuredRegions
+            ? new CoverRegion(MeasuredBackRegionX(geometry), geometry.CoverRegionYPoints, geometry.BackRegionWidthPoints, geometry.CoverRegionHeightPoints)
+            : new CoverRegion(geometry.BleedPoints, geometry.BleedPoints, geometry.TrimWidthPoints, geometry.TrimHeightPoints);
+        return new(
+            Math.Max(back.X, back.X + back.Width - safeInset - barcodeWidth),
+            Math.Max(back.Y, back.Y + back.Height - safeInset - barcodeHeight),
+            Math.Min(barcodeWidth, back.Width),
+            Math.Min(barcodeHeight, back.Height));
+    }
+
     private static CoverRegion Region(CompositionRegionConstraint region, CoverGeometry geometry) => region switch
     {
-        CompositionRegionConstraint.Back when geometry.HasMeasuredRegions => new(0, geometry.CoverRegionYPoints, geometry.BackRegionWidthPoints, geometry.CoverRegionHeightPoints),
-        CompositionRegionConstraint.Spine when geometry.HasMeasuredRegions => new(geometry.BackRegionWidthPoints, geometry.CoverRegionYPoints, Math.Max(geometry.SpineWidthPoints, .01), geometry.CoverRegionHeightPoints),
-        CompositionRegionConstraint.Front when geometry.HasMeasuredRegions => new(geometry.BackRegionWidthPoints + geometry.SpineWidthPoints, geometry.CoverRegionYPoints, geometry.FrontRegionWidthPoints, geometry.CoverRegionHeightPoints),
+        CompositionRegionConstraint.Back when geometry.HasMeasuredRegions => new(MeasuredBackRegionX(geometry), geometry.CoverRegionYPoints, geometry.BackRegionWidthPoints, geometry.CoverRegionHeightPoints),
+        CompositionRegionConstraint.Spine when geometry.HasMeasuredRegions => new(MeasuredBackRegionX(geometry) + geometry.BackRegionWidthPoints, geometry.CoverRegionYPoints, Math.Max(geometry.SpineWidthPoints, .01), geometry.CoverRegionHeightPoints),
+        CompositionRegionConstraint.Front when geometry.HasMeasuredRegions => new(geometry.WidthPoints - MeasuredBackRegionX(geometry) - geometry.FrontRegionWidthPoints, geometry.CoverRegionYPoints, geometry.FrontRegionWidthPoints, geometry.CoverRegionHeightPoints),
         CompositionRegionConstraint.Back => new(geometry.BleedPoints, geometry.BleedPoints, geometry.TrimWidthPoints, geometry.TrimHeightPoints),
         CompositionRegionConstraint.Spine => new(geometry.BleedPoints + geometry.TrimWidthPoints, geometry.BleedPoints, Math.Max(geometry.SpineWidthPoints, .01), geometry.TrimHeightPoints),
         CompositionRegionConstraint.Front => new(geometry.WidthPoints - geometry.BleedPoints - geometry.TrimWidthPoints, geometry.BleedPoints, geometry.TrimWidthPoints, geometry.TrimHeightPoints),
         CompositionRegionConstraint.SafeArea => new(18, 18, Math.Max(1, geometry.WidthPoints - 36), Math.Max(1, geometry.HeightPoints - 36)),
-        CompositionRegionConstraint.BarcodeReserve => new(geometry.BleedPoints + 18, geometry.HeightPoints - geometry.BleedPoints - 104.4, 144, 86.4),
+        CompositionRegionConstraint.BarcodeReserve => BarcodeRegion(geometry),
         _ => new(0, 0, geometry.WidthPoints, geometry.HeightPoints),
     };
 

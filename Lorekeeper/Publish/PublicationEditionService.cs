@@ -240,7 +240,6 @@ public sealed class PublicationEditionService(
         }
         if (patch.PrintIdentifierMode is { } identifierMode) edition.PrintIdentifierMode = identifierMode;
         if (patch.PrintCoverSubmissionMode is { } submissionMode) edition.PrintCoverSubmissionMode = submissionMode;
-        if (patch.PrintTemplateEvidenceJson is not null) edition.PrintTemplateEvidenceJson = patch.PrintTemplateEvidenceJson;
         if (edition.Format == PublicationEditionFormat.DigitalPdf)
             Override(fields, PublicationEditionOverrideField.AllowDesignedPageOverrides, patch.AllowDesignedPageOverrides, value => edition.AllowDesignedPageOverrides = value);
         if (edition.Format == PublicationEditionFormat.Epub)
@@ -782,7 +781,6 @@ public sealed class PublicationEditionService(
                 edition.PrintProjectUse,
                 edition.PrintIdentifierMode,
                 edition.PrintCoverSubmissionMode,
-                edition.PrintTemplateEvidenceJson,
                 edition.Bleed,
                 edition.AllowDesignedPageOverrides,
                 edition.PageWidthInches,
@@ -1118,7 +1116,6 @@ public sealed class PublicationEditionService(
             edition.PrintArtifactRegistryVersion,
             edition.PrintArtifactProfileKey,
             edition.PrintCoverMode,
-            edition.PrintTemplateEvidenceJson,
             edition.Bleed,
             edition.AllowDesignedPageOverrides,
             edition.RectoChapterStarts)
@@ -1262,7 +1259,6 @@ public sealed class PublicationEditionService(
             PrintIdentifierMode = source.PrintIdentifierMode,
             PrintCoverMode = source.PrintCoverMode,
             PrintCoverSubmissionMode = source.PrintCoverSubmissionMode,
-            PrintTemplateEvidenceJson = source.PrintTemplateEvidenceJson,
             Bleed = source.Bleed,
             PageWidthInches = source.PageWidthInches,
             PageHeightInches = source.PageHeightInches,

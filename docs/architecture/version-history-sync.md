@@ -123,8 +123,7 @@ The captured canonical areas are:
 - `manuscript`: project Book Text Styles in `manuscript/styles.json`;
 - `composition`: page compositions, variants, and scene data; and
 - `publication`: Core Book, editions, publication sections, print project use,
-  identifier and cover-submission modes, provider-neutral template evidence,
-  and cover spine direction.
+  identifier and cover-submission modes, and cover spine direction.
 
 Chats, conversations, messages and composer drafts; provider connections,
 OAuth tokens and credentials; the Review Edits workflow toggle, contests,
@@ -134,7 +133,7 @@ auto-link and other projections; visual candidates; render artifacts, page
 maps, packages, audits and migration journals; process-lifetime Undo/Redo; and
 other operational or derived state are deliberately excluded. Restore rebuilds
 the derived projections through their owning services and leaves render
-artifacts absent. Portable export v26 remains a separate boundary with its own
+artifacts absent. Portable export v28 remains a separate boundary with its own
 scope and warnings.
 
 ### Checkpoints and restore

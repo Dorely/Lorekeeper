@@ -443,6 +443,7 @@ public sealed class LorekeeperPressMigrationTests
                 Assert.DoesNotContain("PrintRegistryVersion", publicationEditionColumns);
                 Assert.DoesNotContain("PrintProductKey", publicationEditionColumns);
                 Assert.DoesNotContain("PrintFinish", publicationEditionColumns);
+                Assert.DoesNotContain("PrintTemplateEvidenceJson", publicationEditionColumns);
                 Assert.Equal("{}", edition.PublicationSectionOrderJson);
                 Assert.False(edition.RectoChapterStarts);
                 Assert.Equal(10, edition.Revision);

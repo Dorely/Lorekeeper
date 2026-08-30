@@ -854,8 +854,8 @@ public sealed class PublicationRenderProcessor(
                 await db.SaveChangesAsync(cancellationToken);
             },
             cancellationToken);
-        if (result.ProtocolVersion != 10)
-            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 10 is required.");
+        if (result.ProtocolVersion != 11)
+            throw new InvalidOperationException($"The press renderer returned protocol {result.ProtocolVersion}; protocol 11 is required.");
         if (result.JobId is not null
             && !string.Equals(result.JobId, job.Id.ToString("N"), StringComparison.Ordinal))
             throw new InvalidOperationException("The press renderer returned a response for a different job.");
@@ -1339,16 +1339,10 @@ public sealed class PublicationRenderProcessor(
         var printProduct = release?.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
             ? printArtifactProfiles.GetRequired(release.PrintArtifactProfileKey)
             : null;
-        var printTemplateEvidence = printProduct?.SpineModel.Kind == "TemplateRequired"
-            && !string.IsNullOrWhiteSpace(release!.PrintTemplateEvidenceJson)
-                ? JsonSerializer.Deserialize<PrintTemplateEvidence>(release.PrintTemplateEvidenceJson)
-                : null;
-        if (printProduct?.SpineModel.Kind == "TemplateRequired" && printTemplateEvidence is null)
-            throw new InvalidOperationException("This print release requires imported printer template evidence before rendering.");
         var requiredCoverSurfaces = printProduct is null ? Array.Empty<string>() : RequiredCoverSurfaces(printProduct, release!.PrintCoverMode);
         var payload = new
         {
-            protocolVersion = 10,
+            protocolVersion = 11,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
             outputPurpose = job.TargetKind == PublicationTargetKind.CoreBook
@@ -1375,11 +1369,7 @@ public sealed class PublicationRenderProcessor(
                 printProduct.MaximumPages,
                 printProduct.MinimumSubmittedPages,
                 printProduct.MaximumSubmittedPages,
-                spineModel = ToPressSpineModel(printProduct.Vendor == PublicationVendor.Generic
-                    && printTemplateEvidence?.InchesPerPage is decimal genericCaliper
-                    ? new PrintSpineModel("Caliper", genericCaliper)
-                    : printProduct.SpineModel),
-                printTemplateEvidence,
+                spineModel = ToPressSpineModel(printProduct.SpineModel),
                 requiredCoverSurfaces,
             },
             document = new
@@ -1475,6 +1465,8 @@ public sealed class PublicationRenderProcessor(
         model.Kind,
         model.InchesPerPage,
         anchors = model.Anchors ?? [],
+        model.BaseInches,
+        model.RoundToIncrementInches,
     };
 
     private static PressStagedFont StageFont(PublishFontDocument face)

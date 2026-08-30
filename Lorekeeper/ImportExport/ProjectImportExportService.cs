@@ -641,7 +641,6 @@ public sealed class ProjectImportExportService(
             PrintProjectUse = profile.PrintProjectUse,
             PrintIdentifierMode = profile.PrintIdentifierMode,
             PrintCoverSubmissionMode = profile.PrintCoverSubmissionMode,
-            PrintTemplateEvidenceJson = profile.PrintTemplateEvidenceJson,
             RectoChapterStarts = profile.RectoChapterStarts,
             OverrideFields = ParseOverrideFields(profile.OverrideFieldsJson),
             InheritsCoreCover = profile.InheritsCoreCover,

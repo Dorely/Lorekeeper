@@ -106,7 +106,6 @@ public class PublicationEdition
     public PrintIdentifierMode PrintIdentifierMode { get; set; } = PrintIdentifierMode.UserSuppliedIsbn;
     public PrintCoverMode PrintCoverMode { get; set; } = PrintCoverMode.Simplex;
     public PrintCoverSubmissionMode PrintCoverSubmissionMode { get; set; } = PrintCoverSubmissionMode.FullWrapMeasured;
-    public string PrintTemplateEvidenceJson { get; set; } = string.Empty;
     public bool Bleed { get; set; }
     public bool AllowDesignedPageOverrides { get; set; }
     public bool InheritsCoreCover { get; set; } = true;

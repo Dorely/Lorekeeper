@@ -1,5 +1,5 @@
 {
-  "registryVersion": "2026.08.3",
+  "registryVersion": "2026.08.4",
   "reviewedAtUtc": "2026-08-30T00:00:00Z",
   "sources": [
     "https://kdp.amazon.com/en_US/help/topic/G201834180",
@@ -12,11 +12,13 @@
     "https://help-press.barnesandnoble.com/hc/en-us/articles/5358927293211-Cover-Template-Tool-FAQs",
     "https://help-press.barnesandnoble.com/hc/en-us/articles/5358254743963-ISBN-FAQs",
     "https://help-press.barnesandnoble.com/hc/en-us/articles/5359031189787-Cover-Interior-Not-Accepted",
-    "https://www2.nookassets.com/npassets-spb/pod/resources/BN-Press-Formatting-Guide.pdf"
+    "https://www2.nookassets.com/npassets-spb/pod/resources/BN-Press-Formatting-Guide.pdf",
+    "https://press.barnesandnoble.com/book-cover-template-generator",
+    "https://press.barnesandnoble.com/bnpress-blog/?p=12423"
   ],
   "profiles": [
     {
-      "key": "generic-perfectbound-template",
+      "key": "generic-perfectbound-v1",
       "vendor": "Generic",
       "format": "Paperback",
       "binding": "PerfectBound",
@@ -34,13 +36,13 @@
       "maximumPages": 10000,
       "pdfProfile": "generic-print-v2",
       "spineModel": {
-        "kind": "TemplateRequired"
+        "kind": "Unsupported"
       },
       "minimumSubmittedPages": 2,
       "maximumSubmittedPages": 10000
     },
     {
-      "key": "generic-casebound-template",
+      "key": "generic-casebound-v1",
       "vendor": "Generic",
       "format": "Hardcover",
       "binding": "CaseBound",
@@ -57,7 +59,7 @@
       "maximumPages": 10000,
       "pdfProfile": "generic-print-v2",
       "spineModel": {
-        "kind": "TemplateRequired"
+        "kind": "Unsupported"
       },
       "minimumSubmittedPages": 2,
       "maximumSubmittedPages": 10000
@@ -82,7 +84,10 @@
       "maximumPages": 800,
       "pdfProfile": "bn-print-pdfa1b-v1",
       "spineModel": {
-        "kind": "TemplateRequired"
+        "kind": "RoundedCaliper",
+        "inchesPerPage": 0.0021739130434782609,
+        "baseInches": 0.021739130434782609,
+        "roundToIncrementInches": 0.01
       },
       "minimumSubmittedPages": 18,
       "maximumSubmittedPages": 800,
@@ -112,7 +117,10 @@
       "maximumPages": 800,
       "pdfProfile": "bn-print-pdfa1b-v1",
       "spineModel": {
-        "kind": "TemplateRequired"
+        "kind": "RoundedCaliper",
+        "inchesPerPage": 0.0024038461538461538,
+        "baseInches": 0.134615384615384615,
+        "roundToIncrementInches": 0.01
       },
       "minimumSubmittedPages": 18,
       "maximumSubmittedPages": 800,
@@ -142,7 +150,10 @@
       "maximumPages": 800,
       "pdfProfile": "bn-print-pdfa1b-v1",
       "spineModel": {
-        "kind": "TemplateRequired"
+        "kind": "RoundedCaliper",
+        "inchesPerPage": 0.0024038461538461538,
+        "baseInches": 0.134615384615384615,
+        "roundToIncrementInches": 0.01
       },
       "minimumSubmittedPages": 18,
       "maximumSubmittedPages": 800,
@@ -25707,7 +25718,10 @@
       "maximumPages": 800,
       "pdfProfile": "bn-print-pdfa1b-v1",
       "spineModel": {
-        "kind": "TemplateRequired"
+        "kind": "RoundedCaliper",
+        "inchesPerPage": 0.0024509803921568627,
+        "baseInches": 0.024509803921568627,
+        "roundToIncrementInches": 0.01
       },
       "minimumSubmittedPages": 18,
       "maximumSubmittedPages": 800,

@@ -34,7 +34,7 @@ public static class ProjectExportWarningText
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 27;
+    public const int CurrentFormatVersion = 28;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -330,10 +330,6 @@ public sealed record ProjectExportPublicationEdition(
     public PrintProjectUse PrintProjectUse { get; init; } = PrintProjectUse.ForSale;
     public PrintIdentifierMode PrintIdentifierMode { get; init; } = PrintIdentifierMode.UserSuppliedIsbn;
     public PrintCoverSubmissionMode PrintCoverSubmissionMode { get; init; } = PrintCoverSubmissionMode.FullWrapMeasured;
-    public string PrintTemplateEvidenceJson { get; init; } = string.Empty;
-    [JsonPropertyName("genericPrintTemplateJson")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? LegacyGenericPrintTemplateJson { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? BodyFontSizePoints { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

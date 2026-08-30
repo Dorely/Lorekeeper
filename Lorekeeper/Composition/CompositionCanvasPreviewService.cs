@@ -611,8 +611,14 @@ public sealed partial class CompositionCanvasPreviewService(
             canvas.DrawLine(page.MidX, page.Top, page.MidX, page.Bottom, gutter);
         if (scene.Surface.TrimWidthPoints > 0 && scene.Surface.SpineWidthPoints > 0)
         {
+            var measuredInset = scene.Surface.BackRegionWidthPoints > 0
+                ? (float)Math.Max(0, (scene.Surface.WidthPoints
+                    - scene.Surface.BackRegionWidthPoints
+                    - scene.Surface.SpineWidthPoints
+                    - scene.Surface.FrontRegionWidthPoints) / 2)
+                : 0;
             var backEdge = scene.Surface.BackRegionWidthPoints > 0
-                ? (float)scene.Surface.BackRegionWidthPoints
+                ? measuredInset + (float)scene.Surface.BackRegionWidthPoints
                 : bleed + (float)scene.Surface.TrimWidthPoints;
             var frontEdge = backEdge + (float)scene.Surface.SpineWidthPoints;
             var regionTop = scene.Surface.CoverRegionHeightPoints > 0

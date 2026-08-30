@@ -42,7 +42,7 @@ read paths and true no-ops do not refresh the top-bar review projection.
 
 `IPublicationEditionService` owns optional paperback, hardcover, EPUB ebook,
 and PDF ebook release aggregates. Releases own destination, exact immutable
-profile or Generic template, ISBN, status, sparse Core overrides, edition
+artifact profile, ISBN, status, sparse Core overrides, edition
 content state, artifacts, packages, cloning, archival, comparison, and audit
 history. `IPublicationEffectiveConfigurationResolver` combines Core values
 with explicit release overrides at read/render time. `IPublicationReleasePresetService`

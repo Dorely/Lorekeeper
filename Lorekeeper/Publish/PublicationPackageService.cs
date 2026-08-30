@@ -271,8 +271,6 @@ public sealed class PublicationPackageService(
             {
                 if (coverDesign.BarcodeMode != PublicationBarcodeMode.VendorOverlay)
                     items.Add(Error("COVER_BARCODE_VENDOR_OVERLAY_REQUIRED", "B&N Press generates the SKU or ISBN barcode; remove uploaded barcode artwork and keep the reserved area clear."));
-                if (edition.PrintIdentifierMode == PrintIdentifierMode.VendorAssignedIsbn)
-                    items.Add(new PublicationPreflightItem("warning", "BN_ISBN_ASSIGNED_AT_HANDOFF", "B&N Press assigns its free ISBN in the external wizard; file preparation can complete before assignment."));
             }
             await AddPressEvidenceAsync(edition, interior, physicalArtifacts, coverDesign.Template, currentRendererVersion, items, cancellationToken);
         }

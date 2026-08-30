@@ -41,8 +41,12 @@ foreach ($profile in $registry.profiles) {
             $failures.Add("$($profile.key): frozen lookup contains a non-positive measurement")
         }
     }
-    if ($profile.vendor -notin @("Generic", "BarnesAndNoblePress") -and $profile.spineModel.kind -eq "TemplateRequired") {
-        $failures.Add("$($profile.key): this vendor artifact profile cannot use imported geometry")
+    if ($profile.spineModel.kind -eq "Unsupported" -and $profile.vendor -ne "Generic") {
+        $failures.Add("$($profile.key): a named-vendor artifact profile cannot have unsupported spine geometry")
+    }
+    if ($profile.spineModel.kind -eq "RoundedCaliper" -and
+        (-not $profile.spineModel.inchesPerPage -or -not $profile.spineModel.roundToIncrementInches)) {
+        $failures.Add("$($profile.key): rounded-caliper geometry is incomplete")
     }
 }
 if ($failures.Count -gt 0) {
@@ -69,8 +73,13 @@ $lines.Add("")
 $lines.Add("| Key | Vendor | Format | Process | Construction | Weight | Page range | Spine evidence |")
 $lines.Add("| --- | --- | --- | --- | --- | --- | --- | --- |")
 foreach ($profile in $registry.profiles | Sort-Object vendor, format, key) {
-    $weight = if ($profile.basisWeightPounds) { "$($profile.basisWeightPounds) lb / $($profile.gsm) gsm" } else { "template declared" }
-    $spineEvidence = if ($profile.spineModel.kind -eq "FrozenLookup") { "$($profile.spineModel.anchors.Count) exact measurements" } elseif ($profile.spineModel.kind -eq "Caliper") { "published thickness formula" } else { "printer template required" }
+    $weight = if ($profile.basisWeightPounds) { "$($profile.basisWeightPounds) lb / $($profile.gsm) gsm" } else { "not specified" }
+    $spineEvidence = switch ($profile.spineModel.kind) {
+        "FrozenLookup" { "$($profile.spineModel.anchors.Count) exact measurements" }
+        "Caliper" { "published thickness formula" }
+        "RoundedCaliper" { "calibrated rounded formula" }
+        default { "unsupported" }
+    }
     $lines.Add("| ``$($profile.key)`` | $($profile.vendor) | $($profile.format) | $($profile.interiorProcess) | $($profile.coverMaterial) | $weight | $($profile.minimumSubmittedPages)-$($profile.maximumSubmittedPages) | $spineEvidence |")
 }
 [IO.File]::WriteAllLines($reportFile, $lines, [Text.UTF8Encoding]::new($false))

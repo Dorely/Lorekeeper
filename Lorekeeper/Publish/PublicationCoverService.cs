@@ -1143,13 +1143,9 @@ public sealed class PublicationCoverService(
             ? pages
             : printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey).MinimumPages;
         var geometry = printGeometry.Calculate(edition, provisionalPages, surfaceRole);
-        var evidence = edition.Vendor == PublicationVendor.BarnesAndNoblePress
-            && !string.IsNullOrWhiteSpace(edition.PrintTemplateEvidenceJson)
-                ? JsonSerializer.Deserialize<PrintTemplateEvidence>(edition.PrintTemplateEvidenceJson)
-                : null;
         return new(pages, edition.PageWidthInches, edition.PageHeightInches, (double)geometry.BleedInches,
             (double)geometry.SpineWidthInches, (double)geometry.SurfaceWidthInches, (double)geometry.SurfaceHeightInches,
-            evidence is null ? 0.25 : (double)evidence.SafeInches, 2, 1.2, geometry.GeometryFingerprint,
+            0.25, 2, 1.2, geometry.GeometryFingerprint,
             string.Equals(geometry.GeometryFingerprint, design.AcknowledgedTemplateFingerprint, StringComparison.Ordinal))
         {
             BackRegionWidthInches = (double)geometry.BackRegionWidthInches,

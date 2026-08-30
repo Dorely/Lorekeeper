@@ -150,48 +150,8 @@ pub struct PrintArtifactProfile {
     #[serde(default)]
     pub maximum_submitted_pages: Option<usize>,
     pub spine_model: PhysicalSpineModel,
-    pub print_template_evidence: Option<PrintTemplateEvidence>,
     #[serde(default)]
     pub required_cover_surfaces: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PrintTemplateEvidence {
-    pub trim_width_inches: f32,
-    pub trim_height_inches: f32,
-    pub bleed_inches: f32,
-    pub safe_inches: f32,
-    pub wrap_inches: f32,
-    pub hinge_inches: f32,
-    pub gutter_inches: f32,
-    pub flap_inches: f32,
-    pub barcode_width_inches: f32,
-    pub barcode_height_inches: f32,
-    pub inches_per_page: Option<f32>,
-    pub minimum_pages: usize,
-    pub maximum_pages: usize,
-    pub pdf_standard: String,
-    #[serde(default)]
-    pub provider: String,
-    #[serde(default)]
-    pub artifact_profile_key: String,
-    #[serde(default)]
-    pub page_count: usize,
-    pub geometry_fingerprint: String,
-    pub spine_width_inches: Option<f32>,
-    pub full_cover_width_inches: Option<f32>,
-    pub full_cover_height_inches: Option<f32>,
-    pub front_cover_width_inches: Option<f32>,
-    pub front_cover_height_inches: Option<f32>,
-    pub back_cover_width_inches: Option<f32>,
-    pub back_cover_height_inches: Option<f32>,
-    #[serde(default)]
-    pub full_cover_template_sha256: String,
-    #[serde(default)]
-    pub front_cover_template_sha256: String,
-    #[serde(default)]
-    pub back_cover_template_sha256: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -201,6 +161,9 @@ pub struct PhysicalSpineModel {
     pub inches_per_page: Option<f32>,
     #[serde(default)]
     pub anchors: Vec<PhysicalSpineAnchor>,
+    #[serde(default)]
+    pub base_inches: f32,
+    pub round_to_increment_inches: Option<f32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -274,7 +237,7 @@ pub struct RenderResponse {
 impl RenderResponse {
     pub fn failed(status: &str, diagnostic: Diagnostic) -> Self {
         Self {
-            protocol_version: 10,
+            protocol_version: 11,
             renderer_version: env!("CARGO_PKG_VERSION"),
             job_id: None,
             status: status.to_owned(),

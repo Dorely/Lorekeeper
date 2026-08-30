@@ -143,7 +143,6 @@ public sealed record PublicationEditionView(
     string PrintArtifactRegistryVersion,
     string PrintArtifactProfileKey,
     PrintCoverMode PrintCoverMode,
-    string PrintTemplateEvidenceJson,
     bool Bleed,
     bool AllowDesignedPageOverrides,
     bool RectoChapterStarts)
@@ -167,7 +166,6 @@ public sealed record PublicationReleaseOverridePatch(
     string? Isbn = null,
     string? PrintArtifactProfileKey = null,
     PrintCoverMode? PrintCoverMode = null,
-    string? PrintTemplateEvidenceJson = null,
     bool? AllowDesignedPageOverrides = null,
     bool? RectoChapterStarts = null,
     string? Title = null,

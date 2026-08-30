@@ -204,7 +204,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   release target. Unresolved image accessibility choices remain visible warnings
   on the private Core copy, while publication releases require those choices to
   be resolved. Paperback and hardcover output use a checked-in, versioned
-  print-artifact profile registry with configurable Generic templates plus built-in
+  print-artifact profile registry with built-in
   profiles for Amazon KDP, IngramSpark, and Barnes & Noble Press.
   Print-release creation chooses the destination and creates the release first;
   trim, interior color process, paper weight/thickness, cover construction, and
@@ -212,8 +212,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   color, finish, pricing, listing, and account choices are intentionally outside
   Lorekeeper because they do not change the prepared artifacts.
   B&N paperback, printed-case hardcover, and dust-jacket hardcover releases use
-  imported exact template evidence and an artifact-focused Personal/For sale
-  option that selects SKU/ISBN and barcode preparation behavior;
+  profile-owned, generator-calibrated spine and wrap geometry plus an
+  artifact-focused Personal/For sale option that selects SKU/ISBN and barcode
+  preparation behavior;
   EPUB and PDF ebook workspaces expose only relevant controls. The full-height
   conversational Publish assistant acts as a publication editor and production
   expert, with compact Core/release tools, persistent streaming history, image

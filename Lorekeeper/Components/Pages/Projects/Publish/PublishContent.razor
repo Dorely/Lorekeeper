@@ -16,7 +16,6 @@
 @inject IProjectPageSetupService PageSetups
 @inject IPrintArtifactProfileRegistry PrintArtifactProfiles
 @inject IPrintGeometryService PrintGeometry
-@inject IPrintTemplateEvidenceService PrintTemplateEvidence
 @inject IJSRuntime JS
 
 @if (Project is null || _loading)
@@ -280,7 +279,6 @@ else
     private PublicationEditionFormat _newFormat = PublicationEditionFormat.Paperback;
     private PublicationVendor _newVendor = PublicationVendor.AmazonKdp;
     private PrintProjectUse _newPrintProjectUse = PrintProjectUse.ForSale;
-    private int _bnTemplatePageCount = 100;
     private string _newReleaseName = PublicationReleaseNaming.DefaultName(
         PublicationEditionFormat.Paperback,
         PublicationVendor.AmazonKdp);
@@ -605,18 +603,21 @@ else
                     @if (_releaseDraft.Vendor == PublicationVendor.BarnesAndNoblePress)
                     {
                         <div class="field field-wide"><span>Project use</span><div class="btn-group" role="group" aria-label="Project use"><button type="button" class="btn @(_releaseDraft.PrintProjectUse == PrintProjectUse.PersonalUse ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetReleaseProjectUse(PrintProjectUse.PersonalUse)">Personal / non-commercial</button><button type="button" class="btn @(_releaseDraft.PrintProjectUse == PrintProjectUse.ForSale ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetReleaseProjectUse(PrintProjectUse.ForSale)">For sale / commercial</button></div><small>Changing use invalidates prepared files and setup manifest, while keeping any entered ISBN available if you switch back.</small></div>
-                        <label class="field"><span>Identifier</span><select class="form-select" @bind="_releaseDraft.PrintIdentifierMode" @bind:after="MarkReleaseDirty">@if (_releaseDraft.PrintProjectUse == PrintProjectUse.PersonalUse){<option value="@PrintIdentifierMode.VendorSku">B&amp;N vendor SKU</option>}else{<option value="@PrintIdentifierMode.VendorAssignedIsbn">B&amp;N-assigned ISBN</option><option value="@PrintIdentifierMode.UserSuppliedIsbn">My ISBN</option>}</select><small>@(_releaseDraft.PrintIdentifierMode == PrintIdentifierMode.VendorAssignedIsbn ? "B&N assigns the free ISBN in its wizard; this does not block file preparation." : null)</small></label>
-                        <label class="field"><span>Cover upload</span><select class="form-select" @bind="_releaseDraft.PrintCoverSubmissionMode" @bind:after="MarkReleaseDirty"><option value="@PrintCoverSubmissionMode.FullWrapMeasured">Measured full wrap (includes spine)</option><option value="@PrintCoverSubmissionMode.SeparatePanelsVendorSpine">Separate front/back; B&amp;N spine</option></select></label>
-                    }
-                    <label class="field"><span>ISBN <small>@(_releaseDraft.Vendor == PublicationVendor.IngramSpark || _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn ? "required" : "optional")</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleaseDirty" /></label>
-                    @if (_releaseDraft.Vendor is PublicationVendor.Generic or PublicationVendor.BarnesAndNoblePress)
-                    {
-                        @if (_releaseDraft.Vendor == PublicationVendor.BarnesAndNoblePress)
+                        @if (_releaseDraft.PrintProjectUse == PrintProjectUse.PersonalUse)
                         {
-                            <label class="field"><span>B&amp;N template page count</span><input class="form-control" type="number" min="18" max="800" @bind="_bnTemplatePageCount" /></label>
-                            <label class="field"><span>Import B&amp;N template</span><InputFile OnChange="ImportBnTemplateAsync" multiple accept=".zip,.pdf,application/zip,application/pdf" class="form-control" /><small>Choose the ZIP from B&amp;N's template tool or its full/front/back PDFs. Lorekeeper measures and fingerprints the exact geometry.</small></label>
+                            <div class="plain-setting"><strong>Identifier</strong><span>B&amp;N assigns a vendor SKU. Personal-use preparation does not use an ISBN.</span></div>
                         }
-                        <label class="field field-wide"><span>Printer template evidence</span><textarea class="form-control font-monospace" rows="7" placeholder="Import or paste a Lorekeeper print-template evidence record." @bind="_releaseDraft.PrintTemplateEvidenceJson" @bind:event="oninput" @bind:after="MarkReleaseDirty"></textarea><small>@(_releaseDraft.Vendor == PublicationVendor.BarnesAndNoblePress ? "B&N output is bound to the imported construction, page count, exact cover dimensions, and source hashes." : "Generic output uses this printer-specific spine and cover geometry.")</small></label>
+                        else
+                        {
+                            <label class="field"><span>Identifier</span><select class="form-select" @bind="_releaseDraft.PrintIdentifierMode" @bind:after="MarkReleaseDirty"><option value="@PrintIdentifierMode.VendorAssignedIsbn">B&amp;N-assigned ISBN</option><option value="@PrintIdentifierMode.UserSuppliedIsbn">My ISBN</option></select></label>
+                        }
+                        <label class="field"><span>Cover upload</span><select class="form-select" @bind="_releaseDraft.PrintCoverSubmissionMode" @bind:after="MarkReleaseDirty"><option value="@PrintCoverSubmissionMode.FullWrapMeasured">Full wrap (includes spine)</option><option value="@PrintCoverSubmissionMode.SeparatePanelsVendorSpine">Separate front/back; B&amp;N spine</option></select></label>
+                    }
+                    @if (_releaseDraft.Vendor != PublicationVendor.BarnesAndNoblePress
+                        || _releaseDraft.PrintProjectUse == PrintProjectUse.ForSale
+                            && _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn)
+                    {
+                        <label class="field"><span>ISBN <small>@(_releaseDraft.Vendor == PublicationVendor.IngramSpark || _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn ? "required" : "optional")</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleaseDirty" /></label>
                     }
                 }
                 else if (_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf)
@@ -1661,7 +1662,7 @@ else
                 var reset = _loadedOverrides.Except(_releaseOverrides).ToList();
                 var patch = new PublicationReleaseOverridePatch(
                     revision, _releaseDraft.Name, _releaseDraft.Vendor, _releaseDraft.Isbn,
-                    _releaseDraft.PrintArtifactProfileKey, _releaseDraft.PrintCoverMode, _releaseDraft.PrintTemplateEvidenceJson,
+                    _releaseDraft.PrintArtifactProfileKey, _releaseDraft.PrintCoverMode,
                     BoolValue(PublicationEditionOverrideField.AllowDesignedPageOverrides, _releaseDraft.AllowDesignedPageOverrides),
                     BoolValue(PublicationEditionOverrideField.RectoChapterStarts, _releaseDraft.RectoChapterStarts),
                     Value(PublicationEditionOverrideField.Title, _releaseDraft.Title), Value(PublicationEditionOverrideField.Subtitle, _releaseDraft.Subtitle),
@@ -2475,32 +2476,6 @@ else
         MarkReleaseDirty();
     }
 
-    private async Task ImportBnTemplateAsync(InputFileChangeEventArgs args)
-    {
-        try
-        {
-            var profile = SelectedArtifactProfile() ?? throw new InvalidOperationException("Choose B&N print artifact settings first.");
-            var files = new List<PrintTemplateImportFile>();
-            foreach (var file in args.GetMultipleFiles(8))
-            {
-                await using var stream = file.OpenReadStream(64L * 1024 * 1024);
-                using var memory = new MemoryStream();
-                await stream.CopyToAsync(memory, _dispose.Token);
-                files.Add(new(file.Name, memory.ToArray()));
-            }
-            _releaseDraft.PrintTemplateEvidenceJson = PrintTemplateEvidence.ImportBarnesAndNoble(
-                profile,
-                CurrentTrimKey(),
-                _bnTemplatePageCount,
-                files);
-            MarkReleaseDirty();
-            _notice = "B&N template geometry measured and fingerprinted. Save completes automatically.";
-        }
-        catch (Exception exception)
-        {
-            _error = exception.Message;
-        }
-    }
     private string CurrentTrimKey() => SelectedArtifactProfile()?.TrimSizes.FirstOrDefault(TrimMatches)
         ?? (SelectedArtifactProfile()?.AllowsCustomTrim == true ? "custom" : string.Empty);
     private bool TrimMatches(string trim)
@@ -2537,7 +2512,7 @@ else
         PrintInteriorProcess.BlackAndWhite => "Black and white",
         PrintInteriorProcess.StandardColor => "Standard color",
         PrintInteriorProcess.PremiumColor => "Premium color",
-        _ => "Defined by printer template",
+        _ => "Not specified",
     };
     private static string CoverConstructionLabel(PrintCoverMaterial material) => material switch
     {
@@ -2546,7 +2521,7 @@ else
         PrintCoverMaterial.DigitalCloth => "Cloth case",
         PrintCoverMaterial.DigitalClothWithJacket => "Cloth case with dust jacket",
         PrintCoverMaterial.JacketedCaseLaminate => "Printed case with dust jacket",
-        _ => "Defined by printer template",
+        _ => "Not specified",
     };
     private static decimal? EffectiveCaliper(PrintArtifactProfile profile)
     {
@@ -2560,7 +2535,9 @@ else
     {
         var weight = profile.BasisWeightPounds is int pounds
             ? profile.Gsm is int gsm ? $"{pounds} lb / {gsm} gsm" : $"{pounds} lb"
-            : "Defined by imported printer template";
+            : "Not specified";
+        if (profile.SpineModel.Kind == "RoundedCaliper")
+            return $"{weight} · calibrated spine formula";
         return EffectiveCaliper(profile) is { } caliper
             ? $"{weight} · {caliper:0.######} in/page"
             : weight;
@@ -2576,7 +2553,6 @@ else
                 Name = _releaseDraft.Name,
                 PrintArtifactProfileKey = _releaseDraft.PrintArtifactProfileKey,
                 PrintCoverMode = _releaseDraft.PrintCoverMode,
-                PrintTemplateEvidenceJson = _releaseDraft.PrintTemplateEvidenceJson,
                 PageWidthInches = _releaseDraft.PageWidthInches,
                 PageHeightInches = _releaseDraft.PageHeightInches,
             };
@@ -2585,7 +2561,7 @@ else
         }
         catch (InvalidOperationException)
         {
-            return "Spine width needs a compatible page count and printer template.";
+            return "Spine width needs a compatible page count and supported artifact profile.";
         }
     }
     private IReadOnlyList<PublicationArtifactKind> ReleaseArtifactKinds(PublicationEditionFormat format)
@@ -2617,10 +2593,10 @@ else
 
     private sealed class ReleaseDraft
     {
-        public string Name { get; set; } = ""; public PublicationVendor Vendor { get; set; } public string Isbn { get; set; } = ""; public string PrintArtifactProfileKey { get; set; } = ""; public PrintCoverMode PrintCoverMode { get; set; } public PrintProjectUse PrintProjectUse { get; set; } public PrintIdentifierMode PrintIdentifierMode { get; set; } public PrintCoverSubmissionMode PrintCoverSubmissionMode { get; set; } public string PrintTemplateEvidenceJson { get; set; } = ""; public bool AllowDesignedPageOverrides { get; set; } public bool RectoChapterStarts { get; set; }
+        public string Name { get; set; } = ""; public PublicationVendor Vendor { get; set; } public string Isbn { get; set; } = ""; public string PrintArtifactProfileKey { get; set; } = ""; public PrintCoverMode PrintCoverMode { get; set; } public PrintProjectUse PrintProjectUse { get; set; } public PrintIdentifierMode PrintIdentifierMode { get; set; } public PrintCoverSubmissionMode PrintCoverSubmissionMode { get; set; } public bool AllowDesignedPageOverrides { get; set; } public bool RectoChapterStarts { get; set; }
         public string Title { get; set; } = ""; public string Subtitle { get; set; } = ""; public string Author { get; set; } = ""; public string Language { get; set; } = ""; public string Publisher { get; set; } = ""; public string Copyright { get; set; } = ""; public string Description { get; set; } = "";
         public bool IncludeTableOfContents { get; set; } public bool IncludeVisibleTableOfContents { get; set; } public bool IncludeActSynopses { get; set; } public bool IncludeChapterSynopses { get; set; } public bool IncludeActHeadings { get; set; } public bool IncludeChapterHeadings { get; set; } public bool NumberActs { get; set; } public bool NumberChapters { get; set; }
         public double PageWidthInches { get; set; } public double PageHeightInches { get; set; } public double PageMarginInches { get; set; }
-        public static ReleaseDraft From(PublicationEditionView item) => new() { Name = item.Name, Vendor = item.Vendor, Isbn = item.Isbn, PrintArtifactProfileKey = item.PrintArtifactProfileKey, PrintCoverMode = item.PrintCoverMode, PrintProjectUse = item.PrintProjectUse, PrintIdentifierMode = item.PrintIdentifierMode, PrintCoverSubmissionMode = item.PrintCoverSubmissionMode, PrintTemplateEvidenceJson = item.PrintTemplateEvidenceJson, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, RectoChapterStarts = item.RectoChapterStarts, Title = item.TitleOverride, Subtitle = item.Subtitle, Author = item.Author, Language = PublicationLanguage.Normalize(item.Language), Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, PageWidthInches = item.PageWidthInches, PageHeightInches = item.PageHeightInches, PageMarginInches = item.PageMarginInches };
+        public static ReleaseDraft From(PublicationEditionView item) => new() { Name = item.Name, Vendor = item.Vendor, Isbn = item.Isbn, PrintArtifactProfileKey = item.PrintArtifactProfileKey, PrintCoverMode = item.PrintCoverMode, PrintProjectUse = item.PrintProjectUse, PrintIdentifierMode = item.PrintIdentifierMode, PrintCoverSubmissionMode = item.PrintCoverSubmissionMode, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, RectoChapterStarts = item.RectoChapterStarts, Title = item.TitleOverride, Subtitle = item.Subtitle, Author = item.Author, Language = PublicationLanguage.Normalize(item.Language), Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, PageWidthInches = item.PageWidthInches, PageHeightInches = item.PageHeightInches, PageMarginInches = item.PageMarginInches };
     }
 }

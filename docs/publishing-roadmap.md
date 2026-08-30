@@ -64,12 +64,12 @@ claim.
 | Product | Required files |
 |---|---|
 | Core reading copy | One tagged reading PDF; private/review output only |
-| Generic paperback | Interior PDF plus the cover file(s) required by the supplied printer template |
+| Generic paperback | Preparation remains unavailable until an application-owned geometry profile supports the requested construction |
 | KDP paperback | Interior PDF plus one-page outside cover PDF |
 | Ingram paperback | Interior PDF plus a one-page simplex cover or two-page outside/inside duplex cover PDF |
 | EPUB ebook | EPUB 3 plus a separately downloadable front-cover image |
 | PDF ebook | One tagged Book PDF with the front cover as page one |
-| Generic hardcover | Interior PDF plus printer-declared case/jacket files from a complete template manifest |
+| Generic hardcover | Preparation remains unavailable until an application-owned geometry profile supports the requested construction |
 | KDP hardcover | Interior PDF plus one-page case-laminate cover PDF |
 | Ingram case laminate | Interior PDF plus case-wrap cover PDF |
 | Ingram Digital Cloth | Interior PDF plus setup manifest, and a dust-jacket PDF when selected |
@@ -230,9 +230,9 @@ Status: `Implemented for current KDP, Ingram, and B&N artifact profiles`
 - KDP paperback spines use published stock formulas. KDP hardcover and Ingram
   products use frozen calculator-derived measurements; a Specific product never
   substitutes a generic or neighboring-stock caliper.
-- Generic paperback and hardcover preparation requires a complete printer
-  template manifest and is reported as Template validated, never vendor
-  conformant. Optional vendor PDF/PNG templates are visual underlays only.
+- Generic paperback and hardcover preparation fails closed until an
+  application-owned geometry profile supports the requested construction; it
+  never claims named-vendor conformance.
 - Keep Generic print, Generic EPUB, and Generic PDF ebook output available
   without a named-vendor claim.
 - Add new Specific profiles one vendor/product at a time with sources,

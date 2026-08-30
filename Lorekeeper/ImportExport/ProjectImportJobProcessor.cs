@@ -2199,12 +2199,6 @@ public sealed class ProjectImportJobProcessor(
             PrintProjectUse = formatVersion >= 26 ? importedEdition.PrintProjectUse : PrintProjectUse.ForSale,
             PrintIdentifierMode = formatVersion >= 26 ? importedEdition.PrintIdentifierMode : PrintIdentifierMode.UserSuppliedIsbn,
             PrintCoverSubmissionMode = formatVersion >= 26 ? importedEdition.PrintCoverSubmissionMode : PrintCoverSubmissionMode.FullWrapMeasured,
-            PrintTemplateEvidenceJson = formatVersion switch
-            {
-                >= 26 => NormalizePrintTemplateEvidenceJson(importedEdition.PrintTemplateEvidenceJson),
-                >= 20 => importedEdition.LegacyGenericPrintTemplateJson ?? string.Empty,
-                _ => string.Empty,
-            },
             Bleed = importedEdition.Bleed,
             AllowDesignedPageOverrides = importedEdition.AllowDesignedPageOverrides,
             RectoChapterStarts = importedEdition.RectoChapterStarts,
@@ -3594,7 +3588,6 @@ public sealed class ProjectImportJobProcessor(
             edition.PrintArtifactRegistryVersion,
             edition.PrintArtifactProfileKey,
             edition.PrintCoverMode,
-            edition.PrintTemplateEvidenceJson,
             edition.Bleed,
             edition.RectoChapterStarts,
             edition.PageWidthInches,
@@ -3681,19 +3674,21 @@ public sealed class ProjectImportJobProcessor(
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-pb-bw-50-2225",
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-pb-premium70",
             (PublicationEditionFormat.Paperback, PublicationVendor.IngramSpark, _, _) => "ingram-pb-bw-50-2009",
-            (PublicationEditionFormat.Paperback, _, _, _) => "generic-perfectbound-template",
+            (PublicationEditionFormat.Paperback, _, _, _) => "generic-perfectbound-v1",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, LegacyPublicationPaper.Cream, _) => "kdp-hc-bw-50-2500",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, LegacyPublicationInk.Color) => "kdp-hc-premium-color",
             (PublicationEditionFormat.Hardcover, PublicationVendor.AmazonKdp, _, _) => "kdp-hc-bw-50-2252",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, LegacyPublicationPaper.Cream, _) => "ingram-hc-case-bw-50-2224",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, LegacyPublicationInk.Color) => "ingram-hc-case-premium70",
             (PublicationEditionFormat.Hardcover, PublicationVendor.IngramSpark, _, _) => "ingram-hc-case-bw-50-2009",
-            (PublicationEditionFormat.Hardcover, _, _, _) => "generic-casebound-template",
+            (PublicationEditionFormat.Hardcover, _, _, _) => "generic-casebound-v1",
             _ => string.Empty,
         };
 
     private static string NormalizePrintArtifactProfileKey(string key) => key switch
     {
+        "generic-perfectbound-template" => "generic-perfectbound-v1",
+        "generic-casebound-template" => "generic-casebound-v1",
         "kdp-pb-bw-white" => "kdp-pb-bw-50-2252",
         "kdp-pb-bw-cream" => "kdp-pb-bw-50-2500",
         "kdp-pb-bw-groundwood" => "kdp-pb-bw-45-2350",
@@ -3711,27 +3706,6 @@ public sealed class ProjectImportJobProcessor(
         "bn-hc-jacket-bw-cream50-6x9" => "bn-hc-jacket-bw-50-6x9",
         _ => key,
     };
-
-    private static string NormalizePrintTemplateEvidenceJson(string json) => string.IsNullOrWhiteSpace(json)
-        ? string.Empty
-        : json.Replace("\"productKey\":", "\"artifactProfileKey\":", StringComparison.Ordinal)
-            .Replace("kdp-pb-bw-white", "kdp-pb-bw-50-2252", StringComparison.Ordinal)
-            .Replace("kdp-pb-bw-cream", "kdp-pb-bw-50-2500", StringComparison.Ordinal)
-            .Replace("kdp-pb-bw-groundwood", "kdp-pb-bw-45-2350", StringComparison.Ordinal)
-            .Replace("kdp-hc-bw-white", "kdp-hc-bw-50-2252", StringComparison.Ordinal)
-            .Replace("kdp-hc-bw-cream", "kdp-hc-bw-50-2500", StringComparison.Ordinal)
-            .Replace("ingram-pb-bw-white50", "ingram-pb-bw-50-2009", StringComparison.Ordinal)
-            .Replace("ingram-pb-bw-cream50", "ingram-pb-bw-50-2225", StringComparison.Ordinal)
-            .Replace("ingram-pb-bw-groundwood38", "ingram-pb-bw-38-2550", StringComparison.Ordinal)
-            .Replace("ingram-hc-case-bw-white50", "ingram-hc-case-bw-50-2009", StringComparison.Ordinal)
-            .Replace("ingram-hc-case-bw-cream50", "ingram-hc-case-bw-50-2224", StringComparison.Ordinal)
-            .Replace("ingram-hc-cloth-blue-jacket", "ingram-hc-cloth-jacket-bw-50-2009", StringComparison.Ordinal)
-            .Replace("ingram-hc-cloth-gray-jacket", "ingram-hc-cloth-jacket-bw-50-2009", StringComparison.Ordinal)
-            .Replace("ingram-hc-cloth-blue", "ingram-hc-cloth-bw-50-2009", StringComparison.Ordinal)
-            .Replace("ingram-hc-cloth-gray", "ingram-hc-cloth-bw-50-2009", StringComparison.Ordinal)
-            .Replace("bn-pb-bw-cream50-6x9", "bn-pb-bw-50-6x9", StringComparison.Ordinal)
-            .Replace("bn-hc-case-bw-cream50-6x9", "bn-hc-case-bw-50-6x9", StringComparison.Ordinal)
-            .Replace("bn-hc-jacket-bw-cream50-6x9", "bn-hc-jacket-bw-50-6x9", StringComparison.Ordinal);
 
     private async Task<bool> ImportedBibliographicContentMatchesAsync(
         Guid existingEditionId,

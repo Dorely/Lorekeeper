@@ -29,8 +29,8 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
-    assert_eq!(value["protocolVersion"], 10);
-    assert_eq!(value["rendererVersion"], "2.1.5");
+    assert_eq!(value["protocolVersion"], 11);
+    assert_eq!(value["rendererVersion"], "2.1.6");
     assert_eq!(
         value["profiles"],
         json!([
@@ -63,8 +63,8 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
         stderr(&output)
     );
     let response = response(&output);
-    assert_eq!(response["protocolVersion"], 10);
-    assert_eq!(response["rendererVersion"], "2.1.5");
+    assert_eq!(response["protocolVersion"], 11);
+    assert_eq!(response["rendererVersion"], "2.1.6");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -1051,7 +1051,7 @@ fn declared_cff_otf_uses_cidfont_type0_and_an_opentype_fontfile3_stream() {
 }
 
 #[test]
-fn protocol_v10_renders_paragraph_presentation_and_structured_page_preview_data() {
+fn protocol_v11_renders_paragraph_presentation_and_structured_page_preview_data() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
     let chapter_id = "50000000-0000-0000-0000-000000000001";
     let figure_id = "60000000-0000-0000-0000-000000000001";
@@ -3529,56 +3529,21 @@ fn every_specific_frozen_spine_table_has_an_exact_even_page_measurement() {
 }
 
 #[test]
-fn generic_print_requires_and_honors_complete_printer_declared_geometry() {
+fn generic_print_fails_without_a_supported_artifact_profile() {
     let mut job = PreparedJob::new("generic-paperback-v1");
     job.configure_physical((
-        "generic-perfectbound-template",
+        "generic-perfectbound-v1",
         "Generic",
         "Paperback",
         "PrintedCover",
         &["perfect-bound-outside"],
     ));
-    job.request["printArtifactProfile"]["spineModel"] =
-        json!({ "kind": "Caliper", "inchesPerPage": 0.0023, "anchors": [] });
-    job.request["printArtifactProfile"]["printTemplateEvidence"] = json!({
-        "trimWidthInches": 6.0,
-        "trimHeightInches": 9.0,
-        "bleedInches": 0.125,
-        "safeInches": 0.25,
-        "wrapInches": 0.0,
-        "hingeInches": 0.0,
-        "gutterInches": 0.0,
-        "flapInches": 0.0,
-        "barcodeWidthInches": 2.0,
-        "barcodeHeightInches": 1.2,
-        "inchesPerPage": 0.0023,
-        "minimumPages": 2,
-        "maximumPages": 10000,
-        "pdfStandard": "Printer-declared PDF 1.7",
-        "geometryFingerprint": "generic-test-geometry"
-    });
     job.write_request();
     let output = job.render();
-    assert!(
-        output.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        stderr(&output)
-    );
-
-    let mut mismatched = job.request.clone();
-    mismatched["printArtifactProfile"]["printTemplateEvidence"]["trimWidthInches"] = json!(5.5);
-    fs::write(
-        job.root.path().join("input/request.json"),
-        serde_json::to_vec_pretty(&mismatched).expect("request JSON"),
-    )
-    .expect("write request");
-    fs::remove_dir_all(job.root.path().join("output")).expect("remove prior immutable output");
-    let rejected = job.render();
-    assert!(!rejected.status.success());
+    assert!(!output.status.success());
     assert!(has_diagnostic(
-        &response(&rejected),
-        "PRESS_PRINT_ARTIFACT_PROFILE_MISMATCH"
+        &response(&output),
+        "PRESS_SPINE_MODEL_UNSUPPORTED"
     ));
 }
 
@@ -3846,11 +3811,29 @@ fn barnes_and_noble_personal_and_for_sale_modes_emit_pdfa_and_mode_specific_pack
         assert_eq!(manifest["coverSubmissionMode"], submission);
         assert_eq!(manifest["spineReadingDirection"], direction);
         assert_eq!(manifest["barcode"]["mode"], "VendorOverlay");
+        assert_eq!(manifest["schemaVersion"], 2);
+        assert!(manifest.get("template").is_none());
+        assert!(
+            (manifest["geometry"]["spineWidthInches"]
+                .as_f64()
+                .expect("spine width")
+                - 0.06)
+                .abs()
+                < 0.000_1
+        );
+        assert!(
+            (manifest["geometry"]["fullCoverWidthInches"]
+                .as_f64()
+                .expect("full cover width")
+                - 12.31)
+                .abs()
+                < 0.000_1
+        );
     }
 }
 
 #[test]
-fn barnes_and_noble_rejects_stale_template_evidence_and_ineligible_spine_text() {
+fn barnes_and_noble_uses_registry_geometry_and_rejects_ineligible_spine_text() {
     let mut spine = PreparedJob::new("bn-print-pdfa1b-v1");
     configure_bn_job(
         &mut spine,
@@ -3868,23 +3851,143 @@ fn barnes_and_noble_rejects_stale_template_evidence_and_ineligible_spine_text() 
         "PRESS_BN_SPINE_TEXT_INELIGIBLE"
     ));
 
-    let mut stale = PreparedJob::new("bn-print-pdfa1b-v1");
+    let mut altered = PreparedJob::new("bn-print-pdfa1b-v1");
     configure_bn_job(
-        &mut stale,
+        &mut altered,
         "ForSale",
         "VendorAssignedIsbn",
         "FullWrapMeasured",
         "TopToBottom",
     );
-    stale.request["printArtifactProfile"]["printTemplateEvidence"]["artifactProfileKey"] =
-        json!("stale-product");
-    stale.write_request();
-    let output = stale.render();
+    altered.request["printArtifactProfile"]["spineModel"]["baseInches"] = json!(0.05);
+    altered.write_request();
+    let output = altered.render();
     assert!(!output.status.success());
     assert!(has_diagnostic(
         &response(&output),
         "PRESS_PRINT_ARTIFACT_PROFILE_MISMATCH"
     ));
+}
+
+#[test]
+fn barnes_and_noble_profiles_own_their_wrap_and_panel_geometry() {
+    for (key, format, material, surface, artifact, expected_spine, expected_width) in [
+        (
+            "bn-pb-bw-50-6x9",
+            "Paperback",
+            "PrintedCover",
+            "perfect-bound-outside",
+            "perfect-bound-cover-pdf",
+            0.06,
+            12.31,
+        ),
+        (
+            "bn-pb-bw-45-6x9",
+            "Paperback",
+            "PrintedCover",
+            "perfect-bound-outside",
+            "perfect-bound-cover-pdf",
+            0.07,
+            12.32,
+        ),
+        (
+            "bn-hc-case-bw-50-6x9",
+            "Hardcover",
+            "CaseLaminate",
+            "case-wrap",
+            "case-cover-pdf",
+            0.18,
+            14.068_889,
+        ),
+        (
+            "bn-hc-jacket-bw-50-6x9",
+            "Hardcover",
+            "JacketedCaseLaminate",
+            "dust-jacket",
+            "dust-jacket-pdf",
+            0.18,
+            20.318_889,
+        ),
+    ] {
+        let mut job = PreparedJob::new("bn-print-pdfa1b-v1");
+        job.configure_physical((key, "BarnesAndNoblePress", format, material, &[surface]));
+        job.request["printArtifactProfile"]["projectUse"] = json!("PersonalUse");
+        job.request["printArtifactProfile"]["identifierMode"] = json!("VendorSku");
+        job.request["printArtifactProfile"]["coverSubmissionMode"] = json!("FullWrapMeasured");
+        job.request["cover"]["barcodeMode"] = json!("VendorOverlay");
+        job.write_request();
+
+        let output = job.render();
+        assert!(
+            output.status.success(),
+            "profile={key} stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            stderr(&output)
+        );
+        let response = response(&output);
+        let manifest: Value = serde_json::from_slice(
+            &fs::read(job.artifact(&response, "print-setup-manifest")).expect("manifest"),
+        )
+        .expect("manifest JSON");
+        assert!(
+            (manifest["geometry"]["spineWidthInches"]
+                .as_f64()
+                .expect("spine")
+                - expected_spine)
+                .abs()
+                < 0.000_1,
+            "{key}"
+        );
+        assert!(
+            (manifest["geometry"]["fullCoverWidthInches"]
+                .as_f64()
+                .expect("cover width")
+                - expected_width)
+                .abs()
+                < 0.000_1,
+            "{key}"
+        );
+        assert!(
+            (inspect(&job.artifact(&response, artifact)).page_width - expected_width * 72.0).abs()
+                < 0.02,
+            "{key}"
+        );
+        let expected_flap = if surface == "dust-jacket" { 3.375 } else { 0.0 };
+        assert!(
+            (manifest["geometry"]["backCoverXInches"]
+                .as_f64()
+                .expect("back x")
+                - expected_flap)
+                .abs()
+                < 0.000_1,
+            "{key}"
+        );
+        assert_eq!(manifest["artifactToUpload"]["fullCover"], artifact, "{key}");
+    }
+
+    let mut panels = PreparedJob::new("bn-print-pdfa1b-v1");
+    panels.configure_physical((
+        "bn-hc-jacket-bw-50-6x9",
+        "BarnesAndNoblePress",
+        "Hardcover",
+        "JacketedCaseLaminate",
+        &["dust-jacket"],
+    ));
+    panels.request["printArtifactProfile"]["projectUse"] = json!("PersonalUse");
+    panels.request["printArtifactProfile"]["identifierMode"] = json!("VendorSku");
+    panels.request["printArtifactProfile"]["coverSubmissionMode"] =
+        json!("SeparatePanelsVendorSpine");
+    panels.request["cover"]["barcodeMode"] = json!("VendorOverlay");
+    panels.write_request();
+    let output = panels.render();
+    assert!(output.status.success(), "stderr={}", stderr(&output));
+    let response = response(&output);
+    for kind in ["front-cover-pdf", "back-cover-pdf"] {
+        assert!(
+            (inspect(&panels.artifact(&response, kind)).page_width - 6.694_444 * 72.0).abs() < 0.02,
+            "{kind}"
+        );
+    }
 }
 
 fn configure_bn_job(
@@ -3904,20 +4007,6 @@ fn configure_bn_job(
     job.request["printArtifactProfile"]["projectUse"] = json!(project_use);
     job.request["printArtifactProfile"]["identifierMode"] = json!(identifier_mode);
     job.request["printArtifactProfile"]["coverSubmissionMode"] = json!(submission);
-    job.request["printArtifactProfile"]["printTemplateEvidence"] = json!({
-        "trimWidthInches": 6.0, "trimHeightInches": 9.0, "bleedInches": 0.125,
-        "safeInches": 0.125, "wrapInches": 0.0, "hingeInches": 0.0,
-        "gutterInches": 0.0, "flapInches": 0.0, "barcodeWidthInches": 2.0,
-        "barcodeHeightInches": 1.2, "inchesPerPage": null, "minimumPages": 18,
-        "maximumPages": 800, "pdfStandard": "PDF/A-1b", "provider": "BarnesAndNoblePress",
-        "artifactProfileKey": "bn-pb-bw-50-6x9", "pageCount": 18,
-        "geometryFingerprint": "bn-test-18-6x9", "spineWidthInches": 0.18,
-        "fullCoverWidthInches": 12.43, "fullCoverHeightInches": 9.25,
-        "frontCoverWidthInches": 6.125, "frontCoverHeightInches": 9.25,
-        "backCoverWidthInches": 6.125, "backCoverHeightInches": 9.25,
-        "fullCoverTemplateSha256": "full", "frontCoverTemplateSha256": "front",
-        "backCoverTemplateSha256": "back"
-    });
     job.request["cover"]["barcodeMode"] = json!("VendorOverlay");
     job.request["cover"]["spineReadingDirection"] = json!(direction);
 }
@@ -3933,9 +4022,9 @@ impl PreparedJob {
         fs::create_dir_all(root.path().join("input/assets")).expect("input assets");
         fs::write(root.path().join("input/assets/pixel.png"), PIXEL_PNG).expect("pixel PNG");
         let mut request: Value =
-            serde_json::from_slice(include_bytes!("../fixtures/full-model-v10.json"))
+            serde_json::from_slice(include_bytes!("../fixtures/full-model-v11.json"))
                 .expect("canonical request");
-        request["protocolVersion"] = json!(10);
+        request["protocolVersion"] = json!(11);
         let profile = match profile {
             "generic-paperback-v1" => "generic-print-v2",
             "kdp-paperback-v1" => "kdp-paperback-v2",
@@ -3964,7 +4053,7 @@ impl PreparedJob {
                 .expect("catalog product");
             request["cover"]["surfaces"] = json!(["perfect-bound-outside"]);
             request["printArtifactProfile"] = json!({
-                "registryVersion": "2026.08.3",
+                "registryVersion": "2026.08.4",
                 "registrySha256": hex_hash(include_bytes!("../assets/print-artifact-profiles-v1.json")),
                 "artifactProfileKey": artifact_profile_key,
                 "vendor": catalog["vendor"],
@@ -4011,7 +4100,7 @@ impl PreparedJob {
             .find(|item| item["key"] == artifact_profile_key)
             .expect("catalog product");
         self.request["printArtifactProfile"] = json!({
-            "registryVersion": "2026.08.3",
+            "registryVersion": "2026.08.4",
             "registrySha256": hex_hash(include_bytes!("../assets/print-artifact-profiles-v1.json")),
             "artifactProfileKey": artifact_profile_key,
             "vendor": vendor,
