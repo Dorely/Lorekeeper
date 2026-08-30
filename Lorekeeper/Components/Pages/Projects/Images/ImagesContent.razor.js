@@ -1,4 +1,6 @@
 const states = new WeakMap();
+const maskPaintColor = "rgb(31,111,235)";
+const maskPaintOpacity = 0.46;
 
 export async function loadMaskCanvas(canvas, imageUrl, tool, brushSize) {
     if (!isCanvas(canvas)) return;
@@ -74,11 +76,14 @@ export function exportMaskPng(canvas) {
     mask.width = state.source.width;
     mask.height = state.source.height;
     const ctx = mask.getContext("2d");
-    ctx.fillStyle = "rgba(0,0,0,1)";
-    ctx.fillRect(0, 0, mask.width, mask.height);
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.drawImage(state.paint, 0, 0);
-    ctx.globalCompositeOperation = "source-over";
+    const paintPixels = state.paint.getContext("2d")
+        .getImageData(0, 0, mask.width, mask.height)
+        .data;
+    const maskPixels = ctx.createImageData(mask.width, mask.height);
+    for (let i = 3; i < maskPixels.data.length; i += 4) {
+        maskPixels.data[i] = paintPixels[i] > 0 ? 0 : 255;
+    }
+    ctx.putImageData(maskPixels, 0, 0);
     return mask.toDataURL("image/png");
 }
 
@@ -117,8 +122,13 @@ function onPointerDown(canvas, state, event) {
         return;
     }
 
-    state.drag = { type: "paint" };
-    paintAt(state, worldPoint(canvas, state, event), state.tool === "erase");
+    const point = worldPoint(canvas, state, event);
+    state.drag = {
+        type: "paint",
+        lastPoint: point,
+        erase: state.tool === "erase",
+    };
+    paintStroke(state, point, point, state.drag.erase);
     render(canvas, state);
 }
 
@@ -134,7 +144,9 @@ function onPointerMove(canvas, state, event) {
         return;
     }
 
-    paintAt(state, worldPoint(canvas, state, event), state.tool === "erase");
+    const point = worldPoint(canvas, state, event);
+    paintStroke(state, state.drag.lastPoint, point, state.drag.erase);
+    state.drag.lastPoint = point;
     render(canvas, state);
 }
 
@@ -155,22 +167,37 @@ function render(canvas, state) {
     ctx.imageSmoothingEnabled = false;
     ctx.setTransform(state.view.scale, 0, 0, state.view.scale, state.view.x, state.view.y);
     ctx.drawImage(state.source, 0, 0);
+    ctx.globalAlpha = maskPaintOpacity;
     ctx.drawImage(state.paint, 0, 0);
+    ctx.globalAlpha = 1;
     ctx.strokeStyle = "#38bdf8";
     ctx.lineWidth = 2 / state.view.scale;
     ctx.strokeRect(0.5, 0.5, state.source.width - 1, state.source.height - 1);
     ctx.restore();
 }
 
-function paintAt(state, point, erase) {
-    if (!point) return;
+function paintStroke(state, from, to, erase) {
+    if (!from || !to) return;
     const ctx = state.paint.getContext("2d");
+    const radius = Math.max(1, state.brushSize / 2);
     ctx.save();
     ctx.globalCompositeOperation = erase ? "destination-out" : "source-over";
-    ctx.fillStyle = "rgba(31,111,235,0.46)";
-    ctx.beginPath();
-    ctx.arc(point.x, point.y, Math.max(1, state.brushSize / 2), 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillStyle = maskPaintColor;
+    ctx.strokeStyle = maskPaintColor;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = radius * 2;
+
+    if (from.x === to.x && from.y === to.y) {
+        ctx.beginPath();
+        ctx.arc(to.x, to.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+    } else {
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.stroke();
+    }
     ctx.restore();
 }
 

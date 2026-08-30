@@ -211,25 +211,41 @@ is a security and external-service behavior change, not a UI-only adjustment.
 
 Project image generation and editing use `IProjectImageProvider`; the current
 Codex implementation supports account-backed Responses image generation,
-source-driven edits, optional regional guides for narrowly localized work,
-streamed partial images, explicit generate/edit actions, continuity references,
-and source-image edit semantics. `ImagePromptComposer` supplies the shared
-structured prompt contract. Feature-specific use of generated images, geometry
-targets, assets, and deletion guards belongs to
+source-driven edits, optional soft regional guides for narrowly localized or
+otherwise hard-to-describe work, streamed partial images, explicit generate/edit
+actions, continuity references, and source-image edit semantics. A guide is
+prompt guidance rather than a provider-enforced pixel boundary, so the provider
+contract never represents it as protecting unmasked pixels. `ImagePromptComposer`
+supplies the shared structured prompt contract. Feature-specific use of generated
+images, geometry targets, assets, and deletion guards belongs to
 [Composition and media](composition-media.md).
+
+Regional-guided dispatch revalidates the source, compiled geometry, and mask
+immediately before the request. The image runtime decodes a PNG, JPEG, or WebP
+source and re-encodes the first input as PNG without resizing, requires a
+same-sized binary-alpha PNG mask with at least one editable pixel, and sends
+those same-format inputs together. Failure to load, validate, or normalize
+either input fails the attempt rather than silently issuing an unmasked edit.
+The request uses the source-aspect-bound provider raster resolved by the image
+workflow; regional guides cannot accompany layout-bound targets, reserved
+regions, or aspect-changing reframes.
+`gpt-image-2` receives no
+adjustable input-fidelity field because that model processes edit inputs at high
+fidelity automatically. Stored source assets and requested output formats are
+not rewritten by this transient provider normalization.
 
 Provider output is stored without layout cropping or resizing, apart from
 supported-format normalization such as WebP to lossless PNG. Explicit requested
 rasters are compared with decoded output dimensions even for free-standing jobs,
 and mismatches remain visible in persisted provenance and assistant results;
 aspect compatibility does not make a raster mismatch exact. A proportional
-result remains usable for ordinary layout placement. Free-standing callers send
-a concrete provider-valid raster derived from the configured Core Book page by
-default; layout-bound callers replace it with their server-owned target raster,
-and explicit valid overrides remain possible. Expansion is a normal
-source-driven edit whose prompt describes the desired larger framing and
-direction; the provider owns how the existing scene is reinterpreted to make
-the result coherent. Provider output has its own
+result remains usable for ordinary layout placement. Free-standing generation
+and unmasked edit callers send a concrete provider-valid raster derived from the
+configured Core Book page by default; layout-bound callers replace it with their
+server-owned target raster, and explicit valid overrides remain possible.
+Expansion is a normal source-driven edit whose prompt describes the desired
+larger framing and direction; the provider owns how the existing scene is
+reinterpreted to make the result coherent. Provider output has its own
 configurable 64 MiB byte cap rather than inheriting the smaller upload limit.
 Image options also bound request attempts, timeout, partials, references, output
 count, and one parallel provider request by default.
@@ -288,7 +304,7 @@ atomic artifact semantics are detailed in [Press production](press-production.md
 | [`Lorekeeper/Llm/EmbeddingRebuild*`](../../Lorekeeper/Llm/) | Versioned/coalesced rebuild queue, hosted worker, scoped bulk index rebuild, throttling, retry, and cancellation. |
 | [`ISearchProviderService.cs`](../../Lorekeeper/Search/ISearchProviderService.cs), [`WebSearchProviderFactory.cs`](../../Lorekeeper/Search/WebSearchProviderFactory.cs), [`SerpApiWebSearchClient.cs`](../../Lorekeeper/Search/SerpApiWebSearchClient.cs), and [`BraveWebSearchClient.cs`](../../Lorekeeper/Search/BraveWebSearchClient.cs) | Search-provider persistence/service boundary and normalized external search adapters; project-corpus retrieval remains owned by narrative context. |
 | [`WebPageReader.cs`](../../Lorekeeper/Research/WebPageReader.cs), [`WebHttpFetchClient.cs`](../../Lorekeeper/Research/WebHttpFetchClient.cs), [`WebFetchCoordinator.cs`](../../Lorekeeper/Research/WebFetchCoordinator.cs), [`WebRobotsPolicy.cs`](../../Lorekeeper/Research/WebRobotsPolicy.cs), and [`MediaWikiWebPageSourceReader.cs`](../../Lorekeeper/Research/MediaWikiWebPageSourceReader.cs) | Guarded URL/fetch/robots/throttle/extraction pipeline and source-adapter transport. |
-| [`Lorekeeper/Images/IProjectImageProvider.cs`](../../Lorekeeper/Images/IProjectImageProvider.cs), [`CodexProjectImageProvider.cs`](../../Lorekeeper/Images/CodexProjectImageProvider.cs), and [`ProjectImageGenerationRuntime.cs`](../../Lorekeeper/Images/ProjectImageGenerationRuntime.cs) | Image provider abstraction/adapter and singleton FIFO execution with previews, cancellation, and terminal waiters. |
+| [`Lorekeeper/Images/IProjectImageProvider.cs`](../../Lorekeeper/Images/IProjectImageProvider.cs), [`CodexProjectImageProvider.cs`](../../Lorekeeper/Images/CodexProjectImageProvider.cs), and [`ProjectImageGenerationRuntime.cs`](../../Lorekeeper/Images/ProjectImageGenerationRuntime.cs) | Image provider abstraction/adapter and singleton FIFO execution with regional-guide input normalization, previews, cancellation, and terminal waiters. |
 | [`Lorekeeper/Ingest/IngestJobWorker.cs`](../../Lorekeeper/Ingest/IngestJobWorker.cs) and [`Lorekeeper/ImportExport/ProjectImportJobWorker.cs`](../../Lorekeeper/ImportExport/ProjectImportJobWorker.cs) | Representative database-gated hosted workers with feature-specific interrupted-work reconciliation. |
 
 ## Related chapters

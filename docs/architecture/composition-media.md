@@ -74,21 +74,23 @@ preview primitives; it does not own publication claims or vendor validation.
 ## Current architecture and invariants
 
 Project images are reusable assets with bytes, media metadata, crop lineage,
-alt text, prompt/source metadata, masks, and placement relationships. Generated
-or edited work first creates one unattached project image through the shared
-assistant workflow. Placement into a Figure, Designed Page, cover, entity
-visual association, or chat context is a separate revision-safe operation
-using the completed image ID. Generation never embeds a destination, creates a
-partial placement, or silently crops an output to satisfy a target.
+alt text, prompt/source metadata, regional-guide masks, and placement
+relationships. Generated or edited work first creates one unattached project
+image through the shared assistant workflow. Placement into a Figure, Designed
+Page, cover, entity visual association, or chat context is a separate
+revision-safe operation using the completed image ID. Generation never embeds a
+destination, creates a partial placement, or silently crops an output to satisfy
+a target.
 
 The image generation boundary distinguishes a free-standing library request
-from a layout-bound request. Every free-standing generation or edit defaults to
-a moderate provider-valid raster with the current Core Book page aspect; this
-page-shaped default is included in the compiled prompt and provider request but
-does not make the asset layout-bound. Outline and Images requests omit concrete
-placement geometry. `IProjectImageDefaultRasterResolver` owns the shared Core
-Book page-to-provider-raster default used by prompt compilation, direct job
-creation, and the manual Images UI. A `LayoutGenerationTargetDescriptor` is
+from a layout-bound request. Every free-standing generation or unmasked edit
+defaults to a moderate provider-valid raster with the current Core Book page
+aspect; this page-shaped default is included in the compiled prompt and provider
+request but does not make the asset layout-bound. Outline and Images requests
+omit concrete placement geometry. `IProjectImageDefaultRasterResolver` owns the
+shared Core Book page-to-provider-raster default used by prompt compilation,
+direct job creation, and the manual Images UI. A
+`LayoutGenerationTargetDescriptor` is
 used only when art must honor physical regions such as a page, frame, or cover.
 It carries exact aspect, provider-valid final-DPI recommendation plus moderate
 provider-valid default raster guidance, effective-DPI expectation, geometry
@@ -116,6 +118,13 @@ queueing. The compiled reference manifest and the exact ordered image IDs are
 persisted on the job and sent to the provider; merely uploading or selecting a
 reference does not create a generation job or an entity association.
 
+The manual masked-edit canvas keeps its existing controls and translucent blue
+authoring overlay, but exports a binary-alpha PNG: guided pixels are fully
+transparent and every other pixel is fully opaque. Pointer movement is
+interpolated into continuous round strokes. The server rejects a mask that is
+not a PNG with an alpha channel, does not exactly match the source raster,
+contains intermediate alpha, or has no editable pixel.
+
 `IProjectImageService.ResizeAsync` creates a new unattached, source-linked
 `Resized` asset at an exact provider-valid raster using deterministic
 SkiaSharp sampling. It does not invent visual detail and records the source,
@@ -127,9 +136,23 @@ and right, taller targets above and below, and effectively unchanged aspects
 outward on all sides. This is model-driven editing and does not guarantee
 exact preservation of existing image detail. A regional guide remains an
 exception for genuinely localized changes or changes that cannot be described
-reliably in words. The resulting `Edited` asset remains unattached and linked
-to its source, while provider-versus-final raster details are recorded without
-selecting a materially different fallback implicitly.
+reliably in words. It is explicitly soft guidance for the model, not a pixel
+boundary or protection guarantee; the complete result must be inspected for
+changes outside the indicated region before it is presented, promoted, or
+placed.
+
+A regional-guided edit has a distinct framing contract. An omitted or `auto`
+size resolves to a provider-valid raster with the source image's aspect, and an
+explicit raster is accepted only when it preserves that aspect. Layout-bound
+targets, named reserved regions, and aspect-changing reframes are rejected while
+a guide is present. Immediately before provider dispatch, the source is decoded
+and re-encoded to PNG without resizing so it has the same format and dimensions
+as the validated PNG guide. Failure to load, validate, or normalize either input
+fails the job; it never falls back to an unmasked edit. Stored source bytes and
+requested output-format behavior remain unchanged. The resulting `Edited` asset
+remains unattached and linked to its source, while provider-versus-final raster
+details are recorded without selecting a materially different fallback
+implicitly.
 
 Every valid streamed partial is retained as exact job-owned PNG, JPEG, or WebP
 bytes, identified by output, request attempt, and provider partial index. A
@@ -144,14 +167,17 @@ still associated with that image; already promoted images and unrelated orphan
 partials remain independent.
 
 The shared prompt composer gives generation and editing the same spatial
-discipline. A reserved or quiet region must be explicit when copy needs space;
-the rest of the frame must contribute purposeful subject, setting, depth,
-scale, atmosphere, visual flow, or other meaningful information. The Images
-surface owns concept-art iteration and approved Visual Direction. Outline is
-restricted to explicit canonical entity appearance work. Editor consumes a
-completed image for a Figure or Designed Page. Publish consumes it for a
-publication section or cover. Each surface uses the same bounded inspection
-and revision rules, while mutation scope remains surface-specific.
+discipline. Regional-guide mode focuses the requested change in the indicated
+area and asks the model to preserve surrounding content as closely as possible,
+without contradicting that request with general edit guidance that permits
+reframing or nearby scene changes. A reserved or quiet region must be explicit
+when copy needs space; the rest of the frame must contribute purposeful subject,
+setting, depth, scale, atmosphere, visual flow, or other meaningful information.
+The Images surface owns concept-art iteration and approved Visual Direction.
+Outline is restricted to explicit canonical entity appearance work. Editor
+consumes a completed image for a Figure or Designed Page. Publish consumes it
+for a publication section or cover. Each surface uses the same bounded
+inspection and revision rules, while mutation scope remains surface-specific.
 
 Entity visual examples are ordered associations, not copied image records.
 They carry association origin and source provenance and are reused by image
@@ -279,6 +305,8 @@ composition, Core/release fingerprints, and artifact freshness.
 | `Lorekeeper/Images/IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Durable generation/edit job records, streamed partial artifacts, explicit promotion, structured briefs, provider audit fields, output validation, and diagnostics. |
 | `Lorekeeper/Images/AgentProjectImageWorkflow.cs` | Assistant generation/edit boundary, terminal-state waiting, reconnectable jobs, target diagnostics, and unattached output semantics. |
 | `Lorekeeper/Images/ImagePromptComposer.cs` / `ProjectImageDefaultRasterResolver.cs` | Structured generation/edit briefs, reference labels, reserved regions, spatial guidance, rendered-text policy, and the shared Core Book page raster default. |
+| `Lorekeeper/Images/ProjectImageRegionalGuide.cs` / `ProjectImageBinary.cs` | Soft-guide prompt discipline, source-aspect output resolution, transient same-size PNG normalization, and binary-alpha mask validation. |
+| `Lorekeeper/Components/Pages/Projects/Images/ImagesContent.razor` / `ImagesContent.razor.js` | Manual image-library and job interaction, including the visible regional-guide canvas and binary-alpha mask export. |
 | `Lorekeeper/EntityVisuals/` | Canonical entity-image associations, visual context, bounded reference reads, and provenance. |
 | `Lorekeeper/Composition/CompositionService.cs` | Revision-aware Designed Page aggregates, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |
 | `Lorekeeper/Composition/CompositionSceneResolver.cs` | Group flattening, object visibility/z-order semantics, and shared overlap validation. |
@@ -330,6 +358,11 @@ Playwright, screenshot, or manual UI checks unless explicitly requested.
 Image generation, provider calls, and platform-specific behavior are not
 validated by compilation alone. Report those integrations as unexercised
 unless the relevant provider and target platform were actually used.
+
+When the manual regional-guide canvas changes, also run
+`node --check Lorekeeper/Components/Pages/Projects/Images/ImagesContent.razor.js`
+and statically inspect its export path. A syntax check does not establish mask
+adherence by the provider.
 
 When image, Figure, composition, font, or history ownership changes, inspect
 the complete diff and search for every old field/name and every deletion path.

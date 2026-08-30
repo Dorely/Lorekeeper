@@ -1,11 +1,11 @@
 # Image generation prompting for Lorekeeper
 
-Last reviewed: 2026-08-01
+Last reviewed: 2026-08-30
 Time-sensitive: yes — model aliases, snapshots, dimensions, supported parameters, and Responses API behavior must be rechecked.
 
 ## Executive finding
 
-Reliable book illustration prompting is less about ornamental prose than about a stable production brief: identify the asset's use, describe the visible scene and subject, specify the camera/composition and lighting, name constraints, and explicitly divide reference traits into what remains invariant and what must change. The application should compile that brief, label references by actual provider order, derive page geometry, disable rasterized story text by default, and retain the complete audit trail.
+Reliable book illustration prompting is less about ornamental prose than about a stable production brief: identify the asset's use, describe the visible scene and subject, specify the camera/composition and lighting, name constraints, and explicitly divide reference traits into what remains invariant and what must change. The application should compile that brief, label references by actual provider order, derive page geometry, disable rasterized story text by default, and retain the complete audit trail. A mask can help point the model toward a region, but it is not a hard pixel constraint and must never be presented as one.
 
 ## Model and API facts
 
@@ -17,7 +17,7 @@ The Image API supports one-shot generation and editing with direct model selecti
 
 Current flexible-size constraints are: both edges multiples of 16; maximum edge 3,840 pixels; long-to-short ratio no greater than 3:1; total area from 655,360 through 8,294,400 pixels. The prompting guide cautions that very large outputs above the common 2K range can be more variable ([OpenAI prompting guide](https://developers.openai.com/cookbook/examples/multimodal/image-gen-models-prompting-guide), [OpenAI image-generation guide](https://developers.openai.com/api/docs/guides/image-generation)).
 
-For masked edits, source and mask must have matching size and format, be under the documented size limit, and the mask must carry an alpha channel. `gpt-image-2` processes inputs at high fidelity by default; the guide says not to send the adjustable `input_fidelity` parameter for this model ([OpenAI image-generation guide](https://developers.openai.com/api/docs/guides/image-generation)).
+For masked edits, OpenAI says the source and mask must have matching size and format, each be under 50 MB, and the mask must carry an alpha channel. The same guide explicitly says GPT Image masking is entirely prompt-based: the model uses the mask as guidance and may not follow its exact shape precisely. `gpt-image-2` processes inputs at high fidelity by default; the guide says not to send the adjustable `input_fidelity` parameter for this model ([OpenAI image-generation guide](https://developers.openai.com/api/docs/guides/image-generation)).
 
 ### Lorekeeper interpretation
 
@@ -34,8 +34,9 @@ Book pages need dimensions derived from the actual publish profile, not a menu o
 
 - Model behavior is probabilistic: a valid prompt cannot guarantee exact anatomy, identity, text, layout, or continuity.
 - High input fidelity improves preservation but does not make references immutable.
+- A regional guide cannot guarantee that pixels outside its shape remain unchanged or that the boundary will be followed exactly.
 - Provider prompt revision can alter emphasis; retaining both prompts is necessary for diagnosis.
-- Transparent output is not currently supported by `gpt-image-2` according to the reviewed guide.
+- The 2026-07-14 review recorded transparent output as unsupported. The current guide now documents transparent `gpt-image-2` output as a preview feature for PNG and WebP; that preview status is the current limitation, not a general stability guarantee.
 
 ## Recommended prompt anatomy
 
@@ -92,22 +93,27 @@ Prospective character studies stay unattached to canon entities until the user a
 
 An ordinary scene is a weak identity reference because scenery, pose, occlusion, and small subject scale compete with the desired anchor. Lorekeeper should prefer an approved, tightly cropped subject study but cannot infer perfect identity isolation from metadata alone; a vision-capable inspection remains valuable.
 
-## Generation, editing, masks, and iteration
+## Generation, editing, regional guides, and iteration
 
 ### Evidence
 
-OpenAI distinguishes generating a new image from editing an existing one. Its editing guidance repeatedly names the exact change and restates invariant camera, geometry, lighting, layout, and surrounding objects. Multi-turn Responses workflows support incremental refinement, while masks localize the editable region ([OpenAI image-generation guide](https://developers.openai.com/api/docs/guides/image-generation), [OpenAI prompting guide](https://developers.openai.com/cookbook/examples/multimodal/image-gen-models-prompting-guide)).
+OpenAI distinguishes generating a new image from editing an existing one. Its editing guidance repeatedly names the exact change and restates invariant camera, geometry, lighting, layout, and surrounding objects. Multi-turn Responses workflows support incremental refinement. A mask can indicate the intended region, but OpenAI characterizes GPT Image masking as prompt guidance that may not follow the exact shape precisely; it does not establish an enforced editable boundary ([OpenAI image-generation guide](https://developers.openai.com/api/docs/guides/image-generation), [OpenAI prompting guide](https://developers.openai.com/cookbook/examples/multimodal/image-gen-models-prompting-guide)).
 
 ### Lorekeeper interpretation
 
 - **Generate** for a genuinely new composition.
 - **Edit** when the source canvas should remain recognizably the same image.
-- **Masked edit** when change is spatially local and accidental drift would be costly.
+- **Regional-guided edit** only when the change is genuinely localized and words cannot reliably identify its location. The guide is a soft pointer, not protection from drift.
 - Prefer one controlled correction per iteration over a long list of unrelated changes.
+- Inspect the entire result after every edit, including outside a regional guide.
 
 ### Implementation decisions
 
-`ImageEditBrief` requires both `change` and `preserve`. The compiler emits a direct “change only” instruction and an invariant list. Shape-mask tools validate against the source raster. Each job persists the structured brief, compiled prompt, source and reference manifest, mask/source IDs, geometry, provider revision, output IDs, and per-output provider identifiers.
+`ImageEditBrief` requires both `change` and `preserve`. The compiler emits a direct “change only” instruction and an invariant list. Regional-guide mode narrows that discipline to the indicated area and asks for surrounding content to be preserved as closely as possible without promising pixel identity.
+
+Lorekeeper uses a stricter application contract than the provider minimum: manual strokes and inline assistant shapes become a binary-alpha PNG with at least one editable pixel, and validation requires the exact source dimensions. Immediately before dispatch, the source is re-encoded to PNG without resizing so the first source and mask have the same format and raster. A guided edit is source-aspect-bound; `auto` derives a provider-valid raster with that aspect, while aspect-changing explicit sizes, layout-bound targets, and reserved regions are rejected. Normalization failure stops the job rather than falling back to an unmasked edit.
+
+Assistant access is deliberately inline-only. `edit_project_image` may carry optional `regionalGuideShapes`, which are validated and persisted atomically with that edit. There is no standalone shape-mask tool and no reusable mask ID or label in assistant schemas. Persisted masks and completed-job links remain part of the audit history. Each job retains the structured brief, compiled prompt, source and reference manifest, mask/source IDs where applicable, geometry, provider revision, output IDs, and per-output provider identifiers.
 
 ## Story-page targeting and generated text
 
@@ -168,12 +174,12 @@ constraints: Keep faces and the teapot away from trim and center gutter; no rend
 target: editionId, targetKind, and stable Figure/page/cover target ID; aspect and raster omitted so Lorekeeper derives both.
 ```
 
-### Localized edit
+### Regional-guided edit
 
 ```text
-change: Replace only the red umbrella in the masked region with a closed yellow parasol leaning against the same chair.
-preserve: Every person, face, pose, chair, camera angle, crop, perspective, lighting direction, shadows, palette outside the object, and all background detail.
-constraints: Match contact shadow and watercolor edge texture; add nothing else; no text.
+change: Replace only the red umbrella in the guided region with a closed yellow parasol leaning against the same chair.
+preserve: Keep every person, face, pose, chair, camera angle, crop, perspective, lighting direction, shadow, surrounding color relationship, and background detail as close to the source as possible.
+constraints: Match contact shadow and watercolor edge texture; add nothing else; no text. Treat the guide as the intended focus, then inspect the complete output because boundary and outside-region changes remain possible.
 ```
 
 ## Contract mapping
@@ -185,14 +191,14 @@ constraints: Match contact shadow and watercolor edge texture; add nothing else;
 | Preserve/change separation | Contract + code-owned tool rule | Required edit fields; per-reference preserve/change fields |
 | Page geometry and quiet text regions | Automation | `LayoutGenerationTargetDescriptor`, exact variant/cover geometry, named-region appendix |
 | No story text by default | Contract validation | `AllowRenderedText = false`; explicit exact text required to enable |
-| Local edits | Tooling | Editor and Images edit tools plus shape masks |
+| Optional regional guidance | Application + tool contract | Manual binary-alpha guide editor; inline-only `regionalGuideShapes` on `edit_project_image`; no hard-boundary guarantee |
 | Provider revision and output IDs | Persistence/UI | Image-generation job audit fields and job detail display |
 | Character approval state | Workflow + entity attachment state | Prospective output unattached; rejected/superseded reference excluded |
 | Creative visual direction | User-owned direction | Book Brief visual direction and Project Guidance, not hard-coded style |
 
 ## Sources
 
-- OpenAI, “GPT Image Generation Models Prompting Guide,” Mandeep Singh and Emre Okcular, 21 April 2026, https://developers.openai.com/cookbook/examples/multimodal/image-gen-models-prompting-guide (accessed 2026-07-14).
-- OpenAI, “Image generation,” update date not displayed, https://developers.openai.com/api/docs/guides/image-generation (accessed 2026-07-14).
-- OpenAI, “GPT Image 2 Model,” update date not displayed; reviewed snapshot listing includes 21 April 2026, https://developers.openai.com/api/docs/models/gpt-image-2 (accessed 2026-07-14).
+- OpenAI, “GPT Image Generation Models Prompting Guide,” Mandeep Singh and Emre Okcular, 21 April 2026, https://developers.openai.com/cookbook/examples/multimodal/image-gen-models-prompting-guide (accessed 2026-08-30).
+- OpenAI, “Image generation,” update date not displayed, https://developers.openai.com/api/docs/guides/image-generation (accessed 2026-08-30).
+- OpenAI, “GPT Image 2 Model,” update date not displayed; reviewed snapshot listing includes 21 April 2026, https://developers.openai.com/api/docs/models/gpt-image-2 (accessed 2026-08-30).
 - W3C Publishing Maintenance Working Group, Wendy Reid (editor), “EPUB Fixed Layout Accessibility,” Group Note, 30 May 2024, https://www.w3.org/TR/2024/NOTE-epub-fxl-a11y-20240530/ (accessed 2026-07-14).

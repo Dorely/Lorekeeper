@@ -130,7 +130,7 @@ public sealed record ProjectImageEditJobRequest(
     string? MaskPngDataUrl,
     IReadOnlyList<Guid> ReferenceImageIds,
     string? Label = null,
-    Guid? ExistingMaskId = null,
+    ProjectImageMaskShapeRequest? RegionalGuide = null,
     IReadOnlyList<EntityVisualTarget>? EntityTargets = null,
     bool InheritSourceEntityTargets = true,
     string? BriefJson = null,
@@ -206,17 +206,6 @@ public enum ProjectImageOutputStatus
     Failed,
     Cancelled,
 }
-
-public sealed record ProjectImageMaskView(
-    Guid Id,
-    Guid ImageId,
-    string Label,
-    string ContentType,
-    string PreviewUrl,
-    int Width,
-    int Height,
-    DateTime CreatedAt,
-    DateTime UpdatedAt);
 
 public sealed record ProjectImageProviderGenerateRequest(
     string Prompt,

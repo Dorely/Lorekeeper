@@ -24,7 +24,6 @@ public sealed class ImagesChatTools(
     IProjectImageService projectImages,
     IEntityVisualExampleService entityVisualExamples,
     IEntityService entities,
-    IProjectImageJobService imageJobs,
     IAgentProjectImageWorkflow imageWorkflow,
     IManuscriptService manuscripts,
     IChapterSemanticProjectionService semanticProjection,
@@ -143,22 +142,16 @@ public sealed class ImagesChatTools(
                 description: "Deterministically resize an existing project image to an exact provider-valid WIDTHxHEIGHT raster while preserving its aspect ratio. This is a local pixel transform, not generative editing: it creates a new unattached source-linked image, uses SkiaSharp sampling, and adds no visual detail. Use edit_project_image with the source image and a larger-framing brief when the user's intent is to generate surrounding content."),
 
             AIFunctionFactory.Create(
-                method: (Guid imageId, string label, ProjectImageMaskShape[] shapes) =>
-                    CreateShapeMaskAsync(context, imageId, label, shapes),
-                name: "create_shape_mask",
-                description: "Create a PNG edit mask for an existing image only when the change is tightly localized or the affected region is hard to describe reliably in words. Supply percentage-based rect/ellipse/polygon shapes; transparent pixels are the editable regions."),
-
-            AIFunctionFactory.Create(
                 method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? label = null) =>
                     GenerateImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression, label),
                 name: "generate_project_image",
                 description: $"Generate one free-standing, unattached project-library image at the configured Core Book page raster and wait for a terminal result. Inspect it before promoting it to an entity's canonical references. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
 
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, ImageEditBrief brief, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? label = null) =>
-                    EditImageAsync(context, sourceImageId, brief, maskId, maskShapes, maskLabel, references, altText, quality, outputFormat, outputCompression, label),
+                method: (Guid sourceImageId, ImageEditBrief brief, ProjectImageMaskShape[]? regionalGuideShapes = null, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, string? label = null) =>
+                    EditImageAsync(context, sourceImageId, brief, regionalGuideShapes, references, altText, quality, outputFormat, outputCompression, label),
                 name: "edit_project_image",
-                description: $"Edit one project image at the configured Core Book page raster and wait for a terminal result. Default to an unmasked source-driven edit: use the original image directly and describe the complete desired result. For larger framing, describe the surrounding scene and direction in the existing desired-result and composition fields: left and right for a wider result, above and below for a taller result, or outward on all sides when the aspect is effectively unchanged. Supply a regional guide only for a genuinely localized change or when the changed portion cannot be described reliably in words. The output is a new free-standing, unattached library image; inspect it before promoting it to canon. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
+                description: $"Edit one project image and wait for a terminal result. Unmasked edits use the configured Core Book page raster by default; describe the complete desired result. Supply regionalGuideShapes only when words cannot reliably locate the intended area and a visual guide is necessary. Guide shapes use source-relative 0-100 percentages and may be rect, ellipse, or polygon shapes. A regional guide uses a source-aspect-bound raster and is soft model guidance, not hard pixel protection; the model may change pixels outside it. Never use a regional guide for broad restyling, resizing, reframing, expansion, or layout work. For larger framing, use an unmasked edit and describe the surrounding scene and direction in the desired-result and composition fields: left and right for a wider result, above and below for a taller result, or outward on all sides when the aspect is effectively unchanged. The output is a new free-standing, unattached library image; inspect the entire result, including content outside any guide, before promoting it to canon. You may pass at most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references."),
 
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadImageJobAsync(context, jobId, wait: false),
@@ -490,24 +483,6 @@ public sealed class ImagesChatTools(
         }
     }
 
-    private async Task<string> CreateShapeMaskAsync(ImagesChatToolContext ctx, Guid imageId, string label, ProjectImageMaskShape[] shapes)
-    {
-        if (shapes.Length == 0)
-            return "Error: at least one mask shape is required.";
-
-        var mask = await imageJobs.CreateMaskFromShapesAsync(
-            ctx.ProjectId,
-            imageId,
-            new ProjectImageMaskShapeRequest(label, shapes),
-            CancellationToken.None);
-        ctx.MarkMutated();
-        return JsonSerializer.Serialize(new
-        {
-            message = "Mask saved.",
-            mask,
-        }, JsonOptions);
-    }
-
     private async Task<string> CropProjectImageAsync(
         ImagesChatToolContext ctx,
         Guid sourceImageId,
@@ -593,9 +568,7 @@ public sealed class ImagesChatTools(
         ImagesChatToolContext ctx,
         Guid sourceImageId,
         ImageEditBrief brief,
-        Guid? maskId,
-        ProjectImageMaskShape[]? maskShapes,
-        string? maskLabel,
+        ProjectImageMaskShape[]? regionalGuideShapes,
         ImageReferenceUse[]? references,
         string? altText,
         string? quality,
@@ -605,16 +578,12 @@ public sealed class ImagesChatTools(
     {
         if (sourceImageId == Guid.Empty)
             return "Error: sourceImageId is required.";
-        Guid? effectiveMaskId = maskId;
-        if (effectiveMaskId is null && maskShapes is { Length: > 0 })
-        {
-            var mask = await imageJobs.CreateMaskFromShapesAsync(
-                ctx.ProjectId,
-                sourceImageId,
-                new ProjectImageMaskShapeRequest(maskLabel ?? "Agent edit mask", maskShapes),
-                ctx.TurnCancellationToken);
-            effectiveMaskId = mask.Id;
-        }
+        if (regionalGuideShapes is { Length: 0 })
+            return "Error: regionalGuideShapes must contain at least one shape when supplied.";
+
+        var regionalGuide = regionalGuideShapes is { Length: > 0 }
+            ? new ProjectImageMaskShapeRequest("Images assistant regional guide", regionalGuideShapes)
+            : null;
 
         try
         {
@@ -622,7 +591,7 @@ public sealed class ImagesChatTools(
                 ctx.ProjectId,
                 sourceImageId,
                 brief,
-                effectiveMaskId,
+                regionalGuide,
                 references,
                 null,
                 altText,

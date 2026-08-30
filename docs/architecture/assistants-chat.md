@@ -257,9 +257,10 @@ non-empty manuscript remains legal but returns the non-blocking
 Page and cover scenes use persisted, hashed, expiring, project/conversation-
 scoped stages that cannot be replayed. Image generation creates an unattached
 durable image job; another explicit mutation places or associates the completed
-asset. Free-standing generation and editing default to a provider-valid raster
-with the configured Core Book page aspect; a concrete layout target replaces
-that default when the composition must honor a Figure, page, frame, or cover.
+asset. Free-standing generation and unmasked editing default to a provider-valid
+raster with the configured Core Book page aspect; a concrete layout target
+replaces that default when the composition must honor a Figure, page, frame, or
+cover.
 The Images workspace refreshes its library and job projections only for an
 explicit image-mutation update; ordinary tool completion, assistant completion,
 and turn errors remain local chat updates and must not reload the workspace.
@@ -267,8 +268,16 @@ Expansion of an existing image uses the ordinary source-driven edit
 operation: the original image is supplied directly and the complete larger
 framing is described in the prompt, including left-and-right, above-and-below,
 or all-sides extension as appropriate. Regional guides are reserved for
-genuinely localized or otherwise hard-to-describe edits. Deterministic resize
-creates a new unattached source-linked asset and adds no visual detail.
+genuinely localized or otherwise hard-to-describe edits. They are soft visual
+guidance, not pixel protection, and are unavailable for broad restyling,
+reframing, resizing, layout-bound targets, or reserved-region work. Assistant
+tool catalogs expose no standalone mask-creation tool and no reusable mask ID or
+label. `edit_project_image` accepts only optional inline
+`regionalGuideShapes`; the owning workflow validates and persists the resulting
+guide atomically with that edit. Every generated or edited result is inspected
+in full before the assistant presents, promotes, associates, or places it,
+including the area outside any guide. Deterministic resize creates a new
+unattached source-linked asset and adds no visual detail.
 Failed, cancelled, or stale calls must not create partial destination state. A completed assistant mutation may be captured by the separate
 version-history checkpoint service; that durable Git snapshot history is not
 the process-lifetime Undo/Redo history described by the manuscript chapter.
@@ -313,10 +322,12 @@ view derives from touched entities and accessed cached sources rather than a
 separate assistant-authored log.
 
 Images is concept art and visual canon. It can read narrative context for
-grounding and can mutate project images, masks, canonical entity associations,
-and the user-approved Book Brief Visual Direction. It cannot author Figures,
-Designed Pages, covers, or publication placements. Visual Direction uses an
-exact previously-read value so a stale turn cannot overwrite newer direction.
+grounding and can mutate project images, canonical entity associations, and the
+user-approved Book Brief Visual Direction. It may provide an inline regional
+guide only as part of the edit that consumes it; it cannot create or reuse masks
+independently. It cannot author Figures, Designed Pages, covers, or publication
+placements. Visual Direction uses an exact previously-read value so a stale turn
+cannot overwrite newer direction.
 
 Publish is the Core Book/release production assistant. Each turn receives the
 complete outline and the protected visible Publish surface—overview, cover,

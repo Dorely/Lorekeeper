@@ -319,30 +319,56 @@ public sealed class ProjectImageJobService(
         var referenceIds = await ValidateReferenceIdsAsync(projectId, request.ReferenceImageIds, source.Id, cancellationToken);
         var count = ClampCount(request.Count);
         var layoutBound = HasLayoutTargetGeometry(request.TargetGeometryJson);
+        var hasPngGuide = !string.IsNullOrWhiteSpace(request.MaskPngDataUrl);
+        var hasShapeGuide = request.RegionalGuide is not null;
+        if (hasPngGuide && hasShapeGuide)
+            throw new InvalidOperationException("Supply one regional guide as either a painted PNG or inline shapes, not both.");
+        var hasRegionalGuide = hasPngGuide || hasShapeGuide;
+        var sourceSize = ReadImageSize(source.Data, source.ContentType);
+        if (hasRegionalGuide)
+        {
+            if (layoutBound)
+                throw new InvalidOperationException("Regional guides cannot be combined with layout-bound targets. Use an unmasked edit for layout work.");
+            ProjectImageRegionalGuide.ValidateTargetGeometry(
+                request.TargetGeometryJson,
+                sourceSize.Width,
+                sourceSize.Height,
+                size);
+            ProjectImageRegionalGuide.ValidateOutputSize(sourceSize.Width, sourceSize.Height, size);
+        }
         var targets = (await ValidateEntityTargetsAsync(projectId, request.EntityTargets, cancellationToken)).ToList();
         if (request.InheritSourceEntityTargets)
             targets.AddRange((await entityVisualExamples.ListForImageAsync(projectId, source.Id, cancellationToken))
                 .Select(example => new EntityVisualTarget(example.EntityId, example.Label)));
         var now = DateTime.UtcNow;
         var jobId = Guid.NewGuid();
-        ProjectImageMaskView? mask = null;
-        if (!string.IsNullOrWhiteSpace(request.MaskPngDataUrl))
+        ProjectImageMask? mask = null;
+        if (hasPngGuide)
         {
-            mask = await CreateMaskFromPngDataUrlAsync(
+            var payload = ParsePngDataUrl(request.MaskPngDataUrl!, "Mask must be a binary-alpha PNG data URL.");
+            if (sourceSize.Width != payload.Width || sourceSize.Height != payload.Height)
+                throw new InvalidOperationException("Mask dimensions must match the source image dimensions.");
+            mask = CreateMask(
                 projectId,
                 source.Id,
-                request.MaskPngDataUrl,
                 $"{source.FileName} edit mask",
+                payload,
                 "editJob",
                 jobId,
-                cancellationToken);
+                now);
         }
-        else if (request.ExistingMaskId is { } existingMaskId)
+        else if (request.RegionalGuide is { } regionalGuide)
         {
-            mask = await GetMaskAsync(projectId, existingMaskId, cancellationToken)
-                ?? throw new InvalidOperationException("Mask was not found.");
-            if (mask.ImageId != source.Id)
-                throw new InvalidOperationException("Mask must be tied to the edit source image.");
+            var data = RenderShapeMask(sourceSize.Width, sourceSize.Height, regionalGuide.Shapes);
+            var validated = ProjectImageBinary.ValidateBinaryPngMask(data, "image/png", "regional-guide.png");
+            mask = CreateMask(
+                projectId,
+                source.Id,
+                regionalGuide.Label,
+                new ImagePayload(validated.ContentType, validated.Data, validated.Width, validated.Height),
+                "editJob",
+                jobId,
+                now);
         }
 
         var job = new ProjectImageGenerationJob
@@ -375,6 +401,8 @@ public sealed class ProjectImageJobService(
             UpdatedAt = now,
         };
 
+        if (mask is not null)
+            await db.ProjectImageMasks.AddAsync(mask, cancellationToken);
         await db.ProjectImageGenerationJobs.AddAsync(job, cancellationToken);
         project.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
@@ -704,14 +732,6 @@ public sealed class ProjectImageJobService(
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<ProjectImageMaskView?> GetMaskAsync(Guid projectId, Guid maskId, CancellationToken cancellationToken = default)
-    {
-        await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
-        var db = databaseOperation.Db;
-        var mask = await db.ProjectImageMasks.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == maskId, cancellationToken);
-        return mask is null ? null : ToMaskView(mask);
-    }
-
     public async Task<ProjectImageData?> GetMaskDataAsync(Guid projectId, Guid maskId, CancellationToken cancellationToken = default)
     {
         await using var databaseOperation = await database.OpenReadAsync(cancellationToken);
@@ -720,65 +740,6 @@ public sealed class ProjectImageJobService(
         return mask is null
             ? null
             : new ProjectImageData(mask.Id, string.IsNullOrWhiteSpace(mask.Label) ? $"mask-{mask.Id:N}.png" : SafeFileNameStem(mask.Label, "mask") + ".png", mask.ContentType, mask.Data, string.Empty, mask.UpdatedAt);
-    }
-
-    public async Task<ProjectImageMaskView> CreateMaskFromPngDataUrlAsync(
-        Guid projectId,
-        Guid imageId,
-        string maskPngDataUrl,
-        string label,
-        string ownerKind,
-        Guid ownerId,
-        CancellationToken cancellationToken = default)
-    {
-        await using var databaseOperation = await database.OpenWriteAsync(cancellationToken);
-        databaseOperation.ShareWithNestedOperations();
-        var db = databaseOperation.Db;
-        var source = await GetImageAssetAsync(projectId, imageId, cancellationToken);
-        var payload = ParsePngDataUrl(maskPngDataUrl, "Mask must be a PNG data URL.");
-        var sourceSize = ReadImageSize(source.Data, source.ContentType);
-        if (sourceSize.Width != payload.Width || sourceSize.Height != payload.Height)
-            throw new InvalidOperationException("Mask dimensions must match the source image dimensions.");
-        EnsurePngMaskHasEditableArea(payload.Data);
-
-        var now = DateTime.UtcNow;
-        var mask = new ProjectImageMask
-        {
-            ProjectId = projectId,
-            ImageId = imageId,
-            Label = Clean(label) is { Length: > 0 } cleanLabel ? cleanLabel : $"{source.FileName} mask",
-            ContentType = payload.ContentType,
-            Data = payload.Data,
-            Width = payload.Width,
-            Height = payload.Height,
-            OwnerKind = Clean(ownerKind) is { Length: > 0 } cleanOwner ? cleanOwner : "image",
-            OwnerId = ownerId == Guid.Empty ? imageId : ownerId,
-            CreatedAt = now,
-            UpdatedAt = now,
-        };
-        await db.ProjectImageMasks.AddAsync(mask, cancellationToken);
-        await TouchProjectAsync(projectId, now, cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
-        return ToMaskView(mask);
-    }
-
-    public async Task<ProjectImageMaskView> CreateMaskFromShapesAsync(
-        Guid projectId,
-        Guid imageId,
-        ProjectImageMaskShapeRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var source = await GetImageAssetAsync(projectId, imageId, cancellationToken);
-        var sourceSize = ReadImageSize(source.Data, source.ContentType);
-        var data = RenderShapeMask(sourceSize.Width, sourceSize.Height, request.Shapes);
-        return await CreateMaskFromPngDataUrlAsync(
-            projectId,
-            imageId,
-            DataUrl.ToDataUrl("image/png", data),
-            request.Label,
-            "agentShape",
-            Guid.NewGuid(),
-            cancellationToken);
     }
 
     private async Task<IReadOnlyList<Guid>> ValidateReferenceIdsAsync(
@@ -823,7 +784,7 @@ public sealed class ProjectImageJobService(
         var asset = await db.PublishAssets.FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == imageId, cancellationToken)
             ?? throw new InvalidOperationException("Image was not found.");
         if (NormalizeImageContentType(asset.ContentType) is null)
-            throw new InvalidOperationException("Image must be a PNG or JPEG image.");
+            throw new InvalidOperationException("Image must be a PNG, JPEG, or WebP image.");
         return asset;
     }
 
@@ -852,6 +813,7 @@ public sealed class ProjectImageJobService(
             job.SourceImageId,
             job.MaskId,
             DeserializeIds(job.ReferenceImageIdsJson),
+            job.TargetGeometryJson,
             string.IsNullOrWhiteSpace(job.MainlineModel) ? options.Value.DefaultMainlineModel : job.MainlineModel,
             string.IsNullOrWhiteSpace(job.ImageModel) ? options.Value.DefaultImageModel : job.ImageModel);
 
@@ -943,17 +905,28 @@ public sealed class ProjectImageJobService(
         return validation.Targets;
     }
 
-    private static ProjectImageMaskView ToMaskView(ProjectImageMask mask) =>
-        new(
-            mask.Id,
-            mask.ImageId,
-            mask.Label,
-            mask.ContentType,
-            $"/projects/{mask.ProjectId:N}/image-masks/{mask.Id:N}/content",
-            mask.Width,
-            mask.Height,
-            mask.CreatedAt,
-            mask.UpdatedAt);
+    private static ProjectImageMask CreateMask(
+        Guid projectId,
+        Guid imageId,
+        string label,
+        ImagePayload payload,
+        string ownerKind,
+        Guid ownerId,
+        DateTime now) =>
+        new()
+        {
+            ProjectId = projectId,
+            ImageId = imageId,
+            Label = Clean(label) is { Length: > 0 } cleanLabel ? cleanLabel : "Image edit regional guide",
+            ContentType = payload.ContentType,
+            Data = payload.Data,
+            Width = payload.Width,
+            Height = payload.Height,
+            OwnerKind = Clean(ownerKind) is { Length: > 0 } cleanOwner ? cleanOwner : "editJob",
+            OwnerId = ownerId,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
 
     private int ClampCount(int count) =>
         Math.Clamp(count <= 0 ? 1 : count, 1, Math.Max(1, options.Value.MaxOutputs));
@@ -1080,6 +1053,7 @@ public sealed class ProjectImageJobService(
             "image/png" => "image/png",
             "image/jpeg" => "image/jpeg",
             "image/jpg" => "image/jpeg",
+            "image/webp" => "image/webp",
             _ => null,
         };
 
@@ -1234,10 +1208,15 @@ public sealed class ProjectImageJobService(
             throw new InvalidOperationException(error, ex);
         }
 
-        if (!contentType.Equals("image/png", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException(error);
-        var size = ReadImageSize(data, contentType);
-        return new ImagePayload(contentType, data, size.Width, size.Height);
+        try
+        {
+            var validated = ProjectImageBinary.ValidateBinaryPngMask(data, contentType, "regional-guide.png");
+            return new ImagePayload(validated.ContentType, validated.Data, validated.Width, validated.Height);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new InvalidOperationException($"{error} {ex.Message}", ex);
+        }
     }
 
     private static ImageSize ReadImageSize(byte[] data, string contentType)
@@ -1246,26 +1225,6 @@ public sealed class ProjectImageJobService(
         if (bitmap is null || bitmap.Width <= 0 || bitmap.Height <= 0)
             throw new InvalidOperationException($"{contentType} dimensions could not be read.");
         return new ImageSize(bitmap.Width, bitmap.Height);
-    }
-
-    private static void EnsurePngMaskHasEditableArea(byte[] data)
-    {
-        using var bitmap = SKBitmap.Decode(data);
-        if (bitmap is null || bitmap.Width <= 0 || bitmap.Height <= 0)
-            throw new InvalidOperationException("Mask PNG dimensions could not be read.");
-        if (bitmap.AlphaType == SKAlphaType.Opaque)
-            throw new InvalidOperationException("Mask PNG must contain an alpha channel.");
-
-        for (var y = 0; y < bitmap.Height; y++)
-        {
-            for (var x = 0; x < bitmap.Width; x++)
-            {
-                if (bitmap.GetPixel(x, y).Alpha < byte.MaxValue)
-                    return;
-            }
-        }
-
-        throw new InvalidOperationException("Paint the editable mask area first.");
     }
 
     private static byte[] RenderShapeMask(int width, int height, IReadOnlyList<ProjectImageMaskShape> shapes)
@@ -1279,37 +1238,80 @@ public sealed class ProjectImageJobService(
         using var clearPaint = new SKPaint
         {
             BlendMode = SKBlendMode.Clear,
-            IsAntialias = true,
+            IsAntialias = false,
         };
 
         foreach (var shape in shapes)
         {
-            var kind = shape.Kind.Trim().ToLowerInvariant();
-            if (kind == "ellipse")
+            if (shape is null)
+                throw new InvalidOperationException("Regional guide shapes cannot contain null entries.");
+            var kind = Clean(shape.Kind).ToLowerInvariant();
+            switch (kind)
             {
-                canvas.DrawOval(PercentRect(shape.X, shape.Y, shape.Width, shape.Height, width, height), clearPaint);
-            }
-            else if (kind == "polygon")
-            {
-                var points = shape.Points ?? [];
-                if (points.Count < 3)
-                    throw new InvalidOperationException("Polygon masks require at least three points.");
-                using var path = new SKPath();
-                path.MoveTo(PercentX(points[0].X, width), PercentY(points[0].Y, height));
-                foreach (var point in points.Skip(1))
-                    path.LineTo(PercentX(point.X, width), PercentY(point.Y, height));
-                path.Close();
-                canvas.DrawPath(path, clearPaint);
-            }
-            else
-            {
-                canvas.DrawRect(PercentRect(shape.X, shape.Y, shape.Width, shape.Height, width, height), clearPaint);
+                case "rect":
+                    ValidateRegionalGuideBounds(shape);
+                    canvas.DrawRect(PercentRect(shape.X, shape.Y, shape.Width, shape.Height, width, height), clearPaint);
+                    break;
+                case "ellipse":
+                    ValidateRegionalGuideBounds(shape);
+                    canvas.DrawOval(PercentRect(shape.X, shape.Y, shape.Width, shape.Height, width, height), clearPaint);
+                    break;
+                case "polygon":
+                {
+                    var points = shape.Points ?? [];
+                    if (points.Count < 3)
+                        throw new InvalidOperationException("Polygon regional guides require at least three points.");
+                    using var path = new SKPath();
+                    ValidateRegionalGuidePoint(points[0]);
+                    path.MoveTo(PercentX(points[0].X, width), PercentY(points[0].Y, height));
+                    foreach (var point in points.Skip(1))
+                    {
+                        ValidateRegionalGuidePoint(point);
+                        path.LineTo(PercentX(point.X, width), PercentY(point.Y, height));
+                    }
+                    path.Close();
+                    canvas.DrawPath(path, clearPaint);
+                    break;
+                }
+                default:
+                    throw new InvalidOperationException("Regional guide shape kind must be rect, ellipse, or polygon.");
             }
         }
 
         using var image = surface.Snapshot();
         using var encoded = image.Encode(SKEncodedImageFormat.Png, 100);
         return encoded.ToArray();
+    }
+
+    private static void ValidateRegionalGuideBounds(ProjectImageMaskShape shape)
+    {
+        if (!double.IsFinite(shape.X)
+            || !double.IsFinite(shape.Y)
+            || !double.IsFinite(shape.Width)
+            || !double.IsFinite(shape.Height)
+            || shape.X < 0
+            || shape.Y < 0
+            || shape.Width <= 0
+            || shape.Height <= 0
+            || shape.X + shape.Width > 100
+            || shape.Y + shape.Height > 100)
+        {
+            throw new InvalidOperationException("Rect and ellipse regional guides require positive 0-100 percentage bounds contained within the source image.");
+        }
+    }
+
+    private static void ValidateRegionalGuidePoint(ProjectImageMaskPoint? point)
+    {
+        if (point is null
+            || !double.IsFinite(point.X)
+            || !double.IsFinite(point.Y)
+            || point.X < 0
+            || point.X > 100
+            || point.Y < 0
+            || point.Y > 100)
+        {
+            throw new InvalidOperationException("Polygon regional guide points must use finite 0-100 source-relative percentages.");
+        }
     }
 
     private static SKRect PercentRect(double x, double y, double width, double height, int imageWidth, int imageHeight)

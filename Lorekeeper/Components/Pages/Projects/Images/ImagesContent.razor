@@ -1028,11 +1028,12 @@ else
                 {
                     IntendedUse = "Localized project-library edit requested through the manual mask editor.",
                     Change = _maskPrompt,
-                    Preserve = "Preserve every unmasked pixel and all unmentioned identity, composition, crop, style, palette, lighting, and background details.",
+                    Preserve = "Focus the requested change in the guided region and preserve unmentioned identity, composition, crop, style, palette, lighting, and background details outside it as closely as possible.",
                     AllowRenderedText = false,
                 },
                 references: null,
-                target: new ImageGenerationTarget { Size = _imageSize });
+                target: null,
+                guidanceMode: ImageEditGuidanceMode.RegionalGuide);
             await ImageJobs.CreateEditJobAsync(Project.Id, new ProjectImageEditJobRequest(
                 _editingImage.Id,
                 compiled.Prompt,

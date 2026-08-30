@@ -153,12 +153,15 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   layout details open only when requested. Designed Page text frames are edited
   directly on the canvas; selected text uses the same semantic inline marks as
   ordinary manuscript paragraphs, without exposing content bindings or offsets.
-  Free-standing generation and editing default to the configured Core Book page
-  aspect instead of an implicit square. The manual Generate panel can select
-  existing library images or upload new images as ordered visual references,
-  with an explicit role for each reference carried into the saved generation
-  request. Exact target-aspect generation treats a proportional provider raster
-  as compatible even when its pixel dimensions differ from the request.
+  Free-standing generation and unmasked editing default to the configured Core
+  Book page aspect instead of an implicit square. Regional-guided edits preserve
+  the source framing and treat the painted area as approximate model guidance,
+  not a hard pixel boundary; the complete result still requires inspection. The
+  manual Generate panel can select existing library images or upload new images
+  as ordered visual references, with an explicit role for each reference carried
+  into the saved generation request. Exact target-aspect generation treats a
+  proportional provider raster as compatible even when its pixel dimensions
+  differ from the request.
   Target-bound generation, accessibility state, and layout diagnostics remain
   available. Image frames
   retain the raster's aspect ratio by default, can fill the largest proportional

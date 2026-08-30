@@ -1,17 +1,17 @@
 # Lorekeeper editorial and composition research
 
-Last reviewed: 2026-08-13
+Last reviewed: 2026-08-30
 
 Research access date: recorded by brief.
 
 Runtime model scope for image research: OpenAI `gpt-image-2` and the OpenAI
-Image/Responses APIs documented on 2026-07-14.
+Image/Responses APIs reviewed on 2026-08-30.
 
 These briefs are engineering references for Lorekeeper's prompts, automation, contracts, and diagnostics. They are not prompt payloads and must not be injected wholesale into a model request. Runtime instructions should contain only the compact rules needed for the active task; the application should calculate geometry, assemble context, validate contracts, and measure diagnostics itself.
 
 ## Briefs
 
-- [Image generation prompting](image-generation-prompting.md) — production prompt structure, references, edits, masks, story-page targeting, and direct mappings to Lorekeeper's structured image contracts.
+- [Image generation prompting](image-generation-prompting.md) — production prompt structure, references, edits, soft regional guidance, story-page targeting, and direct mappings to Lorekeeper's structured image contracts.
 - [Visual development and concept-art practice](visual-development-and-concept-art.md) — style vocabulary, exploratory art direction, canonical character/location design, and the Images assistant's library/entity boundary.
 - [Story writing and editorial practice](story-writing-and-editorial-practice.md) — professional editorial stages, narrative craft, picture-book practice, and the requirements for Lorekeeper's code-owned system role.
 - [Page composition and typesetting](page-composition-and-typesetting.md) — page/spread design, typography, accessibility, diagnostic thresholds, and shared page geometry.

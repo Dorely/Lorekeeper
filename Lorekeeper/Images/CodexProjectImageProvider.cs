@@ -429,7 +429,7 @@ public sealed class CodexProjectImageProvider(
 
         var instructions = request.Mask is null
             ? "Use the image_generation tool to render one coherent complete edit from the first supplied image as the visual starting point. Make the requested changes while preserving the source's explicitly requested identity, story, style, and composition continuity. Treat additional supplied images as references only for the roles and traits explicitly assigned to them; do not replace the source composition or inherit unrelated reference details."
-            : "Use the image_generation tool to render one coherent complete edit from the first supplied image as the visual starting point. Use the supplied regional guide only to focus a narrowly localized requested change, while preserving the surrounding scene's explicitly requested identity, story, style, and composition continuity. Treat additional supplied images as references only for the roles and traits explicitly assigned to them; do not replace the source composition or inherit unrelated reference details.";
+            : $"Use the image_generation tool to render one coherent complete edit from the first supplied image as the visual starting point. {ProjectImageRegionalGuide.PromptInstruction} Treat additional supplied images as references only for the roles and traits explicitly assigned to them; do not replace the source composition or inherit unrelated reference details.";
 
         return BasePayload(
             mainlineModel,

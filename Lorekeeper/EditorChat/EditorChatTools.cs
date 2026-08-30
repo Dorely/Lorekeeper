@@ -42,7 +42,6 @@ IActService acts,
     OutlineCollaborationTools outlineTools,
     IProjectImageService projectImages,
     IEntityVisualExampleService entityVisualExamples,
-    IProjectImageJobService imageJobs,
     IAgentProjectImageWorkflow imageWorkflow,
     ICompositionService compositions,
     IProjectPageSetupService pageSetups,
@@ -422,17 +421,11 @@ IActService acts,
                 $"Generate one unattached project image and wait for a terminal result. intendedUse and scene are required. A target supplies geometry guidance only and never places the output. target.size may select an explicit provider-valid raster when a larger proportional raster is warranted; for a layout-bound target, preserve the server-owned aspect and reserved regions. Without a layout target, omit target.size or use auto to use the configured Core Book page raster; a layout target retains its server-owned moderate default. Inspect the returned actualRaster and effectiveDpi before reporting whether the requested raster or DPI was achieved. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
 
         tools.Add(AIFunctionFactory.Create(
-            method: (Guid imageId, string label, ProjectImageMaskShape[] shapes) =>
-                CreateShapeMaskAsync(context, imageId, label, shapes),
-            name: "create_shape_mask",
-            description: "Create a reusable PNG edit mask for an existing project image only when the change is tightly localized or the affected region is hard to describe reliably in words. Supply percentage-based rect, ellipse, or polygon shapes; transparent pixels are editable regions."));
-
-        tools.Add(AIFunctionFactory.Create(
-            method: (Guid sourceImageId, ImageEditBrief brief, Guid? maskId = null, ProjectImageMaskShape[]? maskShapes = null, string? maskLabel = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
-                EditProjectImageAsync(context, sourceImageId, brief, maskId, maskShapes, maskLabel, references, target, altText, quality, outputFormat, outputCompression),
+            method: (Guid sourceImageId, ImageEditBrief brief, ProjectImageMaskShape[]? regionalGuideShapes = null, ImageReferenceUse[]? references = null, ImageGenerationTarget? target = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
+                EditProjectImageAsync(context, sourceImageId, brief, regionalGuideShapes, references, target, altText, quality, outputFormat, outputCompression),
             name: "edit_project_image",
             description:
-                $"Edit one project image and wait for a terminal result. Default to an unmasked source-driven edit: use the original image directly and describe the complete desired result. For larger framing, describe the surrounding scene and direction in the existing desired-result and composition fields: left and right for a wider result, above and below for a taller result, or outward on all sides when the aspect is effectively unchanged. Supply a regional guide only for a genuinely localized change or when the changed portion cannot be described reliably in words. target.size may select an explicit provider-valid raster when a larger proportional result is warranted; for a layout-bound target, preserve the server-owned aspect and reserved regions. Without a layout target, omit target.size or use auto to use the configured Core Book page raster; a layout target retains its server-owned moderate default. Inspect the returned actualRaster and effectiveDpi before reporting whether the requested raster or DPI was achieved. The result is always a new unattached project image. Geometry guidance never places it. Inspect the returned image, then apply its ID with a separate placement tool when requested. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
+                $"Edit one project image and wait for a terminal result. Default to an unmasked source-driven edit: use the original image directly and describe the complete desired result. Supply regionalGuideShapes only when words cannot reliably locate the intended area and a visual guide is necessary. Guide shapes use source-relative 0-100 percentages and may be rect, ellipse, or polygon shapes. A regional guide uses a source-aspect-bound raster and is soft model guidance, not hard pixel protection; the model may change pixels outside it. Never use a regional guide for broad restyling, resizing, reframing, expansion, or layout work, including a layout-bound target. For larger framing, use an unmasked edit and describe the surrounding scene and direction in the desired-result and composition fields: left and right for a wider result, above and below for a taller result, or outward on all sides when the aspect is effectively unchanged. For an unmasked edit, target.size may select an explicit provider-valid raster when a larger proportional result is warranted; for a layout-bound target, preserve the server-owned aspect and reserved regions. Without a layout target, an unmasked edit with omitted or auto target.size uses the configured Core Book page raster. With regionalGuideShapes, omit target.size to derive a source-aspect raster or provide only a source-aspect-preserving explicit raster. Inspect the returned actualRaster and effectiveDpi before reporting whether the requested raster or DPI was achieved. The result is always a new unattached project image. Geometry guidance never places it. Inspect the entire result, including content outside any guide, then apply its ID with a separate placement tool when requested. At most {Math.Max(0, imageOptions.Value.MaxReferenceImages)} references are allowed."));
 
         tools.Add(AIFunctionFactory.Create(
             method: (Guid sourceImageId, int width, int height, string? fileName = null, string? altText = null) =>
@@ -2453,35 +2446,11 @@ IActService acts,
         }
     }
 
-    private async Task<string> CreateShapeMaskAsync(
-        EditorChatContext ctx,
-        Guid imageId,
-        string label,
-        ProjectImageMaskShape[] shapes)
-    {
-        try
-        {
-            var mask = await imageJobs.CreateMaskFromShapesAsync(
-                ctx.ProjectId,
-                imageId,
-                new ProjectImageMaskShapeRequest(label, shapes),
-                ctx.TurnCancellationToken);
-            ctx.OnMutated();
-            return JsonSerializer.Serialize(mask);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
-        {
-            return $"Error: {ex.Message}";
-        }
-    }
-
     private async Task<string> EditProjectImageAsync(
         EditorChatContext ctx,
         Guid sourceImageId,
         ImageEditBrief brief,
-        Guid? maskId,
-        ProjectImageMaskShape[]? maskShapes,
-        string? maskLabel,
+        ProjectImageMaskShape[]? regionalGuideShapes,
         ImageReferenceUse[]? references,
         ImageGenerationTarget? target,
         string? altText,
@@ -2489,23 +2458,12 @@ IActService acts,
         string? outputFormat,
         int? outputCompression)
     {
-        Guid? effectiveMaskId = maskId;
-        if (effectiveMaskId is null && maskShapes is { Length: > 0 })
-        {
-            try
-            {
-                var mask = await imageJobs.CreateMaskFromShapesAsync(
-                    ctx.ProjectId,
-                    sourceImageId,
-                    new ProjectImageMaskShapeRequest(maskLabel ?? "Editor image edit mask", maskShapes),
-                    ctx.TurnCancellationToken);
-                effectiveMaskId = mask.Id;
-            }
-            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
-            {
-                return $"Error: {ex.Message}";
-            }
-        }
+        if (regionalGuideShapes is { Length: 0 })
+            return "Error: regionalGuideShapes must contain at least one shape when supplied.";
+
+        var regionalGuide = regionalGuideShapes is { Length: > 0 }
+            ? new ProjectImageMaskShapeRequest("Editor assistant regional guide", regionalGuideShapes)
+            : null;
 
         try
         {
@@ -2513,7 +2471,7 @@ IActService acts,
                 ctx.ProjectId,
                 sourceImageId,
                 brief,
-                effectiveMaskId,
+                regionalGuide,
                 references,
                 target,
                 altText,

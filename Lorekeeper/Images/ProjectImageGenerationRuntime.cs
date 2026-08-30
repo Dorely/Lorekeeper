@@ -388,11 +388,34 @@ public sealed class ProjectImageGenerationRuntime(
         var source = await images.GetDataAsync(workItem.ProjectId, sourceImageId, cancellationToken: cancellationToken)
             ?? throw new InvalidOperationException("Image edit source could not be found.");
 
+        var sourceReference = new ProjectImageProviderReference(source.FileName, source.ContentType, source.Data);
         ProjectImageProviderReference? mask = null;
-        if (workItem.MaskId is { } maskId
-            && await jobs.GetMaskDataAsync(workItem.ProjectId, maskId, cancellationToken) is { } maskData)
+        if (workItem.MaskId is { } maskId)
         {
-            mask = new ProjectImageProviderReference(maskData.FileName, maskData.ContentType, maskData.Data);
+            var maskData = await jobs.GetMaskDataAsync(workItem.ProjectId, maskId, cancellationToken)
+                ?? throw new InvalidOperationException("Regional edit guide could not be found.");
+            var normalizedSource = ProjectImageBinary.EncodePng(source.Data, source.FileName);
+            var normalizedMask = ProjectImageBinary.ValidateBinaryPngMask(maskData.Data, maskData.ContentType, maskData.FileName);
+            if (normalizedMask.Width != normalizedSource.Width || normalizedMask.Height != normalizedSource.Height)
+            {
+                throw new InvalidOperationException(
+                    $"Regional edit guide dimensions {normalizedMask.Width}x{normalizedMask.Height} do not match the source image dimensions {normalizedSource.Width}x{normalizedSource.Height}.");
+            }
+
+            ProjectImageRegionalGuide.ValidateTargetGeometry(
+                workItem.TargetGeometryJson,
+                normalizedSource.Width,
+                normalizedSource.Height,
+                workItem.Size);
+            ProjectImageRegionalGuide.ValidateOutputSize(normalizedSource.Width, normalizedSource.Height, workItem.Size);
+            sourceReference = new ProjectImageProviderReference(
+                normalizedSource.FileName,
+                normalizedSource.ContentType,
+                normalizedSource.Data);
+            mask = new ProjectImageProviderReference(
+                normalizedMask.FileName,
+                normalizedMask.ContentType,
+                normalizedMask.Data);
         }
 
         var references = new List<ProjectImageProviderReference>();
@@ -409,7 +432,7 @@ public sealed class ProjectImageGenerationRuntime(
             Count: 1,
             workItem.MainlineModel,
             workItem.ImageModel,
-            new ProjectImageProviderReference(source.FileName, source.ContentType, source.Data),
+            sourceReference,
             mask,
             references,
             workItem.OutputFormat,
