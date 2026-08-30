@@ -357,6 +357,11 @@ the live test project; terminate the browser host after the run.
 - Render a Digital PDF and confirm the front cover is page one of one Book PDF,
   bookmarks/internal TOC links work, text is searchable/selectable, and enabled
   independent pages retain their boxes.
+- With **Start chapters on right-hand pages** off, render adjacent short
+  chapters and confirm they use consecutive pages without an interchapter
+  blank. Enable it and confirm every chapter begins on an odd-numbered page and
+  only necessary blanks are added, including when the Digital PDF front cover
+  is page one. Confirm EPUB neither offers nor applies this option.
 - Inspect the Digital PDF structure/reading order, Figure alternatives and
   decorative artifacts; do not label it PDF/UA certified.
 - Export EPUB and confirm flowing semantic Figures plus fixed-layout Designed

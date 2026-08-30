@@ -28,6 +28,7 @@ public sealed record PublicationBookView(
     bool NumberChapters,
     PublishTitlePageMode TitlePageMode,
     bool AllowDesignedPageOverrides,
+    bool RectoChapterStarts,
     ProjectPageSetupView PageSetup,
     int IncludedChapterCount,
     int PublicationSectionCount,
@@ -70,6 +71,7 @@ public sealed record PublicationBookPatch(
     bool? NumberChapters = null,
     PublishTitlePageMode? TitlePageMode = null,
     bool? AllowDesignedPageOverrides = null,
+    bool? RectoChapterStarts = null,
     IReadOnlyList<string>? ClearFields = null);
 
 public interface IPublicationBookService
@@ -139,6 +141,7 @@ public sealed class PublicationBookService(
                 item.NumberActs,
                 item.NumberChapters,
                 item.TitlePageMode,
+                item.RectoChapterStarts,
             }).SingleAsync(cancellationToken);
         var pdfPresentation = await db.PublicationBookPdfPresentations.AsNoTracking()
             .Where(item => item.ProjectId == projectId)
@@ -385,6 +388,7 @@ public sealed class PublicationBookService(
         book.NumberActs = patch.NumberActs ?? book.NumberActs;
         book.NumberChapters = patch.NumberChapters ?? book.NumberChapters;
         book.TitlePageMode = patch.TitlePageMode ?? book.TitlePageMode;
+        book.RectoChapterStarts = patch.RectoChapterStarts ?? book.RectoChapterStarts;
         var pdfPresentation = await db.PublicationBookPdfPresentations.SingleOrDefaultAsync(
             item => item.ProjectId == projectId,
             cancellationToken);
@@ -1020,6 +1024,7 @@ public sealed class PublicationBookService(
             book.NumberChapters,
             book.TitlePageMode,
             pdfPresentation?.AllowDesignedPageOverrides ?? false,
+            book.RectoChapterStarts,
             new ProjectPageSetupView(
                 setup.PageWidthInches,
                 setup.PageHeightInches,
@@ -1110,6 +1115,8 @@ public sealed class PublicationEffectiveConfigurationResolver(
         effective.NumberActs = Pick(fields, PublicationEditionOverrideField.NumberActs, stored.NumberActs, book.NumberActs);
         effective.NumberChapters = Pick(fields, PublicationEditionOverrideField.NumberChapters, stored.NumberChapters, book.NumberChapters);
         effective.TitlePageMode = Pick(fields, PublicationEditionOverrideField.TitlePageMode, stored.TitlePageMode, book.TitlePageMode);
+        effective.RectoChapterStarts = effective.Format != PublicationEditionFormat.Epub
+            && Pick(fields, PublicationEditionOverrideField.RectoChapterStarts, stored.RectoChapterStarts, book.RectoChapterStarts);
         effective.AllowDesignedPageOverrides = effective.Format == PublicationEditionFormat.DigitalPdf
             && Pick(fields, PublicationEditionOverrideField.AllowDesignedPageOverrides, stored.AllowDesignedPageOverrides,
                 pdfPresentation?.AllowDesignedPageOverrides ?? false);
@@ -1233,6 +1240,7 @@ public sealed class PublicationEffectiveConfigurationResolver(
         NumberActs = source.NumberActs,
         NumberChapters = source.NumberChapters,
         TitlePageMode = source.TitlePageMode,
+        RectoChapterStarts = source.RectoChapterStarts,
         PrintRegistryVersion = source.PrintRegistryVersion,
         PrintProductKey = source.PrintProductKey,
         PrintFinish = source.PrintFinish,

@@ -228,6 +228,10 @@ public sealed class PublicationEditionService(
         if (patch.GenericPrintTemplateJson is not null) edition.GenericPrintTemplateJson = patch.GenericPrintTemplateJson;
         if (edition.Format == PublicationEditionFormat.DigitalPdf)
             Override(fields, PublicationEditionOverrideField.AllowDesignedPageOverrides, patch.AllowDesignedPageOverrides, value => edition.AllowDesignedPageOverrides = value);
+        if (edition.Format == PublicationEditionFormat.Epub)
+            fields.Remove(PublicationEditionOverrideField.RectoChapterStarts);
+        else
+            Override(fields, PublicationEditionOverrideField.RectoChapterStarts, patch.RectoChapterStarts, value => edition.RectoChapterStarts = value);
 
         Override(fields, PublicationEditionOverrideField.Title, patch.Title, value => edition.TitleOverride = value);
         Override(fields, PublicationEditionOverrideField.Subtitle, patch.Subtitle, value => edition.Subtitle = value);
@@ -369,11 +373,16 @@ public sealed class PublicationEditionService(
         AddDifference(differences, "Print product", left.PrintProductKey, right.PrintProductKey);
         AddDifference(differences, "Finish", left.PrintFinish, right.PrintFinish);
         AddDifference(differences, "Cover mode", left.PrintCoverMode, right.PrintCoverMode);
-        var leftItems = (await effectiveConfigurations.ResolveReleaseAsync(projectId, leftEditionId, cancellationToken))
-            .OutlineItems.Count(item => item.IsIncluded);
-        var rightItems = (await effectiveConfigurations.ResolveReleaseAsync(projectId, rightEditionId, cancellationToken))
-            .OutlineItems.Count(item => item.IsIncluded);
+        var leftEffective = await effectiveConfigurations.ResolveReleaseAsync(projectId, leftEditionId, cancellationToken);
+        var rightEffective = await effectiveConfigurations.ResolveReleaseAsync(projectId, rightEditionId, cancellationToken);
+        var leftItems = leftEffective.OutlineItems.Count(item => item.IsIncluded);
+        var rightItems = rightEffective.OutlineItems.Count(item => item.IsIncluded);
         AddDifference(differences, "Included content", leftItems, rightItems);
+        AddDifference(
+            differences,
+            "Start chapters on right-hand pages",
+            leftEffective.Edition.RectoChapterStarts,
+            rightEffective.Edition.RectoChapterStarts);
         AddDifference(
             differences,
             "Complete source/settings fingerprint",
@@ -750,6 +759,7 @@ public sealed class PublicationEditionService(
                 edition.NumberActs,
                 edition.NumberChapters,
                 edition.TitlePageMode,
+                edition.RectoChapterStarts,
                 edition.PrintRegistryVersion,
                 edition.PrintProductKey,
                 edition.PrintFinish,
@@ -1025,7 +1035,8 @@ public sealed class PublicationEditionService(
             edition.PageHeightInches,
             edition.PageMarginInches,
             edition.Bleed,
-            edition.AllowDesignedPageOverrides)
+            edition.AllowDesignedPageOverrides,
+            edition.RectoChapterStarts)
         {
             PrintProductKey = edition.PrintProductKey,
             PrintCoverMode = edition.PrintCoverMode,
@@ -1071,7 +1082,8 @@ public sealed class PublicationEditionService(
             edition.PrintCoverMode,
             edition.GenericPrintTemplateJson,
             edition.Bleed,
-            edition.AllowDesignedPageOverrides)
+            edition.AllowDesignedPageOverrides,
+            edition.RectoChapterStarts)
         {
             InheritsCoreCover = edition.InheritsCoreCover,
             EditionSpecificContentEnabled = edition.EditionSpecificContentEnabled,
@@ -1202,6 +1214,7 @@ public sealed class PublicationEditionService(
             NumberActs = source.NumberActs,
             NumberChapters = source.NumberChapters,
             TitlePageMode = source.TitlePageMode,
+            RectoChapterStarts = source.RectoChapterStarts,
             PrintRegistryVersion = source.PrintRegistryVersion,
             PrintProductKey = source.PrintProductKey,
             PrintFinish = source.PrintFinish,

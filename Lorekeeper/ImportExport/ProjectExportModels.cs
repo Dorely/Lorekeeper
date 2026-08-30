@@ -28,13 +28,13 @@ public sealed record ProjectExportFile(
 public static class ProjectExportWarningText
 {
     public static string OutgoingReferencesOmitted(int referenceCount, string referencedProjectNames) =>
-        $"This format v24 export omits {referenceCount} direct project reference link(s) ({referencedProjectNames}). Imports never infer project links; recreate them manually after import.";
+        $"This format v25 export omits {referenceCount} direct project reference link(s) ({referencedProjectNames}). Imports never infer project links; recreate them manually after import.";
 }
 
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 24;
+    public const int CurrentFormatVersion = 25;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -335,6 +335,8 @@ public sealed record ProjectExportPublicationEdition(
     public IReadOnlyList<ProjectExportEditionStyleMapping> LegacyStyleMappings => StyleMappings ?? [];
     [JsonIgnore]
     public IReadOnlyList<ProjectExportPublicationImagePlacement> LegacyImagePlacements => ImagePlacements ?? [];
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool RectoChapterStarts { get; init; }
     public List<PublicationEditionOverrideField> OverrideFields { get; init; } = [];
     public bool InheritsCoreCover { get; init; }
     public bool EditionSpecificContentEnabled { get; init; }
@@ -388,6 +390,8 @@ public sealed record ProjectExportPublicationBook(
     [JsonIgnore]
     public IReadOnlyList<ProjectExportPublicationImagePlacement> LegacyImagePlacements => ImagePlacements ?? [];
     public bool AllowDesignedPageOverrides { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool RectoChapterStarts { get; init; }
 }
 
 public sealed record ProjectExportCoverDesign(

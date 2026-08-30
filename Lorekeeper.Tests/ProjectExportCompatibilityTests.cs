@@ -8,7 +8,7 @@ namespace Lorekeeper.Tests;
 public sealed class ProjectExportCompatibilityTests
 {
     [Fact]
-    public void V24WritesCanonicalSourceContainersCurrentPublicationStateAndAnnotations()
+    public void V25WritesCanonicalSourceContainersCurrentPublicationStateAndAnnotations()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
@@ -16,7 +16,7 @@ public sealed class ProjectExportCompatibilityTests
             PublicationBook = new ProjectExportPublicationBook(
                 1, "Book", "", "Author", "en", "", "", "", true, false,
                 false, false, true, true, false, false, PublishTitlePageMode.Automatic,
-                [], null) { AllowDesignedPageOverrides = true },
+                [], null) { AllowDesignedPageOverrides = true, RectoChapterStarts = true },
             PublicationEditions =
             [
                 Edition(coverImageId, null, []) with
@@ -24,17 +24,19 @@ public sealed class ProjectExportCompatibilityTests
                     IsDefault = false,
                     BodyFontSizePoints = null,
                     BodyLineHeight = null,
+                    RectoChapterStarts = true,
                 },
             ],
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(24, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(25, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"ingestSources\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"bookBriefCanonSourceIds\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationBook\"", json, StringComparison.Ordinal);
         Assert.Contains("\"allowDesignedPageOverrides\":true", json, StringComparison.Ordinal);
+        Assert.Contains("\"rectoChapterStarts\":true", json, StringComparison.Ordinal);
         Assert.Contains($"\"selectedCoverImageId\":\"{coverImageId}\"", json, StringComparison.Ordinal);
         Assert.Contains("\"editionSpecificContentEnabled\":false", json, StringComparison.Ordinal);
         Assert.Contains("\"chapterOverrides\":[]", json, StringComparison.Ordinal);
@@ -52,7 +54,7 @@ public sealed class ProjectExportCompatibilityTests
     }
 
     [Fact]
-    public void V24RoundTripsCurrentAndOutdatedCoreAndEditionAnnotations()
+    public void V25RoundTripsCurrentAndOutdatedCoreAndEditionAnnotations()
     {
         var chapterId = Guid.NewGuid();
         var editionId = Guid.NewGuid();
@@ -91,6 +93,95 @@ public sealed class ProjectExportCompatibilityTests
 
         Assert.Equal(23, imported.FormatVersion);
         Assert.Empty(imported.ManuscriptAnnotations);
+    }
+
+    [Fact]
+    public void V24WithoutRectoChapterStartsRemainsCanonicalAndDefaultsFalse()
+    {
+        var document = Document(new ProjectExportChapter()) with
+        {
+            FormatVersion = 24,
+            PublicationBook = new ProjectExportPublicationBook(
+                1, "Book", "", "Author", "en", "", "", "", true, false,
+                false, false, true, true, false, false, PublishTitlePageMode.Automatic,
+                [], null),
+            PublicationEditions = [Edition(null, null, []) with { IsDefault = false }],
+        };
+
+        var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
+        var imported = JsonSerializer.Deserialize<ProjectExportDocument>(json, ManuscriptCodec.JsonOptions)!;
+
+        Assert.DoesNotContain("rectoChapterStarts", json, StringComparison.Ordinal);
+        Assert.False(imported.PublicationBook!.RectoChapterStarts);
+        Assert.False(Assert.Single(imported.PublicationEditions).RectoChapterStarts);
+    }
+
+    [Fact]
+    public void V25PreservesExplicitFalseRectoReleaseOverrideWhenDefaultValueIsOmitted()
+    {
+        var document = Document(new ProjectExportChapter()) with
+        {
+            PublicationBook = new ProjectExportPublicationBook(
+                1, "Book", "", "Author", "en", "", "", "", true, false,
+                false, false, true, true, false, false, PublishTitlePageMode.Automatic,
+                [], null)
+            {
+                RectoChapterStarts = true,
+            },
+            PublicationEditions =
+            [
+                Edition(null, null, []) with
+                {
+                    IsDefault = false,
+                    RectoChapterStarts = false,
+                    OverrideFields = [PublicationEditionOverrideField.RectoChapterStarts],
+                },
+            ],
+        };
+
+        var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
+        using var parsed = JsonDocument.Parse(json);
+        Assert.False(parsed.RootElement.GetProperty("publicationEditions")[0]
+            .TryGetProperty("rectoChapterStarts", out _));
+
+        var imported = JsonSerializer.Deserialize<ProjectExportDocument>(json, ManuscriptCodec.JsonOptions)!;
+        var edition = Assert.Single(imported.PublicationEditions);
+        Assert.False(edition.RectoChapterStarts);
+        Assert.Contains(PublicationEditionOverrideField.RectoChapterStarts, edition.OverrideFields);
+    }
+
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public void V24RejectsRectoChapterStartDataAtItsVersionBoundary(
+        bool coreValue,
+        bool editionValue,
+        bool overrideMarker)
+    {
+        var edition = Edition(null, null, []) with
+        {
+            IsDefault = false,
+            RectoChapterStarts = editionValue,
+            OverrideFields = overrideMarker ? [PublicationEditionOverrideField.RectoChapterStarts] : [],
+        };
+        var document = Document(new ProjectExportChapter()) with
+        {
+            FormatVersion = 24,
+            PublicationBook = new ProjectExportPublicationBook(
+                1, "Book", "", "Author", "en", "", "", "", true, false,
+                false, false, true, true, false, false, PublishTitlePageMode.Automatic,
+                [], null)
+            {
+                RectoChapterStarts = coreValue,
+            },
+            PublicationEditions = [edition],
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => ProjectImportJobProcessor.ValidatePublicationPayloads(document));
+
+        Assert.Contains("introduced after export format v24", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

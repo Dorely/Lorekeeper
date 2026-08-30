@@ -1846,6 +1846,8 @@ fn paginate_with_cancellation(
     tolerance: LayoutTolerance,
 ) -> RenderResult<LayoutDocument> {
     let browser_preview = request.layout_trace_mode.as_deref() == Some("browser-preview");
+    let leading_page_count =
+        usize::from(request.profile == "generic-digital-pdf-v1" && request.cover.is_some());
     let trim = &request.trim;
     if !(3.5..=12.0).contains(&trim.width_inches)
         || !(5.0..=15.0).contains(&trim.height_inches)
@@ -1934,7 +1936,7 @@ fn paginate_with_cancellation(
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
             {
-                start_recto(&mut pages, trim);
+                start_recto(&mut pages, trim, leading_page_count);
                 pages.push(centered_page(
                     if include_section_heading {
                         &section_title
@@ -1988,7 +1990,7 @@ fn paginate_with_cancellation(
                 {
                     ensure_next_leaf(&mut pages, LeafSide::Verso);
                 } else if !is_designed_page_only_chapter(chapter) {
-                    start_recto(&mut pages, trim);
+                    start_recto(&mut pages, trim, leading_page_count);
                 }
                 let chapter_start = pages.len() + 1;
                 body_start_page.get_or_insert(chapter_start);
@@ -7051,8 +7053,8 @@ fn cover_text_lines(
         .collect())
 }
 
-fn start_recto(pages: &mut Vec<LayoutPage>, trim: &crate::model::Trim) {
-    if trim.recto_chapter_starts && (pages.len() + 1).is_multiple_of(2) {
+fn start_recto(pages: &mut Vec<LayoutPage>, trim: &crate::model::Trim, leading_page_count: usize) {
+    if trim.recto_chapter_starts && (leading_page_count + pages.len() + 1).is_multiple_of(2) {
         pages.push(LayoutPage {
             kind: PageKind::Blank,
             width_points: None,

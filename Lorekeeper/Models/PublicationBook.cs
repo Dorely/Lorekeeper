@@ -24,6 +24,7 @@ public enum PublicationEditionOverrideField
     PageHeightInches = 17,
     PageMarginInches = 18,
     AllowDesignedPageOverrides = 21,
+    RectoChapterStarts = 22,
 }
 
 public class PublicationBook
@@ -49,6 +50,7 @@ public class PublicationBook
     public bool NumberActs { get; set; }
     public bool NumberChapters { get; set; }
     public PublishTitlePageMode TitlePageMode { get; set; } = PublishTitlePageMode.Automatic;
+    public bool RectoChapterStarts { get; set; }
 
     public ICollection<PublicationBookOutlineItem> OutlineItems { get; set; } = [];
     public ICollection<PublicationBookMatter> Matter { get; set; } = [];

@@ -52,6 +52,7 @@ public sealed class DatabaseStartupMigrationService(
     internal const string AuthoringHistoryCleanupMigrationId = "20260821100100_RemovePersistentAuthoringHistory";
     internal const string ReviewWorkflowAdditiveMigrationId = "20260826200707_PrepareReviewWorkflowTransition";
     internal const string ReviewWorkflowCleanupMigrationId = "20260826200708_FinalizeReviewWorkflowTransition";
+    private const string RectoChapterStartsMigrationId = "20260830174820_AddConfigurableRectoChapterStarts";
 
     public async Task<bool> ApplyAsync(
         CancellationToken cancellationToken = default,
@@ -69,15 +70,19 @@ public sealed class DatabaseStartupMigrationService(
         await EnsureReviewPreferenceCompatibilityColumnAsync(db, cancellationToken);
         await EnsureAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         Report(progress, "Checking manuscripts", "Validating chapters, illustrations, and revision history.", 2, totalSteps);
         await manuscriptMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         Report(progress, "Checking publication editions", "Preparing edition-owned publishing records.", 3, totalSteps);
         await editionMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         Report(progress, "Checking press data", "Validating publication layouts, artifacts, and packages.", 4, totalSteps);
         await pressMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
 
         Report(progress, "Checking designed pages", "Migrating visual compositions and semantic text bindings.", 5, totalSteps);
@@ -91,6 +96,7 @@ public sealed class DatabaseStartupMigrationService(
             await EnsureAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
             await EnsureEditionCompatibilityColumnsAsync(db, cancellationToken);
             await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+            await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
             await visualCompositionMigration.ApplyPendingAsync(db, cancellationToken);
             if (!await recovery.IsRecoveryRequiredAsync(cancellationToken))
                 await visualCompositionMigration.ApplyFinalSchemaAsync(db, cancellationToken);
@@ -100,6 +106,7 @@ public sealed class DatabaseStartupMigrationService(
             await EnsureEditionCompatibilityColumnsAsync(db, cancellationToken);
             await visualCompositionMigration.ApplyFinalSchemaAsync(db, cancellationToken);
             await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+            await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
             await visualCompositionMigration.ApplyPendingAsync(db, cancellationToken);
         }
         // Visual cleanup rebuilds several tables from its historical model and
@@ -107,6 +114,7 @@ public sealed class DatabaseStartupMigrationService(
         await EnsureEditionCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
 
         var migrationsBeforeAuthoring = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
             .ToHashSet(StringComparer.Ordinal);
@@ -123,27 +131,33 @@ public sealed class DatabaseStartupMigrationService(
         // first such reader on a fresh database).
         await EnsureReviewPreferenceCompatibilityColumnAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
 
         Report(progress, "Checking authoring pages", "Preparing active page layouts and project page setup.", 6, totalSteps);
         await EnsurePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await authoringPageMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         Report(progress, "Checking publication structure", "Validating Core Book content and ownership.", 7, totalSteps);
         await publicationCoreMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
 
         Report(progress, "Checking edition content", "Preparing release-specific manuscript content.", 8, totalSteps);
         await RemoveEditionCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await RemovePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await editionContentMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await RemovePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         Report(progress, "Checking publication sections", "Validating front matter, body order, and back matter.", 9, totalSteps);
         await publicationSectionMigration.ApplyPendingAsync(db, cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
 
         Report(progress, "Checking print products", "Preparing physical-product and cover configuration.", 10, totalSteps);
         var migrationsBeforePrintProducts = (await db.Database.GetAppliedMigrationsAsync(cancellationToken))
@@ -157,9 +171,11 @@ public sealed class DatabaseStartupMigrationService(
                     PrintProductMigrationService.AdditiveMigrationId,
                     cancellationToken);
                 await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+                await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
             }
             await printProductMigration.ApplyPendingAsync(db, cancellationToken);
             await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+            await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         }
 
         if (await recovery.IsRecoveryRequiredAsync(cancellationToken))
@@ -175,6 +191,7 @@ public sealed class DatabaseStartupMigrationService(
                 PublicationCoreMigrationService.CleanupMigrationId,
                 cancellationToken);
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         if (!migrationsBeforeCleanup.Contains(PrintProductMigrationService.CleanupMigrationId))
             await db.GetService<IMigrator>().MigrateAsync(
                 PrintProductMigrationService.CleanupMigrationId,
@@ -183,6 +200,7 @@ public sealed class DatabaseStartupMigrationService(
         // own immutable models. Restore the compatibility column, remove it at
         // the current boundary, then let the additive migration own it.
         await EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await RemovePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
         await RemoveAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
         // Run the review-baseline transition only after the existing startup
@@ -195,6 +213,7 @@ public sealed class DatabaseStartupMigrationService(
         await PrepareReviewWorkflowTransitionAsync(db, cancellationToken);
         if (await recovery.IsRecoveryRequiredAsync(cancellationToken))
             return false;
+        await RemoveRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await db.GetService<IMigrator>().MigrateAsync(cancellationToken: cancellationToken);
         await CleanupDetachedCompositionsAsync(db, cancellationToken);
         await publicationSectionMigration.RepairSemanticRevisionDriftAsync(db, cancellationToken);
@@ -1754,6 +1773,54 @@ public sealed class DatabaseStartupMigrationService(
                 return true;
         }
         return false;
+    }
+
+    internal static async Task EnsureRectoChapterStartsCompatibilityColumnsAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(RectoChapterStartsMigrationId))
+            return;
+
+        (string Table, string AddSql)[] columns =
+        [
+            ("PublicationBooks", "ALTER TABLE \"PublicationBooks\" ADD COLUMN \"RectoChapterStarts\" INTEGER NOT NULL DEFAULT 0;"),
+            ("PublicationEditions", "ALTER TABLE \"PublicationEditions\" ADD COLUMN \"RectoChapterStarts\" INTEGER NOT NULL DEFAULT 0;"),
+        ];
+        foreach (var (table, addSql) in columns)
+        {
+            if (await HasTableAsync(db, table, cancellationToken)
+                && !await HasColumnAsync(db, table, "RectoChapterStarts", cancellationToken))
+            {
+                await db.Database.ExecuteSqlRawAsync(addSql, cancellationToken);
+            }
+        }
+        db.ChangeTracker.Clear();
+    }
+
+    internal static async Task RemoveRectoChapterStartsCompatibilityColumnsAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var applied = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
+        if (applied.Contains(RectoChapterStartsMigrationId))
+            return;
+
+        (string Table, string DropSql)[] columns =
+        [
+            ("PublicationBooks", "ALTER TABLE \"PublicationBooks\" DROP COLUMN \"RectoChapterStarts\";"),
+            ("PublicationEditions", "ALTER TABLE \"PublicationEditions\" DROP COLUMN \"RectoChapterStarts\";"),
+        ];
+        foreach (var (table, dropSql) in columns)
+        {
+            if (await HasTableAsync(db, table, cancellationToken)
+                && await HasColumnAsync(db, table, "RectoChapterStarts", cancellationToken))
+            {
+                await db.Database.ExecuteSqlRawAsync(dropSql, cancellationToken);
+            }
+        }
+        db.ChangeTracker.Clear();
     }
 
     internal static async Task EnsurePublicationSectionOrderCompatibilityColumnAsync(

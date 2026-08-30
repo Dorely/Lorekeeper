@@ -1416,7 +1416,7 @@ public sealed class PublicationRenderProcessor(
                 bleedInches = release?.Bleed == true
                     && release.Format is (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover) ? 0.125 : 0,
                 mirrorMargins = true,
-                rectoChapterStarts = true,
+                rectoChapterStarts = document.Profile.RectoChapterStarts,
                 minimumWidowLines = 2,
                 minimumOrphanLines = 2,
             },

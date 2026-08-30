@@ -1676,6 +1676,7 @@ public sealed class ProjectVersionRestoreService(
                 NumberActs = source.NumberActs,
                 NumberChapters = source.NumberChapters,
                 TitlePageMode = source.TitlePageMode,
+                RectoChapterStarts = source.RectoChapterStarts,
                 OutlineItems = source.OutlineItems.Select(item => new PublicationBookOutlineItem
                 {
                     Id = item.Id,
@@ -1774,9 +1775,10 @@ public sealed class ProjectVersionRestoreService(
                 GenericPrintTemplateJson = editionData.GenericPrintTemplateJson,
                 Bleed = editionData.Bleed,
                 AllowDesignedPageOverrides = editionData.AllowDesignedPageOverrides,
+                RectoChapterStarts = editionData.RectoChapterStarts,
                 InheritsCoreCover = editionData.InheritsCoreCover,
                 EditionSpecificContentEnabled = editionData.EditionSpecificContentEnabled,
-                OverrideFieldsJson = JsonSerializer.Serialize(editionData.OverrideFields, ManuscriptCodec.JsonOptions),
+                OverrideFieldsJson = JsonSerializer.Serialize(editionData.OverrideFields),
                 PublicationSectionOrderJson = JsonSerializer.Serialize(editionData.PublicationSectionOrder, ManuscriptCodec.JsonOptions),
             };
             edition.OutlineItems = editionData.OutlineItems.Select(item => new PublicationEditionOutlineItem

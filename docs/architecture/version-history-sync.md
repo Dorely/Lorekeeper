@@ -129,7 +129,7 @@ auto-link and other projections; visual candidates; render artifacts, page
 maps, packages, audits and migration journals; process-lifetime Undo/Redo; and
 other operational or derived state are deliberately excluded. Restore rebuilds
 the derived projections through their owning services and leaves render
-artifacts absent. Portable export v24 remains a separate boundary with its own
+artifacts absent. Portable export v25 remains a separate boundary with its own
 scope and warnings.
 
 ### Checkpoints and restore

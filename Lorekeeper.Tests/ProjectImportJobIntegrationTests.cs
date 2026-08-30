@@ -699,7 +699,7 @@ public sealed class ProjectImportJobIntegrationTests
     }
 
     [Fact]
-    public async Task V24ExportWarnsAndImportDoesNotInferProjectReferences()
+    public async Task V25ExportPreservesRectoSettingsWarnsAndDoesNotInferProjectReferences()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -718,7 +718,15 @@ public sealed class ProjectImportJobIntegrationTests
             CreativeRevision = 0,
         };
         db.ProjectVersionRepositories.Add(referencedRepository);
-        db.PublicationBooks.Add(new PublicationBook { ProjectId = source.Id });
+        db.PublicationBooks.Add(new PublicationBook { ProjectId = source.Id, RectoChapterStarts = true });
+        db.PublicationEditions.Add(new PublicationEdition
+        {
+            ProjectId = source.Id,
+            Name = "Recto release",
+            RectoChapterStarts = true,
+            OverrideFieldsJson = JsonSerializer.Serialize(
+                new[] { PublicationEditionOverrideField.RectoChapterStarts }),
+        });
         db.ProjectReferences.Add(new ProjectReference
         {
             Id = Guid.NewGuid(),
@@ -761,6 +769,15 @@ public sealed class ProjectImportJobIntegrationTests
             .Where(reference => reference.ReferencingProjectId == destination.Id)
             .ToListAsync());
         Assert.Single(await db.ProjectReferences.AsNoTracking().ToListAsync());
+        Assert.True((await db.PublicationBooks.AsNoTracking()
+            .SingleAsync(book => book.ProjectId == destination.Id)).RectoChapterStarts);
+        var importedEdition = await db.PublicationEditions.AsNoTracking()
+            .SingleAsync(edition => edition.ProjectId == destination.Id);
+        Assert.True(importedEdition.RectoChapterStarts);
+        Assert.Contains(
+            PublicationEditionOverrideField.RectoChapterStarts,
+            JsonSerializer.Deserialize<List<PublicationEditionOverrideField>>(
+                importedEdition.OverrideFieldsJson) ?? []);
     }
 
     private static T DefaultProxy<T>() where T : class =>

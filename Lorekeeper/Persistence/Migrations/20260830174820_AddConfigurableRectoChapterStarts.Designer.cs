@@ -3,6 +3,7 @@ using System;
 using Lorekeeper.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Lorekeeper.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260830174820_AddConfigurableRectoChapterStarts")]
+    partial class AddConfigurableRectoChapterStarts
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.5");
@@ -379,12 +382,12 @@ namespace Lorekeeper.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ConversationId", "CreatedAt");
-
                     b.HasIndex("ProjectId")
-                        .HasDatabaseName("IX_ContestBatches_ProjectId_Unresolved")
                         .IsUnique()
+                        .HasDatabaseName("IX_ContestBatches_ProjectId_Unresolved")
                         .HasFilter("\"Status\" IN ('Running', 'Completed', 'Failed')");
+
+                    b.HasIndex("ConversationId", "CreatedAt");
 
                     b.HasIndex("ProjectId", "Status", "CreatedAt");
 

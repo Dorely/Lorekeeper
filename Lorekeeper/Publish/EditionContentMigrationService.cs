@@ -32,6 +32,7 @@ public sealed class EditionContentMigrationService(
             await db.GetService<IMigrator>().MigrateAsync(AdditiveMigrationId, cancellationToken);
         await DatabaseStartupMigrationService.EnsureAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await DatabaseStartupMigrationService.EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsurePublicationSectionCompatibilityColumnsAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         if (await db.ManuscriptMigrationJournals.AsNoTracking().AnyAsync(

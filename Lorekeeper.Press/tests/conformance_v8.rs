@@ -658,6 +658,7 @@ fn digital_pdf_is_one_tagged_book_with_the_front_cover_as_page_one() {
 #[test]
 fn short_digital_pdf_does_not_receive_artificial_blank_pages() {
     let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["trim"]["rectoChapterStarts"] = Value::Bool(false);
     job.request["document"]["includeTableOfContents"] = Value::Bool(false);
     job.request["document"]["publicationSections"] = json!([]);
     job.request["document"]["sections"] = json!([{
@@ -674,6 +675,48 @@ fn short_digital_pdf_does_not_receive_artificial_blank_pages() {
     assert_eq!(
         inspection.page_count, 2,
         "front cover plus one semantic body page"
+    );
+}
+
+#[test]
+fn digital_pdf_next_page_chapter_starts_do_not_insert_interchapter_blanks() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["trim"]["rectoChapterStarts"] = Value::Bool(false);
+    job.request["document"]["includeTableOfContents"] = Value::Bool(false);
+    job.request["document"]["publicationSections"] = json!([]);
+    job.request["document"]["sections"] = two_short_chapters();
+    job.write_request();
+
+    let rendered = response(&job.render());
+    assert_eq!(chapter_block_pages(&rendered), [2, 3]);
+    assert_eq!(
+        inspect(&job.artifact(&rendered, "book-pdf")).page_count,
+        3,
+        "front cover plus two consecutive chapter pages"
+    );
+}
+
+#[test]
+fn digital_pdf_recto_chapter_starts_include_the_front_cover_in_parity() {
+    let mut job = PreparedJob::new("generic-digital-pdf-v1");
+    job.request["trim"]["rectoChapterStarts"] = Value::Bool(true);
+    job.request["document"]["includeTableOfContents"] = Value::Bool(false);
+    job.request["document"]["publicationSections"] = json!([]);
+    job.request["document"]["sections"] = two_short_chapters();
+    job.write_request();
+
+    let rendered = response(&job.render());
+    let chapter_pages = chapter_block_pages(&rendered);
+    assert_eq!(chapter_pages, [3, 5]);
+    assert!(
+        chapter_pages
+            .into_iter()
+            .all(|page| !page.is_multiple_of(2))
+    );
+    assert_eq!(
+        inspect(&job.artifact(&rendered, "book-pdf")).page_count,
+        5,
+        "cover and intentional verso blanks must precede both recto chapter pages"
     );
 }
 
@@ -3903,6 +3946,49 @@ fn artifact_value<'a>(response: &'a Value, kind: &str) -> &'a Value {
         .iter()
         .find(|artifact| artifact["kind"] == kind)
         .expect("artifact kind")
+}
+
+fn two_short_chapters() -> Value {
+    json!([{
+        "id": "act",
+        "title": "",
+        "includePage": false,
+        "includeHeading": false,
+        "chapters": [
+            {
+                "id": "chapter-one",
+                "title": "Chapter one",
+                "includeHeading": true,
+                "blocks": [{
+                    "id": "block-one",
+                    "type": "Paragraph",
+                    "content": [{"type": "Text", "text": "First short chapter.", "marks": []}]
+                }]
+            },
+            {
+                "id": "chapter-two",
+                "title": "Chapter two",
+                "includeHeading": true,
+                "blocks": [{
+                    "id": "block-two",
+                    "type": "Paragraph",
+                    "content": [{"type": "Text", "text": "Second short chapter.", "marks": []}]
+                }]
+            }
+        ]
+    }])
+}
+
+fn chapter_block_pages(response: &Value) -> [u64; 2] {
+    ["block-one", "block-two"].map(|block_id| {
+        response["pageMap"]
+            .as_array()
+            .expect("page map")
+            .iter()
+            .find(|entry| entry["blockId"] == block_id)
+            .and_then(|entry| entry["pageNumber"].as_u64())
+            .unwrap_or_else(|| panic!("missing page map for {block_id}"))
+    })
 }
 
 fn has_diagnostic(response: &Value, code: &str) -> bool {

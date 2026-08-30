@@ -92,11 +92,11 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   canon extraction, graph synchronization, and combined lexical/semantic
   retrieval. File ingest accepts up to 50 files together, creates one durable
   job per file sequentially, and keeps per-file success or failure visible.
-- Full project export format v24 preserves manuscript review annotations and only the Book Brief's selected
+- Full project export format v25 preserves manuscript review annotations and only the Book Brief's selected
   canonical ingest sources (source text, chunks, pages, blocks, metadata, and
   selection mapping), remaps their provenance on import, and rebuilds retrieval
   indexes without rerunning extraction. Project-reference links are intentionally
-  omitted from v24 exports; exports with outgoing links warn that imports never infer
+  omitted from v25 exports; exports with outgoing links warn that imports never infer
   links. Non-structural exports omit source bodies, selections, and evidence and
   report that omission.
 - Local version history captures deterministic checkpoints of the creative
@@ -222,6 +222,11 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   behavior across third-party readers remains an external compatibility check.
   Core PDF presentation can preserve a Designed Page as one wide or custom-sized
   PDF page; PDF ebook releases inherit that choice until explicitly customized.
+  Paginated Core and release outputs normally start each chapter on the next
+  available page without adding a blank. An optional **Start chapters on
+  right-hand pages** setting inserts only the leaves needed for odd-numbered
+  chapter starts; Digital PDF parity includes its front cover as page one, and
+  EPUB does not expose or apply this physical-page policy.
 - Lorekeeper-owned paperback, hardcover, and Digital PDF press jobs with cancellation/restart recovery,
   immutable SHA-256-verified interior and product-specific cover PDFs, in-app
   single/facing-page PDF viewing with an optional page seam and transparent
@@ -251,7 +256,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   content, flattened raster alpha and non-overlapping scene opacity, no transparent PDF objects, embedded subset fonts, ToUnicode maps, and a
   240% total-ink ceiling. These checks establish only the exact named
   Lorekeeper profile; they do not claim that a vendor accepted an upload.
-- Versioned project import/export (current v24 manuscript-v4/page-setup/
+- Versioned project import/export (current v25 manuscript-v4/page-setup/
   composition model, Core Book, sparse release overlays, edition chapter
   snapshots/compositions, exact-target review annotations, selected canonical source bodies/evidence, covers, custom-font binaries,
   and isolated older structured/text adapters) plus TXT, Markdown,

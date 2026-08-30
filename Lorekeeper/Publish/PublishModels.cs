@@ -99,7 +99,8 @@ public sealed record PublicationEditionSummary(
     double PageHeightInches,
     double PageMarginInches,
     bool Bleed,
-    bool AllowDesignedPageOverrides)
+    bool AllowDesignedPageOverrides,
+    bool RectoChapterStarts)
 {
     public string PrintProductKey { get; init; } = string.Empty;
     public PrintCoverMode PrintCoverMode { get; init; }
@@ -144,7 +145,8 @@ public sealed record PublicationEditionView(
     PrintCoverMode PrintCoverMode,
     string GenericPrintTemplateJson,
     bool Bleed,
-    bool AllowDesignedPageOverrides)
+    bool AllowDesignedPageOverrides,
+    bool RectoChapterStarts)
 {
     public bool InheritsCoreCover { get; init; }
     public bool EditionSpecificContentEnabled { get; init; }
@@ -165,6 +167,7 @@ public sealed record PublicationReleaseOverridePatch(
     PrintCoverMode? PrintCoverMode = null,
     string? GenericPrintTemplateJson = null,
     bool? AllowDesignedPageOverrides = null,
+    bool? RectoChapterStarts = null,
     string? Title = null,
     string? Subtitle = null,
     string? Author = null,
@@ -308,6 +311,7 @@ public sealed record PublishDocumentProfile(
     double BodyLineHeight)
 {
     public bool AllowDesignedPageOverrides { get; init; }
+    public bool RectoChapterStarts { get; init; }
 }
 
 public sealed record PublishSectionDocument(

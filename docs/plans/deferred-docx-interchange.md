@@ -173,8 +173,8 @@ Assistant parity remains compact:
 Use a protected startup migration to advance manuscript-v4 documents to v5
 while preserving IDs, text, styles, Figures, Designed Pages, edition snapshots,
 compositions, sidecar review annotations, and artifacts. Project export/import
-is already v24 for annotations; advance it again only if the schema-v5 payload
-requires another boundary version.
+is already v25 for the paginated chapter-start policy; advance it again only if
+the schema-v5 payload requires another boundary version.
 
 Only approved Lorekeeper migration/import fixtures are added or changed. Press
 TDD covers the PDF-facing behavior of lists, tables, notes, callouts, columns,

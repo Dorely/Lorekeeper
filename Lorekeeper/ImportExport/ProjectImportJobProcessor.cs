@@ -732,6 +732,14 @@ public sealed class ProjectImportJobProcessor(
 
     internal static void ValidatePublicationPayloads(ProjectExportDocument document)
     {
+        if (document.FormatVersion < 25
+            && ((document.PublicationBook?.RectoChapterStarts ?? false)
+                || document.PublicationEditions.Any(edition => edition.RectoChapterStarts
+                    || edition.OverrideFields.Contains(PublicationEditionOverrideField.RectoChapterStarts))))
+        {
+            throw new InvalidOperationException(
+                $"Import file contains recto chapter-start data introduced after export format v{document.FormatVersion}.");
+        }
         if (document.FormatVersion < 10) return;
         if (document.PublicationEditions.GroupBy(edition => edition.Id).Any(group => group.Count() > 1)
             || document.PublicationEditions.GroupBy(
@@ -2184,6 +2192,7 @@ public sealed class ProjectImportJobProcessor(
             GenericPrintTemplateJson = formatVersion >= 20 ? importedEdition.GenericPrintTemplateJson : string.Empty,
             Bleed = importedEdition.Bleed,
             AllowDesignedPageOverrides = importedEdition.AllowDesignedPageOverrides,
+            RectoChapterStarts = importedEdition.RectoChapterStarts,
             OverrideFieldsJson = formatVersion >= 16
                 ? JsonSerializer.Serialize(importedEdition.OverrideFields.Where(Enum.IsDefined))
                 : "[]",
@@ -2647,6 +2656,7 @@ public sealed class ProjectImportJobProcessor(
             NumberActs = imported.NumberActs,
             NumberChapters = imported.NumberChapters,
             TitlePageMode = imported.TitlePageMode,
+            RectoChapterStarts = imported.RectoChapterStarts,
             PdfPresentation = new PublicationBookPdfPresentation
             {
                 ProjectId = projectId,
@@ -2766,6 +2776,7 @@ public sealed class ProjectImportJobProcessor(
             NumberActs = source?.NumberActs ?? false,
             NumberChapters = source?.NumberChapters ?? false,
             TitlePageMode = source?.TitlePageMode ?? PublishTitlePageMode.Automatic,
+            RectoChapterStarts = source?.RectoChapterStarts ?? false,
             PdfPresentation = new PublicationBookPdfPresentation
             {
                 ProjectId = projectId,
@@ -3568,6 +3579,7 @@ public sealed class ProjectImportJobProcessor(
             edition.PrintCoverMode,
             edition.GenericPrintTemplateJson,
             edition.Bleed,
+            edition.RectoChapterStarts,
             edition.PageWidthInches,
             edition.PageHeightInches,
             edition.PageMarginInches,
@@ -3633,6 +3645,7 @@ public sealed class ProjectImportJobProcessor(
             StringComparison.Ordinal)
         && existing.Bleed == imported.Bleed
         && existing.AllowDesignedPageOverrides == imported.AllowDesignedPageOverrides
+        && existing.RectoChapterStarts == imported.RectoChapterStarts
         && existing.PageWidthInches.Equals(imported.PageWidthInches)
         && existing.PageHeightInches.Equals(imported.PageHeightInches)
         && existing.PageMarginInches.Equals(imported.PageMarginInches)

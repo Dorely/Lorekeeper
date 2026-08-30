@@ -513,6 +513,7 @@ public sealed class PublishService(
         NumberActs = core.NumberActs,
         NumberChapters = core.NumberChapters,
         TitlePageMode = core.TitlePageMode,
+        RectoChapterStarts = core.RectoChapterStarts,
         AllowDesignedPageOverrides = core.AllowDesignedPageOverrides,
         PageWidthInches = core.PageSetup.PageWidthInches,
         PageHeightInches = core.PageSetup.PageHeightInches,
@@ -578,6 +579,7 @@ public sealed class PublishService(
             profile.BodyLineHeight)
         {
             AllowDesignedPageOverrides = profile.AllowDesignedPageOverrides,
+            RectoChapterStarts = profile.RectoChapterStarts,
         };
 
     private static bool IncludeTitlePage(PublicationEdition profile) => profile.TitlePageMode switch

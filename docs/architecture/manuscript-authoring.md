@@ -410,7 +410,7 @@ removing obsolete runtime fields through forward migrations. Historical
 migration names and source version numbers remain accurate even though v4 is
 current.
 
-Project export v24 writes v4 manuscripts, Core/release annotation rows, page
+Project export v25 writes v4 manuscripts, Core/release annotation rows, page
 setup and compositions, style definitions, release snapshots, and current
 publication content. Older manuscript inputs are accepted only through isolated
 versioned transformers. Search, context, TXT, Markdown, EPUB, Read preview, and

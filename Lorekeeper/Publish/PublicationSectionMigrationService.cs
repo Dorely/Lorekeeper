@@ -41,6 +41,7 @@ public sealed class PublicationSectionMigrationService(
         }
         await DatabaseStartupMigrationService.EnsureAuthoringHistoryCompatibilityColumnsAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsurePublicationSectionOrderCompatibilityColumnAsync(db, cancellationToken);
+        await DatabaseStartupMigrationService.EnsureRectoChapterStartsCompatibilityColumnsAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsurePublicationSectionStartSideCompatibilityColumnAsync(db, cancellationToken);
         await DatabaseStartupMigrationService.EnsurePrintProductCompatibilityColumnsAsync(db, cancellationToken);
         await EnsureAuthoringTriggersAsync(db, cancellationToken);

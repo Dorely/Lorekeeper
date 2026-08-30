@@ -639,6 +639,7 @@ public sealed class ProjectImportExportService(
             PrintFinish = profile.PrintFinish,
             PrintCoverMode = profile.PrintCoverMode,
             GenericPrintTemplateJson = profile.GenericPrintTemplateJson,
+            RectoChapterStarts = profile.RectoChapterStarts,
             OverrideFields = ParseOverrideFields(profile.OverrideFieldsJson),
             InheritsCoreCover = profile.InheritsCoreCover,
             EditionSpecificContentEnabled = profile.EditionSpecificContentEnabled,
@@ -669,6 +670,7 @@ public sealed class ProjectImportExportService(
             PublicationBarcodeMode.None, 50, 50, book.CoverDesign.CompositionSceneJson, book.CoverDesign.Revision))
     {
         AllowDesignedPageOverrides = book.PdfPresentation?.AllowDesignedPageOverrides ?? false,
+        RectoChapterStarts = book.RectoChapterStarts,
     };
 
     private static List<PublicationEditionOverrideField> ParseOverrideFields(string json)

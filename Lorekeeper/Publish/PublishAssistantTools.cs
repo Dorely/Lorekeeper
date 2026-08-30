@@ -651,7 +651,7 @@ public sealed class PublishAssistantTools(
             values = new { book.Title, book.Subtitle, book.Author, book.Language, book.Publisher, book.Copyright, book.Description,
                 book.IncludeTableOfContents, book.IncludeVisibleTableOfContents, book.IncludeActSynopses, book.IncludeChapterSynopses,
                 book.IncludeActHeadings, book.IncludeChapterHeadings, book.NumberActs, book.NumberChapters, book.TitlePageMode,
-                book.AllowDesignedPageOverrides, book.PageSetup },
+                book.AllowDesignedPageOverrides, book.RectoChapterStarts, book.PageSetup },
             coverRevision = book.CoverRevision });
     }
 
@@ -1257,6 +1257,7 @@ public sealed class PublishAssistantTools(
                     workspace.Edition.NumberActs,
                     workspace.Edition.NumberChapters,
                     workspace.Edition.TitlePageMode,
+                    workspace.Edition.RectoChapterStarts,
                     workspace.Edition.PageWidthInches,
                     workspace.Edition.PageHeightInches,
                     workspace.Edition.PageMarginInches,

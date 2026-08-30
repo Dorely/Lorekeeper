@@ -431,6 +431,7 @@ public sealed class LorekeeperPressMigrationTests
                 Assert.Equal(PrintFinish.Matte, edition.PrintFinish);
                 Assert.Equal(PrintCoverMode.Simplex, edition.PrintCoverMode);
                 Assert.Equal("{}", edition.PublicationSectionOrderJson);
+                Assert.False(edition.RectoChapterStarts);
                 Assert.Equal(10, edition.Revision);
                 Assert.True(edition.EditionSpecificContentEnabled);
                 Assert.Equal("custom-profile-v9", unknownEdition.VendorProfileVersion);
@@ -450,6 +451,7 @@ public sealed class LorekeeperPressMigrationTests
                 var coreBook = await db.PublicationBooks.AsNoTracking().SingleAsync(item => item.ProjectId == projectId);
                 Assert.Equal("Existing title", coreBook.Title);
                 Assert.Equal("Author", coreBook.Author);
+                Assert.False(coreBook.RectoChapterStarts);
                 Assert.Single(await db.PublicationBookOutlineItems.AsNoTracking()
                     .Where(item => item.ProjectId == coreBook.ProjectId)
                     .ToListAsync());

@@ -725,6 +725,7 @@ else
             @Toggle("Include chapter summaries", _coreDraft.IncludeChapterSynopses, value => CoreToggle(nameof(CoreDraft.IncludeChapterSynopses), value))
             @Toggle("Number acts", _coreDraft.NumberActs, value => CoreToggle(nameof(CoreDraft.NumberActs), value))
             @Toggle("Number chapters", _coreDraft.NumberChapters, value => CoreToggle(nameof(CoreDraft.NumberChapters), value))
+            @ToggleWithHelp("Start chapters on right-hand pages", "Blank pages are added only when needed so each chapter begins on a right-hand page.", _coreDraft.RectoChapterStarts, value => CoreToggle(nameof(CoreDraft.RectoChapterStarts), value))
         }
         else
         {
@@ -736,6 +737,10 @@ else
             @InheritedToggle("Chapter summaries", PublicationEditionOverrideField.IncludeChapterSynopses, _releaseDraft.IncludeChapterSynopses, value => ReleaseToggle(nameof(ReleaseDraft.IncludeChapterSynopses), value))
             @InheritedToggle("Number acts", PublicationEditionOverrideField.NumberActs, _releaseDraft.NumberActs, value => ReleaseToggle(nameof(ReleaseDraft.NumberActs), value))
             @InheritedToggle("Number chapters", PublicationEditionOverrideField.NumberChapters, _releaseDraft.NumberChapters, value => ReleaseToggle(nameof(ReleaseDraft.NumberChapters), value))
+            @if (_workspace!.Edition.Format != PublicationEditionFormat.Epub)
+            {
+                @InheritedToggleWithHelp("Start chapters on right-hand pages", "Blank pages are added only when needed so each chapter begins on a right-hand page.", PublicationEditionOverrideField.RectoChapterStarts, _releaseDraft.RectoChapterStarts, value => ReleaseToggle(nameof(ReleaseDraft.RectoChapterStarts), value))
+            }
         }
     </div>;
 
@@ -884,6 +889,8 @@ else
 
     private RenderFragment Toggle(string Label, bool Value, Action<bool> Changed) => @<label class="check-row"><input type="checkbox" checked="@Value" @onchange="e => Changed((bool)e.Value!)" /><span>@Label</span></label>;
 
+    private RenderFragment ToggleWithHelp(string Label, string Help, bool Value, Action<bool> Changed) => @<label class="check-row"><input type="checkbox" checked="@Value" @onchange="e => Changed((bool)e.Value!)" /><span><strong>@Label</strong><small>@Help</small></span></label>;
+
     private RenderFragment InheritedText(string Label, PublicationEditionOverrideField Field, string Value, Action<string?> Changed) => @<div class="inherited-field">
         <div class="inherited-heading"><label>@Label</label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>Customize</span></label></div>
         <input class="form-control" disabled="@(!_releaseOverrides.Contains(Field))" value="@Value" @oninput="e => Changed(e.Value?.ToString())" />
@@ -906,6 +913,8 @@ else
     </select>;
 
     private RenderFragment InheritedToggle(string Label, PublicationEditionOverrideField Field, bool Value, Action<bool> Changed) => @<div class="inherited-toggle"><label class="check-row"><input type="checkbox" disabled="@(!_releaseOverrides.Contains(Field))" checked="@Value" @onchange="e => Changed((bool)e.Value!)" /><span>@Label</span></label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>Customize</span></label></div>;
+
+    private RenderFragment InheritedToggleWithHelp(string Label, string Help, PublicationEditionOverrideField Field, bool Value, Action<bool> Changed) => @<div class="inherited-toggle"><label class="check-row"><input type="checkbox" disabled="@(!_releaseOverrides.Contains(Field))" checked="@Value" @onchange="e => Changed((bool)e.Value!)" /><span><strong>@Label</strong><small>@Help</small></span></label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>Customize</span></label></div>;
 
     private async Task ReloadPreparationsAsync(PublicationTargetKind targetKind, Guid? editionId)
     {
@@ -1508,7 +1517,7 @@ else
         try
         {
             if (_coreDirty)
-                _core = await Books.UpdateAsync(Project.Id, new PublicationBookPatch(_core.Revision, _coreDraft.Title, _coreDraft.Subtitle, _coreDraft.Author, _coreDraft.Language, _coreDraft.Publisher, _coreDraft.Copyright, _coreDraft.Description, _coreDraft.IncludeTableOfContents, _coreDraft.IncludeVisibleTableOfContents, _coreDraft.IncludeActSynopses, _coreDraft.IncludeChapterSynopses, _coreDraft.IncludeActHeadings, _coreDraft.IncludeChapterHeadings, _coreDraft.NumberActs, _coreDraft.NumberChapters, _coreDraft.TitlePageMode, _coreDraft.AllowDesignedPageOverrides));
+                _core = await Books.UpdateAsync(Project.Id, new PublicationBookPatch(_core.Revision, _coreDraft.Title, _coreDraft.Subtitle, _coreDraft.Author, _coreDraft.Language, _coreDraft.Publisher, _coreDraft.Copyright, _coreDraft.Description, _coreDraft.IncludeTableOfContents, _coreDraft.IncludeVisibleTableOfContents, _coreDraft.IncludeActSynopses, _coreDraft.IncludeChapterSynopses, _coreDraft.IncludeActHeadings, _coreDraft.IncludeChapterHeadings, _coreDraft.NumberActs, _coreDraft.NumberChapters, _coreDraft.TitlePageMode, _coreDraft.AllowDesignedPageOverrides, _coreDraft.RectoChapterStarts));
             if (_coreOutlineDirty)
                 _core = await Books.SetOutlineSelectionsAsync(Project.Id, _coreSelections.Select(item => new PublicationEditionOutlineItemUpdate(item.Key.Kind, item.Key.Id, item.Value)).ToList(), _core.Revision);
             if (saveVersion == _formChangeVersion)
@@ -1648,6 +1657,7 @@ else
                     revision, _releaseDraft.Name, _releaseDraft.Vendor, _releaseDraft.Isbn,
                     _releaseDraft.PrintProductKey, _releaseDraft.PrintFinish, _releaseDraft.PrintCoverMode, _releaseDraft.GenericPrintTemplateJson,
                     BoolValue(PublicationEditionOverrideField.AllowDesignedPageOverrides, _releaseDraft.AllowDesignedPageOverrides),
+                    BoolValue(PublicationEditionOverrideField.RectoChapterStarts, _releaseDraft.RectoChapterStarts),
                     Value(PublicationEditionOverrideField.Title, _releaseDraft.Title), Value(PublicationEditionOverrideField.Subtitle, _releaseDraft.Subtitle),
                     Value(PublicationEditionOverrideField.Author, _releaseDraft.Author), Value(PublicationEditionOverrideField.Language, _releaseDraft.Language),
                     Value(PublicationEditionOverrideField.Publisher, _releaseDraft.Publisher), Value(PublicationEditionOverrideField.Copyright, _releaseDraft.Copyright),
@@ -2520,16 +2530,16 @@ else
     private sealed class CoreDraft
     {
         public string Title { get; set; } = ""; public string Subtitle { get; set; } = ""; public string Author { get; set; } = ""; public string Language { get; set; } = "en"; public string Publisher { get; set; } = ""; public string Copyright { get; set; } = ""; public string Description { get; set; } = "";
-        public bool IncludeTableOfContents { get; set; } public bool IncludeVisibleTableOfContents { get; set; } public bool IncludeActSynopses { get; set; } public bool IncludeChapterSynopses { get; set; } public bool IncludeActHeadings { get; set; } public bool IncludeChapterHeadings { get; set; } public bool NumberActs { get; set; } public bool NumberChapters { get; set; } public PublishTitlePageMode TitlePageMode { get; set; } public bool AllowDesignedPageOverrides { get; set; }
-        public static CoreDraft From(PublicationBookView item) => new() { Title = item.Title, Subtitle = item.Subtitle, Author = item.Author, Language = item.Language, Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, TitlePageMode = item.TitlePageMode, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides };
+        public bool IncludeTableOfContents { get; set; } public bool IncludeVisibleTableOfContents { get; set; } public bool IncludeActSynopses { get; set; } public bool IncludeChapterSynopses { get; set; } public bool IncludeActHeadings { get; set; } public bool IncludeChapterHeadings { get; set; } public bool NumberActs { get; set; } public bool NumberChapters { get; set; } public PublishTitlePageMode TitlePageMode { get; set; } public bool AllowDesignedPageOverrides { get; set; } public bool RectoChapterStarts { get; set; }
+        public static CoreDraft From(PublicationBookView item) => new() { Title = item.Title, Subtitle = item.Subtitle, Author = item.Author, Language = item.Language, Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, TitlePageMode = item.TitlePageMode, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, RectoChapterStarts = item.RectoChapterStarts };
     }
 
     private sealed class ReleaseDraft
     {
-        public string Name { get; set; } = ""; public PublicationVendor Vendor { get; set; } public string Isbn { get; set; } = ""; public string PrintProductKey { get; set; } = ""; public PrintFinish PrintFinish { get; set; } public PrintCoverMode PrintCoverMode { get; set; } public string GenericPrintTemplateJson { get; set; } = ""; public bool AllowDesignedPageOverrides { get; set; }
+        public string Name { get; set; } = ""; public PublicationVendor Vendor { get; set; } public string Isbn { get; set; } = ""; public string PrintProductKey { get; set; } = ""; public PrintFinish PrintFinish { get; set; } public PrintCoverMode PrintCoverMode { get; set; } public string GenericPrintTemplateJson { get; set; } = ""; public bool AllowDesignedPageOverrides { get; set; } public bool RectoChapterStarts { get; set; }
         public string Title { get; set; } = ""; public string Subtitle { get; set; } = ""; public string Author { get; set; } = ""; public string Language { get; set; } = ""; public string Publisher { get; set; } = ""; public string Copyright { get; set; } = ""; public string Description { get; set; } = "";
         public bool IncludeTableOfContents { get; set; } public bool IncludeVisibleTableOfContents { get; set; } public bool IncludeActSynopses { get; set; } public bool IncludeChapterSynopses { get; set; } public bool IncludeActHeadings { get; set; } public bool IncludeChapterHeadings { get; set; } public bool NumberActs { get; set; } public bool NumberChapters { get; set; }
         public double PageWidthInches { get; set; } public double PageHeightInches { get; set; } public double PageMarginInches { get; set; }
-        public static ReleaseDraft From(PublicationEditionView item) => new() { Name = item.Name, Vendor = item.Vendor, Isbn = item.Isbn, PrintProductKey = item.PrintProductKey, PrintFinish = item.PrintFinish, PrintCoverMode = item.PrintCoverMode, GenericPrintTemplateJson = item.GenericPrintTemplateJson, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, Title = item.TitleOverride, Subtitle = item.Subtitle, Author = item.Author, Language = PublicationLanguage.Normalize(item.Language), Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, PageWidthInches = item.PageWidthInches, PageHeightInches = item.PageHeightInches, PageMarginInches = item.PageMarginInches };
+        public static ReleaseDraft From(PublicationEditionView item) => new() { Name = item.Name, Vendor = item.Vendor, Isbn = item.Isbn, PrintProductKey = item.PrintProductKey, PrintFinish = item.PrintFinish, PrintCoverMode = item.PrintCoverMode, GenericPrintTemplateJson = item.GenericPrintTemplateJson, AllowDesignedPageOverrides = item.AllowDesignedPageOverrides, RectoChapterStarts = item.RectoChapterStarts, Title = item.TitleOverride, Subtitle = item.Subtitle, Author = item.Author, Language = PublicationLanguage.Normalize(item.Language), Publisher = item.Publisher, Copyright = item.Copyright, Description = item.Description, IncludeTableOfContents = item.IncludeTableOfContents, IncludeVisibleTableOfContents = item.IncludeVisibleTableOfContents, IncludeActSynopses = item.IncludeActSynopses, IncludeChapterSynopses = item.IncludeChapterSynopses, IncludeActHeadings = item.IncludeActHeadings, IncludeChapterHeadings = item.IncludeChapterHeadings, NumberActs = item.NumberActs, NumberChapters = item.NumberChapters, PageWidthInches = item.PageWidthInches, PageHeightInches = item.PageHeightInches, PageMarginInches = item.PageMarginInches };
     }
 }

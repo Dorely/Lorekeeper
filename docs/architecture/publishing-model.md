@@ -24,9 +24,10 @@ ready merely because a render completed.
 `IPublicationBookService` owns the one-to-one revisioned Core Book per project.
 It owns shared bibliographic metadata, language, title/contents and heading
 presentation, fixed outline content, chapter inclusion, Core publication
-sections, project-linked page setup usage, Digital PDF presentation defaults,
-and the reusable Core front-cover scene. Core exists even when no publication
-release exists and can produce only a private `ReadingPdf`.
+sections, project-linked page setup usage, the shared paginated chapter-start
+policy, Digital PDF presentation defaults, and the reusable Core front-cover
+scene. Core exists even when no publication release exists and can produce only
+a private `ReadingPdf`.
 
 `IPublicationSectionService` owns matter around the fixed Core outline. A
 publication section is either a semantic prose document with optional flowing
@@ -78,6 +79,13 @@ settings determine whether act presentation is emitted. Chapter rows are
 selectable publication content. Core owns shared title/author/language
 metadata, chapter inclusion, publication sections, page setup and Book Text
 Styles through their respective services, and the reusable front cover.
+Core also owns the chapter-start policy for paginated output. It defaults to
+next available page, which never adds a chapter-parity blank. The optional
+right-hand policy adds a blank only when needed to place a chapter opening on a
+recto leaf. Reading PDF, Digital PDF, paperback, and hardcover use the effective
+policy; EPUB has no fixed leaf parity and neither shows nor applies it. Releases
+inherit the Core policy live and may store one sparse override, with reset
+returning to Core inheritance.
 The current Core page aspect also supplies the default provider-valid raster for
 free-standing image generation and editing throughout the application; concrete
 Figure, page, frame, and cover targets retain their own exact geometry.

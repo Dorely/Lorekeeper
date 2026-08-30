@@ -84,6 +84,7 @@ public class PublicationEdition
     public bool NumberActs { get; set; }
     public bool NumberChapters { get; set; }
     public PublishTitlePageMode TitlePageMode { get; set; } = PublishTitlePageMode.Automatic;
+    public bool RectoChapterStarts { get; set; }
     public string PrintRegistryVersion { get; set; } = string.Empty;
     public string PrintProductKey { get; set; } = string.Empty;
     public PrintFinish PrintFinish { get; set; } = PrintFinish.Matte;
