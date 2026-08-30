@@ -7,6 +7,7 @@ public sealed class ImagesChatToolContext(
     Guid conversationId,
     int providerId,
     bool visionReady,
+    IReadOnlyList<ProjectImageView> attachedImages,
     Action onMutated,
     CancellationToken turnCancellationToken)
 {
@@ -14,6 +15,9 @@ public sealed class ImagesChatToolContext(
     private readonly List<ProjectImageView> _modelOnlyImages = [];
     private readonly List<ImagesChatModelOnlyImage> _modelOnlyImagePayloads = [];
     private readonly HashSet<Guid> _imageGenerationJobIds = [];
+    private readonly IReadOnlyDictionary<Guid, ProjectImageView> _attachedImages = attachedImages
+        .DistinctBy(image => image.Id)
+        .ToDictionary(image => image.Id);
 
     public Guid ProjectId { get; } = projectId;
     public Guid ConversationId { get; } = conversationId;
@@ -59,6 +63,9 @@ public sealed class ImagesChatToolContext(
         _modelOnlyImages.Clear();
         return result;
     }
+
+    public ProjectImageView? FindAttachedImage(Guid imageId) =>
+        _attachedImages.GetValueOrDefault(imageId);
 
     public void AddModelOnlyImage(ProjectImageView image, byte[] data)
     {

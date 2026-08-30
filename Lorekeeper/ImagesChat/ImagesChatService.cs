@@ -19,6 +19,8 @@ namespace Lorekeeper.ImagesChat;
 public sealed class ImagesChatService(
     IChatImageAttachmentService imageAttachments, IAppDatabaseOperationFactory database, IContextBuilder contextBuilder, ILlmProviderService providerService, IChatClientFactory chatClientFactory, IProjectImageService projectImages, IEntityVisualContextService entityVisualContext, ImagesChatTools tools, ChatTurnRuntime turnRuntime, ChatTurnEngine turnEngine, IOptions<AgentOptions> options, ILogger<ImagesChatService> logger) : IImagesChatService
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     public const string ImagesWorkflowInstructions = """
         You are Lorekeeper's Images assistant: the concept-art and visual-canon workspace for a long-form writing project.
 
@@ -32,6 +34,7 @@ public sealed class ImagesChatService(
         - Work only in the project image library, entity canonical references, and the approved Book Brief Visual Direction. Do not modify manuscript content, Figures, Designed Pages, page setup, covers, publication sections, or chapter context.
         - When a request belongs to page illustration or composition, direct the user to Editor. When it belongs to publication sections or covers, direct the user to Publish. You may still create reusable concept art when that is the actual request, but never imply that it was placed in the book.
         - Generate or edit unattached project images with generate_project_image or edit_project_image. These tools wait for completion; after a successful job, the generated images are supplied back to your model context when the provider supports vision.
+        - Every image attached to the current turn is already supplied with its complete project-library metadata and, for a vision-ready provider, its full pixels. Treat that attachment snapshot as authoritative for the turn. Do not call list_project_images or read_project_image to rediscover or reload an attached image; use its supplied ID directly when it belongs in references.
         - Inspect completed outputs before describing them as successful. Attach an image to an entity only when the user has approved it as a stable canonical reference; exploratory art remains unattached.
         - Save Visual Direction only after explicit user approval. Read its exact current value immediately before saving and preserve it when the user is still exploring.
         - Reconnect with read_project_image_job or wait_project_image_job when a prior generation/edit job must be resumed; never replay its prompt. Cancel with cancel_project_image_job when requested or when a wait times out.
@@ -271,9 +274,20 @@ public sealed class ImagesChatService(
             yield return new ImagesChatTurnError("The active chat provider has not passed the vision check. Run Test in Settings > Providers before sending images.", Cancelled: false);
             yield break;
         }
-        await imageAttachments.ResolveAsync(projectId, imageIds, cancellationToken);
+        var messageImageIds = imageIds
+            .Where(imageId => imageId != Guid.Empty)
+            .Distinct()
+            .ToList();
+        if (messageImageIds.Count > 4)
+            throw new InvalidOperationException("Attach no more than four images to one message.");
+
         var turnAttachments = await ListAttachmentsAsync(projectId, cancellationToken);
-        var allTurnImageIds = imageIds.Concat(turnAttachments.Select(attachment => attachment.ImageId)).Distinct().ToList();
+        var allTurnImageIds = messageImageIds
+            .Concat(turnAttachments.Select(attachment => attachment.ImageId))
+            .Distinct()
+            .ToList();
+        var turnImages = await ResolveTurnImagesAsync(projectId, allTurnImageIds, cancellationToken);
+        var attachmentLabels = turnAttachments.ToDictionary(attachment => attachment.ImageId, attachment => attachment.Label);
         var nextOrder = await turnEngine.ReadAsync(
             repositories => repositories.ProjectImageConversations,
             conversations => conversations.GetMaxOrderAsync(conversation.Id, cancellationToken),
@@ -288,8 +302,8 @@ public sealed class ImagesChatService(
         };
         conversation.UpdatedAt = DateTime.UtcNow;
         await turnEngine.AddMessageAsync(repositories => repositories.ProjectImageConversations, userMessage, cancellationToken);
-        await imageAttachments.PersistAsync(projectId, ChatTurnSurface.Images, userMessage.Id, imageIds, cancellationToken);
-        var additionalContextAttachments = turnAttachments.Where(attachment => !imageIds.Contains(attachment.ImageId)).ToList();
+        await imageAttachments.PersistAsync(projectId, ChatTurnSurface.Images, userMessage.Id, messageImageIds, cancellationToken);
+        var additionalContextAttachments = turnAttachments.Where(attachment => !messageImageIds.Contains(attachment.ImageId)).ToList();
         if (additionalContextAttachments.Count > 0)
             await PersistVisualsAsync(userMessage.Id, toolCallId: null, BuildAttachmentVisuals(additionalContextAttachments));
 
@@ -315,7 +329,14 @@ public sealed class ImagesChatService(
                 cancellationToken);
             systemPrompt = initialAssembly.Assemble();
             chat = await chatClientFactory.CreateChatClientAsync(chatProvider.Id, cancellationToken);
-            toolContext = new ImagesChatToolContext(projectId, conversation.Id, chatProvider.Id, visionReady, OnToolMutated, cancellationToken);
+            toolContext = new ImagesChatToolContext(
+                projectId,
+                conversation.Id,
+                chatProvider.Id,
+                visionReady,
+                turnImages,
+                OnToolMutated,
+                cancellationToken);
             aiTools = await tools.BuildAsync(toolContext, cancellationToken);
         }
         catch (Exception ex)
@@ -350,21 +371,15 @@ public sealed class ImagesChatService(
         }
         foreach (var persistedMessage in history)
         {
-            if (persistedMessage.Id == userMessage.Id && allTurnImageIds.Count > 0)
+            if (persistedMessage.Id == userMessage.Id && turnImages.Count > 0)
             {
-                if (visionReady)
-                {
-                    messages.Add(await imageAttachments.BuildUserMessageAsync(
-                        projectId,
-                        persistedMessage.Content,
-                        allTurnImageIds,
-                        "Current-turn attached images follow. Treat them as user-provided visual context. When generating or editing a continuity-related image, pass only relevant attached image IDs with explicit roles in references.",
-                        cancellationToken));
-                }
-                else
-                {
-                    messages.Add(await BuildUserMessageWithAttachmentsAsync(projectId, persistedMessage.Content, turnAttachments, visionReady, cancellationToken));
-                }
+                messages.Add(await BuildUserMessageWithAttachedImagesAsync(
+                    projectId,
+                    persistedMessage.Content,
+                    turnImages,
+                    attachmentLabels,
+                    visionReady,
+                    cancellationToken));
                 continue;
             }
 
@@ -621,37 +636,61 @@ public sealed class ImagesChatService(
         await databaseOperation.SaveChangesAsync(CancellationToken.None);
     }
 
-    private async Task<ChatMessage> BuildUserMessageWithAttachmentsAsync(
+    private async Task<IReadOnlyList<ProjectImageView>> ResolveTurnImagesAsync(
+        Guid projectId,
+        IReadOnlyList<Guid> imageIds,
+        CancellationToken cancellationToken)
+    {
+        if (imageIds.Count == 0)
+            return [];
+
+        var images = await projectImages.ListByIdsAsync(projectId, imageIds, cancellationToken);
+        var byId = images.ToDictionary(image => image.Id);
+        if (byId.Count != imageIds.Count)
+            throw new InvalidOperationException("One or more Images Chat attachments no longer exist in this project.");
+
+        return imageIds.Select(imageId => byId[imageId]).ToList();
+    }
+
+    private async Task<ChatMessage> BuildUserMessageWithAttachedImagesAsync(
         Guid projectId,
         string userText,
-        IReadOnlyList<ProjectImageChatAttachmentView> attachments,
+        IReadOnlyList<ProjectImageView> images,
+        IReadOnlyDictionary<Guid, string> attachmentLabels,
         bool visionReady,
         CancellationToken cancellationToken)
     {
         var contents = new List<AIContent>
         {
             new TextContent(userText),
-            new TextContent("\nCurrent-turn attached images follow. Treat them as user-provided visual context. When generating or editing a continuity-related image, pass only relevant attached image IDs with explicit roles in references."),
+            new TextContent(visionReady
+                ? "\nCurrent-turn attached images follow with complete project-library metadata and full pixels. This snapshot is already authoritative for the turn: do not call list_project_images or read_project_image for these IDs. When generating or editing, pass only relevant attached image IDs with explicit roles in references."
+                : "\nCurrent-turn attached images follow with complete project-library metadata. The active provider is not vision-ready, so pixels are unavailable. Do not call list_project_images or read_project_image for these IDs."),
+            new TextContent(JsonSerializer.Serialize(new
+            {
+                attachedImages = images.Select(image => new
+                {
+                    attachmentLabel = attachmentLabels.GetValueOrDefault(image.Id)
+                        ?? (string.IsNullOrWhiteSpace(image.AltText) ? image.FileName : image.AltText),
+                    libraryMetadata = ImagesChatImagePayload.From(image),
+                }),
+            }, JsonOptions)),
         };
 
-        foreach (var attachment in attachments)
+        foreach (var image in images)
         {
-            contents.Add(new TextContent($"\nAttached image {attachment.ImageId:N}: {attachment.Label} ({attachment.FileName})"));
             if (!visionReady)
                 continue;
 
-            var data = await projectImages.GetDataAsync(projectId, attachment.ImageId, cancellationToken: cancellationToken);
-            if (data is null)
-                continue;
+            var data = await projectImages.GetDataAsync(projectId, image.Id, cancellationToken: cancellationToken)
+                ?? throw new InvalidOperationException($"Attached image {image.FileName} is no longer available.");
 
+            contents.Add(new TextContent($"\nFull pixels for attached project image {image.Id:N} ({image.FileName}) follow."));
             contents.Add(new DataContent(data.Data, data.ContentType)
             {
                 Name = data.FileName,
             });
         }
-
-        if (!visionReady)
-            contents.Add(new TextContent("\nThe active chat provider is not vision-ready, so only attachment metadata is available."));
 
         return new ChatMessage(ChatRole.User, contents);
     }

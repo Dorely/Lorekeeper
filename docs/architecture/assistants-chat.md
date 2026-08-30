@@ -92,6 +92,17 @@ send. They are outside SQLite, backups, and project export; clearing site data
 removes them. Temporary selected attachments are not part of the draft, while
 pasted or uploaded images are normal project assets and message associations.
 
+Images Chat builds one authoritative snapshot of the union of current-message
+and persistent conversation attachments at the start of each turn. The provider
+receives an ordered attachment manifest containing each image's complete project-
+library metadata and, when the selected provider is vision-ready, the full
+image bytes. That same snapshot is available to the Images tool context:
+`list_project_images` excludes its IDs and `read_project_image` short-circuits
+them without another repository read or another visual delivery. Because
+cross-turn replay remains text-only and providers do not retain Lorekeeper's
+binary context, a later turn must resolve and resubmit its persistent attachment
+bytes once; this is distinct from redundant tool-driven rereads within a turn.
+
 ### Model selection, tokens, and compaction
 
 Each conversation's nullable `SelectedProviderId` is a soft reference. `null`

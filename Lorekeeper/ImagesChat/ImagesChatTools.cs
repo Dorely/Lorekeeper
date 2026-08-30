@@ -82,12 +82,12 @@ public sealed class ImagesChatTools(
             AIFunctionFactory.Create(
                 method: () => ListProjectImagesAsync(context),
                 name: "list_project_images",
-                description: "List project image library metadata, ids, preview URLs, source, prompts, model names, and sizes."),
+                description: "Discover project-library images that are not already attached to the current turn. Current-turn attachments already include complete library metadata and, for a vision-ready provider, pixels; they are excluded from this tool."),
 
             AIFunctionFactory.Create(
                 method: (Guid imageId) => ReadProjectImageAsync(context, imageId),
                 name: "read_project_image",
-                description: "Read one project image's metadata and URLs and load it as visual context when the provider supports vision."),
+                description: "Read one project image that is not already attached to the current turn, returning complete metadata and loading its pixels as visual context when supported. Attached image IDs already have complete metadata and, for a vision-ready provider, pixels; they must not be reread."),
 
             AIFunctionFactory.Create(
                 method: () => ReadProjectVisualDirectionAsync(context),
@@ -400,15 +400,28 @@ public sealed class ImagesChatTools(
 
     private async Task<string> ListProjectImagesAsync(ImagesChatToolContext ctx)
     {
-        var images = await projectImages.ListAsync(ctx.ProjectId);
+        var images = (await projectImages.ListAsync(ctx.ProjectId))
+            .Where(image => ctx.FindAttachedImage(image.Id) is null)
+            .ToList();
         if (images.Count == 0)
-            return "No project images.";
+            return "No additional project images outside the current-turn attachments.";
 
-        return JsonSerializer.Serialize(images.Select(ImagePayload), JsonOptions);
+        return JsonSerializer.Serialize(images.Select(ImagesChatImagePayload.From), JsonOptions);
     }
 
     private async Task<string> ReadProjectImageAsync(ImagesChatToolContext ctx, Guid imageId)
     {
+        if (ctx.FindAttachedImage(imageId) is { } attachedImage)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                image = ImagesChatImagePayload.From(attachedImage),
+                delivery = ctx.VisionReady
+                    ? "complete metadata and full image bytes were already supplied in the current-turn attachment context; no additional visual read was performed"
+                    : "complete metadata was already supplied in the current-turn attachment context; the active chat provider is not vision-ready, so no visual read was performed",
+            }, JsonOptions);
+        }
+
         var image = await projectImages.GetAsync(ctx.ProjectId, imageId);
         if (image is null)
             return $"Error: image {imageId:N} was not found in this project.";
@@ -422,7 +435,7 @@ public sealed class ImagesChatTools(
 
         return JsonSerializer.Serialize(new
         {
-            image = ImagePayload(image),
+            image = ImagesChatImagePayload.From(image),
             delivery = ctx.VisionReady
                 ? "full image bytes will be supplied to the model on the next iteration"
                 : "metadata only; the active chat provider is not vision-ready",
@@ -534,7 +547,7 @@ public sealed class ImagesChatTools(
             {
                 status = "cropped",
                 sourceImageId,
-                image = ImagePayload(image),
+                image = ImagesChatImagePayload.From(image),
                 canonicalReference = attached,
             }, JsonOptions);
         }
@@ -656,7 +669,7 @@ public sealed class ImagesChatTools(
                 attached = false,
                 interpolation = ProjectImageResize.DeterministicInterpolation,
                 addsNewDetail = false,
-                image = ImagePayload(image),
+                image = ImagesChatImagePayload.From(image),
                 summary = $"Created an unattached source-linked image at exactly {width}x{height} using {ProjectImageResize.DeterministicInterpolation}. This local resize adds no visual detail; use edit_project_image with the source image and a larger-framing brief for generative expansion.",
             }, JsonOptions);
         }
@@ -771,24 +784,7 @@ public sealed class ImagesChatTools(
     private static object VisualPayload(EntityVisualExampleView example) => new
     {
         example.Id, example.EntityId, example.EntityName, example.EntityType, example.Label, example.SortOrder,
-        image = ImagePayload(example.Image),
-    };
-
-    private static object ImagePayload(ProjectImageView image) => new
-    {
-        image.Id,
-        image.FileName,
-        image.ContentType,
-        image.PreviewUrl,
-        FullUrl = image.PreviewUrl.Replace("?maxEdge=640", string.Empty, StringComparison.Ordinal),
-        image.AltText,
-        image.Source,
-        image.Prompt,
-        image.GenerationModel,
-        image.SourceMetadataJson,
-        image.CreatedAt,
-        image.UpdatedAt,
-        image.SizeBytes,
+        image = ImagesChatImagePayload.From(example.Image),
     };
 
     private static object ImageOutputPayload(AgentProjectImageOutput output) => new
