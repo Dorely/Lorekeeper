@@ -15,7 +15,11 @@ public interface IProjectImageService
     Task<ProjectImageView> UploadAsync(Guid projectId, ProjectImageUpload upload, CancellationToken cancellationToken = default);
     Task<ProjectImageView> CropAsync(Guid projectId, Guid sourceImageId, ProjectImageCropRequest request, CancellationToken cancellationToken = default);
     Task<ProjectImageView> ResizeAsync(Guid projectId, Guid sourceImageId, ProjectImageResizeRequest request, CancellationToken cancellationToken = default);
-    Task<ProjectImageView> ResampleForPrintAsync(Guid projectId, Guid sourceImageId, ProjectImagePrintResampleRequest request, CancellationToken cancellationToken = default);
+    Task<ProjectImagePrintUpscaleResult> EnsurePrintUpscaleAsync(
+        Guid projectId,
+        Guid sourceImageId,
+        ProjectImagePrintUpscaleRequest request,
+        CancellationToken cancellationToken = default);
     Task<ProjectImageView> GenerateAsync(Guid projectId, ProjectImageGenerationRequest request, CancellationToken cancellationToken = default);
     Task<ProjectImageView> UpdateAsync(Guid projectId, Guid imageId, ProjectImageUpdate update, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid projectId, Guid imageId, bool clearAffectedHistory = false, CancellationToken cancellationToken = default);

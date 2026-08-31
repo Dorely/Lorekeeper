@@ -18,5 +18,6 @@ public sealed class ProjectImageGenerationOptions
     public int MaxReferenceImages { get; set; } = 4;
     public int AgentJobWaitTimeoutSeconds { get; set; } = 600;
     public int MaxProviderOutputBytes { get; set; } = 64 * 1024 * 1024;
+    public int MaxPrintUpscaleBytes { get; set; } = 256 * 1024 * 1024;
     public bool PrintUpscale { get; set; } = true;
 }

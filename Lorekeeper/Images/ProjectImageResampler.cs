@@ -5,6 +5,8 @@ namespace Lorekeeper.Images;
 public static class ProjectImageResampler
 {
     public const string Lanczos3Interpolation = "Lanczos3 (separable)";
+    public const string Algorithm = "Lanczos3";
+    public const string AlgorithmVersion = "lanczos3-separable-v1";
 
     private const int KernelSupport = 3;
     private const int BytesPerPixel = 4;

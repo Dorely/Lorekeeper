@@ -254,7 +254,7 @@ those concrete layout targets; Images and Outline keep moderate defaults unless
 their callers explicitly request a minimum against the Core Book physical basis.
 When no single provider raster can meet the required DPI, the application-side
 print-upscale pipeline dispatches the largest compatible native raster and, after
-completion, derives a separate print-resampled asset with deterministic Lanczos3
+completion, derives a separate print-upscaled asset with deterministic Lanczos3
 sampling; the provider transport is never asked for, or told about, the final
 print raster.
 Same-aspect generative up-resolution preserves the complete framing and asks

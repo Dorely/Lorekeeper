@@ -356,6 +356,14 @@ The forward identifier-normalization migration preserves EF Core SQLite Guid
 lookups for repository and reference identities created by SQL backfill during
 the cutover.
 
+Snapshot schema v5 preserves image parent links and upscale provenance alongside
+the canonical asset bytes. Restore validates and remaps those links before
+creating rows, adapts older print-resample metadata to the current Upscaled source,
+and fails closed when the current schema references an absent ancestor. Generated
+publication artifacts remain excluded, but permanent image derivatives and the
+authored reference replacements are creative project state and therefore belong
+in deterministic checkpoints, comparisons, restore, and clone import.
+
 ## Key files and file families
 
 | Path or family | Architectural role |

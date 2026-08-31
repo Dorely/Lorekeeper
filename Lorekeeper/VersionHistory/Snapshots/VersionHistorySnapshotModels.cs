@@ -7,7 +7,8 @@ public static class VersionHistorySnapshotContract
 {
     public const string FormatId = "lorekeeper.version-history-snapshot";
     public const int MinimumReadableSchemaVersion = 1;
-    public const int SchemaVersion = 4;
+    public const int SchemaVersion = 5;
+    public const int ImageUpscaleSchemaVersion = 5;
     public const string ManifestFileName = "manifest.json";
 
     public static readonly IReadOnlyList<string> IncludedAreas =

@@ -1105,6 +1105,7 @@ public sealed class PublishAssistantTools(
             ? await preparation.PrepareReleaseAsync(context.ProjectId, id)
             : await preparation.PrepareCoreAsync(context.ProjectId);
         return Serialize(new { ok = true, targetId = releaseId ?? context.ProjectId, releaseId, job.Id, job.Status, job.Step, job.ProgressPercent, job.Message,
+            imagePreparation = job.ImagePreparationSummary,
             summary = releaseId is null ? "Core reading-PDF preparation queued." : "Release file preparation queued.", mutation = new { kind = "preparation", releaseId } });
     }
 
@@ -1112,6 +1113,7 @@ public sealed class PublishAssistantTools(
     {
         var job = await preparation.CancelAsync(context.ProjectId, preparationJobId);
         return Serialize(new { ok = true, targetId = job.EditionId ?? context.ProjectId, releaseId = job.EditionId, job.Id, job.Status, job.Message,
+            imagePreparation = job.ImagePreparationSummary,
             summary = "Preparation cancellation recorded.", mutation = new { kind = "preparation", releaseId = job.EditionId } });
     }
 
@@ -1135,6 +1137,7 @@ public sealed class PublishAssistantTools(
         return Serialize(new { ok = true, targetId = releaseId ?? context.ProjectId,
             current = jobs.Take(3).Select(job => new { job.Id, releaseId = job.EditionId, job.Status, job.Step,
                 job.ProgressPercent, job.Message, job.CreatedAt, job.CompletedAt,
+                imagePreparation = job.ImagePreparationSummary,
                 diagnostics = job.Diagnostics.Take(5) }),
             diagnosticCounts = new
             {
@@ -1591,7 +1594,7 @@ public sealed class PublishAssistantTools(
                 physicalDimensions = new { widthInches = resolution.WidthInches, heightInches = resolution.HeightInches },
                 requestedMinimumDpi = resolution.MinimumDpi,
                 target = new { targetKind, targetId, editionId, variantId, regionRole, surfaceBounds },
-                summary = $"The {upscalePlan.TargetDpi:0}-DPI physical target ({resolution.WidthInches:0.####} x {resolution.HeightInches:0.####} inches) exceeds one provider image. Generation proceeds at {upscalePlan.NativeRaster.Size} (about {upscalePlan.NativeEffectiveDpi:0.#} DPI native) and Lorekeeper resamples the finished image to {upscalePlan.PrintRaster.Size}. Proceed with the normal generate tool; place the returned print-resampled image ID.",
+                summary = $"The {upscalePlan.TargetDpi:0}-DPI physical target ({resolution.WidthInches:0.####} x {resolution.HeightInches:0.####} inches) exceeds one provider image. Generation proceeds at {upscalePlan.NativeRaster.Size} (about {upscalePlan.NativeEffectiveDpi:0.#} DPI native) and Lorekeeper creates a deterministic Lanczos3 upscale of the finished image at {upscalePlan.PrintRaster.Size}; the upscale adds no new detail. Proceed with the normal generate tool; place the returned print-upscaled image ID.",
             });
         }
         return Serialize(new

@@ -20,7 +20,7 @@ public sealed class ProjectExportCompatibilityTests
     }
 
     [Fact]
-    public void V28WritesCanonicalSourceContainersCurrentPublicationStateAndAnnotations()
+    public void V29WritesCanonicalSourceContainersCurrentPublicationStateAndAnnotations()
     {
         var coverImageId = Guid.NewGuid();
         var document = Document(new ProjectExportChapter()) with
@@ -42,7 +42,7 @@ public sealed class ProjectExportCompatibilityTests
         };
         var json = JsonSerializer.Serialize(document, ManuscriptCodec.JsonOptions);
 
-        Assert.Equal(28, ProjectExportDocument.CurrentFormatVersion);
+        Assert.Equal(29, ProjectExportDocument.CurrentFormatVersion);
         Assert.Contains("\"ingestSources\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"bookBriefCanonSourceIds\":[]", json, StringComparison.Ordinal);
         Assert.Contains("\"publicationEditions\"", json, StringComparison.Ordinal);
@@ -68,6 +68,62 @@ public sealed class ProjectExportCompatibilityTests
         Assert.DoesNotContain("\"imagePlacements\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"bodyFontSizePoints\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"bodyLineHeight\"", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void V29PrevalidationRejectsDerivedImageWithoutItsProvenanceParent()
+    {
+        var imageId = Guid.NewGuid();
+        var sourceImageId = Guid.NewGuid();
+        var image = new ProjectExportImage(
+            imageId,
+            "upscaled.png",
+            "image/png",
+            [1, 2, 3],
+            "Upscaled artwork",
+            PublishAssetSource.Upscaled,
+            string.Empty,
+            string.Empty,
+            "{}",
+            sourceImageId,
+            null,
+            null,
+            null,
+            null,
+            DateTime.UtcNow,
+            DateTime.UtcNow);
+        var document = Document(new ProjectExportChapter()) with { Images = [image] };
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => ProjectImportJobProcessor.ValidateChapterPayloads(document));
+
+        Assert.Contains(imageId.ToString("N"), exception.Message, StringComparison.Ordinal);
+        Assert.Contains(sourceImageId.ToString("N"), exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LegacyImageSourcesAdaptWithoutConfusingPrintResamplesWithImportedImages()
+    {
+        Assert.Equal(
+            PublishAssetSource.Upscaled,
+            ProjectExportImageCompatibility.AdaptLegacySource(
+                PublishAssetSource.Resized,
+                "{\"Transform\":{\"Kind\":\"print-resample\"}}"));
+        Assert.Equal(
+            PublishAssetSource.Upscaled,
+            ProjectExportImageCompatibility.AdaptLegacySource(
+                PublishAssetSource.Resized,
+                "{\"transform\":{\"kind\":\"print-resample\"}}"));
+        Assert.Equal(
+            PublishAssetSource.Resized,
+            ProjectExportImageCompatibility.AdaptLegacySource(
+                PublishAssetSource.Resized,
+                "{\"transform\":{\"kind\":\"deterministic-resize\"}}"));
+        Assert.Equal(
+            PublishAssetSource.Imported,
+            ProjectExportImageCompatibility.AdaptLegacySource(
+                (PublishAssetSource)6,
+                "{}"));
     }
 
     [Fact]

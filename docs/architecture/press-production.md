@@ -285,6 +285,14 @@ and provides no inherited PATH, Cargo, Python, uv, Typst, WeasyPrint,
 Chromium, machine PDF tool, or repository fallback. Debug and Release use this
 same boundary; Rust is not compiled at application runtime.
 
+Press remains an artifact renderer and validator; publication-time image
+upscaling is completed by the managed application before the existing Press
+request is staged. Press receives only the effective publication document and
+its already-selected assets, with no preparation mutation or image-lineage
+responsibility. Managed staging permits at most a 12,000-pixel edge,
+120-megapixel raster, and a configured per-asset byte limit no greater than
+Press's existing 256 MiB containment boundary.
+
 ## Key files and file families
 
 | Path or family | Primary responsibility |

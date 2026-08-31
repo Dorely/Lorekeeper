@@ -213,7 +213,7 @@ through immutable models, startup supplies temporary compatibility columns at
 each such boundary, removes them immediately before the current EF boundary,
 and then lets the forward migration own the durable columns.
 
-Project export v27 is a portable, versioned boundary. It renames the durable
+Project export v29 is a portable, versioned boundary. It renames the durable
 print registry/profile fields, removes finish, and accepts v20-v26 legacy
 `printRegistryVersion`, `printProductKey`, and ignored `printFinish` fields only
 through the import adapter. Full exports include the
@@ -280,6 +280,22 @@ security architecture change expands exposure. Version-history repositories use
 the separate development `History/` root (ignored by the source repository) or
 packaged `%LocalAppData%/Lorekeeper/History/<repository-id>.git`; they are not a
 SQLite backup or a portable v26 export.
+
+Image-upscale lineage is durable portable state. V29 preserves parent identity
+and structured upscale metadata, remaps parents on import, and fails closed when
+a v29 derivative names a missing parent. A non-structural export that includes an
+upscale includes omitted ancestors transitively so the package remains valid.
+Older inputs remain accepted through the versioned adapter; historical
+`Resized` assets whose metadata identifies `print-resample` are reclassified as
+`Upscaled` without changing their bytes or provenance.
+
+The forward database migration adds the persisted preparation-summary JSON.
+Database image sources are stored by enum name, so existing `Imported` rows
+remain unchanged when `Imported = 5` and `Upscaled = 6` become the current code
+values. The migration reclassifies only stored `Resized` rows whose historical
+metadata proves they were print resamples. Existing preparation jobs and
+unrelated imported/resized assets are preserved; older portable JSON's numeric
+source value is handled separately by its versioned import adapter.
 
 ## Key files and file families
 

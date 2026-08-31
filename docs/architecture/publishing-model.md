@@ -245,7 +245,7 @@ generation remains unattached and must resolve a 300-DPI-compatible raster
 without stretching. If one native raster cannot satisfy provider limits but the
 target's aspect is provider-representable, the request proceeds through the
 print-upscale pipeline: generation at the largest compatible raster plus a
-deterministic Lanczos print-resample to the exact print raster. Back, Spine, and
+deterministic Lanczos3 print upscale to the exact print raster without adding detail. Back, Spine, and
 Front are preferred split boundaries and already resolve natively; when no single
 provider raster can represent a target's aspect, the request fails before
 dispatch with a smallest equal-panel plan, each panel targets exact surface
@@ -298,6 +298,33 @@ and publication sections so authored publication intent can be restored. They
 exclude preparation jobs, render/package bytes, page maps, audits, migration
 journals, and other derived or operational production state; those artifacts
 are regenerated after restore through the Press boundary.
+
+Publication preparation runs permanent image preparation after basic readiness
+checks and before reusable-render lookup. EPUB records no DPI transformation;
+Core and Digital PDF use 180 DPI, while every print profile uses 300 DPI. The
+managed publication model resolves each included placement's effective geometry
+and a maximum proportional raster per source asset before staging Press. If any included placement is undersized, one suitable
+derivative is created or reused and every included reference owned by the prepared
+target is replaced atomically. Excluded content, unrelated releases, entity
+visuals, and chat attachments are outside this mutation. When
+`Images:PrintUpscale` is disabled, an undersized placement blocks preparation
+without creating a derivative or changing references.
+
+Ownership follows effective publication inheritance: an inherited chapter,
+publication section, composition, or Core cover updates Core; content already
+customized by the release updates that release without manufacturing a new
+customization. The mutation validates the queued source fingerprint immediately
+before commit, updates all owner revisions and invalidations, stores the new
+fingerprint, and then reruns managed image validation. A stale source is retryable;
+corrupt input, an oversized required raster, or any still-undersized placement
+blocks before final rendering. Cancellation before commit rolls back; cancellation
+after a coherent replacement commit preserves it and stops before rendering.
+
+Each preparation job persists and projects a structured image summary containing
+the threshold, created/reused asset counts, replaced-reference count, and
+actionable failures. Publish UI and assistant preparation results surface this
+summary. Since image preparation precedes artifact reuse, both the final artifact
+and its fingerprint describe the permanent replacement references.
 
 ## Key files and file families
 

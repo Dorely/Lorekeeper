@@ -281,7 +281,7 @@ public sealed class AgentProjectImageWorkflow(
                         ? true
                         : effectiveDpi is { } actualDpi && actualDpi + 1e-9 >= minimumDpi;
                 if (printUpscale is not null)
-                    outputWarnings.Add("PRINT_DPI_UPSAMPLED");
+                    outputWarnings.Add("PRINT_DPI_UPSCALED");
                 else if (outputMinimumDpiMet == false)
                     outputWarnings.Add("MINIMUM_DPI_NOT_MET");
                 foreach (var warningCode in outputWarnings)
@@ -304,7 +304,7 @@ public sealed class AgentProjectImageWorkflow(
             && outputImages.Count > 0
             && geometry is { WidthInches: > 0, HeightInches: > 0 })
         {
-            var printRequest = new ProjectImagePrintResampleRequest(
+            var printRequest = new ProjectImagePrintUpscaleRequest(
                 plan.PrintWidth,
                 plan.PrintHeight,
                 geometry.WidthInches,
@@ -313,7 +313,8 @@ public sealed class AgentProjectImageWorkflow(
             for (var index = 0; index < outputImages.Count; index++)
             {
                 var existingOutput = outputImages[index];
-                var printView = await images.ResampleForPrintAsync(projectId, existingOutput.Image.Id, printRequest, cancellationToken);
+                var printResult = await images.EnsurePrintUpscaleAsync(projectId, existingOutput.Image.Id, printRequest, cancellationToken);
+                var printView = printResult.Image;
                 outputImages[index] = existingOutput with
                 {
                     PrintImageId = printView.Id,
@@ -337,7 +338,7 @@ public sealed class AgentProjectImageWorkflow(
             : providerSucceeded && minimumDpiMet == false
                 ? "The provider output was retained as an unattached image, but it did not meet the requested minimum DPI and is not publication-compliant."
             : succeeded && printUpscale is { } appliedPlan
-                ? $"{outputImages.Count} unattached project image(s) completed and were resampled to {appliedPlan.PrintWidth}x{appliedPlan.PrintHeight} for the {appliedPlan.TargetDpi:0} DPI physical print target from the provider's largest compatible raster. Place the print-resampled image ID, not the native one."
+                ? $"{outputImages.Count} unattached project image(s) completed and were upscaled to {appliedPlan.PrintWidth}x{appliedPlan.PrintHeight} for the {appliedPlan.TargetDpi:0} DPI physical print target from the provider's largest compatible raster. Place the print-upscaled image ID, not the native one."
             : succeeded
                 ? $"{outputImages.Count} unattached project image(s) completed. Inspect an image, then place its ID with a separate tool."
                 : job.Status == ProjectImageGenerationJobStatus.Cancelled

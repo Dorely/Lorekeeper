@@ -314,6 +314,7 @@ public sealed class PublishService(
             : JsonSerializer.Deserialize<CompositionScene>(coverDesign.CompositionSceneJson, ManuscriptCodec.JsonOptions);
         if (coverScene is not null)
             coverScene = CoverCompositionFactory.KeepArtworkBehindCopy(coverScene);
+        var coverSurfaceScenes = ReadCoverSurfaceScenes(coverDesign?.SurfaceScenesJson);
         var coverSceneImageIds = coverScene is null
             ? []
             : CompositionSceneResolver.Flatten(coverScene)
@@ -341,6 +342,10 @@ public sealed class PublishService(
                 .Where(item => item.ImageId.HasValue)
                 .Select(item => item.ImageId!.Value))
             .Concat(coverSceneImageIds)
+            .Concat(coverSurfaceScenes.Values
+                .SelectMany(scene => CompositionSceneResolver.Flatten(scene))
+                .Where(item => item.Visible && item.ImageId is not null)
+                .Select(item => item.ImageId!.Value))
             .Concat(profile.SelectedCoverImageId is Guid coverImageId ? [coverImageId] : [])
             .ToHashSet();
         var assets = referencedAssetIds.Count == 0
@@ -388,6 +393,8 @@ public sealed class PublishService(
                 ? []
                 : coverScene.Objects.Select(item => item.FontFamilyKey)
                     .Concat(coverScene.Styles.Select(style => style.FontFamilyKey)))
+            .Concat(coverSurfaceScenes.Values.SelectMany(scene => scene.Objects.Select(item => item.FontFamilyKey)
+                .Concat(scene.Styles.Select(style => style.FontFamilyKey))))
             .Where(key => !string.IsNullOrWhiteSpace(key))
             .Select(key => key!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -457,6 +464,7 @@ public sealed class PublishService(
             NamedStyles = namedStyles,
             Fonts = publishFonts,
             PublicationSections = publicationSectionDocuments,
+            CoverSurfaceScenes = coverSurfaceScenes,
             Cover = coverDesign is null || coverScene is null
                 ? null
                 : new PublishCoverDocument(
@@ -468,6 +476,20 @@ public sealed class PublishService(
                     coverDesign.BackgroundColor,
                     coverScene),
         };
+    }
+
+    private static IReadOnlyDictionary<string, CompositionScene> ReadCoverSurfaceScenes(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return new Dictionary<string, CompositionScene>();
+        var serialized = JsonSerializer.Deserialize<Dictionary<string, string>>(json, ManuscriptCodec.JsonOptions)
+            ?? new Dictionary<string, string>();
+        return serialized.ToDictionary(
+            item => item.Key,
+            item => CoverCompositionFactory.KeepArtworkBehindCopy(
+                JsonSerializer.Deserialize<CompositionScene>(item.Value, ManuscriptCodec.JsonOptions)
+                    ?? throw new InvalidDataException($"Cover surface '{item.Key}' is empty.")),
+            StringComparer.Ordinal);
     }
 
     private async Task<PublicationCoverDesign?> CoreCoverAsync(Guid projectId, CancellationToken cancellationToken)
@@ -580,6 +602,10 @@ public sealed class PublishService(
         {
             AllowDesignedPageOverrides = profile.AllowDesignedPageOverrides,
             RectoChapterStarts = profile.RectoChapterStarts,
+            BleedInches = profile.Bleed
+                && profile.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
+                    ? .125
+                    : 0,
         };
 
     private static bool IncludeTitlePage(PublicationEdition profile) => profile.TitlePageMode switch

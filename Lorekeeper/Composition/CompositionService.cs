@@ -1979,17 +1979,11 @@ public sealed class CompositionService(
             .FirstOrDefault(block => block is not null)
             ?? throw new KeyNotFoundException("Figure target was not found in this project.");
         var presentation = figure.FigurePresentation ?? new FigurePresentation();
-        var contentWidth = Math.Max(.25, setup.PageWidthInches - setup.PageMarginInches * 2);
-        var contentHeight = Math.Max(.25, setup.PageHeightInches - setup.PageMarginInches * 2);
-        var width = presentation.Placement == FigurePlacementIntent.FullBleed
-            ? setup.PageWidthInches
-            : contentWidth * Math.Clamp(presentation.WidthPercent, 5, 100) / 100;
-        var height = presentation.Placement switch
-        {
-            FigurePlacementIntent.FullBleed => setup.PageHeightInches,
-            FigurePlacementIntent.DedicatedPage => contentHeight * .75,
-            _ => Math.Min(contentHeight * .34, width * 1.25),
-        };
+        var (width, height) = LayoutImageSizeResolver.ResolveFlowingFigurePhysicalSize(
+            setup.PageWidthInches,
+            setup.PageHeightInches,
+            setup.PageMarginInches,
+            presentation);
         var scene = CreatePageScene(setup);
         var regions = presentation.Placement is FigurePlacementIntent.FullBleed or FigurePlacementIntent.DedicatedPage
             ? PageRegions(scene, includeReservedText: presentation.Placement == FigurePlacementIntent.DedicatedPage)

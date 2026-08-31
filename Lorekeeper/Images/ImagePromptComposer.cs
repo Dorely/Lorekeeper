@@ -928,7 +928,7 @@ public sealed class ImagePromptComposer(
                     .Append(minimumDpi.ToString("0.##", CultureInfo.InvariantCulture))
                     .Append("; this request raster ")
                     .Append(plan.NativeRaster.Size)
-                    .Append(" is the largest provider-compatible raster for the target, and Lorekeeper resamples the finished image to ")
+                    .Append(" is the largest provider-compatible raster for the target, and Lorekeeper upscales the finished image without adding new detail to ")
                     .Append(plan.PrintRaster.Size)
                     .Append(" for the physical print target afterward. Produce the requested raster at full quality without cropping, borders, or simulated resolution.");
             }

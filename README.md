@@ -92,7 +92,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   canon extraction, graph synchronization, and combined lexical/semantic
   retrieval. File ingest accepts up to 50 files together, creates one durable
   job per file sequentially, and keeps per-file success or failure visible.
-- Full project export format v27 preserves artifact-only print settings, manuscript review annotations, and only the Book Brief's selected
+- Full project export format v29 preserves artifact-only print settings, manuscript review annotations, image-upscale provenance, and only the Book Brief's selected
   canonical ingest sources (source text, chunks, pages, blocks, metadata, and
   selection mapping), remaps their provenance on import, and rebuilds retrieval
   indexes without rerunning extraction. Project-reference links are intentionally
@@ -163,9 +163,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   resolves that effective placement density into provider-valid pixels. Editor
   and Publish use 300 DPI for layout-bound generation. When no single
   provider-compatible raster can meet that DPI, Lorekeeper generates at the
-  largest compatible raster and deterministically resamples the finished image
-  (Lanczos, no invented detail) to the exact print raster, flagging the result
-  as print-upsampled; only targets whose aspect no provider raster can represent
+  largest compatible raster and deterministically upscales the finished image
+  (Lanczos3, no invented detail) to the exact print raster, flagging the result
+  as print-upscaled; only targets whose aspect no provider raster can represent
   fail before generation with a multi-panel plan for Designed Pages and covers,
   and independently generated panels require deliberate layout and visual
   inspection rather than an assumed seamless join. Same-aspect
@@ -184,9 +184,17 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   Generation partials remain available behind a `Partials` action on their final
   image or unfinished job card; authors can inspect, download, or promote a
   partial into a separate unattached library image.
+  Publication preparation permanently replaces any included image below the
+  active output threshold with a deterministic Lanczos3 upscale: 180 DPI for
+  Core and Digital PDF, 300 DPI for print, and no DPI transformation for EPUB.
+  The original remains in the project as provenance, while linked upscales show
+  their source/target raster, effective DPI, algorithm, and explicit no-new-detail
+  status. Repeated preparation reuses the smallest sufficient derivative and a
+  later larger target is derived directly from the original.
   The Images library keeps every card at one bounded size, marks assets used by
   chapters, and disables deletion until every semantic Figure and chapter-owned
-  Designed Page reference has been removed or replaced; the image service
+  Designed Page reference has been removed or replaced. An original is also
+  protected while linked upscales exist; the image service
   enforces the same rule against stale UI state.
 - An always-present Core Book for shared title/author/language metadata, fixed
   outline order, presentation, publication sections, project typography, and
@@ -210,7 +218,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - An in-app preview and immutable download for the Core reading PDF used for
   private review and sharing, plus one-action preparation
   jobs that compile, render, validate, and store or package the selected Core or
-  release target. Unresolved image accessibility choices remain visible warnings
+  release target. Preparation runs managed image-layout preflight before
+  artifact reuse, commits permanent owner-aware reference replacements, repeats
+  preflight, and includes the resulting image summary and new source fingerprint
+  in the job. Unresolved image accessibility choices remain visible warnings
   on the private Core copy, while publication releases require those choices to
   be resolved. Paperback and hardcover output use a checked-in, versioned
   print-artifact profile registry with built-in

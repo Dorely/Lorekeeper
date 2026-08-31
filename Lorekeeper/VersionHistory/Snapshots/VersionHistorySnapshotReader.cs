@@ -72,6 +72,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         var graph = ReadRequired<VersionHistorySnapshotGraphArea>(files, "graph/graph.json");
         var sources = ReadRequired<VersionHistorySnapshotSourcesArea>(files, "sources/sources.json");
         var assets = ReadRequired<VersionHistorySnapshotAssetsArea>(files, "assets/assets.json");
+        assets = AdaptAssetsForSchema(assets, manifest.SchemaVersion);
         var manuscript = ReadRequired<VersionHistorySnapshotManuscriptArea>(files, "manuscript/styles.json");
         var composition = ReadRequired<VersionHistorySnapshotCompositionArea>(files, "composition/composition.json");
         var publication = ReadRequired<VersionHistorySnapshotPublicationArea>(
@@ -182,6 +183,26 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         }
 
         return result;
+    }
+
+    private static VersionHistorySnapshotAssetsArea AdaptAssetsForSchema(
+        VersionHistorySnapshotAssetsArea assets,
+        int schemaVersion)
+    {
+        if (schemaVersion >= VersionHistorySnapshotContract.ImageUpscaleSchemaVersion)
+            return assets;
+
+        return assets with
+        {
+            Images = assets.Images
+                .Select(image => image with
+                {
+                    Source = ProjectExportImageCompatibility.AdaptLegacySource(
+                        image.Source,
+                        image.SourceMetadataJson),
+                })
+                .ToList(),
+        };
     }
 
     private static IReadOnlyDictionary<Guid, ChapterFilePaths> ValidateChapterFileSet(
@@ -369,6 +390,13 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             throw new InvalidDataException("Snapshot contains duplicate image IDs.");
         if (payload.Assets.Images.Select(image => image.BlobPath).Distinct(StringComparer.Ordinal).Count() != payload.Assets.Images.Count)
             throw new InvalidDataException("Snapshot contains duplicate image blob paths.");
+        foreach (var image in payload.Assets.Images)
+        {
+            if (image.DerivedFromImageId is Guid sourceImageId && !imageIds.Contains(sourceImageId))
+                throw new InvalidDataException(
+                    $"Image {image.Id:N} references missing source image {sourceImageId:N}.");
+        }
+        ValidateImageLineageAcyclic(payload.Assets.Images);
         var fontFaceIds = payload.Assets.FontFamilies
             .SelectMany(family => family.Faces)
             .Select(face => face.Id)
@@ -411,6 +439,24 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
         var sourceIds = payload.Sources.Sources.Select(source => source.Id).ToHashSet();
         if (payload.Narrative.BookBriefCanonSourceIds.Any(sourceId => !sourceIds.Contains(sourceId)))
             throw new InvalidDataException("Book Brief canonical-source selection references a missing source.");
+    }
+
+    private static void ValidateImageLineageAcyclic(IReadOnlyList<VersionHistoryImageAsset> images)
+    {
+        var parentByImageId = images
+            .Where(image => image.DerivedFromImageId is not null)
+            .ToDictionary(image => image.Id, image => image.DerivedFromImageId!.Value);
+        foreach (var image in images)
+        {
+            var visited = new HashSet<Guid>();
+            var current = image.Id;
+            while (parentByImageId.TryGetValue(current, out var parentId))
+            {
+                if (!visited.Add(current))
+                    throw new InvalidDataException($"Image lineage contains a cycle involving image '{current:N}'.");
+                current = parentId;
+            }
+        }
     }
 
     private static string ResolveSafePath(string root, string relativePath)

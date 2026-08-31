@@ -117,12 +117,12 @@ the exact print raster (`widthInches × dpi`, ceil). With `Images:PrintUpscale`
 enabled (the default), prompt compilation dispatches the native raster and
 records the plan in the target geometry before any provider request;
 after a successful completion `AgentProjectImageWorkflow` derives a separate
-unattached print asset through `IProjectImageService.ResampleForPrintAsync`
+unattached print asset through `IProjectImageService.EnsurePrintUpscaleAsync`
 using deterministic separable Lanczos3 sampling that adds no visual detail
-(`print-resample` provenance with source/target rasters, source/target
+(`print-upscale` provenance with source/target rasters, source/required/target
 effective DPI, and `AddsNewDetail: false`). Results flag
-`PRINT_DPI_UPSAMPLED`, carry both native and print rasters and DPIs, and
-assistants place the print-resampled derivative. Only a target whose aspect no
+`PRINT_DPI_UPSCALED`, carry both native and print rasters and DPIs, and
+assistants place the print-upscaled derivative. Only a target whose aspect no
 provider raster can represent, or whose print raster exceeds the generous
 print sanity guards, fails with `MINIMUM_DPI_UNACHIEVABLE` before a job,
 partial, asset, or provider request exists; that rejection carries required and
@@ -146,7 +146,7 @@ requested minimum, `effectiveDpi`, `minimumDpiMet`, and every warning code. An
 unexpected undersized provider result remains an unattached asset with
 `MINIMUM_DPI_NOT_MET`; it is not publication-compliant and must not be placed as
 though it were. Under a print-upscale plan this warning describes the native
-asset only; the derived print-resampled asset is the publication candidate, and
+asset only; the derived print-upscaled asset is the publication candidate, and
 its provenance records the native source DPI honestly.
 Placement validation remains the final DPI diagnostic owner.
 The provider-output byte boundary is separately configurable and defaults to
@@ -363,11 +363,28 @@ Browser, Read preview, EPUB, cover, and Press all stage the same referenced
 faces rather than substituting a machine font. Font changes affect manuscript,
 composition, Core/release fingerprints, and artifact freshness.
 
+Publication-time image preparation uses the same idempotent upscale contract as
+generation-time output. `EnsurePrintUpscaleAsync` resolves the non-upscaled root,
+hashes its bytes, and gives an exact source/hash/raster/algorithm-version request
+a deterministic identity. It reuses the smallest linked upscale that satisfies
+the requested raster; larger siblings are always sampled from the original so
+resampling is never compounded. The maximum accepted output is 12,000 pixels on
+either edge, 120 megapixels, and the configured byte limit clamped to Press's
+256 MiB per-asset boundary.
+
+Upscales are ordinary permanent project assets with `PublishAssetSource.Upscaled`,
+`DerivedFromImageId`, source and target raster/DPI evidence, Lanczos3 version,
+source-byte hash, creation trigger, and `AddsNewDetail = false`. Originals expose
+direct upscale children in the Images library and cannot be deleted while those
+children exist; an unused upscale may be deleted. Publication reference replacement
+changes only image IDs, preserving canvas bounds, fit, focal crop, rotation,
+opacity, z-order, semantic IDs, reading order, captions, and accessibility.
+
 ## Key files and file families
 
 | Path or family | Primary responsibility |
 |---|---|
-| `Lorekeeper/Images/IProjectImageService.cs` / `ProjectImageService.cs` | Reusable image-library reads, uploads, crops, deterministic exact resizing, metadata, usage projections, and deletion guards. |
+| `Lorekeeper/Images/IProjectImageService.cs` / `ProjectImageService.cs` | Reusable image-library reads, uploads, crops, deterministic exact upscaling, dimensions and lineage views, provenance metadata, usage projections, and deletion guards. |
 | `Lorekeeper/Images/IProjectImageJobService.cs` / `ProjectImageJobService.cs` | Durable generation/edit job records, streamed partial artifacts, explicit promotion, structured briefs, provider audit fields, output validation, and diagnostics. |
 | `Lorekeeper/Images/AgentProjectImageWorkflow.cs` | Assistant generation/edit boundary, terminal-state waiting, reconnectable jobs, target diagnostics, and unattached output semantics. |
 | `Lorekeeper/Images/ImagePromptComposer.cs` / `ProjectImageDefaultRasterResolver.cs` | Structured generation/edit briefs, reference labels, reserved regions, spatial guidance, rendered-text policy, and the shared Core Book page raster default. |

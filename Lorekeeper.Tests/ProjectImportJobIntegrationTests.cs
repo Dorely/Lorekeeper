@@ -192,6 +192,143 @@ public sealed class ProjectImportJobIntegrationTests
     }
 
     [Fact]
+    public async Task V29ImageImportRemapsUpscaleLineageAndPreservesSourceMetadata()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
+        await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+        await db.Database.MigrateAsync();
+        var project = new Project { Name = "Upscale import", Slug = $"upscale-{Guid.NewGuid():N}" };
+        db.Projects.Add(project);
+        await db.SaveChangesAsync();
+
+        var exportedSourceId = Guid.NewGuid();
+        var exportedUpscaleId = Guid.NewGuid();
+        var sourceMetadata = "{\"transform\":{\"kind\":\"print-upscale\",\"sourceRaster\":\"2x2\",\"targetRaster\":\"8x8\"}}";
+        var document = new ProjectExportDocument
+        {
+            FormatVersion = 29,
+            ExportKind = ProjectExportKind.Full,
+            Project = new ProjectExportProject(Guid.NewGuid(), "Exported", "exported", string.Empty, true, true),
+            PublicationBook = EmptyPublicationBook(),
+            Images =
+            [
+                ExportImage(exportedSourceId, "original.png", TinyPng()),
+                new ProjectExportImage(
+                    exportedUpscaleId,
+                    "original-upscaled.png",
+                    "image/png",
+                    TinyPng(),
+                    "Original artwork",
+                    PublishAssetSource.Upscaled,
+                    string.Empty,
+                    string.Empty,
+                    sourceMetadata,
+                    exportedSourceId,
+                    2,
+                    3,
+                    90,
+                    80,
+                    DateTime.UnixEpoch,
+                    DateTime.UnixEpoch),
+            ],
+        };
+        var job = AddImportJob(db, project.Id, document);
+        await db.SaveChangesAsync();
+
+        var processor = await CreateProcessorAsync(db, project);
+        await processor.RunAsync(job.Id);
+
+        db.ChangeTracker.Clear();
+        var completed = await db.ProjectImportJobs.AsNoTracking().SingleAsync();
+        Assert.True(completed.Status == ProjectImportJobStatus.Completed, completed.ErrorMessage);
+        var assets = await db.PublishAssets.AsNoTracking().ToDictionaryAsync(asset => asset.FileName);
+        var source = assets["original.png"];
+        var upscale = assets["original-upscaled.png"];
+        Assert.Equal(PublishAssetSource.Uploaded, source.Source);
+        Assert.Equal(PublishAssetSource.Upscaled, upscale.Source);
+        Assert.Equal(source.Id, upscale.DerivedFromImageId);
+        Assert.Equal(sourceMetadata, upscale.SourceMetadataJson);
+        Assert.Equal(2, upscale.CropXPercent);
+        Assert.Equal(3, upscale.CropYPercent);
+        Assert.Equal(90, upscale.CropWidthPercent);
+        Assert.Equal(80, upscale.CropHeightPercent);
+    }
+
+    [Fact]
+    public async Task LegacyImageImportAdaptsPrintResampleAndPreservesNumericImportedSource()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
+        await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+        await db.Database.MigrateAsync();
+        var project = new Project { Name = "Legacy image import", Slug = $"legacy-image-{Guid.NewGuid():N}" };
+        db.Projects.Add(project);
+        await db.SaveChangesAsync();
+
+        var document = new ProjectExportDocument
+        {
+            FormatVersion = 28,
+            ExportKind = ProjectExportKind.Full,
+            Project = new ProjectExportProject(Guid.NewGuid(), "Legacy", "legacy", string.Empty, true, true),
+            PublicationBook = EmptyPublicationBook(),
+            Images =
+            [
+                new ProjectExportImage(
+                    Guid.NewGuid(),
+                    "print-resample.png",
+                    "image/png",
+                    TinyPng(),
+                    "Print resample",
+                    PublishAssetSource.Resized,
+                    string.Empty,
+                    string.Empty,
+                    "{\"Transform\":{\"Kind\":\"print-resample\"}}",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    DateTime.UnixEpoch,
+                    DateTime.UnixEpoch),
+                new ProjectExportImage(
+                    Guid.NewGuid(),
+                    "legacy-imported.png",
+                    "image/png",
+                    TinyPng(),
+                    "Imported image",
+                    (PublishAssetSource)6,
+                    string.Empty,
+                    string.Empty,
+                    "{}",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    DateTime.UnixEpoch,
+                    DateTime.UnixEpoch),
+            ],
+        };
+        var job = AddImportJob(db, project.Id, document);
+        await db.SaveChangesAsync();
+
+        var processor = await CreateProcessorAsync(db, project);
+        await processor.RunAsync(job.Id);
+
+        db.ChangeTracker.Clear();
+        var completed = await db.ProjectImportJobs.AsNoTracking().SingleAsync();
+        Assert.True(completed.Status == ProjectImportJobStatus.Completed, completed.ErrorMessage);
+        var assets = await db.PublishAssets.AsNoTracking().ToDictionaryAsync(asset => asset.FileName);
+        Assert.Equal(PublishAssetSource.Upscaled, assets["print-resample.png"].Source);
+        Assert.Equal(PublishAssetSource.Imported, assets["legacy-imported.png"].Source);
+    }
+
+    [Fact]
     public async Task V9ProfileCoverImportKeepsItsFallbackOutlineRowExcluded()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -779,6 +916,71 @@ public sealed class ProjectImportJobIntegrationTests
                 importedEdition.OverrideFieldsJson) ?? []);
     }
 
+    [Fact]
+    public async Task V29NonStructuralExportIncludesTransitiveUpscaleParents()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection)
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking).Options;
+        await using var db = new AppDbContext(options, NullLogger<AppDbContext>.Instance);
+        await db.Database.MigrateAsync();
+
+        var project = new Project { Name = "Image export", Slug = $"image-export-{Guid.NewGuid():N}" };
+        var original = new PublishAsset
+        {
+            ProjectId = project.Id,
+            FileName = "original.png",
+            ContentType = "image/png",
+            Data = TinyPng(),
+            Source = PublishAssetSource.Uploaded,
+        };
+        var upscale = new PublishAsset
+        {
+            ProjectId = project.Id,
+            FileName = "original-upscaled.png",
+            ContentType = "image/png",
+            Data = TinyPng(),
+            Source = PublishAssetSource.Upscaled,
+            DerivedFromImageId = original.Id,
+            SourceMetadataJson = "{\"transform\":{\"kind\":\"print-upscale\"}}",
+        };
+        var node = new GraphNode
+        {
+            ProjectId = project.Id,
+            NodeType = "Character",
+            Key = "hero",
+            Label = "Hero",
+        };
+        db.Projects.Add(project);
+        db.PublishAssets.AddRange(original, upscale);
+        db.GraphNodes.Add(node);
+        db.EntityVisualExamples.Add(new EntityVisualExample
+        {
+            ProjectId = project.Id,
+            GraphNode = node,
+            Image = upscale,
+            Label = "Hero reference",
+            SortOrder = 0,
+        });
+        await db.SaveChangesAsync();
+
+        var exporter = new ProjectImportExportService(
+            Database(db),
+            new EntityTypeService(Database(db)),
+            new ProjectImportJobQueue(),
+            new ProjectImportJobNotifier());
+        var file = await exporter.ExportProjectAsync(project.Id, ProjectExportKind.NonStructural);
+        var document = JsonSerializer.Deserialize<ProjectExportDocument>(
+            file.Content,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+
+        Assert.Equal(29, document.FormatVersion);
+        Assert.Equal(new[] { upscale.Id, original.Id }.OrderBy(id => id), document.Images.Select(image => image.Id).OrderBy(id => id));
+        Assert.Equal(original.Id, document.Images.Single(image => image.Id == upscale.Id).DerivedFromImageId);
+        Assert.Equal(upscale.Id, Assert.Single(document.EntityVisualExamples).ImageId);
+    }
+
     private static T DefaultProxy<T>() where T : class =>
         DispatchProxy.Create<T, DefaultDispatchProxy>();
 
@@ -828,6 +1030,11 @@ public sealed class ProjectImportJobIntegrationTests
             id, fileName, "image/png", data, "Cover artwork", PublishAssetSource.Uploaded,
             string.Empty, string.Empty, "{}", null, null, null, null, null,
             DateTime.UtcNow, DateTime.UtcNow);
+
+    private static ProjectExportPublicationBook EmptyPublicationBook() => new(
+        1, string.Empty, string.Empty, string.Empty, "en", string.Empty, string.Empty,
+        string.Empty, true, true, false, false, true, true, false, false,
+        PublishTitlePageMode.Automatic, [], null);
 
     private static ProjectExportChapter ExportPicturePage(
         Guid id,

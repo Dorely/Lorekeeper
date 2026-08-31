@@ -37,5 +37,6 @@
 .release-workspace-stack>.technical { order: 7; }
 .preparation.warning { background: var(--lk-warning-soft); color: var(--lk-warning-strong); }
 .preparation-progress{flex:1 0 100%;height:.32rem;overflow:hidden;border-radius:999px;background:color-mix(in srgb,currentColor 14%,transparent)}.preparation-progress>span{display:block;height:100%;border-radius:inherit;background:currentColor;transition:width .3s linear}
+.preparation-image-summary{flex:1 0 100%;font-size:.72rem;line-height:1.35}
 .check-row,.publication-section-row{background:var(--lk-surface)}
 .publish-notice{background:var(--lk-success-soft);color:var(--lk-success)}

@@ -124,6 +124,28 @@ public sealed class ProjectImportExportService(
                 example.SourceVisualCandidate?.Locator ?? string.Empty))
             .ToList();
         var referencedVisualImageIds = exportedVisualExamples.Select(example => example.ImageId).ToHashSet();
+        HashSet<Guid>? exportedImageIds = null;
+        if (kind == ProjectExportKind.NonStructural)
+        {
+            exportedImageIds = referencedVisualImageIds;
+            var imageParents = await db.PublishAssets
+                .AsNoTracking()
+                .Where(asset => asset.ProjectId == projectId)
+                .Select(asset => new { asset.Id, asset.DerivedFromImageId })
+                .ToListAsync(cancellationToken);
+            var parentByImageId = imageParents.ToDictionary(item => item.Id, item => item.DerivedFromImageId);
+            var pending = new Queue<Guid>(exportedImageIds);
+            while (pending.TryDequeue(out var imageId))
+            {
+                if (parentByImageId.GetValueOrDefault(imageId) is not Guid parentId
+                    || !exportedImageIds.Add(parentId))
+                {
+                    continue;
+                }
+
+                pending.Enqueue(parentId);
+            }
+        }
 
         var exportedEdges = new List<ProjectExportEdge>();
         foreach (var edge in await edges.ListByProjectAsync(projectId, cancellationToken))
@@ -198,7 +220,7 @@ public sealed class ProjectImportExportService(
             Images = await db.PublishAssets
                     .AsNoTracking()
                     .Where(asset => asset.ProjectId == projectId
-                        && (kind == ProjectExportKind.Full || referencedVisualImageIds.Contains(asset.Id)))
+                        && (kind == ProjectExportKind.Full || exportedImageIds!.Contains(asset.Id)))
                     .OrderBy(asset => asset.CreatedAt)
                     .Select(asset => ProjectImage(asset))
                     .ToListAsync(cancellationToken),

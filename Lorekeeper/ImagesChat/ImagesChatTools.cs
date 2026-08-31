@@ -745,7 +745,7 @@ public sealed class ImagesChatTools(
                     ctx,
                     printImage,
                     printImage.FileName,
-                    "Print-resampled derivative for the physical print target; place this image ID.");
+                    "Print-upscaled derivative for the physical print target; place this image ID.");
                 ctx.AddVisual(printVisual);
                 ctx.AddModelOnlyImage(printImage);
             }

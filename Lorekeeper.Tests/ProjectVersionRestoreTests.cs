@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using Lorekeeper.Context;
 using Lorekeeper.Graph;
 using Lorekeeper.ImportExport;
@@ -125,6 +126,161 @@ public sealed class ProjectVersionRestoreTests
             Assert.Equal(expectedMetadata.PageLayoutJson, actual.PageLayoutJson);
             Assert.Equal(expectedMetadata.IllustrationLayoutJson, actual.IllustrationLayoutJson);
             Assert.Equal(expectedMetadata.ExplicitImageContextImageIds, actual.ExplicitImageContextImageIds);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SnapshotReaderPreservesImageLineageMetadataAndLegacySourceMeaning()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var repositoryId = Guid.NewGuid();
+            var projectId = Guid.NewGuid();
+            var sourceId = Guid.NewGuid();
+            var upscaleId = Guid.NewGuid();
+            var sourceMetadata = "{\"transform\":{\"kind\":\"print-upscale\"}}";
+            var source = new VersionHistoryImageAsset(
+                sourceId,
+                "original.png",
+                "image/png",
+                $"assets/images/{sourceId:N}/content.png",
+                VersionHistoryCanonicalJson.Sha256Hex([1, 2, 3]),
+                3,
+                "Original",
+                PublishAssetSource.Uploaded,
+                string.Empty,
+                string.Empty,
+                "{}",
+                null,
+                null,
+                null,
+                null,
+                null);
+            var upscale = new VersionHistoryImageAsset(
+                upscaleId,
+                "original-upscaled.png",
+                "image/png",
+                $"assets/images/{upscaleId:N}/content.png",
+                VersionHistoryCanonicalJson.Sha256Hex([4, 5, 6]),
+                3,
+                "Original",
+                PublishAssetSource.Upscaled,
+                string.Empty,
+                string.Empty,
+                sourceMetadata,
+                sourceId,
+                2,
+                3,
+                90,
+                80);
+            var payload = CreatePayload(repositoryId, projectId) with
+            {
+                Assets = new VersionHistorySnapshotAssetsArea([source, upscale], [], []),
+                ImageData = new Dictionary<Guid, byte[]>
+                {
+                    [sourceId] = [1, 2, 3],
+                    [upscaleId] = [4, 5, 6],
+                },
+            };
+            var snapshotRoot = Path.Combine(root, "current");
+            WriteSnapshotTree(snapshotRoot, payload);
+
+            var artifact = new VersionHistorySnapshotReader().Read(snapshotRoot, repositoryId, projectId);
+            var actual = artifact.Payload.Assets.Images.Single(image => image.Id == upscaleId);
+            Assert.Equal(PublishAssetSource.Upscaled, actual.Source);
+            Assert.Equal(sourceId, actual.DerivedFromImageId);
+            using var actualMetadata = JsonDocument.Parse(actual.SourceMetadataJson);
+            Assert.Equal(
+                "print-upscale",
+                actualMetadata.RootElement.GetProperty("transform").GetProperty("kind").GetString());
+            Assert.Equal(2, actual.CropXPercent);
+            Assert.Equal(3, actual.CropYPercent);
+            Assert.Equal(90, actual.CropWidthPercent);
+            Assert.Equal(80, actual.CropHeightPercent);
+            Assert.Equal([4, 5, 6], artifact.Payload.ImageData[upscaleId]);
+
+            var legacyId = Guid.NewGuid();
+            var legacy = new VersionHistoryImageAsset(
+                legacyId,
+                "legacy-imported.png",
+                "image/png",
+                $"assets/images/{legacyId:N}/content.png",
+                VersionHistoryCanonicalJson.Sha256Hex([7, 8, 9]),
+                3,
+                "Imported",
+                (PublishAssetSource)6,
+                string.Empty,
+                string.Empty,
+                "{}",
+                null,
+                null,
+                null,
+                null,
+                null);
+            var legacyPayload = CreatePayload(repositoryId, projectId) with
+            {
+                Assets = new VersionHistorySnapshotAssetsArea([legacy], [], []),
+                ImageData = new Dictionary<Guid, byte[]> { [legacyId] = [7, 8, 9] },
+            };
+            var legacyRoot = Path.Combine(root, "legacy");
+            WriteSnapshotTree(legacyRoot, legacyPayload, schemaVersion: 4);
+
+            var legacyArtifact = new VersionHistorySnapshotReader().Read(legacyRoot, repositoryId, projectId);
+            Assert.Equal(
+                PublishAssetSource.Imported,
+                Assert.Single(legacyArtifact.Payload.Assets.Images).Source);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SnapshotReaderRejectsImageWithMissingLineageParent()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var imageId = Guid.NewGuid();
+            var sourceId = Guid.NewGuid();
+            var image = new VersionHistoryImageAsset(
+                imageId,
+                "upscaled.png",
+                "image/png",
+                $"assets/images/{imageId:N}/content.png",
+                VersionHistoryCanonicalJson.Sha256Hex([1]),
+                1,
+                "Upscaled",
+                PublishAssetSource.Upscaled,
+                string.Empty,
+                string.Empty,
+                "{}",
+                sourceId,
+                null,
+                null,
+                null,
+                null);
+            var payload = CreatePayload(Guid.NewGuid(), Guid.NewGuid()) with
+            {
+                Assets = new VersionHistorySnapshotAssetsArea([image], [], []),
+                ImageData = new Dictionary<Guid, byte[]> { [imageId] = [1] },
+            };
+            var snapshotRoot = Path.Combine(root, "snapshot");
+            WriteSnapshotTree(snapshotRoot, payload);
+
+            var exception = Assert.Throws<InvalidDataException>(
+                () => new VersionHistorySnapshotReader().Read(snapshotRoot, payload.RepositoryId, payload.ProjectId));
+            Assert.Contains(sourceId.ToString("N"), exception.Message, StringComparison.Ordinal);
         }
         finally
         {
@@ -662,7 +818,8 @@ public sealed class ProjectVersionRestoreTests
     private static void WriteSnapshotTree(
         string root,
         VersionHistorySnapshotPayload payload,
-        Func<string, byte[], byte[]>? transform = null)
+        Func<string, byte[], byte[]>? transform = null,
+        int? schemaVersion = null)
     {
         var files = new SortedDictionary<string, byte[]>(StringComparer.Ordinal)
         {
@@ -684,6 +841,11 @@ public sealed class ProjectVersionRestoreTests
             files[$"{chapterDirectory}/manuscript.json"] = VersionHistoryCanonicalJson.SerializeDirectManuscript(
                 chapter.ManuscriptJson);
         }
+        foreach (var image in payload.Assets.Images)
+            files[image.BlobPath] = payload.ImageData.GetValueOrDefault(image.Id) ?? [];
+        foreach (var family in payload.Assets.FontFamilies)
+        foreach (var face in family.Faces)
+            files[face.BlobPath] = payload.FontFaceData.GetValueOrDefault(face.Id) ?? [];
         if (transform is not null)
         {
             foreach (var path in files.Keys.ToList())
@@ -693,7 +855,7 @@ public sealed class ProjectVersionRestoreTests
         var contentHash = VersionHistoryCanonicalJson.Sha256Hex(files.Select(item => (item.Key, item.Value)));
         var manifest = new VersionHistorySnapshotManifest(
             VersionHistorySnapshotContract.FormatId,
-            VersionHistorySnapshotContract.SchemaVersion,
+            schemaVersion ?? VersionHistorySnapshotContract.SchemaVersion,
             payload.RepositoryId,
             payload.ProjectId,
             VersionHistorySnapshotContract.IncludedAreas,

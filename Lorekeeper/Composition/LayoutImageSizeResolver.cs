@@ -1,3 +1,5 @@
+using Lorekeeper.Manuscripts;
+
 namespace Lorekeeper.Composition;
 
 public sealed record LayoutImageSize(int Width, int Height)
@@ -68,6 +70,32 @@ public static class LayoutImageSizeResolver
 
     public const int PrintMaximumEdge = 12_000;
     public const long PrintMaximumPixels = 120_000_000;
+
+    public static (double WidthInches, double HeightInches) ResolveFlowingFigurePhysicalSize(
+        double pageWidthInches,
+        double pageHeightInches,
+        double pageMarginInches,
+        FigurePresentation presentation,
+        double bleedInches = 0)
+    {
+        var contentWidth = Math.Max(.25, pageWidthInches - pageMarginInches * 2);
+        var contentHeight = Math.Max(.25, pageHeightInches - pageMarginInches * 2);
+        if (!double.IsFinite(presentation.WidthPercent))
+            throw new ArgumentException("Figure width must be finite.", nameof(presentation));
+        var width = presentation.Placement switch
+        {
+            FigurePlacementIntent.FullBleed => pageWidthInches + Math.Max(0, bleedInches) * 2,
+            FigurePlacementIntent.FullWidth => contentWidth,
+            _ => contentWidth * Math.Clamp(presentation.WidthPercent, 10, 100) / 100,
+        };
+        var height = presentation.Placement switch
+        {
+            FigurePlacementIntent.FullBleed => pageHeightInches + Math.Max(0, bleedInches) * 2,
+            FigurePlacementIntent.DedicatedPage => contentHeight * .75,
+            _ => Math.Min(contentHeight * .34, width * 1.25),
+        };
+        return (width, height);
+    }
 
     public static LayoutImageSize Resolve(double width, double height)
     {

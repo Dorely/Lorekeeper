@@ -538,6 +538,14 @@ cancels and awaits any outstanding progress read
 before disposing the async enumerator. Completion, cancellation, and failure
 must leave durable terminal state and no concurrent-disposal error.
 
+Publish preparation results include the persisted image-preparation summary:
+active threshold, created and reused derivatives, replaced references, and
+actionable failures. The assistant reports this existing job evidence; it does
+not choose alternate DPI rules, perform provider generation, or reproduce the
+managed publication model's layout math. Permanent replacements are system-owned publication mutations and
+invalidate Review Edits/manual history through their content owners just like
+other direct assistant-visible changes.
+
 ## Key files and file families
 
 | File or family | Architectural role |

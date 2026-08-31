@@ -44,5 +44,6 @@ public enum PublishAssetSource
     Edited = 2,
     Cropped = 3,
     Resized = 4,
-    Imported = 6,
+    Imported = 5,
+    Upscaled = 6,
 }

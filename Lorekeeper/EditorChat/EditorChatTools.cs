@@ -2611,7 +2611,7 @@ IActService acts,
                     ctx,
                     printImage,
                     printImage.FileName,
-                    "Print-resampled derivative for the physical print target; place this image ID.");
+                    "Print-upscaled derivative for the physical print target; place this image ID.");
                 ctx.AddVisual(printVisual);
                 ctx.AddModelOnlyImage(printImage);
             }
@@ -2747,7 +2747,7 @@ IActService acts,
                 physicalDimensions = new { widthInches = resolution.WidthInches, heightInches = resolution.HeightInches },
                 requestedMinimumDpi = resolution.MinimumDpi,
                 target = new { targetKind, targetId, editionId, variantId, surfaceBounds },
-                summary = $"The {upscalePlan.TargetDpi:0}-DPI physical target ({resolution.WidthInches:0.####} x {resolution.HeightInches:0.####} inches) exceeds one provider image. Generation proceeds at {upscalePlan.NativeRaster.Size} (about {upscalePlan.NativeEffectiveDpi:0.#} DPI native) and Lorekeeper resamples the finished image to {upscalePlan.PrintRaster.Size}. Proceed with the normal generate tool; place the returned print-resampled image ID.",
+                summary = $"The {upscalePlan.TargetDpi:0}-DPI physical target ({resolution.WidthInches:0.####} x {resolution.HeightInches:0.####} inches) exceeds one provider image. Generation proceeds at {upscalePlan.NativeRaster.Size} (about {upscalePlan.NativeEffectiveDpi:0.#} DPI native) and Lorekeeper upscales the finished image to {upscalePlan.PrintRaster.Size}. Proceed with the normal generate tool; place the returned print-upscaled image ID.",
             }, ManuscriptCodec.JsonOptions);
         }
         return JsonSerializer.Serialize(new
