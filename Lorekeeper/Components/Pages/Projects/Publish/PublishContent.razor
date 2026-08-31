@@ -1043,6 +1043,11 @@ else
 
     private async Task BeginPublicationSectionEditAsync(PublicationSectionView item)
     {
+        _ = await TryBeginPublicationSectionEditAsync(item);
+    }
+
+    private async Task<bool> TryBeginPublicationSectionEditAsync(PublicationSectionView item)
+    {
         try
         {
             await SavePendingAsync();
@@ -1052,8 +1057,13 @@ else
                 item = await PublicationSections.EnsureSystemDesignedPageAsync(CurrentPublicationSectionTarget(), item.Id, _dispose.Token);
             BeginPublicationSectionEdit(item);
             await RefreshPublicationSectionsAsync();
+            return true;
         }
-        catch (Exception exception) { _error = exception.Message; }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+            return false;
+        }
     }
 
     private void BeginPublicationSectionEdit(PublicationSectionView item)
@@ -1853,8 +1863,9 @@ else
                     _error = "The publication section for this note is no longer available.";
                     return;
                 }
-                BeginPublicationSectionEdit(section);
-                if (diagnostic.CompositionId is Guid compositionId)
+                if (!await TryBeginPublicationSectionEditAsync(section))
+                    return;
+                if (diagnostic.CompositionId is Guid compositionId && SectionCompositionIds().Contains(compositionId))
                     _selectedSectionCompositionId = compositionId;
                 _sectionPageSelectionId = diagnostic.ObjectId;
                 _sectionPageRefreshSignal++;

@@ -193,17 +193,23 @@ public sealed partial class PublicationDiagnosticPresentationService(IAppDatabas
                 var label = chapterOrdinals.TryGetValue(chapter.Id, out var ordinal)
                     ? $"Chapter {ordinal}: {chapter.Title}"
                     : chapter.Title;
-                return new(PublicationDiagnosticTargetKind.ChapterPage, label, ChapterId: chapter.Id);
+                return new(PublicationDiagnosticTargetKind.ChapterPage, label, ChapterId: chapter.Id, EditionId: selectedEditionId);
             }
 
             var publicationSection = await db.PublicationSections.AsNoTracking()
-                .FirstOrDefaultAsync(item => item.Id == candidateId && item.ProjectId == projectId, cancellationToken);
+                .Where(item => item.Id == candidateId
+                    && item.ProjectId == projectId
+                    && (selectedEditionId == null
+                        ? item.EditionId == null
+                        : item.EditionId == selectedEditionId || item.EditionId == null))
+                .OrderByDescending(item => item.EditionId == selectedEditionId)
+                .FirstOrDefaultAsync(cancellationToken);
             if (publicationSection is not null)
             {
                 return new(
                     PublicationDiagnosticTargetKind.PublicationSectionPage,
                     publicationSection.Title,
-                    EditionId: publicationSection.EditionId,
+                    EditionId: selectedEditionId ?? publicationSection.EditionId,
                     PublicationSectionId: publicationSection.Id);
             }
         }
@@ -225,7 +231,7 @@ public sealed partial class PublicationDiagnosticPresentationService(IAppDatabas
             return new(
                 PublicationDiagnosticTargetKind.PublicationSectionPage,
                 $"{section.Title} · {pageLabel}",
-                EditionId: section.EditionId,
+                EditionId: selectedEditionId ?? section.EditionId,
                 PublicationSectionId: section.Id,
                 CompositionId: composition.Id,
                 ObjectId: objectId);
@@ -240,7 +246,7 @@ public sealed partial class PublicationDiagnosticPresentationService(IAppDatabas
                 PublicationDiagnosticTargetKind.ChapterPage,
                 $"{chapterLabel} · {pageLabel}",
                 ChapterId: chapter.Id,
-                EditionId: composition.EditionId,
+                EditionId: selectedEditionId ?? composition.EditionId,
                 CompositionId: composition.Id,
                 ObjectId: objectId);
         }
