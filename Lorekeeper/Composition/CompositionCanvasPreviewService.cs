@@ -472,6 +472,7 @@ public sealed partial class CompositionCanvasPreviewService(
         for (var lineIndex = 0; lineIndex < lines.Count; lineIndex++)
         {
             var line = lines[lineIndex];
+            var wordSpacing = JustificationSpacing(item, line, lineIndex, lines.Count, frame.Width);
             var x = item.TextAlignment switch
             {
                 CompositionTextAlignment.Center => frame.Left + (frame.Width - line.Width) / 2,
@@ -497,10 +498,28 @@ public sealed partial class CompositionCanvasPreviewService(
                     if (token.Underline) canvas.DrawLine((float)x, (float)(tokenBaseline + token.Size * .1), (float)(x + token.Width), (float)(tokenBaseline + token.Size * .1), decoration);
                     if (token.Strikethrough) canvas.DrawLine((float)x, (float)(tokenBaseline - token.Size * .3), (float)(x + token.Width), (float)(tokenBaseline - token.Size * .3), decoration);
                 }
-                x += token.Width;
+                x += token.Width + wordSpacing * token.Text.Count(char.IsWhiteSpace);
             }
         }
         canvas.Restore();
+    }
+
+    private static double JustificationSpacing(
+        CompositionObject item,
+        TextLine line,
+        int lineIndex,
+        int lineCount,
+        double availableWidth)
+    {
+        if (item.TextAlignment != CompositionTextAlignment.Justify
+            || lineIndex >= lineCount - 1
+            || line.EndsParagraph
+            || line.Width >= availableWidth)
+            return 0;
+        var whitespaceCount = line.Tokens.Sum(token => token.Text.Count(char.IsWhiteSpace));
+        return whitespaceCount == 0
+            ? 0
+            : Math.Clamp((availableWidth - line.Width) / whitespaceCount, 0, item.FontSizePoints * .25);
     }
 
     private static List<TextLine> LayoutLines(
@@ -522,6 +541,7 @@ public sealed partial class CompositionCanvasPreviewService(
                 var value = match.Value;
                 if (value == "\n")
                 {
+                    lines[^1] = lines[^1] with { EndsParagraph = true };
                     lines.Add(new([], 0));
                     continue;
                 }
@@ -531,6 +551,8 @@ public sealed partial class CompositionCanvasPreviewService(
                 var current = lines[^1];
                 if (!whitespace && current.Tokens.Count > 0 && current.Width + width > maximumWidth)
                 {
+                    current = TrimTrailingWhitespace(current);
+                    lines[^1] = current;
                     lines.Add(new([], 0));
                     current = lines[^1];
                 }
@@ -556,6 +578,16 @@ public sealed partial class CompositionCanvasPreviewService(
             }
         }
         return lines;
+    }
+
+    private static TextLine TrimTrailingWhitespace(TextLine line)
+    {
+        while (line.Tokens.Count > 0 && line.Tokens[^1].Text.All(char.IsWhiteSpace))
+        {
+            line = line with { Width = line.Width - line.Tokens[^1].Width };
+            line.Tokens.RemoveAt(line.Tokens.Count - 1);
+        }
+        return line with { Width = Math.Max(0, line.Width) };
     }
 
     private static DrawToken Token(string text, double width, FontKey font, double size, IReadOnlyList<ManuscriptMark> marks) => new(
@@ -813,5 +845,5 @@ public sealed partial class CompositionCanvasPreviewService(
         bool Underline,
         bool Strikethrough,
         double BaselineShift);
-    private sealed record TextLine(List<DrawToken> Tokens, double Width);
+    private sealed record TextLine(List<DrawToken> Tokens, double Width, bool EndsParagraph = false);
 }

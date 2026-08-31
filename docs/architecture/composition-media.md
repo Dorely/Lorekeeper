@@ -239,6 +239,11 @@ but above older images; new text and shapes enter at the front. Front/back
 actions move to the actual applicable stack edge. Group transforms, opacity,
 visibility, clipping, rotation, and z-order must resolve consistently in the
 canvas, previews, generation-target inspection, EPUB projection, and Press.
+Text objects use `CompositionTextAlignment.Start`, `Center`, `End`, or
+`Justify`. Justification distributes bounded inter-word spacing on soft-wrapped
+non-final lines; final lines and explicit hard-break paragraph endings remain
+ragged. The canvas, transient preview, EPUB projection, and Press layout trace
+share that alignment behavior.
 
 Active authoring variants always use the current project page setup and retain
 only single-page or facing-spread mode. A variant is selected by exact
@@ -298,7 +303,9 @@ persist the preview through their transcript visual boundary so the exact image
 inspected by a model is visible in the tool chip and survives transcript
 reload. A preview is an inspection gate, never a new project image. Assistants
 inspect the same current revision before another visual mutation, then validate
-and inspect a clean preview for final verification.
+and inspect a clean preview for final verification. Text justification in the
+preview follows the shared composition alignment contract, including ragged
+final and hard-break lines.
 
 Project fonts include bundled OFL families and imported static TTF/OTF faces.
 The project font catalog owns validation, face resolution, browser URLs, and

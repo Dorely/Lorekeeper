@@ -171,6 +171,12 @@ Text, manuscript-decoration vectors, and images follow the selected interior
 color space; a black-and-white job converts quotation-rule and caption tones to
 gray while preserving color-cover independence.
 
+Composition text uses the scene's Start, Center, End, or Justify alignment.
+Press emits bounded inter-word spacing for justified soft-wrapped non-final
+lines, leaves final and explicit hard-break paragraph-ending lines ragged, and
+applies the same spacing to text-shadow and foreground paint in the layout
+trace and PDF.
+
 B&N `bn-print-pdfa1b-v1` emits PDF 1.4 with PDF/A-1b identification, embedded
 fonts, output intent, flattened transparency, and profile-calculated page boxes.
 Authoring always remains one connected `[BACK][SPINE][FRONT]` scene, with

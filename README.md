@@ -250,7 +250,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   bookmarks, internal links, semantic structure, and logical reading order.
   Renderer/profile upgrades make older owned PDFs stale until regenerated.
 - Core/release-aware structured cover design with shared image/text/shape/layer/style
-  tools: the Core front scene flows into digital releases and the front panel of
+  tools, including justified text alignment: the Core front scene flows into digital releases and the front panel of
   print surfaces until explicitly customized. Print releases select exact
   paper weight/thickness, color process, construction, and cover mode. Paper
   color and finish stay outside the artifact workflow. The final interior page

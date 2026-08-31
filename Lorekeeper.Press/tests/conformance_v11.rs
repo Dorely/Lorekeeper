@@ -1120,7 +1120,14 @@ fn protocol_v11_renders_paragraph_presentation_and_structured_page_preview_data(
                             "fontSizePoints": 18, "letterSpacingEm": 0.1, "textAlignment": "Center",
                             "verticalAlignment": "Bottom", "backgroundColor": "#fff1cc", "backgroundOpacity": 0.8,
                             "textShadow": "Soft", "rotationDegrees": 30,
-                            "semanticRole": "Heading2", "readingOrder": 2, "zIndex": 2 }]
+                            "semanticRole": "Heading2", "readingOrder": 2, "zIndex": 2 },
+                        { "id": "90000000-0000-0000-0000-000000000015",
+                            "layerId": "80000000-0000-0000-0000-000000000001", "kind": "Text",
+                            "bounds": { "xPercent": 55, "yPercent": 25, "widthPercent": 40, "heightPercent": 50 },
+                            "textBinding": "This composition text demonstrates justified spacing across wrapped lines.\nA hard break keeps this paragraph ending ragged.\nAnother final paragraph confirms hard-break endings.",
+                            "fontFamilyKey": "sans", "fontSizePoints": 12, "textAlignment": "Justify",
+                            "verticalAlignment": "Top", "textShadow": "Soft",
+                            "semanticRole": "Paragraph", "readingOrder": 3, "zIndex": 3 }]
                     }
                 }]
             }]
@@ -1190,6 +1197,36 @@ fn protocol_v11_renders_paragraph_presentation_and_structured_page_preview_data(
             .any(|line| line["artifact"] == true && line["text"] == "Map legend"),
         "text shadow paint must be an artifact rather than duplicate semantic content"
     );
+    let justified_lines = designed_page["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|line| line["semanticId"] == "90000000-0000-0000-0000-000000000015")
+        .collect::<Vec<_>>();
+    assert!(
+        justified_lines.iter().any(|line| line["wordSpacing"]
+            .as_f64()
+            .is_some_and(|spacing| spacing > 0.0)),
+        "composition Justify must distribute bounded spacing on wrapped non-final lines"
+    );
+    let hard_break_line = justified_lines
+        .iter()
+        .find(|line| line["text"] == "A hard break keeps this paragraph ending ragged.")
+        .expect("hard-break composition line");
+    assert_eq!(hard_break_line["wordSpacing"], 0.0);
+    let shadow = designed_page["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|line| {
+            line["artifact"] == true
+                && line["text"] == justified_lines[0]["text"]
+                && line["wordSpacing"]
+                    .as_f64()
+                    .is_some_and(|spacing| spacing > 0.0)
+        })
+        .expect("justified composition shadow");
+    assert_eq!(shadow["wordSpacing"], justified_lines[0]["wordSpacing"]);
     assert!(
         designed_page["images"]
             .as_array()

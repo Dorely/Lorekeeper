@@ -733,7 +733,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                     .Append(";font-family:").Append(Html(FontCssFamily(item.FontFamilyKey))).Append(";font-size:").Append(item.FontSizePoints.ToString(CultureInfo.InvariantCulture)).Append("px;font-weight:").Append(item.FontWeight)
                     .Append(";font-style:").Append(item.Italic ? "italic" : "normal").Append(";line-height:").Append(item.LineHeight.ToString(CultureInfo.InvariantCulture))
                     .Append(";letter-spacing:").Append(item.LetterSpacingEm.ToString(CultureInfo.InvariantCulture)).Append("em;text-align:")
-                    .Append(item.TextAlignment == CompositionTextAlignment.Center ? "center" : item.TextAlignment == CompositionTextAlignment.End ? "right" : "left")
+                    .Append(item.TextAlignment == CompositionTextAlignment.Center ? "center" : item.TextAlignment == CompositionTextAlignment.End ? "right" : item.TextAlignment == CompositionTextAlignment.Justify ? "justify" : "left")
                     .Append(";justify-content:").Append(item.VerticalAlignment == CompositionVerticalAlignment.Center ? "center" : item.VerticalAlignment == CompositionVerticalAlignment.Bottom ? "flex-end" : "flex-start")
                     .Append(";text-shadow:").Append(TextShadowCss(item.TextShadow)).Append("\">").Append(Html(text)).Append("</div></foreignObject>");
             }
@@ -779,7 +779,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             {
                 var item = ResolveCompositionStyle(cover.Scene, sceneItem);
                 var style = FormattableString.Invariant(
-                    $"left:{item.Bounds.XPercent}%;top:{item.Bounds.YPercent}%;width:{item.Bounds.WidthPercent}%;height:{item.Bounds.HeightPercent}%;opacity:{item.Opacity};transform:rotate({item.RotationDegrees}deg);z-index:{item.ZIndex};color:{item.FillColor};background:{BackgroundCss(item.BackgroundColor, item.BackgroundOpacity)};border:{item.StrokeWidthPoints}px solid {item.StrokeColor};font-family:{FontCssFamily(item.FontFamilyKey)};font-weight:{item.FontWeight};font-style:{(item.Italic ? "italic" : "normal")};font-size:{item.FontSizePoints}px;line-height:{item.LineHeight};letter-spacing:{item.LetterSpacingEm}em;text-align:{(item.TextAlignment == CompositionTextAlignment.Center ? "center" : item.TextAlignment == CompositionTextAlignment.End ? "right" : "left")};justify-content:{(item.VerticalAlignment == CompositionVerticalAlignment.Center ? "center" : item.VerticalAlignment == CompositionVerticalAlignment.Bottom ? "flex-end" : "flex-start")};text-shadow:{TextShadowCss(item.TextShadow)};object-fit:{ImageFitCss(item.ImageFit)};object-position:{item.CropXPercent}% {item.CropYPercent}%");
+                    $"left:{item.Bounds.XPercent}%;top:{item.Bounds.YPercent}%;width:{item.Bounds.WidthPercent}%;height:{item.Bounds.HeightPercent}%;opacity:{item.Opacity};transform:rotate({item.RotationDegrees}deg);z-index:{item.ZIndex};color:{item.FillColor};background:{BackgroundCss(item.BackgroundColor, item.BackgroundOpacity)};border:{item.StrokeWidthPoints}px solid {item.StrokeColor};font-family:{FontCssFamily(item.FontFamilyKey)};font-weight:{item.FontWeight};font-style:{(item.Italic ? "italic" : "normal")};font-size:{item.FontSizePoints}px;line-height:{item.LineHeight};letter-spacing:{item.LetterSpacingEm}em;text-align:{(item.TextAlignment == CompositionTextAlignment.Center ? "center" : item.TextAlignment == CompositionTextAlignment.End ? "right" : item.TextAlignment == CompositionTextAlignment.Justify ? "justify" : "left")};justify-content:{(item.VerticalAlignment == CompositionVerticalAlignment.Center ? "center" : item.VerticalAlignment == CompositionVerticalAlignment.Bottom ? "flex-end" : "flex-start")};text-shadow:{TextShadowCss(item.TextShadow)};object-fit:{ImageFitCss(item.ImageFit)};object-position:{item.CropXPercent}% {item.CropYPercent}%");
                 if (item.Kind == CompositionObjectKind.Text)
                 {
                     var text = item.TextBinding switch
@@ -941,7 +941,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                     .Append(item.LineHeight.ToString(CultureInfo.InvariantCulture)).Append(";letter-spacing:")
                     .Append(item.LetterSpacingEm.ToString(CultureInfo.InvariantCulture)).Append("em;color:")
                     .Append(Html(item.FillColor)).Append(";background:").Append(Html(BackgroundCss(item.BackgroundColor, item.BackgroundOpacity)))
-                    .Append(";text-align:").Append(item.TextAlignment switch { CompositionTextAlignment.Center => "center", CompositionTextAlignment.End => "right", _ => "left" })
+                    .Append(";text-align:").Append(item.TextAlignment switch { CompositionTextAlignment.Center => "center", CompositionTextAlignment.End => "right", CompositionTextAlignment.Justify => "justify", _ => "left" })
                     .Append(";justify-content:").Append(item.VerticalAlignment switch { CompositionVerticalAlignment.Center => "center", CompositionVerticalAlignment.Bottom => "flex-end", _ => "flex-start" })
                     .Append(";text-shadow:").Append(TextShadowCss(item.TextShadow))
                     .Append(";-webkit-text-stroke:").Append(item.StrokeWidthPoints.ToString(CultureInfo.InvariantCulture)).Append("px ")

@@ -187,7 +187,7 @@ public enum CompositionObjectKind { Image, Text, Rectangle, Ellipse, Line, Group
 [JsonConverter(typeof(JsonStringEnumConverter<CompositionSemanticRole>))]
 public enum CompositionSemanticRole { Artifact, Paragraph, Heading1, Heading2, Heading3, Figure, Caption, Credit }
 [JsonConverter(typeof(JsonStringEnumConverter<CompositionTextAlignment>))]
-public enum CompositionTextAlignment { Start, Center, End }
+public enum CompositionTextAlignment { Start, Center, End, Justify }
 [JsonConverter(typeof(JsonStringEnumConverter<CompositionVerticalAlignment>))]
 public enum CompositionVerticalAlignment { Top, Center, Bottom }
 [JsonConverter(typeof(JsonStringEnumConverter<CompositionTextShadow>))]

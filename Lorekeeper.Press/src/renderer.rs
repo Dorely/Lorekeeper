@@ -3546,7 +3546,8 @@ fn designed_page(
                     item["visible"] = Value::Bool(false);
                     continue;
                 }
-                let wrapped = wrap_layout_runs(&text, &source_runs, size, width * scene_width);
+                let wrapped =
+                    wrap_layout_runs_with_breaks(&text, &source_runs, size, width * scene_width);
                 let line_height = size
                     * scene_style_value(scene, &item, "lineHeight")
                         .and_then(Value::as_f64)
@@ -3649,7 +3650,10 @@ fn designed_page(
                     }
                 };
                 let frame_bottom = scene_height - (y + height) * scene_height;
-                for (line_index, (mut line_text, mut runs)) in wrapped.into_iter().enumerate() {
+                let wrapped_line_count = wrapped.len();
+                for (line_index, (mut line_text, mut runs, ends_paragraph)) in
+                    wrapped.into_iter().enumerate()
+                {
                     let line_y = scene_height
                         - y * scene_height
                         - vertical_offset
@@ -3696,11 +3700,26 @@ fn designed_page(
                             ));
                         }
                     }
+                    let alignment = scene_style_value(scene, &item, "textAlignment")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Start");
+                    let whitespace_count = line_text
+                        .chars()
+                        .filter(|character| character.is_whitespace())
+                        .count();
+                    let word_spacing = if alignment == "Justify"
+                        && line_index + 1 < wrapped_line_count
+                        && !ends_paragraph
+                        && whitespace_count > 0
+                        && measured_width < width * scene_width
+                    {
+                        ((width * scene_width - measured_width) / whitespace_count as f32)
+                            .clamp(0.0, size * 0.25)
+                    } else {
+                        0.0
+                    };
                     let line_x = x * scene_width
-                        + match scene_style_value(scene, &item, "textAlignment")
-                            .and_then(Value::as_str)
-                            .unwrap_or("Start")
-                        {
+                        + match alignment {
                             "Center" => (width * scene_width - measured_width) / 2.0,
                             "End" => width * scene_width - measured_width,
                             _ => 0.0,
@@ -3719,7 +3738,7 @@ fn designed_page(
                             x: line_x + shadow_offset,
                             y: line_y - shadow_offset,
                             baseline_offset_points,
-                            word_spacing: 0.0,
+                            word_spacing,
                             character_spacing,
                             rotation_degrees: item
                                 .get("rotationDegrees")
@@ -3755,7 +3774,7 @@ fn designed_page(
                         x: line_x,
                         y: line_y,
                         baseline_offset_points,
-                        word_spacing: 0.0,
+                        word_spacing,
                         character_spacing,
                         rotation_degrees: item
                             .get("rotationDegrees")
@@ -5261,11 +5280,24 @@ fn wrap_layout_runs(
     size: f32,
     available_width: f32,
 ) -> Vec<(String, Vec<LayoutRun>)> {
+    wrap_layout_runs_with_breaks(text, source_runs, size, available_width)
+        .into_iter()
+        .map(|(line, runs, _)| (line, runs))
+        .collect()
+}
+
+fn wrap_layout_runs_with_breaks(
+    text: &str,
+    source_runs: &[LayoutRun],
+    size: f32,
+    available_width: f32,
+) -> Vec<(String, Vec<LayoutRun>, bool)> {
     let mut lines = Vec::new();
+    let paragraph_count = text.split('\n').count();
     let mut paragraph_offset = 0usize;
-    for paragraph in text.split('\n') {
+    for (paragraph_index, paragraph) in text.split('\n').enumerate() {
         if paragraph.is_empty() {
-            lines.push(String::new());
+            lines.push((String::new(), paragraph_index + 1 < paragraph_count));
             paragraph_offset = paragraph_offset.saturating_add(1);
             continue;
         }
@@ -5292,16 +5324,26 @@ fn wrap_layout_runs(
                 maximum_candidate = candidate_limit - 1;
             }
         }
-        lines.extend(fitted);
+        let fitted_count = fitted.len();
+        lines.extend(fitted.into_iter().enumerate().map(|(line_index, line)| {
+            (
+                line,
+                line_index + 1 == fitted_count && paragraph_index + 1 < paragraph_count,
+            )
+        }));
         paragraph_offset = paragraph_offset.saturating_add(paragraph.len() + 1);
     }
 
     let mut search_offset = 0;
     let runs = lines
         .iter()
-        .map(|line| runs_for_line(text, source_runs, line, &mut search_offset))
+        .map(|(line, _)| runs_for_line(text, source_runs, line, &mut search_offset))
         .collect::<Vec<_>>();
-    lines.into_iter().zip(runs).collect()
+    lines
+        .into_iter()
+        .zip(runs)
+        .map(|((line, ends_paragraph), runs)| (line, runs, ends_paragraph))
+        .collect()
 }
 
 fn wrapped_caption_with_runs(

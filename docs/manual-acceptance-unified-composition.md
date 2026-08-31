@@ -320,6 +320,9 @@ the live test project; terminate the browser host after the run.
   bottom toolbar. Confirm Page details exposes no content-binding, block-ID,
   range-offset, or technical inline-mark editor. Reorder logical reading order
   and confirm preserved unplaced content and overflow diagnostics remain clear.
+- Set a Designed Page text frame to **Justify**. Confirm wrapped non-final lines
+  distribute bounded inter-word spacing while the final line and any line ending
+  at an explicit hard break remain ragged in the canvas and transient preview.
 - Generate surface/frame art and confirm reserved text and gutter regions reach
   the generation brief, the provider's returned raster is retained, and the
   selected aspect-ratio behavior determines proportional or stretched placement.
@@ -342,6 +345,9 @@ the live test project; terminate the browser host after the run.
 - Add several cover images and text objects. Confirm artwork remains behind copy,
   newly added artwork is above older artwork, front/back actions reorder within
   the appropriate artwork or content band, and every mutation autosaves.
+- Set a cover text object to **Justify**. Confirm wrapped non-final lines use
+  bounded inter-word spacing while the final line and explicit hard-break
+  paragraph endings remain ragged in the canvas, preview, EPUB, and Press output.
 - Change trim or page count and confirm constraint-bound objects reflow, free
   objects are not stretched, and overflow is surfaced.
 - Confirm full-wrap generation requires current interior page count while
