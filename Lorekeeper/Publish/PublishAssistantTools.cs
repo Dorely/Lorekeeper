@@ -88,6 +88,7 @@ public sealed class PublishAssistantTools(
     IPublicationPreparationService preparation,
     IPublishService publishing,
     IPublicationRenderService renders,
+    IPublicationPaginationService pagination,
     IPublicationEpubPreviewService epubPreviews,
     IPublicationCoverService covers,
     IManuscriptStyleService manuscriptStyles,
@@ -2417,6 +2418,24 @@ public sealed class PublishAssistantTools(
             throw new InvalidOperationException("The requested page target does not match the release selected in the Publish workspace.");
     }
 
+    private async Task EnsurePrintCoverPaginationAsync(
+        PublishAssistantContext context,
+        Guid editionId)
+    {
+        PublicationEditionFormat? format;
+        await using (var operation = await database.OpenReadAsync(context.TurnCancellationToken))
+        {
+            format = await operation.Db.PublicationEditions.AsNoTracking()
+                .Where(item => item.ProjectId == context.ProjectId && item.Id == editionId)
+                .Select(item => (PublicationEditionFormat?)item.Format)
+                .SingleOrDefaultAsync(context.TurnCancellationToken);
+        }
+        if (format is null)
+            throw new KeyNotFoundException("Publication release not found.");
+        if (format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
+            await pagination.EnsureCurrentAsync(context.ProjectId, editionId, context.TurnCancellationToken);
+    }
+
     private static EditorContentTarget SectionContentTarget(Guid? releaseId) =>
         releaseId is Guid id ? EditorContentTarget.ForEdition(id) : EditorContentTarget.Core;
 
@@ -2428,6 +2447,7 @@ public sealed class PublishAssistantTools(
             {
                 if (editionId is not Guid regionReleaseId)
                     throw new ArgumentException("CoverRegion requires releaseId.");
+                await EnsurePrintCoverPaginationAsync(context, regionReleaseId);
                 var role = ParseCoverRegion(regionRole ?? string.Empty);
                 var cover = string.IsNullOrWhiteSpace(surfaceRole)
                     ? await covers.GetAsync(context.ProjectId, regionReleaseId, context.TurnCancellationToken)
@@ -2532,6 +2552,8 @@ public sealed class PublishAssistantTools(
         int structureStart,
         int structureCount)
     {
+        if (releaseId is Guid paginatedReleaseId)
+            await EnsurePrintCoverPaginationAsync(context, paginatedReleaseId);
         var cover = releaseId is Guid editionId
             ? string.IsNullOrWhiteSpace(surfaceRole)
                 ? await covers.GetAsync(context.ProjectId, editionId)
@@ -2588,6 +2610,8 @@ public sealed class PublishAssistantTools(
 
         try
         {
+            if (releaseId is Guid paginatedReleaseId)
+                await EnsurePrintCoverPaginationAsync(context, paginatedReleaseId);
             var cover = releaseId is Guid editionId
                 ? string.IsNullOrWhiteSpace(surfaceRole)
                     ? await covers.GetAsync(context.ProjectId, editionId, context.TurnCancellationToken)
@@ -2687,6 +2711,7 @@ public sealed class PublishAssistantTools(
     {
         try
         {
+            await EnsurePrintCoverPaginationAsync(context, releaseId);
             var role = ParseCoverRegion(regionRole);
             var cover = string.IsNullOrWhiteSpace(surfaceRole)
                 ? await covers.GetAsync(context.ProjectId, releaseId, context.TurnCancellationToken)
@@ -2722,6 +2747,7 @@ public sealed class PublishAssistantTools(
             return Serialize(new { ok = false, code = "CANVAS_PREVIEW_UNAVAILABLE", summary = "Cover canvas preview is unavailable." });
         try
         {
+            await EnsurePrintCoverPaginationAsync(context, releaseId);
             var role = ParseCoverRegion(regionRole);
             var previewMode = mode.Trim().ToLowerInvariant() switch
             {
@@ -2794,6 +2820,7 @@ public sealed class PublishAssistantTools(
     {
         try
         {
+            await EnsurePrintCoverPaginationAsync(context, releaseId);
             if (!decorative && string.IsNullOrWhiteSpace(altText))
                 throw new ArgumentException("Provide alternative text or explicitly mark the artwork decorative.");
             if (await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken) is null)
@@ -2842,6 +2869,7 @@ public sealed class PublishAssistantTools(
         long expectedRevision,
         SpineReadingDirection direction)
     {
+        await EnsurePrintCoverPaginationAsync(context, releaseId);
         var cover = await covers.GetAsync(context.ProjectId, releaseId, context.TurnCancellationToken);
         if (cover.Revision != expectedRevision)
             return Serialize(new { ok = false, code = "REVISION_CONFLICT", targetId = releaseId, summary = "The cover changed; reread it before retrying." });
@@ -2976,6 +3004,7 @@ public sealed class PublishAssistantTools(
         Guid releaseId,
         long expectedReleaseRevision)
     {
+        await EnsurePrintCoverPaginationAsync(context, releaseId);
         var cover = await covers.CustomizeFromCoreAsync(
             context.ProjectId, releaseId, expectedReleaseRevision, context.TurnCancellationToken);
         return Serialize(new { ok = true, targetId = releaseId, revision = cover.Revision,
@@ -3034,6 +3063,7 @@ public sealed class PublishAssistantTools(
         Guid releaseId,
         long expectedReleaseRevision)
     {
+        await EnsurePrintCoverPaginationAsync(context, releaseId);
         await covers.UseCoreAsync(context.ProjectId, releaseId, expectedReleaseRevision, context.TurnCancellationToken);
         return Serialize(new { ok = true, targetId = releaseId,
             summary = "The release now inherits the Core cover live.",
@@ -3042,7 +3072,7 @@ public sealed class PublishAssistantTools(
 
     private async Task<string> PatchCoverElementAsync(PublishAssistantContext context, Guid editionId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch)
     {
-        try { var cover = await covers.PatchElementAsync(context.ProjectId, editionId, expectedRevision, targetKind, targetId, patch, context.TurnCancellationToken); return Serialize(new { ok = true, targetId, revision = cover.Revision, changedIds = new[] { targetId }, summary = $"Patched cover {targetKind} {targetId:N}.", mutation = new { kind = "coverComposition", id = editionId } }); }
+        try { await EnsurePrintCoverPaginationAsync(context, editionId); var cover = await covers.PatchElementAsync(context.ProjectId, editionId, expectedRevision, targetKind, targetId, patch, context.TurnCancellationToken); return Serialize(new { ok = true, targetId, revision = cover.Revision, changedIds = new[] { targetId }, summary = $"Patched cover {targetKind} {targetId:N}.", mutation = new { kind = "coverComposition", id = editionId } }); }
         catch (Exception ex) { return Serialize(new { ok = false, code = ex is DbUpdateConcurrencyException ? "REVISION_CONFLICT" : "PATCH_REJECTED", targetId, summary = ex.Message, recovery = "Reread the cover and retry only the intended fields against its current revision." }); }
     }
 
@@ -3057,6 +3087,7 @@ public sealed class PublishAssistantTools(
     {
         try
         {
+            await EnsurePrintCoverPaginationAsync(context, editionId);
             var cover = await covers.PatchSurfaceElementAsync(
                 context.ProjectId, editionId, surfaceRole, expectedRevision, targetKind, targetId, patch,
                 context.TurnCancellationToken);
@@ -3165,6 +3196,7 @@ public sealed class PublishAssistantTools(
     {
         try
         {
+            await EnsurePrintCoverPaginationAsync(context, editionId);
             if (!decorative && string.IsNullOrWhiteSpace(altText))
                 return Serialize(new { ok = false, code = "ALT_DECISION_REQUIRED", targetId = editionId, surfaceRole, summary = "Provide alternative text or explicitly mark the artwork decorative." });
             if (await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken) is null)
@@ -3225,6 +3257,7 @@ public sealed class PublishAssistantTools(
     {
         try
         {
+            await EnsurePrintCoverPaginationAsync(context, editionId);
             if (await projectImages.GetAsync(context.ProjectId, imageId, context.TurnCancellationToken) is null)
                 return Serialize(new { ok = false, code = "IMAGE_NOT_FOUND", targetId = editionId, imageId, summary = "Project image was not found." });
             var cover = await covers.GetAsync(context.ProjectId, editionId, context.TurnCancellationToken);
@@ -3258,8 +3291,11 @@ public sealed class PublishAssistantTools(
     private async Task<string> UpdateCoverAsync(
         PublishAssistantContext context,
         Guid editionId,
-        PublicationCoverDesignUpdate update) =>
-        Serialize(await covers.UpdateAsync(context.ProjectId, editionId, update));
+        PublicationCoverDesignUpdate update)
+    {
+        await EnsurePrintCoverPaginationAsync(context, editionId);
+        return Serialize(await covers.UpdateAsync(context.ProjectId, editionId, update, context.TurnCancellationToken));
+    }
 
     private static IReadOnlyList<PublicationCoverDiagnostic> StructuredCoverDiagnostics(
         PublicationCoverDesignView cover) =>
@@ -3273,6 +3309,8 @@ public sealed class PublishAssistantTools(
     {
         try
         {
+            if (releaseId is Guid paginatedReleaseId)
+                await EnsurePrintCoverPaginationAsync(context, paginatedReleaseId);
             var cover = releaseId is Guid editionId
                 ? await covers.GetAsync(context.ProjectId, editionId, context.TurnCancellationToken)
                 : await books.GetCoverAsync(context.ProjectId, context.TurnCancellationToken);
@@ -3305,6 +3343,7 @@ public sealed class PublishAssistantTools(
     {
         try
         {
+            await EnsurePrintCoverPaginationAsync(context, editionId);
             var normalized = CompositionSceneResolver.NormalizeLogicalReadingOrder(scene);
             var stage = await covers.StageSceneAsync(
                 context.ProjectId,
@@ -3338,6 +3377,20 @@ public sealed class PublishAssistantTools(
     {
         try
         {
+            Guid editionId;
+            await using (var operation = await database.OpenReadAsync(context.TurnCancellationToken))
+            {
+                editionId = await operation.Db.CompositionMutationStages.AsNoTracking()
+                    .Where(item => item.Id == stageId
+                        && item.ProjectId == context.ProjectId
+                        && item.ConversationId == context.ConversationId
+                        && item.TargetKind == "cover-scene")
+                    .Select(item => item.TargetId)
+                    .SingleOrDefaultAsync(context.TurnCancellationToken);
+            }
+            if (editionId == Guid.Empty)
+                throw new KeyNotFoundException("Cover stage was not found for this conversation.");
+            await EnsurePrintCoverPaginationAsync(context, editionId);
             var cover = await covers.ApplySceneStageAsync(
                 context.ProjectId,
                 context.ConversationId,

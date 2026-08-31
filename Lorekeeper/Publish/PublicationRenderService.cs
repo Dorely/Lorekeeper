@@ -88,6 +88,21 @@ public interface IPublicationRenderService
     Task<PublicationArtifact?> GetArtifactAsync(Guid projectId, Guid artifactId, CancellationToken cancellationToken = default);
 }
 
+public sealed record PublicationPaginationView(
+    int PageCount,
+    string PaginationFingerprint,
+    string RendererVersion,
+    string ProfileId,
+    bool WasPrepared);
+
+public interface IPublicationPaginationService
+{
+    Task<PublicationPaginationView> EnsureCurrentAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IPublicationRenderQueue
 {
     ValueTask EnqueueAsync(Guid jobId, CancellationToken cancellationToken);
@@ -734,7 +749,7 @@ public sealed class PublicationRenderProcessor(
     IProjectFontService projectFonts,
     IPublicationPressRuntime pressRuntime,
     IPrintArtifactProfileRegistry printArtifactProfiles,
-    IOptions<PublicationPressOptions> options)
+    IOptions<PublicationPressOptions> options) : IPublicationPaginationService
 {
     public PublicationRenderProcessor(
         IAppDatabaseOperationFactory database,
@@ -765,6 +780,163 @@ public sealed class PublicationRenderProcessor(
         : vendor == PublicationVendor.AmazonKdp
             ? "kdp-paperback-v2"
             : "generic-print-v2";
+
+    public async Task<PublicationPaginationView> EnsureCurrentAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken = default)
+    {
+        PublicationEdition edition;
+        await using (var operation = await database.OpenReadAsync(cancellationToken))
+        {
+            edition = await operation.Db.PublicationEditions.AsNoTracking().SingleOrDefaultAsync(
+                item => item.ProjectId == projectId && item.Id == editionId,
+                cancellationToken) ?? throw new KeyNotFoundException("Publication release not found.");
+        }
+        if (edition.Status != PublicationEditionStatus.Draft)
+            throw new InvalidOperationException("Archived editions cannot be paginated.");
+        if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover))
+            throw new InvalidOperationException("Interior pagination is required only for physical print editions.");
+
+        var runtime = pressRuntime.GetDescription();
+        var profileId = ProfileFor(edition.Format, edition.Vendor);
+        if (!runtime.Profiles.Contains(profileId, StringComparer.Ordinal))
+            throw new InvalidOperationException("The selected print profile is unsupported by the installed Lorekeeper Press runtime.");
+        var paginationFingerprint = await editions.GetPaginationFingerprintAsync(projectId, editionId, cancellationToken);
+        PublicationInteriorPagination? snapshot;
+        await using (var operation = await database.OpenReadAsync(cancellationToken))
+        {
+            snapshot = await operation.Db.PublicationInteriorPaginations.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.EditionId == editionId, cancellationToken);
+        }
+        if (snapshot is { PageCount: > 0 }
+            && string.Equals(snapshot.PaginationFingerprint, paginationFingerprint, StringComparison.Ordinal)
+            && string.Equals(snapshot.RendererVersion, runtime.RendererVersion, StringComparison.Ordinal)
+            && string.Equals(snapshot.ProfileId, profileId, StringComparison.Ordinal))
+        {
+            return new(
+                snapshot.PageCount,
+                paginationFingerprint,
+                runtime.RendererVersion,
+                profileId,
+                WasPrepared: false);
+        }
+
+        int? artifactPageCount;
+        await using (var operation = await database.OpenReadAsync(cancellationToken))
+        {
+            artifactPageCount = await operation.Db.PublicationArtifacts.AsNoTracking()
+                .Where(artifact => artifact.ProjectId == projectId
+                    && artifact.EditionId == editionId
+                    && artifact.Kind == PublicationArtifactKind.InteriorPdf
+                    && !artifact.IsLegacy
+                    && artifact.PaginationFingerprint == paginationFingerprint
+                    && artifact.RendererVersion == runtime.RendererVersion
+                    && artifact.ProfileId == profileId)
+                .OrderByDescending(artifact => artifact.CreatedAt)
+                .Select(artifact => artifact.PageCount)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+        if (artifactPageCount is > 0)
+        {
+            await StorePaginationSnapshotAsync(
+                projectId,
+                editionId,
+                artifactPageCount.Value,
+                paginationFingerprint,
+                runtime.RendererVersion,
+                profileId,
+                cancellationToken);
+            return new(
+                artifactPageCount.Value,
+                paginationFingerprint,
+                runtime.RendererVersion,
+                profileId,
+                WasPrepared: false);
+        }
+
+        var document = await publishing.GetDocumentAsync(projectId, editionId, cancellationToken);
+        var jobId = Guid.NewGuid();
+        var job = new PublicationRenderJob
+        {
+            Id = jobId,
+            ProjectId = projectId,
+            TargetKind = PublicationTargetKind.Release,
+            EditionId = editionId,
+            Edition = edition,
+            SourceFingerprint = await editions.GetSourceFingerprintAsync(projectId, editionId, cancellationToken),
+            PaginationFingerprint = paginationFingerprint,
+            ProfileId = profileId,
+            RendererVersion = runtime.RendererVersion,
+        };
+        try
+        {
+            var request = await BuildRequestAsync(
+                job,
+                document,
+                coverDesign: null,
+                cancellationToken,
+                layoutTraceMode: "pagination");
+            var response = await InvokePaginationAsync(jobId, request, cancellationToken);
+            if (response.ProtocolVersion != 11)
+                throw new InvalidOperationException($"The press renderer returned pagination protocol {response.ProtocolVersion}; protocol 11 is required.");
+            if (!string.Equals(response.RendererVersion, runtime.RendererVersion, StringComparison.Ordinal))
+                throw new InvalidOperationException("The press renderer returned a different renderer version while paginating the interior.");
+            if (!string.Equals(response.JobId, jobId.ToString("N"), StringComparison.Ordinal))
+                throw new InvalidOperationException("The press renderer returned pagination for a different job.");
+            if (response.PageCount is <= 0 or > 100_000)
+                throw new InvalidOperationException("The press renderer returned an invalid interior page count.");
+
+            await StorePaginationSnapshotAsync(
+                projectId,
+                editionId,
+                response.PageCount,
+                paginationFingerprint,
+                runtime.RendererVersion,
+                profileId,
+                cancellationToken);
+            return new(response.PageCount, paginationFingerprint, runtime.RendererVersion, profileId, WasPrepared: true);
+        }
+        finally
+        {
+            Cleanup(jobId);
+        }
+    }
+
+    private async Task StorePaginationSnapshotAsync(
+        Guid projectId,
+        Guid editionId,
+        int pageCount,
+        string paginationFingerprint,
+        string rendererVersion,
+        string profileId,
+        CancellationToken cancellationToken)
+    {
+        var currentFingerprint = await editions.GetPaginationFingerprintAsync(projectId, editionId, cancellationToken);
+        if (!string.Equals(currentFingerprint, paginationFingerprint, StringComparison.Ordinal))
+            throw new InvalidOperationException("The edition changed during interior pagination. Try opening the cover again.");
+
+        await using var write = await database.OpenWriteAsync(projectId, cancellationToken);
+        var editionExists = await write.Db.PublicationEditions.AnyAsync(
+            item => item.ProjectId == projectId && item.Id == editionId,
+            cancellationToken);
+        if (!editionExists)
+            throw new KeyNotFoundException("Publication release not found.");
+        var stored = await write.Db.PublicationInteriorPaginations.SingleOrDefaultAsync(
+            item => item.EditionId == editionId,
+            cancellationToken);
+        if (stored is null)
+        {
+            stored = new PublicationInteriorPagination { EditionId = editionId };
+            write.Db.PublicationInteriorPaginations.Add(stored);
+        }
+        stored.PageCount = pageCount;
+        stored.PaginationFingerprint = paginationFingerprint;
+        stored.RendererVersion = rendererVersion;
+        stored.ProfileId = profileId;
+        stored.UpdatedAt = DateTime.UtcNow;
+        await write.SaveChangesAsync(cancellationToken);
+    }
 
     public async Task ProcessAsync(Guid jobId, CancellationToken cancellationToken)
     {
@@ -1122,7 +1294,8 @@ public sealed class PublicationRenderProcessor(
         "generic-digital-pdf-v1" or
         "kdp-paperback-v2" or
         "kdp-hardcover-v1" or
-        "ingram-print-pdfx1a-v2";
+        "ingram-print-pdfx1a-v2" or
+        "bn-print-pdfa1b-v1";
 
     private static string[] RequiredCoverSurfaces(PrintArtifactProfile product, PrintCoverMode coverMode)
     {
@@ -1167,8 +1340,9 @@ public sealed class PublicationRenderProcessor(
     private async Task<PressPreparedRequest> BuildRequestAsync(
         PublicationRenderJob job,
         PublishDocument document,
-        PublicationCoverDesignView coverDesign,
-        CancellationToken cancellationToken)
+        PublicationCoverDesignView? coverDesign,
+        CancellationToken cancellationToken,
+        string? layoutTraceMode = null)
     {
         var release = job.Edition;
         var digitalOutput = job.TargetKind == PublicationTargetKind.CoreBook
@@ -1177,12 +1351,12 @@ public sealed class PublicationRenderProcessor(
             .GroupBy(asset => asset.Id)
             .Select(group => StageAsset(group.First()))
             .ToArray();
-        var coverScene = JsonSerializer.Deserialize<CompositionScene>(
+        var coverScene = coverDesign is null ? null : JsonSerializer.Deserialize<CompositionScene>(
             coverDesign.CompositionSceneJson,
             ManuscriptCodec.JsonOptions);
         if (coverScene is not null)
             coverScene = NormalizeSceneLanguages(CoverCompositionFactory.KeepArtworkBehindCopy(coverScene));
-        var coverSurfaceScenes = coverDesign.SurfaceScenes.ToDictionary(
+        var coverSurfaceScenes = (coverDesign?.SurfaceScenes ?? new Dictionary<string, string>()).ToDictionary(
             item => item.Key,
             item => NormalizeSceneLanguages(CoverCompositionFactory.KeepArtworkBehindCopy(
                 JsonSerializer.Deserialize<CompositionScene>(item.Value, ManuscriptCodec.JsonOptions)
@@ -1345,6 +1519,7 @@ public sealed class PublicationRenderProcessor(
             protocolVersion = 11,
             jobId = job.Id.ToString("N"),
             profile = job.ProfileId,
+            layoutTraceMode,
             outputPurpose = job.TargetKind == PublicationTargetKind.CoreBook
                 ? "reading-copy"
                 : "publication",
@@ -1414,7 +1589,7 @@ public sealed class PublicationRenderProcessor(
                 minimumWidowLines = 2,
                 minimumOrphanLines = 2,
             },
-            cover = new
+            cover = coverDesign is null ? null : (object)new
             {
                 bleedInches = release?.Bleed == true ? 0.125 : 0,
                 surfaces = requiredCoverSurfaces,
@@ -1641,6 +1816,67 @@ public sealed class PublicationRenderProcessor(
         }
     }
 
+    private async Task<PressPaginationResponse> InvokePaginationAsync(
+        Guid jobId,
+        PressPreparedRequest request,
+        CancellationToken cancellationToken)
+    {
+        var jobRoot = JobRoot(jobId);
+        var inputRoot = Path.Combine(jobRoot, "input");
+        Directory.CreateDirectory(Path.Combine(inputRoot, "assets"));
+        foreach (var asset in request.Assets)
+        {
+            var path = Path.GetFullPath(Path.Combine(inputRoot, asset.RelativePath));
+            if (!IsContainedBy(inputRoot, path))
+                throw new InvalidOperationException("A staged Press asset escaped the bounded input directory.");
+            await File.WriteAllBytesAsync(path, asset.Data, cancellationToken);
+        }
+        Directory.CreateDirectory(Path.Combine(inputRoot, "fonts"));
+        foreach (var font in request.Fonts)
+        {
+            var path = Path.GetFullPath(Path.Combine(inputRoot, font.RelativePath));
+            if (!IsContainedBy(inputRoot, path))
+                throw new InvalidOperationException("A staged Press font escaped the bounded input directory.");
+            await File.WriteAllBytesAsync(path, font.Data, cancellationToken);
+        }
+        await File.WriteAllBytesAsync(
+            Path.Combine(inputRoot, "request.json"),
+            SerializeRequest(request.Payload),
+            cancellationToken);
+
+        var start = pressRuntime.CreateStartInfo(jobId, jobRoot);
+        start.ArgumentList[0] = "layout";
+        using var process = Process.Start(start)
+            ?? throw new InvalidOperationException("The configured press renderer could not be started.");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(
+            Math.Clamp(options.Value.RenderTimeoutSeconds, 10, 1800)));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+        var stdoutTask = ReadBoundedAsync(process.StandardOutput, 1024 * 1024, linked.Token);
+        var stderrTask = ReadBoundedAsync(process.StandardError, 64 * 1024, linked.Token);
+        try
+        {
+            await process.WaitForExitAsync(linked.Token);
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
+            if (process.ExitCode != 0)
+            {
+                var failure = JsonSerializer.Deserialize<PressResponse>(stdout, JsonOptions);
+                var detail = failure?.Diagnostics?.FirstOrDefault(item => item.Severity == "error")?.Message;
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(detail)
+                    ? $"Press interior pagination failed. {Limit(stderr)} {Limit(stdout)}".Trim()
+                    : detail);
+            }
+            return JsonSerializer.Deserialize<PressPaginationResponse>(stdout, JsonOptions)
+                ?? throw new InvalidOperationException("Press returned an empty interior-pagination response.");
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+            throw;
+        }
+    }
+
     private static async Task<PressProgress?> ReadProgressAsync(
         string jobRoot,
         Guid jobId,
@@ -1814,6 +2050,13 @@ public sealed class PublicationRenderProcessor(
         PublicationRenderDiagnostic[]? Diagnostics,
         JsonElement Evidence,
         PressPageMap[]? PageMap);
+
+    private sealed record PressPaginationResponse(
+        int ProtocolVersion,
+        string RendererVersion,
+        string JobId,
+        int PageCount,
+        PublicationRenderDiagnostic[]? Diagnostics);
 
     private sealed record PressProgress(string JobId, int Percent, string Message);
 

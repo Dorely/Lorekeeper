@@ -1306,12 +1306,27 @@ pub fn trace(job_root: &Path) -> RenderResult<()> {
 fn trace_parsed(job_root: &Path, request: &RenderRequest) -> RenderResult<()> {
     validate_request(request, job_root, &mut |_, _| {})?;
     let browser_preview = request.layout_trace_mode.as_deref() == Some("browser-preview");
-    let tolerance = if browser_preview {
+    let pagination_only = request.layout_trace_mode.as_deref() == Some("pagination");
+    let tolerance = if browser_preview || pagination_only {
         LayoutTolerance::authoring_preview()
     } else {
         LayoutTolerance::default()
     };
     let layout = paginate_with_cancellation(request, None, tolerance)?;
+    if pagination_only {
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "protocolVersion": 11,
+                "rendererVersion": env!("CARGO_PKG_VERSION"),
+                "jobId": request.job_id,
+                "pageCount": layout.pages.len(),
+                "diagnostics": layout.diagnostics,
+            }))
+            .expect("serialize pagination response")
+        );
+        return Ok(());
+    }
     let fonts = if browser_preview {
         None
     } else {
@@ -1601,7 +1616,7 @@ fn validate_request(
     if request
         .layout_trace_mode
         .as_deref()
-        .is_some_and(|mode| mode != "browser-preview")
+        .is_some_and(|mode| mode != "browser-preview" && mode != "pagination")
     {
         return reject(
             "PRESS_LAYOUT_TRACE_MODE_UNSUPPORTED",

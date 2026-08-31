@@ -38,17 +38,21 @@ public static class CoverCompositionFactory
         if (!layersNeedNormalization && !zIndexesNeedNormalization)
             return scene;
 
-        var imageOrder = zIndexesNeedNormalization
-            ? images.Select((item, index) => (item.Id, ZIndex: index - images.Count))
-                .ToDictionary(item => item.Id, item => item.ZIndex)
-            : new Dictionary<Guid, int>();
+        var highestArtworkZIndex = scene.Objects
+            .Where(item => item.Kind != CompositionObjectKind.Text)
+            .Select(item => EffectiveZIndex(item, groups))
+            .DefaultIfEmpty(0)
+            .Max();
         var copyOrder = zIndexesNeedNormalization
-            ? copy.Select((item, index) => (item.Id, ZIndex: index + 1))
+            ? copy.Select((item, index) =>
+                {
+                    var parentZIndex = item.GroupId is Guid groupId && groups.TryGetValue(groupId, out var group)
+                        ? group.ZIndex
+                        : 0;
+                    return (item.Id, ZIndex: checked((int)(highestArtworkZIndex + index + 1 - parentZIndex)));
+                })
                 .ToDictionary(item => item.Id, item => item.ZIndex)
             : new Dictionary<Guid, int>();
-        var normalizedGroupIds = zIndexesNeedNormalization
-            ? images.Concat(copy).Where(item => item.GroupId is not null).Select(item => item.GroupId!.Value).ToHashSet()
-            : [];
         return scene with
         {
             Layers = layersNeedNormalization
@@ -57,11 +61,7 @@ public static class CoverCompositionFactory
                     : layer).ToList()
                 : scene.Layers,
             Objects = scene.Objects.Select(item =>
-                normalizedGroupIds.Contains(item.Id)
-                    ? item with { ZIndex = 0 }
-                    : imageOrder.TryGetValue(item.Id, out var imageZIndex)
-                    ? item with { ZIndex = imageZIndex }
-                    : copyOrder.TryGetValue(item.Id, out var copyZIndex)
+                copyOrder.TryGetValue(item.Id, out var copyZIndex)
                         ? item with { ZIndex = copyZIndex }
                         : item).ToList(),
         };

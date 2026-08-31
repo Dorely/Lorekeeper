@@ -444,6 +444,19 @@ public sealed class LorekeeperPressMigrationTests
                 Assert.DoesNotContain("PrintProductKey", publicationEditionColumns);
                 Assert.DoesNotContain("PrintFinish", publicationEditionColumns);
                 Assert.DoesNotContain("PrintTemplateEvidenceJson", publicationEditionColumns);
+                var paginationColumns = new HashSet<string>(StringComparer.Ordinal);
+                await using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "PRAGMA table_info('PublicationInteriorPaginations');";
+                    await using var reader = await command.ExecuteReaderAsync();
+                    while (await reader.ReadAsync()) paginationColumns.Add(reader.GetString(1));
+                }
+                Assert.Contains("EditionId", paginationColumns);
+                Assert.Contains("PageCount", paginationColumns);
+                Assert.Contains("PaginationFingerprint", paginationColumns);
+                Assert.Contains("RendererVersion", paginationColumns);
+                Assert.Contains("ProfileId", paginationColumns);
+                Assert.Empty(await db.PublicationInteriorPaginations.AsNoTracking().ToListAsync());
                 Assert.Equal("{}", edition.PublicationSectionOrderJson);
                 Assert.False(edition.RectoChapterStarts);
                 Assert.Equal(10, edition.Revision);

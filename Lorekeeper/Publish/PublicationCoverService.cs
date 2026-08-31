@@ -170,6 +170,7 @@ public sealed class PublicationCoverService(
         long expectedEditionRevision,
         CancellationToken cancellationToken = default)
     {
+        await RequireCurrentInteriorPaginationAsync(projectId, editionId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
@@ -209,6 +210,7 @@ public sealed class PublicationCoverService(
         long expectedEditionRevision,
         CancellationToken cancellationToken = default)
     {
+        await RequireCurrentInteriorPaginationAsync(projectId, editionId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
@@ -250,6 +252,7 @@ public sealed class PublicationCoverService(
         PublicationCoverDesignUpdate update,
         CancellationToken cancellationToken = default)
     {
+        await RequireCurrentInteriorPaginationAsync(projectId, editionId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
@@ -382,6 +385,7 @@ public sealed class PublicationCoverService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        await RequireCurrentInteriorPaginationAsync(projectId, editionId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
@@ -470,6 +474,7 @@ public sealed class PublicationCoverService(
         bool redo,
         CancellationToken cancellationToken)
     {
+        await RequireCurrentInteriorPaginationAsync(projectId, editionId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
@@ -606,6 +611,7 @@ public sealed class PublicationCoverService(
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
+        await RequireCurrentInteriorPaginationAsync(projectId, editionId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
@@ -664,6 +670,7 @@ public sealed class PublicationCoverService(
         CompositionScene scene,
         CancellationToken cancellationToken = default)
     {
+        await RequireCurrentInteriorPaginationAsync(projectId, editionId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
@@ -708,6 +715,20 @@ public sealed class PublicationCoverService(
         long expectedRevision,
         CancellationToken cancellationToken = default)
     {
+        Guid editionId;
+        await using (var read = await database.OpenReadAsync(cancellationToken))
+        {
+            editionId = await read.Db.CompositionMutationStages.AsNoTracking()
+                .Where(item => item.Id == stageId
+                    && item.ProjectId == projectId
+                    && item.ConversationId == conversationId
+                    && item.TargetKind == "cover-scene")
+                .Select(item => item.TargetId)
+                .SingleOrDefaultAsync(cancellationToken);
+        }
+        if (editionId == Guid.Empty)
+            throw new KeyNotFoundException("Cover stage was not found for this conversation.");
+        await RequireCurrentInteriorPaginationAsync(projectId, editionId, cancellationToken);
         await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
         databaseOperation.ShareWithNestedOperations();
         var db = databaseOperation.Db;
@@ -1139,10 +1160,22 @@ public sealed class PublicationCoverService(
             .OrderByDescending(artifact => artifact.CreatedAt)
             .Select(artifact => artifact.PageCount)
             .FirstOrDefaultAsync(cancellationToken) ?? 0;
-        var provisionalPages = pages > 0
+        var snapshot = pages > 0
+            ? null
+            : await db.PublicationInteriorPaginations.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.EditionId == edition.Id, cancellationToken);
+        if (pages <= 0
+            && snapshot is { PageCount: > 0 }
+            && string.Equals(snapshot.PaginationFingerprint, currentFingerprint, StringComparison.Ordinal)
+            && string.Equals(snapshot.RendererVersion, currentRendererVersion, StringComparison.Ordinal)
+            && string.Equals(snapshot.ProfileId, edition.VendorProfileVersion, StringComparison.Ordinal))
+        {
+            pages = snapshot.PageCount;
+        }
+        var geometryPages = pages > 0
             ? pages
             : printArtifactProfiles.GetRequired(edition.PrintArtifactProfileKey).MinimumPages;
-        var geometry = printGeometry.Calculate(edition, provisionalPages, surfaceRole);
+        var geometry = printGeometry.Calculate(edition, geometryPages, surfaceRole);
         return new(pages, edition.PageWidthInches, edition.PageHeightInches, (double)geometry.BleedInches,
             (double)geometry.SpineWidthInches, (double)geometry.SurfaceWidthInches, (double)geometry.SurfaceHeightInches,
             0.25, 2, 1.2, geometry.GeometryFingerprint,
@@ -1153,6 +1186,33 @@ public sealed class PublicationCoverService(
             CoverRegionYInches = (double)geometry.CoverRegionYInches,
             CoverRegionHeightInches = (double)geometry.CoverRegionHeightInches,
         };
+    }
+
+    private async Task RequireCurrentInteriorPaginationAsync(
+        Guid projectId,
+        Guid editionId,
+        CancellationToken cancellationToken)
+    {
+        var edition = await GetEditionAsync(projectId, editionId, cancellationToken);
+        if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover))
+            return;
+
+        var paginationFingerprint = await editions.GetPaginationFingerprintAsync(projectId, editionId, cancellationToken);
+        var rendererVersion = pressRuntime.GetDescription().RendererVersion;
+        PublicationInteriorPagination? snapshot;
+        await using (var operation = await database.OpenReadAsync(cancellationToken))
+        {
+            snapshot = await operation.Db.PublicationInteriorPaginations.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.EditionId == editionId, cancellationToken);
+        }
+        if (snapshot is not { PageCount: > 0 }
+            || !string.Equals(snapshot.PaginationFingerprint, paginationFingerprint, StringComparison.Ordinal)
+            || !string.Equals(snapshot.RendererVersion, rendererVersion, StringComparison.Ordinal)
+            || !string.Equals(snapshot.ProfileId, edition.VendorProfileVersion, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "Prepare the current interior pagination before editing this print cover.");
+        }
     }
 
     private async Task<PublicationEdition> GetEditionAsync(

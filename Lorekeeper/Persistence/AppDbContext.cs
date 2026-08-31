@@ -86,6 +86,7 @@ public class AppDbContext(
     public DbSet<PublicationEditionAuditEntry> PublicationEditionAuditEntries => Set<PublicationEditionAuditEntry>();
     public DbSet<PublicationEditionMigrationJournal> PublicationEditionMigrationJournals => Set<PublicationEditionMigrationJournal>();
     public DbSet<PublicationRenderJob> PublicationRenderJobs => Set<PublicationRenderJob>();
+    public DbSet<PublicationInteriorPagination> PublicationInteriorPaginations => Set<PublicationInteriorPagination>();
     public DbSet<PublicationArtifact> PublicationArtifacts => Set<PublicationArtifact>();
     public DbSet<PublicationPageMapEntry> PublicationPageMapEntries => Set<PublicationPageMapEntry>();
     public DbSet<PublicationCoverDesign> PublicationCoverDesigns => Set<PublicationCoverDesign>();
@@ -1063,6 +1064,15 @@ public class AppDbContext(
             entity.HasOne(e => e.Chapter)
                 .WithMany(e => e.PublicationEditionChapterOverrides)
                 .HasForeignKey(e => e.ChapterId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PublicationInteriorPagination>(entity =>
+        {
+            entity.HasKey(e => e.EditionId);
+            entity.HasOne(e => e.Edition)
+                .WithOne(e => e.InteriorPagination)
+                .HasForeignKey<PublicationInteriorPagination>(e => e.EditionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

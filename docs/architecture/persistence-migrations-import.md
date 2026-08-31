@@ -236,6 +236,14 @@ field at its input boundary, but current exports never write that alias. Manual
 Undo/Redo is process memory only and therefore is also absent from every export
 without adding database rows.
 
+`PublicationInteriorPagination` caches a derived interior page count together
+with its pagination fingerprint, Press renderer version, and profile ID. This snapshot
+exists only to give print-cover geometry an authoritative spine before a full
+interior artifact is prepared. It does not advance the edition revision, is
+reused only when all provenance still matches, and remains operational state:
+project export/import and version-history snapshots omit it and regenerate it
+when cover editing is next attempted.
+
 Direct `ProjectReference` rows are deliberately omitted from both export kinds.
 When outgoing links exist, the serialized document warning and returned file
 warning must contain the same explicit omission text. Imports never infer links

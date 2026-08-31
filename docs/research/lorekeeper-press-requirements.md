@@ -4,7 +4,7 @@ Last reviewed: 2026-08-27
 
 ## Scope
 
-Lorekeeper Press 2.1.6 targets English/Latin, left-to-right paperback and
+Lorekeeper Press 2.1.7 targets English/Latin, left-to-right paperback and
 hardcover interiors, product-specific cover surfaces, and tagged Digital PDF
 books with front cover page one. Physical print jobs resolve through the
 checked-in registry `2026.08.4`; digital output uses
@@ -24,7 +24,7 @@ begins on a verso leaf because both rendered leaves must share one opening.
 These profiles establish the durable taxonomy used by the application:
 Generic profiles provide configurable output without a named-vendor claim,
 while Specific products are built-in, versioned contracts for a named vendor,
-binding construction, print process, exact paper stock/weight, trim, finish,
+binding construction, print process, exact paper stock/weight, trim,
 cover mode, artifact set, and geometry. KDP paperback/hardcover and Ingram
 paperback, duplex, case, cloth, and jacket constructions are the current
 Specific print-artifact profiles. Additional vendors require new reviewed registry
@@ -44,7 +44,7 @@ assertion was removed or relaxed.
 
 | Area | Required behavior | Evidence boundary |
 |---|---|---|
-| Protocol | Version 11; absolute job root; BOM-free UTF-8 app requests with compatible BOM parsing; job-bound terminal responses and bounded job-bound progress sidecar; staged request; declared relative image/font assets; resolved print-artifact profile with registry version/hash; explicit cover surfaces; hashes, sizes, dimensions/rights where applicable, limits, explicit publication/reading-copy purpose, anchored publication sections, full glyph-evidence and compact browser-preview layout traces, structured layout response, and diagnostics; browser preview and Core reading-copy output report unfinished accessibility decisions as warnings while publication artifact rendering rejects them | Black-box CLI adversarial fixtures, including BOM compatibility, artifact-profile/progress identity, deterministic page-paint responses, publication-section ordering, pending-accessibility preview/reading-copy/publication separation, reading-purpose profile containment, compact-trace payload assertions, and parsed-rejection identity assertions |
+| Protocol | Version 11; absolute job root; BOM-free UTF-8 app requests with compatible BOM parsing; job-bound terminal responses and bounded job-bound progress sidecar; staged request; declared relative image/font assets; resolved print-artifact profile with registry version/hash; explicit cover surfaces for artifact renders; hashes, sizes, dimensions/rights where applicable, limits, explicit publication/reading-copy purpose, anchored publication sections, full glyph-evidence, compact browser-preview traces, and coverless pagination-only traces, structured layout response, and diagnostics; browser preview, pagination-only layout, and Core reading-copy output report unfinished accessibility decisions as warnings while publication artifact rendering rejects them | Black-box CLI adversarial fixtures, including BOM compatibility, artifact-profile/progress identity, deterministic page-paint responses, publication-section ordering, pending-accessibility preview/pagination/reading-copy/publication separation, reading-purpose profile containment, compact-trace payload assertions, pagination-only final-count/no-page-payload assertions, and parsed-rejection identity assertions |
 | Containment | Reject traversal, absolute asset paths, symlinks/reparse points, undeclared files, corrupt/changed assets, pre-existing output, unsupported formats, and unsupported scripts | Test-owned filesystem fixtures; no production validator calls |
 | Atomicity | Cancellation before or during rendering and any failure leave no promoted artifact; existing output is never overwritten | Process tests, staging observation, and sentinel bytes |
 | Determinism | Identical semantic input, settings, assets, fonts, profile, and renderer produce byte-identical PDFs and hashes | Two independent job roots compared byte for byte |

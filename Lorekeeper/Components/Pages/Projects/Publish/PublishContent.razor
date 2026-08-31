@@ -11,6 +11,7 @@
 @inject IEditionContentService EditionContent
 @inject IPublicationCoverService Covers
 @inject IPublicationPreparationService Preparation
+@inject IPublicationPaginationService Pagination
 @inject IPublicationDiagnosticPresentationService DiagnosticPresentation
 @inject IPublicationRenderService Renders
 @inject IProjectPageSetupService PageSetups
@@ -254,6 +255,7 @@ else
     private CoverCompositionWorkspace? _coverWorkspace;
     private long _coverRefreshSignal;
     private Guid? _coverSelectionId;
+    private int? _preparedCoverPageCount;
     private PublicationArtifactView? _previewArtifact;
     private bool _coreDirty;
     private bool _coreOutlineDirty;
@@ -369,6 +371,7 @@ else
             _preparationDiagnostics = [];
             _artifacts = [];
             _selectedReleaseId = null;
+            _preparedCoverPageCount = null;
             _workspace = null;
             _refreshCoreSummaryOnTargetLoad = false;
             _targetLoadPending = true;
@@ -397,10 +400,13 @@ else
     private async Task SelectReleaseAsync(Guid id)
     {
         if (Project is null) return;
-        var keepCoverOpen = _coverEditorOpen;
+        var targetChanged = _selectedReleaseId != id;
+        var keepCoverOpen = _coverEditorOpen && !targetChanged;
         await SavePendingAsync();
         _previewArtifact = null;
         _selectedReleaseId = id;
+        if (targetChanged)
+            _preparedCoverPageCount = null;
         _workspace = null;
         _preparations = [];
         _preparationDiagnostics = [];
@@ -1857,9 +1863,18 @@ else
                         await SelectCoreAsync();
                     await LoadPendingTargetNowAsync();
                 }
-                _coverSelectionId = diagnostic.ObjectId;
-                _coverEditorOpen = true;
-                _coverRefreshSignal++;
+                try
+                {
+                    if (!await EnsureReleaseCoverPaginationAsync())
+                        return;
+                    _coverSelectionId = diagnostic.ObjectId;
+                    _coverEditorOpen = true;
+                    _coverRefreshSignal++;
+                }
+                catch (Exception exception)
+                {
+                    _error = exception.Message;
+                }
                 break;
         }
     }
@@ -1914,6 +1929,7 @@ else
             else _releaseOverrides.Remove(field);
         }
         _releaseDirty = true;
+        _preparedCoverPageCount = null;
         QueueFormAutosave();
     }
 
@@ -1926,6 +1942,7 @@ else
         foreach (var id in _releaseSelections.Keys.ToList())
             if (chapters.TryGetValue(id, out var included)) _releaseSelections[id] = included;
         _releaseContentDirty = true;
+        _preparedCoverPageCount = null;
         QueueFormAutosave();
     }
 
@@ -2095,6 +2112,8 @@ else
         _busy = true; _error = null;
         try
         {
+            if (!await EnsureReleaseCoverPaginationAsync())
+                return;
             await Covers.CustomizeFromCoreAsync(Project.Id, _workspace.Edition.Id, _workspace.Edition.Revision);
             await SelectReleaseAsync(_workspace.Edition.Id);
             _coverSelectionId = null;
@@ -2106,12 +2125,45 @@ else
 
     private async Task OpenReleaseCoverAsync()
     {
-        await SavePendingAsync();
-        if (_selectedReleaseId is not null)
+        if (Project is null || _selectedReleaseId is null)
+            return;
+        _busy = true;
+        _error = null;
+        try
         {
+            if (!await EnsureReleaseCoverPaginationAsync())
+                return;
             _coverSelectionId = null;
             _coverEditorOpen = true;
         }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task<bool> EnsureReleaseCoverPaginationAsync()
+    {
+        if (Project is null || _workspace is null || _selectedReleaseId is not Guid releaseId)
+            return false;
+        if (_workspace.Edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover))
+            return true;
+
+        await SavePendingAsync();
+        if (_releaseDirty || _releaseContentDirty)
+            return false;
+        _notice = "Preparing the current interior pagination before opening the cover…";
+        await InvokeAsync(StateHasChanged);
+        var pagination = await Pagination.EnsureCurrentAsync(Project.Id, releaseId, _dispose.Token);
+        _preparedCoverPageCount = pagination.PageCount;
+        _notice = pagination.WasPrepared
+            ? $"Interior pagination prepared: {pagination.PageCount} pages. The cover now uses the calculated spine."
+            : $"Current interior pagination: {pagination.PageCount} pages.";
+        return true;
     }
 
     private async Task UseCoreCoverAsync()
@@ -2120,6 +2172,8 @@ else
         _busy = true; _error = null;
         try
         {
+            if (!await EnsureReleaseCoverPaginationAsync())
+                return;
             await Covers.UseCoreAsync(Project.Id, _workspace.Edition.Id, _workspace.Edition.Revision);
             await SelectReleaseAsync(_workspace.Edition.Id);
             _notice = "This release now inherits the Core cover live.";
@@ -2215,9 +2269,9 @@ else
         QueueAssistantTargetRefresh(targetReleaseId);
         if (mutation.Kind == PublishWorkspaceMutationKind.Edition && coverWasOpen)
         {
-            _coverEditorOpen = true;
-            _coverSelectionId = mutation.SelectedObjectId;
-            _coverRefreshSignal++;
+            _coverEditorOpen = false;
+            _coverSelectionId = null;
+            _notice = "The edition changed. Reopen the cover to update its interior pagination and spine.";
         }
     }
 
@@ -2295,11 +2349,11 @@ else
     private void MarkCoreDirty() { _coreDirty = true; QueueFormAutosave(); }
     private void CoreToggle(string field, bool value) { typeof(CoreDraft).GetProperty(field)!.SetValue(_coreDraft, value); _coreDirty = true; QueueFormAutosave(); }
     private void CoreOutlineChanged(PublicationBookOutlineView item, bool value) { _coreSelections[(item.TargetKind, item.TargetId)] = value; _coreOutlineDirty = true; QueueFormAutosave(); }
-    private void ReleaseText(string field, string? value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value ?? string.Empty); _releaseDirty = true; QueueFormAutosave(); }
-    private void ReleaseToggle(string field, bool value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value); _releaseDirty = true; QueueFormAutosave(); }
-    private void MarkReleaseDirty() { _releaseDirty = true; QueueFormAutosave(); }
-    private void ReleaseContentChanged(Guid chapterId, bool value) { _releaseSelections[chapterId] = value; _releaseContentDirty = true; QueueFormAutosave(); }
-    private void ToggleOverride(PublicationEditionOverrideField field, bool enabled) { if (enabled) _releaseOverrides.Add(field); else _releaseOverrides.Remove(field); _releaseDirty = true; QueueFormAutosave(); }
+    private void ReleaseText(string field, string? value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value ?? string.Empty); _releaseDirty = true; _preparedCoverPageCount = null; QueueFormAutosave(); }
+    private void ReleaseToggle(string field, bool value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value); _releaseDirty = true; _preparedCoverPageCount = null; QueueFormAutosave(); }
+    private void MarkReleaseDirty() { _releaseDirty = true; _preparedCoverPageCount = null; QueueFormAutosave(); }
+    private void ReleaseContentChanged(Guid chapterId, bool value) { _releaseSelections[chapterId] = value; _releaseContentDirty = true; _preparedCoverPageCount = null; QueueFormAutosave(); }
+    private void ToggleOverride(PublicationEditionOverrideField field, bool enabled) { if (enabled) _releaseOverrides.Add(field); else _releaseOverrides.Remove(field); _releaseDirty = true; _preparedCoverPageCount = null; QueueFormAutosave(); }
 
     private void QueueFormAutosave()
     {
@@ -2544,7 +2598,8 @@ else
     }
     private string CurrentSpineDescription()
     {
-        var pages = _artifacts.FirstOrDefault(item => item.Kind == PublicationArtifactKind.InteriorPdf && !item.IsLegacy && !item.IsStale)?.PageCount;
+        var pages = _artifacts.FirstOrDefault(item => item.Kind == PublicationArtifactKind.InteriorPdf && !item.IsLegacy && !item.IsStale)?.PageCount
+            ?? _preparedCoverPageCount;
         if (pages is not > 0 || _workspace is null) return "Spine width is calculated after the interior layout.";
         try
         {

@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 11);
-    assert_eq!(value["rendererVersion"], "2.1.6");
+    assert_eq!(value["rendererVersion"], "2.1.7");
     assert_eq!(
         value["profiles"],
         json!([
@@ -64,7 +64,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 11);
-    assert_eq!(response["rendererVersion"], "2.1.6");
+    assert_eq!(response["rendererVersion"], "2.1.7");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -2990,6 +2990,29 @@ fn browser_preview_layout_trace_omits_unused_glyph_payloads() {
         .collect::<Vec<_>>();
     assert!(!runs.is_empty());
     assert!(runs.iter().all(|run| run.get("glyphs").is_none()));
+}
+
+#[test]
+fn pagination_trace_reports_the_final_print_page_count_without_a_cover() {
+    let mut job = PreparedJob::new("bn-print-pdfa1b-v1");
+    configure_bn_job(
+        &mut job,
+        "PersonalUse",
+        "VendorSku",
+        "FullWrapMeasured",
+        "TopToBottom",
+    );
+    job.request["layoutTraceMode"] = json!("pagination");
+    job.request["cover"] = Value::Null;
+    job.write_request();
+
+    let trace = job.layout_trace();
+    assert!(
+        trace["pageCount"].as_u64().is_some_and(|pages| pages > 0),
+        "pagination trace must report a positive page count: {trace}"
+    );
+    assert!(trace.get("pages").is_none());
+    assert_eq!(trace["rendererVersion"], env!("CARGO_PKG_VERSION"));
 }
 
 #[test]

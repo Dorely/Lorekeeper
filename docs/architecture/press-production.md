@@ -56,6 +56,12 @@ Intentional full-surface Page/Front artwork may cross the inset safe area while
 remaining bounded by the physical surface; barcode reserve, accessibility,
 reading order, and image-resolution rules still apply. Text and ordinary
 figure placement remain inside their safe regions.
+Opening a physical-release cover first asks Press for a compact interior-only
+pagination result. The resulting page count is bound to the current pagination
+fingerprint, renderer version, and profile; cover mutations fail closed when
+that evidence is missing or stale. This pass does not create or claim a prepared
+interior PDF. It establishes the real page count needed for spine and wrap
+geometry, and the UI runs it automatically when cover editing is attempted.
 
 `PublicationPressRuntime` owns packaged executable discovery, exact manifest
 validation, platform/architecture checks, file hashes, environment isolation,
@@ -197,8 +203,10 @@ while coverless chapter layout traces have no synthetic leading-page offset.
 
 The application requests the full glyph-evidence `layout` trace for
 conformance and `layoutTraceMode: browser-preview` for bounded chapter Read or
-assistant page images. The browser trace retains paint order and typographic
-runs but omits unused glyph arrays. Authoring traces may render unresolved
+assistant page images. It uses `layoutTraceMode: pagination` for the compact,
+coverless final interior page count required before print-cover authoring; that
+response omits the page-paint array and is not an artifact. The browser trace
+retains paint order and typographic runs but omits unused glyph arrays. Authoring traces may render unresolved
 image accessibility as warnings and clip text at an authored frame; Core
 reading-copy and publication renders retain strict overflow validation.
 Publication renders reject meaningful images until alternative text or an

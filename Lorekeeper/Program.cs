@@ -328,6 +328,7 @@ builder.Services.AddScoped<IPublicationPreparationService, PublicationPreparatio
 builder.Services.AddScoped<IPublicationDiagnosticPresentationService, PublicationDiagnosticPresentationService>();
 builder.Services.AddHostedService<PublicationPreparationWorker>();
 builder.Services.AddScoped<PublicationRenderProcessor>();
+builder.Services.AddScoped<IPublicationPaginationService>(services => services.GetRequiredService<PublicationRenderProcessor>());
 builder.Services.AddHostedService<PublicationRenderWorker>();
 builder.Services.AddScoped<IPublishAssistantTools, PublishAssistantTools>();
 builder.Services.AddScoped<IPublishChatService, PublishChatService>();

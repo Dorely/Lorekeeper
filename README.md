@@ -258,6 +258,10 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   outside, inside, case, jacket, or cloth setup surfaces, safe regions, and
   ISBN-13/EAN-13 barcode behavior. Ingram duplex paperback produces outside
   then inside cover pages with the required no-ink spine region.
+  Attempting to edit a print cover automatically runs the compact interior
+  layout needed to obtain that current page count; the editor opens only after
+  the calculated spine is available, without requiring a full prepared interior
+  PDF first.
   B&N covers remain one connected Back/Spine/Front composition with region-local
   focus, fill, crop, generation guidance, and spine direction. They can prepare
   either one measured full-wrap PDF or derived front/back PDFs when B&N supplies

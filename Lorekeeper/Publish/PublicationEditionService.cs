@@ -788,7 +788,7 @@ public sealed class PublicationEditionService(
                 edition.PageMarginInches,
                 edition.BodyFontSizePoints,
                 edition.BodyLineHeight,
-                edition.InheritsCoreCover,
+                InheritsCoreCover = includeCover ? edition.InheritsCoreCover : false,
                 SelectedCoverImageId = includeCover ? edition.SelectedCoverImageId : null,
             },
             Items = items,

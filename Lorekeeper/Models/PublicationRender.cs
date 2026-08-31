@@ -58,6 +58,17 @@ public class PublicationRenderJob
     public ICollection<PublicationPageMapEntry> PageMapEntries { get; set; } = [];
 }
 
+public class PublicationInteriorPagination
+{
+    public Guid EditionId { get; set; }
+    public PublicationEdition Edition { get; set; } = null!;
+    public int PageCount { get; set; }
+    public string PaginationFingerprint { get; set; } = string.Empty;
+    public string RendererVersion { get; set; } = string.Empty;
+    public string ProfileId { get; set; } = string.Empty;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
 public class PublicationArtifact
 {
     public Guid Id { get; set; } = Guid.NewGuid();

@@ -137,6 +137,7 @@ public class PublicationEdition
     public ICollection<ManuscriptAnnotation> ManuscriptAnnotations { get; set; } = [];
     public ICollection<PublicationSection> PublicationSections { get; set; } = [];
     public PublicationCoverDesign? CoverDesign { get; set; }
+    public PublicationInteriorPagination? InteriorPagination { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
