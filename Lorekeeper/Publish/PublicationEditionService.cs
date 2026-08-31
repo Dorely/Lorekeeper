@@ -493,7 +493,13 @@ public sealed class PublicationEditionService(
         var acts = await db.Acts.AsNoTracking()
             .Where(act => act.ProjectId == projectId)
             .OrderBy(act => act.Order)
-            .Select(act => new { act.Id, act.Title, act.Synopsis, act.Order })
+            .Select(act => new
+            {
+                act.Id,
+                act.Title,
+                Synopsis = includeCover || edition.IncludeActSynopses ? act.Synopsis : string.Empty,
+                act.Order,
+            })
             .ToListAsync(cancellationToken);
         var coreChapters = await db.Chapters.AsNoTracking()
             .Where(chapter => chapter.ProjectId == projectId && !excludedChapterIds.Contains(chapter.Id))
@@ -503,7 +509,7 @@ public sealed class PublicationEditionService(
                 chapter.Id,
                 chapter.ActId,
                 chapter.Title,
-                chapter.Synopsis,
+                Synopsis = includeCover || edition.IncludeChapterSynopses ? chapter.Synopsis : string.Empty,
                 chapter.Order,
                 chapter.ManuscriptRevision,
                 chapter.ManuscriptJson,
@@ -588,12 +594,15 @@ public sealed class PublicationEditionService(
             })
             .ToListAsync(cancellationToken);
         var referencedStyleRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var referencedBoundFields = new HashSet<PublicationBoundField>();
         foreach (var document in chapters.Select(chapter => ManuscriptCodec.Deserialize(chapter.ManuscriptJson, chapter.Id, chapter.ManuscriptRevision))
             .Concat(compositions.Select(composition => ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision)))
             .Concat(publicationSections.Select(item => ManuscriptCodec.Deserialize(item.ManuscriptJson, item.Id, item.Revision))))
         {
             foreach (var block in document.Content)
             {
+                if (block.PublicationField is { } publicationField)
+                    referencedBoundFields.Add(publicationField);
                 if (!string.IsNullOrWhiteSpace(block.StyleRole))
                     referencedStyleRoles.Add(block.StyleRole);
                 foreach (var role in block.Content.SelectMany(inline => inline.Marks)
@@ -747,10 +756,8 @@ public sealed class PublicationEditionService(
                 asset.SourceMetadataJson,
             })
             .ToListAsync(cancellationToken);
-        var canonical = JsonSerializer.Serialize(new
-        {
-            Project = project,
-            Edition = new
+        object canonicalEdition = includeCover
+            ? new
             {
                 edition.Name,
                 edition.Format,
@@ -788,9 +795,40 @@ public sealed class PublicationEditionService(
                 edition.PageMarginInches,
                 edition.BodyFontSizePoints,
                 edition.BodyLineHeight,
-                InheritsCoreCover = includeCover ? edition.InheritsCoreCover : false,
-                SelectedCoverImageId = includeCover ? edition.SelectedCoverImageId : null,
-            },
+                edition.InheritsCoreCover,
+                edition.SelectedCoverImageId,
+            }
+            : new
+            {
+                edition.Format,
+                TitleOverride = referencedBoundFields.Contains(PublicationBoundField.Title) ? edition.TitleOverride : string.Empty,
+                Subtitle = referencedBoundFields.Contains(PublicationBoundField.Subtitle) ? edition.Subtitle : string.Empty,
+                Author = referencedBoundFields.Contains(PublicationBoundField.Author) ? edition.Author : string.Empty,
+                edition.Language,
+                Publisher = referencedBoundFields.Contains(PublicationBoundField.Publisher) ? edition.Publisher : string.Empty,
+                Copyright = referencedBoundFields.Contains(PublicationBoundField.Copyright) ? edition.Copyright : string.Empty,
+                Isbn = referencedBoundFields.Contains(PublicationBoundField.Isbn) ? edition.Isbn : string.Empty,
+                Description = referencedBoundFields.Contains(PublicationBoundField.Description) ? edition.Description : string.Empty,
+                edition.IncludeVisibleTableOfContents,
+                edition.IncludeActSynopses,
+                edition.IncludeChapterSynopses,
+                edition.IncludeActHeadings,
+                edition.IncludeChapterHeadings,
+                edition.NumberActs,
+                edition.NumberChapters,
+                edition.TitlePageMode,
+                edition.RectoChapterStarts,
+                edition.AllowDesignedPageOverrides,
+                edition.PageWidthInches,
+                edition.PageHeightInches,
+                edition.PageMarginInches,
+                edition.BodyFontSizePoints,
+                edition.BodyLineHeight,
+            };
+        var canonical = JsonSerializer.Serialize(new
+        {
+            Project = includeCover ? project : null,
+            Edition = canonicalEdition,
             Items = items,
             Acts = acts,
             Chapters = chapters,

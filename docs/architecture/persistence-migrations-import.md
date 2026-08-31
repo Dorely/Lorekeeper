@@ -237,10 +237,12 @@ Undo/Redo is process memory only and therefore is also absent from every export
 without adding database rows.
 
 `PublicationInteriorPagination` caches a derived interior page count together
-with its pagination fingerprint, Press renderer version, and profile ID. This snapshot
-exists only to give print-cover geometry an authoritative spine before a full
-interior artifact is prepared. It does not advance the edition revision, is
-reused only when all provenance still matches, and remains operational state:
+with its pagination fingerprint, Press renderer version, and producing profile
+ID. This snapshot exists only to give print-cover geometry an authoritative spine
+before a full interior artifact is prepared. It does not advance the edition
+revision and is reused while the renderer and pagination-affecting interior state
+still match; the profile ID is retained as provenance rather than a cache key.
+It remains operational state:
 project export/import and version-history snapshots omit it and regenerate it
 when cover editing is next attempted.
 

@@ -811,47 +811,49 @@ public sealed class PublicationRenderProcessor(
         }
         if (snapshot is { PageCount: > 0 }
             && string.Equals(snapshot.PaginationFingerprint, paginationFingerprint, StringComparison.Ordinal)
-            && string.Equals(snapshot.RendererVersion, runtime.RendererVersion, StringComparison.Ordinal)
-            && string.Equals(snapshot.ProfileId, profileId, StringComparison.Ordinal))
+            && string.Equals(snapshot.RendererVersion, runtime.RendererVersion, StringComparison.Ordinal))
         {
             return new(
                 snapshot.PageCount,
                 paginationFingerprint,
                 runtime.RendererVersion,
-                profileId,
+                snapshot.ProfileId,
                 WasPrepared: false);
         }
 
-        int? artifactPageCount;
+        (int PageCount, string ProfileId)? artifactPagination;
         await using (var operation = await database.OpenReadAsync(cancellationToken))
         {
-            artifactPageCount = await operation.Db.PublicationArtifacts.AsNoTracking()
+            var candidate = await operation.Db.PublicationArtifacts.AsNoTracking()
                 .Where(artifact => artifact.ProjectId == projectId
                     && artifact.EditionId == editionId
                     && artifact.Kind == PublicationArtifactKind.InteriorPdf
                     && !artifact.IsLegacy
                     && artifact.PaginationFingerprint == paginationFingerprint
-                    && artifact.RendererVersion == runtime.RendererVersion
-                    && artifact.ProfileId == profileId)
+                    && artifact.RendererVersion == runtime.RendererVersion)
                 .OrderByDescending(artifact => artifact.CreatedAt)
-                .Select(artifact => artifact.PageCount)
+                .Select(artifact => new { artifact.PageCount, artifact.ProfileId })
+                .Where(artifact => artifact.PageCount > 0)
                 .FirstOrDefaultAsync(cancellationToken);
+            artifactPagination = candidate?.PageCount is int pageCount
+                ? (pageCount, candidate.ProfileId)
+                : null;
         }
-        if (artifactPageCount is > 0)
+        if (artifactPagination is { PageCount: > 0 } cachedArtifact)
         {
             await StorePaginationSnapshotAsync(
                 projectId,
                 editionId,
-                artifactPageCount.Value,
+                cachedArtifact.PageCount,
                 paginationFingerprint,
                 runtime.RendererVersion,
-                profileId,
+                cachedArtifact.ProfileId,
                 cancellationToken);
             return new(
-                artifactPageCount.Value,
+                cachedArtifact.PageCount,
                 paginationFingerprint,
                 runtime.RendererVersion,
-                profileId,
+                cachedArtifact.ProfileId,
                 WasPrepared: false);
         }
 

@@ -1155,8 +1155,7 @@ public sealed class PublicationCoverService(
                 && artifact.Kind == PublicationArtifactKind.InteriorPdf
                 && !artifact.IsLegacy
                 && artifact.PaginationFingerprint == currentFingerprint
-                && artifact.RendererVersion == currentRendererVersion
-                && artifact.ProfileId == edition.VendorProfileVersion)
+                && artifact.RendererVersion == currentRendererVersion)
             .OrderByDescending(artifact => artifact.CreatedAt)
             .Select(artifact => artifact.PageCount)
             .FirstOrDefaultAsync(cancellationToken) ?? 0;
@@ -1167,8 +1166,7 @@ public sealed class PublicationCoverService(
         if (pages <= 0
             && snapshot is { PageCount: > 0 }
             && string.Equals(snapshot.PaginationFingerprint, currentFingerprint, StringComparison.Ordinal)
-            && string.Equals(snapshot.RendererVersion, currentRendererVersion, StringComparison.Ordinal)
-            && string.Equals(snapshot.ProfileId, edition.VendorProfileVersion, StringComparison.Ordinal))
+            && string.Equals(snapshot.RendererVersion, currentRendererVersion, StringComparison.Ordinal))
         {
             pages = snapshot.PageCount;
         }
@@ -1207,8 +1205,7 @@ public sealed class PublicationCoverService(
         }
         if (snapshot is not { PageCount: > 0 }
             || !string.Equals(snapshot.PaginationFingerprint, paginationFingerprint, StringComparison.Ordinal)
-            || !string.Equals(snapshot.RendererVersion, rendererVersion, StringComparison.Ordinal)
-            || !string.Equals(snapshot.ProfileId, edition.VendorProfileVersion, StringComparison.Ordinal))
+            || !string.Equals(snapshot.RendererVersion, rendererVersion, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 "Prepare the current interior pagination before editing this print cover.");

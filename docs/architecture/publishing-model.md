@@ -125,9 +125,12 @@ Physical-release cover entry is also a pagination boundary. After flushing the
 current release, Publish automatically runs the compact Press interior layout
 needed to obtain the current page count and opens the cover only after that
 snapshot succeeds. The release cover and its assistant tools therefore use the
-calculated spine rather than minimum-page placeholder geometry. An edition
-mutation while the cover is open closes that editor; reopening automatically
-refreshes pagination before further cover work.
+calculated spine rather than minimum-page placeholder geometry. The persisted
+page count survives release, printer, paper, cover, identifier, and other changes
+that cannot affect interior pagination. While the cover is open, Publish compares
+the pagination fingerprint after an assistant mutation and closes the editor only
+when the interior layout identity actually changed; reopening then refreshes
+pagination before further cover work.
 
 Release-specific manuscript content is opt-in. An untouched release chapter
 reads current Core live. Its first text or layout mutation creates a complete

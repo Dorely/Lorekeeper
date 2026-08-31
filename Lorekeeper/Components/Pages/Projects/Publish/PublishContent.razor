@@ -256,6 +256,7 @@ else
     private long _coverRefreshSignal;
     private Guid? _coverSelectionId;
     private int? _preparedCoverPageCount;
+    private string? _preparedCoverPaginationFingerprint;
     private PublicationArtifactView? _previewArtifact;
     private bool _coreDirty;
     private bool _coreOutlineDirty;
@@ -372,6 +373,7 @@ else
             _artifacts = [];
             _selectedReleaseId = null;
             _preparedCoverPageCount = null;
+            _preparedCoverPaginationFingerprint = null;
             _workspace = null;
             _refreshCoreSummaryOnTargetLoad = false;
             _targetLoadPending = true;
@@ -406,7 +408,10 @@ else
         _previewArtifact = null;
         _selectedReleaseId = id;
         if (targetChanged)
+        {
             _preparedCoverPageCount = null;
+            _preparedCoverPaginationFingerprint = null;
+        }
         _workspace = null;
         _preparations = [];
         _preparationDiagnostics = [];
@@ -623,16 +628,16 @@ else
                         || _releaseDraft.PrintProjectUse == PrintProjectUse.ForSale
                             && _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn)
                     {
-                        <label class="field"><span>ISBN <small>@(_releaseDraft.Vendor == PublicationVendor.IngramSpark || _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn ? "required" : "optional")</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleaseDirty" /></label>
+                        <label class="field"><span>ISBN <small>@(_releaseDraft.Vendor == PublicationVendor.IngramSpark || _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn ? "required" : "optional")</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" /></label>
                     }
                 }
                 else if (_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf)
                 {
-                    <label class="field"><span>ISBN <small>optional</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleaseDirty" /></label>
+                    <label class="field"><span>ISBN <small>optional</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" /></label>
                 }
                 else
                 {
-                    <label class="field"><span>ISBN <small>optional</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleaseDirty" /></label>
+                    <label class="field"><span>ISBN <small>optional</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" /></label>
                     <div class="plain-setting"><strong>EPUB 3</strong><span>Reflowable navigation and accessibility are managed automatically.</span></div>
                 }
             </div>
@@ -668,9 +673,9 @@ else
                 @if (_releaseDesignOpen)
                 {
                     <div class="form-grid">
-                        <label class="field"><span>Page width (in)</span><input class="form-control" type="number" min="3" max="18" step="0.01" @bind="_releaseDraft.PageWidthInches" @bind:after="MarkReleaseDirty" /></label>
-                        <label class="field"><span>Page height (in)</span><input class="form-control" type="number" min="3" max="24" step="0.01" @bind="_releaseDraft.PageHeightInches" @bind:after="MarkReleaseDirty" /></label>
-                        <label class="field"><span>Margin (in)</span><input class="form-control" type="number" min="0.25" max="3" step="0.01" @bind="_releaseDraft.PageMarginInches" @bind:after="MarkReleaseDirty" /></label>
+                        <label class="field"><span>Page width (in)</span><input class="form-control" type="number" min="3" max="18" step="0.01" @bind="_releaseDraft.PageWidthInches" @bind:after="MarkReleasePaginationDirty" /></label>
+                        <label class="field"><span>Page height (in)</span><input class="form-control" type="number" min="3" max="24" step="0.01" @bind="_releaseDraft.PageHeightInches" @bind:after="MarkReleasePaginationDirty" /></label>
+                        <label class="field"><span>Margin (in)</span><input class="form-control" type="number" min="0.25" max="3" step="0.01" @bind="_releaseDraft.PageMarginInches" @bind:after="MarkReleasePaginationDirty" /></label>
                     </div>
                 }
             </section>
@@ -1929,7 +1934,7 @@ else
             else _releaseOverrides.Remove(field);
         }
         _releaseDirty = true;
-        _preparedCoverPageCount = null;
+        InvalidatePreparedCoverPagination();
         QueueFormAutosave();
     }
 
@@ -1942,7 +1947,7 @@ else
         foreach (var id in _releaseSelections.Keys.ToList())
             if (chapters.TryGetValue(id, out var included)) _releaseSelections[id] = included;
         _releaseContentDirty = true;
-        _preparedCoverPageCount = null;
+        InvalidatePreparedCoverPagination();
         QueueFormAutosave();
     }
 
@@ -2160,6 +2165,7 @@ else
         await InvokeAsync(StateHasChanged);
         var pagination = await Pagination.EnsureCurrentAsync(Project.Id, releaseId, _dispose.Token);
         _preparedCoverPageCount = pagination.PageCount;
+        _preparedCoverPaginationFingerprint = pagination.PaginationFingerprint;
         _notice = pagination.WasPrepared
             ? $"Interior pagination prepared: {pagination.PageCount} pages. The cover now uses the calculated spine."
             : $"Current interior pagination: {pagination.PageCount} pages.";
@@ -2229,7 +2235,7 @@ else
             QueueFormAutosave();
             return;
         }
-        if (Project is not null && mutation.EditionId == _selectedReleaseId
+        if (!_coverEditorOpen && Project is not null && mutation.EditionId == _selectedReleaseId
             && (mutation.SelectedSectionId is not null || mutation.SelectedCompositionId is not null))
         {
             _publicationSections = await PublicationSections.ListAsync(new(Project.Id, _selectedReleaseId), _dispose.Token);
@@ -2263,15 +2269,37 @@ else
             return;
         }
         var coverWasOpen = _coverEditorOpen;
+        var selectedReleaseId = _selectedReleaseId;
         var targetReleaseId = mutation.SelectEdition && mutation.EditionId is Guid id
             ? id
-            : _selectedReleaseId;
+            : selectedReleaseId;
+        var targetChanged = targetReleaseId != selectedReleaseId;
+        var paginationChanged = false;
+        if (coverWasOpen && !targetChanged && selectedReleaseId is Guid selectedEditionId
+            && mutation.Kind == PublishWorkspaceMutationKind.Edition)
+        {
+            var currentFingerprint = await Releases.GetPaginationFingerprintAsync(Project!.Id, selectedEditionId, _dispose.Token);
+            paginationChanged = !string.Equals(
+                currentFingerprint,
+                _preparedCoverPaginationFingerprint,
+                StringComparison.Ordinal);
+        }
         QueueAssistantTargetRefresh(targetReleaseId);
-        if (mutation.Kind == PublishWorkspaceMutationKind.Edition && coverWasOpen)
+        if (coverWasOpen && targetChanged)
         {
             _coverEditorOpen = false;
             _coverSelectionId = null;
-            _notice = "The edition changed. Reopen the cover to update its interior pagination and spine.";
+            _preparedCoverPageCount = null;
+            _preparedCoverPaginationFingerprint = null;
+            _notice = "The selected release changed. Open its cover when you are ready to work on it.";
+        }
+        else if (coverWasOpen && paginationChanged)
+        {
+            _coverEditorOpen = false;
+            _coverSelectionId = null;
+            _preparedCoverPageCount = null;
+            _preparedCoverPaginationFingerprint = null;
+            _notice = "The interior layout changed. Reopen the cover to refresh its page count and spine.";
         }
     }
 
@@ -2349,11 +2377,18 @@ else
     private void MarkCoreDirty() { _coreDirty = true; QueueFormAutosave(); }
     private void CoreToggle(string field, bool value) { typeof(CoreDraft).GetProperty(field)!.SetValue(_coreDraft, value); _coreDirty = true; QueueFormAutosave(); }
     private void CoreOutlineChanged(PublicationBookOutlineView item, bool value) { _coreSelections[(item.TargetKind, item.TargetId)] = value; _coreOutlineDirty = true; QueueFormAutosave(); }
-    private void ReleaseText(string field, string? value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value ?? string.Empty); _releaseDirty = true; _preparedCoverPageCount = null; QueueFormAutosave(); }
-    private void ReleaseToggle(string field, bool value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value); _releaseDirty = true; _preparedCoverPageCount = null; QueueFormAutosave(); }
-    private void MarkReleaseDirty() { _releaseDirty = true; _preparedCoverPageCount = null; QueueFormAutosave(); }
-    private void ReleaseContentChanged(Guid chapterId, bool value) { _releaseSelections[chapterId] = value; _releaseContentDirty = true; _preparedCoverPageCount = null; QueueFormAutosave(); }
-    private void ToggleOverride(PublicationEditionOverrideField field, bool enabled) { if (enabled) _releaseOverrides.Add(field); else _releaseOverrides.Remove(field); _releaseDirty = true; _preparedCoverPageCount = null; QueueFormAutosave(); }
+    private void ReleaseText(string field, string? value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value ?? string.Empty); _releaseDirty = true; InvalidatePreparedCoverPagination(); QueueFormAutosave(); }
+    private void ReleaseToggle(string field, bool value) { typeof(ReleaseDraft).GetProperty(field)!.SetValue(_releaseDraft, value); _releaseDirty = true; InvalidatePreparedCoverPagination(); QueueFormAutosave(); }
+    private void MarkReleaseDirty() { _releaseDirty = true; QueueFormAutosave(); }
+    private void MarkReleaseDirty(bool paginationChanged) { if (paginationChanged) InvalidatePreparedCoverPagination(); MarkReleaseDirty(); }
+    private void MarkReleasePaginationDirty() { _releaseDirty = true; InvalidatePreparedCoverPagination(); QueueFormAutosave(); }
+    private void ReleaseContentChanged(Guid chapterId, bool value) { _releaseSelections[chapterId] = value; _releaseContentDirty = true; InvalidatePreparedCoverPagination(); QueueFormAutosave(); }
+    private void ToggleOverride(PublicationEditionOverrideField field, bool enabled) { if (enabled) _releaseOverrides.Add(field); else _releaseOverrides.Remove(field); _releaseDirty = true; InvalidatePreparedCoverPagination(); QueueFormAutosave(); }
+    private void InvalidatePreparedCoverPagination()
+    {
+        _preparedCoverPageCount = null;
+        _preparedCoverPaginationFingerprint = null;
+    }
 
     private void QueueFormAutosave()
     {
@@ -2477,13 +2512,13 @@ else
     private void ReleaseVendorChanged()
     {
         var profile = PrintArtifactProfiles.GetDefault(_workspace!.Edition.Format, _releaseDraft.Vendor);
-        ApplyArtifactProfile(profile);
+        var paginationChanged = ApplyArtifactProfile(profile);
         _releaseDraft.PrintProjectUse = profile.DefaultProjectUse;
         _releaseDraft.PrintIdentifierMode = _releaseDraft.Vendor == PublicationVendor.BarnesAndNoblePress
             ? _releaseDraft.PrintProjectUse == PrintProjectUse.PersonalUse ? PrintIdentifierMode.VendorSku : PrintIdentifierMode.VendorAssignedIsbn
             : PrintIdentifierMode.UserSuppliedIsbn;
         _releaseDraft.PrintCoverSubmissionMode = PrintCoverSubmissionMode.FullWrapMeasured;
-        MarkReleaseDirty();
+        MarkReleaseDirty(paginationChanged);
     }
     private void ReleaseInteriorProcessChanged(ChangeEventArgs args)
     {
@@ -2492,8 +2527,7 @@ else
         var profile = CompatibleArtifactProfiles().FirstOrDefault(item =>
             item.InteriorProcess == process && item.CoverMaterial == selected?.CoverMaterial)
             ?? CompatibleArtifactProfiles().First(item => item.InteriorProcess == process);
-        ApplyArtifactProfile(profile);
-        MarkReleaseDirty();
+        MarkReleaseDirty(ApplyArtifactProfile(profile));
     }
     private void ReleaseCoverConstructionChanged(ChangeEventArgs args)
     {
@@ -2502,24 +2536,26 @@ else
         var profile = CompatibleArtifactProfiles().FirstOrDefault(item =>
             item.CoverMaterial == material && item.InteriorProcess == selected?.InteriorProcess)
             ?? CompatibleArtifactProfiles().First(item => item.CoverMaterial == material);
-        ApplyArtifactProfile(profile);
-        MarkReleaseDirty();
+        MarkReleaseDirty(ApplyArtifactProfile(profile));
     }
     private void ReleasePaperThicknessChanged(ChangeEventArgs args)
     {
         var key = args.Value?.ToString() ?? string.Empty;
         var profile = PaperThicknessOptions().FirstOrDefault(item => item.Key == key);
         if (profile is null) return;
-        ApplyArtifactProfile(profile);
-        MarkReleaseDirty();
+        MarkReleaseDirty(ApplyArtifactProfile(profile));
     }
-    private void ApplyArtifactProfile(PrintArtifactProfile profile)
+    private bool ApplyArtifactProfile(PrintArtifactProfile profile)
     {
+        var width = _releaseDraft.PageWidthInches;
+        var height = _releaseDraft.PageHeightInches;
         _releaseDraft.PrintArtifactProfileKey = profile.Key;
         if (!profile.CoverModes.Contains(_releaseDraft.PrintCoverMode)) _releaseDraft.PrintCoverMode = profile.CoverModes[0];
         EnsureArtifactProfileTrim(profile);
         if (!profile.EffectiveSupportedProjectUses.Contains(_releaseDraft.PrintProjectUse))
             _releaseDraft.PrintProjectUse = profile.DefaultProjectUse;
+        return Math.Abs(width - _releaseDraft.PageWidthInches) >= .0001
+            || Math.Abs(height - _releaseDraft.PageHeightInches) >= .0001;
     }
     private void SetReleaseProjectUse(PrintProjectUse use)
     {
@@ -2550,7 +2586,7 @@ else
     {
         var trim = args.Value?.ToString() ?? string.Empty;
         if (trim != "custom") ApplyTrim(trim);
-        MarkReleaseDirty();
+        MarkReleasePaginationDirty();
     }
     private void ApplyTrim(string trim)
     {

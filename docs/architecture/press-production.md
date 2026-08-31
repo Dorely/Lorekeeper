@@ -58,8 +58,13 @@ reading order, and image-resolution rules still apply. Text and ordinary
 figure placement remain inside their safe regions.
 Opening a physical-release cover first asks Press for a compact interior-only
 pagination result. The resulting page count is bound to the current pagination
-fingerprint, renderer version, and profile; cover mutations fail closed when
-that evidence is missing or stale. This pass does not create or claim a prepared
+fingerprint and renderer version; cover mutations fail closed when that evidence
+is missing or stale. The fingerprint contains only inputs that can affect the
+interior layout, so printer identity, paper/caliper, cover construction, project
+use, identifier mode, cover-submission choices, and cover artwork do not discard an
+otherwise current page count. The producing profile remains recorded as
+provenance but is not part of pagination validity. This pass does not create or
+claim a prepared
 interior PDF. It establishes the real page count needed for spine and wrap
 geometry, and the UI runs it automatically when cover editing is attempted.
 
