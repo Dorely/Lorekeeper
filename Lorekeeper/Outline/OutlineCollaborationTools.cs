@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Lorekeeper.Chapters;
+using Lorekeeper.Composition;
 using Lorekeeper.Context;
 using Lorekeeper.EntityVisuals;
 using Lorekeeper.Graph;
@@ -130,16 +131,16 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         var tools = BuildSharedTools(context);
         tools.AddRange([
             AIFunctionFactory.Create(
-                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
-                    GenerateProjectImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression, cancellationToken),
+                method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null) =>
+                    GenerateProjectImageAsync(context, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, cancellationToken),
                 name: "generate_project_image",
-                description: "Generate one unattached project image at the configured Core Book page raster only when the user explicitly asks to establish or revise an entity's canonical appearance. Geometry targets and manuscript placement are unavailable in Outline. Inspect the result, then attach its project-image ID with attach_entity_canonical_reference."),
+                description: "Generate one unattached project image only when the user explicitly asks to establish or revise an entity's canonical appearance. Omit minimumDpi for the moderate Core Book page raster; when explicitly requested, minimumDpi uses the exact Core Book page as its physical basis, or the largest fitting rectangle for aspectRatio. An infeasible request rejects before dispatch with provider limits and a panel plan. Geometry targets and manuscript placement are unavailable in Outline; multi-image publication coverage requires multiple Figure blocks or a confirmed conversion to a Designed Page. Inspect effectiveDpi and minimumDpiMet before attaching the image."),
 
             AIFunctionFactory.Create(
-                method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
-                    EditProjectImageAsync(context, sourceImageId, brief, references, altText, quality, outputFormat, outputCompression, cancellationToken),
+                method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null, int? minimumDpi = null, string? aspectRatio = null) =>
+                    EditProjectImageAsync(context, sourceImageId, brief, references, altText, quality, outputFormat, outputCompression, minimumDpi, aspectRatio, cancellationToken),
                 name: "edit_project_image",
-                description: "Edit one project image at the configured Core Book page raster only when the user explicitly asks to refine an entity's canonical appearance. The output is a new unattached project image; inspect it and attach it separately."),
+                description: "Edit one project image only when the user explicitly asks to refine an entity's canonical appearance. Omit minimumDpi for the moderate Core Book page raster; an explicit minimumDpi may use an optional aspectRatio and rejects before dispatch when infeasible. Same-aspect up-resolution preserves complete source framing/content while reconstructing credible detail; it does not zoom out, crop, or invent surrounding canvas. Intentional framing expansion is separate outpainting. The output is a new unattached project image; inspect effectiveDpi and minimumDpiMet before attaching it."),
 
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: false, cancellationToken),
@@ -1034,6 +1035,8 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         string? quality,
         string? outputFormat,
         int? outputCompression,
+        int? minimumDpi,
+        string? aspectRatio,
         CancellationToken cancellationToken)
     {
         if (imageWorkflow is null)
@@ -1044,7 +1047,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 context.ProjectId,
                 brief,
                 references,
-                geometryGuidance: null,
+                geometryGuidance: MinimumDpiTarget(minimumDpi, aspectRatio),
                 altText,
                 quality,
                 outputFormat,
@@ -1053,6 +1056,10 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 context.TrackImageGenerationJob,
                 cancellationToken);
             return ImageResult(context, result);
+        }
+        catch (MinimumDpiUnachievableException ex)
+        {
+            return SerializeMinimumDpiRejection(ex);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
@@ -1069,6 +1076,8 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         string? quality,
         string? outputFormat,
         int? outputCompression,
+        int? minimumDpi,
+        string? aspectRatio,
         CancellationToken cancellationToken)
     {
         if (imageWorkflow is null)
@@ -1081,7 +1090,7 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 brief,
                 null,
                 references,
-                geometryGuidance: null,
+                geometryGuidance: MinimumDpiTarget(minimumDpi, aspectRatio),
                 altText,
                 quality,
                 outputFormat,
@@ -1090,6 +1099,10 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
                 context.TrackImageGenerationJob,
                 cancellationToken);
             return ImageResult(context, result);
+        }
+        catch (MinimumDpiUnachievableException ex)
+        {
+            return SerializeMinimumDpiRejection(ex);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
@@ -1124,6 +1137,68 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
         return JsonSerializer.Serialize(new { ok = true, jobId, status = "cancelled", summary = "Image job cancelled; no image was placed." });
     }
 
+    private static ImageGenerationTarget? MinimumDpiTarget(int? minimumDpi, string? aspectRatio)
+    {
+        if (minimumDpi is null && string.IsNullOrWhiteSpace(aspectRatio))
+            return null;
+        return new ImageGenerationTarget
+        {
+            MinimumDpi = minimumDpi,
+            AspectRatio = aspectRatio?.Trim() ?? string.Empty,
+        };
+    }
+
+    private static string SerializeMinimumDpiRejection(MinimumDpiUnachievableException exception) =>
+        JsonSerializer.Serialize(new
+        {
+            ok = false,
+            code = MinimumDpiUnachievableException.Code,
+            stage = exception.Stage,
+            physicalDimensions = new
+            {
+                widthInches = exception.Resolution.WidthInches,
+                heightInches = exception.Resolution.HeightInches,
+            },
+            requestedMinimumDpi = exception.RequestedMinimumDpi,
+            requiredRaster = new { widthPixels = exception.RequiredRaster.Width, heightPixels = exception.RequiredRaster.Height, size = exception.RequiredRaster.Size },
+            largestCompatibleRaster = exception.MaximumRaster is null
+                ? null
+                : new { widthPixels = (int?)exception.MaximumRaster.Width, heightPixels = (int?)exception.MaximumRaster.Height, size = exception.MaximumRaster.Size },
+            maximumAchievableDpi = Math.Round(exception.MaximumAchievableDpi, 1),
+            bindingProviderLimits = exception.Resolution.BindingProviderLimits,
+            providerConstraints = new
+            {
+                sizeMultiple = LayoutImageSizeResolver.SizeMultiple,
+                minimumPixels = LayoutImageSizeResolver.MinimumPixels,
+                maximumPixels = LayoutImageSizeResolver.MaximumPixels,
+                maximumEdgePixels = LayoutImageSizeResolver.MaximumEdge,
+                minimumAspectRatio = 1d / LayoutImageSizeResolver.MaximumAspectRatio,
+                maximumAspectRatio = LayoutImageSizeResolver.MaximumAspectRatio,
+            },
+            splitSuggestions = exception.SplitSuggestions.Select(suggestion => new
+            {
+                rows = suggestion.Rows,
+                columns = suggestion.Columns,
+                panelCount = suggestion.PanelCount,
+                panels = suggestion.Panels.Select(panel => new
+                {
+                    panel.Index,
+                    panel.XPercent,
+                    panel.YPercent,
+                    panel.WidthPercent,
+                    panel.HeightPercent,
+                    panel.WidthInches,
+                    panel.HeightInches,
+                    panel.AspectRatio,
+                    raster = panel.Raster.Size,
+                    effectiveDpi = Math.Round(panel.EffectiveDpi, 1),
+                }),
+            }),
+            partitioningSupported = false,
+            summary = exception.Message,
+            recovery = "One Figure block holds one image. Use multiple Figure blocks, or confirm a structural change to a Designed Page before using a multi-image layout; treat independently generated images as deliberate panels rather than a seamless panorama.",
+        });
+
     private static string ImageResult(OutlineCollaborationContext context, AgentProjectImageResult result)
     {
         foreach (var image in result.Images)
@@ -1150,14 +1225,30 @@ IAppDatabaseOperationFactory database, IActService acts, IChapterService chapter
             status = result.Status,
             targetAspect = result.TargetAspect,
             requestedRaster = result.RequestedRaster,
+            requestedMinimumDpi = result.RequestedMinimumDpi,
+            minimumDpiMet = result.MinimumDpiMet,
+            warningCodes = result.WarningCodes ?? [],
             outputImageIds = result.Images.Select(image => image.Id),
-            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.RasterMatched, output.AspectMatched, output.Image.PreviewUrl }),
+            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.RasterMatched, output.AspectMatched, effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null, requestedMinimumDpi = output.RequestedMinimumDpi, minimumDpiMet = output.MinimumDpiMet, warningCodes = output.WarningCodes ?? [], output.Image.PreviewUrl }),
             attached = false,
-            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = 0 },
+            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.Outputs.Count(output => !output.RasterMatched || !output.AspectMatched || output.MinimumDpiMet == false) },
             diagnostics = result.Diagnostics.Take(3),
+            warnings = result.Outputs.Where(output => !output.RasterMatched || !output.AspectMatched || output.MinimumDpiMet == false).Select(output => new
+            {
+                code = output.MinimumDpiMet == false
+                    ? "MINIMUM_DPI_NOT_MET"
+                    : !output.RasterMatched && !output.AspectMatched
+                        ? "PROVIDER_IMAGE_RASTER_AND_ASPECT_MISMATCH"
+                        : !output.RasterMatched ? "PROVIDER_IMAGE_RASTER_MISMATCH" : "IMAGE_ASPECT_MISMATCH",
+                message = output.MinimumDpiMet == false
+                    ? $"Provider output {output.ActualRaster} achieved only {output.EffectiveDpi:0.0#} effective DPI, below the requested {output.RequestedMinimumDpi:0.0#}. Keep this unattached and do not describe it as publication-compliant."
+                    : $"Provider output {output.ActualRaster} did not satisfy the requested raster or target aspect. Inspect before reporting it as achieved.",
+            }),
             summary = result.Summary,
-            nextAction = result.Succeeded
-                ? "Inspect the returned project image, then attach its ID as the intended entity's canonical reference before completing the request."
+            nextAction = result.MinimumDpiMet == false
+                ? "Inspect the returned project image, but keep it unattached and do not describe it as publication-compliant."
+                : result.Succeeded
+                    ? "Inspect the returned project image, then attach its ID as the intended entity's canonical reference before completing the request."
                 : null,
         });
     }

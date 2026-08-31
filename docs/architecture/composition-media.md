@@ -95,23 +95,49 @@ used only when art must honor physical regions such as a page, frame, or cover.
 It carries exact aspect, provider-valid final-DPI recommendation plus moderate
 provider-valid default raster guidance, effective-DPI expectation, geometry
 fingerprint, and named trim, bleed, safe, gutter, barcode, cover, or reserved-text
-regions. An assistant may select a proportional larger provider
-size when the requested quality or effective DPI warrants it; explicit
-overrides are accepted only when provider-valid and, for layout-bound targets,
-when they preserve the server-owned aspect. It is guidance and prompt context,
-not an acceptance rule imposed on provider pixels.
+regions. An assistant may select a proportional larger provider size when the
+requested quality warrants it, or request a positive integer `minimumDpi` and
+let Lorekeeper select the smallest provider-valid raster that meets that
+effective DPI at the physical target size. Editor and Publish apply a 300-DPI
+default to concrete layout targets; Images and Outline retain their moderate
+concept-art defaults while exposing explicit `minimumDpi` and optional custom
+aspect controls to their assistants. Free-standing explicit-DPI work uses the
+exact Core Book page as its physical basis, or the largest rectangle of the
+requested aspect that fits inside it. A concrete `size` and explicit
+`minimumDpi` are mutually exclusive, and a publication caller's concrete size
+must still satisfy its surface default. DPI is pixels divided by intended
+placement inches, not a PNG/JPEG density header.
+
+Minimum-DPI resolution is a pre-dispatch acceptance boundary. If edge,
+megapixel, aspect, or alignment constraints make the requested DPI impossible,
+prompt compilation returns `MINIMUM_DPI_UNACHIEVABLE` before a job, partial,
+asset, or provider request exists. The rejection carries required and
+maximum-compatible rasters, maximum achievable DPI, binding provider limits,
+target identity, and the deterministic smallest equal-panel split of at most 64 images
+when one is available. `surfaceBounds` may bind a panel to a verified Designed
+Page, Core-cover, or release-cover surface subregion; its physical dimensions,
+transformed protected regions, and bounds participate in the geometry
+fingerprint. It is not valid for semantic Project Pages, Figures, or existing
+image frames.
 
 Provider output is stored without layout cropping or resizing, apart from
 supported-format normalization such as WebP to lossless PNG. The result
 reports `rasterMatched` separately from `aspectMatched`; any explicit
 requested raster is compared with actual decoded pixels even for a
-free-standing request, and mismatches are surfaced as warnings. Generation
-does not infer publication DPI readiness; placed-image validation owns DPI
-diagnostics. The provider-output byte boundary is separately configurable and
-defaults to 64 MiB.
+free-standing request, and mismatches are surfaced as warnings. When a minimum
+was requested, provenance and assistant results also carry the physical basis,
+requested minimum, `effectiveDpi`, `minimumDpiMet`, and every warning code. An
+unexpected undersized provider result remains an unattached asset with
+`MINIMUM_DPI_NOT_MET`; it is not publication-compliant and must not be placed as
+though it were. Placement validation remains the final DPI diagnostic owner.
+The provider-output byte boundary is separately configurable and defaults to
+64 MiB.
 
-The manual Images Generate panel uses that Core Book page raster by default and
-still offers explicit provider-valid raster overrides. Authors can select
+The manual Images Generate panel uses that Core Book page raster by default,
+offers explicit provider-valid raster overrides, and exposes an optional
+Minimum DPI field that is unavailable while a concrete size is selected.
+Infeasible requests show pre-dispatch resolution and panel guidance instead of
+queueing. Authors can select
 existing project images or upload new project-library images as ordered
 generation references, give each reference a visible role, and remove it before
 queueing. The compiled reference manifest and the exact ordered image IDs are
@@ -128,13 +154,14 @@ contains intermediate alpha, or has no editable pixel.
 `IProjectImageService.ResizeAsync` creates a new unattached, source-linked
 `Resized` asset at an exact provider-valid raster using deterministic
 SkiaSharp sampling. It does not invent visual detail and records the source,
-target, interpolation, and raster storage in provenance. A larger version of
-an existing image uses the ordinary source-driven edit workflow: the original
-image is supplied directly to the provider and the prompt describes the
-complete larger framing. Wider targets ask for natural extension to the left
-and right, taller targets above and below, and effectively unchanged aspects
-outward on all sides. This is model-driven editing and does not guarantee
-exact preservation of existing image detail. A regional guide remains an
+target, interpolation, and raster storage in provenance. Same-aspect generative
+up-resolution instead uses the original image, preserves its complete framing
+and visible content, and asks the model to reconstruct credible fine detail
+without cropping, zooming out, or inventing surrounding canvas. Intentional
+aspect or framing expansion is a separate outpainting edit: wider targets ask
+for natural extension left and right and taller targets above and below. Both
+are model-driven and do not guarantee exact source-pixel preservation. A
+regional guide remains an
 exception for genuinely localized changes or changes that cannot be described
 reliably in words. It is explicitly soft guidance for the model, not a pixel
 boundary or protection guarantee; the complete result must be inspected for

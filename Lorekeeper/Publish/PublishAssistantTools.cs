@@ -345,9 +345,9 @@ public sealed class PublishAssistantTools(
                 name: "apply_publication_section_page_workspace_stage",
                 description: "Apply a staged publication-section page workspace using only its one-use stage ID and current composition revision."),
             AIFunctionFactory.Create(
-                method: (string targetKind, Guid targetId, Guid? variantId = null, Guid? releaseId = null, string? surfaceRole = null, string? regionRole = null) => ReadLayoutGenerationTargetAsync(context, targetKind, targetId, variantId, releaseId, surfaceRole, regionRole),
+                method: (string targetKind, Guid targetId, Guid? variantId = null, Guid? releaseId = null, string? surfaceRole = null, string? regionRole = null, CompositionBounds? surfaceBounds = null) => ReadLayoutGenerationTargetAsync(context, targetKind, targetId, variantId, releaseId, surfaceRole, regionRole, surfaceBounds),
                 name: "read_publication_generation_target",
-                description: "Resolve composition geometry, provider-valid final-DPI recommendation, moderate default raster, physical dimensions, protected regions, and provider raster constraints for a Figure, page, cover surface/frame, or exact cover region. CoverRegion requires releaseId and regionRole Back, Spine, or Front; it returns exact physical aspect, closest supported generation raster, aspect error, expected crop, effective DPI, safe regions, orientation, and geometry fingerprint. Use CoreCoverSurface/CoreCoverFrame with no releaseId for the Core front cover; use CoverSurface/CoverFrame only with a releaseId for a release cover. Generate outputs unattached and inspect actualRaster/effectiveDpi before placement."),
+                description: "Resolve composition geometry, the 300-DPI publication default, protected regions, provider constraints, and the resolved 300-DPI raster for a Figure, page, cover surface/frame, or exact cover region. CoverRegion requires releaseId and regionRole Back, Spine, or Front. Pass surfaceBounds only for a verified PageSurface, CoverSurface, or CoreCoverSurface subregion; bounds become the physical target and protected regions are localized. If a full surface or region is infeasible, use returned exact panel bounds with the same surface target, generate deliberate panels/collage, and validate annotated and clean full-wrap/page previews—never claim seamless panorama continuity. Use CoreCoverSurface/CoreCoverFrame with no releaseId for the Core front cover; use CoverSurface/CoverFrame only with a releaseId for a release cover. Generate outputs unattached and inspect actualRaster/effectiveDpi before placement."),
             AIFunctionFactory.Create(
                 method: (Guid variantId) => ValidateCompositionAsync(context, context.SelectedEditionId, variantId),
                 name: "validate_publication_page_composition",
@@ -356,17 +356,17 @@ public sealed class PublishAssistantTools(
                 method: (ImageGenerationBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
                     GenerateProjectImageAsync(context, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression),
                 name: "generate_project_image",
-                description: "Generate one unattached project image and wait for a terminal result. Optional page, Figure, frame, or cover geometry guides composition only and never places output. target.size may select an explicit provider-valid raster when a larger proportional raster is warranted; for a layout-bound target, preserve the server-owned aspect and protected regions. Without a layout target, omit target.size or use auto to use the configured Core Book page raster; a layout target retains its server-owned moderate default. Inspect actualRaster and effectiveDpi before reporting whether the requested raster or DPI was achieved. Inspect the returned image, then apply its project-image ID with a focused cover tool or edit the relevant publication section during this turn."),
+                description: "Generate one unattached project image and wait for a terminal result. Optional page, Figure, frame, or cover geometry guides composition only and never places output. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned subregion. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate every suggested panel with its exact bounds and use deliberate panel/collage treatment; do not retry the same full surface or claim seamless continuity. Inspect actualRaster, effectiveDpi, minimumDpiMet, and warningCodes before placement. Inspect the returned image, then apply its project-image ID with a focused cover tool or edit the relevant publication section during this turn."),
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, ImageEditBrief brief, ImageReferenceUse[]? references = null, ImageGenerationTarget? geometryGuidance = null, string? altText = null, string? quality = null, string? outputFormat = null, int? outputCompression = null) =>
                     EditProjectImageAsync(context, sourceImageId, brief, references, geometryGuidance, altText, quality, outputFormat, outputCompression),
                 name: "edit_project_image",
-                description: "Edit one project image and wait for a terminal result. Use the original source directly for one coherent desired result. For larger framing, describe the surrounding scene and direction in the existing desired-result and composition fields: left and right for a wider result, above and below for a taller result, or outward on all sides when the aspect is effectively unchanged. target.size may select an explicit provider-valid raster when a larger proportional result is warranted; for a layout-bound target, preserve the server-owned aspect and protected regions. Without a layout target, omit target.size or use auto to use the configured Core Book page raster; a layout target retains its server-owned moderate default. Inspect actualRaster and effectiveDpi before reporting whether the requested raster or DPI was achieved. The output remains an unattached project image; inspect it and place its ID with a separate publication tool."),
+                description: "Edit one project image and wait for a terminal result. Use the original source directly for one coherent desired result. Layout-bound targets default to 300 effective DPI; use target.minimumDpi for an explicit request and target.surfaceBounds for an exact server-owned subregion. Same-aspect up-resolution preserves complete source framing/content while reconstructing credible detail; it does not zoom out, crop, or invent surrounding canvas. Intentional framing expansion is separate outpainting: describe new surroundings and direction in desired-result/composition. Regional guides cannot accompany layout targets or explicit DPI. If preflight returns MINIMUM_DPI_UNACHIEVABLE, generate suggested panels with exact bounds and use deliberate panel/collage treatment rather than repeated retries or seamless claims. Inspect actualRaster, effectiveDpi, minimumDpiMet, and warningCodes; keep undersized output unattached and do not place it as publication-compliant."),
             AIFunctionFactory.Create(
                 method: (Guid sourceImageId, int width, int height, string? fileName = null, string? altText = null) =>
                     ResizeProjectImageAsync(context, sourceImageId, width, height, fileName, altText),
                 name: "resize_project_image",
-                description: "Deterministically resize an existing project image to an exact provider-valid WIDTHxHEIGHT raster while preserving its aspect ratio. This is a local pixel transform, not generative editing: it creates a new unattached source-linked image, uses SkiaSharp sampling, and adds no visual detail. Use edit_project_image with the source image and a larger-framing brief when the user's intent is to generate surrounding content."),
+                description: "Deterministically resize an existing project image to an exact provider-valid WIDTHxHEIGHT raster while preserving its aspect ratio. This local pixel transform creates a new unattached source-linked image and adds no visual detail; it is not publication-quality enhancement. Use edit_project_image with the original source for same-aspect up-resolution that preserves complete framing while reconstructing detail, or use intentional outpainting when expanding framing."),
             AIFunctionFactory.Create(
                 method: (Guid jobId) => ReadProjectImageJobAsync(context, jobId, wait: false),
                 name: "read_project_image_job",
@@ -1330,8 +1330,13 @@ public sealed class PublishAssistantTools(
                 outputCompression,
                 "Publish image",
                 context.TrackImageJob,
-                context.TurnCancellationToken);
+                context.TurnCancellationToken,
+                defaultMinimumDpi: 300);
             return ImageResult(context, result);
+        }
+        catch (MinimumDpiUnachievableException ex)
+        {
+            return SerializeMinimumDpiRejection(ex);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
@@ -1367,8 +1372,13 @@ public sealed class PublishAssistantTools(
                 outputCompression,
                 "Publish image edit",
                 context.TrackImageJob,
-                context.TurnCancellationToken);
+                context.TurnCancellationToken,
+                defaultMinimumDpi: 300);
             return ImageResult(context, result);
+        }
+        catch (MinimumDpiUnachievableException ex)
+        {
+            return SerializeMinimumDpiRejection(ex);
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
         {
@@ -1410,6 +1420,9 @@ public sealed class PublishAssistantTools(
                 sourceImageId,
                 targetRaster = $"{width}x{height}",
                 actualRaster = $"{width}x{height}",
+                requestedMinimumDpi = (double?)null,
+                minimumDpiMet = (bool?)null,
+                warningCodes = Array.Empty<string>(),
                 sourceLinked = true,
                 attached = false,
                 interpolation = ProjectImageResize.DeterministicInterpolation,
@@ -1425,7 +1438,7 @@ public sealed class PublishAssistantTools(
                     image.Source,
                     image.SourceMetadataJson,
                 },
-                summary = $"Created an unattached source-linked image at exactly {width}x{height} using {ProjectImageResize.DeterministicInterpolation}. This local resize adds no visual detail; use edit_project_image with the source image and a larger-framing brief for generative expansion.",
+                summary = $"Created an unattached source-linked image at exactly {width}x{height} using {ProjectImageResize.DeterministicInterpolation}. This local resize adds no visual detail and is not publication-quality enhancement; use an original-source generative edit for detail reconstruction or intentional outpainting.",
                 nextAction = "Inspect the returned project image, then place its ID with a separate publication tool if the user approves it.",
             });
         }
@@ -1480,20 +1493,29 @@ public sealed class PublishAssistantTools(
             targetAspect = result.TargetAspect,
             requestedRaster = result.RequestedRaster,
             outputImageIds = result.Images.Select(image => image.Id),
-            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.RasterMatched, output.AspectMatched, effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null, output.Image.PreviewUrl }),
+            requestedMinimumDpi = result.RequestedMinimumDpi,
+            minimumDpiMet = result.MinimumDpiMet,
+            warningCodes = result.WarningCodes ?? [],
+            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.RasterMatched, output.AspectMatched, effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null, requestedMinimumDpi = output.RequestedMinimumDpi, minimumDpiMet = output.MinimumDpiMet, warningCodes = output.WarningCodes ?? [], output.Image.PreviewUrl }),
             attached = false,
-            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.Outputs.Count(output => !output.RasterMatched || !output.AspectMatched) },
+            diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.Outputs.Count(output => !output.RasterMatched || !output.AspectMatched || output.MinimumDpiMet == false) },
             diagnostics = result.Diagnostics.Take(3),
-            warnings = result.Outputs.Where(output => !output.RasterMatched || !output.AspectMatched).Select(output => new
+            warnings = result.Outputs.Where(output => !output.RasterMatched || !output.AspectMatched || output.MinimumDpiMet == false).Select(output => new
             {
-                code = !output.RasterMatched && !output.AspectMatched
-                    ? "PROVIDER_IMAGE_RASTER_AND_ASPECT_MISMATCH"
-                    : !output.RasterMatched ? "PROVIDER_IMAGE_RASTER_MISMATCH" : "LAYOUT_IMAGE_ASPECT_MISMATCH",
-                message = $"Provider output {output.ActualRaster} did not satisfy {(output.RasterMatched ? string.Empty : $"requested raster {result.RequestedRaster}")}{(!output.RasterMatched && !output.AspectMatched ? " and " : string.Empty)}{(output.AspectMatched ? string.Empty : $"target aspect {result.TargetAspect}")}. Inspect before placement or reporting the requested dimensions as achieved.",
+                code = output.MinimumDpiMet == false
+                    ? "MINIMUM_DPI_NOT_MET"
+                    : !output.RasterMatched && !output.AspectMatched
+                        ? "PROVIDER_IMAGE_RASTER_AND_ASPECT_MISMATCH"
+                        : !output.RasterMatched ? "PROVIDER_IMAGE_RASTER_MISMATCH" : "LAYOUT_IMAGE_ASPECT_MISMATCH",
+                message = output.MinimumDpiMet == false
+                    ? $"Provider output {output.ActualRaster} achieved only {output.EffectiveDpi:0.0#} effective DPI, below the requested {output.RequestedMinimumDpi:0.0#}. Keep this unattached and do not place or describe it as publication-compliant."
+                    : $"Provider output {output.ActualRaster} did not satisfy {(output.RasterMatched ? string.Empty : $"requested raster {result.RequestedRaster}")}{(!output.RasterMatched && !output.AspectMatched ? " and " : string.Empty)}{(output.AspectMatched ? string.Empty : $"target aspect {result.TargetAspect}")}. Inspect before placement or reporting the requested dimensions as achieved.",
             }),
             summary = result.Summary,
-            nextAction = result.Succeeded
-                ? "Inspect the returned project image, then place its ID with a separate cover or publication tool before completing the request."
+            nextAction = result.MinimumDpiMet == false
+                ? "Inspect the returned image, but keep it unattached and do not place it as publication-compliant; use the suggested panel bounds or a deliberate collage/panel treatment."
+                : result.Succeeded
+                    ? "Inspect the returned project image, then place its ID with a separate cover or publication tool before completing the request."
                 : null,
         });
     }
@@ -1506,6 +1528,164 @@ public sealed class PublishAssistantTools(
             : null;
         return Serialize(new { readiness, description });
     }
+
+    private static string SerializeMinimumDpiRejection(MinimumDpiUnachievableException exception) =>
+        Serialize(new
+        {
+            ok = false,
+            code = MinimumDpiUnachievableException.Code,
+            stage = exception.Stage,
+            physicalDimensions = new
+            {
+                widthInches = exception.Resolution.WidthInches,
+                heightInches = exception.Resolution.HeightInches,
+            },
+            requestedMinimumDpi = exception.RequestedMinimumDpi,
+            requiredRaster = RasterPayload(exception.RequiredRaster),
+            largestCompatibleRaster = RasterPayload(exception.MaximumRaster),
+            maximumAchievableDpi = Math.Round(exception.MaximumAchievableDpi, 1),
+            bindingProviderLimits = exception.Resolution.BindingProviderLimits,
+            providerConstraints = ProviderConstraintsPayload(),
+            target = new
+            {
+                targetKind = exception.TargetKind,
+                targetId = exception.TargetId,
+                editionId = exception.EditionId,
+                variantId = exception.VariantId,
+                surfaceBounds = exception.SurfaceBounds,
+            },
+            splitSuggestions = exception.SplitSuggestions.Select(PanelSuggestionPayload),
+            partitioningSupported = SupportsDirectSurfacePartition(exception.TargetKind)
+                && exception.SplitSuggestions.Count > 0,
+            automaticPartitioningUnsupported = SupportsDirectSurfacePartition(exception.TargetKind)
+                && exception.SplitSuggestions.Count == 0,
+            summary = exception.Message,
+            recovery = MinimumDpiRecovery(exception.TargetKind),
+        });
+
+    private static string SerializeMinimumDpiPreflight(
+        LayoutImageDpiResolution resolution,
+        string targetKind,
+        Guid targetId,
+        Guid? editionId,
+        Guid? variantId,
+        CompositionBounds? surfaceBounds,
+        string? regionRole = null) =>
+        Serialize(new
+        {
+            ok = false,
+            code = MinimumDpiUnachievableException.Code,
+            stage = "pre_dispatch",
+            physicalDimensions = new { widthInches = resolution.WidthInches, heightInches = resolution.HeightInches },
+            requestedMinimumDpi = resolution.MinimumDpi,
+            requiredRaster = RasterPayload(resolution.RequiredRaster),
+            largestCompatibleRaster = RasterPayload(resolution.MaximumRaster),
+            maximumAchievableDpi = Math.Round(resolution.MaximumAchievableDpi, 1),
+            bindingProviderLimits = resolution.BindingProviderLimits,
+            providerConstraints = ProviderConstraintsPayload(),
+            target = new { targetKind, targetId, editionId, variantId, regionRole, surfaceBounds },
+            splitSuggestions = SurfacePanelSuggestions(resolution.PanelSuggestions, targetKind, surfaceBounds).Select(PanelSuggestionPayload),
+            partitioningSupported = SupportsDirectSurfacePartition(targetKind)
+                && resolution.PanelSuggestions.Count > 0,
+            automaticPartitioningUnsupported = SupportsDirectSurfacePartition(targetKind)
+                && resolution.PanelSuggestions.Count == 0,
+            summary = $"The 300-DPI layout target cannot be generated as one provider-compatible image ({resolution.WidthInches:0.####} x {resolution.HeightInches:0.####} inches). No image provider request was dispatched.",
+            recovery = MinimumDpiRecovery(targetKind),
+        });
+
+    private static IReadOnlyList<LayoutImagePanelSuggestion> SurfacePanelSuggestions(
+        IReadOnlyList<LayoutImagePanelSuggestion> suggestions,
+        string targetKind,
+        CompositionBounds? surfaceBounds)
+    {
+        return surfaceBounds is null
+            ? suggestions
+            : !SupportsDirectSurfacePartition(targetKind)
+                ? []
+            : LayoutImageSizeResolver.MapPanelSuggestions(
+                suggestions,
+                surfaceBounds.XPercent,
+                surfaceBounds.YPercent,
+                surfaceBounds.WidthPercent,
+                surfaceBounds.HeightPercent);
+    }
+
+    private static LayoutImageDpiResolution ResolveSurfaceBoundsMinimumDpi(
+        LayoutGenerationTargetDescriptor surface,
+        CompositionBounds bounds,
+        int minimumDpi)
+    {
+        if (!double.IsFinite(bounds.XPercent)
+            || !double.IsFinite(bounds.YPercent)
+            || !double.IsFinite(bounds.WidthPercent)
+            || !double.IsFinite(bounds.HeightPercent)
+            || bounds.XPercent < 0
+            || bounds.YPercent < 0
+            || bounds.WidthPercent <= 0
+            || bounds.HeightPercent <= 0
+            || bounds.XPercent + bounds.WidthPercent > 100
+            || bounds.YPercent + bounds.HeightPercent > 100)
+            throw new ArgumentException("surfaceBounds must use finite positive percentage dimensions inside the 0-100 surface.", nameof(bounds));
+        return LayoutImageSizeResolver.ResolveMinimumDpi(
+            surface.WidthInches * bounds.WidthPercent / 100,
+            surface.HeightInches * bounds.HeightPercent / 100,
+            minimumDpi);
+    }
+
+    private static bool SupportsDirectSurfacePartition(string targetKind) =>
+        NormalizeImageTargetKind(targetKind) is "pagesurface" or "coversurface" or "corecoversurface";
+
+    private static string MinimumDpiRecovery(string targetKind) => NormalizeImageTargetKind(targetKind) switch
+    {
+        "" => "The free-standing Core Book physical basis cannot meet this minimum as one provider image. Use multiple deliberate images for the intended layout, reduce the intended physical size, or use an external higher-resolution source; no exact layout bounds are available from this target.",
+        "figure" => "One Figure block holds one image. Ask the user before replacing it with multiple Figure blocks or converting it to a Designed Page; otherwise reduce the physical placement or use an external higher-resolution source.",
+        "projectpage" => "A semantic Project Page is not a composited surface. Ask the user before using multiple Figure blocks or converting the content to a Designed Page.",
+        "pageframe" or "coverframe" or "corecoverframe" => "An existing image frame holds one image. Recompose the owning PageSurface or cover surface as deliberate image panels, or reduce the frame's physical size; do not retry the same frame target.",
+        "coversurface" or "corecoversurface" => "Do not retry the same infeasible cover target. Prefer Back, Spine, and Front regions, then generate each returned subpanel with its exact CoverSurface bounds. Place every image at those bounds and inspect annotated regions plus the clean whole wrap; do not claim seamless continuity without visual verification.",
+        _ => "Do not retry the same infeasible full-surface request. Generate each returned panel with the exact surfaceBounds, add every unattached image at those bounds, and validate the complete page preview. Use deliberate panels/collage treatment; do not claim seamless panorama continuity.",
+    };
+
+    private static string NormalizeImageTargetKind(string value) =>
+        new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private static object? RasterPayload(LayoutImageSize? raster) => raster is null
+        ? null
+        : new { widthPixels = raster.Width, heightPixels = raster.Height, size = raster.Size };
+
+    private static object RasterPayload(LayoutImageRequiredRaster raster) =>
+        new { widthPixels = raster.Width, heightPixels = raster.Height, size = raster.Size };
+
+    private static object ProviderConstraintsPayload() => new
+    {
+        rasterFormat = "WIDTHxHEIGHT",
+        sizeMultiple = LayoutImageSizeResolver.SizeMultiple,
+        minimumPixels = LayoutImageSizeResolver.MinimumPixels,
+        maximumPixels = LayoutImageSizeResolver.MaximumPixels,
+        maximumEdgePixels = LayoutImageSizeResolver.MaximumEdge,
+        minimumAspectRatio = 1d / LayoutImageSizeResolver.MaximumAspectRatio,
+        maximumAspectRatio = LayoutImageSizeResolver.MaximumAspectRatio,
+    };
+
+    private static object PanelSuggestionPayload(LayoutImagePanelSuggestion suggestion) => new
+    {
+        rows = suggestion.Rows,
+        columns = suggestion.Columns,
+        panelCount = suggestion.PanelCount,
+        maximumAchievableDpi = Math.Round(suggestion.MaximumAchievableDpi, 1),
+        panels = suggestion.Panels.Select(panel => new
+        {
+            panel.Index,
+            xPercent = panel.XPercent,
+            yPercent = panel.YPercent,
+            widthPercent = panel.WidthPercent,
+            heightPercent = panel.HeightPercent,
+            widthInches = panel.WidthInches,
+            heightInches = panel.HeightInches,
+            panel.AspectRatio,
+            raster = RasterPayload(panel.Raster),
+            effectiveDpi = Math.Round(panel.EffectiveDpi, 1),
+        }),
+    };
 
     private async Task<string> ListNamedStylesAsync(PublishAssistantContext context, int offset, int limit)
     {
@@ -2439,12 +2619,22 @@ public sealed class PublishAssistantTools(
     private static EditorContentTarget SectionContentTarget(Guid? releaseId) =>
         releaseId is Guid id ? EditorContentTarget.ForEdition(id) : EditorContentTarget.Core;
 
-    private async Task<string> ReadLayoutGenerationTargetAsync(PublishAssistantContext context, string targetKind, Guid targetId, Guid? variantId, Guid? editionId, string? surfaceRole, string? regionRole)
+    private async Task<string> ReadLayoutGenerationTargetAsync(
+        PublishAssistantContext context,
+        string targetKind,
+        Guid targetId,
+        Guid? variantId,
+        Guid? editionId,
+        string? surfaceRole,
+        string? regionRole,
+        CompositionBounds? surfaceBounds)
     {
         try
         {
             if (targetKind.Trim().Equals("CoverRegion", StringComparison.OrdinalIgnoreCase))
             {
+                if (surfaceBounds is not null)
+                    throw new ArgumentException("surfaceBounds applies only to server-owned CoverSurface, PageSurface, or CoreCoverSurface targets.");
                 if (editionId is not Guid regionReleaseId)
                     throw new ArgumentException("CoverRegion requires releaseId.");
                 await EnsurePrintCoverPaginationAsync(context, regionReleaseId);
@@ -2453,6 +2643,16 @@ public sealed class PublishAssistantTools(
                     ? await covers.GetAsync(context.ProjectId, regionReleaseId, context.TurnCancellationToken)
                     : await covers.GetSurfaceAsync(context.ProjectId, regionReleaseId, surfaceRole, context.TurnCancellationToken);
                 var region = cover.Regions.Single(item => item.Role == role);
+                var regionDpiResolution = LayoutImageSizeResolver.ResolveMinimumDpi(region.WidthInches, region.HeightInches, 300);
+                if (!regionDpiResolution.MeetsMinimumDpi)
+                    return SerializeMinimumDpiPreflight(
+                        regionDpiResolution,
+                        "CoverSurface",
+                        cover.Id,
+                        regionReleaseId,
+                        null,
+                        region.Bounds,
+                        role.ToString());
                 var raster = LayoutImageSizeResolver.Resolve(region.WidthInches, region.HeightInches);
                 var rasterAspect = (double)raster.Width / raster.Height;
                 var aspectErrorPercent = Math.Abs(rasterAspect / region.AspectRatio - 1) * 100;
@@ -2475,6 +2675,28 @@ public sealed class PublishAssistantTools(
                         aspectErrorPercent = Math.Round(aspectErrorPercent, 3),
                         expectedCropPercent = Math.Round(expectedCropPercent, 3),
                         effectiveDpi = Math.Round(effectiveDpi, 1),
+                        minimumDpi = 300,
+                        minimumDpiRaster = regionDpiResolution.Raster!.Size,
+                        generationTarget = new
+                        {
+                            editionId = regionReleaseId,
+                            targetKind = "CoverSurface",
+                            targetId = cover.Id,
+                            surfaceBounds = region.Bounds,
+                            minimumDpi = 300,
+                        },
+                        minimumDpiResolution = new
+                        {
+                            physicalDimensions = new { widthInches = regionDpiResolution.WidthInches, heightInches = regionDpiResolution.HeightInches },
+                            requiredRaster = RasterPayload(regionDpiResolution.RequiredRaster),
+                            resolvedRaster = RasterPayload(regionDpiResolution.Raster),
+                            maximumCompatibleRaster = RasterPayload(regionDpiResolution.MaximumRaster),
+                            maximumAchievableDpi = Math.Round(regionDpiResolution.MaximumAchievableDpi, 1),
+                            splitSuggestions = SurfacePanelSuggestions(
+                                regionDpiResolution.PanelSuggestions,
+                                "CoverSurface",
+                                region.Bounds),
+                        },
                         safeRegions = new { insetInches = region.SafeInsetInches, region.Guides },
                         orientation = role == CompositionRegionConstraint.Spine ? cover.SpineReadingDirection.ToString() : "upright",
                         geometryFingerprint = region.GeometryFingerprint,
@@ -2483,9 +2705,23 @@ public sealed class PublishAssistantTools(
                 });
             }
             var service = compositions ?? throw new InvalidOperationException("Publication composition tools are unavailable.");
+            if (surfaceBounds is not null && !SupportsDirectSurfacePartition(targetKind))
+                throw new ArgumentException("surfaceBounds requires a PageSurface, CoverSurface, or CoreCoverSurface target.");
+            if (surfaceBounds is not null)
+            {
+                var surface = editionId is Guid boundedReleaseId
+                    ? await service.DescribeGenerationTargetAsync(context.ProjectId, boundedReleaseId, targetKind, targetId, variantId, context.TurnCancellationToken)
+                    : await service.DescribeAuthoringGenerationTargetAsync(context.ProjectId, targetKind, targetId, variantId, context.TurnCancellationToken);
+                var boundedResolution = ResolveSurfaceBoundsMinimumDpi(surface, surfaceBounds, 300);
+                if (!boundedResolution.MeetsMinimumDpi)
+                    return SerializeMinimumDpiPreflight(boundedResolution, targetKind, targetId, surface.EditionId, surface.VariantId, surfaceBounds);
+            }
             var descriptor = editionId is Guid releaseId
-                ? await service.DescribeGenerationTargetAsync(context.ProjectId, releaseId, targetKind, targetId, variantId, context.TurnCancellationToken)
-                : await service.DescribeAuthoringGenerationTargetAsync(context.ProjectId, targetKind, targetId, variantId, context.TurnCancellationToken);
+                ? await service.DescribeGenerationTargetAsync(context.ProjectId, releaseId, targetKind, targetId, variantId, context.TurnCancellationToken, surfaceBounds)
+                : await service.DescribeAuthoringGenerationTargetAsync(context.ProjectId, targetKind, targetId, variantId, context.TurnCancellationToken, surfaceBounds);
+            var dpiResolution = LayoutImageSizeResolver.ResolveMinimumDpi(descriptor.WidthInches, descriptor.HeightInches, 300);
+            if (!dpiResolution.MeetsMinimumDpi)
+                return SerializeMinimumDpiPreflight(dpiResolution, targetKind, targetId, descriptor.EditionId, descriptor.VariantId, surfaceBounds);
             return Serialize(new
             {
                 ok = true,
@@ -2506,11 +2742,27 @@ public sealed class PublishAssistantTools(
                     descriptor.RequestedHeightPixels,
                     descriptor.RequestedRaster,
                     descriptor.EffectiveDpiExpectation,
+                    minimumDpi = 300,
+                    effectiveDpi = Math.Round(LayoutImageSizeResolver.EffectiveDpi(
+                        dpiResolution.Raster!,
+                        descriptor.WidthInches,
+                        descriptor.HeightInches), 1),
+                    minimumDpiResolution = new
+                    {
+                        physicalDimensions = new { widthInches = dpiResolution.WidthInches, heightInches = dpiResolution.HeightInches },
+                        requestedMinimumDpi = dpiResolution.MinimumDpi,
+                        requiredRaster = RasterPayload(dpiResolution.RequiredRaster),
+                        resolvedRaster = RasterPayload(dpiResolution.Raster),
+                        maximumCompatibleRaster = RasterPayload(dpiResolution.MaximumRaster),
+                        maximumAchievableDpi = Math.Round(dpiResolution.MaximumAchievableDpi, 1),
+                        splitSuggestions = dpiResolution.PanelSuggestions.Select(PanelSuggestionPayload),
+                    },
                     descriptor.Regions,
                     descriptor.Diagnostics,
                 },
             });
         }
+        catch (MinimumDpiUnachievableException ex) { return SerializeMinimumDpiRejection(ex); }
         catch (Exception ex) { return Serialize(new { ok = false, code = "INVALID_TARGET", targetId, summary = ex.Message }); }
     }
 
@@ -2726,7 +2978,7 @@ public sealed class PublishAssistantTools(
                 region,
                 spineReadingDirection = cover.SpineReadingDirection,
                 generationGuidance = role == CompositionRegionConstraint.Spine
-                    ? "Use the closest supported raster without stretching. Generate art without baked-in words and keep a quiet center lane for real title/author text; inspect and adjust the focal crop after placement."
+                    ? "Read the 300-DPI region target before generating. If one raster is infeasible, use its exact CoverSurface panel bounds. Generate without baked-in words, preserve a quiet center lane for real title/author text, and inspect the annotated region plus whole wrap after placement."
                     : "Generate without baked-in copy and preserve quiet zones for real cover typography.",
             });
         }

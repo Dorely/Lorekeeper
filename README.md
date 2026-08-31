@@ -159,9 +159,14 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   not a hard pixel boundary; the complete result still requires inspection. The
   manual Generate panel can select existing library images or upload new images
   as ordered visual references, with an explicit role for each reference carried
-  into the saved generation request. Exact target-aspect generation treats a
-  proportional provider raster as compatible even when its pixel dimensions
-  differ from the request.
+  into the saved generation request. It also accepts an optional Minimum DPI and
+  resolves that effective placement density into provider-valid pixels. Editor
+  and Publish use 300 DPI for layout-bound generation. Requests that cannot meet
+  the minimum fail before generation and return a multi-panel plan for Designed
+  Pages and covers; independently generated panels require deliberate layout and
+  visual inspection rather than an assumed seamless join. Same-aspect
+  generative up-resolution preserves the complete framing and reconstructs
+  detail, while deterministic resizing changes dimensions without adding detail.
   Target-bound generation, accessibility state, and layout diagnostics remain
   available. Image frames
   retain the raster's aspect ratio by default, can fill the largest proportional

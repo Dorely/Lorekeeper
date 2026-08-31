@@ -159,6 +159,17 @@ else
                             </label>
                         }
                         <label>
+                            <span>Minimum DPI</span>
+                            <input class="form-control form-control-sm"
+                                   type="number"
+                                   min="1"
+                                   step="1"
+                                   placeholder="Optional"
+                                   @bind="_minimumDpi"
+                                   disabled="@HasConcreteImageSize" />
+                            <small>@(HasConcreteImageSize ? "Clear the concrete size to resolve a raster from DPI." : "Uses effective pixels at the intended physical size; no file-header DPI is stamped.")</small>
+                        </label>
+                        <label>
                             <span>Quality</span>
                             <select class="form-select form-select-sm" @bind="_imageQuality">
                                 <option value="auto">Auto</option>
@@ -408,6 +419,7 @@ else
     private string _uploadAltText = string.Empty;
     private string _imagePrompt = string.Empty;
     private string _imageSize = "auto";
+    private int? _minimumDpi;
     private string _defaultImageRaster = string.Empty;
     private string _imageQuality = "auto";
     private string _imageFormat = "png";
@@ -435,6 +447,11 @@ else
     private LayoutGenerationTargetDescriptor? _layoutTarget;
 
     private int MaxReferenceImages => Math.Max(0, ImageOptions.Value.MaxReferenceImages);
+
+    private bool HasConcreteImageSize =>
+        _layoutTarget is null
+        && !string.IsNullOrWhiteSpace(_imageSize)
+        && !_imageSize.Equals("auto", StringComparison.OrdinalIgnoreCase);
 
     private IReadOnlyCollection<Guid> GenerationReferenceImageIds =>
         _generationReferences.Select(reference => reference.Image.Id).ToList();
@@ -498,6 +515,7 @@ else
         _generationReferences.Clear();
         _generationReferencePickerOpen = false;
         _imageSize = "auto";
+        _minimumDpi = null;
         _loadedProjectId = Project.Id;
         await ReloadAsync();
     }
@@ -633,8 +651,8 @@ else
                 },
                 references,
                 target: _layoutTarget is null
-                    ? new ImageGenerationTarget { Size = _imageSize }
-                    : new ImageGenerationTarget { EditionId = _layoutTarget.EditionId, TargetKind = _layoutTarget.TargetKind, TargetId = _layoutTarget.TargetId, VariantId = _layoutTarget.VariantId });
+                    ? new ImageGenerationTarget { Size = _imageSize, MinimumDpi = HasConcreteImageSize ? null : _minimumDpi }
+                    : new ImageGenerationTarget { EditionId = _layoutTarget.EditionId, TargetKind = _layoutTarget.TargetKind, TargetId = _layoutTarget.TargetId, VariantId = _layoutTarget.VariantId, MinimumDpi = _minimumDpi });
             await ImageJobs.CreateGenerateJobAsync(Project.Id, new ProjectImageGenerateJobRequest(
                 compiled.Prompt,
                 compiled.Size,
@@ -652,6 +670,13 @@ else
             await ImageRuntime.EnqueueProjectAsync(Project.Id);
             _status = "Image job queued.";
             await ReloadAsync();
+        }
+        catch (MinimumDpiUnachievableException ex)
+        {
+            var split = ex.SplitSuggestions.FirstOrDefault();
+            _error = $"{ex.Message} Required raster: {ex.RequiredRaster.Size}. Largest compatible raster: {ex.MaximumRaster?.Size ?? "none"}."
+                + (ex.Resolution.BindingProviderLimits.Count == 0 ? string.Empty : $" Binding provider limits: {string.Join(", ", ex.Resolution.BindingProviderLimits)}.")
+                + (split is null ? string.Empty : $" Use {split.PanelCount} images in a {split.Rows}×{split.Columns} panel layout to cover this space at the requested DPI.");
         }
         catch (Exception ex)
         {

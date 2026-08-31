@@ -219,6 +219,11 @@ contract never represents it as protecting unmasked pixels. `ImagePromptComposer
 supplies the shared structured prompt contract. Feature-specific use of generated
 images, geometry targets, assets, and deletion guards belongs to
 [Composition and media](composition-media.md).
+The provider transport accepts pixel dimensions, not physical DPI. Lorekeeper
+resolves effective-DPI requests against server-owned physical geometry before
+dispatch, enforcing the provider's 16-pixel alignment, edge, megapixel, and
+aspect limits. An infeasible request fails before any durable job or provider
+call; no density metadata is fabricated in the image file.
 
 Regional-guided dispatch revalidates the source, compiled geometry, and mask
 immediately before the request. The image runtime decodes a PNG, JPEG, or WebP
@@ -238,14 +243,19 @@ Provider output is stored without layout cropping or resizing, apart from
 supported-format normalization such as WebP to lossless PNG. Explicit requested
 rasters are compared with decoded output dimensions even for free-standing jobs,
 and mismatches remain visible in persisted provenance and assistant results;
-aspect compatibility does not make a raster mismatch exact. A proportional
-result remains usable for ordinary layout placement. Free-standing generation
+aspect compatibility does not make a raster mismatch exact. For a requested
+minimum DPI, an undersized provider result is retained unattached with
+`MINIMUM_DPI_NOT_MET` and is not a compliant publication candidate.
+Free-standing generation
 and unmasked edit callers send a concrete provider-valid raster derived from the
 configured Core Book page by default; layout-bound callers replace it with their
-server-owned target raster, and explicit valid overrides remain possible.
-Expansion is a normal source-driven edit whose prompt describes the desired
-larger framing and direction; the provider owns how the existing scene is
-reinterpreted to make the result coherent. Provider output has its own
+server-owned target raster. Editor and Publish require 300 effective DPI for
+those concrete layout targets; Images and Outline keep moderate defaults unless
+their callers explicitly request a minimum against the Core Book physical basis.
+Same-aspect generative up-resolution preserves the complete framing and asks
+for reconstructed detail, while intentional outpainting separately describes
+the desired larger framing and direction. The provider owns how source pixels
+are reinterpreted in either operation. Provider output has its own
 configurable 64 MiB byte cap rather than inheriting the smaller upload limit.
 Image options also bound request attempts, timeout, partials, references, output
 count, and one parallel provider request by default.

@@ -17,7 +17,8 @@ public interface IAgentProjectImageWorkflow
         int? outputCompression,
         string label,
         Action<Guid>? onJobCreated = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        int? defaultMinimumDpi = null);
 
     Task<AgentProjectImageResult> EditAsync(
         Guid projectId,
@@ -32,7 +33,8 @@ public interface IAgentProjectImageWorkflow
         int? outputCompression,
         string label,
         Action<Guid>? onJobCreated = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        int? defaultMinimumDpi = null);
 
     Task<AgentProjectImageResult?> ReadAsync(
         Guid projectId,
@@ -58,7 +60,10 @@ public sealed record AgentProjectImageResult(
     bool LayoutBound,
     IReadOnlyList<AgentProjectImageOutput> Outputs,
     IReadOnlyList<ProjectImageOutputErrorView> Diagnostics,
-    string Summary)
+    string Summary,
+    double? RequestedMinimumDpi = null,
+    bool? MinimumDpiMet = null,
+    IReadOnlyList<string>? WarningCodes = null)
 {
     public IReadOnlyList<ProjectImageView> Images => Outputs.Select(output => output.Image).ToList();
 }
@@ -70,7 +75,10 @@ public sealed record AgentProjectImageOutput(
     string ActualRaster,
     bool RasterMatched,
     bool AspectMatched,
-    double? EffectiveDpi);
+    double? EffectiveDpi,
+    double? RequestedMinimumDpi = null,
+    bool? MinimumDpiMet = null,
+    IReadOnlyList<string>? WarningCodes = null);
 
 public sealed class AgentProjectImageWorkflow(
     IImagePromptComposer prompts,
@@ -90,13 +98,15 @@ public sealed class AgentProjectImageWorkflow(
         int? outputCompression,
         string label,
         Action<Guid>? onJobCreated = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int? defaultMinimumDpi = null)
     {
+        var effectiveTarget = WithDefaultMinimumDpi(geometryGuidance, defaultMinimumDpi);
         var compiled = await prompts.CompileGenerationAsync(
             projectId,
             brief,
             references?.ToArray(),
-            geometryGuidance,
+            effectiveTarget,
             cancellationToken);
         var job = await jobs.CreateGenerateJobAsync(
             projectId,
@@ -131,14 +141,18 @@ public sealed class AgentProjectImageWorkflow(
         int? outputCompression,
         string label,
         Action<Guid>? onJobCreated = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        int? defaultMinimumDpi = null)
     {
+        var effectiveTarget = WithDefaultMinimumDpi(
+            geometryGuidance,
+            regionalGuide is null ? defaultMinimumDpi : null);
         var compiled = await prompts.CompileEditAsync(
             projectId,
             sourceImageId,
             brief,
             references?.ToArray(),
-            geometryGuidance,
+            effectiveTarget,
             regionalGuide is null ? ImageEditGuidanceMode.SourceDriven : ImageEditGuidanceMode.RegionalGuide,
             cancellationToken);
         var job = await jobs.CreateEditJobAsync(
@@ -227,6 +241,7 @@ public sealed class AgentProjectImageWorkflow(
         if (geometry is not null && !hasRequestedRaster)
             throw new InvalidDataException("Layout-bound image jobs require an explicit requested raster.");
         var outputImages = new List<AgentProjectImageOutput>();
+        var warningCodes = new HashSet<string>(StringComparer.Ordinal);
         foreach (var imageId in job.OutputImageIds)
         {
             if (await images.GetAsync(projectId, imageId, cancellationToken) is { } image)
@@ -247,6 +262,18 @@ public sealed class AgentProjectImageWorkflow(
                 double? effectiveDpi = geometry is { WidthInches: > 0, HeightInches: > 0 }
                     ? Math.Min(normalized.Width / geometry.WidthInches, normalized.Height / geometry.HeightInches)
                     : null;
+                var outputWarnings = new List<string>();
+                if (!rasterMatched)
+                    outputWarnings.Add("PROVIDER_IMAGE_RASTER_MISMATCH");
+                if (!aspectMatched)
+                    outputWarnings.Add("LAYOUT_IMAGE_ASPECT_MISMATCH");
+                var outputMinimumDpiMet = geometry?.MinimumDpi is not { } minimumDpi
+                    ? (bool?)null
+                    : effectiveDpi is { } actualDpi && actualDpi + 1e-9 >= minimumDpi;
+                if (outputMinimumDpiMet == false)
+                    outputWarnings.Add("MINIMUM_DPI_NOT_MET");
+                foreach (var warningCode in outputWarnings)
+                    warningCodes.Add(warningCode);
                 outputImages.Add(new AgentProjectImageOutput(
                     image,
                     normalized.Width,
@@ -254,15 +281,28 @@ public sealed class AgentProjectImageWorkflow(
                     $"{normalized.Width}x{normalized.Height}",
                     rasterMatched,
                     aspectMatched,
-                    effectiveDpi));
+                    effectiveDpi,
+                    geometry?.MinimumDpi,
+                    outputMinimumDpiMet,
+                    outputWarnings));
             }
         }
 
-        var succeeded = !timedOut && job.Status is ProjectImageGenerationJobStatus.Succeeded
+        var providerSucceeded = !timedOut && job.Status is ProjectImageGenerationJobStatus.Succeeded
             or ProjectImageGenerationJobStatus.CompletedWithErrors;
-        var status = timedOut ? "timed_out" : StatusName(job.Status);
+        var minimumDpiMet = geometry?.MinimumDpi is null || outputImages.Count == 0
+            ? (bool?)null
+            : outputImages.All(output => output.MinimumDpiMet == true);
+        var succeeded = providerSucceeded && minimumDpiMet != false;
+        var status = timedOut
+            ? "timed_out"
+            : providerSucceeded && minimumDpiMet == false
+                ? "minimum_dpi_not_met"
+                : StatusName(job.Status);
         var summary = timedOut
             ? "Image generation exceeded the configured lifetime and was cancelled; no image was placed."
+            : providerSucceeded && minimumDpiMet == false
+                ? "The provider output was retained as an unattached image, but it did not meet the requested minimum DPI and is not publication-compliant."
             : succeeded
                 ? $"{outputImages.Count} unattached project image(s) completed. Inspect an image, then place its ID with a separate tool."
                 : job.Status == ProjectImageGenerationJobStatus.Cancelled
@@ -282,10 +322,13 @@ public sealed class AgentProjectImageWorkflow(
                     : outputImages.FirstOrDefault() is { } output
                         ? AspectLabel(output.Width, output.Height)
                         : "unknown"),
-            geometry is not null,
+            geometry?.LayoutBound ?? false,
             outputImages,
             job.OutputErrors,
-            summary);
+            summary,
+            geometry?.MinimumDpi,
+            minimumDpiMet,
+            warningCodes.ToList());
     }
 
     private static bool IsTerminal(ProjectImageGenerationJobStatus status) => status is
@@ -303,6 +346,37 @@ public sealed class AgentProjectImageWorkflow(
     private static string CleanOr(string? value, string fallback) =>
         string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
 
+    private static ImageGenerationTarget? WithDefaultMinimumDpi(
+        ImageGenerationTarget? target,
+        int? defaultMinimumDpi)
+    {
+        if (defaultMinimumDpi is not { } minimumDpi
+            || target?.MinimumDpi is not null)
+        {
+            return target;
+        }
+
+        LayoutImageSizeResolver.ValidateMinimumDpi(minimumDpi);
+        if (target?.TargetId is not Guid targetId
+            || targetId == Guid.Empty
+            || string.IsNullOrWhiteSpace(target.TargetKind))
+            return target;
+
+        return new ImageGenerationTarget
+        {
+            EditionId = target.EditionId,
+            TargetKind = target.TargetKind,
+            TargetId = target.TargetId,
+            VariantId = target.VariantId,
+            AspectRatio = target.AspectRatio,
+            Size = target.Size,
+            ReservedTextRegions = target.ReservedTextRegions,
+            MinimumDpi = minimumDpi,
+            SurfaceBounds = target.SurfaceBounds,
+            MinimumDpiIsSurfaceDefault = true,
+        };
+    }
+
     private static LayoutGeometry? ReadGeometry(ProjectImageJobView job)
     {
         try
@@ -310,9 +384,6 @@ public sealed class AgentProjectImageWorkflow(
             using var document = System.Text.Json.JsonDocument.Parse(job.TargetGeometryJson);
             var root = document.RootElement;
             if (root.ValueKind != System.Text.Json.JsonValueKind.Object
-                || !root.TryGetProperty("targetKind", out var targetKind)
-                || targetKind.ValueKind != System.Text.Json.JsonValueKind.String
-                || string.IsNullOrWhiteSpace(targetKind.GetString())
                 || !root.TryGetProperty("widthInches", out var width)
                 || !width.TryGetDouble(out var widthInches)
                 || !root.TryGetProperty("heightInches", out var height)
@@ -325,13 +396,29 @@ public sealed class AgentProjectImageWorkflow(
                 && aspectValue.ValueKind == System.Text.Json.JsonValueKind.String
                     ? aspectValue.GetString() ?? string.Empty
                     : string.Empty;
-            return new LayoutGeometry(widthInches, heightInches, aspect);
+            var layoutBound = root.TryGetProperty("targetKind", out var targetKind)
+                    && targetKind.ValueKind == System.Text.Json.JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(targetKind.GetString())
+                || root.TryGetProperty("layoutBound", out var layoutValue)
+                    && layoutValue.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
+                    && layoutValue.GetBoolean();
+            var minimumDpi = TryReadPositiveDouble(root, "minimumDpi")
+                ?? TryReadPositiveDouble(root, "requestedMinimumDpi");
+            return new LayoutGeometry(widthInches, heightInches, aspect, layoutBound, minimumDpi);
         }
         catch (System.Text.Json.JsonException)
         {
             return null;
         }
     }
+
+    private static double? TryReadPositiveDouble(
+        System.Text.Json.JsonElement root,
+        string propertyName) => root.TryGetProperty(propertyName, out var value)
+            && value.TryGetDouble(out var parsed)
+            && parsed > 0
+                ? parsed
+                : null;
 
     private static string AspectLabel(int width, int height)
     {
@@ -346,5 +433,10 @@ public sealed class AgentProjectImageWorkflow(
         return Math.Abs(left);
     }
 
-    private sealed record LayoutGeometry(double WidthInches, double HeightInches, string AspectRatio);
+    private sealed record LayoutGeometry(
+        double WidthInches,
+        double HeightInches,
+        string AspectRatio,
+        bool LayoutBound,
+        double? MinimumDpi);
 }

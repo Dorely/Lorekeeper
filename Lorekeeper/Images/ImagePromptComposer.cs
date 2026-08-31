@@ -35,7 +35,7 @@ public sealed class ImageGenerationBrief
 public sealed class ImageEditBrief
 {
     public string IntendedUse { get; init; } = string.Empty;
-    [Description("Describe the coherent desired result, not a brittle command such as 'move the character but change nothing else'. For a larger version, describe the new framing and whether the surrounding scene should extend left and right, above and below, or outward on all sides. Prefer a complete source-driven edit for spatial or compositional changes.")]
+    [Description("Describe the coherent desired result, not a brittle command such as 'move the character but change nothing else'. For same-aspect up-resolution, require the complete original framing and visible content with credible reconstructed detail and no crop, zoom-out, or surrounding-canvas invention. For intentional outpainting, describe the new framing and surrounding scene direction. Prefer a complete source-driven edit for spatial or compositional changes.")]
     public string Change { get; init; } = string.Empty;
     [Description("Only the identity, story, style, or composition anchors that materially require continuity. Do not require every unmentioned detail to remain exact; let the image model adapt nearby details so the result remains coherent.")]
     public string Preserve { get; init; } = string.Empty;
@@ -80,6 +80,65 @@ public sealed class ImageGenerationTarget
     public string Size { get; init; } = string.Empty;
     [Description("Only for free-standing library generation. Layout-bound targets derive every reserved region from Lorekeeper.")]
     public IReadOnlyList<ImageReservedRegion>? ReservedTextRegions { get; init; }
+    [Description("Optional positive integer minimum effective DPI for the physical target. Omit size when using minimumDpi. The request is rejected before provider dispatch when the provider cannot meet it; do not confuse this with embedded file metadata. Regional-guide edits cannot request minimumDpi because they are source-aspect-bound.")]
+    public int? MinimumDpi { get; init; }
+    [Description("Optional canvas-local percentage bounds for generating only a subregion of a verified PageSurface, CoverSurface, or CoreCoverSurface. The bounds become the physical target and all protected regions are transformed into that local coordinate system.")]
+    public CompositionBounds? SurfaceBounds { get; init; }
+    internal bool MinimumDpiIsSurfaceDefault { get; init; }
+}
+
+public sealed class MinimumDpiUnachievableException : InvalidOperationException
+{
+    public const string Code = "MINIMUM_DPI_UNACHIEVABLE";
+
+    public MinimumDpiUnachievableException(
+        LayoutImageDpiResolution resolution,
+        string? requestedRaster,
+        string targetKind,
+        Guid? targetId,
+        Guid? editionId,
+        Guid? variantId,
+        CompositionBounds? surfaceBounds)
+        : base(BuildMessage(resolution, requestedRaster))
+    {
+        Resolution = resolution;
+        RequestedRaster = requestedRaster;
+        TargetKind = targetKind;
+        TargetId = targetId;
+        EditionId = editionId;
+        VariantId = variantId;
+        SurfaceBounds = surfaceBounds;
+        SplitSuggestions = surfaceBounds is null
+            ? resolution.PanelSuggestions
+            : LayoutImageSizeResolver.MapPanelSuggestions(
+                resolution.PanelSuggestions,
+                surfaceBounds.XPercent,
+                surfaceBounds.YPercent,
+                surfaceBounds.WidthPercent,
+                surfaceBounds.HeightPercent);
+    }
+
+    public string Stage => "pre_dispatch";
+    public double RequestedMinimumDpi => Resolution.MinimumDpi;
+    public LayoutImageRequiredRaster RequiredRaster => Resolution.RequiredRaster;
+    public double MaximumAchievableDpi => Resolution.MaximumAchievableDpi;
+    public LayoutImageSize? MaximumRaster => Resolution.MaximumRaster;
+    public IReadOnlyList<LayoutImagePanelSuggestion> SplitSuggestions { get; }
+    public LayoutImageDpiResolution Resolution { get; }
+    public string? RequestedRaster { get; }
+    public string TargetKind { get; }
+    public Guid? TargetId { get; }
+    public Guid? EditionId { get; }
+    public Guid? VariantId { get; }
+    public CompositionBounds? SurfaceBounds { get; }
+
+    private static string BuildMessage(LayoutImageDpiResolution resolution, string? requestedRaster)
+    {
+        var requested = string.IsNullOrWhiteSpace(requestedRaster)
+            ? $"the required raster is {resolution.RequiredRaster.Size}, but the provider caps at approximately {resolution.MaximumAchievableDpi:0.##} DPI"
+            : $"the explicit raster {requestedRaster} resolves to less than the requested minimum";
+        return $"Minimum DPI {resolution.MinimumDpi:0.##} cannot be met for the physical target ({resolution.WidthInches:0.####} x {resolution.HeightInches:0.####} inches): {requested}. No image provider request was dispatched.";
+    }
 }
 
 public sealed class ImageReservedRegion
@@ -269,6 +328,18 @@ public sealed class ImagePromptComposer(
                 "Regional guides cannot be combined with reserved text regions. Use an unmasked source-driven edit for composition changes.",
                 nameof(target));
         }
+        if (target?.MinimumDpi is not null)
+        {
+            throw new ArgumentException(
+                "Regional guides cannot be combined with minimumDpi. Use an unmasked source-driven edit for a physical DPI target.",
+                nameof(target));
+        }
+        if (target?.SurfaceBounds is not null)
+        {
+            throw new ArgumentException(
+                "Regional guides cannot be combined with surfaceBounds. Use an unmasked source-driven edit for layout work.",
+                nameof(target));
+        }
 
         var source = await images.GetDataAsync(projectId, sourceImageId, cancellationToken: cancellationToken)
             ?? throw new InvalidOperationException($"Source image {sourceImageId:N} was not found in this project.");
@@ -346,6 +417,7 @@ public sealed class ImagePromptComposer(
         ImageGenerationTarget? target,
         CancellationToken cancellationToken)
     {
+        ValidateTargetRequest(target);
         var hasBoundTarget = target?.TargetId is { } targetId && targetId != Guid.Empty
             || !string.IsNullOrWhiteSpace(target?.TargetKind);
         if (hasBoundTarget)
@@ -362,27 +434,80 @@ public sealed class ImagePromptComposer(
             {
                 if (target.EditionId is not { } boundEditionId || boundEditionId == Guid.Empty)
                     throw new ArgumentException("Cover targets require an editionId.", nameof(target));
+                if (target is { MinimumDpi: { } boundedMinimumDpi, SurfaceBounds: { } coverBounds })
+                {
+                    var surface = await compositions.DescribeGenerationTargetAsync(
+                        projectId, boundEditionId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken);
+                    RejectUnachievableSurfaceBounds(surface, coverBounds, boundedMinimumDpi, target);
+                }
                 descriptor = await compositions.DescribeGenerationTargetAsync(
-                    projectId, boundEditionId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken);
+                    projectId, boundEditionId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken, target.SurfaceBounds);
             }
             else
             {
                 if (target.EditionId is not null)
                     throw new ArgumentException("Figure and Designed Page targets use project authoring geometry; omit editionId.", nameof(target));
+                if (target is { MinimumDpi: { } boundedMinimumDpi, SurfaceBounds: { } authoringBounds })
+                {
+                    var surface = await compositions.DescribeAuthoringGenerationTargetAsync(
+                        projectId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken);
+                    RejectUnachievableSurfaceBounds(surface, authoringBounds, boundedMinimumDpi, target);
+                }
                 descriptor = await compositions.DescribeAuthoringGenerationTargetAsync(
-                    projectId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken);
+                    projectId, target.TargetKind, boundTargetId, target.VariantId, cancellationToken, target.SurfaceBounds);
             }
             descriptor = ApplyLayoutRasterOverride(descriptor, target.Size);
+            descriptor = ApplyMinimumDpi(descriptor, target, target.Size);
+            if (descriptor.RequestedWidthPixels <= 0 || descriptor.RequestedHeightPixels <= 0)
+                throw new ArgumentException("The physical target aspect cannot be represented by one provider-compatible raster. Use a minimum-DPI preflight and its multi-image surface plan, reduce the placement, or choose a compatible frame aspect.", nameof(target));
             var appendix = BuildLayoutTargetAppendix(descriptor);
             return new(
                 descriptor.RequestedRaster,
                 descriptor.AspectRatio,
                 appendix,
-                JsonSerializer.Serialize(descriptor, JsonOptions));
+                JsonSerializer.Serialize(descriptor, JsonOptions),
+                descriptor.RequestedMinimumDpi);
         }
 
         var requestedSize = Clean(target?.Size);
         var requestedAspect = Clean(target?.AspectRatio);
+        if (target?.MinimumDpi is { } minimumDpi)
+        {
+            var hasExplicitSize = requestedSize.Length > 0 && !requestedSize.Equals("auto", StringComparison.OrdinalIgnoreCase);
+            if (hasExplicitSize)
+                throw new ArgumentException("minimumDpi and a concrete size are mutually exclusive; omit size and let Lorekeeper resolve the raster.", nameof(target));
+
+            var intendedAspect = requestedAspect.Length > 0
+                ? ParsePositiveAspectRatio(requestedAspect)
+                : (double?)null;
+            var physicalBasis = await ResolveCoreBookPhysicalBasisAsync(projectId, intendedAspect, cancellationToken);
+            var resolution = LayoutImageSizeResolver.ResolveMinimumDpi(
+                physicalBasis.WidthInches,
+                physicalBasis.HeightInches,
+                minimumDpi);
+            if (resolution.Raster is not { } minimumRaster)
+                throw CreateMinimumDpiException(resolution, null, target);
+            var minimumAspectLabel = AspectLabel(physicalBasis.WidthInches, physicalBasis.HeightInches);
+            return new(
+                minimumRaster.Size,
+                minimumAspectLabel,
+                string.Empty,
+                JsonSerializer.Serialize(new
+                {
+                    LayoutBound = false,
+                    CoreBookPhysicalBasis = true,
+                    WidthInches = physicalBasis.WidthInches,
+                    HeightInches = physicalBasis.HeightInches,
+                    Size = minimumRaster.Size,
+                    AspectRatio = minimumAspectLabel,
+                    ResolvedRasterAspectRatio = AspectLabel(minimumRaster.Width, minimumRaster.Height),
+                    RequestedAspectRatio = requestedAspect.Length > 0 ? requestedAspect : null,
+                    target.ReservedTextRegions,
+                    MinimumDpi = minimumDpi,
+                }, JsonOptions),
+                minimumDpi);
+        }
+
         var resolvedSize = await ResolveExplicitSizeAsync(
             projectId,
             requestedSize,
@@ -411,6 +536,22 @@ public sealed class ImagePromptComposer(
             }, JsonOptions));
     }
 
+    private async Task<(double WidthInches, double HeightInches)> ResolveCoreBookPhysicalBasisAsync(
+        Guid projectId,
+        double? requestedAspect,
+        CancellationToken cancellationToken)
+    {
+        var geometry = await compositions.GetAuthoringGeometryAsync(projectId, cancellationToken);
+        var pageWidth = geometry.LeafWidthPoints / 72;
+        var pageHeight = geometry.LeafHeightPoints / 72;
+        if (requestedAspect is null)
+            return (pageWidth, pageHeight);
+        var pageAspect = pageWidth / pageHeight;
+        return requestedAspect.Value >= pageAspect
+            ? (pageWidth, pageWidth / requestedAspect.Value)
+            : (pageHeight * requestedAspect.Value, pageHeight);
+    }
+
     private static LayoutGenerationTargetDescriptor ApplyLayoutRasterOverride(
         LayoutGenerationTargetDescriptor descriptor,
         string? requestedSize)
@@ -437,15 +578,154 @@ public sealed class ImagePromptComposer(
         };
     }
 
+    private static LayoutGenerationTargetDescriptor ApplyMinimumDpi(
+        LayoutGenerationTargetDescriptor descriptor,
+        ImageGenerationTarget target,
+        string? requestedSize)
+    {
+        if (target.MinimumDpi is not { } minimumDpi)
+            return descriptor;
+
+        var resolution = LayoutImageSizeResolver.ResolveMinimumDpi(
+            descriptor.WidthInches,
+            descriptor.HeightInches,
+            minimumDpi);
+        var normalizedSize = Clean(requestedSize);
+        if (normalizedSize.Length > 0 && !normalizedSize.Equals("auto", StringComparison.OrdinalIgnoreCase))
+        {
+            var requested = ParseAndValidateSize(normalizedSize);
+            var requestedDpi = LayoutImageSizeResolver.EffectiveDpi(
+                new LayoutImageSize(requested.Width, requested.Height),
+                descriptor.WidthInches,
+                descriptor.HeightInches);
+            if (requestedDpi + 1e-9 < minimumDpi)
+                throw CreateMinimumDpiException(resolution, normalizedSize, target);
+
+            return descriptor with
+            {
+                EffectiveDpiExpectation = Math.Max(descriptor.EffectiveDpiExpectation, minimumDpi),
+                RequestedMinimumDpi = minimumDpi,
+            };
+        }
+
+        if (resolution.Raster is not { } raster)
+            throw CreateMinimumDpiException(resolution, null, target);
+
+        return descriptor with
+        {
+            RequestedWidthPixels = raster.Width,
+            RequestedHeightPixels = raster.Height,
+            RequestedRaster = raster.Size,
+            EffectiveDpiExpectation = Math.Max(descriptor.EffectiveDpiExpectation, minimumDpi),
+            RequestedMinimumDpi = minimumDpi,
+        };
+    }
+
+    private static MinimumDpiUnachievableException CreateMinimumDpiException(
+        LayoutImageDpiResolution resolution,
+        string? requestedRaster,
+        ImageGenerationTarget target) =>
+        new(
+            resolution,
+            requestedRaster,
+            target.TargetKind.Trim(),
+            target.TargetId,
+            target.EditionId,
+            target.VariantId,
+            target.SurfaceBounds);
+
+    private static void RejectUnachievableSurfaceBounds(
+        LayoutGenerationTargetDescriptor surface,
+        CompositionBounds bounds,
+        int minimumDpi,
+        ImageGenerationTarget target)
+    {
+        ValidateSurfaceBounds(bounds);
+        var widthInches = surface.WidthInches * bounds.WidthPercent / 100;
+        var heightInches = surface.HeightInches * bounds.HeightPercent / 100;
+        var resolution = LayoutImageSizeResolver.ResolveMinimumDpi(widthInches, heightInches, minimumDpi);
+        if (!resolution.MeetsMinimumDpi)
+            throw CreateMinimumDpiException(resolution, null, target);
+    }
+
+    private static void ValidateTargetRequest(ImageGenerationTarget? target)
+    {
+        if (target is null)
+            return;
+        if (target.MinimumDpi is { } minimumDpi)
+            LayoutImageSizeResolver.ValidateMinimumDpi(minimumDpi);
+        var layoutBound = target.TargetId is { } targetId
+            && targetId != Guid.Empty
+            && !string.IsNullOrWhiteSpace(target.TargetKind);
+        if (layoutBound && target.MinimumDpi is < 300)
+        {
+            throw new ArgumentException(
+                "Layout-bound Editor and Publish generation requires a minimumDpi of at least 300.",
+                nameof(target));
+        }
+        var concreteSize = Clean(target.Size);
+        if (target.MinimumDpi is not null
+            && !target.MinimumDpiIsSurfaceDefault
+            && concreteSize.Length > 0
+            && !concreteSize.Equals("auto", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("minimumDpi and a concrete size are mutually exclusive; omit size and let Lorekeeper resolve the raster.", nameof(target));
+        }
+        if (target.EditionId is not null
+            && target.TargetId is null
+            && string.IsNullOrWhiteSpace(target.TargetKind))
+        {
+            throw new ArgumentException("editionId requires a release cover targetKind and targetId.", nameof(target));
+        }
+        if (target.VariantId is not null
+            && target.TargetId is null
+            && string.IsNullOrWhiteSpace(target.TargetKind))
+        {
+            throw new ArgumentException("variantId requires a layout-bound targetKind and targetId.", nameof(target));
+        }
+        if (target.SurfaceBounds is not { } bounds)
+            return;
+
+        ValidateSurfaceBounds(bounds);
+        var normalizedKind = new string((target.TargetKind ?? string.Empty)
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray());
+        if (normalizedKind is not ("pagesurface" or "coversurface" or "corecoversurface"))
+        {
+            throw new ArgumentException(
+                "surfaceBounds requires a PageSurface, CoverSurface, or CoreCoverSurface target.",
+                nameof(target));
+        }
+    }
+
+    private static void ValidateSurfaceBounds(CompositionBounds bounds)
+    {
+        if (!double.IsFinite(bounds.XPercent)
+            || !double.IsFinite(bounds.YPercent)
+            || !double.IsFinite(bounds.WidthPercent)
+            || !double.IsFinite(bounds.HeightPercent)
+            || bounds.XPercent < 0
+            || bounds.YPercent < 0
+            || bounds.WidthPercent <= 0
+            || bounds.HeightPercent <= 0
+            || bounds.XPercent + bounds.WidthPercent > 100
+            || bounds.YPercent + bounds.HeightPercent > 100)
+        {
+            throw new ArgumentException("surfaceBounds must use finite positive percentage dimensions inside the 0-100 surface.", nameof(bounds));
+        }
+    }
+
     private static string BuildLayoutTargetAppendix(LayoutGenerationTargetDescriptor descriptor)
     {
         var prompt = new StringBuilder();
+        var dpiExpectation = descriptor.RequestedMinimumDpi ?? descriptor.EffectiveDpiExpectation;
         prompt.Append("Layout target: ").Append(descriptor.TargetKind)
             .Append("; intended frame aspect ratio ").Append(descriptor.AspectRatio)
             .Append("; physical surface ")
             .Append(descriptor.WidthInches.ToString("0.####", CultureInfo.InvariantCulture)).Append(" x ")
             .Append(descriptor.HeightInches.ToString("0.####", CultureInfo.InvariantCulture)).Append(" inches; target ")
-            .Append(descriptor.EffectiveDpiExpectation.ToString("0", CultureInfo.InvariantCulture)).AppendLine(" effective DPI.");
+            .Append(dpiExpectation.ToString("0", CultureInfo.InvariantCulture)).AppendLine(" effective DPI.");
         prompt.Append("Request raster ").Append(descriptor.RequestedRaster)
             .Append(" and preserve the target aspect exactly if the provider returns different pixel dimensions. Compose edge-to-edge for the complete surface, keep important content within its usable regions, and do not draw a simulated page border, binding, fold, gutter line, or book mockup.").AppendLine();
         foreach (var region in descriptor.Regions)
@@ -513,6 +793,34 @@ public sealed class ImagePromptComposer(
         throw new ArgumentException($"Invalid aspect ratio '{value}'. Use W:H, W/H, or a positive decimal.", nameof(value));
     }
 
+    private static double ParsePositiveAspectRatio(string value)
+    {
+        var normalized = value.Trim().Replace('/', ':');
+        if (normalized.Contains(':'))
+        {
+            var parts = normalized.Split(':', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 2
+                && double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var width)
+                && double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var height)
+                && double.IsFinite(width)
+                && double.IsFinite(height)
+                && width > 0
+                && height > 0)
+            {
+                var aspect = width / height;
+                if (double.IsFinite(aspect) && aspect > 0)
+                    return aspect;
+            }
+        }
+        if (double.TryParse(normalized, NumberStyles.Float, CultureInfo.InvariantCulture, out var ratio)
+            && double.IsFinite(ratio)
+            && ratio > 0)
+        {
+            return ratio;
+        }
+        throw new ArgumentException($"Invalid aspect ratio '{value}'. Use W:H, W/H, or a positive decimal.", nameof(value));
+    }
+
     private static double ValidateAspect(double aspect)
     {
         if (aspect is < (1d / LayoutImageSizeResolver.MaximumAspectRatio) or > LayoutImageSizeResolver.MaximumAspectRatio)
@@ -546,6 +854,12 @@ public sealed class ImagePromptComposer(
         var targetText = new StringBuilder();
         targetText.Append("Raster size: ").Append(target.Size)
             .Append(". Aspect ratio: ").Append(target.AspectRatio).Append('.');
+        if (target.MinimumDpi is { } minimumDpi)
+        {
+            targetText.Append(" Minimum effective DPI: ")
+                .Append(minimumDpi.ToString("0.##", CultureInfo.InvariantCulture))
+                .Append("; treat this as a hard output requirement and do not report success unless the returned actual raster meets it.");
+        }
         if (!string.IsNullOrWhiteSpace(target.PromptAppendix))
             targetText.Append('\n').Append(target.PromptAppendix);
         foreach (var region in reservedRegions ?? [])
@@ -605,11 +919,26 @@ public sealed class ImagePromptComposer(
         return $"{width / divisor}:{height / divisor}";
     }
 
+    private static string AspectLabel(double width, double height)
+    {
+        var scaledWidth = (long)Math.Round(width * 1_000_000);
+        var scaledHeight = (long)Math.Round(height * 1_000_000);
+        var divisor = GreatestCommonDivisor(scaledWidth, scaledHeight);
+        return $"{scaledWidth / divisor}:{scaledHeight / divisor}";
+    }
+
     private static int GreatestCommonDivisor(int left, int right)
     {
         while (right != 0)
             (left, right) = (right, left % right);
         return Math.Abs(left);
+    }
+
+    private static long GreatestCommonDivisor(long left, long right)
+    {
+        while (right != 0)
+            (left, right) = (right, left % right);
+        return Math.Max(Math.Abs(left), 1);
     }
 
     private static string Clean(string? value) => value?.Trim() ?? string.Empty;
@@ -619,5 +948,6 @@ public sealed class ImagePromptComposer(
         string Size,
         string AspectRatio,
         string PromptAppendix,
-        string GeometryJson);
+        string GeometryJson,
+        double? MinimumDpi = null);
 }

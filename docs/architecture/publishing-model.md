@@ -88,7 +88,10 @@ inherit the Core policy live and may store one sparse override, with reset
 returning to Core inheritance.
 The current Core page aspect also supplies the default provider-valid raster for
 free-standing image generation and editing throughout the application; concrete
-Figure, page, frame, and cover targets retain their own exact geometry.
+Figure, page, frame, and cover targets retain their own exact geometry. Editor
+and Publish resolve layout-bound generation to at least 300 effective DPI,
+including hardcover targets. Digital-PDF placement validation remains 180 DPI;
+that validation threshold does not lower the authoring-generation default.
 Release creation is explicit: no release or ISBN is created automatically. The
 creation dialog establishes release format, destination, name, and any
 destination-level use mode. Release setup then exposes only artifact-affecting
@@ -238,9 +241,12 @@ Release cover reads expose exact Back, Spine, and Front region descriptors with
 bounds, physical aspect, safety/guides, participation, and geometry fingerprints.
 The assistant can read or preview one region, fill it with a project image, set
 spine direction, and request an exact region generation target. Region-targeted
-generation remains unattached, selects the closest supported raster without
-stretching, and reports aspect error, expected crop, effective DPI, and focal
-placement guidance before any revision-checked mutation.
+generation remains unattached and must resolve a 300-DPI-compatible raster
+without stretching. If one raster cannot satisfy provider limits, the request
+fails before dispatch with a smallest equal-panel plan. Back, Spine, and Front
+are preferred split boundaries; each panel can target exact surface bounds, and
+the assistant must inspect annotated regions plus the clean whole wrap without
+claiming independent generations are seamless.
 
 `read_publication_section` returns section metadata, canvas summaries, and the
 shared `agent-manuscript-v1` projection for its bounded prose blocks. Core or

@@ -34,6 +34,16 @@ one. Existing policy permits application tests only for startup database migrati
 and versioned project import/export transformation safety, plus Press conformance
 tests that map to the native renderer evidence matrix.
 
+Image-generation DPI controls therefore use compilation, static contract
+inspection, startup smoke checks, and user-authorized provider/UI exercise rather
+than new automated assistant or provider tests. Static evidence must cover a
+feasible 300-DPI target, an infeasible edge/megapixel target with deterministic
+panel guidance, surface-bound geometry fingerprints, hardcover versus digital
+expectations, invalid minimum/size combinations, regional-guide exclusion, and
+the `MINIMUM_DPI_NOT_MET` path for an unexpectedly undersized provider result.
+Do not claim the external provider or rendered UI was exercised unless that
+integration check actually ran.
+
 ## Current architecture and invariants
 
 ### Documentation hierarchy and routed reading

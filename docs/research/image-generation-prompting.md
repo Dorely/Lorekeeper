@@ -133,7 +133,7 @@ pictorial—for example a hand-lettered sign—and explicitly requested.
 
 - `allowRenderedText` defaults to false and the compiler adds “no text, logos, or watermarks.”
 - A true value requires explicit desired text; otherwise validation fails.
-- Layout-bound Figure, page-frame/surface, and cover-frame/surface targets derive the exact aspect and a deterministic moderate raster near 1.57 MP from the active authoring or release-cover geometry. A provider dimension mismatch is retained as an unattached project image and returned visually with a warning; it is not silently resized, cropped, or rejected.
+- Layout-bound Editor and Publish targets derive their physical placement from verified authoring or release-cover geometry and default to a 300-DPI minimum. Requests that cannot meet that minimum within provider edge, megapixel, aspect, and alignment limits are rejected before dispatch with exact multi-panel bounds when a grid of no more than 64 panels is feasible. A provider result that unexpectedly misses the resolved raster or DPI is retained unattached with explicit compliance evidence; it is never silently resized, cropped, placed, or described as publication-compliant.
 - Full-page prompts add bleed-aware edges, trim safety, gutter avoidance for spreads, focal-detail safety, and buffered reserved-text rectangles.
 - Alt text is stored separately and describes the resulting image's relevant subject, action, setting, and composition. It is never baked into the image.
 - The assistant inspects the direct complete canvas in annotated mode during layout work and in clean mode after final scene mutations. These transient previews do not create project-image assets; Press page preview remains a separate pagination/output check.

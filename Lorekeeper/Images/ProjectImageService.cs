@@ -283,7 +283,7 @@ public sealed class ProjectImageService(
         if (!LayoutImageSizeResolver.AspectMatches(
                 (double)request.Width / request.Height,
                 (double)sourceBitmap.Width / sourceBitmap.Height))
-            throw new InvalidOperationException("The requested resize raster must preserve the source aspect ratio. Use edit_project_image with a larger-framing brief for model-driven expansion.");
+            throw new InvalidOperationException("The requested resize raster must preserve the source aspect ratio. Use edit_project_image with an intentional-outpainting brief for model-driven expansion.");
         if (sourceBitmap.Width == request.Width && sourceBitmap.Height == request.Height)
             throw new InvalidOperationException("The source image already has the requested raster; no derived image was created.");
 

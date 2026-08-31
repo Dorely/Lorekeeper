@@ -225,7 +225,9 @@ public sealed record LayoutGenerationTargetDescriptor(
     string RequestedRaster,
     double EffectiveDpiExpectation,
     IReadOnlyList<LayoutGenerationRegionDescriptor> Regions,
-    IReadOnlyList<string> Diagnostics);
+    IReadOnlyList<string> Diagnostics,
+    CompositionBounds? SurfaceBounds = null,
+    double? RequestedMinimumDpi = null);
 
 public sealed record LayoutValidationDiagnostic(string Severity, string Code, string Message, Guid? ObjectId = null);
 
