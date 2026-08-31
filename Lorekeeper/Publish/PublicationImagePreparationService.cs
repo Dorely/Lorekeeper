@@ -146,17 +146,17 @@ public sealed class PublicationImagePreparationService(
 
                 foreach (var asset in required)
                 {
-                    ValidateRaster(asset.RequiredWidthPixels, asset.RequiredHeightPixels, asset.AssetId);
-                    var request = new ProjectImagePrintUpscaleRequest(
-                        asset.RequiredWidthPixels,
-                        asset.RequiredHeightPixels,
-                        asset.RequiredWidthPixels / threshold,
-                        asset.RequiredHeightPixels / threshold,
-                        threshold,
-                        "publication-preparation");
                     ProjectImagePrintUpscaleResult derivative;
                     try
                     {
+                        ValidateRaster(asset.RequiredWidthPixels, asset.RequiredHeightPixels, asset.AssetId);
+                        var request = new ProjectImagePrintUpscaleRequest(
+                            asset.RequiredWidthPixels,
+                            asset.RequiredHeightPixels,
+                            asset.RequiredWidthPixels / threshold,
+                            asset.RequiredHeightPixels / threshold,
+                            threshold,
+                            "publication-preparation");
                         derivative = await images.EnsurePrintUpscaleAsync(
                             projectId,
                             asset.AssetId,
@@ -167,10 +167,9 @@ public sealed class PublicationImagePreparationService(
                     {
                         throw;
                     }
-                    catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException or IOException)
+                    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or InvalidDataException or IOException)
                     {
-                        var code = exception.Message.Contains("limit", StringComparison.OrdinalIgnoreCase)
-                            || exception.Message.Contains("raster", StringComparison.OrdinalIgnoreCase)
+                        var code = IsRasterLimitFailure(exception)
                             ? "IMAGE_UPSCALE_RASTER_TOO_LARGE"
                             : exception.Message.Contains("decode", StringComparison.OrdinalIgnoreCase)
                                 ? "IMAGE_CORRUPT"
@@ -589,10 +588,22 @@ public sealed class PublicationImagePreparationService(
 
     private static int CeilingRaster(double value)
     {
-        if (!double.IsFinite(value) || value <= 0 || value > int.MaxValue)
-            throw new InvalidOperationException("Image placement requires an invalid raster size.");
-        return (int)Math.Ceiling(value);
+        try
+        {
+            return LayoutImageSizeResolver.CeilingRasterDimension(value);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new InvalidOperationException("Image placement requires an invalid raster size.", exception);
+        }
     }
+
+    private static bool IsRasterLimitFailure(Exception exception) =>
+        exception.Message.Contains("limit", StringComparison.OrdinalIgnoreCase)
+        || exception.Message.Contains("exceed", StringComparison.OrdinalIgnoreCase)
+        || exception.Message.Contains("too large", StringComparison.OrdinalIgnoreCase)
+        || exception.Message.Contains("maximum edge", StringComparison.OrdinalIgnoreCase)
+        || exception.Message.Contains("maximum pixels", StringComparison.OrdinalIgnoreCase);
 
     private sealed class MutableImageAssetEvidence(Guid assetId, int sourceWidthPixels, int sourceHeightPixels)
     {

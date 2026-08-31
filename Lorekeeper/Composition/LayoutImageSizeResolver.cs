@@ -66,6 +66,7 @@ public static class LayoutImageSizeResolver
 
     public const double PreferredAspectError = .001d;
     private const double ExactAspectError = 1e-10;
+    private const double RasterIntegerTolerance = 1e-9;
     private const int MaximumSuggestedPanels = 64;
 
     public const int PrintMaximumEdge = 12_000;
@@ -240,8 +241,8 @@ public static class LayoutImageSizeResolver
     {
         ValidatePhysicalDimensions(widthInches, heightInches);
         ValidateMinimumDpi(dpi);
-        var width = CeilPositiveFinite(widthInches * dpi);
-        var height = CeilPositiveFinite(heightInches * dpi);
+        var width = CeilingRasterDimension(widthInches * dpi);
+        var height = CeilingRasterDimension(heightInches * dpi);
         ValidatePrintRaster(width, height);
         return new LayoutImageSize(width, height);
     }
@@ -267,11 +268,14 @@ public static class LayoutImageSizeResolver
         ResolvePrintRaster(widthInches, heightInches, dpi),
         dpi);
 
-    private static int CeilPositiveFinite(double value)
+    internal static int CeilingRasterDimension(double value)
     {
         if (!double.IsFinite(value) || value <= 0 || value > int.MaxValue)
             throw new ArgumentException("Derived raster dimension must be a finite positive pixel value.");
-        return (int)Math.Ceiling(value);
+        var nearestInteger = Math.Round(value);
+        return nearestInteger >= 1 && Math.Abs(value - nearestInteger) <= RasterIntegerTolerance
+            ? (int)nearestInteger
+            : (int)Math.Ceiling(value);
     }
 
     public static IReadOnlyList<LayoutImagePanelSuggestion> MapPanelSuggestions(
