@@ -534,7 +534,7 @@ public sealed class PublicationRenderService(
             job.RendererVersion,
             job.ProfileId,
             job.ProgressPercent,
-            job.ProgressMessage,
+            PublicationDiagnosticText.SanitizeUserFacing(job.ProgressMessage),
             job.CancellationRequested,
             DeserializeDiagnostics(job.DiagnosticsJson),
             artifacts.Select(artifact => ArtifactView(artifact, currentFingerprint, currentRendererVersion)).ToList(),
@@ -1008,7 +1008,20 @@ public sealed class PublicationRenderProcessor(
             .Where(diagnostic => string.Equals(diagnostic.Severity, "error", StringComparison.OrdinalIgnoreCase))
             .ToList();
         if (coverErrors.Count > 0)
-            throw new InvalidOperationException(string.Join(" ", coverErrors.Select(diagnostic => diagnostic.Message)));
+        {
+            job.Status = PublicationRenderStatus.Failed;
+            job.ProgressPercent = 100;
+            job.ProgressMessage = "Cover needs attention";
+            job.DiagnosticsJson = JsonSerializer.Serialize(coverErrors.Select(diagnostic => new PublicationRenderDiagnostic(
+                diagnostic.Severity,
+                diagnostic.Code,
+                diagnostic.Message,
+                SourceKind: "cover",
+                SourceId: diagnostic.ObjectId?.ToString("D"))), JsonOptions);
+            job.CompletedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+            return;
+        }
         var request = await BuildRequestAsync(job, document, coverDesign, cancellationToken);
         job.ProgressPercent = 30;
         job.ProgressMessage = "Typesetting interior and cover";
@@ -1331,10 +1344,12 @@ public sealed class PublicationRenderProcessor(
             : PublicationRenderStatus.Failed;
         job.CancellationRequested |= cancelled;
         job.ProgressPercent = 100;
+        var failureMessage = diagnostics?.FirstOrDefault(diagnostic => diagnostic.Severity == "error")?.Message;
         job.ProgressMessage = cancelled
             ? "Cancelled"
-            : diagnostics?.FirstOrDefault(diagnostic => diagnostic.Severity == "error")?.Message
-                ?? "Render failed";
+            : string.IsNullOrWhiteSpace(failureMessage)
+                ? "Render failed"
+                : PublicationDiagnosticText.SanitizeUserFacing(failureMessage);
         job.CompletedAt = DateTime.UtcNow;
         return true;
     }

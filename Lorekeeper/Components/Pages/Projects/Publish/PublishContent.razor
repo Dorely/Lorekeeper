@@ -60,7 +60,7 @@ else
 
                 @if (!string.IsNullOrWhiteSpace(_error))
                 {
-                    <div class="alert alert-danger" role="alert">@_error</div>
+                    <div class="alert alert-danger" role="alert">@PublicationDiagnosticText.SanitizeUserFacing(_error)</div>
                 }
                 @if (!string.IsNullOrWhiteSpace(_notice))
                 {
@@ -579,7 +579,7 @@ else
                                 @foreach (var issue in difference.LayoutIssues)
                                 {
                                     <a class="edition-layout-issue" href="@EditionEditorHref(difference.ChapterId, "pages", issue.CompositionId, issue.ObjectId)">
-                                        <span>@issue.Message</span><strong>Fix in Pages</strong>
+                                        <span>@PublicationDiagnosticText.SanitizeUserFacing(issue.Message)</span><strong>Fix in Pages</strong>
                                     </a>
                                 }
                             </div>

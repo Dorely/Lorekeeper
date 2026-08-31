@@ -141,7 +141,10 @@ public sealed class PublicationPreparationService(
                 diagnostics = renderDiagnostics;
         }
         return new(
-            job.Id, job.TargetKind, job.EditionId, job.Status, job.Step, job.ProgressPercent, job.Message,
+            job.Id, job.TargetKind, job.EditionId, job.Status,
+            PublicationDiagnosticText.SanitizeUserFacing(job.Step),
+            job.ProgressPercent,
+            PublicationDiagnosticText.SanitizeUserFacing(job.Message),
             diagnostics, job.CreatedAt, job.CompletedAt);
     }
 

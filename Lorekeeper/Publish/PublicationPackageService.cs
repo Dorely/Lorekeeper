@@ -270,7 +270,7 @@ public sealed class PublicationPackageService(
             if (edition.Vendor == PublicationVendor.BarnesAndNoblePress)
             {
                 if (coverDesign.BarcodeMode != PublicationBarcodeMode.VendorOverlay)
-                    items.Add(Error("COVER_BARCODE_VENDOR_OVERLAY_REQUIRED", "B&N Press generates the SKU or ISBN barcode; remove uploaded barcode artwork and keep the reserved area clear."));
+                    items.Add(Error("COVER_BARCODE_VENDOR_OVERLAY_REQUIRED", "B&N Press generates the SKU or ISBN barcode; remove uploaded barcode artwork and keep important copy or foreground content out of the placement area."));
             }
             await AddPressEvidenceAsync(edition, interior, physicalArtifacts, coverDesign.Template, currentRendererVersion, items, cancellationToken);
         }

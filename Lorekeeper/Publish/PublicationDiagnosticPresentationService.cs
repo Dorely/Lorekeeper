@@ -29,7 +29,18 @@ public sealed record PublicationDiagnosticPresentation(
 public static partial class PublicationDiagnosticText
 {
     public static string SanitizeIdentifiers(string message) =>
-        IdentifierRegex().Replace(message, "this item");
+        SanitizeUserFacing(message);
+
+    public static string SanitizeUserFacing(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return message;
+        var sanitized = ObjectIdentifierRegex().Replace(message, "This item ");
+        return IdentifierRegex().Replace(sanitized, "this item").Trim();
+    }
+
+    [GeneratedRegex("(?i)(?:Composition\\s+)?(?:object|frame|item)\\s+['\"]?(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})['\"]?\\s*")]
+    private static partial Regex ObjectIdentifierRegex();
 
     [GeneratedRegex("(?i)(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32})")]
     private static partial Regex IdentifierRegex();
@@ -290,6 +301,14 @@ public sealed partial class PublicationDiagnosticPresentationService(IAppDatabas
 
     private static string FriendlyMessage(string code, string message)
     {
+        if (string.Equals(code, "COVER_OBJECT_OUTSIDE_SURFACE", StringComparison.OrdinalIgnoreCase))
+            return "This item extends outside the physical cover surface.";
+        if (string.Equals(code, "COVER_BARCODE_OVERLAP", StringComparison.OrdinalIgnoreCase))
+            return "This item places important content in the barcode placement area. Background artwork may continue through this area, but the printer may cover it with a barcode.";
+        if (string.Equals(code, "COVER_SAFE_AREA_OVERFLOW", StringComparison.OrdinalIgnoreCase))
+            return "This item extends outside the safe area for its cover region.";
+        if (string.Equals(code, "COVER_TRANSPARENCY_UNSUPPORTED", StringComparison.OrdinalIgnoreCase))
+            return "Overlapping transparent cover items cannot be preserved in this printer's PDF format. Make the upper item opaque or combine the artwork into one image.";
         if (string.Equals(code, "PRESS_COMPOSITION_OBJECT_CLIPPED", StringComparison.OrdinalIgnoreCase))
             return "An item extends beyond the canvas and will be clipped to the page.";
         if (string.Equals(code, "PRESS_ALT_DECISION_REQUIRED", StringComparison.OrdinalIgnoreCase))
@@ -297,9 +316,7 @@ public sealed partial class PublicationDiagnosticPresentationService(IAppDatabas
         if (string.Equals(code, "PRESS_COMPOSITION_RANGE_INVALID", StringComparison.OrdinalIgnoreCase))
             return "A text frame points to an invalid portion of its page content. Open the page to repair or replace that text.";
 
-        var sanitized = ObjectReferenceRegex().Replace(message, "This item ");
-        sanitized = PublicationDiagnosticText.SanitizeIdentifiers(sanitized);
-        return sanitized.Trim();
+        return PublicationDiagnosticText.SanitizeUserFacing(message);
     }
 
     private static readonly IReadOnlyDictionary<string, string> FriendlyTitles =
@@ -315,10 +332,11 @@ public sealed partial class PublicationDiagnosticPresentationService(IAppDatabas
             ["PRESS_PAGE_MAP_INCOMPLETE"] = "Some content was not placed on a page",
             ["PRESS_PAGE_MAP_DUPLICATE"] = "Duplicate page entry",
             ["PRESS_PAGE_MAP_UNEXPECTED"] = "Unexpected page entry",
+            ["COVER_OBJECT_OUTSIDE_SURFACE"] = "Cover item outside the surface",
+            ["COVER_BARCODE_OVERLAP"] = "Barcode placement warning",
+            ["COVER_SAFE_AREA_OVERFLOW"] = "Cover item outside the safe area",
+            ["COVER_TRANSPARENCY_UNSUPPORTED"] = "Cover transparency is unsupported",
         };
-
-    [GeneratedRegex("(?i)(?:Composition\\s+)?(?:object|frame)\\s+['\"]?(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})['\"]?\\s*")]
-    private static partial Regex ObjectReferenceRegex();
 
     [GeneratedRegex("(?i)(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32})")]
     private static partial Regex IdentifierRegex();

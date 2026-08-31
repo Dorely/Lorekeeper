@@ -2285,7 +2285,7 @@ public sealed class CompositionService(
 
     private static IReadOnlyList<string> CoverDiagnostics(PublicationEdition edition) =>
         edition.Format == PublicationEditionFormat.Paperback
-            ? ["Keep essential artwork and text outside the bleed, gutter, spine folds, and barcode reserve."]
+            ? ["Keep essential copy and focal content outside the bleed, gutter, spine folds, and barcode placement area; background artwork may continue through the barcode area."]
             : ["Keep essential artwork and text inside the digital cover safe area."];
 
     public static string GeometryKey(PublicationEdition edition) => GeometryKey(edition, CreatePageScene(edition));

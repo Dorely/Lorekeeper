@@ -53,9 +53,14 @@ trim/bleed/page-count geometry before validation. Incomplete copy bindings,
 accessibility choices, reading order, and layout placement remain editable
 draft state and visible readiness blockers; autosave must not discard them.
 Intentional full-surface Page/Front artwork may cross the inset safe area while
-remaining bounded by the physical surface; barcode reserve, accessibility,
-reading order, and image-resolution rules still apply. Text and ordinary
-figure placement remain inside their safe regions.
+remaining bounded by the physical surface. Background artwork may continue
+through the barcode placement area; important semantic copy or foreground
+content there produces a targeted warning rather than blocking output because
+the printer may overlay it. Accessibility, reading order, and image-resolution
+rules still apply. Text and ordinary figure placement remain inside their safe
+regions. Structured diagnostics retain object IDs only as internal navigation
+metadata; publishing UI messages sanitize identifiers at their service/view
+boundaries.
 Opening a physical-release cover first asks Press for a compact interior-only
 pagination result. The resulting page count is bound to the current pagination
 fingerprint and renderer version; cover mutations fail closed when that evidence

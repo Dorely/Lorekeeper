@@ -1063,7 +1063,12 @@ public sealed class PublicationCoverService(
                 && item.RegionConstraint != CompositionRegionConstraint.BarcodeReserve
                 && edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover
                 && Intersects(item.Bounds, barcode))
-                AddDiagnostic(diagnostics, "error", "COVER_BARCODE_OVERLAP", $"Object {item.Id:N} overlaps the barcode reserve.", item.Id);
+                AddDiagnostic(
+                    diagnostics,
+                    "warning",
+                    "COVER_BARCODE_OVERLAP",
+                    $"Object {item.Id:N} places important content in the barcode placement area. Background artwork may continue through this area, but the printer may cover it with a barcode.",
+                    item.Id);
             if (item.Decorative || item.SemanticRole == CompositionSemanticRole.Artifact) continue;
             if (IsFullSurfaceArtwork(item, geometry)) continue;
             var region = CoverCompositionFactory.RegionBoundsPercent(item.RegionConstraint, geometry);
