@@ -172,6 +172,20 @@ block a Core reading copy. An empty optional bound frame is omitted from
 output when its canonical cover binding or semantic content reference is
 valid; a frame with neither valid binding nor reference remains an error.
 
+System title and copyright Designed Page compositions have one semantic block
+per bound field. Their live metadata values are projected into those blocks
+without changing the canonical Core or release field. The projection converts
+CRLF and CR line endings to LF, preserves single hard breaks, and collapses
+blank-line paragraph delimiters to one hard break because a semantic block must
+remain one paragraph. Initial composition creation and later binding refreshes
+use the same projection for Core and effective release values.
+
+The expected page map sent through preparation includes the same blocks Press
+can place: all nonempty text blocks plus every SceneBreak, Figure, and
+DesignedPage block. Empty ordinary paragraphs, headings, block quotes, and
+list items are omitted because Press intentionally skips them; optional empty
+bound fields therefore do not produce incomplete-page warnings.
+
 Publish route initialization is progressive. Core metadata and the release
 navigator form the blocking shell. Outline/publication-section details,
 preparation state, artifact freshness, and the project-aware assistant mount

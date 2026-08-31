@@ -987,13 +987,13 @@ public sealed class PublicationRenderProcessor(
             throw new InvalidOperationException("The edition changed while this render was queued. Request a new render.");
         var expectedChapterPageMap = document.Sections
             .SelectMany(section => section.Chapters)
-            .SelectMany(chapter => chapter.Manuscript.Content.Select(block => (
+            .SelectMany(chapter => chapter.Manuscript.Content.Where(IsPressPageMappedBlock).Select(block => (
                 OwnerId: chapter.Id.ToString("D"),
                 BlockId: block.Id)))
             .ToHashSet();
         var expectedPublicationSectionPageMap = document.PublicationSections
             .Where(section => section.SystemRole != PublicationSectionSystemRole.Contents)
-            .SelectMany(section => section.Manuscript.Content.Select(block => (
+            .SelectMany(section => section.Manuscript.Content.Where(IsPressPageMappedBlock).Select(block => (
                 OwnerId: section.Id.ToString("D"),
                 BlockId: block.Id)))
             .ToHashSet();
@@ -1975,6 +1975,10 @@ public sealed class PublicationRenderProcessor(
             }).ToArray(),
         }).ToArray(),
     };
+
+    private static bool IsPressPageMappedBlock(ManuscriptBlock block) =>
+        block.Type is ManuscriptBlockType.SceneBreak or ManuscriptBlockType.Figure or ManuscriptBlockType.DesignedPage
+        || !string.IsNullOrWhiteSpace(ManuscriptCodec.Text(block));
 
     private static CompositionScene NormalizeSceneLanguages(CompositionScene scene) => scene with
     {

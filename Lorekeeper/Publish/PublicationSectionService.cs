@@ -510,7 +510,7 @@ public sealed class PublicationSectionService(
         var semanticBlocks = sourceBlocks.Select((block, index) => block with
         {
             Id = $"section-text-{Guid.NewGuid():N}",
-            Content = [new ManuscriptInline { Text = values.GetValueOrDefault(block.PublicationField!.Value, string.Empty) }],
+            Content = [new ManuscriptInline { Text = ProjectBoundText(values.GetValueOrDefault(block.PublicationField!.Value, string.Empty)) }],
             Type = index == 0 && section.SystemRole == PublicationSectionSystemRole.Title
                 ? ManuscriptBlockType.Heading
                 : ManuscriptBlockType.Paragraph,
@@ -889,10 +889,42 @@ public sealed class PublicationSectionService(
             Content = document.Content.Select(block => block.PublicationField is { } field
                 ? block with
                 {
-                    Content = [new ManuscriptInline { Text = values.GetValueOrDefault(field, string.Empty) }],
+                    Content = [new ManuscriptInline { Text = ProjectBoundText(values.GetValueOrDefault(field, string.Empty)) }],
                 }
                 : block).ToList(),
         };
+
+    private static string ProjectBoundText(string value)
+    {
+        var normalized = value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        var builder = new StringBuilder(normalized.Length);
+        for (var index = 0; index < normalized.Length; index++)
+        {
+            if (normalized[index] != '\n')
+            {
+                builder.Append(normalized[index]);
+                continue;
+            }
+
+            builder.Append('\n');
+            var next = index + 1;
+            while (true)
+            {
+                var whitespaceEnd = next;
+                while (whitespaceEnd < normalized.Length && normalized[whitespaceEnd] is ' ' or '\t')
+                    whitespaceEnd++;
+                if (whitespaceEnd >= normalized.Length || normalized[whitespaceEnd] != '\n')
+                {
+                    index = next - 1;
+                    break;
+                }
+
+                next = whitespaceEnd + 1;
+            }
+        }
+
+        return builder.ToString();
+    }
 
     internal static async Task<int> RefreshSystemBindingsAsync(
         AppDbContext db,
