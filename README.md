@@ -270,7 +270,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   bookmarks, internal links, semantic structure, and logical reading order.
   Renderer/profile upgrades make older owned PDFs stale until regenerated.
 - Core/release-aware structured cover design with shared image/text/shape/layer/style
-  tools, including justified text alignment: the Core front scene flows into digital releases and the front panel of
+  tools, canvas-aligned resize handles for rotated objects, justified text
+  alignment, and reusable `{{title}}`, `{{subtitle}}`, `{{author}}`,
+  `{{spineText}}`, and `{{backCopy}}` text tokens: the Core front scene flows into digital releases and the front panel of
   print surfaces until explicitly customized. Print releases select exact
   paper weight/thickness, color process, construction, and cover mode. Paper
   color and finish stay outside the artifact workflow. The final interior page
@@ -282,8 +284,9 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   layout needed to obtain that current page count; the editor opens only after
   the calculated spine is available, without requiring a full prepared interior
   PDF first.
-  B&N covers remain one connected Back/Spine/Front composition with region-local
-  focus, fill, crop, generation guidance, and spine direction. They can prepare
+  B&N covers remain one connected Back/Spine/Front composition; choosing a
+  region is confined to the Fill selected region dialog while ordinary editing,
+  crop, generation guidance, and spine direction stay whole-canvas. They can prepare
   either one measured full-wrap PDF or derived front/back PDFs when B&N supplies
   the spine in its wizard.
 - Versioned Lorekeeper validation with independent post-write inspection,

@@ -365,6 +365,12 @@ art contains no baked-in words, title/author remain real
 text above the art, US/English defaults to top-to-bottom unless the user asks
 otherwise, and successful mutations are followed by annotated spine and
 whole-wrap inspection plus clean final previews.
+Bindable cover copy uses the token catalog returned by the cover read. The
+assistant can place `{{title}}`, `{{subtitle}}`, `{{author}}`, `{{spineText}}`,
+or `{{backCopy}}` inside any text frame, including repeated author or title
+frames on the spine, and may combine tokens with literal copy. Large cover-scene
+stages must name the same exact surface role that was read and previewed; apply
+is surface-bound and must not target an implicit default.
 
 ### Review Edits and approval
 

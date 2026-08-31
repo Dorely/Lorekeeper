@@ -82,6 +82,10 @@ maps. `PublicationRenderWorker` owns recovery/cancellation and
 `PublicationRenderProcessor` owns the bounded child process. `PublicationPackageService`
 owns final format-specific preflight and deterministic package assembly, consuming
 validated evidence rather than silently rerunning a different validation path.
+Managed request assembly resolves every cover text template against the
+effective Core/release title, subtitle, author, spine text, and back copy before
+protocol serialization. Press therefore receives concrete selectable text and
+does not own application metadata-token semantics.
 
 The native `Lorekeeper.Press` project owns protocol v11, shaping, pagination,
 PDF serialization, color/asset normalization, and post-write inspection.

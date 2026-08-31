@@ -39,6 +39,7 @@ public sealed record PublicationCoverDesignView(
     public IReadOnlyList<PublicationCoverDiagnostic> DiagnosticDetails { get; init; } = [];
     public SpineReadingDirection SpineReadingDirection { get; init; } = SpineReadingDirection.TopToBottom;
     public IReadOnlyList<CoverRegionDescriptor> Regions { get; init; } = [];
+    public string SurfaceRole { get; init; } = "front";
 }
 
 public sealed record PublicationCoverTemplate(
@@ -97,7 +98,7 @@ public interface IPublicationCoverService
     Task<PublicationCoverDesignView> UpdateSceneAsync(Guid projectId, Guid editionId, string sceneJson, long expectedRevision, CancellationToken cancellationToken = default);
     Task<PublicationCoverDesignView> PatchElementAsync(Guid projectId, Guid editionId, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch, CancellationToken cancellationToken = default);
     Task<PublicationCoverDesignView> PatchSurfaceElementAsync(Guid projectId, Guid editionId, string surfaceRole, long expectedRevision, string targetKind, Guid targetId, CompositionElementPatch patch, CancellationToken cancellationToken = default);
-    Task<CompositionMutationStage> StageSceneAsync(Guid projectId, Guid conversationId, Guid editionId, long expectedRevision, CompositionScene scene, CancellationToken cancellationToken = default);
+    Task<CompositionMutationStage> StageSceneAsync(Guid projectId, Guid conversationId, Guid editionId, long expectedRevision, CompositionScene scene, string? surfaceRole = null, CancellationToken cancellationToken = default);
     Task<PublicationCoverDesignView> ApplySceneStageAsync(Guid projectId, Guid conversationId, Guid stageId, long expectedRevision, CancellationToken cancellationToken = default);
     Task<PublicationCoverDesignView> CustomizeFromCoreAsync(Guid projectId, Guid editionId, long expectedEditionRevision, CancellationToken cancellationToken = default);
     Task UseCoreAsync(Guid projectId, Guid editionId, long expectedEditionRevision, CancellationToken cancellationToken = default);
@@ -116,6 +117,8 @@ public sealed class PublicationCoverService(
     IAuthoringHistoryRuntime? authoringHistory = null,
     IAuthoringMutationContextAccessor? authoringMutationContext = null) : IPublicationCoverService
 {
+    private const string CoverSceneStagePrefix = "cover-scene:";
+
     public PublicationCoverService(
         IAppDatabaseOperationFactory database,
         IPublicationEditionService editions,
@@ -668,6 +671,7 @@ public sealed class PublicationCoverService(
         Guid editionId,
         long expectedRevision,
         CompositionScene scene,
+        string? surfaceRole = null,
         CancellationToken cancellationToken = default)
     {
         await RequireCurrentInteriorPaginationAsync(projectId, editionId, cancellationToken);
@@ -682,13 +686,14 @@ public sealed class PublicationCoverService(
                 && (item.ExpiresAt <= DateTime.UtcNow || item.AppliedAt != null))
             .ExecuteDeleteAsync(cancellationToken);
         var edition = await GetEffectiveEditionAsync(projectId, editionId, cancellationToken);
+        surfaceRole = NormalizeSurfaceRole(edition, surfaceRole);
         var design = await db.PublicationCoverDesigns.AsNoTracking()
             .FirstOrDefaultAsync(item => item.EditionId == editionId, cancellationToken)
             ?? await DefaultAsync(projectId, edition, lockCoreLayers: false, cancellationToken);
         if (design.Revision != expectedRevision)
             throw new DbUpdateConcurrencyException("The cover composition changed.");
-        var template = await TemplateAsync(edition, design, cancellationToken);
-        scene = ReflowToCurrentGeometry(edition, design, template, scene, out _);
+        var template = await TemplateAsync(edition, design, cancellationToken, surfaceRole);
+        scene = ReflowToCurrentGeometry(edition, design, template, scene, out _, surfaceRole);
         ValidateAuthoringScene(scene, edition, template);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         var payload = System.Text.Json.JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
@@ -696,7 +701,7 @@ public sealed class PublicationCoverService(
         {
             ProjectId = projectId,
             ConversationId = conversationId,
-            TargetKind = "cover-scene",
+            TargetKind = CoverSceneStageTarget(surfaceRole),
             TargetId = editionId,
             ExpectedRevision = expectedRevision,
             OperationsJson = payload,
@@ -722,7 +727,7 @@ public sealed class PublicationCoverService(
                 .Where(item => item.Id == stageId
                     && item.ProjectId == projectId
                     && item.ConversationId == conversationId
-                    && item.TargetKind == "cover-scene")
+                    && (item.TargetKind == "cover-scene" || item.TargetKind.StartsWith(CoverSceneStagePrefix)))
                 .Select(item => item.TargetId)
                 .SingleOrDefaultAsync(cancellationToken);
         }
@@ -737,7 +742,7 @@ public sealed class PublicationCoverService(
             item.Id == stageId
             && item.ProjectId == projectId
             && item.ConversationId == conversationId
-            && item.TargetKind == "cover-scene", cancellationToken)
+            && (item.TargetKind == "cover-scene" || item.TargetKind.StartsWith(CoverSceneStagePrefix)), cancellationToken)
             ?? throw new KeyNotFoundException("Cover stage was not found for this conversation.");
         if (stage.AppliedAt is not null)
             throw new InvalidOperationException("Cover composition stages are non-replayable.");
@@ -753,6 +758,7 @@ public sealed class PublicationCoverService(
         scene = CoverCompositionFactory.KeepArtworkBehindCopy(scene);
         var storedEdition = await GetEditionAsync(projectId, stage.TargetId, cancellationToken, tracked: true);
         var edition = await GetEffectiveEditionAsync(projectId, stage.TargetId, cancellationToken);
+        var surfaceRole = NormalizeSurfaceRole(edition, CoverSceneStageSurfaceRole(stage.TargetKind));
         PublicationEditionService.EnsureDraft(storedEdition);
         var design = await db.PublicationCoverDesigns.FirstOrDefaultAsync(
             item => item.EditionId == edition.Id, cancellationToken);
@@ -763,8 +769,8 @@ public sealed class PublicationCoverService(
         design ??= await DefaultAsync(projectId, edition, lockCoreLayers: false, cancellationToken);
         if (design.Revision != expectedRevision)
             throw new DbUpdateConcurrencyException("The cover composition changed after it was staged.");
-        var template = await TemplateAsync(edition, design, cancellationToken);
-        scene = ReflowToCurrentGeometry(edition, design, template, scene, out _);
+        var template = await TemplateAsync(edition, design, cancellationToken, surfaceRole);
+        scene = ReflowToCurrentGeometry(edition, design, template, scene, out _, surfaceRole);
         ValidateAuthoringScene(scene, edition, template);
         await ValidateSceneAssetsAsync(projectId, scene, cancellationToken);
         if (db.Entry(design).State == EntityState.Detached)
@@ -772,7 +778,12 @@ public sealed class PublicationCoverService(
             db.PublicationCoverDesigns.Add(design);
             storedEdition.InheritsCoreCover = false;
         }
-        design.CompositionSceneJson = System.Text.Json.JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
+        var sceneJson = System.Text.Json.JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions);
+        var surfaceScenes = ReadSurfaceScenes(design.SurfaceScenesJson).ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+        surfaceScenes[surfaceRole] = sceneJson;
+        design.SurfaceScenesJson = JsonSerializer.Serialize(surfaceScenes, ManuscriptCodec.JsonOptions);
+        if (surfaceRole == NormalizeSurfaceRole(edition, null))
+            design.CompositionSceneJson = sceneJson;
         design.Revision = checked(design.Revision + 1);
         design.UpdatedAt = DateTime.UtcNow;
         storedEdition.SelectedCoverImageId = CompositionSceneResolver.Flatten(scene)
@@ -790,14 +801,14 @@ public sealed class PublicationCoverService(
             db.Entry(storedEdition).State = EntityState.Unchanged;
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            return await GetAsync(projectId, edition.Id, cancellationToken);
+            return await GetSurfaceAsync(projectId, edition.Id, surfaceRole, cancellationToken);
         }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         if (authoringHistory is not null)
             await RecordReleaseCoverMutationAsync(
                 projectId, edition.Id, beforeHistory, afterHistory, "Edit release cover");
-        return await ViewAsync(await GetEffectiveEditionAsync(projectId, edition.Id, cancellationToken), design, cancellationToken);
+        return await ViewAsync(await GetEffectiveEditionAsync(projectId, edition.Id, cancellationToken), design, cancellationToken, surfaceRole);
     }
 
     private async Task ValidateSceneAssetsAsync(
@@ -885,6 +896,7 @@ public sealed class PublicationCoverService(
             DiagnosticDetails = diagnosticDetails,
             SpineReadingDirection = design.SpineReadingDirection,
             Regions = DescribeRegions(edition, template, expectedGeometry),
+            SurfaceRole = surfaceRole,
         };
     }
 
@@ -953,6 +965,14 @@ public sealed class PublicationCoverService(
             return surfaceRole;
         return available.FirstOrDefault() ?? "front";
     }
+
+    private static string CoverSceneStageTarget(string surfaceRole) =>
+        $"{CoverSceneStagePrefix}{surfaceRole}";
+
+    private static string? CoverSceneStageSurfaceRole(string targetKind) =>
+        targetKind.StartsWith(CoverSceneStagePrefix, StringComparison.Ordinal)
+            ? targetKind[CoverSceneStagePrefix.Length..]
+            : null;
 
     internal static async Task AddImageDpiDiagnosticsAsync(
         IAppDatabaseOperationFactory database,
@@ -1042,12 +1062,15 @@ public sealed class PublicationCoverService(
                     $"Object {item.Id:N} extends outside the physical cover surface.",
                     item.Id);
             }
+            if (item.Kind == CompositionObjectKind.Text && string.IsNullOrWhiteSpace(item.TextBinding))
+                AddDiagnostic(diagnostics, "error", "COVER_TEXT_REQUIRED", $"Text object {item.Id:N} requires text or a bindable cover-copy token.", item.Id);
             if (item.Kind == CompositionObjectKind.Text
-                && item.TextBinding is not "title" and not "subtitle" and not "author" and not "spineText" and not "backCopy")
-                AddDiagnostic(diagnostics, "error", "COVER_TEXT_BINDING_REQUIRED", $"Text object {item.Id:N} requires a canonical cover-copy binding.", item.Id);
+                && CoverTextTokens.UnknownTokens(item.TextBinding) is { Count: > 0 } unknownTokens)
+                AddDiagnostic(diagnostics, "error", "COVER_TEXT_TOKEN_INVALID", $"Text object {item.Id:N} contains unsupported token(s): {string.Join(", ", unknownTokens)}.", item.Id);
             if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
                 && item.Kind == CompositionObjectKind.Text
-                && item.TextBinding is ("spineText" or "backCopy"))
+                && (CoverTextTokens.UsesBinding(item.TextBinding, "spineText")
+                    || CoverTextTokens.UsesBinding(item.TextBinding, "backCopy")))
                 AddDiagnostic(diagnostics, "error", "COVER_TEXT_BINDING_INVALID", $"Digital cover text object {item.Id:N} requires a front-cover copy binding before publishing.", item.Id);
             if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
                 && item.RegionConstraint is not CompositionRegionConstraint.Page

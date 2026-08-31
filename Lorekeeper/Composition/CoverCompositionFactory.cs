@@ -90,7 +90,8 @@ public static class CoverCompositionFactory
         var front = Region(CompositionRegionConstraint.Front, sourceGeometry);
         var frontPercent = RegionBoundsPercent(CompositionRegionConstraint.Front, sourceGeometry);
         var selectedTopLevel = sourceScene.Objects.Where(item => item.GroupId is null
-            && item.TextBinding is not ("spineText" or "backCopy")
+            && !CoverTextTokens.UsesBinding(item.TextBinding, "spineText")
+            && !CoverTextTokens.UsesBinding(item.TextBinding, "backCopy")
             && item.RegionConstraint is not (CompositionRegionConstraint.Back or CompositionRegionConstraint.Spine or CompositionRegionConstraint.BarcodeReserve)
             && Intersects(item.Bounds, frontPercent)).ToList();
         var selectedIds = selectedTopLevel.Select(item => item.Id).ToHashSet();
@@ -165,7 +166,8 @@ public static class CoverCompositionFactory
 
         var additions = Create(edition, cover, pageCount);
         var additionObjects = additions.Objects
-            .Where(item => item.TextBinding is "spineText" or "backCopy")
+            .Where(item => CoverTextTokens.UsesBinding(item.TextBinding, "spineText")
+                || CoverTextTokens.UsesBinding(item.TextBinding, "backCopy"))
             .Select(item => item with { ReadingOrder = (item.ReadingOrder ?? 0) + coreObjects.Count })
             .ToList();
         return KeepArtworkBehindCopy(additions with
@@ -402,7 +404,7 @@ public static class CoverCompositionFactory
         CompositionScene scene,
         SpineReadingDirection direction) => scene with
         {
-            Objects = scene.Objects.Select(item => item.TextBinding == "spineText"
+            Objects = scene.Objects.Select(item => CoverTextTokens.UsesBinding(item.TextBinding, "spineText")
                 ? item with { RotationDegrees = SpineRotation(direction) }
                 : item).ToList(),
         };

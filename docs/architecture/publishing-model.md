@@ -214,6 +214,10 @@ return compact changed IDs, fields, revisions, diagnostic counts, and refresh
 notices rather than echoing complete unchanged records. Large scene changes
 use persisted non-replayable stages; preview returns a stage ID and compact
 diagnostics, and apply accepts only that ID plus expected revision.
+Cover-scene stages are bound to the exact artifact surface role used to preview
+them. Apply updates that same surface rather than a hidden default scene, and
+the agent must pass the same role when staging an outside, inside, case, jacket,
+cloth, or other supported surface.
 
 Publish mutation tools cover section metadata, focused prose operations,
 section page scenes, cover operations, readiness, preparation, cancellation,
@@ -251,6 +255,14 @@ provider raster can represent a target's aspect, the request fails before
 dispatch with a smallest equal-panel plan, each panel targets exact surface
 bounds, and the assistant must inspect annotated regions plus the clean whole
 wrap without claiming independent generations are seamless.
+
+Cover text frames may use literal text or inline canonical tokens:
+`{{title}}`, `{{subtitle}}`, `{{author}}`, `{{spineText}}`, and `{{backCopy}}`.
+Tokens can be repeated or combined with literals, allowing the same effective
+value to appear independently on a front, spine, or back frame. The Publish UI
+exposes insertion controls and the assistant cover read returns the supported
+token catalog; render/export resolves templates from the effective Core/release
+metadata immediately before producing output.
 
 `read_publication_section` returns section metadata, canvas summaries, and the
 shared `agent-manuscript-v1` projection for its bounded prose blocks. Core or

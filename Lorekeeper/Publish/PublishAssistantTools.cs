@@ -472,10 +472,10 @@ public sealed class PublishAssistantTools(
                 name: "add_project_image_to_release_cover",
                 description: "Add an existing project-image ID as a new release-cover image object. Contain and Cover retain aspect ratio; Stretch permits distortion. Requires an alt-text or decorative decision. This is separate from image generation."),
             AIFunctionFactory.Create(
-                method: (Guid releaseId, long expectedRevision, CompositionScene scene) =>
-                    StageCoverCompositionAsync(context, releaseId, expectedRevision, scene),
+                method: (Guid releaseId, long expectedRevision, CompositionScene scene, string? surfaceRole = null) =>
+                    StageCoverCompositionAsync(context, releaseId, expectedRevision, scene, surfaceRole),
                 name: "stage_publication_cover_composition",
-                description: "Submit a complete cover scene exactly once. Reading order may be omitted; Lorekeeper preserves supplied relative order and uses object-array position as the deterministic fallback before validation. Artwork is normalized below canonical cover copy. Returns an opaque one-use stage ID and compact diagnostics without echoing the scene."),
+                description: "Submit a complete release-cover scene exactly once. For an exact outside, inside, case, jacket, or cloth scene, pass the surfaceRole returned by read_publication_cover_design; omission targets the release's default surface. TextBinding is an editable text template and may contain repeatable {{title}}, {{subtitle}}, {{author}}, {{spineText}}, or {{backCopy}} tokens. Reading order may be omitted; Lorekeeper preserves supplied relative order and uses object-array position as the deterministic fallback before validation. Artwork is normalized below cover text. Returns an opaque one-use stage ID and compact diagnostics without echoing the scene."),
             AIFunctionFactory.Create(
                 method: (Guid stageId, long expectedRevision) =>
                     ApplyCoverCompositionStageAsync(context, stageId, expectedRevision),
@@ -2851,6 +2851,7 @@ public sealed class PublishAssistantTools(
             target = releaseId is null ? "core" : "release",
             targetId = releaseId ?? context.ProjectId,
             revision = cover.Revision,
+            surfaceRole = cover.SurfaceRole,
             cover.Title,
             cover.Subtitle,
             cover.Author,
@@ -2860,6 +2861,7 @@ public sealed class PublishAssistantTools(
             cover.BarcodeMode,
             cover.Template,
             cover.Diagnostics,
+            bindableTextTokens = CoverTextTokens.Definitions.Select(item => new { item.Token, item.Label }),
             scene.SchemaVersion,
             scene.Surface,
             layers = scene.Layers.Skip(structureStart).Take(structureCount),
@@ -3618,7 +3620,8 @@ public sealed class PublishAssistantTools(
         PublishAssistantContext context,
         Guid editionId,
         long expectedRevision,
-        CompositionScene scene)
+        CompositionScene scene,
+        string? surfaceRole)
     {
         try
         {
@@ -3630,6 +3633,7 @@ public sealed class PublishAssistantTools(
                 editionId,
                 expectedRevision,
                 normalized.Scene,
+                surfaceRole,
                 context.TurnCancellationToken);
             return Serialize(new
             {
@@ -3638,6 +3642,7 @@ public sealed class PublishAssistantTools(
                 revision = expectedRevision,
                 stageId = stage.Id,
                 stage.ExpiresAt,
+                surfaceRole = stage.TargetKind["cover-scene:".Length..],
                 normalizedReadingOrderCount = normalized.ChangedObjectCount,
                 summary = $"Staged {scene.Objects.Count} cover objects across {scene.Layers.Count} layers.",
             });
@@ -3659,13 +3664,14 @@ public sealed class PublishAssistantTools(
             Guid editionId;
             await using (var operation = await database.OpenReadAsync(context.TurnCancellationToken))
             {
-                editionId = await operation.Db.CompositionMutationStages.AsNoTracking()
+                var stagedTarget = await operation.Db.CompositionMutationStages.AsNoTracking()
                     .Where(item => item.Id == stageId
                         && item.ProjectId == context.ProjectId
                         && item.ConversationId == context.ConversationId
-                        && item.TargetKind == "cover-scene")
-                    .Select(item => item.TargetId)
+                        && (item.TargetKind == "cover-scene" || item.TargetKind.StartsWith("cover-scene:")))
+                    .Select(item => new { item.TargetId })
                     .SingleOrDefaultAsync(context.TurnCancellationToken);
+                editionId = stagedTarget?.TargetId ?? Guid.Empty;
             }
             if (editionId == Guid.Empty)
                 throw new KeyNotFoundException("Cover stage was not found for this conversation.");
@@ -3681,7 +3687,8 @@ public sealed class PublishAssistantTools(
                 ok = true,
                 targetId = cover.EditionId,
                 revision = cover.Revision,
-                changedFields = new[] { "compositionScene" },
+                surfaceRole = cover.SurfaceRole,
+                changedFields = new[] { "surfaceScene" },
                 diagnosticCount = cover.Diagnostics.Count,
                 diagnostics = cover.Diagnostics.Take(5),
                 mutation = new { kind = "coverComposition", id = cover.EditionId, selectId = cover.EditionId },

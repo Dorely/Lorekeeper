@@ -3614,9 +3614,11 @@ public sealed class ProjectImportJobProcessor(
         {
             if (!allowCoverBindings && !string.IsNullOrWhiteSpace(item.TextBinding))
                 throw new InvalidOperationException($"{label} stores duplicated text instead of a semantic content reference.");
+            if (allowCoverBindings && string.IsNullOrWhiteSpace(item.TextBinding))
+                throw new InvalidOperationException($"{label} contains an empty cover text frame.");
             if (allowCoverBindings
-                && item.TextBinding is not "title" and not "subtitle" and not "author" and not "spineText" and not "backCopy")
-                throw new InvalidOperationException($"{label} contains an unsupported cover-copy binding.");
+                && CoverTextTokens.UnknownTokens(item.TextBinding) is { Count: > 0 } unknownTokens)
+                throw new InvalidOperationException($"{label} contains unsupported cover-copy token(s): {string.Join(", ", unknownTokens)}.");
         }
     }
 

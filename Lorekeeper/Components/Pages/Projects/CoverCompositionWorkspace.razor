@@ -45,15 +45,6 @@
                             }
                         </div>
                     }
-                    @if (IsPrint)
-                    {
-                        <div class="cover-surface-tabs" role="tablist" aria-label="Cover regions">
-                            @foreach (var region in CoverRegions)
-                            {
-                                <button type="button" role="tab" aria-selected="@(region.Role == _focusedRegion)" class="@(region.Role == _focusedRegion ? "selected" : null)" title="Focus @region.Role — @region.WidthInches.ToString("0.###") × @region.HeightInches.ToString("0.###") in" @onclick="() => _focusedRegion = region.Role">@region.Role</button>
-                            }
-                        </div>
-                    }
                     <div class="cover-view-toggles" role="group" aria-label="Cover canvas aids">
                         <label title="Snap objects to the cover regions while moving or resizing"><input type="checkbox" @bind="_snap" /><span aria-hidden="true">&#8982;</span><span>Snap</span></label>
                         <label title="Show or hide safe-area and panel guides"><input type="checkbox" @bind="_guides" /><span aria-hidden="true">&#9638;</span><span>Guides</span></label>
@@ -66,9 +57,9 @@
                     <div class="cover-safe"></div>
                     @if (IsPrint)
                     {
-                        <div class="cover-panel cover-panel-back @(_focusedRegion == CompositionRegionConstraint.Back ? "selected" : null)" style="@BackStyle">Back</div>
-                        <div class="cover-panel cover-panel-spine @(_focusedRegion == CompositionRegionConstraint.Spine ? "selected" : null)" style="@SpineStyle">Spine</div>
-                        <div class="cover-panel cover-panel-front @(_focusedRegion == CompositionRegionConstraint.Front ? "selected" : null)" style="@FrontStyle">Front</div>
+                        <div class="cover-panel cover-panel-back" style="@BackStyle">Back</div>
+                        <div class="cover-panel cover-panel-spine" style="@SpineStyle">Spine</div>
+                        <div class="cover-panel cover-panel-front" style="@FrontStyle">Front</div>
                         <div class="cover-barcode" style="@BarcodeStyle">@(_surfaceRole == "perfect-bound-inside" ? "No-ink spine area" : "Barcode reserve")</div>
                     }
                     @foreach (var item in _objects.Where(IsVisible))
@@ -78,11 +69,13 @@
                             else if (item.Kind == CompositionObjectKind.Image && item.ImageId is Guid imageId && Image(imageId) is { } image) { <img src="@image.PreviewUrl" alt="" draggable="false" style="@ImageStyle(item)" /> }
                             else if (item.Kind == CompositionObjectKind.Image) { <span>Choose artwork</span> }
                             else if (item.Kind == CompositionObjectKind.Line) { <span class="cover-line" style="@LineStyle(item)"></span> }
-                            @if (item.Id == _selectedId && !IsLocked(item) && !IsCropRepositioning(item))
-                            {
-                                <span class="cover-handle cover-handle-resize" title="Drag to resize" @onpointerdown:stopPropagation="true" @onpointerdown:preventDefault="true" @onpointerdown="e => BeginTransformAsync(e, item, CoverTransformMode.Resize)"></span>
-                                <span class="cover-handle cover-handle-rotate" title="Drag to rotate" @onpointerdown:stopPropagation="true" @onpointerdown:preventDefault="true" @onpointerdown="e => BeginTransformAsync(e, item, CoverTransformMode.Rotate)"></span>
-                            }
+                        </div>
+                    }
+                    @if (Selected is { } transformSelection && !IsLocked(transformSelection) && !IsCropRepositioning(transformSelection))
+                    {
+                        <div class="cover-selection-frame" style="@SelectionFrameStyle(transformSelection)" aria-hidden="true">
+                            <span class="cover-handle cover-handle-resize" title="Drag to resize along the canvas axes" @onpointerdown:stopPropagation="true" @onpointerdown:preventDefault="true" @onpointerdown="e => BeginTransformAsync(e, transformSelection, CoverTransformMode.Resize)"></span>
+                            <span class="cover-handle cover-handle-rotate" title="Drag to rotate" @onpointerdown:stopPropagation="true" @onpointerdown:preventDefault="true" @onpointerdown="e => BeginTransformAsync(e, transformSelection, CoverTransformMode.Rotate)"></span>
                         </div>
                     }
                 </div>
@@ -115,13 +108,14 @@
                             <button type="button" title="Choose different artwork for this image" @onclick="() => OpenReplaceArtworkPicker(primarySelection.Id)">Replace</button>
                             <label class="cover-retain-aspect" title="Keep the artwork's original proportions while resizing"><input type="checkbox" checked="@RetainsAspectRatio(primarySelection)" @onchange="e => SetRetainAspectRatioAsync(primarySelection, (bool)e.Value!)" /> Ratio</label>
                             <button type="button" title="Fill the entire cover; proportional artwork is cropped rather than stretched" @onclick="() => FillCanvasAsync(primarySelection)">Fill canvas</button>
-                            @if (IsPrint) { <button type="button" title="Crop-to-fill only the focused Back, Spine, or Front region" @onclick="() => FillSelectedRegionAsync(primarySelection)">Fill selected region</button> }
+                            @if (IsPrint) { <button type="button" title="Choose the Back, Spine, or Front region to crop-to-fill" @onclick="() => OpenFillRegionPicker(primarySelection)">Fill selected region</button> }
                             @if (primarySelection.ImageFit == FigureImageFit.Cover) { <button type="button" class="@(IsCropRepositioning(primarySelection) ? "selected" : null)" title="Drag the artwork within its fixed frame" @onclick="() => ToggleCropReposition(primarySelection)">@(IsCropRepositioning(primarySelection) ? "Finish crop" : "Reposition crop")</button> }
                         }
                         else if (primarySelection.Kind == CompositionObjectKind.Text)
                         {
                             var primaryStyle = Resolved(primarySelection);
-                            <label>Content<select value="@primarySelection.TextBinding" @onchange="e => Patch(primarySelection with { TextBinding = e.Value?.ToString() ?? string.Empty })"><option value="">Unbound text</option>@foreach (var binding in AvailableBindings) { <option value="@binding">@binding</option> }</select></label>
+                            <label>Text<input value="@primarySelection.TextBinding" @onchange="e => Patch(primarySelection with { TextBinding = e.Value?.ToString() ?? string.Empty })" /></label>
+                            <label>Insert field<select value="" @onchange="e => AppendBindableToken(primarySelection, e.Value?.ToString())"><option value="">Choose…</option>@foreach (var token in AvailableTokens) { <option value="@token.Token">@token.Label</option> }</select></label>
                             <label>Font<select value="@primaryStyle.FontFamilyKey" @onchange="e => Patch(primarySelection with { StyleId = null, FontFamilyKey = e.Value?.ToString() ?? string.Empty })">@foreach (var family in _fontFamilies) { <option value="@family.Key">@family.Name</option> }</select></label>
                             <label>Size<input class="cover-number" type="number" min="4" max="144" value="@primaryStyle.FontSizePoints" @onchange="e => Patch(primarySelection with { StyleId = null, FontSizePoints = Number(e) })" /></label>
                             <label>Align<select value="@primaryStyle.TextAlignment" @onchange="e => Patch(primarySelection with { StyleId = null, TextAlignment = Enum.Parse<CompositionTextAlignment>(e.Value!.ToString()!) })">@foreach (var alignment in Enum.GetValues<CompositionTextAlignment>()) { <option value="@alignment">@alignment</option> }</select></label>
@@ -147,7 +141,6 @@
                         {
                             <label>Spine text<input @bind="_spineText" @bind:after="MarkDirty" /></label>
                             <label>Spine direction<select @bind="_spineDirection" @bind:after="SpineDirectionChanged"><option value="@SpineReadingDirection.TopToBottom">Top to bottom (US/English default)</option><option value="@SpineReadingDirection.BottomToTop">Bottom to top</option><option value="@SpineReadingDirection.Horizontal">Horizontal</option></select></label>
-                            @if (FocusedRegion is { } focused) { <div class="cover-current-artwork"><span><small>Focused @focused.Role region</small><strong>@focused.WidthInches.ToString("0.###") × @focused.HeightInches.ToString("0.###") in · aspect @focused.AspectRatio.ToString("0.####")</strong><small>@(focused.ParticipatesInOutput ? $"Output: {focused.OutputRole}" : "B&N-generated; excluded from separate-panel package")</small></span></div> }
                             <label>Back copy<textarea rows="5" @bind="_backCopy" @bind:after="MarkDirty"></textarea></label>
                             <label>Barcode behavior<select @bind="_barcodeMode" @bind:after="MarkDirty"><option value="@PublicationBarcodeMode.LorekeeperBarcode">Generate ISBN-13 barcode</option><option value="@PublicationBarcodeMode.VendorOverlay">Reserve vendor overlay area</option></select></label>
                         }
@@ -183,7 +176,7 @@
                                 </div>
                                 <label><input type="checkbox" checked="@RetainsAspectRatio(selected)" @onchange="e => SetRetainAspectRatioAsync(selected, (bool)e.Value!)" /> Retain aspect ratio</label>
                                 <button type="button" title="Fill the entire cover; proportional artwork is cropped rather than stretched" @onclick="() => FillCanvasAsync(selected)">Fill canvas</button>
-                                @if (IsPrint) { <button type="button" title="Crop-to-fill only the focused Back, Spine, or Front region" @onclick="() => FillSelectedRegionAsync(selected)">Fill selected region</button> }
+                                @if (IsPrint) { <button type="button" title="Choose the Back, Spine, or Front region to crop-to-fill" @onclick="() => OpenFillRegionPicker(selected)">Fill selected region</button> }
                                 @if (selected.ImageFit == FigureImageFit.Cover)
                                 {
                                     <button type="button" class="@(IsCropRepositioning(selected) ? "selected" : null)" @onclick="() => ToggleCropReposition(selected)">@(IsCropRepositioning(selected) ? "Finish repositioning" : "Reposition crop")</button>
@@ -194,7 +187,13 @@
                             @if (selected.Kind == CompositionObjectKind.Text)
                             {
                                 var resolved = Resolved(selected);
-                                <label>Canonical binding<select value="@selected.TextBinding" @onchange="e => Patch(selected with { TextBinding = e.Value?.ToString() ?? string.Empty })"><option value="">Unbound text</option>@foreach (var binding in AvailableBindings) { <option value="@binding">@binding</option> }</select></label>
+                                <label>Text template<textarea rows="3" value="@selected.TextBinding" @onchange="e => Patch(selected with { TextBinding = e.Value?.ToString() ?? string.Empty })"></textarea></label>
+                                <div class="cover-token-list" aria-label="Bindable cover text fields">
+                                    @foreach (var token in AvailableTokens)
+                                    {
+                                        <button type="button" title="Append @token.Token to this text box" @onclick="() => AppendBindableToken(selected, token.Token)">@token.Token</button>
+                                    }
+                                </div>
                                 <label>Font family<select value="@resolved.FontFamilyKey" @onchange="e => Patch(selected with { StyleId = null, FontFamilyKey = e.Value?.ToString() ?? string.Empty })">@foreach (var family in _fontFamilies) { <option value="@family.Key">@family.Name</option> }</select></label>
                                 <label>Font weight<input type="number" min="100" max="900" step="100" value="@resolved.FontWeight" @onchange="e => Patch(selected with { StyleId = null, FontWeight = (int)Number(e) })" /></label>
                                 <label>Font size<input type="number" min="4" max="144" value="@resolved.FontSizePoints" @onchange="e => Patch(selected with { StyleId = null, FontSizePoints = Number(e) })" /></label>
@@ -242,6 +241,28 @@
                                 OnPrimaryAction="UsePickedArtworkAsync"
                                 OnClose="CloseArtworkPicker" />
 
+@if (_fillRegionTargetId is not null && IsPrint)
+{
+    <div class="cover-region-modal-backdrop" @onclick="CloseFillRegionPicker">
+        <section class="cover-region-modal" role="dialog" aria-modal="true" aria-labelledby="cover-fill-region-title" @onclick:stopPropagation="true">
+            <header>
+                <div><h2 id="cover-fill-region-title">Fill a cover region</h2><p>Choose the only region this image should crop-to-fill.</p></div>
+                <button type="button" title="Close region picker" aria-label="Close region picker" @onclick="CloseFillRegionPicker">&#215;</button>
+            </header>
+            <div class="cover-region-options">
+                @foreach (var region in CoverRegions)
+                {
+                    <button type="button" @onclick="() => FillRegionAsync(region)">
+                        <strong>@region.Role</strong>
+                        <span>@region.WidthInches.ToString("0.###") × @region.HeightInches.ToString("0.###") in</span>
+                        <small>@(region.ParticipatesInOutput ? $"Output: {region.OutputRole}" : "Vendor-generated; excluded from this package")</small>
+                    </button>
+                }
+            </div>
+        </section>
+    </div>
+}
+
 @code {
     [Parameter, EditorRequired] public Guid ProjectId { get; set; }
     [Parameter] public Guid EditionId { get; set; }
@@ -261,19 +282,18 @@
     private long _changeVersion;
     private Guid _loadedProjectId; private Guid _loadedEditionId; private bool _loadedCoreBook; private long _loadedRefreshSignal = -1;
     private string _surfaceRole = "front"; private IReadOnlyList<string> _surfaceRoles = ["front"];
-    private string _title = "", _subtitle = "", _author = "", _spineText = "", _backCopy = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private SpineReadingDirection _spineDirection = SpineReadingDirection.TopToBottom; private CompositionRegionConstraint _focusedRegion = CompositionRegionConstraint.Front; private string? _error; private bool _dirty, _snap = true, _guides = true, _cropReposition; private double _zoom = .95;
+    private string _title = "", _subtitle = "", _author = "", _spineText = "", _backCopy = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private SpineReadingDirection _spineDirection = SpineReadingDirection.TopToBottom; private string? _error; private bool _dirty, _snap = true, _guides = true, _cropReposition; private double _zoom = .95;
     private bool _newRetainAspectRatio = true;
     private ArtworkPickerMode? _artworkPickerMode;
     private Guid? _artworkPickerTargetId;
+    private Guid? _fillRegionTargetId;
     private ElementReference _stageElement; private IJSObjectReference? _workspaceModule; private CoverTransformState? _transform;
     private CompositionObject? Selected => _objects.FirstOrDefault(item => item.Id == _selectedId);
     private bool IsPrint => _edition?.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover;
     private IReadOnlyList<CoverRegionDescriptor> CoverRegions => _cover?.Regions ?? [];
-    private CoverRegionDescriptor? FocusedRegion => CoverRegions.FirstOrDefault(item => item.Role == _focusedRegion);
     private string ModeSummary => CoreBook ? "Reusable front cover" : IsPrint ? "Print full wrap: back, spine, and front" : "Digital front cover";
     private IReadOnlyList<CompositionRegionConstraint> AvailableRegions => IsPrint ? Enum.GetValues<CompositionRegionConstraint>() : [CompositionRegionConstraint.Page, CompositionRegionConstraint.SafeArea, CompositionRegionConstraint.Front];
-    private static readonly string[] Bindings = ["title", "subtitle", "author", "spineText", "backCopy"];
-    private IEnumerable<string> AvailableBindings => IsPrint ? Bindings : Bindings.Take(3);
+    private IEnumerable<CoverTextTokenDefinition> AvailableTokens => IsPrint ? CoverTextTokens.Definitions : CoverTextTokens.Definitions.Take(3);
 
     protected override async Task OnParametersSetAsync()
     {
@@ -414,7 +434,7 @@
     private void Patch(CompositionObject item) { Snapshot(); var index = _objects.FindIndex(candidate => candidate.Id == item.Id); if (index >= 0) { _objects[index] = item; MarkDirty(); } }
     private void PatchBounds(CompositionObject item, double? x = null, double? y = null, double? width = null, double? height = null) => Patch(item with { Bounds = item.Bounds with { XPercent = Snap(x ?? item.Bounds.XPercent), YPercent = Snap(y ?? item.Bounds.YPercent), WidthPercent = Snap(width ?? item.Bounds.WidthPercent), HeightPercent = Snap(height ?? item.Bounds.HeightPercent) } });
     private double Snap(double value) => _snap ? Math.Round(value * 2, MidpointRounding.AwayFromZero) / 2 : value;
-    private void AddObject(CompositionObjectKind kind) { if (_scene is null || kind == CompositionObjectKind.Image) return; Snapshot(); var semantic = kind == CompositionObjectKind.Text; var item = new CompositionObject { Id = Guid.NewGuid(), LayerId = ContentLayerId, Kind = kind, Name = kind.ToString(), Bounds = new CompositionBounds { XPercent = 15, YPercent = 15, WidthPercent = 30, HeightPercent = 20 }, ZIndex = NextFrontZIndex(), Decorative = !semantic, SemanticRole = semantic ? CompositionSemanticRole.Paragraph : CompositionSemanticRole.Artifact, ReadingOrder = semantic ? NextReadingOrder() : null }; _objects.Add(item); _selectedId = item.Id; MarkDirty(); }
+    private void AddObject(CompositionObjectKind kind) { if (_scene is null || kind == CompositionObjectKind.Image) return; Snapshot(); var semantic = kind == CompositionObjectKind.Text; var item = new CompositionObject { Id = Guid.NewGuid(), LayerId = ContentLayerId, Kind = kind, Name = kind.ToString(), Bounds = new CompositionBounds { XPercent = 15, YPercent = 15, WidthPercent = 30, HeightPercent = 20 }, ZIndex = NextFrontZIndex(), TextBinding = semantic ? "Text" : string.Empty, Decorative = !semantic, SemanticRole = semantic ? CompositionSemanticRole.Paragraph : CompositionSemanticRole.Artifact, ReadingOrder = semantic ? NextReadingOrder() : null }; _objects.Add(item); _selectedId = item.Id; MarkDirty(); }
     private void AddImageObject(ProjectImageView image)
     {
         if (_scene is null) return;
@@ -457,11 +477,22 @@
         Patch(CompositionImageLayout.FillCanvas(item, RetainsAspectRatio(item)));
         return Task.CompletedTask;
     }
-    private Task FillSelectedRegionAsync(CompositionObject item)
+    private void OpenFillRegionPicker(CompositionObject item)
     {
-        if (FocusedRegion is not { } region)
+        if (item.Kind == CompositionObjectKind.Image && IsPrint)
+            _fillRegionTargetId = item.Id;
+    }
+    private void CloseFillRegionPicker() => _fillRegionTargetId = null;
+    private Task FillRegionAsync(CoverRegionDescriptor region)
+    {
+        if (_fillRegionTargetId is not Guid targetId
+            || _objects.FirstOrDefault(candidate => candidate.Id == targetId && candidate.Kind == CompositionObjectKind.Image) is not { } item)
+        {
+            CloseFillRegionPicker();
             return Task.CompletedTask;
+        }
         Patch(CompositionImageLayout.FillRegion(item, region.Role, region.Bounds));
+        CloseFillRegionPicker();
         return Task.CompletedTask;
     }
     private void SpineDirectionChanged()
@@ -618,7 +649,15 @@
     private void SetDecorative(CompositionObject item, bool decorative) => Patch(item with { Decorative = decorative, AltText = decorative ? string.Empty : item.AltText, AccessibilityDecisionPending = !decorative && string.IsNullOrWhiteSpace(item.AltText), SemanticRole = decorative ? CompositionSemanticRole.Artifact : CompositionSemanticRole.Figure, ReadingOrder = decorative ? null : item.ReadingOrder ?? NextReadingOrder() });
     private int NextReadingOrder() => _objects.Where(o => o.ReadingOrder is not null).Select(o => o.ReadingOrder!.Value).DefaultIfEmpty().Max() + 1;
     private ProjectImageView? Image(Guid id) => _images.FirstOrDefault(item => item.Id == id);
-    private string BoundText(CompositionObject item) => item.TextBinding switch { "title" => _title, "subtitle" => _subtitle, "author" => _author, "spineText" => _spineText, "backCopy" => _backCopy, _ => item.TextBinding };
+    private void AppendBindableToken(CompositionObject item, string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return;
+        Patch(item with { TextBinding = $"{item.TextBinding}{token}" });
+    }
+    private string BoundText(CompositionObject item) => CoverTextTokens.Resolve(
+        item.TextBinding,
+        CoverTextTokens.Bindings(_title, _subtitle, _author, _spineText, _backCopy));
     private async Task SaveAsync()
     {
         await _saveGate.WaitAsync();
@@ -742,6 +781,12 @@
     private string BarcodeStyle => RegionStyle(_cover!.Template.BleedInches + .25, _cover.Template.FullHeightInches - _cover.Template.BleedInches - 1.45, 2, 1.2);
     private string RegionStyle(double x, double y, double w, double h) => FormattableString.Invariant($"left:{x / _cover!.Template.FullWidthInches * 100}%;top:{y / _cover.Template.FullHeightInches * 100}%;width:{w / _cover.Template.FullWidthInches * 100}%;height:{h / _cover.Template.FullHeightInches * 100}%");
     private string ObjectStyle(CompositionObject item) { var resolved = Resolved(item); var group = item.GroupId is Guid groupId ? _objects.FirstOrDefault(candidate => candidate.Id == groupId) : null; var bounds = group is null ? item.Bounds : EffectiveBounds(item, group); var rotation = item.RotationDegrees + (group?.RotationDegrees ?? 0); var background = item.Kind == CompositionObjectKind.Text ? CssColor(resolved.BackgroundColor, resolved.BackgroundOpacity) : item.Kind is CompositionObjectKind.Rectangle or CompositionObjectKind.Ellipse ? resolved.FillColor : "transparent"; var strokeCqw = resolved.StrokeWidthPoints / _scene!.Surface.WidthPoints * 100; var fontCqw = resolved.FontSizePoints / _scene.Surface.WidthPoints * 100; var border = item.Kind == CompositionObjectKind.Line ? "0" : $"{strokeCqw:R}cqw solid {resolved.StrokeColor}"; var radius = item.Kind == CompositionObjectKind.Ellipse ? "50%" : "0"; return FormattableString.Invariant($"left:{bounds.XPercent}%;top:{bounds.YPercent}%;width:{bounds.WidthPercent}%;height:{bounds.HeightPercent}%;opacity:{item.Opacity * (group?.Opacity ?? 1)};transform:rotate({rotation}deg);z-index:{item.ZIndex + (group?.ZIndex ?? 0)};background:{background};border:{border};border-radius:{radius};color:{resolved.FillColor};font-family:{FontCssName(resolved.FontFamilyKey)};font-size:{fontCqw:R}cqw;font-style:{(resolved.Italic ? "italic" : "normal")};font-weight:{resolved.FontWeight};line-height:{resolved.LineHeight};letter-spacing:{resolved.LetterSpacingEm}em;text-align:{CssTextAlignment(resolved.TextAlignment)};justify-content:{CssVerticalAlignment(resolved.VerticalAlignment)};text-shadow:{CssTextShadow(resolved.TextShadow)}"); }
+    private string SelectionFrameStyle(CompositionObject item)
+    {
+        var group = item.GroupId is Guid groupId ? _objects.FirstOrDefault(candidate => candidate.Id == groupId) : null;
+        var bounds = group is null ? item.Bounds : EffectiveBounds(item, group);
+        return FormattableString.Invariant($"left:{bounds.XPercent}%;top:{bounds.YPercent}%;width:{bounds.WidthPercent}%;height:{bounds.HeightPercent}%");
+    }
     private string ImageStyle(CompositionObject item) => FormattableString.Invariant($"width:100%;height:100%;object-fit:{ImageFitCss(item.ImageFit)};object-position:{item.CropXPercent}% {item.CropYPercent}%");
     private static string ImageFitCss(FigureImageFit fit) => fit switch { FigureImageFit.Cover => "cover", FigureImageFit.Stretch => "fill", _ => "contain" };
     private string LineStyle(CompositionObject item) { var resolved = Resolved(item); return FormattableString.Invariant($"border-top:{resolved.StrokeWidthPoints / _scene!.Surface.WidthPoints * 100:R}cqw solid {resolved.StrokeColor}"); }

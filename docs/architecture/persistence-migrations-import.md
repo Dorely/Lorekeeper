@@ -226,6 +226,10 @@ project-owned font families/faces with binary hashes. Version 26 adds print
 project use, identifier mode, cover submission mode, provider-neutral template
 evidence, and spine direction. Pre-v26 imports preserve existing behavior with
 for-sale, user-supplied ISBN, measured full-wrap, and top-to-bottom defaults.
+Cover text tokens live in existing composition text fields and therefore require
+no schema or export-version migration. Import validates their names and rejects
+unknown `{{token}}` references while continuing to accept existing exact bare
+bindings as shorthand.
 Non-structural exports omit source bodies,
 selections, and evidence and include a warning. Jobs, operational review rows, temporary
 visual candidates, unselected source bodies/provenance, assistant transcripts,

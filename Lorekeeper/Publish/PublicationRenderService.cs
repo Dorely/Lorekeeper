@@ -1373,13 +1373,25 @@ public sealed class PublicationRenderProcessor(
         var coverScene = coverDesign is null ? null : JsonSerializer.Deserialize<CompositionScene>(
             coverDesign.CompositionSceneJson,
             ManuscriptCodec.JsonOptions);
+        var coverTextBindings = coverDesign is null
+            ? null
+            : CoverTextTokens.Bindings(
+                coverDesign.Title,
+                coverDesign.Subtitle,
+                coverDesign.Author,
+                coverDesign.SpineText,
+                coverDesign.BackCopy);
         if (coverScene is not null)
-            coverScene = NormalizeSceneLanguages(CoverCompositionFactory.KeepArtworkBehindCopy(coverScene));
+            coverScene = NormalizeSceneLanguages(CoverTextTokens.ResolveScene(
+                CoverCompositionFactory.KeepArtworkBehindCopy(coverScene),
+                coverTextBindings!));
         var coverSurfaceScenes = (coverDesign?.SurfaceScenes ?? new Dictionary<string, string>()).ToDictionary(
             item => item.Key,
-            item => NormalizeSceneLanguages(CoverCompositionFactory.KeepArtworkBehindCopy(
-                JsonSerializer.Deserialize<CompositionScene>(item.Value, ManuscriptCodec.JsonOptions)
-                    ?? throw new InvalidDataException($"Cover surface '{item.Key}' is empty."))),
+            item => NormalizeSceneLanguages(CoverTextTokens.ResolveScene(
+                CoverCompositionFactory.KeepArtworkBehindCopy(
+                    JsonSerializer.Deserialize<CompositionScene>(item.Value, ManuscriptCodec.JsonOptions)
+                        ?? throw new InvalidDataException($"Cover surface '{item.Key}' is empty.")),
+                coverTextBindings!)),
             StringComparer.Ordinal);
         var usedFontKeys = document.NamedStyles
             .Select(style => style.Definition.FontFamilyKey)

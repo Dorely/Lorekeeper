@@ -290,6 +290,11 @@ Text objects use `CompositionTextAlignment.Start`, `Center`, `End`, or
 non-final lines; final lines and explicit hard-break paragraph endings remain
 ragged. The canvas, transient preview, EPUB projection, and Press layout trace
 share that alignment behavior.
+Cover text frames additionally accept inline bindable tokens for canonical
+`title`, `subtitle`, `author`, `spineText`, and `backCopy` values. A frame can
+combine literal copy with one or more `{{token}}` references, and the same
+resolver supplies canvas previews, EPUB projection, and Press request scenes.
+The former exact bare binding remains valid shorthand for existing scenes.
 
 Active authoring variants always use the current project page setup and retain
 only single-page or facing-spread mode. A variant is selected by exact
@@ -315,9 +320,14 @@ art.
 Physical covers additionally expose exact Back, Spine, and Front regions.
 `FillRegion` constrains a selected image to one region, defaults to proportional
 crop-to-fill, and retains focal positioning when page-count-driven spine reflow
-changes the connected wrap. The cover workspace can focus each region, reports
-its physical dimensions/aspect and output participation, and preserves the full
-connected scene even when a provider package derives separate front/back pages.
+changes the connected wrap. The cover workspace always edits the full connected
+scene; only the app-owned Fill selected region dialog chooses Back, Spine, or
+Front and reports that region's physical dimensions, aspect, and output
+participation. A global region focus must not constrain ordinary cover editing.
+Canvas resize handles remain aligned to the canvas axes even when the selected
+object is rotated, so pointer deltas continue to update stored bounds in canvas
+coordinates. The full connected scene is preserved even when a provider package
+derives separate front/back pages.
 Spine copy remains real text above artwork. Persisted direction supports
 top-to-bottom (the US/English default), bottom-to-top, and horizontal layouts;
 the user can override the default. The assistant must inspect annotated spine
@@ -395,7 +405,7 @@ opacity, z-order, semantic IDs, reading order, captions, and accessibility.
 | `Lorekeeper/Composition/CompositionService.cs` | Revision-aware Designed Page aggregates, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |
 | `Lorekeeper/Composition/CompositionSceneResolver.cs` | Group flattening, object visibility/z-order semantics, and shared overlap validation. |
 | `Lorekeeper/Composition/CompositionCanvasPreviewService.cs` | Exact transient clean/annotated page and cover canvas rasterization. |
-| `Lorekeeper/Composition/CompositionImageLayout.cs` / `CoverCompositionFactory.cs` | Region-local fill, connected-wrap reflow, exact region bounds, and persisted spine-text orientation. |
+| `Lorekeeper/Composition/CompositionImageLayout.cs` / `CoverCompositionFactory.cs` / `CoverTextTokens.cs` | Region-local fill, connected-wrap reflow, exact region bounds, persisted spine-text orientation, and shared cover text-token resolution. |
 | `Lorekeeper/Composition/ProjectPageSetupService.cs` | Project authoring geometry, typography, setup revisions, and transactional reflow. |
 | `Lorekeeper/Composition/CompositionAgentPayloads.cs` | Bounded assistant reads and revision-safe scene/object/style patch envelopes. |
 | `Lorekeeper/Fonts/` and `ProjectFont*` models | Bundled/imported font catalogs, static-face validation, bytes, URLs, and live/in-process-history use guards. |
