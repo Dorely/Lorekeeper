@@ -108,13 +108,29 @@ requested aspect that fits inside it. A concrete `size` and explicit
 must still satisfy its surface default. DPI is pixels divided by intended
 placement inches, not a PNG/JPEG density header.
 
-Minimum-DPI resolution is a pre-dispatch acceptance boundary. If edge,
-megapixel, aspect, or alignment constraints make the requested DPI impossible,
-prompt compilation returns `MINIMUM_DPI_UNACHIEVABLE` before a job, partial,
-asset, or provider request exists. The rejection carries required and
+Minimum-DPI resolution is a pre-dispatch acceptance boundary. When edge,
+megapixel, aspect, or alignment constraints make the requested DPI impossible
+as one native provider raster, but the physical target's aspect is still
+provider-representable, `ResolveMinimumDpi` returns a
+`LayoutPrintUpscalePlan`: the largest provider-compatible native raster plus
+the exact print raster (`widthInches × dpi`, ceil). With `Images:PrintUpscale`
+enabled (the default), prompt compilation dispatches the native raster and
+records the plan in the target geometry before any provider request;
+after a successful completion `AgentProjectImageWorkflow` derives a separate
+unattached print asset through `IProjectImageService.ResampleForPrintAsync`
+using deterministic separable Lanczos3 sampling that adds no visual detail
+(`print-resample` provenance with source/target rasters, source/target
+effective DPI, and `AddsNewDetail: false`). Results flag
+`PRINT_DPI_UPSAMPLED`, carry both native and print rasters and DPIs, and
+assistants place the print-resampled derivative. Only a target whose aspect no
+provider raster can represent, or whose print raster exceeds the generous
+print sanity guards, fails with `MINIMUM_DPI_UNACHIEVABLE` before a job,
+partial, asset, or provider request exists; that rejection carries required and
 maximum-compatible rasters, maximum achievable DPI, binding provider limits,
-target identity, and the deterministic smallest equal-panel split of at most 64 images
-when one is available. `surfaceBounds` may bind a panel to a verified Designed
+target identity, and the deterministic smallest equal-panel split of at most 64
+images when one is available. Disabling `Images:PrintUpscale` restores the
+reject-with-panels behavior for every target. `surfaceBounds` may bind a panel
+to a verified Designed
 Page, Core-cover, or release-cover surface subregion; its physical dimensions,
 transformed protected regions, and bounds participate in the geometry
 fingerprint. It is not valid for semantic Project Pages, Figures, or existing
@@ -129,7 +145,10 @@ was requested, provenance and assistant results also carry the physical basis,
 requested minimum, `effectiveDpi`, `minimumDpiMet`, and every warning code. An
 unexpected undersized provider result remains an unattached asset with
 `MINIMUM_DPI_NOT_MET`; it is not publication-compliant and must not be placed as
-though it were. Placement validation remains the final DPI diagnostic owner.
+though it were. Under a print-upscale plan this warning describes the native
+asset only; the derived print-resampled asset is the publication candidate, and
+its provenance records the native source DPI honestly.
+Placement validation remains the final DPI diagnostic owner.
 The provider-output byte boundary is separately configurable and defaults to
 64 MiB.
 
@@ -353,6 +372,7 @@ composition, Core/release fingerprints, and artifact freshness.
 | `Lorekeeper/Images/AgentProjectImageWorkflow.cs` | Assistant generation/edit boundary, terminal-state waiting, reconnectable jobs, target diagnostics, and unattached output semantics. |
 | `Lorekeeper/Images/ImagePromptComposer.cs` / `ProjectImageDefaultRasterResolver.cs` | Structured generation/edit briefs, reference labels, reserved regions, spatial guidance, rendered-text policy, and the shared Core Book page raster default. |
 | `Lorekeeper/Images/ProjectImageRegionalGuide.cs` / `ProjectImageBinary.cs` | Soft-guide prompt discipline, source-aspect output resolution, transient same-size PNG normalization, and binary-alpha mask validation. |
+| `Lorekeeper/Images/ProjectImageResampler.cs` | Deterministic separable Lanczos3 print resampling used by the print-upscale pipeline. |
 | `Lorekeeper/Components/Pages/Projects/Images/ImagesContent.razor` / `ImagesContent.razor.js` | Manual image-library and job interaction, including the visible regional-guide canvas and binary-alpha mask export. |
 | `Lorekeeper/EntityVisuals/` | Canonical entity-image associations, visual context, bounded reference reads, and provenance. |
 | `Lorekeeper/Composition/CompositionService.cs` | Revision-aware Designed Page aggregates, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |

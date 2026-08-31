@@ -20,10 +20,17 @@ public sealed record LayoutImageDpiResolution(
     double MaximumAchievableDpi,
     LayoutImageSize? MaximumRaster,
     IReadOnlyList<string> BindingProviderLimits,
-    IReadOnlyList<LayoutImagePanelSuggestion> PanelSuggestions)
+    IReadOnlyList<LayoutImagePanelSuggestion> PanelSuggestions,
+    LayoutPrintUpscalePlan? PrintUpscalePlan = null)
 {
     public bool MeetsMinimumDpi => Raster is not null;
 }
+
+public sealed record LayoutPrintUpscalePlan(
+    LayoutImageSize NativeRaster,
+    double NativeEffectiveDpi,
+    LayoutImageSize PrintRaster,
+    double TargetDpi);
 
 public sealed record LayoutImagePanelSuggestion(
     int Rows,
@@ -58,6 +65,9 @@ public static class LayoutImageSizeResolver
     public const double PreferredAspectError = .001d;
     private const double ExactAspectError = 1e-10;
     private const int MaximumSuggestedPanels = 64;
+
+    public const int PrintMaximumEdge = 12_000;
+    public const long PrintMaximumPixels = 120_000_000;
 
     public static LayoutImageSize Resolve(double width, double height)
     {
@@ -198,6 +208,44 @@ public static class LayoutImageSizeResolver
         return Math.Min(raster.Width / widthInches, raster.Height / heightInches);
     }
 
+    public static LayoutImageSize ResolvePrintRaster(double widthInches, double heightInches, double dpi)
+    {
+        ValidatePhysicalDimensions(widthInches, heightInches);
+        ValidateMinimumDpi(dpi);
+        var width = CeilPositiveFinite(widthInches * dpi);
+        var height = CeilPositiveFinite(heightInches * dpi);
+        ValidatePrintRaster(width, height);
+        return new LayoutImageSize(width, height);
+    }
+
+    public static void ValidatePrintRaster(int width, int height)
+    {
+        if (width <= 0 || height <= 0)
+            throw new ArgumentException("Print raster dimensions must be positive.", nameof(width));
+        if (width > PrintMaximumEdge || height > PrintMaximumEdge)
+            throw new ArgumentException($"Print raster edges cannot exceed {PrintMaximumEdge:N0} pixels.", nameof(width));
+        if ((long)width * height > PrintMaximumPixels)
+            throw new ArgumentException($"Print raster cannot exceed {PrintMaximumPixels:N0} pixels.", nameof(width));
+    }
+
+    public static LayoutPrintUpscalePlan CreatePrintUpscalePlan(
+        double widthInches,
+        double heightInches,
+        double dpi,
+        LayoutImageSize nativeRaster,
+        double nativeEffectiveDpi) => new(
+        nativeRaster,
+        nativeEffectiveDpi,
+        ResolvePrintRaster(widthInches, heightInches, dpi),
+        dpi);
+
+    private static int CeilPositiveFinite(double value)
+    {
+        if (!double.IsFinite(value) || value <= 0 || value > int.MaxValue)
+            throw new ArgumentException("Derived raster dimension must be a finite positive pixel value.");
+        return (int)Math.Ceiling(value);
+    }
+
     public static IReadOnlyList<LayoutImagePanelSuggestion> MapPanelSuggestions(
         IReadOnlyList<LayoutImagePanelSuggestion> suggestions,
         double xPercent,
@@ -296,6 +344,23 @@ public static class LayoutImageSizeResolver
             .Select(candidate => candidate.Size)
             .FirstOrDefault();
         var bindingProviderLimits = ResolveBindingProviderLimits(aspect, requiredRaster, raster, maximum);
+        LayoutPrintUpscalePlan? printUpscalePlan = null;
+        if (raster is null && maximum is not null)
+        {
+            try
+            {
+                printUpscalePlan = CreatePrintUpscalePlan(
+                    widthInches,
+                    heightInches,
+                    minimumDpi,
+                    maximum.Size,
+                    maximum.EffectiveDpi);
+            }
+            catch (ArgumentException)
+            {
+                printUpscalePlan = null;
+            }
+        }
         return new LayoutImageDpiResolution(
             widthInches,
             heightInches,
@@ -305,7 +370,8 @@ public static class LayoutImageSizeResolver
             maximum?.EffectiveDpi ?? 0,
             maximum?.Size,
             bindingProviderLimits,
-            []);
+            [],
+            printUpscalePlan);
     }
 
     private static IReadOnlyList<string> ResolveBindingProviderLimits(

@@ -520,6 +520,34 @@ else
         await ReloadAsync();
     }
 
+    private static (int Width, int Height, double TargetDpi)? ReadPrintUpscalePlan(string? geometryJson)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(geometryJson ?? string.Empty);
+            var root = document.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !root.TryGetProperty("printUpscalePlan", out var plan)
+                || plan.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                return null;
+            }
+            if (!plan.TryGetProperty("printRaster", out var raster) || raster.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !raster.TryGetProperty("width", out var widthElement) || !widthElement.TryGetInt32(out var width)
+                || !raster.TryGetProperty("height", out var heightElement) || !heightElement.TryGetInt32(out var height)
+                || !plan.TryGetProperty("targetDpi", out var dpiElement) || !dpiElement.TryGetDouble(out var targetDpi)
+                || width <= 0 || height <= 0 || targetDpi <= 0)
+            {
+                return null;
+            }
+            return (width, height, targetDpi);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
@@ -668,7 +696,10 @@ else
                 ReferenceManifestJson: compiled.ReferenceManifestJson,
                 TargetGeometryJson: compiled.TargetGeometryJson));
             await ImageRuntime.EnqueueProjectAsync(Project.Id);
-            _status = "Image job queued.";
+            var printPlan = ReadPrintUpscalePlan(compiled.TargetGeometryJson);
+            _status = printPlan is { } queuedPlan
+                ? $"Image job queued at the largest provider-compatible raster; the finished image is resampled to {queuedPlan.Width}x{queuedPlan.Height} for the {queuedPlan.TargetDpi:0} DPI print target when generated through the image assistant."
+                : "Image job queued.";
             await ReloadAsync();
         }
         catch (MinimumDpiUnachievableException ex)

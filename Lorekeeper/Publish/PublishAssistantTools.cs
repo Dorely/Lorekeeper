@@ -11,6 +11,7 @@ using Lorekeeper.Composition;
 using Lorekeeper.Search;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Options;
 using SkiaSharp;
 
 namespace Lorekeeper.Publish;
@@ -103,7 +104,8 @@ public sealed class PublishAssistantTools(
     ICompositionService? compositions = null,
     IAgentProjectImageWorkflow? imageWorkflow = null,
     IProjectSearchService? projectSearch = null,
-    IReferenceVisualService? referenceVisuals = null) : IPublishAssistantTools
+    IReferenceVisualService? referenceVisuals = null,
+    IOptions<ProjectImageGenerationOptions>? imageOptions = null) : IPublishAssistantTools
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -1493,10 +1495,11 @@ public sealed class PublishAssistantTools(
             targetAspect = result.TargetAspect,
             requestedRaster = result.RequestedRaster,
             outputImageIds = result.Images.Select(image => image.Id),
+            printImageIds = result.Outputs.Where(output => output.PrintImageId is not null).Select(output => output.PrintImageId!.Value),
             requestedMinimumDpi = result.RequestedMinimumDpi,
             minimumDpiMet = result.MinimumDpiMet,
             warningCodes = result.WarningCodes ?? [],
-            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.RasterMatched, output.AspectMatched, effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null, requestedMinimumDpi = output.RequestedMinimumDpi, minimumDpiMet = output.MinimumDpiMet, warningCodes = output.WarningCodes ?? [], output.Image.PreviewUrl }),
+            images = result.Outputs.Select(output => new { output.Image.Id, output.Image.FileName, output.Image.ContentType, output.Width, output.Height, output.ActualRaster, output.RasterMatched, output.AspectMatched, effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null, requestedMinimumDpi = output.RequestedMinimumDpi, minimumDpiMet = output.MinimumDpiMet, warningCodes = output.WarningCodes ?? [], printImageId = output.PrintImageId, printRaster = output.PrintRaster, printEffectiveDpi = output.PrintEffectiveDpi is { } printDpi ? (double?)Math.Round(printDpi, 1) : null, output.Image.PreviewUrl }),
             attached = false,
             diagnosticCounts = new { errors = result.Diagnostics.Count, warnings = result.Outputs.Count(output => !output.RasterMatched || !output.AspectMatched || output.MinimumDpiMet == false) },
             diagnostics = result.Diagnostics.Take(3),
@@ -1563,15 +1566,35 @@ public sealed class PublishAssistantTools(
             recovery = MinimumDpiRecovery(exception.TargetKind),
         });
 
-    private static string SerializeMinimumDpiPreflight(
+    private string SerializeMinimumDpiPreflight(
         LayoutImageDpiResolution resolution,
         string targetKind,
         Guid targetId,
         Guid? editionId,
         Guid? variantId,
         CompositionBounds? surfaceBounds,
-        string? regionRole = null) =>
-        Serialize(new
+        string? regionRole = null)
+    {
+        if (resolution.PrintUpscalePlan is { } upscalePlan
+            && imageOptions?.Value.PrintUpscale is not false)
+        {
+            return Serialize(new
+            {
+                ok = true,
+                printUpscalePlan = new
+                {
+                    nativeRaster = RasterPayload(upscalePlan.NativeRaster),
+                    nativeEffectiveDpi = Math.Round(upscalePlan.NativeEffectiveDpi, 1),
+                    printRaster = RasterPayload(upscalePlan.PrintRaster),
+                    targetDpi = upscalePlan.TargetDpi,
+                },
+                physicalDimensions = new { widthInches = resolution.WidthInches, heightInches = resolution.HeightInches },
+                requestedMinimumDpi = resolution.MinimumDpi,
+                target = new { targetKind, targetId, editionId, variantId, regionRole, surfaceBounds },
+                summary = $"The {upscalePlan.TargetDpi:0}-DPI physical target ({resolution.WidthInches:0.####} x {resolution.HeightInches:0.####} inches) exceeds one provider image. Generation proceeds at {upscalePlan.NativeRaster.Size} (about {upscalePlan.NativeEffectiveDpi:0.#} DPI native) and Lorekeeper resamples the finished image to {upscalePlan.PrintRaster.Size}. Proceed with the normal generate tool; place the returned print-resampled image ID.",
+            });
+        }
+        return Serialize(new
         {
             ok = false,
             code = MinimumDpiUnachievableException.Code,
@@ -1592,6 +1615,7 @@ public sealed class PublishAssistantTools(
             summary = $"The 300-DPI layout target cannot be generated as one provider-compatible image ({resolution.WidthInches:0.####} x {resolution.HeightInches:0.####} inches). No image provider request was dispatched.",
             recovery = MinimumDpiRecovery(targetKind),
         });
+    }
 
     private static IReadOnlyList<LayoutImagePanelSuggestion> SurfacePanelSuggestions(
         IReadOnlyList<LayoutImagePanelSuggestion> suggestions,

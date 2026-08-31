@@ -48,6 +48,13 @@ public sealed record ProjectImageResizeRequest(
     string FileName,
     string AltText);
 
+public sealed record ProjectImagePrintResampleRequest(
+    int Width,
+    int Height,
+    double WidthInches,
+    double HeightInches,
+    double TargetDpi);
+
 public sealed record ProjectImageCropSaved(
     ProjectImageView Image,
     IReadOnlyList<EntityVisualTarget> EntityTargets);

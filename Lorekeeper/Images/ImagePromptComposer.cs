@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using Lorekeeper.Composition;
 using Lorekeeper.Models;
 using Lorekeeper.Publish;
+using Microsoft.Extensions.Options;
 
 namespace Lorekeeper.Images;
 
@@ -195,7 +196,8 @@ public interface IImagePromptComposer
 public sealed class ImagePromptComposer(
     ICompositionService compositions,
     IProjectImageService images,
-    IProjectImageDefaultRasterResolver defaultRasters) : IImagePromptComposer
+    IProjectImageDefaultRasterResolver defaultRasters,
+    IOptions<ProjectImageGenerationOptions> options) : IImagePromptComposer
 {
     private const double AspectTolerance = 0.025d;
     private const string PurposefulSpaceInstruction = "Unless the brief explicitly calls for a sparse, minimalist, isolated-study, or open-field composition, concentrate quiet negative space only in explicit text-reservation regions. Everywhere else, make each area contribute to subject, setting, atmosphere, depth, scale, motion, focus, or visual flow without adding clutter. Atmospheric open space is purposeful when it clearly establishes mood or scale; avoid large unmotivated blank areas and do not invent a text landing zone where none was requested.";
@@ -466,7 +468,8 @@ public sealed class ImagePromptComposer(
                 descriptor.AspectRatio,
                 appendix,
                 JsonSerializer.Serialize(descriptor, JsonOptions),
-                descriptor.RequestedMinimumDpi);
+                descriptor.RequestedMinimumDpi,
+                descriptor.PrintUpscalePlan);
         }
 
         var requestedSize = Clean(target?.Size);
@@ -485,8 +488,14 @@ public sealed class ImagePromptComposer(
                 physicalBasis.WidthInches,
                 physicalBasis.HeightInches,
                 minimumDpi);
+            LayoutPrintUpscalePlan? printUpscalePlan = null;
             if (resolution.Raster is not { } minimumRaster)
-                throw CreateMinimumDpiException(resolution, null, target);
+            {
+                if (resolution.PrintUpscalePlan is not { } resolutionPlan || !options.Value.PrintUpscale)
+                    throw CreateMinimumDpiException(resolution, null, target);
+                minimumRaster = resolutionPlan.NativeRaster;
+                printUpscalePlan = resolutionPlan;
+            }
             var minimumAspectLabel = AspectLabel(physicalBasis.WidthInches, physicalBasis.HeightInches);
             return new(
                 minimumRaster.Size,
@@ -504,8 +513,10 @@ public sealed class ImagePromptComposer(
                     RequestedAspectRatio = requestedAspect.Length > 0 ? requestedAspect : null,
                     target.ReservedTextRegions,
                     MinimumDpi = minimumDpi,
+                    PrintUpscalePlan = printUpscalePlan,
                 }, JsonOptions),
-                minimumDpi);
+                minimumDpi,
+                printUpscalePlan);
         }
 
         var resolvedSize = await ResolveExplicitSizeAsync(
@@ -578,7 +589,7 @@ public sealed class ImagePromptComposer(
         };
     }
 
-    private static LayoutGenerationTargetDescriptor ApplyMinimumDpi(
+    private LayoutGenerationTargetDescriptor ApplyMinimumDpi(
         LayoutGenerationTargetDescriptor descriptor,
         ImageGenerationTarget target,
         string? requestedSize)
@@ -598,27 +609,79 @@ public sealed class ImagePromptComposer(
                 new LayoutImageSize(requested.Width, requested.Height),
                 descriptor.WidthInches,
                 descriptor.HeightInches);
-            if (requestedDpi + 1e-9 < minimumDpi)
-                throw CreateMinimumDpiException(resolution, normalizedSize, target);
+            if (requestedDpi + 1e-9 >= minimumDpi)
+            {
+                return descriptor with
+                {
+                    EffectiveDpiExpectation = Math.Max(descriptor.EffectiveDpiExpectation, minimumDpi),
+                    RequestedMinimumDpi = minimumDpi,
+                };
+            }
 
+            var requestedPlan = TryCreatePrintUpscalePlan(
+                resolution,
+                new LayoutImageSize(requested.Width, requested.Height),
+                requestedDpi);
+            if (requestedPlan is not null)
+            {
+                return descriptor with
+                {
+                    EffectiveDpiExpectation = Math.Max(descriptor.EffectiveDpiExpectation, minimumDpi),
+                    RequestedMinimumDpi = minimumDpi,
+                    PrintUpscalePlan = requestedPlan,
+                };
+            }
+            throw CreateMinimumDpiException(resolution, normalizedSize, target);
+        }
+
+        if (resolution.Raster is { } raster)
+        {
             return descriptor with
             {
+                RequestedWidthPixels = raster.Width,
+                RequestedHeightPixels = raster.Height,
+                RequestedRaster = raster.Size,
                 EffectiveDpiExpectation = Math.Max(descriptor.EffectiveDpiExpectation, minimumDpi),
                 RequestedMinimumDpi = minimumDpi,
             };
         }
 
-        if (resolution.Raster is not { } raster)
-            throw CreateMinimumDpiException(resolution, null, target);
-
-        return descriptor with
+        if (resolution.PrintUpscalePlan is { } plan && options.Value.PrintUpscale)
         {
-            RequestedWidthPixels = raster.Width,
-            RequestedHeightPixels = raster.Height,
-            RequestedRaster = raster.Size,
-            EffectiveDpiExpectation = Math.Max(descriptor.EffectiveDpiExpectation, minimumDpi),
-            RequestedMinimumDpi = minimumDpi,
-        };
+            return descriptor with
+            {
+                RequestedWidthPixels = plan.NativeRaster.Width,
+                RequestedHeightPixels = plan.NativeRaster.Height,
+                RequestedRaster = plan.NativeRaster.Size,
+                EffectiveDpiExpectation = Math.Max(descriptor.EffectiveDpiExpectation, minimumDpi),
+                RequestedMinimumDpi = minimumDpi,
+                PrintUpscalePlan = plan,
+            };
+        }
+
+        throw CreateMinimumDpiException(resolution, null, target);
+    }
+
+    private LayoutPrintUpscalePlan? TryCreatePrintUpscalePlan(
+        LayoutImageDpiResolution resolution,
+        LayoutImageSize nativeRaster,
+        double nativeEffectiveDpi)
+    {
+        if (!options.Value.PrintUpscale)
+            return null;
+        try
+        {
+            return LayoutImageSizeResolver.CreatePrintUpscalePlan(
+                resolution.WidthInches,
+                resolution.HeightInches,
+                resolution.MinimumDpi,
+                nativeRaster,
+                nativeEffectiveDpi);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 
     private static MinimumDpiUnachievableException CreateMinimumDpiException(
@@ -634,7 +697,7 @@ public sealed class ImagePromptComposer(
             target.VariantId,
             target.SurfaceBounds);
 
-    private static void RejectUnachievableSurfaceBounds(
+    private void RejectUnachievableSurfaceBounds(
         LayoutGenerationTargetDescriptor surface,
         CompositionBounds bounds,
         int minimumDpi,
@@ -644,8 +707,11 @@ public sealed class ImagePromptComposer(
         var widthInches = surface.WidthInches * bounds.WidthPercent / 100;
         var heightInches = surface.HeightInches * bounds.HeightPercent / 100;
         var resolution = LayoutImageSizeResolver.ResolveMinimumDpi(widthInches, heightInches, minimumDpi);
-        if (!resolution.MeetsMinimumDpi)
-            throw CreateMinimumDpiException(resolution, null, target);
+        if (resolution.MeetsMinimumDpi)
+            return;
+        if (resolution.PrintUpscalePlan is not null && options.Value.PrintUpscale)
+            return;
+        throw CreateMinimumDpiException(resolution, null, target);
     }
 
     private static void ValidateTargetRequest(ImageGenerationTarget? target)
@@ -856,9 +922,22 @@ public sealed class ImagePromptComposer(
             .Append(". Aspect ratio: ").Append(target.AspectRatio).Append('.');
         if (target.MinimumDpi is { } minimumDpi)
         {
-            targetText.Append(" Minimum effective DPI: ")
-                .Append(minimumDpi.ToString("0.##", CultureInfo.InvariantCulture))
-                .Append("; treat this as a hard output requirement and do not report success unless the returned actual raster meets it.");
+            if (target.PrintUpscalePlan is { } plan)
+            {
+                targetText.Append(" Final placement DPI: ")
+                    .Append(minimumDpi.ToString("0.##", CultureInfo.InvariantCulture))
+                    .Append("; this request raster ")
+                    .Append(plan.NativeRaster.Size)
+                    .Append(" is the largest provider-compatible raster for the target, and Lorekeeper resamples the finished image to ")
+                    .Append(plan.PrintRaster.Size)
+                    .Append(" for the physical print target afterward. Produce the requested raster at full quality without cropping, borders, or simulated resolution.");
+            }
+            else
+            {
+                targetText.Append(" Minimum effective DPI: ")
+                    .Append(minimumDpi.ToString("0.##", CultureInfo.InvariantCulture))
+                    .Append("; treat this as a hard output requirement and do not report success unless the returned actual raster meets it.");
+            }
         }
         if (!string.IsNullOrWhiteSpace(target.PromptAppendix))
             targetText.Append('\n').Append(target.PromptAppendix);
@@ -949,5 +1028,6 @@ public sealed class ImagePromptComposer(
         string AspectRatio,
         string PromptAppendix,
         string GeometryJson,
-        double? MinimumDpi = null);
+        double? MinimumDpi = null,
+        LayoutPrintUpscalePlan? PrintUpscalePlan = null);
 }

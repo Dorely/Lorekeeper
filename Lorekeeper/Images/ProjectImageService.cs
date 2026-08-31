@@ -335,6 +335,102 @@ public sealed class ProjectImageService(
         return ToView(projectId, asset);
     }
 
+    public async Task<ProjectImageView> ResampleForPrintAsync(
+        Guid projectId,
+        Guid sourceImageId,
+        ProjectImagePrintResampleRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        LayoutImageSizeResolver.ValidatePrintRaster(request.Width, request.Height);
+        LayoutImageSizeResolver.ValidatePhysicalDimensions(request.WidthInches, request.HeightInches);
+        LayoutImageSizeResolver.ValidateMinimumDpi(request.TargetDpi);
+        var expected = LayoutImageSizeResolver.ResolvePrintRaster(request.WidthInches, request.HeightInches, request.TargetDpi);
+        if (expected.Width != request.Width || expected.Height != request.Height)
+            throw new InvalidOperationException(
+                $"The requested print raster {request.Width}x{request.Height} does not match the physical target "
+                + $"({request.WidthInches:0.####} x {request.HeightInches:0.####} inches at {request.TargetDpi:0.##} DPI = {expected.Size}).");
+
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var project = await GetProjectAsync(projectId, cancellationToken);
+        var source = await db.PublishAssets
+            .AsNoTracking()
+            .FirstOrDefaultAsync(asset => asset.ProjectId == projectId && asset.Id == sourceImageId, cancellationToken)
+            ?? throw new InvalidOperationException("Source image was not found in this project.");
+
+        using var sourceBitmap = SKBitmap.Decode(source.Data)
+            ?? throw new InvalidOperationException("Source image data could not be decoded.");
+        if (sourceBitmap.Width <= 0 || sourceBitmap.Height <= 0)
+            throw new InvalidOperationException("Source image dimensions are invalid.");
+        if (sourceBitmap.Width == request.Width && sourceBitmap.Height == request.Height)
+            throw new InvalidOperationException("The source image already has the print raster; no derived image was created.");
+
+        foreach (var derived in await db.PublishAssets
+                     .AsNoTracking()
+                     .Where(asset => asset.ProjectId == projectId
+                         && asset.DerivedFromImageId == sourceImageId
+                         && asset.Source == PublishAssetSource.Resized)
+                     .ToListAsync(cancellationToken))
+        {
+            using var derivedBitmap = SKBitmap.Decode(derived.Data);
+            if (derivedBitmap is { Width: var width, Height: var height } && width == request.Width && height == request.Height)
+                return ToView(projectId, derived);
+        }
+
+        var fileName = PrintResampleFileName(source.FileName);
+        var data = ProjectImageResampler.ResampleExact(source.Data, request.Width, request.Height);
+        var normalized = ProjectImageBinary.Normalize(
+            data,
+            "image/png",
+            fileName,
+            Math.Max(ProjectImageBinary.DefaultMaxBytes, imageOptions.Value.MaxProviderOutputBytes));
+        var now = DateTime.UtcNow;
+        var asset = new PublishAsset
+        {
+            ProjectId = projectId,
+            Source = PublishAssetSource.Resized,
+            FileName = normalized.FileName,
+            ContentType = normalized.ContentType,
+            Data = normalized.Data,
+            AltText = source.AltText,
+            Prompt = string.Empty,
+            GenerationModel = string.Empty,
+            SourceMetadataJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                Transform = new
+                {
+                    Kind = "print-resample",
+                    SourceImageId = source.Id,
+                    SourceRaster = $"{sourceBitmap.Width}x{sourceBitmap.Height}",
+                    TargetRaster = $"{normalized.Width}x{normalized.Height}",
+                    WidthInches = request.WidthInches,
+                    HeightInches = request.HeightInches,
+                    SourceEffectiveDpi = Math.Min(sourceBitmap.Width / request.WidthInches, sourceBitmap.Height / request.HeightInches),
+                    TargetEffectiveDpi = Math.Min(normalized.Width / request.WidthInches, normalized.Height / request.HeightInches),
+                    Interpolation = ProjectImageResampler.Lanczos3Interpolation,
+                    AddsNewDetail = false,
+                    PlannedBy = "print-upscale-pipeline",
+                },
+                RasterStorage = new
+                {
+                    normalized.ContentType,
+                    normalized.Width,
+                    normalized.Height,
+                    LayoutTransform = "none",
+                },
+            }),
+            DerivedFromImageId = source.Id,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+
+        await db.PublishAssets.AddAsync(asset, cancellationToken);
+        project.UpdatedAt = now;
+        await db.SaveChangesAsync(cancellationToken);
+        return ToView(projectId, asset);
+    }
+
     public async Task<ProjectImageView> GenerateAsync(
         Guid projectId,
         ProjectImageGenerationRequest request,
@@ -685,6 +781,13 @@ public sealed class ProjectImageService(
         var sourceStem = Path.GetFileNameWithoutExtension(sourceFileName);
         if (string.IsNullOrWhiteSpace(sourceStem)) sourceStem = "image";
         return $"{sourceStem}-resized.png";
+    }
+
+    private static string PrintResampleFileName(string sourceFileName)
+    {
+        var sourceStem = Path.GetFileNameWithoutExtension(sourceFileName);
+        if (string.IsNullOrWhiteSpace(sourceStem)) sourceStem = "image";
+        return $"{sourceStem}-print.png";
     }
 
     private static string Clean(string? value) => value?.Trim() ?? string.Empty;

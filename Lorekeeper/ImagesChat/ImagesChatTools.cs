@@ -738,6 +738,17 @@ public sealed class ImagesChatTools(
             var visual = await BuildVisualAsync(ctx, image, image.FileName, caption);
             ctx.AddVisual(visual);
             ctx.AddModelOnlyImage(image);
+            if (output.PrintImageId is { } printImageId
+                && await projectImages.GetAsync(ctx.ProjectId, printImageId, ctx.TurnCancellationToken) is { } printImage)
+            {
+                var printVisual = await BuildVisualAsync(
+                    ctx,
+                    printImage,
+                    printImage.FileName,
+                    "Print-resampled derivative for the physical print target; place this image ID.");
+                ctx.AddVisual(printVisual);
+                ctx.AddModelOnlyImage(printImage);
+            }
             outputs.Add(ImageOutputPayload(output));
         }
         if (result.Images.Count > 0)
@@ -856,6 +867,9 @@ public sealed class ImagesChatTools(
         output.RasterMatched,
         output.AspectMatched,
         effectiveDpi = output.EffectiveDpi is { } dpi ? (double?)Math.Round(dpi, 1) : null,
+        printImageId = output.PrintImageId,
+        printRaster = output.PrintRaster,
+        printEffectiveDpi = output.PrintEffectiveDpi is { } printDpi ? (double?)Math.Round(printDpi, 1) : null,
         requestedMinimumDpi = output.RequestedMinimumDpi,
         minimumDpiMet = output.MinimumDpiMet,
         warningCodes = output.WarningCodes ?? [],

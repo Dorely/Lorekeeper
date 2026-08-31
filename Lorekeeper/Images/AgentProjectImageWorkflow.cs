@@ -78,7 +78,10 @@ public sealed record AgentProjectImageOutput(
     double? EffectiveDpi,
     double? RequestedMinimumDpi = null,
     bool? MinimumDpiMet = null,
-    IReadOnlyList<string>? WarningCodes = null);
+    IReadOnlyList<string>? WarningCodes = null,
+    Guid? PrintImageId = null,
+    string? PrintRaster = null,
+    double? PrintEffectiveDpi = null);
 
 public sealed class AgentProjectImageWorkflow(
     IImagePromptComposer prompts,
@@ -240,6 +243,11 @@ public sealed class AgentProjectImageWorkflow(
         var hasRequestedRaster = LayoutImageSizeResolver.TryParse(job.Size, out var requested);
         if (geometry is not null && !hasRequestedRaster)
             throw new InvalidDataException("Layout-bound image jobs require an explicit requested raster.");
+        var providerSucceeded = !timedOut && job.Status is ProjectImageGenerationJobStatus.Succeeded
+            or ProjectImageGenerationJobStatus.CompletedWithErrors;
+        var printUpscale = geometry is { HasPrintUpscalePlan: true }
+            ? (PrintWidth: geometry.PrintWidth!.Value, PrintHeight: geometry.PrintHeight!.Value, TargetDpi: geometry.PrintTargetDpi!.Value)
+            : ((int PrintWidth, int PrintHeight, double TargetDpi)?)null;
         var outputImages = new List<AgentProjectImageOutput>();
         var warningCodes = new HashSet<string>(StringComparer.Ordinal);
         foreach (var imageId in job.OutputImageIds)
@@ -269,8 +277,12 @@ public sealed class AgentProjectImageWorkflow(
                     outputWarnings.Add("LAYOUT_IMAGE_ASPECT_MISMATCH");
                 var outputMinimumDpiMet = geometry?.MinimumDpi is not { } minimumDpi
                     ? (bool?)null
-                    : effectiveDpi is { } actualDpi && actualDpi + 1e-9 >= minimumDpi;
-                if (outputMinimumDpiMet == false)
+                    : printUpscale is not null
+                        ? true
+                        : effectiveDpi is { } actualDpi && actualDpi + 1e-9 >= minimumDpi;
+                if (printUpscale is not null)
+                    outputWarnings.Add("PRINT_DPI_UPSAMPLED");
+                else if (outputMinimumDpiMet == false)
                     outputWarnings.Add("MINIMUM_DPI_NOT_MET");
                 foreach (var warningCode in outputWarnings)
                     warningCodes.Add(warningCode);
@@ -288,8 +300,29 @@ public sealed class AgentProjectImageWorkflow(
             }
         }
 
-        var providerSucceeded = !timedOut && job.Status is ProjectImageGenerationJobStatus.Succeeded
-            or ProjectImageGenerationJobStatus.CompletedWithErrors;
+        if (printUpscale is { } plan && providerSucceeded
+            && outputImages.Count > 0
+            && geometry is { WidthInches: > 0, HeightInches: > 0 })
+        {
+            var printRequest = new ProjectImagePrintResampleRequest(
+                plan.PrintWidth,
+                plan.PrintHeight,
+                geometry.WidthInches,
+                geometry.HeightInches,
+                plan.TargetDpi);
+            for (var index = 0; index < outputImages.Count; index++)
+            {
+                var existingOutput = outputImages[index];
+                var printView = await images.ResampleForPrintAsync(projectId, existingOutput.Image.Id, printRequest, cancellationToken);
+                outputImages[index] = existingOutput with
+                {
+                    PrintImageId = printView.Id,
+                    PrintRaster = $"{plan.PrintWidth}x{plan.PrintHeight}",
+                    PrintEffectiveDpi = Math.Min(plan.PrintWidth / geometry.WidthInches, plan.PrintHeight / geometry.HeightInches),
+                };
+            }
+        }
+
         var minimumDpiMet = geometry?.MinimumDpi is null || outputImages.Count == 0
             ? (bool?)null
             : outputImages.All(output => output.MinimumDpiMet == true);
@@ -303,6 +336,8 @@ public sealed class AgentProjectImageWorkflow(
             ? "Image generation exceeded the configured lifetime and was cancelled; no image was placed."
             : providerSucceeded && minimumDpiMet == false
                 ? "The provider output was retained as an unattached image, but it did not meet the requested minimum DPI and is not publication-compliant."
+            : succeeded && printUpscale is { } appliedPlan
+                ? $"{outputImages.Count} unattached project image(s) completed and were resampled to {appliedPlan.PrintWidth}x{appliedPlan.PrintHeight} for the {appliedPlan.TargetDpi:0} DPI physical print target from the provider's largest compatible raster. Place the print-resampled image ID, not the native one."
             : succeeded
                 ? $"{outputImages.Count} unattached project image(s) completed. Inspect an image, then place its ID with a separate tool."
                 : job.Status == ProjectImageGenerationJobStatus.Cancelled
@@ -404,7 +439,31 @@ public sealed class AgentProjectImageWorkflow(
                     && layoutValue.GetBoolean();
             var minimumDpi = TryReadPositiveDouble(root, "minimumDpi")
                 ?? TryReadPositiveDouble(root, "requestedMinimumDpi");
-            return new LayoutGeometry(widthInches, heightInches, aspect, layoutBound, minimumDpi);
+            int? printWidth = null;
+            int? printHeight = null;
+            double? printTargetDpi = null;
+            if (root.TryGetProperty("printUpscalePlan", out var plan)
+                && plan.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                printWidth = TryReadNestedPositiveInt(plan, "printRaster", "width");
+                printHeight = TryReadNestedPositiveInt(plan, "printRaster", "height");
+                printTargetDpi = TryReadPositiveDouble(plan, "targetDpi");
+                if (printWidth is null || printHeight is null || printTargetDpi is null)
+                {
+                    printWidth = null;
+                    printHeight = null;
+                    printTargetDpi = null;
+                }
+            }
+            return new LayoutGeometry(
+                widthInches,
+                heightInches,
+                aspect,
+                layoutBound,
+                minimumDpi,
+                printWidth,
+                printHeight,
+                printTargetDpi);
         }
         catch (System.Text.Json.JsonException)
         {
@@ -419,6 +478,22 @@ public sealed class AgentProjectImageWorkflow(
             && parsed > 0
                 ? parsed
                 : null;
+
+    private static int? TryReadNestedPositiveInt(
+        System.Text.Json.JsonElement root,
+        string objectName,
+        string propertyName)
+    {
+        if (!root.TryGetProperty(objectName, out var nested)
+            || nested.ValueKind != System.Text.Json.JsonValueKind.Object
+            || !nested.TryGetProperty(propertyName, out var value)
+            || !value.TryGetInt32(out var parsed)
+            || parsed <= 0)
+        {
+            return null;
+        }
+        return parsed;
+    }
 
     private static string AspectLabel(int width, int height)
     {
@@ -438,5 +513,13 @@ public sealed class AgentProjectImageWorkflow(
         double HeightInches,
         string AspectRatio,
         bool LayoutBound,
-        double? MinimumDpi);
+        double? MinimumDpi,
+        int? PrintWidth = null,
+        int? PrintHeight = null,
+        double? PrintTargetDpi = null)
+    {
+        public bool HasPrintUpscalePlan => PrintWidth is not null
+            && PrintHeight is not null
+            && PrintTargetDpi is not null;
+    }
 }

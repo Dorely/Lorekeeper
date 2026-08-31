@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Lorekeeper.Composition;
 using Lorekeeper.Manuscripts;
 
 namespace Lorekeeper.Models;
@@ -227,7 +228,8 @@ public sealed record LayoutGenerationTargetDescriptor(
     IReadOnlyList<LayoutGenerationRegionDescriptor> Regions,
     IReadOnlyList<string> Diagnostics,
     CompositionBounds? SurfaceBounds = null,
-    double? RequestedMinimumDpi = null);
+    double? RequestedMinimumDpi = null,
+    LayoutPrintUpscalePlan? PrintUpscalePlan = null);
 
 public sealed record LayoutValidationDiagnostic(string Severity, string Code, string Message, Guid? ObjectId = null);
 

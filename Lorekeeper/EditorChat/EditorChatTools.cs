@@ -2604,6 +2604,17 @@ IActService acts,
             var visual = await BuildVisualAsync(ctx, image, image.FileName, caption);
             ctx.AddVisual(visual);
             ctx.AddModelOnlyImage(image);
+            if (output.PrintImageId is { } printImageId
+                && await projectImages.GetAsync(ctx.ProjectId, printImageId, ctx.TurnCancellationToken) is { } printImage)
+            {
+                var printVisual = await BuildVisualAsync(
+                    ctx,
+                    printImage,
+                    printImage.FileName,
+                    "Print-resampled derivative for the physical print target; place this image ID.");
+                ctx.AddVisual(printVisual);
+                ctx.AddModelOnlyImage(printImage);
+            }
             payloads.Add(new
             {
                 image.Id,
@@ -2617,6 +2628,9 @@ IActService acts,
                 requestedMinimumDpi = output.RequestedMinimumDpi,
                 minimumDpiMet = output.MinimumDpiMet,
                 warningCodes = output.WarningCodes ?? [],
+                printImageId = output.PrintImageId,
+                printRaster = output.PrintRaster,
+                printEffectiveDpi = output.PrintEffectiveDpi is { } printDpi ? (double?)Math.Round(printDpi, 1) : null,
             });
         }
         if (result.Images.Count > 0)
@@ -2630,6 +2644,7 @@ IActService acts,
             minimumDpiMet = result.MinimumDpiMet,
             warningCodes = result.WarningCodes ?? [],
             outputImageIds = result.Images.Select(image => image.Id),
+            printImageIds = result.Outputs.Where(output => output.PrintImageId is not null).Select(output => output.PrintImageId!.Value),
             images = payloads,
             attached = false,
             diagnosticCounts = new
@@ -2708,14 +2723,34 @@ IActService acts,
             recovery = MinimumDpiRecovery(exception.TargetKind),
         }, ManuscriptCodec.JsonOptions);
 
-    private static string SerializeMinimumDpiPreflight(
+    private string SerializeMinimumDpiPreflight(
         LayoutImageDpiResolution resolution,
         string targetKind,
         Guid targetId,
         Guid? editionId,
         Guid? variantId,
-        CompositionBounds? surfaceBounds) =>
-        JsonSerializer.Serialize(new
+        CompositionBounds? surfaceBounds)
+    {
+        if (resolution.PrintUpscalePlan is { } upscalePlan
+            && imageOptions.Value.PrintUpscale)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                printUpscalePlan = new
+                {
+                    nativeRaster = RasterPayload(upscalePlan.NativeRaster),
+                    nativeEffectiveDpi = Math.Round(upscalePlan.NativeEffectiveDpi, 1),
+                    printRaster = RasterPayload(upscalePlan.PrintRaster),
+                    targetDpi = upscalePlan.TargetDpi,
+                },
+                physicalDimensions = new { widthInches = resolution.WidthInches, heightInches = resolution.HeightInches },
+                requestedMinimumDpi = resolution.MinimumDpi,
+                target = new { targetKind, targetId, editionId, variantId, surfaceBounds },
+                summary = $"The {upscalePlan.TargetDpi:0}-DPI physical target ({resolution.WidthInches:0.####} x {resolution.HeightInches:0.####} inches) exceeds one provider image. Generation proceeds at {upscalePlan.NativeRaster.Size} (about {upscalePlan.NativeEffectiveDpi:0.#} DPI native) and Lorekeeper resamples the finished image to {upscalePlan.PrintRaster.Size}. Proceed with the normal generate tool; place the returned print-resampled image ID.",
+            }, ManuscriptCodec.JsonOptions);
+        }
+        return JsonSerializer.Serialize(new
         {
             ok = false,
             code = MinimumDpiUnachievableException.Code,
@@ -2736,6 +2771,7 @@ IActService acts,
             summary = $"The 300-DPI layout target cannot be generated as one provider-compatible image ({resolution.WidthInches:0.####} x {resolution.HeightInches:0.####} inches). No image provider request was dispatched.",
             recovery = MinimumDpiRecovery(targetKind),
         }, ManuscriptCodec.JsonOptions);
+    }
 
     private static IReadOnlyList<LayoutImagePanelSuggestion> SurfacePanelSuggestions(
         IReadOnlyList<LayoutImagePanelSuggestion> suggestions,

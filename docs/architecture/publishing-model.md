@@ -242,11 +242,15 @@ bounds, physical aspect, safety/guides, participation, and geometry fingerprints
 The assistant can read or preview one region, fill it with a project image, set
 spine direction, and request an exact region generation target. Region-targeted
 generation remains unattached and must resolve a 300-DPI-compatible raster
-without stretching. If one raster cannot satisfy provider limits, the request
-fails before dispatch with a smallest equal-panel plan. Back, Spine, and Front
-are preferred split boundaries; each panel can target exact surface bounds, and
-the assistant must inspect annotated regions plus the clean whole wrap without
-claiming independent generations are seamless.
+without stretching. If one native raster cannot satisfy provider limits but the
+target's aspect is provider-representable, the request proceeds through the
+print-upscale pipeline: generation at the largest compatible raster plus a
+deterministic Lanczos print-resample to the exact print raster. Back, Spine, and
+Front are preferred split boundaries and already resolve natively; when no single
+provider raster can represent a target's aspect, the request fails before
+dispatch with a smallest equal-panel plan, each panel targets exact surface
+bounds, and the assistant must inspect annotated regions plus the clean whole
+wrap without claiming independent generations are seamless.
 
 `read_publication_section` returns section metadata, canvas summaries, and the
 shared `agent-manuscript-v1` projection for its bounded prose blocks. Core or
