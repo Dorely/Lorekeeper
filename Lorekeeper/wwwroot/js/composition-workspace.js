@@ -1,8 +1,165 @@
+const pointerTrackers = new WeakMap();
+
+export function connectPointerTracking(stage, dotNetReference) {
+    if (!stage) {
+        throw new Error("The page canvas is not available.");
+    }
+    disconnectPointerTracking(stage);
+
+    const state = {
+        dotNetReference,
+        activePointerId: null,
+        pendingMove: null,
+        endPointerId: null,
+        invocationInFlight: false,
+        disposed: false,
+        releasedPointerIds: new Set(),
+        startedPointerIds: new Set(),
+    };
+
+    const pump = () => {
+        if (state.disposed || state.invocationInFlight) {
+            return;
+        }
+        if (state.pendingMove) {
+            const move = state.pendingMove;
+            state.pendingMove = null;
+            state.invocationInFlight = true;
+            state.dotNetReference.invokeMethodAsync(
+                "ContinueTrackedTransform",
+                move.pointerId,
+                move.clientX,
+                move.clientY)
+                .catch(() => { })
+                .finally(() => {
+                    state.invocationInFlight = false;
+                    pump();
+                });
+            return;
+        }
+        if (state.endPointerId !== null) {
+            const pointerId = state.endPointerId;
+            state.endPointerId = null;
+            state.invocationInFlight = true;
+            state.dotNetReference.invokeMethodAsync("EndTrackedTransform", pointerId)
+                .catch(() => { })
+                .finally(() => {
+                    state.invocationInFlight = false;
+                    pump();
+                });
+        }
+    };
+
+    const release = pointerId => {
+        try {
+            if (stage.hasPointerCapture(pointerId)) {
+                stage.releasePointerCapture(pointerId);
+            }
+        } catch { }
+    };
+
+    const finish = (event, includeFinalPosition) => {
+        if (state.activePointerId !== event.pointerId) {
+            return;
+        }
+        state.activePointerId = null;
+        if (includeFinalPosition) {
+            state.pendingMove = {
+                pointerId: event.pointerId,
+                clientX: event.clientX,
+                clientY: event.clientY,
+            };
+        }
+        state.endPointerId = event.pointerId;
+        release(event.pointerId);
+        pump();
+    };
+
+    state.onPointerMove = event => {
+        if (state.activePointerId !== event.pointerId) {
+            return;
+        }
+        if (event.buttons === 0) {
+            finish(event, true);
+            return;
+        }
+        state.pendingMove = {
+            pointerId: event.pointerId,
+            clientX: event.clientX,
+            clientY: event.clientY,
+        };
+        pump();
+    };
+    state.onPointerDown = event => {
+        state.releasedPointerIds.delete(event.pointerId);
+        state.startedPointerIds.add(event.pointerId);
+    };
+    state.onPointerUp = event => {
+        if (state.startedPointerIds.delete(event.pointerId)
+            && state.activePointerId !== event.pointerId) {
+            state.releasedPointerIds.add(event.pointerId);
+        }
+        finish(event, true);
+    };
+    state.onPointerCancel = event => {
+        if (state.startedPointerIds.delete(event.pointerId)
+            && state.activePointerId !== event.pointerId) {
+            state.releasedPointerIds.add(event.pointerId);
+        }
+        finish(event, false);
+    };
+    state.onLostPointerCapture = event => finish(event, false);
+
+    stage.addEventListener("pointerdown", state.onPointerDown);
+    stage.addEventListener("pointermove", state.onPointerMove);
+    window.addEventListener("pointerup", state.onPointerUp);
+    window.addEventListener("pointercancel", state.onPointerCancel);
+    stage.addEventListener("lostpointercapture", state.onLostPointerCapture);
+    pointerTrackers.set(stage, state);
+}
+
+export function disconnectPointerTracking(stage) {
+    const state = pointerTrackers.get(stage);
+    if (!state) {
+        return;
+    }
+    state.disposed = true;
+    stage.removeEventListener("pointerdown", state.onPointerDown);
+    stage.removeEventListener("pointermove", state.onPointerMove);
+    window.removeEventListener("pointerup", state.onPointerUp);
+    window.removeEventListener("pointercancel", state.onPointerCancel);
+    stage.removeEventListener("lostpointercapture", state.onLostPointerCapture);
+    if (state.activePointerId !== null) {
+        try {
+            if (stage.hasPointerCapture(state.activePointerId)) {
+                stage.releasePointerCapture(state.activePointerId);
+            }
+        } catch { }
+    }
+    pointerTrackers.delete(stage);
+}
+
 export function begin(stage, pointerId, objectId) {
     if (!stage) {
         throw new Error("The page canvas is not available.");
     }
-    stage.setPointerCapture(pointerId);
+    const tracker = pointerTrackers.get(stage);
+    let active = true;
+    if (tracker?.releasedPointerIds.has(pointerId)) {
+        tracker.releasedPointerIds.delete(pointerId);
+        active = false;
+    } else {
+        try {
+            stage.setPointerCapture(pointerId);
+        } catch {
+            active = false;
+        }
+    }
+    if (tracker) {
+        tracker.activePointerId = active ? pointerId : null;
+        tracker.pendingMove = null;
+        tracker.endPointerId = null;
+    }
     const rect = stage.getBoundingClientRect();
     return {
         left: rect.left,
@@ -10,6 +167,7 @@ export function begin(stage, pointerId, objectId) {
         width: rect.width,
         height: rect.height,
         imageAspectRatio: imageAspectRatio(stage, objectId),
+        active,
     };
 }
 
@@ -25,6 +183,10 @@ export function imageAspectRatio(stage, objectId) {
 }
 
 export function end(stage, pointerId) {
+    const tracker = pointerTrackers.get(stage);
+    if (tracker?.activePointerId === pointerId) {
+        tracker.activePointerId = null;
+    }
     if (stage?.hasPointerCapture(pointerId)) {
         stage.releasePointerCapture(pointerId);
     }

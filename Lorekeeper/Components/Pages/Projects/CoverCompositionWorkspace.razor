@@ -52,7 +52,7 @@
                 </nav>
             </Toolbar>
             <Canvas>
-                <div class="cover-stage" style="@StageStyle()" @ref="_stageElement" @onpointermove="ContinueTransform" @onpointerup="EndTransform" @onpointercancel="EndTransform">
+                <div class="cover-stage" style="@StageStyle()" @ref="_stageElement">
                     @if (_guides) { <div class="cover-guide cover-guide-x"></div><div class="cover-guide cover-guide-y"></div> }
                     <div class="cover-safe"></div>
                     @if (IsPrint)
@@ -287,7 +287,7 @@
     private ArtworkPickerMode? _artworkPickerMode;
     private Guid? _artworkPickerTargetId;
     private Guid? _fillRegionTargetId;
-    private ElementReference _stageElement; private IJSObjectReference? _workspaceModule; private CoverTransformState? _transform;
+    private ElementReference _stageElement; private IJSObjectReference? _workspaceModule; private DotNetObjectReference<CoverCompositionWorkspace>? _dotNetReference; private CoverTransformState? _transform; private long? _pendingTransformPointerId; private bool _pointerTrackingConnected;
     private CompositionObject? Selected => _objects.FirstOrDefault(item => item.Id == _selectedId);
     private bool IsPrint => _edition?.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover;
     private IReadOnlyList<CoverRegionDescriptor> CoverRegions => _cover?.Regions ?? [];
@@ -805,9 +805,68 @@
     private static string ColorValue(string value) => value.StartsWith('#') && value.Length == 7 ? value : "#000000";
     private enum ArtworkPickerMode { Add, Replace }
 
-    protected override async Task OnAfterRenderAsync(bool firstRender) { if (firstRender) _workspaceModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-workspace.js"); }
-    private async Task BeginTransformAsync(PointerEventArgs e, CompositionObject item, CoverTransformMode mode) { if (IsLocked(item) || _workspaceModule is null) return; Snapshot(); _selectedId = item.Id; var bounds = item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group ? EffectiveBounds(item, group) : item.Bounds; var rect = await _workspaceModule.InvokeAsync<CoverStageRect>("begin", _stageElement, e.PointerId, item.Id.ToString("N")); _transform = new(item.Id, mode, e.ClientX, e.ClientY, bounds, item.Bounds, item.RotationDegrees, item.CropXPercent, item.CropYPercent, e.PointerId, rect); }
-    private void ContinueTransform(PointerEventArgs e) { if (_transform is not { } state) return; var index = _objects.FindIndex(item => item.Id == state.ObjectId); if (index < 0) return; var item = _objects[index]; var clientDx = e.ClientX - state.StartClientX; var clientDy = e.ClientY - state.StartClientY; var surfaceDx = clientDx / Math.Max(1, state.Stage.Width) * 100; var surfaceDy = clientDy / Math.Max(1, state.Stage.Height) * 100; var dx = surfaceDx; var dy = surfaceDy; if (item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group) { dx = dx / Math.Max(.01, group.Bounds.WidthPercent) * 100; dy = dy / Math.Max(.01, group.Bounds.HeightPercent) * 100; } item = state.Mode switch { CoverTransformMode.Move => item with { Bounds = state.LocalBounds with { XPercent = Snap(state.LocalBounds.XPercent + dx), YPercent = Snap(state.LocalBounds.YPercent + dy) } }, CoverTransformMode.Resize => item with { Bounds = ResizeBounds(item, state, dx, dy, clientDx, clientDy) }, CoverTransformMode.Rotate => item with { RotationDegrees = state.StartRotation + RotationDelta(e, state) }, CoverTransformMode.Crop => item with { CropXPercent = Math.Clamp(state.StartCropX - surfaceDx / Math.Max(.01, state.SurfaceBounds.WidthPercent) * 100, 0, 100), CropYPercent = Math.Clamp(state.StartCropY - surfaceDy / Math.Max(.01, state.SurfaceBounds.HeightPercent) * 100, 0, 100) }, _ => item }; _objects[index] = item; MarkDirty(scheduleAutosave: false); }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            _workspaceModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-workspace.js");
+        if (_workspaceModule is not null && !_pointerTrackingConnected && _scene is not null)
+        {
+            _dotNetReference = DotNetObjectReference.Create(this);
+            await _workspaceModule.InvokeVoidAsync("connectPointerTracking", _stageElement, _dotNetReference);
+            _pointerTrackingConnected = true;
+        }
+    }
+    private async Task BeginTransformAsync(PointerEventArgs e, CompositionObject item, CoverTransformMode mode)
+    {
+        if (IsLocked(item) || _workspaceModule is null || _transform is not null || _pendingTransformPointerId is not null)
+            return;
+        _selectedId = item.Id;
+        var bounds = item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group ? EffectiveBounds(item, group) : item.Bounds;
+        _pendingTransformPointerId = e.PointerId;
+        var rect = await _workspaceModule.InvokeAsync<CoverStageRect>("begin", _stageElement, e.PointerId, item.Id.ToString("N"));
+        if (!rect.Active || _pendingTransformPointerId != e.PointerId)
+        {
+            if (_pendingTransformPointerId == e.PointerId)
+                _pendingTransformPointerId = null;
+            await _workspaceModule.InvokeVoidAsync("end", _stageElement, e.PointerId);
+            return;
+        }
+        _pendingTransformPointerId = null;
+        Snapshot();
+        _transform = new(item.Id, mode, e.ClientX, e.ClientY, bounds, item.Bounds, item.RotationDegrees, item.CropXPercent, item.CropYPercent, e.PointerId, rect);
+    }
+    [JSInvokable]
+    public Task ContinueTrackedTransform(long pointerId, double clientX, double clientY)
+    {
+        if (_transform is not { } state || state.PointerId != pointerId)
+            return Task.CompletedTask;
+        var index = _objects.FindIndex(item => item.Id == state.ObjectId);
+        if (index < 0)
+            return Task.CompletedTask;
+        var item = _objects[index];
+        var clientDx = clientX - state.StartClientX;
+        var clientDy = clientY - state.StartClientY;
+        var surfaceDx = clientDx / Math.Max(1, state.Stage.Width) * 100;
+        var surfaceDy = clientDy / Math.Max(1, state.Stage.Height) * 100;
+        var dx = surfaceDx;
+        var dy = surfaceDy;
+        if (item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group)
+        {
+            dx = dx / Math.Max(.01, group.Bounds.WidthPercent) * 100;
+            dy = dy / Math.Max(.01, group.Bounds.HeightPercent) * 100;
+        }
+        item = state.Mode switch
+        {
+            CoverTransformMode.Move => item with { Bounds = state.LocalBounds with { XPercent = Snap(state.LocalBounds.XPercent + dx), YPercent = Snap(state.LocalBounds.YPercent + dy) } },
+            CoverTransformMode.Resize => item with { Bounds = ResizeBounds(item, state, dx, dy, clientDx, clientDy) },
+            CoverTransformMode.Rotate => item with { RotationDegrees = state.StartRotation + RotationDelta(clientX, clientY, state) },
+            CoverTransformMode.Crop => item with { CropXPercent = Math.Clamp(state.StartCropX - surfaceDx / Math.Max(.01, state.SurfaceBounds.WidthPercent) * 100, 0, 100), CropYPercent = Math.Clamp(state.StartCropY - surfaceDy / Math.Max(.01, state.SurfaceBounds.HeightPercent) * 100, 0, 100) },
+            _ => item,
+        };
+        _objects[index] = item;
+        MarkDirty(scheduleAutosave: false);
+        return InvokeAsync(StateHasChanged);
+    }
     private CompositionBounds ResizeBounds(CompositionObject item, CoverTransformState state, double dx, double dy, double clientDx, double clientDy)
     {
         if (item.Kind != CompositionObjectKind.Image || !RetainsAspectRatio(item) || state.Stage.ImageAspectRatio is not > 0)
@@ -825,10 +884,17 @@
             HeightPercent = Math.Max(.25, state.LocalBounds.HeightPercent * surfaceHeight / Math.Max(.01, state.SurfaceBounds.HeightPercent)),
         };
     }
-    private static double RotationDelta(PointerEventArgs e, CoverTransformState state) { var centerX = state.Stage.Left + (state.SurfaceBounds.XPercent + state.SurfaceBounds.WidthPercent / 2) / 100 * state.Stage.Width; var centerY = state.Stage.Top + (state.SurfaceBounds.YPercent + state.SurfaceBounds.HeightPercent / 2) / 100 * state.Stage.Height; return (Math.Atan2(e.ClientY - centerY, e.ClientX - centerX) - Math.Atan2(state.StartClientY - centerY, state.StartClientX - centerX)) * 180 / Math.PI; }
-    private async Task EndTransform(PointerEventArgs _)
+    private static double RotationDelta(double clientX, double clientY, CoverTransformState state) { var centerX = state.Stage.Left + (state.SurfaceBounds.XPercent + state.SurfaceBounds.WidthPercent / 2) / 100 * state.Stage.Width; var centerY = state.Stage.Top + (state.SurfaceBounds.YPercent + state.SurfaceBounds.HeightPercent / 2) / 100 * state.Stage.Height; return (Math.Atan2(clientY - centerY, clientX - centerX) - Math.Atan2(state.StartClientY - centerY, state.StartClientX - centerX)) * 180 / Math.PI; }
+    [JSInvokable]
+    public async Task EndTrackedTransform(long pointerId)
     {
-        if (_transform is not { } state) return;
+        if (_pendingTransformPointerId == pointerId)
+        {
+            _pendingTransformPointerId = null;
+            return;
+        }
+        if (_transform is not { } state || state.PointerId != pointerId)
+            return;
         _transform = null;
         if (_workspaceModule is not null)
             await _workspaceModule.InvokeVoidAsync("end", _stageElement, state.PointerId);
@@ -842,11 +908,21 @@
     {
         _autosaveCancellation?.Cancel();
         _autosaveCancellation?.Dispose();
-        if (_workspaceModule is null) return;
-        try { await _workspaceModule.DisposeAsync(); }
+        if (_workspaceModule is null)
+        {
+            _dotNetReference?.Dispose();
+            return;
+        }
+        try
+        {
+            if (_pointerTrackingConnected)
+                await _workspaceModule.InvokeVoidAsync("disconnectPointerTracking", _stageElement);
+            await _workspaceModule.DisposeAsync();
+        }
         catch (JSDisconnectedException) { }
+        finally { _dotNetReference?.Dispose(); }
     }
     private enum CoverTransformMode { Move, Resize, Rotate, Crop }
     private sealed record CoverTransformState(Guid ObjectId, CoverTransformMode Mode, double StartClientX, double StartClientY, CompositionBounds SurfaceBounds, CompositionBounds LocalBounds, double StartRotation, double StartCropX, double StartCropY, long PointerId, CoverStageRect Stage);
-    private sealed record CoverStageRect(double Left, double Top, double Width, double Height, double? ImageAspectRatio);
+    private sealed record CoverStageRect(double Left, double Top, double Width, double Height, double? ImageAspectRatio, bool Active);
 }
