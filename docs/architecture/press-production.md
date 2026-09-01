@@ -40,7 +40,9 @@ reported production page counts, exact stock/spine calculations, trim, bleed,
 safe, hinge, board, wrap, flap, gutter, barcode, and duplex no-ink regions.
 The interior layout pass precedes final cover geometry. Constraint-bound cover
 objects reflow when geometry changes; free-positioned objects retain their
-coordinates and produce actionable compatibility warnings.
+coordinates and produce actionable compatibility warnings. Page-constrained
+crop-to-fill or stretch-to-fill artwork that covered the prior canvas continues
+to cover the recalculated canvas instead of retaining a stale absolute wrap size.
 
 `PublicationCoverService`, `PublicationCoverDesign`, and the cover-oriented
 publication services own release cover aggregates and artifact-surface scenes.

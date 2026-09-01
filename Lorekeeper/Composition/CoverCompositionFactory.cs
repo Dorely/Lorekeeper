@@ -274,6 +274,9 @@ public static class CoverCompositionFactory
                 return item;
             if (item.RegionConstraint == CompositionRegionConstraint.Page)
             {
+                if (CompositionImageLayout.ImageCoversCanvas(item))
+                    return item with { Bounds = new CompositionBounds() };
+
                 var widthPoints = item.Bounds.WidthPercent / 100 * oldGeometry.WidthPoints;
                 var heightPoints = item.Bounds.HeightPercent / 100 * oldGeometry.HeightPoints;
                 var xPoints = item.Bounds.XPercent / 100 * oldGeometry.WidthPoints;
