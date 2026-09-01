@@ -297,10 +297,10 @@ actions move to the actual applicable stack edge. Group transforms, opacity,
 visibility, clipping, rotation, and z-order must resolve consistently in the
 canvas, previews, generation-target inspection, EPUB projection, and Press.
 Text objects use `CompositionTextAlignment.Start`, `Center`, `End`, or
-`Justify`. Justification distributes bounded inter-word spacing on soft-wrapped
-non-final lines; final lines and explicit hard-break paragraph endings remain
-ragged. The canvas, transient preview, EPUB projection, and Press layout trace
-share that alignment behavior.
+`Justify`. Justification distributes the complete residual width as inter-word
+spacing on soft-wrapped non-final lines; final lines and explicit hard-break
+paragraph endings remain ragged. The canvas, transient preview, EPUB projection,
+and Press layout trace share that alignment behavior.
 Cover text frames additionally accept inline bindable tokens for canonical
 `title`, `subtitle`, `author`, `spineText`, and `backCopy` values. A frame can
 combine literal copy with one or more `{{token}}` references, and the same
@@ -355,14 +355,18 @@ The visual editor uses `CompositionVisualEditorShell`: a one-line view
 toolbar, largest practical canvas, fixed contextual bottom controls, and an
 on-demand details drawer for accessibility, reading order, exact geometry,
 diagnostics, and secondary settings. It does not expose a permanent inspector
-or layer manager that steals canvas width. Saves are serialized per mounted
-workspace. Each save uses an immutable semantic/scene snapshot, adopts returned
-revisions before the next queued save, and clears dirty state only when no
-newer local mutation exists. A cover object-format override materializes every
-resolved reusable-style value before detaching the style, and applies the
-requested property to the latest mounted object rather than a stale render
-snapshot. If an external or assistant cover save advances the revision while a
-manual save is in flight, the workspace three-way merges unchanged remote
+or layer manager that steals canvas width. The primary cover text toolbar keeps
+background color and a percentage-labelled background-opacity control beside
+the other text formatting actions and provides an explicit No background action
+that sets full transparency; these controls are not hidden in the details drawer.
+Saves are serialized per mounted workspace. Each save uses an immutable
+semantic/scene snapshot, adopts returned revisions before the next queued save,
+and clears dirty state only when no newer local mutation exists. A cover
+object-format override materializes every resolved reusable-style value before
+detaching the style, and applies the requested property to the latest mounted
+object rather than a stale render snapshot. If an external or assistant cover
+save advances the revision while a manual save is in flight, the workspace
+three-way merges unchanged remote
 items and locally changed items against its loaded baseline, adopts the current
 revision, and retries; it must not reload over dirty manual work.
 Revision-checked assistant mutations acquire the project mutation lease, reread

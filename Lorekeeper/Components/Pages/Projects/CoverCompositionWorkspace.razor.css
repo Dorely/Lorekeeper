@@ -84,6 +84,11 @@
 .cover-selection-controls .cover-retain-aspect input { flex: 0 0 1.7rem; width: 1.7rem; min-height: 0; height: .95rem; max-width: none; padding: 0; border: 0; border-radius: 999px; }
 .cover-selection-controls input[type=color] { width: 2.2rem; padding: .1rem; }
 .cover-selection-controls .cover-number { width: 4rem; }
+.cover-selection-controls .cover-background-opacity { min-width: 9rem; }
+.cover-background-opacity > span { display: flex; gap: .3rem; align-items: center; }
+.cover-background-opacity input[type=range] { width: 6.2rem; min-height: 1.35rem; padding: 0; }
+.cover-background-opacity output { min-width: 2.25rem; color: var(--lk-ink); font-size: .66rem; font-variant-numeric: tabular-nums; text-align: right; }
+.cover-selection-controls .cover-no-background { align-self: flex-end; }
 .cover-fit-choice { display: inline-flex; }
 .cover-fit-choice button { border-radius: 0; }
 .cover-fit-choice button:first-child { border-radius: .35rem 0 0 .35rem; }
