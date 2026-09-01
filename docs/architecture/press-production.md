@@ -203,8 +203,18 @@ deterministically composites translucent backing shapes where safe while
 retaining selectable opaque text. Ingram PDF/X-1a flattens opacity against the
 page or cover substrate. A translucent object overlapping lower page art is
 rejected with exact object IDs when flattening would change appearance or
-rasterize semantic text/vector content. Raster source alpha is flattened in
-owned image normalization.
+rasterize semantic text/vector content. For transparency-flattened print
+profiles, decoded raster alpha and image-frame opacity remain separate until
+the display list is complete. A transparent or translucent image immediately
+above opaque lower artwork is deterministically precomposed into that artwork
+before PDF serialization; only an image without eligible lower artwork is
+flattened against the page or cover substrate. This keeps transparent PNG
+icons and overlays from acquiring a white matte.
+
+Composition rotation remains clockwise-positive in the editor, Skia previews,
+layout traces, and persisted scenes. The PDF writer negates that angle only
+when crossing into PDF's bottom-up page coordinate system, so the final visual
+direction matches the canvas without changing the shared scene contract.
 
 Digital PDF jobs produce one immutable Book PDF whose front cover is page one,
 followed by publication sections and manuscript content. Tagged structure,
@@ -301,7 +311,7 @@ Press's existing 256 MiB containment boundary.
 
 | Path or family | Primary responsibility |
 |---|---|
-| `Lorekeeper.Press/src/model.rs` | Protocol-v10 request/response, artifact-profile/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
+| `Lorekeeper.Press/src/model.rs` | Protocol-v11 request/response, artifact-profile/cover descriptors, purpose, diagnostics, artifacts, evidence, and layout contracts. |
 | `Lorekeeper.Press/src/renderer.rs` | Containment, validation, deterministic pagination, composition, cover rendering, atomic promotion, progress, and evidence. |
 | `Lorekeeper.Press/src/pdf.rs` | Owned PDF 1.7/1.3 writer, tagged structure, color/bleed/compositing, fonts, images, and barcodes. |
 | `Lorekeeper.Press/src/font.rs` | TTF/OTF validation, shaping, subsetting, widths, embedding, ToUnicode, and glyph outlines. |

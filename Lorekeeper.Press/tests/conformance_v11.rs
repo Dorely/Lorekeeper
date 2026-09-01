@@ -30,7 +30,7 @@ fn describe_exposes_the_owned_versioned_capability_contract() {
     let value: Value = serde_json::from_slice(&output.stdout).expect("describe JSON");
 
     assert_eq!(value["protocolVersion"], 11);
-    assert_eq!(value["rendererVersion"], "2.1.7");
+    assert_eq!(value["rendererVersion"], "2.1.8");
     assert_eq!(
         value["profiles"],
         json!([
@@ -64,7 +64,7 @@ fn kdp_fixture_renders_pdf_17_with_complete_semantic_evidence() {
     );
     let response = response(&output);
     assert_eq!(response["protocolVersion"], 11);
-    assert_eq!(response["rendererVersion"], "2.1.7");
+    assert_eq!(response["rendererVersion"], "2.1.8");
     assert_eq!(response["status"], "completed");
     assert_eq!(response["evidence"]["validationStatus"], "validated");
     assert_eq!(response["evidence"]["pdfVersion"], "1.7");
@@ -1304,16 +1304,18 @@ fn protocol_v11_renders_paragraph_presentation_and_structured_page_preview_data(
             .any(|operation| operation.operator == "gs"),
         "Digital composition opacity must be emitted through a graphics state"
     );
+    let clockwise_rotation_matrices = operations
+        .iter()
+        .filter(|operation| operation.operator == "cm")
+        .filter(|operation| {
+            operation.operands.len() == 6
+                && (number(&operation.operands[0]) - 30f64.to_radians().cos()).abs() < 0.001
+                && (number(&operation.operands[1]) + 0.5).abs() < 0.001
+        })
+        .count();
     assert!(
-        operations
-            .iter()
-            .filter(|operation| operation.operator == "cm")
-            .any(|operation| {
-                operation.operands.len() == 6
-                    && (number(&operation.operands[0]) - 30f64.to_radians().cos()).abs() < 0.001
-                    && (number(&operation.operands[1]) - 0.5).abs() < 0.001
-            }),
-        "image and text objects must emit a general center-based rotation matrix"
+        clockwise_rotation_matrices >= 2,
+        "image and text PDF rotations must preserve the editor's clockwise-positive visual direction"
     );
     let image_paint = operations
         .iter()
@@ -4050,6 +4052,92 @@ fn barnes_and_noble_profiles_own_their_wrap_and_panel_geometry() {
     }
 }
 
+#[test]
+fn barnes_and_noble_precomposes_transparent_cover_images_into_lower_artwork() {
+    let mut job = PreparedJob::new("bn-print-pdfa1b-v1");
+    configure_bn_job(
+        &mut job,
+        "PersonalUse",
+        "VendorSku",
+        "FullWrapMeasured",
+        "TopToBottom",
+    );
+    let background = rgb_png(2, 1, &[255, 0, 0, 255, 0, 0]);
+    fs::write(job.root.path().join("input/assets/pixel.png"), &background)
+        .expect("cover background");
+    job.request["assets"][0]["byteLength"] = json!(background.len());
+    job.request["assets"][0]["sha256"] = json!(hex_hash(&background));
+    job.request["assets"][0]["widthPixels"] = json!(2);
+    let icon = rgba_png(2, 1, &[0, 0, 255, 255, 0, 255, 0, 0]);
+    fs::write(job.root.path().join("input/assets/icon.png"), &icon).expect("transparent icon");
+    job.request["assets"]
+        .as_array_mut()
+        .expect("asset declarations")
+        .push(json!({
+            "id": "90000000-0000-0000-0000-000000000099",
+            "relativePath": "assets/icon.png",
+            "mediaType": "image/png",
+            "byteLength": icon.len(),
+            "sha256": hex_hash(&icon),
+            "widthPixels": 2,
+            "heightPixels": 1,
+            "altText": "A transparent cover icon."
+        }));
+    job.request["cover"]["scenes"]["perfect-bound-outside"] = json!({
+        "schemaVersion": 1,
+        "surface": {
+            "kind": "FacingSpread", "outputPageMode": "SingleSurface",
+            "widthPoints": 900, "heightPoints": 666, "bleedPoints": 9,
+            "safeInsetPoints": 36, "allowIndependentPdfPage": false
+        },
+        "layers": [{ "id": "91000000-0000-0000-0000-000000000099", "name": "Artwork", "order": 0 }],
+        "objects": [
+            {
+                "id": "92000000-0000-0000-0000-000000000098",
+                "layerId": "91000000-0000-0000-0000-000000000099",
+                "kind": "Image", "visible": true,
+                "bounds": { "xPercent": 0, "yPercent": 0, "widthPercent": 100, "heightPercent": 100 },
+                "imageId": "90000000-0000-0000-0000-000000000001",
+                "imageFit": "Stretch", "opacity": 1,
+                "decorative": true, "semanticRole": "Artifact", "zIndex": 0
+            },
+            {
+                "id": "92000000-0000-0000-0000-000000000099",
+                "layerId": "91000000-0000-0000-0000-000000000099",
+                "kind": "Image", "visible": true,
+                "bounds": { "xPercent": 0, "yPercent": 0, "widthPercent": 100, "heightPercent": 100 },
+                "imageId": "90000000-0000-0000-0000-000000000099",
+                "imageFit": "Stretch", "opacity": 0.5,
+                "decorative": true, "semanticRole": "Artifact", "zIndex": 1
+            }
+        ]
+    });
+    job.write_request();
+
+    let output = job.render();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    let rendered = response(&output);
+    assert_eq!(rendered["status"], "completed");
+    assert_eq!(rendered["evidence"]["hasTransparency"], false);
+    let pdf = Document::load(job.artifact(&rendered, "cover-pdf")).expect("B&N cover PDF");
+    assert!(
+        pdf.objects
+            .values()
+            .filter_map(|object| {
+                let stream = object.as_stream().ok()?;
+                matches!(stream.dict.get(b"Subtype"), Ok(Object::Name(name)) if name == b"Image")
+                    .then(|| stream.decompressed_content().expect("image samples"))
+            })
+            .any(|samples| samples == [128, 0, 128, 255, 0, 0]),
+        "the blue half-opacity icon pixel must blend into red artwork while its transparent pixel leaves the artwork unchanged"
+    );
+}
+
 fn configure_bn_job(
     job: &mut PreparedJob,
     project_use: &str,
@@ -4323,6 +4411,18 @@ fn rgb_png(width: u32, height: u32, samples: &[u8]) -> Vec<u8> {
     {
         let mut encoder = png::Encoder::new(&mut bytes, width, height);
         encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().expect("PNG header");
+        writer.write_image_data(samples).expect("PNG samples");
+    }
+    bytes
+}
+
+fn rgba_png(width: u32, height: u32, samples: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder.write_header().expect("PNG header");
         writer.write_image_data(samples).expect("PNG samples");
