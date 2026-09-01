@@ -326,7 +326,10 @@ Front and reports that region's physical dimensions, aspect, and output
 participation. A global region focus must not constrain ordinary cover editing.
 Canvas resize handles remain aligned to the canvas axes even when the selected
 object is rotated, so pointer deltas continue to update stored bounds in canvas
-coordinates. The full connected scene is preserved even when a provider package
+coordinates. Move, resize, rotate, and crop gestures update transient canvas
+state without scheduling persistence on every pointer event; the completed
+gesture is saved once when the pointer is released or cancelled. The full
+connected scene is preserved even when a provider package
 derives separate front/back pages.
 Spine copy remains real text above artwork. Persisted direction supports
 top-to-bottom (the US/English default), bottom-to-top, and horizontal layouts;

@@ -400,11 +400,13 @@
         await FlushAsync();
         await Back.InvokeAsync();
     }
-    private void MarkDirty()
+    private void MarkDirty() => MarkDirty(scheduleAutosave: true);
+    private void MarkDirty(bool scheduleAutosave)
     {
         _dirty = true;
         _changeVersion++;
-        ScheduleAutosave();
+        if (scheduleAutosave)
+            ScheduleAutosave();
     }
     private void ScheduleAutosave()
     {
@@ -805,7 +807,7 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender) { if (firstRender) _workspaceModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/composition-workspace.js"); }
     private async Task BeginTransformAsync(PointerEventArgs e, CompositionObject item, CoverTransformMode mode) { if (IsLocked(item) || _workspaceModule is null) return; Snapshot(); _selectedId = item.Id; var bounds = item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group ? EffectiveBounds(item, group) : item.Bounds; var rect = await _workspaceModule.InvokeAsync<CoverStageRect>("begin", _stageElement, e.PointerId, item.Id.ToString("N")); _transform = new(item.Id, mode, e.ClientX, e.ClientY, bounds, item.Bounds, item.RotationDegrees, item.CropXPercent, item.CropYPercent, e.PointerId, rect); }
-    private void ContinueTransform(PointerEventArgs e) { if (_transform is not { } state) return; var index = _objects.FindIndex(item => item.Id == state.ObjectId); if (index < 0) return; var item = _objects[index]; var clientDx = e.ClientX - state.StartClientX; var clientDy = e.ClientY - state.StartClientY; var surfaceDx = clientDx / Math.Max(1, state.Stage.Width) * 100; var surfaceDy = clientDy / Math.Max(1, state.Stage.Height) * 100; var dx = surfaceDx; var dy = surfaceDy; if (item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group) { dx = dx / Math.Max(.01, group.Bounds.WidthPercent) * 100; dy = dy / Math.Max(.01, group.Bounds.HeightPercent) * 100; } item = state.Mode switch { CoverTransformMode.Move => item with { Bounds = state.LocalBounds with { XPercent = Snap(state.LocalBounds.XPercent + dx), YPercent = Snap(state.LocalBounds.YPercent + dy) } }, CoverTransformMode.Resize => item with { Bounds = ResizeBounds(item, state, dx, dy, clientDx, clientDy) }, CoverTransformMode.Rotate => item with { RotationDegrees = state.StartRotation + RotationDelta(e, state) }, CoverTransformMode.Crop => item with { CropXPercent = Math.Clamp(state.StartCropX - surfaceDx / Math.Max(.01, state.SurfaceBounds.WidthPercent) * 100, 0, 100), CropYPercent = Math.Clamp(state.StartCropY - surfaceDy / Math.Max(.01, state.SurfaceBounds.HeightPercent) * 100, 0, 100) }, _ => item }; _objects[index] = item; MarkDirty(); }
+    private void ContinueTransform(PointerEventArgs e) { if (_transform is not { } state) return; var index = _objects.FindIndex(item => item.Id == state.ObjectId); if (index < 0) return; var item = _objects[index]; var clientDx = e.ClientX - state.StartClientX; var clientDy = e.ClientY - state.StartClientY; var surfaceDx = clientDx / Math.Max(1, state.Stage.Width) * 100; var surfaceDy = clientDy / Math.Max(1, state.Stage.Height) * 100; var dx = surfaceDx; var dy = surfaceDy; if (item.GroupId is Guid groupId && _objects.FirstOrDefault(candidate => candidate.Id == groupId) is { } group) { dx = dx / Math.Max(.01, group.Bounds.WidthPercent) * 100; dy = dy / Math.Max(.01, group.Bounds.HeightPercent) * 100; } item = state.Mode switch { CoverTransformMode.Move => item with { Bounds = state.LocalBounds with { XPercent = Snap(state.LocalBounds.XPercent + dx), YPercent = Snap(state.LocalBounds.YPercent + dy) } }, CoverTransformMode.Resize => item with { Bounds = ResizeBounds(item, state, dx, dy, clientDx, clientDy) }, CoverTransformMode.Rotate => item with { RotationDegrees = state.StartRotation + RotationDelta(e, state) }, CoverTransformMode.Crop => item with { CropXPercent = Math.Clamp(state.StartCropX - surfaceDx / Math.Max(.01, state.SurfaceBounds.WidthPercent) * 100, 0, 100), CropYPercent = Math.Clamp(state.StartCropY - surfaceDy / Math.Max(.01, state.SurfaceBounds.HeightPercent) * 100, 0, 100) }, _ => item }; _objects[index] = item; MarkDirty(scheduleAutosave: false); }
     private CompositionBounds ResizeBounds(CompositionObject item, CoverTransformState state, double dx, double dy, double clientDx, double clientDy)
     {
         if (item.Kind != CompositionObjectKind.Image || !RetainsAspectRatio(item) || state.Stage.ImageAspectRatio is not > 0)

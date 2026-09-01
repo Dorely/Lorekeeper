@@ -67,6 +67,7 @@ public sealed record PublishAssistantWorkspaceContext(
 public enum PublishWorkspaceMutationKind
 {
     Edition,
+    Cover,
     Render,
     Preflight,
     Package,

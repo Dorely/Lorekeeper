@@ -2309,6 +2309,12 @@ else
             ? id
             : selectedReleaseId;
         var targetChanged = targetReleaseId != selectedReleaseId;
+        if (coverWasOpen && !targetChanged && mutation.Kind == PublishWorkspaceMutationKind.Cover)
+        {
+            if (mutation.SelectedObjectId is Guid selectedObjectId)
+                _coverSelectionId = selectedObjectId;
+            _coverRefreshSignal++;
+        }
         var paginationChanged = false;
         if (coverWasOpen && !targetChanged && selectedReleaseId is Guid selectedEditionId
             && mutation.Kind == PublishWorkspaceMutationKind.Edition)

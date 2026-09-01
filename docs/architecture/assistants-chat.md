@@ -371,6 +371,11 @@ or `{{backCopy}}` inside any text frame, including repeated author or title
 frames on the spine, and may combine tokens with literal copy. Large cover-scene
 stages must name the same exact surface role that was read and previewed; apply
 is surface-bound and must not target an implicit default.
+Every successful durable Core or release cover mutation, including an
+exact-surface patch or placement, emits a cover-specific workspace update as
+soon as that tool completes. An open cover canvas reloads from that update
+during the turn and preserves a returned object selection; it does not wait for
+the assistant's final message before reflecting the persisted scene.
 
 ### Review Edits and approval
 

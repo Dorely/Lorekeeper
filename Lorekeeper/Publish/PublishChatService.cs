@@ -133,8 +133,11 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
         "update_publication_cover_design",
         "apply_publication_cover_composition_stage",
         "patch_publication_cover_element",
+        "patch_publication_cover_surface_element",
         "place_project_image_on_release_cover",
+        "place_project_image_on_release_cover_surface",
         "add_project_image_to_release_cover",
+        "add_project_image_to_release_cover_surface",
         "fill_project_image_on_publication_cover_region",
         "set_publication_cover_spine_direction",
         "generate_project_image",
@@ -773,35 +776,65 @@ IAppDatabaseOperationFactory database, IChatImageAttachmentService imageAttachme
                         ? ReadGuid(resultJson, "targetId")
                         : ReadGuid(argumentsJson, "variantId")));
         }
-        if (toolName is "patch_publication_book" or "patch_publication_book_page_setup"
-            or "upsert_publication_book_text_style" or "delete_publication_book_text_style"
-            or "patch_publication_book_content"
-            or "patch_publication_core_cover_element" or "place_project_image_on_core_cover" or "add_project_image_to_core_cover"
+        if (toolName is "patch_publication_core_cover_element"
+            or "place_project_image_on_core_cover"
+            or "add_project_image_to_core_cover"
             or "apply_publication_core_cover_composition_stage")
             return new PublishWorkspaceMutated(
                 null,
                 false,
-                PublishWorkspaceMutationKind.Edition,
+                PublishWorkspaceMutationKind.Cover,
                 toolName is "patch_publication_core_cover_element" or "place_project_image_on_core_cover"
                     ? ReadGuid(argumentsJson, "targetId")
                     : toolName == "add_project_image_to_core_cover"
                         ? ReadGuid(resultJson, "selectId")
                     : null);
+        if (toolName is "patch_publication_book" or "patch_publication_book_page_setup"
+            or "upsert_publication_book_text_style" or "delete_publication_book_text_style"
+            or "patch_publication_book_content")
+            return new PublishWorkspaceMutated(null, false);
 
-        var selectEdition = toolName is "create_publication_release" or "customize_publication_release_cover" or "use_core_publication_cover";
+        if (toolName is "customize_publication_release_cover"
+            or "use_core_publication_cover"
+            or "update_publication_cover_design"
+            or "apply_publication_cover_composition_stage"
+            or "patch_publication_cover_element"
+            or "patch_publication_cover_surface_element"
+            or "place_project_image_on_release_cover"
+            or "place_project_image_on_release_cover_surface"
+            or "add_project_image_to_release_cover"
+            or "add_project_image_to_release_cover_surface"
+            or "fill_project_image_on_publication_cover_region"
+            or "set_publication_cover_spine_direction")
+        {
+            var selectCoverEdition = toolName is "customize_publication_release_cover" or "use_core_publication_cover";
+            var coverEditionId = selectCoverEdition
+                ? ReadGuid(resultJson, "id") ?? ReadGuid(resultJson, "targetId")
+                : ReadGuid(argumentsJson, "releaseId") ?? ReadGuid(argumentsJson, "editionId")
+                    ?? (toolName == "apply_publication_cover_composition_stage"
+                        ? ReadGuid(resultJson, "targetId")
+                        : null);
+            var coverObjectId = toolName is "patch_publication_cover_element"
+                or "patch_publication_cover_surface_element"
+                or "place_project_image_on_release_cover"
+                or "place_project_image_on_release_cover_surface"
+                    ? ReadGuid(argumentsJson, "targetId")
+                    : toolName is "add_project_image_to_release_cover"
+                        or "add_project_image_to_release_cover_surface"
+                        or "fill_project_image_on_publication_cover_region"
+                            ? ReadGuid(resultJson, "selectId")
+                            : null;
+            return coverEditionId is { } coverId
+                ? new PublishWorkspaceMutated(coverId, selectCoverEdition, PublishWorkspaceMutationKind.Cover, coverObjectId)
+                : null;
+        }
+
+        var selectEdition = toolName == "create_publication_release";
         var editionId = selectEdition
             ? ReadGuid(resultJson, "id") ?? ReadGuid(resultJson, "targetId")
-            : ReadGuid(argumentsJson, "releaseId") ?? ReadGuid(argumentsJson, "editionId")
-                ?? (toolName == "apply_publication_cover_composition_stage"
-                    ? ReadGuid(resultJson, "targetId")
-                    : null);
-        var selectedObjectId = toolName is "patch_publication_cover_element" or "place_project_image_on_release_cover"
-            ? ReadGuid(argumentsJson, "targetId")
-            : toolName is "add_project_image_to_release_cover" or "fill_project_image_on_publication_cover_region"
-                ? ReadGuid(resultJson, "selectId")
-                : null;
+            : ReadGuid(argumentsJson, "releaseId") ?? ReadGuid(argumentsJson, "editionId");
         return editionId is { } id
-            ? new PublishWorkspaceMutated(id, selectEdition, PublishWorkspaceMutationKind.Edition, selectedObjectId)
+            ? new PublishWorkspaceMutated(id, selectEdition)
             : null;
     }
 
