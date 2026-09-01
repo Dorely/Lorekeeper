@@ -12,6 +12,11 @@ the live test project; terminate the browser host after the run.
 - Open Publish in a project with zero releases. Confirm Core Book is selected,
   shared details/content/matter/design/cover remain usable, and no release or
   ISBN is created implicitly.
+- Confirm Core begins with Cover, Book details, and Book content before page and
+  PDF settings. Confirm every release follows Cover, Book details, Book content,
+  Edition-specific content, page/format settings where applicable, and Release
+  setup in that document and visual order. Confirm Core and release Copyright and
+  Description fields are full-width multiline controls that resize vertically.
 - Supply title, author, and language, choose **Prepare reading PDF**, reconnect
   after navigation, preview the current PDF in-app, and download the immutable
   private reading copy. Confirm the Markdown and plain-text downloads sit beside

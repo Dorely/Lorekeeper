@@ -103,6 +103,14 @@ product selector. Paper color, finish, price, listing, account, tax, and
 fulfillment settings remain at the printer because they do not change generated
 bytes or geometry.
 
+The Publish workspace orders editable sections by likely authoring frequency.
+Core and release targets both lead with cover, book details, and book content;
+release-only content follows those shared concerns, then page geometry and other
+format presentation, with release setup last. This order is the document order,
+not a visual CSS rearrangement. Long-form copyright and description metadata use
+full-width, vertically resizable multiline fields in both Core and release
+overrides.
+
 Publication sections have an anchor before, after, or around the Core outline,
 an inclusion state, and a start-side choice of next available, right/recto, or
 left/verso. Inclusion, order, and starting side are authored settings rather
