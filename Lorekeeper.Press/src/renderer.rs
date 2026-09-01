@@ -7529,7 +7529,7 @@ fn assign_page_labels(pages: &mut [LayoutPage], body_start: usize) {
     let mut front_number = 0;
     for (index, page) in pages.iter_mut().enumerate() {
         let physical = index + 1;
-        if page.kind == PageKind::Blank || page.kind == PageKind::Cover || physical == 1 {
+        if page.kind == PageKind::Cover || physical == 1 {
             page.page_label = None;
         } else if physical < body_start {
             front_number += 1;

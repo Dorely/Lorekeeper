@@ -234,6 +234,9 @@ no parity blanks. When the effective Core/release right-hand policy is enabled,
 Press inserts only the blanks needed for recto chapter openings. Parity is based
 on final artifact page numbers: a Digital PDF front cover counts as page one,
 while coverless chapter layout traces have no synthetic leading-page offset.
+Every deliberately inserted interior blank remains in the active Roman or Arabic
+folio sequence and paints its page number; only covers and the intentionally
+suppressed opening interior folio omit that label.
 
 The application requests the full glyph-evidence `layout` trace for
 conformance and `layoutTraceMode: browser-preview` for bounded chapter Read or

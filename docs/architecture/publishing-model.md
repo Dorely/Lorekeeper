@@ -108,8 +108,10 @@ an inclusion state, and a start-side choice of next available, right/recto, or
 left/verso. Inclusion, order, and starting side are authored settings rather
 than silently derived vendor policy. A two-leaf Designed Page spread is the
 specific parity exception that must begin on a verso leaf so its two leaves
-form one physical opening. KDP/common front-matter guidance is surfaced as a
-non-blocking recommendation; it does not rewrite the author’s section order.
+form one physical opening. A blank leaf deliberately inserted to satisfy either
+parity rule remains part of the interior folio sequence and displays its page
+number. KDP/common front-matter guidance is surfaced as a non-blocking
+recommendation; it does not rewrite the author’s section order.
 
 Releases inherit Core sections live. They may replace, omit, add, reset, or
 reorder sections through sparse overlays. A release order overlay does not

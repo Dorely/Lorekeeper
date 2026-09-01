@@ -356,6 +356,11 @@ mutate Core/release metadata and settings, publication sections, covers, page
 setup/styles where allowed, and preparation workflows. It cannot mutate chapter
 manuscript or reorder the project outline. Low-level renderer invocation, raw
 profile versions, ISBN invention, and vendor-acceptance claims are unavailable.
+When it creates an ordinary custom single-page publication section without a
+user-directed side, it uses the next available leaf rather than inventing a
+parity blank. Contents retains its authored recto start, so any required numbered
+parity leaf sits immediately before Contents instead of before preceding custom
+matter.
 For a full-wrap cover it uses the exact region tools to read and preview Back,
 Spine, or Front before editing, then fills only the selected region or changes
 the persisted spine direction with an expected revision. A narrow spine

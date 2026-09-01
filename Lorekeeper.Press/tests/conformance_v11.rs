@@ -281,6 +281,100 @@ fn print_front_matter_preserves_configured_order_and_sides_with_advisory_warning
 }
 
 #[test]
+fn print_front_matter_places_the_numbered_parity_blank_before_contents() {
+    let mut job = PreparedJob::new("kdp-paperback-v1");
+    job.request["document"]["publicationSections"] = json!([
+        {
+            "id": "21000000-0000-0000-0000-000000000031",
+            "title": "Title page",
+            "kind": "TitlePage",
+            "systemRole": "Title",
+            "anchor": "Front",
+            "localOrder": 0,
+            "startSide": "Recto",
+            "blocks": [{
+                "id": "31000000-0000-0000-0000-000000000031",
+                "type": "Heading",
+                "styleRole": "chapter-title",
+                "content": [{ "type": "Text", "text": "The Cartographer's Lantern", "marks": [] }]
+            }],
+            "pageCompositions": []
+        },
+        {
+            "id": "21000000-0000-0000-0000-000000000032",
+            "title": "Copyright",
+            "kind": "Copyright",
+            "systemRole": "Copyright",
+            "anchor": "Front",
+            "localOrder": 1,
+            "startSide": "Verso",
+            "blocks": [{
+                "id": "31000000-0000-0000-0000-000000000032",
+                "type": "Paragraph",
+                "styleRole": "body",
+                "content": [{ "type": "Text", "text": "Copyright 2026 Mara Vale", "marks": [] }]
+            }],
+            "pageCompositions": []
+        },
+        {
+            "id": "21000000-0000-0000-0000-000000000033",
+            "title": "Custom front matter",
+            "kind": "Custom",
+            "systemRole": "None",
+            "anchor": "Front",
+            "localOrder": 2,
+            "startSide": "Next",
+            "blocks": [{
+                "id": "31000000-0000-0000-0000-000000000033",
+                "type": "Paragraph",
+                "styleRole": "body",
+                "content": [{ "type": "Text", "text": "Custom front matter copy", "marks": [] }]
+            }],
+            "pageCompositions": []
+        },
+        {
+            "id": "21000000-0000-0000-0000-000000000034",
+            "title": "Contents",
+            "kind": "Contents",
+            "systemRole": "Contents",
+            "anchor": "Front",
+            "localOrder": 3,
+            "startSide": "Recto",
+            "blocks": [],
+            "pageCompositions": []
+        }
+    ]);
+    job.write_request();
+
+    let output = job.render();
+    assert!(output.status.success(), "{}", stderr(&output));
+    let rendered = response(&output);
+    let custom_page = rendered["pageMap"]
+        .as_array()
+        .expect("page map")
+        .iter()
+        .find(|entry| entry["blockId"] == "31000000-0000-0000-0000-000000000033")
+        .and_then(|entry| entry["pageNumber"].as_u64())
+        .expect("custom front matter page");
+    assert_eq!(
+        custom_page, 3,
+        "next-available custom front matter must follow copyright directly"
+    );
+
+    let pdf = Document::load(job.artifact(&rendered, "interior-pdf")).expect("KDP PDF");
+    let custom_text = pdf.extract_text(&[3]).expect("custom front matter text");
+    assert!(custom_text.contains("Custom front matter copy"));
+    let blank_text = pdf.extract_text(&[4]).expect("blank-leaf folio text");
+    assert_eq!(
+        blank_text.trim(),
+        "iii",
+        "the deliberate parity blank before Contents must carry and advance the front-matter folio"
+    );
+    let contents_text = pdf.extract_text(&[5]).expect("Contents text");
+    assert!(contents_text.contains("Contents"));
+}
+
+#[test]
 fn print_facing_designed_pages_begin_on_a_verso_leaf() {
     let mut job = PreparedJob::new("kdp-paperback-v1");
     let mut designed_chapter = job.request["document"]["sections"][0]["chapters"][1].clone();
