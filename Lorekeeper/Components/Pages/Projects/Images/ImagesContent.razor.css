@@ -260,6 +260,29 @@
     animation: image-job-spin 0.8s linear infinite;
 }
 
+.image-job-terminal {
+    display: grid;
+    justify-items: center;
+    gap: 0.45rem;
+    color: var(--bs-secondary-color, #6c757d);
+    text-align: center;
+}
+
+.image-job-terminal > span {
+    display: grid;
+    width: 2.5rem;
+    height: 2.5rem;
+    place-items: center;
+    border: 2px solid currentColor;
+    border-radius: 50%;
+    font-size: 1.6rem;
+    line-height: 1;
+}
+
+.image-job-terminal > strong {
+    font-size: 0.78rem;
+}
+
 @keyframes image-job-spin {
     to { transform: rotate(360deg); }
 }

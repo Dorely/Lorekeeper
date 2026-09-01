@@ -221,7 +221,11 @@ asset boundary, stored as a separate unattached project image with provenance,
 and removed from the partial collection. It never inherits entity associations
 or a placement. Deleting a final image also deletes every unpromoted partial
 still associated with that image; already promoted images and unrelated orphan
-partials remain independent.
+partials remain independent. Active jobs alone use an animated progress preview;
+cancelled and failed jobs display their persisted terminal state and any latest
+partial. An author may delete a terminal request card and its unpromoted partials;
+this removes those job-owned previews while retaining the hidden terminal job as
+durable audit state.
 
 The shared prompt composer gives generation and editing the same spatial
 discipline. Regional-guide mode focuses the requested change in the indicated
@@ -411,10 +415,12 @@ either edge, 120 megapixels, and the configured byte limit clamped to Press's
 Upscales are ordinary permanent project assets with `PublishAssetSource.Upscaled`,
 `DerivedFromImageId`, source and target raster/DPI evidence, Lanczos3 version,
 source-byte hash, creation trigger, and `AddsNewDetail = false`. Originals expose
-direct upscale children in the Images library and cannot be deleted while those
-children exist; an unused upscale may be deleted. Publication reference replacement
-changes only image IDs, preserving canvas bounds, fit, focal crop, rotation,
-opacity, z-order, semantic IDs, reading order, captions, and accessibility.
+direct upscale children through an Upscales modal rather than duplicating them as
+top-level library cards. Search matches on a child surface its parent card, and
+the modal owns viewing and deletion of unused children. An original cannot be
+deleted while those children exist. Publication reference replacement changes
+only image IDs, preserving canvas bounds, fit, focal crop, rotation, opacity,
+z-order, semantic IDs, reading order, captions, and accessibility.
 
 ## Key files and file families
 

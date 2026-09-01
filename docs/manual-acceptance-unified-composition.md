@@ -141,6 +141,14 @@ the live test project; terminate the browser host after the run.
   upload a second reference. Give each a distinct role, queue generation, and
   confirm the job's reference manifest and provider inputs preserve the visible
   order and exact image identities.
+- Create or reuse a deterministic print upscale and confirm the Images library
+  shows only the original as a top-level card, with each child available through
+  its **Upscales** modal and deletable there when unused. Search for the child
+  filename and confirm the parent card remains discoverable. Cancel an image
+  request after it has streamed partials; confirm its card shows the persisted
+  cancelled state and latest partial without an animated loader, then use
+  **Delete card & partials** and confirm the card and unpromoted partials leave
+  the library while completed images remain intact.
 
 ## Review Edits and Contest review
 

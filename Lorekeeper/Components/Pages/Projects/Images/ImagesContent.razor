@@ -320,6 +320,8 @@ else
                 <div class="partials-group-grid">
                     @foreach (var upscale in upscaleOwner.Upscales.OrderBy(item => (long)item.Width * item.Height))
                     {
+                        var upscaleImage = _images.FirstOrDefault(image => image.Id == upscale.Id);
+                        var upscaleUsage = ChapterUsage(upscale.Id);
                         <article class="partial-card" @key="upscale.Id">
                             <button type="button" class="partial-preview-button" @onclick="() => OpenUpscale(upscale.Id)">
                                 <img src="@upscale.PreviewUrl" alt="@upscale.FileName" />
@@ -330,7 +332,14 @@ else
                                 {
                                     <span>@detail</span>
                                 }
-                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenUpscale(upscale.Id)">View upscale</button>
+                                <div class="image-actions">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenUpscale(upscale.Id)">View upscale</button>
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-danger"
+                                            disabled="@(upscaleImage is null || upscaleUsage is not null)"
+                                            title="@(upscaleImage is null ? "Upscale image not found." : upscaleUsage is null ? "Delete upscale" : ChapterUsageTitle(upscaleUsage))"
+                                            @onclick="() => DeleteAsync(upscale.Id)">Delete</button>
+                                </div>
                             </div>
                         </article>
                     }
@@ -449,6 +458,14 @@ else
                     OnConfirm="ConfirmHistoryImageDeleteAsync"
                     OnCancel="CancelHistoryDelete" />
 
+<ConfirmationDialog IsOpen="@(_discardPartialsJobId is not null)"
+                    Title="Delete request card and partials?"
+                    Message="@(_discardPartialsMessage ?? string.Empty)"
+                    ConfirmLabel="Delete card and partials"
+                    Destructive="true"
+                    OnConfirm="ConfirmDiscardJobPartialsAsync"
+                    OnCancel="CancelDiscardJobPartials" />
+
 @code {
     private const long MaxImageBytes = 20L * 1024 * 1024;
 
@@ -516,12 +533,16 @@ else
     private IReadOnlyCollection<Guid> GenerationReferenceImageIds =>
         _generationReferences.Select(reference => reference.Image.Id).ToList();
 
+    private IReadOnlyList<ProjectImageView> LibraryImages =>
+        _images.Where(image => !IsNestedUpscale(image)).ToList();
+
     private IReadOnlyList<ProjectImageView> FilteredImages =>
         string.IsNullOrWhiteSpace(_query)
-            ? _images
-            : _images.Where(image => image.FileName.Contains(_query, StringComparison.OrdinalIgnoreCase)
-                || image.AltText.Contains(_query, StringComparison.OrdinalIgnoreCase)
-                || image.Prompt.Contains(_query, StringComparison.OrdinalIgnoreCase)).ToList();
+            ? LibraryImages
+            : LibraryImages.Where(image => MatchesImageSearch(image, _query)
+                || _images.Any(candidate => candidate.Source == PublishAssetSource.Upscaled
+                    && candidate.DerivedFromImageId == image.Id
+                    && MatchesImageSearch(candidate, _query))).ToList();
 
     private IReadOnlyList<ProjectImageJobView> VisibleJobs =>
         _jobs.Where(job => IsActiveJob(job.Status) || OrphanPartialsForJob(job.Id).Count > 0)
@@ -866,6 +887,8 @@ else
 
     private Guid? _historyDeleteImageId;
     private string? _historyDeleteMessage;
+    private Guid? _discardPartialsJobId;
+    private string? _discardPartialsMessage;
 
     private async Task DeleteAsync(Guid imageId, bool clearAffectedHistory = false)
     {
@@ -900,6 +923,42 @@ else
     private Task ConfirmHistoryImageDeleteAsync() => _historyDeleteImageId is Guid imageId
         ? DeleteAsync(imageId, true)
         : Task.CompletedTask;
+
+    private void RequestDiscardJobPartials(ProjectImageJobView job, int partialCount)
+    {
+        if (IsActiveJob(job.Status))
+            return;
+
+        _discardPartialsJobId = job.Id;
+        _discardPartialsMessage = $"Delete {partialCount} unpromoted partial image{(partialCount == 1 ? string.Empty : "s")} from “{job.Label}”? The request card will leave the Images library. This cannot be undone.";
+    }
+
+    private void CancelDiscardJobPartials()
+    {
+        _discardPartialsJobId = null;
+        _discardPartialsMessage = null;
+    }
+
+    private async Task ConfirmDiscardJobPartialsAsync()
+    {
+        if (Project is null || _discardPartialsJobId is not Guid jobId)
+            return;
+
+        _error = null;
+        try
+        {
+            await ImageJobs.DeleteUnpromotedPartialsAsync(Project.Id, jobId);
+            if (_partialModalJobId == jobId)
+                ClosePartialsModal();
+            CancelDiscardJobPartials();
+            _status = "Request card and partials deleted.";
+            await ReloadJobsAndPartialsAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
 
     private async Task AttachToChatAsync(ProjectImageView image)
     {
@@ -1057,6 +1116,14 @@ else
     private ProjectImageView? ParentImage(ProjectImageView image) => image.DerivedFromImageId is Guid parentId
         ? _images.FirstOrDefault(candidate => candidate.Id == parentId)
         : null;
+
+    private bool IsNestedUpscale(ProjectImageView image) =>
+        image.Source == PublishAssetSource.Upscaled && ParentImage(image) is not null;
+
+    private static bool MatchesImageSearch(ProjectImageView image, string query) =>
+        image.FileName.Contains(query, StringComparison.OrdinalIgnoreCase)
+        || image.AltText.Contains(query, StringComparison.OrdinalIgnoreCase)
+        || image.Prompt.Contains(query, StringComparison.OrdinalIgnoreCase);
 
     private ProjectImageUpscaleSummary? UpscaleSummary(Guid imageId) => _images
         .SelectMany(image => image.Upscales)
@@ -1247,26 +1314,41 @@ else
     private RenderFragment RenderJobCard(ProjectImageJobView job) => __builder =>
     {
         var runtimeJob = RuntimeJob(job.Id);
+        var activeJob = IsActiveJob(job.Status);
+        var displayedRuntimeJob = activeJob ? runtimeJob : null;
+        var jobPartials = OrphanPartialsForJob(job.Id);
+        var latestPartial = jobPartials.OrderByDescending(partial => partial.UpdatedAt).FirstOrDefault();
         <article class="image-card image-job-card" @key="job.Id">
             <div class="image-job-preview">
-                @if (runtimeJob?.Outputs.FirstOrDefault(output => !string.IsNullOrWhiteSpace(output.PartialImageUrl)) is { PartialImageUrl: { } partialUrl })
+                @if (displayedRuntimeJob?.Outputs.FirstOrDefault(output => !string.IsNullOrWhiteSpace(output.PartialImageUrl)) is { PartialImageUrl: { } partialUrl })
                 {
                     <img src="@partialUrl" alt="Partial image preview" />
+                }
+                else if (latestPartial is not null)
+                {
+                    <img src="@latestPartial.PreviewUrl" alt="@PartialAlt(latestPartial)" />
                 }
                 else if (job.OutputImageIds.FirstOrDefault() is Guid outputId && outputId != Guid.Empty)
                 {
                     <img src="@ImagePreviewUrl(outputId)" alt="@job.Label" />
                 }
-                else
+                else if (activeJob)
                 {
                     <div class="image-job-spinner" aria-hidden="true"></div>
+                }
+                else
+                {
+                    <div class="image-job-terminal" role="img" aria-label="@JobTerminalPreviewLabel(job.Status)">
+                        <span aria-hidden="true">@JobTerminalPreviewSymbol(job.Status)</span>
+                        <strong>@JobTerminalPreviewLabel(job.Status)</strong>
+                    </div>
                 }
             </div>
             <div class="image-card-body">
                 <strong>@job.Label</strong>
                 <div class="image-meta">
                     <span>@job.Kind</span>
-                    <span>@JobStatusText(job, runtimeJob)</span>
+                    <span>@JobStatusText(job, displayedRuntimeJob)</span>
                 </div>
                 <p class="small mb-0">@Truncate(job.Prompt, 160)</p>
                 <details class="small mt-2">
@@ -1292,13 +1374,17 @@ else
                 {
                     <p class="small text-danger mb-0">@job.Error</p>
                 }
-                @if (OrphanPartialsForJob(job.Id) is { Count: > 0 } jobPartials)
+                @if (jobPartials.Count > 0)
                 {
                     <div class="image-actions">
                         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenJobPartials(job)">Partials (@jobPartials.Count)</button>
+                        @if (!activeJob)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RequestDiscardJobPartials(job, jobPartials.Count)">Delete card &amp; partials</button>
+                        }
                     </div>
                 }
-                @foreach (var output in (runtimeJob?.Outputs ?? job.OutputStates.Select(ToRuntimeOutput)).OrderBy(output => output.OutputIndex))
+                @foreach (var output in (displayedRuntimeJob?.Outputs ?? job.OutputStates.Select(ToRuntimeOutput)).OrderBy(output => output.OutputIndex))
                 {
                     <div class="image-output-row">
                         <span>@(output.OutputIndex + 1)</span>
@@ -1333,10 +1419,26 @@ else
 
     private static string JobStatusText(ProjectImageJobView job, ProjectImageGenerationJobRuntimeView? runtimeJob)
     {
-        if (runtimeJob is { IsRunning: true })
+        if (IsActiveJob(job.Status) && runtimeJob is { IsRunning: true })
             return "Running";
         return job.Status.ToString();
     }
+
+    private static string JobTerminalPreviewLabel(ProjectImageGenerationJobStatus status) => status switch
+    {
+        ProjectImageGenerationJobStatus.Cancelled => "Request cancelled",
+        ProjectImageGenerationJobStatus.Failed => "Request failed",
+        ProjectImageGenerationJobStatus.CompletedWithErrors => "Completed with errors",
+        ProjectImageGenerationJobStatus.Succeeded => "Request complete",
+        _ => "Request stopped",
+    };
+
+    private static string JobTerminalPreviewSymbol(ProjectImageGenerationJobStatus status) => status switch
+    {
+        ProjectImageGenerationJobStatus.Succeeded => "✓",
+        ProjectImageGenerationJobStatus.CompletedWithErrors => "!",
+        _ => "×",
+    };
 
     private string ImagePreviewUrl(Guid imageId) =>
         Project is null ? string.Empty : $"/projects/{Project.Id:N}/images/{imageId:N}/content?maxEdge=640";

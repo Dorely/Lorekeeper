@@ -292,6 +292,34 @@ public sealed class ProjectImageJobService(
         return ProjectImageService.ToView(projectId, asset);
     }
 
+    public async Task DeleteUnpromotedPartialsAsync(
+        Guid projectId,
+        Guid jobId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var databaseOperation = await database.OpenWriteAsync(projectId, cancellationToken);
+        databaseOperation.ShareWithNestedOperations();
+        var db = databaseOperation.Db;
+        var job = await db.ProjectImageGenerationJobs
+            .FirstOrDefaultAsync(candidate => candidate.ProjectId == projectId && candidate.Id == jobId, cancellationToken)
+            ?? throw new InvalidOperationException("Image generation job was not found.");
+        if (job.Status is ProjectImageGenerationJobStatus.Queued or ProjectImageGenerationJobStatus.Running)
+            throw new InvalidOperationException("Cancel the image request before deleting its partials.");
+
+        var partials = await db.ProjectImagePartials
+            .Where(partial => partial.ProjectId == projectId
+                && partial.JobId == jobId
+                && partial.FinalOutputImageId == null)
+            .ToListAsync(cancellationToken);
+        if (partials.Count == 0)
+            return;
+
+        db.ProjectImagePartials.RemoveRange(partials);
+        if (await db.Projects.FirstOrDefaultAsync(project => project.Id == projectId, cancellationToken) is { } project)
+            project.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<ProjectImageJobView> CreateGenerateJobAsync(
         Guid projectId,
         ProjectImageGenerateJobRequest request,
