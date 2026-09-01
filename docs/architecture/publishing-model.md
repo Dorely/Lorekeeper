@@ -130,7 +130,9 @@ stales only releases whose effective source fingerprint changes.
 
 Core and release forms use one serialized debounce queue. Navigation, assistant
 turns, cover entry, and preparation flush pending edits before reading or
-acting. A revision race reloads the current target and retries a still-dirty
+acting. Text inputs keep their active draft local and suspend background saves
+while focused; leaving the field resumes the debounce queue so a save-time
+rerender cannot move the active caret. A revision race reloads the current target and retries a still-dirty
 patch when intent remains unambiguous. Successful background saves remain
 silent but refresh artifact freshness. A stale assistant or UI operation must
 receive a compact conflict/recovery result rather than overwriting newer

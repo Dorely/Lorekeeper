@@ -291,6 +291,7 @@ else
     private CancellationTokenSource? _formAutosave;
     private readonly SemaphoreSlim _formSaveGate = new(1, 1);
     private long _formChangeVersion;
+    private bool _formFieldFocused;
     private int _pollGeneration;
     private int _targetLoadGeneration;
 
@@ -508,13 +509,13 @@ else
 
         <section class="workspace-card"><header><div><span class="step">02</span><div><h2>Book details</h2><p>Enter these once. Releases use them unless customized.</p></div></div></header>
             <div class="form-grid">
-                <label class="field wide"><span>Title</span><input class="form-control" value="@_coreDraft.Title" @oninput="e => CoreChanged(nameof(CoreDraft.Title), e.Value?.ToString())" /></label>
-                <label class="field wide"><span>Subtitle <small>optional</small></span><input class="form-control" value="@_coreDraft.Subtitle" @oninput="e => CoreChanged(nameof(CoreDraft.Subtitle), e.Value?.ToString())" /></label>
-                <label class="field"><span>Author</span><input class="form-control" value="@_coreDraft.Author" @oninput="e => CoreChanged(nameof(CoreDraft.Author), e.Value?.ToString())" /></label>
+                <label class="field wide"><span>Title</span><input class="form-control" value="@_coreDraft.Title" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Title), e.Value?.ToString())" /></label>
+                <label class="field wide"><span>Subtitle <small>optional</small></span><input class="form-control" value="@_coreDraft.Subtitle" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Subtitle), e.Value?.ToString())" /></label>
+                <label class="field"><span>Author</span><input class="form-control" value="@_coreDraft.Author" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Author), e.Value?.ToString())" /></label>
                 <label class="field"><span>Language</span>@LanguageSelect(_coreDraft.Language, false, value => CoreChanged(nameof(CoreDraft.Language), value))</label>
-                <label class="field"><span>Publisher <small>optional</small></span><input class="form-control" value="@_coreDraft.Publisher" @oninput="e => CoreChanged(nameof(CoreDraft.Publisher), e.Value?.ToString())" /></label>
-                <label class="field full metadata-long-field"><span>Copyright <small>optional</small></span><textarea class="form-control" rows="3" value="@_coreDraft.Copyright" @oninput="e => CoreChanged(nameof(CoreDraft.Copyright), e.Value?.ToString())"></textarea></label>
-                <label class="field full metadata-long-field"><span>Description <small>optional</small></span><textarea class="form-control" rows="5" value="@_coreDraft.Description" @oninput="e => CoreChanged(nameof(CoreDraft.Description), e.Value?.ToString())"></textarea></label>
+                <label class="field"><span>Publisher <small>optional</small></span><input class="form-control" value="@_coreDraft.Publisher" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Publisher), e.Value?.ToString())" /></label>
+                <label class="field full metadata-long-field"><span>Copyright <small>optional</small></span><textarea class="form-control" rows="3" value="@_coreDraft.Copyright" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Copyright), e.Value?.ToString())"></textarea></label>
+                <label class="field full metadata-long-field"><span>Description <small>optional</small></span><textarea class="form-control" rows="5" value="@_coreDraft.Description" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => CoreChanged(nameof(CoreDraft.Description), e.Value?.ToString())"></textarea></label>
             </div>
         </section>
 
@@ -635,7 +636,7 @@ else
 
         <section class="workspace-card"><header><div><span class="step">@(_workspace.Edition.Format == PublicationEditionFormat.Epub ? "05" : _workspace.Edition.Format == PublicationEditionFormat.DigitalPdf ? "07" : "06")</span><div><h2>Release setup</h2><p>Only choices that change the prepared files belong here. Changes save automatically.</p></div></div></header>
             <div class="form-grid">
-                <label class="field"><span>Release name</span><input class="form-control" @bind="_releaseDraft.Name" @bind:event="oninput" @bind:after="MarkReleaseDirty" /></label>
+                <label class="field"><span>Release name</span><input class="form-control" @bind="_releaseDraft.Name" @bind:event="oninput" @bind:after="MarkReleaseDirty" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" /></label>
                 @if (_workspace.Edition.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
                 {
                     <label class="field"><span>Printer or service</span><select class="form-select" @bind="_releaseDraft.Vendor" @bind:after="ReleaseVendorChanged"><option value="@PublicationVendor.AmazonKdp">Amazon KDP</option><option value="@PublicationVendor.IngramSpark">IngramSpark</option><option value="@PublicationVendor.BarnesAndNoblePress">Barnes &amp; Noble Press</option><option value="@PublicationVendor.Generic">Other printer</option></select></label>
@@ -670,16 +671,16 @@ else
                         || _releaseDraft.PrintProjectUse == PrintProjectUse.ForSale
                             && _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn)
                     {
-                        <label class="field"><span>ISBN <small>@(_releaseDraft.Vendor == PublicationVendor.IngramSpark || _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn ? "required" : "optional")</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" /></label>
+                        <label class="field"><span>ISBN <small>@(_releaseDraft.Vendor == PublicationVendor.IngramSpark || _releaseDraft.PrintIdentifierMode == PrintIdentifierMode.UserSuppliedIsbn ? "required" : "optional")</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" /></label>
                     }
                 }
                 else if (_workspace.Edition.Format == PublicationEditionFormat.DigitalPdf)
                 {
-                    <label class="field"><span>ISBN <small>optional</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" /></label>
+                    <label class="field"><span>ISBN <small>optional</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" /></label>
                 }
                 else
                 {
-                    <label class="field"><span>ISBN <small>optional</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" /></label>
+                    <label class="field"><span>ISBN <small>optional</small></span><input class="form-control" @bind="_releaseDraft.Isbn" @bind:event="oninput" @bind:after="MarkReleasePaginationDirty" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" /></label>
                     <div class="plain-setting"><strong>EPUB 3</strong><span>Reflowable navigation and accessibility are managed automatically.</span></div>
                 }
             </div>
@@ -915,12 +916,12 @@ else
 
     private RenderFragment InheritedText(string Label, PublicationEditionOverrideField Field, string Value, Action<string?> Changed) => @<div class="inherited-field">
         <div class="inherited-heading"><label>@Label</label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>Customize</span></label></div>
-        <input class="form-control" disabled="@(!_releaseOverrides.Contains(Field))" value="@Value" @oninput="e => Changed(e.Value?.ToString())" />
+        <input class="form-control" disabled="@(!_releaseOverrides.Contains(Field))" value="@Value" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => Changed(e.Value?.ToString())" />
     </div>;
 
     private RenderFragment InheritedLongText(string Label, PublicationEditionOverrideField Field, string Value, int Rows, Action<string?> Changed) => @<div class="inherited-field metadata-long-field">
         <div class="inherited-heading"><label>@Label</label><label class="customize"><input type="checkbox" checked="@_releaseOverrides.Contains(Field)" @onchange="e => ToggleOverride(Field, (bool)e.Value!)" /><span>Customize</span></label></div>
-        <textarea class="form-control" rows="@Rows" disabled="@(!_releaseOverrides.Contains(Field))" value="@Value" @oninput="e => Changed(e.Value?.ToString())"></textarea>
+        <textarea class="form-control" rows="@Rows" disabled="@(!_releaseOverrides.Contains(Field))" value="@Value" @onfocus="BeginFormFieldEdit" @onblur="EndFormFieldEdit" @oninput="e => Changed(e.Value?.ToString())"></textarea>
     </div>;
 
     private RenderFragment InheritedLanguage() => @<div class="inherited-field">
@@ -2440,13 +2441,34 @@ else
         _preparedCoverPaginationFingerprint = null;
     }
 
+    private void BeginFormFieldEdit()
+    {
+        _formFieldFocused = true;
+        CancelFormAutosave();
+    }
+
+    private void EndFormFieldEdit()
+    {
+        _formFieldFocused = false;
+        if (_coreDirty || _coreOutlineDirty || _pageSetupDirty || _releaseDirty || _releaseContentDirty)
+            QueueFormAutosave();
+    }
+
     private void QueueFormAutosave()
     {
         var version = ++_formChangeVersion;
-        _formAutosave?.Cancel();
-        _formAutosave?.Dispose();
+        CancelFormAutosave();
+        if (_formFieldFocused)
+            return;
         _formAutosave = CancellationTokenSource.CreateLinkedTokenSource(_dispose.Token);
         _ = AutosaveFormsAsync(version, _formAutosave.Token);
+    }
+
+    private void CancelFormAutosave()
+    {
+        _formAutosave?.Cancel();
+        _formAutosave?.Dispose();
+        _formAutosave = null;
     }
 
     private async Task AutosaveFormsAsync(long version, CancellationToken cancellationToken)
@@ -2456,6 +2478,8 @@ else
             await Task.Delay(500, cancellationToken);
             await InvokeAsync(async () =>
             {
+                if (_formFieldFocused)
+                    return;
                 await SavePendingAsync();
                 if (version != _formChangeVersion && !_dispose.IsCancellationRequested)
                     QueueFormAutosave();
