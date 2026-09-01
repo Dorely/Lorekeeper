@@ -35,7 +35,7 @@ public static class ProjectExportWarningText
 public sealed record ProjectExportDocument
 {
     public const string CurrentFormatId = "lorekeeper.project-export";
-    public const int CurrentFormatVersion = 29;
+    public const int CurrentFormatVersion = 30;
 
     public string FormatId { get; init; } = CurrentFormatId;
     public int FormatVersion { get; init; } = CurrentFormatVersion;
@@ -250,8 +250,8 @@ public sealed record ProjectExportImage(
 /// <summary>
 /// Keeps the versioned export boundary compatible with the persisted image
 /// source values that predate the dedicated upscaled source. Before export
-/// format v29, numeric source value 6 meant <see cref="PublishAssetSource.Imported"/>;
-/// current format v29 has a dedicated <see cref="PublishAssetSource.Upscaled"/>
+/// Before format v29, numeric source value 6 meant <see cref="PublishAssetSource.Imported"/>;
+/// format v29 added a dedicated <see cref="PublishAssetSource.Upscaled"/>
 /// source instead.
 /// </summary>
 internal static class ProjectExportImageCompatibility
@@ -474,7 +474,6 @@ public sealed record ProjectExportCoverDesign(
     string Subtitle,
     string Author,
     string SpineText,
-    string BackCopy,
     string BackgroundColor,
     PublicationBarcodeMode BarcodeMode,
     double ImageCropXPercent,
@@ -484,6 +483,10 @@ public sealed record ProjectExportCoverDesign(
 {
     public string SurfaceScenesJson { get; init; } = "{}";
     public SpineReadingDirection SpineReadingDirection { get; init; } = SpineReadingDirection.TopToBottom;
+
+    [JsonPropertyName("backCopy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacyBackCopy { get; init; }
 }
 
 public sealed record ProjectExportEditionOutlineItem(

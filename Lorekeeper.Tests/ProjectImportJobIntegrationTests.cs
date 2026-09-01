@@ -917,7 +917,7 @@ public sealed class ProjectImportJobIntegrationTests
     }
 
     [Fact]
-    public async Task V29NonStructuralExportIncludesTransitiveUpscaleParents()
+    public async Task V30NonStructuralExportIncludesTransitiveUpscaleParents()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -975,7 +975,7 @@ public sealed class ProjectImportJobIntegrationTests
             file.Content,
             new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
 
-        Assert.Equal(29, document.FormatVersion);
+        Assert.Equal(30, document.FormatVersion);
         Assert.Equal(new[] { upscale.Id, original.Id }.OrderBy(id => id), document.Images.Select(image => image.Id).OrderBy(id => id));
         Assert.Equal(original.Id, document.Images.Single(image => image.Id == upscale.Id).DerivedFromImageId);
         Assert.Equal(upscale.Id, Assert.Single(document.EntityVisualExamples).ImageId);

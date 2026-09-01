@@ -95,7 +95,7 @@ fn default_two() -> usize {
 pub struct Cover {
     pub bleed_inches: f32,
     #[serde(default)]
-    pub back_copy: String,
+    pub description: String,
     #[serde(default)]
     pub title: String,
     #[serde(default)]

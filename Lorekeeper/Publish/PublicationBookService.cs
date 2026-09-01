@@ -841,7 +841,7 @@ public sealed class PublicationBookService(
             book.Subtitle,
             book.Author,
             string.Empty,
-            string.Empty,
+            book.Description,
             design.BackgroundColor,
             PublicationBarcodeMode.None,
             50,

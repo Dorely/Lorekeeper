@@ -24,7 +24,7 @@ public sealed record PublicationCoverDesignView(
     string Subtitle,
     string Author,
     string SpineText,
-    string BackCopy,
+    string Description,
     string BackgroundColor,
     PublicationBarcodeMode BarcodeMode,
     double ImageCropXPercent,
@@ -79,7 +79,6 @@ public sealed record PublicationCoverDesignUpdate(
     string Subtitle,
     string Author,
     string SpineText,
-    string BackCopy,
     string BackgroundColor,
     PublicationBarcodeMode BarcodeMode,
     double ImageCropXPercent,
@@ -287,7 +286,6 @@ public sealed class PublicationCoverService(
         design.Subtitle = update.Subtitle.Trim();
         design.Author = update.Author.Trim();
         design.SpineText = update.SpineText.Trim();
-        design.BackCopy = update.BackCopy.Trim();
         design.BackgroundColor = update.BackgroundColor.Trim().ToLowerInvariant();
         design.BarcodeMode = edition.Vendor == PublicationVendor.BarnesAndNoblePress
             ? PublicationBarcodeMode.VendorOverlay
@@ -365,7 +363,7 @@ public sealed class PublicationCoverService(
             editionId,
             surfaceRole,
             new PublicationCoverDesignUpdate(
-                cover.Title, cover.Subtitle, cover.Author, cover.SpineText, cover.BackCopy,
+                cover.Title, cover.Subtitle, cover.Author, cover.SpineText,
                 cover.BackgroundColor, cover.BarcodeMode, cover.ImageCropXPercent, cover.ImageCropYPercent,
                 expectedRevision, true),
             patched,
@@ -430,7 +428,6 @@ public sealed class PublicationCoverService(
         design.Subtitle = update.Subtitle.Trim();
         design.Author = update.Author.Trim();
         design.SpineText = update.SpineText.Trim();
-        design.BackCopy = update.BackCopy.Trim();
         design.BackgroundColor = update.BackgroundColor.Trim().ToLowerInvariant();
         design.BarcodeMode = edition.Vendor == PublicationVendor.BarnesAndNoblePress
             ? PublicationBarcodeMode.VendorOverlay
@@ -492,7 +489,12 @@ public sealed class PublicationCoverService(
         var current = CaptureReleaseCover(currentDesign, storedEdition, design is not null);
         async Task Apply(string payload, CancellationToken ct)
         {
-            var saved = AuthoringSnapshotCodec.Deserialize<AuthoringReleaseCoverSnapshot>(payload);
+            var snapshot = AuthoringSnapshotCodec.Deserialize<AuthoringReleaseCoverSnapshot>(payload);
+            var saved = snapshot with
+            {
+                SceneJson = LegacyCoverTextBindingMigration.AdaptSceneJson(snapshot.SceneJson),
+                SurfaceScenesJson = LegacyCoverTextBindingMigration.AdaptSurfaceScenesJson(snapshot.SurfaceScenesJson),
+            };
             var scenes = ReadSurfaceScenes(saved.SurfaceScenesJson);
             foreach (var sceneJson in scenes.Values.Append(saved.SceneJson).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct())
             {
@@ -526,7 +528,6 @@ public sealed class PublicationCoverService(
                 design.Subtitle = saved.Subtitle;
                 design.Author = saved.Author;
                 design.SpineText = saved.SpineText;
-                design.BackCopy = saved.BackCopy;
                 design.SpineReadingDirection = saved.SpineReadingDirection;
                 design.BackgroundColor = saved.BackgroundColor;
                 design.BarcodeMode = saved.BarcodeMode;
@@ -568,7 +569,6 @@ public sealed class PublicationCoverService(
             design.Subtitle,
             design.Author,
             design.SpineText,
-            design.BackCopy,
             design.SpineReadingDirection,
             design.BackgroundColor,
             design.BarcodeMode,
@@ -882,7 +882,7 @@ public sealed class PublicationCoverService(
             design.Subtitle,
             design.Author,
             design.SpineText,
-            design.BackCopy,
+            edition.Description,
             design.BackgroundColor,
             design.BarcodeMode,
             design.ImageCropXPercent,
@@ -1070,7 +1070,7 @@ public sealed class PublicationCoverService(
             if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
                 && item.Kind == CompositionObjectKind.Text
                 && (CoverTextTokens.UsesBinding(item.TextBinding, "spineText")
-                    || CoverTextTokens.UsesBinding(item.TextBinding, "backCopy")))
+                    || CoverTextTokens.UsesBinding(item.TextBinding, "description")))
                 AddDiagnostic(diagnostics, "error", "COVER_TEXT_BINDING_INVALID", $"Digital cover text object {item.Id:N} requires a front-cover copy binding before publishing.", item.Id);
             if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
                 && item.RegionConstraint is not CompositionRegionConstraint.Page
@@ -1272,7 +1272,6 @@ public sealed class PublicationCoverService(
             // too short for safe spine copy. Users can add spine text after the
             // calculated template proves that it fits.
             SpineText = string.Empty,
-            BackCopy = edition.Description,
             SpineReadingDirection = SpineReadingDirection.TopToBottom,
             BarcodeMode = edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
                 ? PublicationBarcodeMode.None
@@ -1400,8 +1399,7 @@ public sealed class PublicationCoverService(
         if (update.Title.Trim().Length > 160
             || update.Subtitle.Trim().Length > 240
             || update.Author.Trim().Length > 160
-            || update.SpineText.Trim().Length > 120
-            || update.BackCopy.Trim().Length > 1_800)
+            || update.SpineText.Trim().Length > 120)
             throw new ArgumentException("Cover copy exceeds its allowed length.");
         if (!System.Text.RegularExpressions.Regex.IsMatch(update.BackgroundColor, "^#[0-9a-fA-F]{6}$"))
             throw new ArgumentException("Background color must be a six-digit hex color.");

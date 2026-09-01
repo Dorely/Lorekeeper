@@ -213,7 +213,7 @@ through immutable models, startup supplies temporary compatibility columns at
 each such boundary, removes them immediately before the current EF boundary,
 and then lets the forward migration own the durable columns.
 
-Project export v29 is a portable, versioned boundary. It renames the durable
+Project export v30 is a portable, versioned boundary. It retains the durable
 print registry/profile fields, removes finish, and accepts v20-v26 legacy
 `printRegistryVersion`, `printProductKey`, and ignored `printFinish` fields only
 through the import adapter. Full exports include the
@@ -226,10 +226,13 @@ project-owned font families/faces with binary hashes. Version 26 adds print
 project use, identifier mode, cover submission mode, provider-neutral template
 evidence, and spine direction. Pre-v26 imports preserve existing behavior with
 for-sale, user-supplied ISBN, measured full-wrap, and top-to-bottom defaults.
-Cover text tokens live in existing composition text fields and therefore require
-no schema or export-version migration. Import validates their names and rejects
-unknown `{{token}}` references while continuing to accept existing exact bare
-bindings as shorthand.
+Version 30 removes the cover-owned back-copy value and makes the visible effective
+publication Description the sole descriptive-cover source. Current exports write
+only `description`/`{{description}}` bindings. The v1-v29 adapter rewrites the
+retired binding in primary and exact-surface scenes and discards its hidden value;
+it never overwrites the imported Book or release Description. Import validates
+current token names and rejects unknown `{{token}}` references while continuing
+to accept exact bare canonical bindings as shorthand.
 Non-structural exports omit source bodies,
 selections, and evidence and include a warning. Jobs, operational review rows, temporary
 visual candidates, unselected source bodies/provenance, assistant transcripts,
@@ -285,8 +288,8 @@ the separate development `History/` root (ignored by the source repository) or
 packaged `%LocalAppData%/Lorekeeper/History/<repository-id>.git`; they are not a
 SQLite backup or a portable v26 export.
 
-Image-upscale lineage is durable portable state. V29 preserves parent identity
-and structured upscale metadata, remaps parents on import, and fails closed when
+Image-upscale lineage is durable portable state. V29 and later preserve parent identity
+and structured upscale metadata, remap parents on import, and fail closed when
 a v29 derivative names a missing parent. A non-structural export that includes an
 upscale includes omitted ancestors transitively so the package remains valid.
 Older inputs remain accepted through the versioned adapter; historical
@@ -300,6 +303,12 @@ values. The migration reclassifies only stored `Resized` rows whose historical
 metadata proves they were print resamples. Existing preparation jobs and
 unrelated imported/resized assets are preserved; older portable JSON's numeric
 source value is handled separately by its versioned import adapter.
+
+The cover-description forward migration rewrites persisted primary and
+exact-surface scene bindings to `description`, then drops the obsolete
+`PublicationCoverDesigns.BackCopy` column. The downgrade recreates the column
+from each release's Description and rewrites the bindings back so the historical
+runtime remains internally consistent.
 
 ## Key files and file families
 
@@ -317,7 +326,7 @@ source value is handled separately by its versioned import adapter.
 | `Lorekeeper/Manuscripts/ManuscriptMigrationService.cs` | WAL-safe structured-manuscript migration, recovery, validation, journaling, and current v4 upgrade. |
 | `Lorekeeper/Manuscripts/VisualCompositionMigrationService.cs` / `AuthoringPageMigrationService.cs` | Guarded visual/composition and authoring-page cutovers with protected invariants. |
 | `Lorekeeper/Publish/Publication*MigrationService.cs` | Core, edition, Press, section, print-artifact-profile, and edition-content transformations. |
-| `Lorekeeper/ImportExport/ProjectExportModels.cs` | Current v26 portable DTOs and isolated older input adapters. |
+| `Lorekeeper/ImportExport/ProjectExportModels.cs` | Current v30 portable DTOs and isolated older input adapters. |
 | `Lorekeeper/ImportExport/ProjectImportExportService.cs` | UI-facing Full/Non-structural export, warnings, queueing, and import job lifecycle. |
 | `Lorekeeper/ImportExport/ProjectImportJobProcessor.cs` | Transactional v26 import, ID remapping, rollback/report behavior, legacy conversion, and post-commit indexing. |
 | `Lorekeeper/ImportExport/ProjectImportJobQueue.cs` / `ProjectImportJobNotifier.cs` | Import job dispatch and ephemeral live UI updates; the provider/background chapter owns hosted worker execution. |

@@ -144,7 +144,7 @@
                         {
                             <label>Spine text<input @bind="_spineText" @bind:after="MarkDirty" /></label>
                             <label>Spine direction<select @bind="_spineDirection" @bind:after="SpineDirectionChanged"><option value="@SpineReadingDirection.TopToBottom">Top to bottom (US/English default)</option><option value="@SpineReadingDirection.BottomToTop">Bottom to top</option><option value="@SpineReadingDirection.Horizontal">Horizontal</option></select></label>
-                            <label>Back copy<textarea rows="5" @bind="_backCopy" @bind:after="MarkDirty"></textarea></label>
+                            <p class="cover-copy-source">The <code>{{description}}</code> token uses the Description shown in Book details.</p>
                             <label>Barcode behavior<select @bind="_barcodeMode" @bind:after="MarkDirty"><option value="@PublicationBarcodeMode.LorekeeperBarcode">Generate ISBN-13 barcode</option><option value="@PublicationBarcodeMode.VendorOverlay">Reserve vendor overlay area</option></select></label>
                         }
                         <label>Background<input type="color" @bind="_background" @bind:after="MarkDirty" /></label>
@@ -283,7 +283,7 @@
     private long _changeVersion;
     private Guid _loadedProjectId; private Guid _loadedEditionId; private bool _loadedCoreBook; private long _loadedRefreshSignal = -1;
     private string _surfaceRole = "front"; private IReadOnlyList<string> _surfaceRoles = ["front"];
-    private string _title = "", _subtitle = "", _author = "", _spineText = "", _backCopy = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private SpineReadingDirection _spineDirection = SpineReadingDirection.TopToBottom; private string? _error; private bool _dirty, _snap = true, _guides = true, _cropReposition; private double _zoom = .95;
+    private string _title = "", _subtitle = "", _author = "", _spineText = "", _description = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private SpineReadingDirection _spineDirection = SpineReadingDirection.TopToBottom; private string? _error; private bool _dirty, _snap = true, _guides = true, _cropReposition; private double _zoom = .95;
     private bool _newRetainAspectRatio = true;
     private ArtworkPickerMode? _artworkPickerMode;
     private Guid? _artworkPickerTargetId;
@@ -343,7 +343,7 @@
             _subtitle = _cover.Subtitle;
             _author = _cover.Author;
             _spineText = _cover.SpineText;
-            _backCopy = _cover.BackCopy;
+            _description = _cover.Description;
             _background = _cover.BackgroundColor;
             _barcodeMode = _cover.BarcodeMode;
             _spineDirection = _cover.SpineReadingDirection;
@@ -633,7 +633,7 @@
             _subtitle = _cover.Subtitle;
             _author = _cover.Author;
             _spineText = _cover.SpineText;
-            _backCopy = _cover.BackCopy;
+            _description = _cover.Description;
             _background = _cover.BackgroundColor;
             _barcodeMode = _cover.BarcodeMode;
             _dirty = false;
@@ -685,7 +685,7 @@
     }
     private string BoundText(CompositionObject item) => CoverTextTokens.Resolve(
         item.TextBinding,
-        CoverTextTokens.Bindings(_title, _subtitle, _author, _spineText, _backCopy));
+        CoverTextTokens.Bindings(_title, _subtitle, _author, _spineText, _description));
     private async Task SaveAsync()
     {
         await _saveGate.WaitAsync();
@@ -700,7 +700,7 @@
             baselineScene = _scene;
             var changeVersion = _changeVersion;
             var scene = CoverCompositionFactory.KeepArtworkBehindCopy(_scene with { Layers = _layers.ToList(), Styles = _styles.ToList(), Objects = _objects.ToList() });
-            var update = new PublicationCoverDesignUpdate(_title, _subtitle, _author, IsPrint ? _spineText : "", IsPrint ? _backCopy : "", _background, IsPrint ? _barcodeMode : PublicationBarcodeMode.None, 50, 50, _cover.Revision, true, _spineDirection);
+            var update = new PublicationCoverDesignUpdate(_title, _subtitle, _author, IsPrint ? _spineText : "", _background, IsPrint ? _barcodeMode : PublicationBarcodeMode.None, 50, 50, _cover.Revision, true, _spineDirection);
             var saveProjectId = _loadedProjectId == Guid.Empty ? ProjectId : _loadedProjectId;
             _cover = _loadedCoreBook
                 ? await Books.SaveCoverAsync(saveProjectId, _cover.CoreBookRevision ?? throw new InvalidOperationException("Core Book revision is unavailable."), update, scene)
@@ -770,7 +770,7 @@
         _subtitle = MergeConcurrentValue(baselineCover.Subtitle, _subtitle, currentCover.Subtitle);
         _author = MergeConcurrentValue(baselineCover.Author, _author, currentCover.Author);
         _spineText = MergeConcurrentValue(baselineCover.SpineText, _spineText, currentCover.SpineText);
-        _backCopy = MergeConcurrentValue(baselineCover.BackCopy, _backCopy, currentCover.BackCopy);
+        _description = currentCover.Description;
         _background = MergeConcurrentValue(baselineCover.BackgroundColor, _background, currentCover.BackgroundColor);
         _barcodeMode = MergeConcurrentValue(baselineCover.BarcodeMode, _barcodeMode, currentCover.BarcodeMode);
         _spineDirection = MergeConcurrentValue(baselineCover.SpineReadingDirection, _spineDirection, currentCover.SpineReadingDirection);

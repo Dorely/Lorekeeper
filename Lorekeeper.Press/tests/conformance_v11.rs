@@ -2657,7 +2657,7 @@ fn parsed_layout_rejections_are_bound_but_unparseable_requests_remain_unbound() 
 #[test]
 fn cover_copy_that_cannot_fit_the_safe_region_is_rejected() {
     let mut job = PreparedJob::new("kdp-paperback-v1");
-    job.request["cover"]["backCopy"] = Value::String("Bounded cover copy. ".repeat(100));
+    job.request["cover"]["description"] = Value::String("Bounded book description. ".repeat(100));
     job.write_request();
 
     let output = job.render();

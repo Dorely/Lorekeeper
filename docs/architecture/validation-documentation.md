@@ -290,9 +290,9 @@ contain/cover/stretch geometry; 180/300-DPI thresholds; and aggregation to the
 maximum required proportional raster. Press conformance remains unchanged because
 the application passes the prepared assets through its existing request contract.
 Approved migration/import fixtures cover historical
-print-resample reclassification, preparation-job preservation, v29 full and
+print-resample reclassification, preparation-job preservation, v30 full and
 non-structural round trips, parent remapping/missing-parent rejection, legacy
-adaptation, and snapshot-schema-v5 restore preservation. Ordinary publication
+cover-description adaptation, and snapshot-schema-v6 restore preservation. Ordinary publication
 service or UI tests remain outside the automated-test boundary.
 
 ## Key files and file families

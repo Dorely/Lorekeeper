@@ -49,7 +49,7 @@ publication services own release cover aggregates and artifact-surface scenes.
 Core owns the reusable front scene; physical releases project it into the
 artifact front panel while retaining profile-owned outside, inside, case,
 jacket, cloth, spine, flap, and barcode regions. Canonical title, subtitle,
-author, spine, and back copy remain bindings, not duplicated frame text.
+author, spine, and publication Description remain bindings, not duplicated frame text.
 Cover reads and mutations normalize a valid current-schema scene to effective
 trim/bleed/page-count geometry before validation. Incomplete copy bindings,
 accessibility choices, reading order, and layout placement remain editable
@@ -87,7 +87,7 @@ maps. `PublicationRenderWorker` owns recovery/cancellation and
 owns final format-specific preflight and deterministic package assembly, consuming
 validated evidence rather than silently rerunning a different validation path.
 Managed request assembly resolves every cover text template against the
-effective Core/release title, subtitle, author, spine text, and back copy before
+effective Core/release title, subtitle, author, spine text, and Description before
 protocol serialization. Press therefore receives concrete selectable text and
 does not own application metadata-token semantics.
 
@@ -252,7 +252,7 @@ Publication renders reject meaningful images until alternative text or an
 explicit decorative decision is present. Core reading copies may retain an
 unresolved image as a warning-bearing private artifact so tagged reading order
 remains structurally valid. Cover scene text retains canonical bindings until
-Press materializes the resolved title, subtitle, author, spine, and back copy;
+Press materializes the resolved title, subtitle, author, spine, and Description;
 an optional binding or valid semantic content reference that resolves to empty
 is omitted without creating a text frame, while a frame with neither binding
 nor reference remains a hard layout error. Application-side cover validation

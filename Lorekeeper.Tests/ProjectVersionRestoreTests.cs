@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using Lorekeeper.Composition;
 using Lorekeeper.Context;
 using Lorekeeper.Graph;
 using Lorekeeper.ImportExport;
@@ -24,6 +25,57 @@ namespace Lorekeeper.Tests;
 
 public sealed class ProjectVersionRestoreTests
 {
+    [Fact]
+    public void SchemaFiveCoverBindingsAdaptToDescription()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "Lorekeeper.Tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var repositoryId = Guid.NewGuid();
+            var projectId = Guid.NewGuid();
+            var scene = new CompositionScene
+            {
+                Objects =
+                [
+                    new CompositionObject
+                    {
+                        Id = Guid.NewGuid(),
+                        LayerId = Guid.NewGuid(),
+                        Kind = CompositionObjectKind.Text,
+                        TextBinding = "backCopy",
+                    },
+                ],
+            };
+            var cover = new ProjectExportCoverDesign(
+                "Book", "", "Author", "", "#ffffff", PublicationBarcodeMode.None,
+                50, 50, JsonSerializer.Serialize(scene, ManuscriptCodec.JsonOptions), 1)
+            {
+                LegacyBackCopy = "Invisible legacy copy",
+            };
+            var book = new ProjectExportPublicationBook(
+                1, "Book", "", "Author", "en", "", "", "Visible description", true, false,
+                false, false, true, true, false, false, PublishTitlePageMode.Automatic, [], cover);
+            var payload = CreatePayload(repositoryId, projectId) with
+            {
+                Publication = new VersionHistorySnapshotPublicationArea(book, [], []),
+            };
+            WriteSnapshotTree(root, payload, schemaVersion: 5);
+
+            var artifact = new VersionHistorySnapshotReader().Read(root, repositoryId, projectId);
+            var adaptedCover = artifact.Payload.Publication.PublicationBook?.CoverDesign;
+
+            Assert.NotNull(adaptedCover);
+            Assert.Null(adaptedCover.LegacyBackCopy);
+            Assert.Contains("description", adaptedCover.CompositionSceneJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("backCopy", adaptedCover.CompositionSceneJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void SnapshotReaderRequiresCanonicalJsonAndExactSchemaFiles()
     {

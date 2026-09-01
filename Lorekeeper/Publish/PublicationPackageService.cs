@@ -1247,7 +1247,7 @@ public sealed class PublicationPackageService(
                 ($"cover {coverDesign.Id:N} subtitle", coverDesign.Subtitle),
                 ($"cover {coverDesign.Id:N} author", coverDesign.Author),
                 ($"cover {coverDesign.Id:N} spine", coverDesign.SpineText),
-                ($"cover {coverDesign.Id:N} back copy", coverDesign.BackCopy),
+                ($"cover {coverDesign.Id:N} description", document.Profile.Description),
             ]);
         }
         foreach (var source in renderedText.Where(source =>

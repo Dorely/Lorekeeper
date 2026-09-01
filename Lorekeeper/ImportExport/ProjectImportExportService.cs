@@ -645,7 +645,6 @@ public sealed class ProjectImportExportService(
                 profile.CoverDesign.Subtitle,
                 profile.CoverDesign.Author,
                 profile.CoverDesign.SpineText,
-                profile.CoverDesign.BackCopy,
                 profile.CoverDesign.BackgroundColor,
                 profile.CoverDesign.BarcodeMode,
                 profile.CoverDesign.ImageCropXPercent,
@@ -690,7 +689,7 @@ public sealed class ProjectImportExportService(
         book.OutlineItems.OrderBy(item => item.SortOrder).Select(item => new ProjectExportEditionOutlineItem(
             item.Id, item.TargetKind, item.TargetId, item.IsIncluded, item.SortOrder)).ToList(),
         book.CoverDesign is null ? null : new ProjectExportCoverDesign(
-            book.Title, book.Subtitle, book.Author, string.Empty, string.Empty, book.CoverDesign.BackgroundColor,
+            book.Title, book.Subtitle, book.Author, string.Empty, book.CoverDesign.BackgroundColor,
             PublicationBarcodeMode.None, 50, 50, book.CoverDesign.CompositionSceneJson, book.CoverDesign.Revision))
     {
         AllowDesignedPageOverrides = book.PdfPresentation?.AllowDesignedPageOverrides ?? false,

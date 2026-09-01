@@ -92,7 +92,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
   canon extraction, graph synchronization, and combined lexical/semantic
   retrieval. File ingest accepts up to 50 files together, creates one durable
   job per file sequentially, and keeps per-file success or failure visible.
-- Full project export format v29 preserves artifact-only print settings, manuscript review annotations, image-upscale provenance, and only the Book Brief's selected
+- Full project export format v30 preserves artifact-only print settings, manuscript review annotations, image-upscale provenance, cover Description bindings, and only the Book Brief's selected
   canonical ingest sources (source text, chunks, pages, blocks, metadata, and
   selection mapping), remaps their provenance on import, and rebuilds retrieval
   indexes without rerunning extraction. Project-reference links are intentionally
@@ -269,7 +269,7 @@ in [docs/publishing-roadmap.md](docs/publishing-roadmap.md).
 - Core/release-aware structured cover design with shared image/text/shape/layer/style
   tools, canvas-aligned resize handles for rotated objects, justified text
   alignment, and reusable `{{title}}`, `{{subtitle}}`, `{{author}}`,
-  `{{spineText}}`, and `{{backCopy}}` text tokens: the Core front scene flows into digital releases and the front panel of
+  `{{spineText}}`, and `{{description}}` text tokens. Description is the same editable Book details field shown in the Publish UI, so back-cover frames stay linked without separate hidden copy. The Core front scene flows into digital releases and the front panel of
   print surfaces until explicitly customized. Print releases select exact
   paper weight/thickness, color process, construction, and cover mode. Paper
   color and finish stay outside the artifact workflow. The final interior page

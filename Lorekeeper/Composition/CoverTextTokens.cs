@@ -12,7 +12,7 @@ public static class CoverTextTokens
         new("subtitle", "{{subtitle}}", "Subtitle"),
         new("author", "{{author}}", "Author"),
         new("spineText", "{{spineText}}", "Spine text"),
-        new("backCopy", "{{backCopy}}", "Back copy"),
+        new("description", "{{description}}", "Description"),
     ];
 
     private static readonly IReadOnlySet<string> Keys = Definitions
@@ -24,13 +24,13 @@ public static class CoverTextTokens
         string subtitle,
         string author,
         string spineText,
-        string backCopy) => new Dictionary<string, string>(StringComparer.Ordinal)
+        string description) => new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["title"] = title,
             ["subtitle"] = subtitle,
             ["author"] = author,
             ["spineText"] = spineText,
-            ["backCopy"] = backCopy,
+            ["description"] = description,
         };
 
     public static string Resolve(

@@ -28,7 +28,6 @@ public class PublicationCoverDesign
     public string Subtitle { get; set; } = string.Empty;
     public string Author { get; set; } = string.Empty;
     public string SpineText { get; set; } = string.Empty;
-    public string BackCopy { get; set; } = string.Empty;
     public SpineReadingDirection SpineReadingDirection { get; set; } = SpineReadingDirection.TopToBottom;
     public string BackgroundColor { get; set; } = "#5c7ca5";
     public PublicationBarcodeMode BarcodeMode { get; set; } = PublicationBarcodeMode.None;

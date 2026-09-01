@@ -267,7 +267,7 @@ public sealed record PublishCoverDocument(
     string Subtitle,
     string Author,
     string SpineText,
-    string BackCopy,
+    string Description,
     string BackgroundColor,
     CompositionScene Scene);
 

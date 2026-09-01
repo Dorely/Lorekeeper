@@ -1235,7 +1235,6 @@ public sealed class VisualCompositionMigrationService(
                 Subtitle = reader.GetString(3),
                 Author = reader.GetString(4),
                 SpineText = reader.GetString(5),
-                BackCopy = reader.GetString(6),
                 BackgroundColor = reader.GetString(7),
                 BarcodeMode = Enum.Parse<PublicationBarcodeMode>(reader.GetString(8)),
                 ImageCropXPercent = reader.GetDouble(9),

@@ -472,7 +472,7 @@ public sealed class PublishService(
                     coverDesign.Subtitle,
                     coverDesign.Author,
                     coverDesign.SpineText,
-                    coverDesign.BackCopy,
+                    profile.Description,
                     coverDesign.BackgroundColor,
                     coverScene),
         };

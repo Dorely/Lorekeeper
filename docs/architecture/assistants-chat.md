@@ -373,10 +373,12 @@ otherwise, and successful mutations are followed by annotated spine and
 whole-wrap inspection plus clean final previews.
 Bindable cover copy uses the token catalog returned by the cover read. The
 assistant can place `{{title}}`, `{{subtitle}}`, `{{author}}`, `{{spineText}}`,
-or `{{backCopy}}` inside any text frame, including repeated author or title
+or `{{description}}` inside any text frame, including repeated author or title
 frames on the spine, and may combine tokens with literal copy. Large cover-scene
 stages must name the same exact surface role that was read and previewed; apply
-is surface-bound and must not target an implicit default.
+is surface-bound and must not target an implicit default. `{{description}}`
+means the effective Description returned from the visible Book details; the
+assistant must not invent or maintain separate back-cover metadata.
 Every successful durable Core or release cover mutation, including an
 exact-surface patch or placement, emits a cover-specific workspace update as
 soon as that tool completes. An open cover canvas reloads from that update

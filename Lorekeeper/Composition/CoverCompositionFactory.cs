@@ -91,7 +91,7 @@ public static class CoverCompositionFactory
         var frontPercent = RegionBoundsPercent(CompositionRegionConstraint.Front, sourceGeometry);
         var selectedTopLevel = sourceScene.Objects.Where(item => item.GroupId is null
             && !CoverTextTokens.UsesBinding(item.TextBinding, "spineText")
-            && !CoverTextTokens.UsesBinding(item.TextBinding, "backCopy")
+            && !CoverTextTokens.UsesBinding(item.TextBinding, "description")
             && item.RegionConstraint is not (CompositionRegionConstraint.Back or CompositionRegionConstraint.Spine or CompositionRegionConstraint.BarcodeReserve)
             && Intersects(item.Bounds, frontPercent)).ToList();
         var selectedIds = selectedTopLevel.Select(item => item.Id).ToHashSet();
@@ -167,7 +167,7 @@ public static class CoverCompositionFactory
         var additions = Create(edition, cover, pageCount);
         var additionObjects = additions.Objects
             .Where(item => CoverTextTokens.UsesBinding(item.TextBinding, "spineText")
-                || CoverTextTokens.UsesBinding(item.TextBinding, "backCopy"))
+                || CoverTextTokens.UsesBinding(item.TextBinding, "description"))
             .Select(item => item with { ReadingOrder = (item.ReadingOrder ?? 0) + coreObjects.Count })
             .ToList();
         return KeepArtworkBehindCopy(additions with
@@ -204,7 +204,7 @@ public static class CoverCompositionFactory
         if (print)
         {
             AddText("spineText", CompositionRegionConstraint.Spine, 10, CompositionSemanticRole.Paragraph);
-            AddText("backCopy", CompositionRegionConstraint.Back, 18, CompositionSemanticRole.Paragraph);
+            AddText("description", CompositionRegionConstraint.Back, 18, CompositionSemanticRole.Paragraph);
         }
         if (edition.SelectedCoverImageId is { } imageId)
         {

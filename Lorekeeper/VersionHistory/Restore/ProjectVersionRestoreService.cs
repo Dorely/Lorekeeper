@@ -1849,7 +1849,6 @@ public sealed class ProjectVersionRestoreService(
                     Subtitle = cover.Subtitle,
                     Author = cover.Author,
                     SpineText = cover.SpineText,
-                    BackCopy = cover.BackCopy,
                     BackgroundColor = cover.BackgroundColor,
                     BarcodeMode = cover.BarcodeMode,
                     ImageCropXPercent = cover.ImageCropXPercent,

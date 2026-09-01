@@ -1300,7 +1300,7 @@ public sealed class PublicationRenderProcessor(
             cover.Subtitle,
             cover.Author,
             string.Empty,
-            string.Empty,
+            document.Profile.Description,
             cover.BackgroundColor,
             PublicationBarcodeMode.None,
             50,
@@ -1396,7 +1396,7 @@ public sealed class PublicationRenderProcessor(
                 coverDesign.Subtitle,
                 coverDesign.Author,
                 coverDesign.SpineText,
-                coverDesign.BackCopy);
+                coverDesign.Description);
         if (coverScene is not null)
             coverScene = NormalizeSceneLanguages(CoverTextTokens.ResolveScene(
                 CoverCompositionFactory.KeepArtworkBehindCopy(coverScene),
@@ -1640,7 +1640,7 @@ public sealed class PublicationRenderProcessor(
             {
                 bleedInches = release?.Bleed == true ? 0.125 : 0,
                 surfaces = requiredCoverSurfaces,
-                backCopy = coverDesign.BackCopy,
+                description = coverDesign.Description,
                 title = coverDesign.Title,
                 subtitle = coverDesign.Subtitle,
                 author = coverDesign.Author,

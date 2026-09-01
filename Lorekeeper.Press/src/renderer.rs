@@ -1703,7 +1703,7 @@ fn validate_request(
             || cover.subtitle.chars().count() > 400
             || cover.author.chars().count() > 240
             || cover.spine_text.chars().count() > 240
-            || cover.back_copy.chars().count() > 4_000
+            || cover.description.chars().count() > 100_000
         {
             return reject(
                 "PRESS_COVER_TEXT_OVERFLOW",
@@ -6918,7 +6918,7 @@ fn cover_layout(
         17.0,
     )?);
     lines.extend(cover_text_lines(
-        &cover.back_copy,
+        &cover.description,
         FontFace::SerifRegular,
         9.0,
         back_x,
@@ -7274,7 +7274,7 @@ fn cover_scene_layout(
                 "subtitle" => Some(&cover.subtitle),
                 "author" => Some(&cover.author),
                 "spineText" => Some(&cover.spine_text),
-                "backCopy" => Some(&cover.back_copy),
+                "description" => Some(&cover.description),
                 _ => None,
             };
             if let Some(resolved) = resolved {
@@ -8461,7 +8461,7 @@ mod tests {
         let height = request.trim.height_inches * 72.0;
         request.cover = Some(crate::model::Cover {
             bleed_inches: 0.0,
-            back_copy: String::new(),
+            description: String::new(),
             title: "Grouped title".to_owned(),
             subtitle: String::new(),
             author: String::new(),
@@ -8572,7 +8572,7 @@ mod tests {
         }));
         request.cover = Some(crate::model::Cover {
             bleed_inches: 0.0,
-            back_copy: String::new(),
+            description: String::new(),
             title: "Cover".to_owned(),
             subtitle: String::new(),
             author: "Author".to_owned(),
@@ -8907,7 +8907,7 @@ mod tests {
         }));
         request.cover = Some(crate::model::Cover {
             bleed_inches: 0.125,
-            back_copy: "Back copy".to_owned(),
+            description: "Book description".to_owned(),
             title: "Front title".to_owned(),
             subtitle: "Subtitle".to_owned(),
             author: "Author".to_owned(),

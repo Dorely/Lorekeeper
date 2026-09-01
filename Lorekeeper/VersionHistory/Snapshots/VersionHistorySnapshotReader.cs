@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Lorekeeper.Composition;
 using Lorekeeper.ImportExport;
 using Lorekeeper.Manuscripts;
 
@@ -79,6 +80,7 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
             files,
             "publication/publication.json",
             requireCanonicalRoundTrip: manifest.SchemaVersion == VersionHistorySnapshotContract.SchemaVersion);
+        publication = AdaptPublicationForSchema(publication, manifest.SchemaVersion);
         ValidateSchemaFileSet(files.Keys, assets, chapterPaths);
         var payload = new VersionHistorySnapshotPayload(
             manifest.RepositoryId,
@@ -201,6 +203,36 @@ public sealed class VersionHistorySnapshotReader : IVersionHistorySnapshotReader
                         image.Source,
                         image.SourceMetadataJson),
                 })
+                .ToList(),
+        };
+    }
+
+    private static VersionHistorySnapshotPublicationArea AdaptPublicationForSchema(
+        VersionHistorySnapshotPublicationArea publication,
+        int schemaVersion)
+    {
+        if (schemaVersion >= VersionHistorySnapshotContract.CoverDescriptionSchemaVersion)
+            return publication;
+
+        static ProjectExportCoverDesign? Adapt(ProjectExportCoverDesign? cover) => cover is null
+            ? null
+            : cover with
+            {
+                CompositionSceneJson = LegacyCoverTextBindingMigration.AdaptSceneJson(cover.CompositionSceneJson),
+                SurfaceScenesJson = LegacyCoverTextBindingMigration.AdaptSurfaceScenesJson(cover.SurfaceScenesJson),
+                LegacyBackCopy = null,
+            };
+
+        return publication with
+        {
+            PublicationBook = publication.PublicationBook is null
+                ? null
+                : publication.PublicationBook with
+                {
+                    CoverDesign = Adapt(publication.PublicationBook.CoverDesign),
+                },
+            PublicationEditions = publication.PublicationEditions
+                .Select(edition => edition with { CoverDesign = Adapt(edition.CoverDesign) })
                 .ToList(),
         };
     }

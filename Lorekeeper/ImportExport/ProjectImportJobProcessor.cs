@@ -425,9 +425,10 @@ public sealed class ProjectImportJobProcessor(
             throw new InvalidOperationException($"Unsupported import format '{document.FormatId}'.");
         if (document.FormatVersion < 1 || document.FormatVersion > ProjectExportDocument.CurrentFormatVersion)
             throw new InvalidOperationException($"Unsupported import format version {document.FormatVersion}.");
-        document = AdaptLegacySourceEvidence(
-            AdaptLegacyImageSources(
-                AdaptLegacyPublicationEditions(AdaptLegacyManuscriptStyles(document))));
+        document = AdaptLegacyCoverDescription(
+            AdaptLegacySourceEvidence(
+                AdaptLegacyImageSources(
+                    AdaptLegacyPublicationEditions(AdaptLegacyManuscriptStyles(document)))));
 
         var duplicateNode = document.Nodes
             .GroupBy(node => StableKey(node.NodeType, node.Key), StringComparer.Ordinal)
@@ -881,11 +882,11 @@ public sealed class ProjectImportJobProcessor(
             }
             if (edition.CoverDesign is { } cover
                 && (!Enum.IsDefined(cover.BarcodeMode)
+                    || (document.FormatVersion >= 30 && cover.LegacyBackCopy is not null)
                     || cover.Title.Trim().Length is < 1 or > 160
                     || cover.Subtitle.Trim().Length > 240
                     || cover.Author.Trim().Length > 160
                     || cover.SpineText.Trim().Length > 120
-                    || cover.BackCopy.Trim().Length > 1_800
                     || !System.Text.RegularExpressions.Regex.IsMatch(cover.BackgroundColor, "^#[0-9a-fA-F]{6}$")
                     || !double.IsFinite(cover.ImageCropXPercent)
                     || !double.IsFinite(cover.ImageCropYPercent)
@@ -1748,6 +1749,31 @@ public sealed class ProjectImportJobProcessor(
         };
     }
 
+    internal static ProjectExportDocument AdaptLegacyCoverDescription(ProjectExportDocument document)
+    {
+        if (document.FormatVersion >= 30)
+            return document;
+
+        static ProjectExportCoverDesign? Adapt(ProjectExportCoverDesign? cover) => cover is null
+            ? null
+            : cover with
+            {
+                CompositionSceneJson = LegacyCoverTextBindingMigration.AdaptSceneJson(cover.CompositionSceneJson),
+                SurfaceScenesJson = LegacyCoverTextBindingMigration.AdaptSurfaceScenesJson(cover.SurfaceScenesJson),
+                LegacyBackCopy = null,
+            };
+
+        return document with
+        {
+            PublicationBook = document.PublicationBook is null
+                ? null
+                : document.PublicationBook with { CoverDesign = Adapt(document.PublicationBook.CoverDesign) },
+            PublicationEditions = document.PublicationEditions
+                .Select(edition => edition with { CoverDesign = Adapt(edition.CoverDesign) })
+                .ToList(),
+        };
+    }
+
     private static void ValidateImageLineageAcyclic(IReadOnlyList<ProjectExportImage> images)
     {
         var parentByImageId = images
@@ -2311,7 +2337,6 @@ public sealed class ProjectImportJobProcessor(
                 Subtitle = cover.Subtitle,
                 Author = cover.Author,
                 SpineText = cover.SpineText,
-                BackCopy = cover.BackCopy,
                 BackgroundColor = cover.BackgroundColor,
                 BarcodeMode = cover.BarcodeMode,
                 ImageCropXPercent = cover.ImageCropXPercent,

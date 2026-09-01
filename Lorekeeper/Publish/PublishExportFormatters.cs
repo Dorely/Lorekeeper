@@ -694,7 +694,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         var cover = document.Cover ?? throw new InvalidOperationException("A composed cover is required.");
         var scene = cover.Scene;
         var textBindings = CoverTextTokens.Bindings(
-            cover.Title, cover.Subtitle, cover.Author, cover.SpineText, cover.BackCopy);
+            cover.Title, cover.Subtitle, cover.Author, cover.SpineText, cover.Description);
         var visibleLayers = scene.Layers.Where(layer => layer.Visible).Select(layer => layer.Id).ToHashSet();
         var sb = new StringBuilder();
         sb.Append("<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 ")
@@ -775,7 +775,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         {
             var visibleLayers = cover.Scene.Layers.Where(layer => layer.Visible).Select(layer => layer.Id).ToHashSet();
             var textBindings = CoverTextTokens.Bindings(
-                cover.Title, cover.Subtitle, cover.Author, cover.SpineText, cover.BackCopy);
+                cover.Title, cover.Subtitle, cover.Author, cover.SpineText, cover.Description);
             foreach (var sceneItem in CompositionSceneResolver.Flatten(cover.Scene).Where(item => item.Visible && visibleLayers.Contains(item.LayerId))
                 .OrderBy(item => item.ReadingOrder is null ? 1 : 0)
                 .ThenBy(item => item.ReadingOrder)

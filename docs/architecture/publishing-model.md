@@ -270,12 +270,14 @@ plan. Back, Spine, and Front remain the preferred semantic regions, and the
 assistant must inspect annotated regions plus the clean whole wrap after placement.
 
 Cover text frames may use literal text or inline canonical tokens:
-`{{title}}`, `{{subtitle}}`, `{{author}}`, `{{spineText}}`, and `{{backCopy}}`.
+`{{title}}`, `{{subtitle}}`, `{{author}}`, `{{spineText}}`, and `{{description}}`.
 Tokens can be repeated or combined with literals, allowing the same effective
 value to appear independently on a front, spine, or back frame. The Publish UI
 exposes insertion controls and the assistant cover read returns the supported
 token catalog; render/export resolves templates from the effective Core/release
-metadata immediately before producing output.
+metadata immediately before producing output. `{{description}}` always resolves
+from the inherited or overridden Description visible in Book details. A cover
+does not own a second back-copy field or editor control.
 
 `read_publication_section` returns section metadata, canvas summaries, and the
 shared `agent-manuscript-v1` projection for its bounded prose blocks. Core or

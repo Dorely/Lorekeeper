@@ -356,8 +356,11 @@ The forward identifier-normalization migration preserves EF Core SQLite Guid
 lookups for repository and reference identities created by SQL backfill during
 the cutover.
 
-Snapshot schema v5 preserves image parent links and upscale provenance alongside
-the canonical asset bytes. Restore validates and remaps those links before
+Snapshot schema v6 removes the duplicate cover-owned back-copy value and stores
+cover layouts against the effective publication Description. The v1-v5 reader
+rewrites retired bindings in primary and exact-surface cover scenes while keeping
+the visible saved Description authoritative. Schema v5 introduced image parent
+links and upscale provenance alongside the canonical asset bytes. Restore validates and remaps those links before
 creating rows, adapts older print-resample metadata to the current Upscaled source,
 and fails closed when the current schema references an absent ancestor. Generated
 publication artifacts remain excluded, but permanent image derivatives and the
@@ -368,7 +371,7 @@ in deterministic checkpoints, comparisons, restore, and clone import.
 
 | Path or family | Architectural role |
 |---|---|
-| `Lorekeeper/VersionHistory/Snapshots/` | Schema-v1 payloads, canonical JSON, deterministic writer, strict reader, and manifest/blob validation. |
+| `Lorekeeper/VersionHistory/Snapshots/` | Schema-v1-through-v6 payloads, canonical JSON, deterministic writer, strict reader, compatibility adapters, and manifest/blob validation. |
 | `Lorekeeper/VersionHistory/Git/` | Bare-repository paths, Git object/ref operations, history relation, and safe deletion staging. |
 | `Lorekeeper/VersionHistory/Services/` | Checkpoint timeline, Git HEAD/live dirty-state reconciliation, pending and historical Review modes, operation journal, and assistant checkpoint adapter. |
 | `Lorekeeper/VersionHistory/Compare/` | Pure semantic area summaries, bounded readable before/after text, detailed entries, and restore-selection contract. |
