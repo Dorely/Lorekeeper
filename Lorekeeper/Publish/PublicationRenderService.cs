@@ -987,6 +987,22 @@ public sealed class PublicationRenderProcessor(
             : await editions.GetSourceFingerprintAsync(job.ProjectId, edition!.Id, cancellationToken);
         if (!string.Equals(fingerprintBeforeRender, job.SourceFingerprint, StringComparison.Ordinal))
             throw new InvalidOperationException("The edition changed while this render was queued. Request a new render.");
+        if (!coreTarget
+            && edition!.Format is PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
+        {
+            job.ProgressPercent = 20;
+            job.ProgressMessage = "Calculating current interior pagination";
+            await db.SaveChangesAsync(cancellationToken);
+            var pagination = await EnsureCurrentAsync(job.ProjectId, edition.Id, cancellationToken);
+            if (!string.Equals(
+                pagination.PaginationFingerprint,
+                job.PaginationFingerprint,
+                StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "The edition changed while its cover geometry was being prepared. Request a new render.");
+            }
+        }
         var expectedChapterPageMap = document.Sections
             .SelectMany(section => section.Chapters)
             .SelectMany(chapter => chapter.Manuscript.Content.Where(IsPressPageMappedBlock).Select(block => (
