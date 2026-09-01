@@ -36,6 +36,7 @@ public static class CompositionAgentPayloads
             type = block.Type.ToString(),
             block.StyleRole,
             block.HeadingLevel,
+            block.PublicationField,
             text = Truncate(ManuscriptCodec.Text(block), 800),
         }).ToList();
         var objectPage = scene.Objects.Skip(objectStart).Take(objectCount).ToList();
@@ -68,6 +69,11 @@ public static class CompositionAgentPayloads
                 imageLayout,
             },
             semanticBlocks = semanticPage,
+            bindableTextFields = PublicationTextBindings.CanonicalDefinitions.Select(item => new
+            {
+                item.Label,
+                field = item.PublicationField,
+            }),
             objectContinuation = Continuation(objectStart, objectPage.Count, scene.Objects.Count),
             semanticContinuation = Continuation(semanticStart, semanticPage.Count, semantic.Content.Count),
             structureContinuation = new

@@ -1391,19 +1391,22 @@ public sealed class PublicationRenderProcessor(
             ManuscriptCodec.JsonOptions);
         var coverTextBindings = coverDesign is null
             ? null
-            : CoverTextTokens.Bindings(
+            : PublicationTextBindings.Bindings(
                 coverDesign.Title,
                 coverDesign.Subtitle,
                 coverDesign.Author,
-                coverDesign.SpineText,
-                coverDesign.Description);
+                document.Profile.Publisher,
+                document.Profile.Copyright,
+                document.Profile.Description,
+                document.Profile.Isbn,
+                coverDesign.SpineText);
         if (coverScene is not null)
-            coverScene = NormalizeSceneLanguages(CoverTextTokens.ResolveScene(
+            coverScene = NormalizeSceneLanguages(PublicationTextBindings.ResolveScene(
                 CoverCompositionFactory.KeepArtworkBehindCopy(coverScene),
                 coverTextBindings!));
         var coverSurfaceScenes = (coverDesign?.SurfaceScenes ?? new Dictionary<string, string>()).ToDictionary(
             item => item.Key,
-            item => NormalizeSceneLanguages(CoverTextTokens.ResolveScene(
+            item => NormalizeSceneLanguages(PublicationTextBindings.ResolveScene(
                 CoverCompositionFactory.KeepArtworkBehindCopy(
                     JsonSerializer.Deserialize<CompositionScene>(item.Value, ManuscriptCodec.JsonOptions)
                         ?? throw new InvalidDataException($"Cover surface '{item.Key}' is empty.")),

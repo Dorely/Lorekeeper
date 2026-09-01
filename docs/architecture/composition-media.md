@@ -305,8 +305,13 @@ Text objects use `CompositionTextAlignment.Start`, `Center`, `End`, or
 spacing on soft-wrapped non-final lines; final lines and explicit hard-break
 paragraph endings remain ragged. The canvas, transient preview, EPUB projection,
 and Press layout trace share that alignment behavior.
-Cover text frames additionally accept inline bindable tokens for canonical
-`title`, `subtitle`, `author`, `spineText`, and `description` values. A frame can
+Publication text bindings use one canonical catalog for `title`, `subtitle`,
+`author`, `publisher`, `copyright`, `description`, and `isbn`. Designed Page text
+frames bind semantically to one catalog field and expose the selector in the
+visual editor; their live editor and render projections use the effective Core or
+release Book details without converting the frame back to literal copy. Cover
+text frames accept the corresponding inline tokens, while the print-only
+`spineText` token remains a cover-specific derived value. A cover frame can
 combine literal copy with one or more `{{token}}` references, and the same
 resolver supplies canvas previews, EPUB projection, and Press request scenes.
 The exact bare canonical binding remains valid shorthand. Description is sourced
@@ -438,7 +443,7 @@ z-order, semantic IDs, reading order, captions, and accessibility.
 | `Lorekeeper/Composition/CompositionService.cs` | Revision-aware Designed Page aggregates, exact variants, scene validation, autosave snapshots, and geometry-bound descriptors. |
 | `Lorekeeper/Composition/CompositionSceneResolver.cs` | Group flattening, object visibility/z-order semantics, and shared overlap validation. |
 | `Lorekeeper/Composition/CompositionCanvasPreviewService.cs` | Exact transient clean/annotated page and cover canvas rasterization. |
-| `Lorekeeper/Composition/CompositionImageLayout.cs` / `CoverCompositionFactory.cs` / `CoverTextTokens.cs` / `LegacyCoverTextBindingMigration.cs` | Region-local fill, connected-wrap reflow, exact region bounds, persisted spine-text orientation, shared cover text-token resolution, and boundary-only retired-token adaptation. |
+| `Lorekeeper/Composition/CompositionImageLayout.cs` / `CoverCompositionFactory.cs` / `PublicationTextBindings.cs` / `LegacyCoverTextBindingMigration.cs` | Region-local fill, connected-wrap reflow, exact region bounds, persisted spine-text orientation, shared publication text-binding catalog and cover token resolution, and boundary-only retired-token adaptation. |
 | `Lorekeeper/Composition/ProjectPageSetupService.cs` | Project authoring geometry, typography, setup revisions, and transactional reflow. |
 | `Lorekeeper/Composition/CompositionAgentPayloads.cs` | Bounded assistant reads and revision-safe scene/object/style patch envelopes. |
 | `Lorekeeper/Fonts/` and `ProjectFont*` models | Bundled/imported font catalogs, static-face validation, bytes, URLs, and live/in-process-history use guards. |

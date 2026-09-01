@@ -694,7 +694,7 @@ public sealed partial class CompositionCanvasPreviewService(
     {
         if (!string.IsNullOrWhiteSpace(item.TextBinding))
         {
-            var text = CoverTextTokens.Resolve(item.TextBinding, textBindings);
+            var text = PublicationTextBindings.Resolve(item.TextBinding, textBindings);
             return string.IsNullOrWhiteSpace(text)
                 ? []
                 : [new ManuscriptInline { Text = text }];
@@ -730,7 +730,7 @@ public sealed partial class CompositionCanvasPreviewService(
         item.Kind == CompositionObjectKind.Text
         && !string.IsNullOrWhiteSpace(item.TextBinding)
         && textBindings is not null
-        && string.IsNullOrWhiteSpace(CoverTextTokens.Resolve(item.TextBinding, textBindings));
+        && string.IsNullOrWhiteSpace(PublicationTextBindings.Resolve(item.TextBinding, textBindings));
 
     private static CompositionObject ResolveStyle(
         CompositionObject item,

@@ -485,7 +485,7 @@ public sealed class PublishAssistantTools(
                 method: (Guid releaseId, long expectedRevision, CompositionScene scene, string? surfaceRole = null) =>
                     StageCoverCompositionAsync(context, releaseId, expectedRevision, scene, surfaceRole),
                 name: "stage_publication_cover_composition",
-                description: "Submit a complete release-cover scene exactly once. For an exact outside, inside, case, jacket, or cloth scene, pass the surfaceRole returned by read_publication_cover_design; omission targets the release's default surface. TextBinding is an editable text template and may contain repeatable {{title}}, {{subtitle}}, {{author}}, {{spineText}}, or {{description}} tokens. {{description}} always resolves from the Description visible in Book details. Reading order may be omitted; Lorekeeper preserves supplied relative order and uses object-array position as the deterministic fallback before validation. Artwork is normalized below cover text. Returns an opaque one-use stage ID and compact diagnostics without echoing the scene."),
+                description: "Submit a complete release-cover scene exactly once. For an exact outside, inside, case, jacket, or cloth scene, pass the surfaceRole returned by read_publication_cover_design; omission targets the release's default surface. TextBinding is an editable text template and may contain the repeatable canonical tokens returned by read_publication_cover_design; {{spineText}} is print-cover-only. Reading order may be omitted; Lorekeeper preserves supplied relative order and uses object-array position as the deterministic fallback before validation. Artwork is normalized below cover text. Returns an opaque one-use stage ID and compact diagnostics without echoing the scene."),
             AIFunctionFactory.Create(
                 method: (Guid stageId, long expectedRevision) =>
                     ApplyCoverCompositionStageAsync(context, stageId, expectedRevision),
@@ -2588,7 +2588,12 @@ public sealed class PublishAssistantTools(
             cover.BarcodeMode,
             cover.Template,
             cover.Diagnostics,
-            bindableTextTokens = CoverTextTokens.Definitions.Select(item => new { item.Token, item.Label }),
+            bindableTextTokens = PublicationTextBindings.Definitions.Select(item => new
+            {
+                item.Token,
+                item.Label,
+                item.RequiresPrintCover,
+            }),
             scene.SchemaVersion,
             scene.Surface,
             layers = scene.Layers.Skip(structureStart).Take(structureCount),

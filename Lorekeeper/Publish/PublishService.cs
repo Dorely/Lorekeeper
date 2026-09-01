@@ -207,6 +207,9 @@ public sealed class PublishService(
                 && (composition.EditionId == null || composition.EditionId == editionId))
             .Include(composition => composition.Variants.Where(variant => variant.DetachedAt == null))
             .ToListAsync(cancellationToken);
+        var boundValues = new Dictionary<PublicationBoundField, string>();
+        foreach (var field in Enum.GetValues<PublicationBoundField>())
+            boundValues[field] = await publicationSections.ResolveBoundFieldAsync(new(projectId, coreTarget ? null : editionId), field, cancellationToken);
         var sections = new List<PublishSectionDocument>();
         var actNumber = 0;
         var chapterNumber = 0;
@@ -254,7 +257,8 @@ public sealed class PublishService(
                     compositions.Where(composition => composition.ChapterId == chapter.Id
                         && (chapterOverrides.ContainsKey(chapter.Id)
                             ? composition.EditionId == editionId
-                            : composition.EditionId == null)).ToList()));
+                            : composition.EditionId == null)).ToList(),
+                    boundValues));
             }
 
             if (source.Act is null)
@@ -286,9 +290,6 @@ public sealed class PublishService(
                 chapterDocuments));
         }
 
-        var boundValues = new Dictionary<PublicationBoundField, string>();
-        foreach (var field in Enum.GetValues<PublicationBoundField>())
-            boundValues[field] = await publicationSections.ResolveBoundFieldAsync(new(projectId, coreTarget ? null : editionId), field, cancellationToken);
         var publicationSectionIds = publicationSectionViews.Select(item => item.Id).ToHashSet();
         var sectionCompositions = compositions.Where(item => item.PublicationSectionId is Guid sectionId && publicationSectionIds.Contains(sectionId))
             .GroupBy(item => item.PublicationSectionId!.Value).ToDictionary(group => group.Key, group => group.ToList());
@@ -693,7 +694,8 @@ public sealed class PublishService(
         Chapter chapter,
         PublicationEdition profile,
         int chapterNumber,
-        IReadOnlyList<PageComposition> compositions)
+        IReadOnlyList<PageComposition> compositions,
+        IReadOnlyDictionary<PublicationBoundField, string> boundValues)
     {
         return new(
             chapter.Id,
@@ -704,24 +706,7 @@ public sealed class PublishService(
             chapterNumber - 1,
             profile.IncludeChapterHeadings,
             chapter.Manuscript,
-            compositions.Select(composition => new PublishPageCompositionDocument(
-                composition.Id,
-                composition.Name,
-                ManuscriptCodec.Deserialize(composition.SemanticManuscriptJson, composition.Id, composition.Revision),
-                composition.Revision,
-                composition.Variants
-                    .Where(variant => CompositionService.VariantMatchesEdition(variant, profile))
-                    .OrderByDescending(variant => composition.ActiveAuthoringVariantId == variant.Id)
-                    .ThenByDescending(variant => variant.UpdatedAt)
-                    .Take(1)
-                    .Select(variant => new PublishPageCompositionVariantDocument(
-                    variant.Id,
-                    variant.GeometryKey,
-                    NormalizeSceneLanguages(PdfPresentationScene(
-                        JsonSerializer.Deserialize<CompositionScene>(variant.SceneJson, ManuscriptCodec.JsonOptions)
-                            ?? throw new InvalidOperationException($"Page composition {composition.Id:N} has no scene."),
-                        profile)),
-                    variant.Revision)).ToList())).ToList());
+            compositions.Select(composition => CompositionDocument(composition, profile, boundValues)).ToList());
     }
 
     private static PublishPageCompositionDocument CompositionDocument(

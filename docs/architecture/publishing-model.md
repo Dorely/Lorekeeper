@@ -271,8 +271,13 @@ generated aspect with crop-safe margins rather than an assistant-managed panel
 plan. Back, Spine, and Front remain the preferred semantic regions, and the
 assistant must inspect annotated regions plus the clean whole wrap after placement.
 
-Cover text frames may use literal text or inline canonical tokens:
-`{{title}}`, `{{subtitle}}`, `{{author}}`, `{{spineText}}`, and `{{description}}`.
+Publication text uses one canonical binding catalog for title, subtitle, author,
+publisher, copyright, description, and ISBN. Designed Page frames store these as
+semantic `PublicationBoundField` links and resolve the effective Core or release
+Book details in both the editor and every publication render path. Cover frames
+use the equivalent inline tokens (`{{title}}`, `{{subtitle}}`, `{{author}}`,
+`{{publisher}}`, `{{copyright}}`, `{{description}}`, and `{{isbn}}`); the derived
+`{{spineText}}` token is available only on print covers.
 Tokens can be repeated or combined with literals, allowing the same effective
 value to appear independently on a front, spine, or back frame. The Publish UI
 exposes insertion controls and the assistant cover read returns the supported

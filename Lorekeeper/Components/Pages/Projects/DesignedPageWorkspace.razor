@@ -9,6 +9,8 @@
 @implements IAsyncDisposable
 @inject ICompositionService Compositions
 @inject IManuscriptService Manuscripts
+@inject IPublicationBookService Books
+@inject IPublicationSectionService PublicationSections
 @inject IProjectImageService Images
 @inject IProjectFontService ProjectFonts
 @inject IAuthoringHistoryRuntime AuthoringHistory
@@ -133,6 +135,7 @@
                         {
                             var primaryStyle = Resolved(primarySelection);
                             <button type="button" disabled="@IsBoundText(primarySelection)" class="@(_editingTextId == primarySelection.Id ? "selected" : null)" title="@(IsBoundText(primarySelection) ? "This copy comes from Core Book details" : "Edit the text directly in this frame")" @onclick="() => BeginTextEdit(primarySelection)">@(IsBoundText(primarySelection) ? "Linked book text" : _editingTextId == primarySelection.Id ? "Editing text" : "Edit text")</button>
+                            <label title="@(IsProtectedBoundText(primarySelection) ? "Generated publication fields remain linked to Book details" : "Fill this frame from a Book details field")">Linked field<select disabled="@IsProtectedBoundText(primarySelection)" value="@BoundFieldValue(primarySelection)" @onchange="e => SetBoundFieldAsync(primarySelection, e.Value?.ToString())"><option value="">Not linked</option>@foreach (var binding in PublicationTextBindings.CanonicalDefinitions) { <option value="@binding.PublicationField!.Value">@binding.Label</option> }</select></label>
                             <div class="composition-inline-formatting" aria-label="Inline text formatting">
                                 <button type="button" disabled="@IsBoundText(primarySelection)" title="Bold selected text" aria-label="Bold selected text" @onpointerdown:preventDefault="true" @onclick="() => ToggleInlineMarkAsync(primarySelection, ManuscriptMarkType.Strong)"><strong>B</strong></button>
                                 <button type="button" disabled="@IsBoundText(primarySelection)" title="Italicize selected text" aria-label="Italicize selected text" @onpointerdown:preventDefault="true" @onclick="() => ToggleInlineMarkAsync(primarySelection, ManuscriptMarkType.Emphasis)"><em>I</em></button>
@@ -151,7 +154,7 @@
                             <label>Fill<input type="color" value="@ColorValue(primaryStyle.FillColor)" @onchange="e => Patch(primarySelection with { StyleId = null, FillColor = Color(e) })" /></label><label>Border<input type="color" value="@ColorValue(primaryStyle.StrokeColor)" @onchange="e => Patch(primarySelection with { StyleId = null, StrokeColor = Color(e) })" /></label>
                         }
                         <span class="composition-control-divider" aria-hidden="true"></span>
-                        <button type="button" title="Move this object behind every other object" @onclick="() => SendToBack(primarySelection)">Back</button><button type="button" title="Move this object in front of every other object" @onclick="() => BringToFront(primarySelection)">Front</button><button type="button" class="@(!primarySelection.Visible ? "selected" : null)" title="Show or hide this object" @onclick="() => ToggleObjectVisibility(primarySelection)">@(primarySelection.Visible ? "Hide" : "Show")</button><button type="button" class="@(primarySelection.Locked ? "selected" : null)" title="Lock or unlock this object's position" @onclick="() => ToggleObjectLock(primarySelection)">@(primarySelection.Locked ? "Unlock" : "Lock")</button><button type="button" class="danger" title="Delete selected object" @onclick="() => Delete(primarySelection.Id)">Delete</button>
+                        <button type="button" title="Move this object behind every other object" @onclick="() => SendToBack(primarySelection)">Back</button><button type="button" title="Move this object in front of every other object" @onclick="() => BringToFront(primarySelection)">Front</button><button type="button" class="@(!primarySelection.Visible ? "selected" : null)" title="Show or hide this object" @onclick="() => ToggleObjectVisibility(primarySelection)">@(primarySelection.Visible ? "Hide" : "Show")</button><button type="button" class="@(primarySelection.Locked ? "selected" : null)" title="Lock or unlock this object's position" @onclick="() => ToggleObjectLock(primarySelection)">@(primarySelection.Locked ? "Unlock" : "Lock")</button><button type="button" class="danger" disabled="@IsProtectedBoundText(primarySelection)" title="@(IsProtectedBoundText(primarySelection) ? "Generated publication fields cannot be removed" : "Delete selected object")" @onclick="() => Delete(primarySelection.Id)">Delete</button>
                     </div>
                 }
                 else { <p class="composition-empty-selection">Select an object on the page to edit it. Drag to move; use the handles to resize or rotate.</p> }
@@ -232,7 +235,7 @@
                                 <button type="button" @onclick="() => Nudge(selected, 0, -1)">Up</button>
                                 <button type="button" @onclick="() => Nudge(selected, 0, 1)">Down</button>
                                 <button type="button" @onclick="() => Nudge(selected, 1, 0)">Right</button>
-                                <button type="button" class="danger" @onclick="() => Delete(selected.Id)">Delete</button>
+                                <button type="button" class="danger" disabled="@IsProtectedBoundText(selected)" title="@(IsProtectedBoundText(selected) ? "Generated publication fields cannot be removed" : "Delete selected object")" @onclick="() => Delete(selected.Id)">Delete</button>
                             </div>
                         }
                                 <h3>Objects and grouping</h3>
@@ -299,6 +302,7 @@
     private List<CompositionLayer> _layers = [];
     private List<CompositionObjectStyle> _styles = [];
     private List<ManuscriptBlock> _semanticBlocks = [];
+    private readonly HashSet<PublicationBoundField> _protectedBoundFields = [];
     private CompositionEditionGeometry? _authoringGeometry;
     private IReadOnlyList<ProjectImageView> _images = [];
     private IReadOnlyList<ProjectFontFamilyView> _fontFamilies = [];
@@ -478,6 +482,8 @@
                 _composition.SemanticManuscriptJson,
                 _composition.Id,
                 _composition.Revision).Content.ToList();
+            await LoadProtectedBoundFieldsAsync();
+            await ResolveBoundPageTextAsync();
             _images = (await Images.ListAsync(ProjectId)).Where(image => image.ContentType is "image/png" or "image/jpeg").ToList();
             _fontFamilies = await ProjectFonts.ListAsync(ProjectId);
             await LoadVariantAsync();
@@ -696,9 +702,109 @@
         }
     }
 
-    private bool IsBoundText(CompositionObject item) => item.ContentReferences
+    private IReadOnlyList<PublicationBoundField> BoundFields(CompositionObject item) => item.ContentReferences
         .Select(reference => _semanticBlocks.FirstOrDefault(block => block.Id == reference.BlockId))
-        .Any(block => block?.PublicationField is not null);
+        .Where(block => block?.PublicationField is not null)
+        .Select(block => block!.PublicationField!.Value)
+        .Distinct()
+        .ToList();
+
+    private PublicationBoundField? BoundField(CompositionObject item)
+    {
+        var fields = BoundFields(item);
+        return fields.Count == 1 ? fields[0] : null;
+    }
+
+    private bool IsBoundText(CompositionObject item) => BoundFields(item).Count > 0;
+
+    private bool IsProtectedBoundText(CompositionObject item) =>
+        BoundFields(item).Any(_protectedBoundFields.Contains);
+
+    private string BoundFieldValue(CompositionObject item) => BoundField(item)?.ToString() ?? string.Empty;
+
+    private async Task SetBoundFieldAsync(CompositionObject item, string? value)
+    {
+        try
+        {
+            if (IsProtectedBoundText(item))
+                throw new InvalidOperationException("Linked fields in a generated publication page cannot be removed or rebound.");
+            if (IsBoundText(item) && BoundField(item) is null)
+                throw new InvalidOperationException("This frame contains multiple linked fields and cannot be rebound safely.");
+            PublicationBoundField? field = Enum.TryParse<PublicationBoundField>(value, out var parsed)
+                && Enum.IsDefined(parsed)
+                    ? parsed
+                    : null;
+            string? text = null;
+            if (field is { } selectedField)
+            {
+                _ = await Books.GetOrCreateAsync(ProjectId);
+                text = PublicationTextBindings.NormalizeSemanticText(await PublicationSections.ResolveBoundFieldAsync(
+                    new PublicationSectionTarget(ProjectId, ContentTarget.EditionId),
+                    selectedField));
+            }
+            Snapshot();
+            var block = EnsureOwnedTextBlock(item.Id);
+            var index = _semanticBlocks.FindIndex(candidate => candidate.Id == block.Id);
+            if (index < 0)
+                throw new InvalidOperationException("The selected text frame no longer has semantic content.");
+            _semanticBlocks[index] = block with
+            {
+                PublicationField = field,
+                Content = text is null ? block.Content : [new ManuscriptInline { Text = text }],
+            };
+            _editingTextId = null;
+            MarkDirty();
+            _error = null;
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+    }
+
+    private async Task LoadProtectedBoundFieldsAsync()
+    {
+        _protectedBoundFields.Clear();
+        if (_composition?.PublicationSectionId is not Guid sectionId)
+            return;
+
+        var section = await PublicationSections.GetAsync(
+            new PublicationSectionTarget(ProjectId, ContentTarget.EditionId),
+            sectionId);
+        _protectedBoundFields.UnionWith(section.SystemRole switch
+        {
+            PublicationSectionSystemRole.Title =>
+                [PublicationBoundField.Title, PublicationBoundField.Subtitle, PublicationBoundField.Author],
+            PublicationSectionSystemRole.Copyright =>
+                [PublicationBoundField.Copyright, PublicationBoundField.Publisher, PublicationBoundField.Isbn],
+            _ => [],
+        });
+    }
+
+    private async Task ResolveBoundPageTextAsync()
+    {
+        if (_semanticBlocks.All(block => block.PublicationField is null))
+            return;
+        _ = await Books.GetOrCreateAsync(ProjectId);
+        var target = new PublicationSectionTarget(ProjectId, ContentTarget.EditionId);
+        foreach (var field in _semanticBlocks.Where(block => block.PublicationField is not null)
+            .Select(block => block.PublicationField!.Value)
+            .Distinct())
+        {
+            var value = PublicationTextBindings.NormalizeSemanticText(
+                await PublicationSections.ResolveBoundFieldAsync(target, field));
+            for (var index = 0; index < _semanticBlocks.Count; index++)
+            {
+                if (_semanticBlocks[index].PublicationField == field)
+                {
+                    _semanticBlocks[index] = _semanticBlocks[index] with
+                    {
+                        Content = [new ManuscriptInline { Text = value }],
+                    };
+                }
+            }
+        }
+    }
 
     private ManuscriptBlock EnsureOwnedTextBlock(Guid objectId)
     {
@@ -1046,6 +1152,8 @@
             return;
         try
         {
+            if (IsProtectedBoundText(item))
+                throw new InvalidOperationException("Linked fields in a generated publication page cannot be removed.");
             var ownedBlockId = item.Kind == CompositionObjectKind.Text
                 ? EnsureOwnedTextBlock(item.Id).Id
                 : null;

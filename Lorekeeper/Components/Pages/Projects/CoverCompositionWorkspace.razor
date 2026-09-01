@@ -10,6 +10,7 @@
 @inject IPublicationCoverService Covers
 @inject IPublicationBookService Books
 @inject IPublicationEditionService Editions
+@inject IPublicationSectionService PublicationSections
 @inject IProjectImageService Images
 @inject IProjectFontService ProjectFonts
 @inject IAuthoringHistoryRuntime AuthoringHistory
@@ -283,7 +284,7 @@
     private long _changeVersion;
     private Guid _loadedProjectId; private Guid _loadedEditionId; private bool _loadedCoreBook; private long _loadedRefreshSignal = -1;
     private string _surfaceRole = "front"; private IReadOnlyList<string> _surfaceRoles = ["front"];
-    private string _title = "", _subtitle = "", _author = "", _spineText = "", _description = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private SpineReadingDirection _spineDirection = SpineReadingDirection.TopToBottom; private string? _error; private bool _dirty, _snap = true, _guides = true, _cropReposition; private double _zoom = .95;
+    private string _title = "", _subtitle = "", _author = "", _publisher = "", _copyright = "", _spineText = "", _description = "", _isbn = "", _background = "#5c7ca5"; private PublicationBarcodeMode _barcodeMode; private SpineReadingDirection _spineDirection = SpineReadingDirection.TopToBottom; private string? _error; private bool _dirty, _snap = true, _guides = true, _cropReposition; private double _zoom = .95;
     private bool _newRetainAspectRatio = true;
     private ArtworkPickerMode? _artworkPickerMode;
     private Guid? _artworkPickerTargetId;
@@ -294,7 +295,8 @@
     private IReadOnlyList<CoverRegionDescriptor> CoverRegions => _cover?.Regions ?? [];
     private string ModeSummary => CoreBook ? "Reusable front cover" : IsPrint ? "Print full wrap: back, spine, and front" : "Digital front cover";
     private IReadOnlyList<CompositionRegionConstraint> AvailableRegions => IsPrint ? Enum.GetValues<CompositionRegionConstraint>() : [CompositionRegionConstraint.Page, CompositionRegionConstraint.SafeArea, CompositionRegionConstraint.Front];
-    private IEnumerable<CoverTextTokenDefinition> AvailableTokens => IsPrint ? CoverTextTokens.Definitions : CoverTextTokens.Definitions.Take(3);
+    private IEnumerable<PublicationTextBindingDefinition> AvailableTokens => PublicationTextBindings.Definitions
+        .Where(item => !item.RequiresPrintCover || IsPrint);
 
     protected override async Task OnParametersSetAsync()
     {
@@ -344,6 +346,10 @@
             _author = _cover.Author;
             _spineText = _cover.SpineText;
             _description = _cover.Description;
+            var publicationTarget = new PublicationSectionTarget(ProjectId, CoreBook ? null : EditionId);
+            _publisher = await PublicationSections.ResolveBoundFieldAsync(publicationTarget, PublicationBoundField.Publisher);
+            _copyright = await PublicationSections.ResolveBoundFieldAsync(publicationTarget, PublicationBoundField.Copyright);
+            _isbn = await PublicationSections.ResolveBoundFieldAsync(publicationTarget, PublicationBoundField.Isbn);
             _background = _cover.BackgroundColor;
             _barcodeMode = _cover.BarcodeMode;
             _spineDirection = _cover.SpineReadingDirection;
@@ -683,9 +689,10 @@
             return;
         Patch(item with { TextBinding = $"{item.TextBinding}{token}" });
     }
-    private string BoundText(CompositionObject item) => CoverTextTokens.Resolve(
+    private string BoundText(CompositionObject item) => PublicationTextBindings.Resolve(
         item.TextBinding,
-        CoverTextTokens.Bindings(_title, _subtitle, _author, _spineText, _description));
+        PublicationTextBindings.Bindings(
+            _title, _subtitle, _author, _publisher, _copyright, _description, _isbn, _spineText));
     private async Task SaveAsync()
     {
         await _saveGate.WaitAsync();

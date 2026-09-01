@@ -693,8 +693,9 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
     {
         var cover = document.Cover ?? throw new InvalidOperationException("A composed cover is required.");
         var scene = cover.Scene;
-        var textBindings = CoverTextTokens.Bindings(
-            cover.Title, cover.Subtitle, cover.Author, cover.SpineText, cover.Description);
+        var textBindings = PublicationTextBindings.Bindings(
+            cover.Title, cover.Subtitle, cover.Author, document.Profile.Publisher,
+            document.Profile.Copyright, document.Profile.Description, document.Profile.Isbn, cover.SpineText);
         var visibleLayers = scene.Layers.Where(layer => layer.Visible).Select(layer => layer.Id).ToHashSet();
         var sb = new StringBuilder();
         sb.Append("<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 ")
@@ -726,7 +727,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
             }
             else if (item.Kind == CompositionObjectKind.Text)
             {
-                var text = CoverTextTokens.Resolve(item.TextBinding, textBindings);
+                var text = PublicationTextBindings.Resolve(item.TextBinding, textBindings);
                 sb.Append("<foreignObject x=\"").Append(x.ToString(CultureInfo.InvariantCulture)).Append("\" y=\"").Append(y.ToString(CultureInfo.InvariantCulture))
                     .Append("\" width=\"").Append(width.ToString(CultureInfo.InvariantCulture)).Append("\" height=\"").Append(height.ToString(CultureInfo.InvariantCulture))
                     .Append("\" opacity=\"").Append(item.Opacity.ToString(CultureInfo.InvariantCulture)).Append("\" transform=\"").Append(transform).Append("\"><div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"box-sizing:border-box;display:flex;flex-direction:column;width:100%;height:100%;overflow:hidden;overflow-wrap:anywhere;white-space:pre-wrap;color:")
@@ -774,8 +775,9 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
         if (document.Cover is { } cover)
         {
             var visibleLayers = cover.Scene.Layers.Where(layer => layer.Visible).Select(layer => layer.Id).ToHashSet();
-            var textBindings = CoverTextTokens.Bindings(
-                cover.Title, cover.Subtitle, cover.Author, cover.SpineText, cover.Description);
+            var textBindings = PublicationTextBindings.Bindings(
+                cover.Title, cover.Subtitle, cover.Author, document.Profile.Publisher,
+                document.Profile.Copyright, document.Profile.Description, document.Profile.Isbn, cover.SpineText);
             foreach (var sceneItem in CompositionSceneResolver.Flatten(cover.Scene).Where(item => item.Visible && visibleLayers.Contains(item.LayerId))
                 .OrderBy(item => item.ReadingOrder is null ? 1 : 0)
                 .ThenBy(item => item.ReadingOrder)
@@ -786,7 +788,7 @@ public sealed class EpubPublishFormatter : IPublishExportFormatter
                     $"left:{item.Bounds.XPercent}%;top:{item.Bounds.YPercent}%;width:{item.Bounds.WidthPercent}%;height:{item.Bounds.HeightPercent}%;opacity:{item.Opacity};transform:rotate({item.RotationDegrees}deg);z-index:{item.ZIndex};color:{item.FillColor};background:{BackgroundCss(item.BackgroundColor, item.BackgroundOpacity)};border:{item.StrokeWidthPoints}px solid {item.StrokeColor};font-family:{FontCssFamily(item.FontFamilyKey)};font-weight:{item.FontWeight};font-style:{(item.Italic ? "italic" : "normal")};font-size:{item.FontSizePoints}px;line-height:{item.LineHeight};letter-spacing:{item.LetterSpacingEm}em;text-align:{(item.TextAlignment == CompositionTextAlignment.Center ? "center" : item.TextAlignment == CompositionTextAlignment.End ? "right" : item.TextAlignment == CompositionTextAlignment.Justify ? "justify" : "left")};justify-content:{(item.VerticalAlignment == CompositionVerticalAlignment.Center ? "center" : item.VerticalAlignment == CompositionVerticalAlignment.Bottom ? "flex-end" : "flex-start")};text-shadow:{TextShadowCss(item.TextShadow)};object-fit:{ImageFitCss(item.ImageFit)};object-position:{item.CropXPercent}% {item.CropYPercent}%");
                 if (item.Kind == CompositionObjectKind.Text)
                 {
-                    var text = CoverTextTokens.Resolve(item.TextBinding, textBindings);
+                    var text = PublicationTextBindings.Resolve(item.TextBinding, textBindings);
                     if (!string.IsNullOrWhiteSpace(text))
                         sb.Append("<div class=\"cover-scene-object cover-scene-text\" style=\"").Append(Html(style)).Append("\">").Append(Html(text)).AppendLine("</div>");
                 }

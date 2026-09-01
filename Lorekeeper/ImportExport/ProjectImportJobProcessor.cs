@@ -3642,7 +3642,7 @@ public sealed class ProjectImportJobProcessor(
             if (allowCoverBindings && string.IsNullOrWhiteSpace(item.TextBinding))
                 throw new InvalidOperationException($"{label} contains an empty cover text frame.");
             if (allowCoverBindings
-                && CoverTextTokens.UnknownTokens(item.TextBinding) is { Count: > 0 } unknownTokens)
+                && PublicationTextBindings.UnknownTokens(item.TextBinding) is { Count: > 0 } unknownTokens)
                 throw new InvalidOperationException($"{label} contains unsupported cover-copy token(s): {string.Join(", ", unknownTokens)}.");
         }
     }

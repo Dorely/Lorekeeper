@@ -1065,12 +1065,11 @@ public sealed class PublicationCoverService(
             if (item.Kind == CompositionObjectKind.Text && string.IsNullOrWhiteSpace(item.TextBinding))
                 AddDiagnostic(diagnostics, "error", "COVER_TEXT_REQUIRED", $"Text object {item.Id:N} requires text or a bindable cover-copy token.", item.Id);
             if (item.Kind == CompositionObjectKind.Text
-                && CoverTextTokens.UnknownTokens(item.TextBinding) is { Count: > 0 } unknownTokens)
+                && PublicationTextBindings.UnknownTokens(item.TextBinding) is { Count: > 0 } unknownTokens)
                 AddDiagnostic(diagnostics, "error", "COVER_TEXT_TOKEN_INVALID", $"Text object {item.Id:N} contains unsupported token(s): {string.Join(", ", unknownTokens)}.", item.Id);
             if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
                 && item.Kind == CompositionObjectKind.Text
-                && (CoverTextTokens.UsesBinding(item.TextBinding, "spineText")
-                    || CoverTextTokens.UsesBinding(item.TextBinding, "description")))
+                && PublicationTextBindings.UsesBinding(item.TextBinding, "spineText"))
                 AddDiagnostic(diagnostics, "error", "COVER_TEXT_BINDING_INVALID", $"Digital cover text object {item.Id:N} requires a front-cover copy binding before publishing.", item.Id);
             if (edition.Format is not (PublicationEditionFormat.Paperback or PublicationEditionFormat.Hardcover)
                 && item.RegionConstraint is not CompositionRegionConstraint.Page

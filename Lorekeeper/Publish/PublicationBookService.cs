@@ -402,7 +402,7 @@ public sealed class PublicationBookService(
         Validate(book);
         book.Revision++;
         book.UpdatedAt = DateTime.UtcNow;
-        _ = await PublicationSectionService.RefreshSystemBindingsAsync(
+        _ = await PublicationSectionService.RefreshBindingsAsync(
             db,
             new PublicationSectionTarget(projectId),
             new Dictionary<PublicationBoundField, string>
